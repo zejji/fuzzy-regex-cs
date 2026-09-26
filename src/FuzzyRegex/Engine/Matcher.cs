@@ -7311,8 +7311,12 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 
@@ -7518,8 +7522,12 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 

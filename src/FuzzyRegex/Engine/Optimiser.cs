@@ -46,6 +46,10 @@ internal static class Optimiser
         // Mark all the group that are named.
         MarkNamedGroups(pattern);
 
+        // NOT UPSTREAM. Withdraw the failure memo from a pattern that can read more than the
+        // position; see RepeatInfo.FailureMemo.
+        KeepFailureMemosSound(pattern);
+
         // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
         // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
         FindAnchorGuards(pattern);
@@ -571,6 +575,52 @@ internal static class Optimiser
 
         // Upstream frees the rest; here dropping the reference is the same act.
         _ = pattern.NodeList.RemoveAll(static node => (node.Status & NodeStatus.Used) == 0);
+    }
+
+    /// <summary>
+    /// Clears <see cref="RepeatInfo.FailureMemo"/> on every repeat when the pattern has anything
+    /// that makes the rest of a match depend on more than the position it resumes from. <b>Not an
+    /// upstream pass.</b>
+    /// </summary>
+    /// <remarks>
+    /// These are the pattern-wide conditions, so one of them anywhere withdraws the memo
+    /// everywhere: a group can be set before a repeat and read after it. A backreference or a
+    /// group-exists conditional reads the captures; a group call returns to wherever it was called
+    /// from; <c>(*PRUNE)</c> and <c>(*SKIP)</c> cut the backtracking stack and <c>(*SKIP)</c> moves
+    /// the slice; fuzzy matching can come back to a position with a different error budget; and
+    /// POSIX matching goes on after a success, so a path that ended in a match is recorded as a
+    /// failure. The compiler's per-repeat half is in <c>NodeCompiler.BuildRepeat</c>.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    private static void KeepFailureMemosSound(PatternObject pattern)
+    {
+        bool unsafePattern =
+            pattern.IsFuzzy
+            || (pattern.Flags & RegexFlags.Posix) != 0
+            || pattern.NodeList.Exists(static node =>
+                node.Op
+                    is Opcode.RefGroup
+                        or Opcode.RefGroupFld
+                        or Opcode.RefGroupFldRev
+                        or Opcode.RefGroupIgn
+                        or Opcode.RefGroupIgnRev
+                        or Opcode.RefGroupRev
+                        or Opcode.GroupExists
+                        or Opcode.GroupCall
+                        or Opcode.CallRef
+                        or Opcode.Prune
+                        or Opcode.Skip
+            );
+
+        if (!unsafePattern)
+        {
+            return;
+        }
+
+        foreach (RepeatInfo info in pattern.RepeatInfoList)
+        {
+            info.FailureMemo = false;
+        }
     }
 
     /// <summary>Upstream <c>mark_named_groups</c> (line 23672).</summary>

@@ -289,7 +289,11 @@ public sealed class OptimiserTrapsTests
         //
         // DIVERGENCES.md, "Exception mapping": a matching timeout raises
         // RegexMatchTimeoutException where upstream raises TimeoutError.
-        var pattern = new FuzzyRegex(@"(a|a)*\b\B");
+        //
+        // The '\1' was added on 2026-09-26: the failure memo makes '(a|a)*\b\B' fail in linear
+        // time, and a pattern with a backreference gets no memo. 2,170 ms at n=22 with it
+        // (Release, 2026-09-26).
+        var pattern = new FuzzyRegex(@"(a|a)*\1\b\B");
         string subject = new('a', 22);
 
         Action act = () => pattern.IsMatch(subject, timeout: TimeSpan.FromMilliseconds(100));

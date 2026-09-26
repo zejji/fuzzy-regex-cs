@@ -242,7 +242,7 @@ public sealed class PoolDisciplineTests
     {
         // The pattern and subject TimeoutAndCancellationTests uses: exponential, and no match.
         var pool = new TrackingPool<char>();
-        FuzzyRegex regex = new(@"(a|a)*\b\B");
+        FuzzyRegex regex = new(@"(a|a)*\1\b\B");
         string subject = new('a', 26);
 
         Action call = () =>
@@ -320,7 +320,7 @@ public sealed class PoolDisciplineTests
     public void A_span_walk_that_times_out_returns_its_copy()
     {
         var pool = new TrackingPool<char>();
-        FuzzyRegex regex = new(@"(a|a)*\b\B");
+        FuzzyRegex regex = new(@"(a|a)*\1\b\B");
         string subject = new('a', 26);
 
         Action call = () =>

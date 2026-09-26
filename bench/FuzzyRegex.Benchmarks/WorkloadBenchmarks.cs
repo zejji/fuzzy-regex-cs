@@ -66,6 +66,38 @@ public class WorkloadBenchmarks
     /// </summary>
     private static readonly FuzzyRegex _best = new("(?b)(?:haystack){e<=3}");
 
+    /// <summary>
+    /// The pathological group: failing searches that backtrack heavily. The first two are
+    /// exponential in upstream and were here until the failure memo (<c>RepeatInfo.FailureMemo</c>,
+    /// 2026-09-26); the other two are polynomial, a nested repeat and a repeat of a word and an
+    /// optional space. Each subject ends in a <c>c</c> or an <c>!</c> the pattern cannot pass, and
+    /// holds every literal the pattern needs, so the required-string screen cannot answer first.
+    /// The lengths keep one call on upstream regex 2026.9.10 under 160 ms (measured 2026-09-26:
+    /// 156, 35, 13 and 68 ms, best of five).
+    /// </summary>
+    private static readonly FuzzyRegex _sameBranches = new("(?:a|a)+c");
+
+    /// <summary>Overlapping branches of different lengths; see <see cref="_sameBranches"/>.</summary>
+    private static readonly FuzzyRegex _prefixBranches = new("(a|aa)+c");
+
+    /// <summary>A repeat of a repeat; see <see cref="_sameBranches"/>.</summary>
+    private static readonly FuzzyRegex _nestedRepeat = new("(a+)+c");
+
+    /// <summary>Words with optional spaces between them, anchored at the end.</summary>
+    private static readonly FuzzyRegex _wordsToEnd = new(@"(\w+\s?)+$");
+
+    /// <summary>Twenty <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twentyAs = new string('a', 20) + "bc";
+
+    /// <summary>Twenty-four <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twentyFourAs = new string('a', 24) + "bc";
+
+    /// <summary>Two hundred <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twoHundredAs = new string('a', 200) + "bc";
+
+    /// <summary>Two hundred four-letter words, each followed by a space, then <c>!</c>.</summary>
+    private static readonly string _wordsThenBang = string.Concat(Enumerable.Repeat("aaaa ", 200)) + "!";
+
     /// <summary>Full scan of a megabyte for a literal that occurs once, at the end.</summary>
     /// <returns>Where it was found.</returns>
     [Benchmark]
@@ -196,6 +228,26 @@ public class WorkloadBenchmarks
     /// <returns>How many errors the answer carries, which is 1 rather than 3.</returns>
     [Benchmark]
     public int BestMatch() => _best.Match(Corpus.Fuzzy).FuzzyCounts.Total;
+
+    /// <summary><c>(?:a|a)+c</c> failing over twenty <c>a</c>s: two identical ways to take each one.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalSameBranches() => _sameBranches.IsMatch(_twentyAs);
+
+    /// <summary><c>(a|aa)+c</c> failing over twenty-four <c>a</c>s: every split of the run into ones and twos.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalPrefixBranches() => _prefixBranches.IsMatch(_twentyFourAs);
+
+    /// <summary><c>(a+)+c</c> failing over two hundred <c>a</c>s.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalNestedRepeat() => _nestedRepeat.IsMatch(_twoHundredAs);
+
+    /// <summary><c>(\w+\s?)+$</c> failing over two hundred words and a <c>!</c>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalWordsToEnd() => _wordsToEnd.IsMatch(_wordsThenBang);
 
     /// <summary>Compiles a large pattern from source, which is parser and compiler work only.</summary>
     /// <returns>How many capture groups it has, so the result cannot be discarded.</returns>

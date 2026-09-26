@@ -29,8 +29,14 @@ public sealed class RepeatTests
     /// before the engine runs - which is a Phase 7 prefilter this port has not got, so a
     /// <c>'b'</c>-free subject would be testing the deferral rather than the engine, and the test
     /// would silently stop timing out the day Phase 7 lands.
+    /// <para>
+    /// Since 2026-09-26 the pattern carries a <c>\1</c>. The failure memo
+    /// (<c>RepeatInfo.FailureMemo</c>) makes <c>(a|a)*b</c> itself fail in linear time here, which
+    /// is faster than upstream and changes no answer, but it is then no longer a pattern the guards
+    /// cannot tame. A pattern with a backreference gets no memo, so this one still is.
+    /// </para>
     /// </remarks>
-    private const string _catastrophicPattern = "(a|a)*b";
+    private const string _catastrophicPattern = @"(a|a)*\1b";
 
     [Test]
     public void A_catastrophic_pattern_raises_the_match_timeout_rather_than_running_to_completion()

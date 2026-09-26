@@ -49,6 +49,47 @@ internal sealed class RepeatInfo
     /// <see cref="NodeStatus.Tail"/> need position guards, plus <see cref="NodeStatus.Inner"/>.
     /// </summary>
     internal uint Status;
+
+    /// <summary>
+    /// Whether this repeat's body guard is a failure memo. <b>Not upstream.</b> When set,
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> do not mark the position where the body
+    /// matched, so the failure recorded when the engine later backtracks past that position is
+    /// kept, and the body is never tried there again in the same attempt. That turns
+    /// <c>(?:a|a)+c</c> from exponential to linear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's success mark exists because a failure is not always a fact about the position
+    /// alone: <c>(?:(a)|a)+(?(1)c|b)</c> over <c>aab</c> fails from position 1 on the path that set
+    /// group 1 and matches from it on the path that did not. The memo is sound only when nothing
+    /// after the body can see how the engine got there. The compiler sets this flag for a repeat
+    /// with no maximum and a minimum of at most 1, that is not inside another repeat, an atomic
+    /// group, a possessive repeat, a lookaround, a conditional's lookaround test, a called group or
+    /// a fuzzy section. <c>Optimiser.KeepFailureMemosSound</c> then clears it for every repeat if
+    /// the pattern has anything that reads more than the position: a backreference, a group-exists
+    /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
+    /// matching. A partial match does not use it either (<c>MatchState.KeepsFailureMemo</c>).
+    /// </para>
+    /// <para>
+    /// Three conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
+    /// condition is deleted: the maximum, backreferences and group-exists conditionals. The rest
+    /// have none. Differential grids of 7.6 million rows found no answer that changes when any one
+    /// of them is deleted (2026-09-26), and for most there is a reason. Guards are reset at every
+    /// start position, so a verb that ends the attempt leaves nothing behind for a later path to
+    /// misread. An atomic group, a lookaround and a conditional's test throw away the body's
+    /// backtrack entries once the body reaches its end, so a failure recorded inside one of them
+    /// only ever means "cannot reach the end of the construct from here", a fact about the
+    /// position; and a group call clears the guard lists on the way in and restores them on the
+    /// way out. A repeat inside a bounded
+    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body). A
+    /// partial match returns at the first path that reaches the end of the text, POSIX matching
+    /// replaces its best match only with a longer one, and the guards are not consulted under
+    /// fuzzy matching. They stay as exclusions anyway: each is a place where the rest of the match
+    /// can read more than the position, and none of those arguments has been proved in general.
+    /// <c>docs/plan/2026-09-26-backtrack-memoisation-design.md</c> gives the full reasoning.
+    /// </para>
+    /// </remarks>
+    internal bool FailureMemo;
 }
 
 /// <summary>

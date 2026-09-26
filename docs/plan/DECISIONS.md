@@ -1473,3 +1473,36 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
   `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
   no match.
+- 2026-09-26: **the body guard of a safe repeat is a failure memo, so `(?:a|a)+c` and `(a|aa)+c`
+  fail in linear time per attempt instead of exponential.** Option A of
+  `docs/plan/2026-09-26-backtrack-memoisation-design.md`. Upstream already records a failure when
+  the engine backtracks past the start of a repeat's body, but `END_GREEDY_REPEAT` and
+  `END_LAZY_REPEAT` first mark every position where the body matched, and a marked position is
+  never recorded again, so the failure memo never forms. For a repeat marked
+  `RepeatInfo.FailureMemo` the success mark is skipped, and the existing guards do the rest. The
+  mark is skipped only where nothing after the body can see how the engine got there: no maximum
+  and a minimum of at most 1; not inside another repeat, an atomic group, a possessive repeat, a
+  lookaround, a conditional's lookaround test, a called group or a fuzzy section (the compiler, in
+  `BuildRepeat`); no backreference, group-exists conditional, group call, `(*PRUNE)`, `(*SKIP)`,
+  fuzzy matching or POSIX matching anywhere in the pattern (`Optimiser.KeepFailureMemosSound`);
+  and not a partial match (`MatchState.KeepsFailureMemo`). Three of those conditions have a
+  witness, an answer that changes when the condition is deleted, pinned in `FailureMemoTests`
+  and each shown red by the deletion: `(?:(a)|a)+(?(1)c|b)` over `aab` answers (0, 3), not
+  (1, 3); `a(?:.|(a)){1,}\1c` over `aabac` answers (0, 5), not no match; `^(?:a|ab|b){0,3}c`
+  over `abbbc` answers (0, 5), not no match. The rest have none: two differential grids against
+  main, 3.2 and 4.4 million rows over 12 calls each (1,607 and 2,000 patterns built around
+  overlapping branches, captures, conditionals, backreferences, nesting, lookarounds, atomic
+  groups, verbs, group calls and fuzzy sections, every subject over `abc` up to length 6 plus
+  long ones), found no answer change with any one of them deleted, and the reasons are written
+  on `RepeatInfo.FailureMemo`. They stay anyway, because each is a place where the rest of the
+  match can read more than the position and none of the arguments is a proof. With every
+  condition in place both grids have 0 answer differences from main (answers, spans, groups,
+  every capture, the partial flag; only timeouts differ). Measured, Release, best of three,
+  searching `'a' * n + 'bc'`: `(?:a|a)+c` at n=24 from 2,981 ms to 0.32 ms, and at n=40 from
+  over 20 s to 0.82 ms; `(a|aa)+c` at n=24 from 54 ms to 0.07 ms. Guards are still reset at every
+  start position, so a failing search is quadratic in the subject (54 ms at n=1000) and nested
+  repeats stay polynomial, `(a+)+c` at n=1000 from 6,235 ms to 2,186 ms. That is Option B's
+  ground. Every test and demo that needed a runaway pattern used one of these shapes, so each now
+  carries a backreference, `(a|a)*\1\b\B`, or a maximum, `^(a|aa){1,99}$`, which keeps it slow;
+  the oracle's `timeout` generator swaps seven shapes for bounded twins for the same reason, both
+  halves of `timeout-row-margin` putting all ten still running at twenty times the budget.

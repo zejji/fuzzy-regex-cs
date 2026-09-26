@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names fifty-four, and under the JIT this set is exactly those fifty-four. A floor of
+        // The allowlist names fifty-five, and under the JIT this set is exactly those fifty-five. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names fifty-four writable fields, so a near-empty answer means the "
+                "the allowlist names fifty-five writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -768,5 +768,8 @@ public sealed class ThreadSafetyTests
             "CallRefInfo.Node",
             "CallRefInfo.Used",
             "RepeatInfo.Status",
+            // Set by NodeCompiler.BuildRepeat and withdrawn by Optimiser.KeepFailureMemosSound, both
+            // inside Compile. Read by MatchState.KeepsFailureMemo, never written by matching.
+            "RepeatInfo.FailureMemo",
         };
 }

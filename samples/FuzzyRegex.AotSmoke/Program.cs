@@ -482,12 +482,16 @@ internal static class Program
         // at least 48x over the budget, and still bounded, so a regression that stopped the
         // timeout firing shows up as a MISS in a few seconds rather than as a hung smoke test.
         // `(a|a)*$` over 31 a's takes 379,561 ms and is deliberately NOT used here for that reason.
+        //
+        // Since 2026-09-26 the pattern is `(a|aa){1,99}$`. The failure memo (RepeatInfo.FailureMemo)
+        // made `(a|aa)+$` fail at once, and a repeat with a maximum gets no memo, so the bounded
+        // form is the same search at the old speed: 2,107 ms over this subject (Release, one run).
         yield return (
             "match-timeout",
             "RegexMatchTimeoutException",
             static () =>
             {
-                FuzzyRegex pattern = new(@"(a|aa)+$", FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(50));
+                FuzzyRegex pattern = new(@"(a|aa){1,99}$", FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(50));
                 try
                 {
                     pattern.Match(new string('a', 32) + "b");

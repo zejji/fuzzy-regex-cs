@@ -106,10 +106,13 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// answered in 75 ms with no match, and upstream answered the same input in 1 ms. Both engines
 /// really do optimise that shape away - upstream's 1 ms is its repeat guards and not its
 /// required-string prefilter, because it is just as fast on <c>"a" * 28 + "cb"</c>, where a "b" is
-/// there to be found. <c>^(a|aa)+$</c> against 36 a's and a b is exponential in both instead: this
-/// port spends its whole two-second budget, and upstream <c>regex 2026.9.10</c>, given the same
-/// input with <c>timeout=6.0</c>, spent 6.298 s before raising <c>TimeoutError</c> (2.252 s for 34
-/// a's, 0.985 s for 32 - the shape of the growth, and why the subject is 37 characters and not 60).
+/// there to be found. <c>^(a|aa)+$</c> against 36 a's and a b replaced it, exponential in both
+/// engines until 2026-09-26, when this port's failure memo (<c>RepeatInfo.FailureMemo</c>) made it
+/// answer at once. <c>^(a|aa){1,99}$</c> is the same search with a maximum far above the subject's
+/// length, which keeps the memo off: this port spends its whole two-second budget, and upstream
+/// <c>regex 2026.9.10</c> spent 4.314 s on the same input with no match (1.661 s for 34 a's, 0.631 s
+/// for 32 - the shape of the growth, and why the subject is 37 characters and not 60). Measured
+/// 2026-09-26.
 /// </para>
 /// </remarks>
 public sealed class DemoExamplesTests

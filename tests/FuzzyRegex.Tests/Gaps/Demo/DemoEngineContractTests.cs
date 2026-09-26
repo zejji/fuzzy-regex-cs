@@ -312,8 +312,10 @@ public sealed class DemoEngineContractTests
 
         // S60 changed the tail from 'b': the required-string prefilter refuses a subject with no
         // 'b' in it before matching starts, so the old pattern is no longer a runaway anywhere.
-        // '\b\B' is false at every position and offers no literal to key on, so it still is.
-        Error(Run(@"(a|a)*\b\B", "", new string('a', 30))).Should().Contain("timed out");
+        // '\b\B' is false at every position and offers no literal to key on, so it still is. The
+        // '\1' keeps it a runaway since the failure memo: a pattern with a backreference gets none
+        // (TimeoutAndCancellationTests' pattern says why).
+        Error(Run(@"(a|a)*\1\b\B", "", new string('a', 30))).Should().Contain("timed out");
 
         // The message alone is not the contract - returning is. Asserting only on the text is how
         // the suite stayed green while Run could take forever (S70 review). The bound is loose
@@ -339,7 +341,8 @@ public sealed class DemoEngineContractTests
         string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "cb", 200));
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        Error(Run("(a|a)*b", "", subject)).Should().Contain("timed out");
+        // The optional '\1' keeps each step exponential; see the runaway test above.
+        Error(Run(@"(a|a)*\1?b", "", subject)).Should().Contain("timed out");
 
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
     }
@@ -830,7 +833,8 @@ public sealed class DemoEngineContractTests
         string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "c", 10)) + "aaab";
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        Error(DemoEngine.Run("(a|a)*b", "", subject, "replace", "X", "")).Should().Contain("timed out");
+        // The optional '\1' keeps the search exponential; see the runaway test above.
+        Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "")).Should().Contain("timed out");
 
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(6));
     }

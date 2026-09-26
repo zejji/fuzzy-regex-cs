@@ -67,6 +67,14 @@ internal struct CompileArgs
     /// <summary>Upstream <c>all_atomic</c>.</summary>
     internal bool AllAtomic;
 
+    /// <summary>
+    /// Whether this is inside an atomic group, a possessive repeat, a lookaround, a conditional's
+    /// lookaround test or a called group, where the rest of the match ends at the construct's end
+    /// rather than at the end of the pattern. <b>Not upstream</b>; it keeps a repeat in there from
+    /// getting a failure memo (<see cref="RepeatInfo.FailureMemo"/>).
+    /// </summary>
+    internal bool WithinSubmatch;
+
     /// <summary>The opcode at the read position.</summary>
     internal readonly Opcode Op => (Opcode)CodeList[Code];
 
@@ -634,6 +642,7 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of it.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
 
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -798,6 +807,7 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
         int status = BuildSequence(ref subargs);
         if (status != _success)
         {
@@ -895,6 +905,7 @@ internal static class NodeCompiler
 
         // Compile the lookaround test and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
         subargs.Forward = forward;
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -1254,6 +1265,7 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
         subargs.Forward = forward;
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -1507,6 +1519,17 @@ internal static class NodeCompiler
                     4
                 );
                 RecordRepeat(args.Pattern, index, args.RepeatDepth);
+
+                // NOT UPSTREAM: the repeat's own half of the failure memo's conditions; the
+                // pattern's half is Optimiser.KeepFailureMemosSound. With no maximum and a minimum
+                // of at most 1, the count after the body can never change what happens next. The
+                // loop above has already moved any larger minimum into copies of the body.
+                args.Pattern.RepeatInfoAt(index).FailureMemo =
+                    args.RepeatDepth == 0
+                    && !args.WithinSubmatch
+                    && !args.WithinFuzzy
+                    && ~maxCount == 0
+                    && minCount <= 1;
 
                 repeatNode.Values[0] = (uint)index;
                 repeatNode.Values[1] = minCount;

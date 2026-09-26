@@ -41,8 +41,15 @@ public sealed class TimeoutAndCancellationTests
     /// is false everywhere, and it keeps the exponential failure while giving no literal for any
     /// prefilter to key on. Deliberately not a literal or a character set: the rest of Phase 7
     /// (a start-code bitmap, a rarity gate) would defeat those in turn.
+    /// <para>
+    /// The <c>\1</c> was added on 2026-09-26, for a reason of the same kind. The failure memo
+    /// (<c>RepeatInfo.FailureMemo</c>) remembers where a repeat's body has already failed, which
+    /// makes <c>(a|a)*\b\B</c> fail in linear time. A pattern with a backreference gets no memo,
+    /// because what follows a repeat can then depend on the captures as well as the position, so
+    /// this one is still exponential.
+    /// </para>
     /// </remarks>
-    private const string _slowPattern = @"(a|a)*\b\B";
+    private const string _slowPattern = @"(a|a)*\1\b\B";
 
     /// <summary>A subject the pattern cannot match, long enough to make the search exponential.</summary>
     private static readonly string _slowSubject = new('a', 26);
