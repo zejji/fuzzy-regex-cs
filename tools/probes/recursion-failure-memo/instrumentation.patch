@@ -1,0 +1,486 @@
+diff --git a/src/FuzzyRegex/Engine/ByteStack.cs b/src/FuzzyRegex/Engine/ByteStack.cs
+index 03d7e48..f68b0b2 100644
+--- a/src/FuzzyRegex/Engine/ByteStack.cs
++++ b/src/FuzzyRegex/Engine/ByteStack.cs
+@@ -70,6 +70,8 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
+     /// </summary>
+     internal void Reset() => Count = 0;
+ 
++    internal ReadOnlySpan<byte> ProbeBytes => _storage.AsSpan(0, Count);
++
+     /// <summary>
+     /// Upstream's caching of the stack's storage in <c>state_fini</c> (line 18684): empties the
+     /// stack and keeps its buffer for the next call, unless the buffer is larger than
+diff --git a/src/FuzzyRegex/Engine/Matcher.cs b/src/FuzzyRegex/Engine/Matcher.cs
+index ba373f9..e918db6 100644
+--- a/src/FuzzyRegex/Engine/Matcher.cs
++++ b/src/FuzzyRegex/Engine/Matcher.cs
+@@ -7474,6 +7474,11 @@ internal static class Matcher
+                 return MatchStatus.Cancelled;
+             }
+ 
++            if (ProbeCounters.On)
++            {
++                ProbeCounters.Visit(state, node);
++            }
++
+             switch (node.Op)
+             {
+                 case Opcode.Any: // Any character except a newline.
+@@ -9010,6 +9015,16 @@ internal static class Matcher
+                     // already open. See MatchState.ActiveCalls and ledger entry 14 - the path is
+                     // infinite, and failing it leaves every other path alone.
+                     long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
++                    long probeEntry = 0;
++                    if (ProbeCounters.Memo)
++                    {
++                        probeEntry = ProbeCounters.EntryKey(state, node);
++                        if (ProbeCounters.NoExit.Contains(probeEntry))
++                        {
++                            ProbeCounters.MemoHits++;
++                            goto backtrack;
++                        }
++                    }
+ 
+                     if (!state.ActiveCalls.Add(groupCallKey))
+                     {
+@@ -9027,6 +9042,10 @@ internal static class Matcher
+                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
+                     // open calls it has just thrown away.
+                     state.OpenCalls.Add((groupCallKey, state.Sstack.Count));
++                    if (ProbeCounters.Memo)
++                    {
++                        ProbeCounters.Open[(groupCallKey, state.Sstack.Count)] = (probeEntry, false);
++                    }
+ 
+                     /* sstack: caller_groups caller_repeats capture_change return_node
+                      *
+@@ -9112,6 +9131,15 @@ internal static class Matcher
+                         // The call is closed, so it is no longer one this position may not re-enter.
+                         // It is the innermost open one - calls nest - and its key goes on the
+                         // backtracking stack so the arm below can re-open it.
++                        if (ProbeCounters.Memo)
++                        {
++                            (long probeKey, int probeDepth) = state.OpenCalls[^1];
++                            if (ProbeCounters.Open.TryGetValue((probeKey, probeDepth), out var probeOpen))
++                            {
++                                ProbeCounters.Open[(probeKey, probeDepth)] = (probeOpen.Key, true);
++                            }
++                        }
++
+                         long groupReturnCallKey = PopOpenCall(state);
+ 
+                         // For the callee.
+@@ -11356,6 +11384,16 @@ internal static class Matcher
+                      * bstack: -
+                      */
+ 
++                    if (ProbeCounters.Memo)
++                    {
++                        (long probeKey, int probeDepth) = state.OpenCalls[^1];
++                        if (ProbeCounters.Open.Remove((probeKey, probeDepth), out var probeOpen) && !probeOpen.Returned)
++                        {
++                            ProbeCounters.NoExit.Add(probeOpen.Key);
++                            ProbeCounters.MemoRecords++;
++                        }
++                    }
++
+                     // The call is no longer open: backtracking past it means it never happened.
+                     PopOpenCall(state);
+ 
+diff --git a/src/FuzzyRegex/Engine/ProbeCounters.cs b/src/FuzzyRegex/Engine/ProbeCounters.cs
+new file mode 100644
+index 0000000..74e98ba
+--- /dev/null
++++ b/src/FuzzyRegex/Engine/ProbeCounters.cs
+@@ -0,0 +1,390 @@
++#pragma warning disable
++// TEMPORARY INSTRUMENTATION for docs/plan/2026-09-27-recursion-failure-memo-design.md. Delete.
++using Fuzzy.Text.RegularExpressions.Parsing;
++
++namespace Fuzzy.Text.RegularExpressions.Engine;
++
++internal static class ProbeCounters
++{
++    public static bool On;
++    public static long Visits;
++    public static long MaxDepth;
++    public static readonly HashSet<long> Pos = new();
++    public static readonly HashSet<long> Local = new();
++    public static readonly HashSet<long> Norm = new();
++    public static readonly HashSet<long> NormNoAttempt = new();
++    public static readonly HashSet<long> Callee = new();
++    public static readonly HashSet<long> Strict = new();
++    public static readonly HashSet<long> Summary = new();
++    public static readonly HashSet<long> Deficit = new();
++    public static readonly HashSet<long> NoStack = new();
++    public static readonly HashSet<long> Entries = new();
++    public static long CallVisits;
++    public static readonly Dictionary<string, long> Ops = new();
++    public static long LastCall;
++    public static long LastCallKey;
++    public static readonly Dictionary<(long, int), long> Pending = new();
++    public static readonly HashSet<long> Returned = new();
++    public static readonly List<long> Instances = new();
++    public static readonly Dictionary<int, long[]> ByDepth = new();
++
++    public static void Reset()
++    {
++        Visits = 0;
++        MaxDepth = 0;
++        Pos.Clear();
++        Local.Clear();
++        Norm.Clear();
++        NormNoAttempt.Clear();
++        Callee.Clear();
++        Strict.Clear();
++        Summary.Clear();
++        Deficit.Clear();
++        NoStack.Clear();
++        Entries.Clear();
++        CallVisits = 0;
++        MemoHits = 0;
++        MemoRecords = 0;
++        NoExit.Clear();
++        Open.Clear();
++        Ops.Clear();
++        Pending.Clear();
++        Returned.Clear();
++        Instances.Clear();
++        ByDepth.Clear();
++    }
++
++    private static long Mix(long h, long v)
++    {
++        unchecked
++        {
++            ulong x = (ulong)h ^ ((ulong)v + 0x9E3779B97F4A7C15UL + ((ulong)h << 6) + ((ulong)h >> 2));
++            x ^= x >> 30;
++            x *= 0xBF58476D1CE4E5B9UL;
++            x ^= x >> 27;
++            x *= 0x94D049BB133111EBUL;
++            x ^= x >> 31;
++            return (long)x;
++        }
++    }
++
++    private static long Bytes(long h, ReadOnlySpan<byte> bytes)
++    {
++        int i = 0;
++        for (; i + 8 <= bytes.Length; i += 8)
++        {
++            h = Mix(h, BitConverter.ToInt64(bytes.Slice(i, 8)));
++        }
++
++        for (; i < bytes.Length; i++)
++        {
++            h = Mix(h, bytes[i]);
++        }
++
++        return Mix(h, bytes.Length);
++    }
++
++    public static void Visit(MatchState state, Node node)
++    {
++        Visits++;
++        Ops[node.Op.ToString()] = Ops.GetValueOrDefault(node.Op.ToString()) + 1;
++        int depth = state.OpenCalls.Count;
++        if (depth > MaxDepth)
++        {
++            MaxDepth = depth;
++        }
++
++        long h = Mix(Mix(17, node.Index), state.TextPos);
++        Pos.Add(h);
++
++        // Local: the open section's counts and the whole match's totals.
++        h = Mix(h, state.FuzzyCounts[0]);
++        h = Mix(h, state.FuzzyCounts[1]);
++        h = Mix(h, state.FuzzyCounts[2]);
++        h = Mix(h, state.FuzzyNode?.Index ?? -1);
++        h = Mix(h, state.TotalErrors);
++        h = Mix(h, state.TotalCost);
++        Local.Add(h);
++
++        // Norm: what the forward matcher can read, with histories reduced to what is read of them:
++        // current spans, not capture lists; per repeat, whether the capture-change counter and the
++        // edit count moved since the iteration began, not their absolute values.
++        long n = h;
++        foreach (GroupData g in state.Groups)
++        {
++            GroupSpan s = g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1);
++            n = Mix(Mix(n, s.Start), s.End);
++        }
++
++        foreach (RepeatData r in state.Repeats)
++        {
++            n = Mix(n, r.Count);
++            n = Mix(n, r.Start);
++            n = Mix(n, r.CaptureChange == state.CaptureChange ? 0 : 1);
++            n = Mix(n, state.FuzzyChanges.Count > r.ChangesAtStart ? 1 : 0);
++        }
++
++        n = Mix(n, state.SliceStart);
++        n = Mix(n, state.SliceEnd);
++        n = Mix(n, state.SectionFrame);
++
++        NoStack.Add(Mix(n, state.MatchPos));
++
++        // The continuation, raw: the saved stack, the open calls.
++        long stackHash = Bytes(0, state.Sstack.ProbeBytes);
++        foreach ((long key, int d) in state.OpenCalls)
++        {
++            stackHash = Mix(Mix(stackHash, key), d);
++        }
++
++        long norm = Mix(n, stackHash);
++        NormNoAttempt.Add(norm);
++        norm = Mix(norm, state.MatchPos);
++        Norm.Add(norm);
++
++        // Callee: the local state plus only the part of the saved stack above the innermost call.
++        int from = depth > 0 ? state.OpenCalls[depth - 1].SstackDepth : 0;
++        long callee = Bytes(Mix(n, state.MatchPos), state.Sstack.ProbeBytes[from..]);
++        Callee.Add(callee);
++
++        // Summary: the callee key plus what a call can read of its callers: the chain of enclosing
++        // fuzzy sections (node and counts, through every call level) and the open calls at or after
++        // the innermost call's position (the re-entry guard reads those).
++        long sum = callee;
++        int frame = state.SectionFrame;
++        Span<long> outer = stackalloc long[3];
++        while (state.TryOuterSection(ref frame, outer) is { } section)
++        {
++            sum = Mix(Mix(Mix(Mix(sum, section.Index), outer[0]), outer[1]), outer[2]);
++        }
++
++        int innerPos = depth > 0 ? (int)(uint)state.OpenCalls[depth - 1].Key : -1;
++        foreach ((long key, int d) in state.OpenCalls)
++        {
++            if ((int)(uint)key >= innerPos)
++            {
++                sum = Mix(sum, key);
++            }
++        }
++
++        Summary.Add(sum);
++
++        // Deficit: the summary with each enclosing section reduced to how far its minimums are from
++        // met, counting the errors of the sections inside it, which is all that
++        // Matcher.AllMinimumsMet and Matcher.RaisesUnmetMinimum read of it.
++        long def = callee;
++        {
++            long a0 = state.FuzzyCounts[0], a1 = state.FuzzyCounts[1], a2 = state.FuzzyCounts[2];
++            int f = state.SectionFrame;
++            Node? sec = state.FuzzyNode;
++            while (sec is not null)
++            {
++                List<uint> v = sec.Values;
++                def = Mix(def, Math.Max(0, v[FuzzyValue.MinSub] - a0));
++                def = Mix(def, Math.Max(0, v[FuzzyValue.MinIns] - a1));
++                def = Mix(def, Math.Max(0, v[FuzzyValue.MinDel] - a2));
++                def = Mix(def, Math.Max(0, v[FuzzyValue.MinErr] - (a0 + a1 + a2)));
++                sec = state.TryOuterSection(ref f, outer);
++                a0 += outer[0]; a1 += outer[1]; a2 += outer[2];
++            }
++        }
++
++        foreach ((long key, int d) in state.OpenCalls)
++        {
++            if ((int)(uint)key >= innerPos)
++            {
++                def = Mix(def, key);
++            }
++        }
++
++        Deficit.Add(def);
++
++        // Call entries, keyed by the deficit key; and which entry keys ever reached their return.
++        // Attribution is by (call key, saved-stack depth), which a closed call's sibling at the
++        // same position and depth can share, so "returned" can be over-reported, never under.
++        if (node.Op == Opcode.GroupCall)
++        {
++            CallVisits++;
++            Entries.Add(def);
++            Instances.Add(def);
++            int callIndex = (int)node.Values[0];
++            long callKey = ((long)callIndex << 32) | (uint)state.TextPos;
++            // The frame GROUP_CALL is about to push: groups, repeats, capture change, return node.
++            Pending[(callKey, -1)] = def;
++            LastCall = def;
++            LastCallKey = callKey;
++        }
++        else if (node.Op == Opcode.GroupReturn && depth > 0)
++        {
++            (long key, int d) = state.OpenCalls[depth - 1];
++            if (Pending.TryGetValue((key, d), out long entry))
++            {
++                Returned.Add(entry);
++            }
++        }
++
++        // Bind the pending entry to the depth the call's frame ends at, once the call has opened.
++        if (depth > 0 && LastCallKey != 0 && state.OpenCalls[depth - 1].Key == LastCallKey)
++        {
++            Pending[(LastCallKey, state.OpenCalls[depth - 1].SstackDepth)] = LastCall;
++            LastCallKey = 0;
++        }
++
++        // Strict: everything, histories included.
++        long s2 = Mix(norm, state.CaptureChange);
++        foreach (GroupData g in state.Groups)
++        {
++            s2 = Mix(Mix(s2, g.Count), g.Current);
++            for (int i = 0; i < g.Count; i++)
++            {
++                s2 = Mix(Mix(s2, g.Captures[i].Start), g.Captures[i].End);
++            }
++        }
++
++        foreach (RepeatData r in state.Repeats)
++        {
++            s2 = Mix(Mix(s2, r.CaptureChange), r.ChangesAtStart);
++        }
++
++        foreach (FuzzyChange c in state.FuzzyChanges)
++        {
++            s2 = Mix(s2, c.GetHashCode());
++        }
++
++        s2 = Mix(s2, state.Pstack.Count);
++        bool isNew = Strict.Add(s2);
++
++        if (!ByDepth.TryGetValue(depth, out long[]? row))
++        {
++            ByDepth[depth] = row = new long[2];
++        }
++
++        row[0]++;
++        if (isNew)
++        {
++            row[1]++;
++        }
++    }
++
++    // PROTOTYPE of the "call with no exit" memo (design option C1).
++    public static bool Memo;
++    public static long MemoHits;
++    public static long MemoRecords;
++    public static readonly HashSet<long> NoExit = new();
++    public static readonly Dictionary<(long, int), (long Key, bool Returned)> Open = new();
++
++    public static int KeyMode;
++
++    // The minimal key: only what a callee can read before it writes it.
++    public static long MinimalKey(MatchState state, Node node)
++    {
++        long n = Mix(Mix(19, node.Index), state.TextPos);
++        n = Mix(n, state.FuzzyCounts[0]);
++        n = Mix(n, state.FuzzyCounts[1]);
++        n = Mix(n, state.FuzzyCounts[2]);
++        n = Mix(n, state.FuzzyNode?.Index ?? -1);
++        n = Mix(n, state.TotalErrors);
++        n = Mix(n, state.TotalCost);
++        n = Mix(n, state.MaxErrors);
++        n = Mix(n, state.MaxCost);
++        n = Mix(n, state.SliceStart);
++        n = Mix(n, state.SliceEnd);
++        // Every group, since the prototype does not know which ones a backreference reads.
++        foreach (GroupData g in state.Groups)
++        {
++            GroupSpan s = g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1);
++            n = Mix(Mix(n, s.Start), s.End);
++        }
++
++        Span<long> outer = stackalloc long[3];
++        long a0 = state.FuzzyCounts[0], a1 = state.FuzzyCounts[1], a2 = state.FuzzyCounts[2];
++        int f = state.SectionFrame;
++        Node? sec = state.FuzzyNode;
++        while (sec is not null)
++        {
++            List<uint> v = sec.Values;
++            n = Mix(n, sec.Index);
++            n = Mix(n, Math.Max(0, v[FuzzyValue.MinSub] - a0));
++            n = Mix(n, Math.Max(0, v[FuzzyValue.MinIns] - a1));
++            n = Mix(n, Math.Max(0, v[FuzzyValue.MinDel] - a2));
++            n = Mix(n, Math.Max(0, v[FuzzyValue.MinErr] - (a0 + a1 + a2)));
++            sec = state.TryOuterSection(ref f, outer);
++            a0 += outer[0]; a1 += outer[1]; a2 += outer[2];
++        }
++
++        foreach ((long key, int d) in state.OpenCalls)
++        {
++            int pos = (int)(uint)key;
++            if (state.Reverse ? pos <= state.TextPos : pos >= state.TextPos)
++            {
++                n = Mix(n, key);
++            }
++        }
++
++        return n;
++    }
++
++    public static long EntryKey(MatchState state, Node node)
++    {
++        if (KeyMode == 1)
++        {
++            return MinimalKey(state, node);
++        }
++
++        int depth = state.OpenCalls.Count;
++        long n = Mix(Mix(17, -1), state.TextPos);
++        n = Mix(n, state.FuzzyCounts[0]);
++        n = Mix(n, state.FuzzyCounts[1]);
++        n = Mix(n, state.FuzzyCounts[2]);
++        n = Mix(n, state.FuzzyNode?.Index ?? -1);
++        n = Mix(n, state.TotalErrors);
++        n = Mix(n, state.TotalCost);
++        n = Mix(n, state.MaxErrors);
++        n = Mix(n, state.MaxCost);
++        foreach (GroupData g in state.Groups)
++        {
++            GroupSpan s = g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1);
++            n = Mix(Mix(n, s.Start), s.End);
++        }
++
++        foreach (RepeatData r in state.Repeats)
++        {
++            n = Mix(n, r.Count);
++            n = Mix(n, r.Start);
++            n = Mix(n, r.CaptureChange == state.CaptureChange ? 0 : 1);
++            n = Mix(n, state.FuzzyChanges.Count > r.ChangesAtStart ? 1 : 0);
++        }
++
++        n = Mix(n, state.SliceStart);
++        n = Mix(n, state.SliceEnd);
++        n = Mix(n, state.SectionFrame);
++        n = Mix(n, state.MatchPos);
++        int from = depth > 0 ? state.OpenCalls[depth - 1].SstackDepth : 0;
++        long def = Bytes(n, state.Sstack.ProbeBytes[from..]);
++        Span<long> outer = stackalloc long[3];
++        long a0 = state.FuzzyCounts[0], a1 = state.FuzzyCounts[1], a2 = state.FuzzyCounts[2];
++        int f = state.SectionFrame;
++        Node? sec = state.FuzzyNode;
++        while (sec is not null)
++        {
++            List<uint> v = sec.Values;
++            def = Mix(def, Math.Max(0, v[FuzzyValue.MinSub] - a0));
++            def = Mix(def, Math.Max(0, v[FuzzyValue.MinIns] - a1));
++            def = Mix(def, Math.Max(0, v[FuzzyValue.MinDel] - a2));
++            def = Mix(def, Math.Max(0, v[FuzzyValue.MinErr] - (a0 + a1 + a2)));
++            sec = state.TryOuterSection(ref f, outer);
++            a0 += outer[0]; a1 += outer[1]; a2 += outer[2];
++        }
++
++        int innerPos = depth > 0 ? (int)(uint)state.OpenCalls[depth - 1].Key : -1;
++        foreach ((long key, int d) in state.OpenCalls)
++        {
++            if ((int)(uint)key >= innerPos)
++            {
++                def = Mix(def, key);
++            }
++        }
++
++        return def;
++    }
++}
