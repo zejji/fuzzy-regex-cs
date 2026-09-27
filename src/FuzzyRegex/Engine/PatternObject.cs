@@ -346,6 +346,63 @@ internal sealed class PatternObject
     internal int[] MemoGroups = [];
 
     /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): whether <c>GROUP_CALL</c> may fail a call at once
+    /// because an earlier call with the same entry key ran out of choices without returning
+    /// (<c>Matcher.FailedCallKey</c>). Set when the pattern is compiled, for a pattern with a group
+    /// call and none of the constructs that let a failed call leave something behind.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A call that fails is undone completely by backtracking, except where a construct succeeds
+    /// and throws away the undo entries of its body. A lookaround, an atomic group, a possessive
+    /// repeat or a conditional's test does that, so a capture list keeps an entry from a path that
+    /// later failed, and skipping the failed call would leave that entry out:
+    /// <c>(?r)(a)(?:b(?:(?R)|)(?R)?(?:(?!.(?R)(?R))(?:a.))*?.){2&lt;=e&lt;=3}</c> over <c>aa</c>
+    /// changed group 1's capture list with the memo. So one of those constructs whose body holds a
+    /// capture group, a call or a <c>\K</c> turns the memo off (<see cref="CaptureInDiscardingConstruct"/>,
+    /// <see cref="KeepInSubmatch"/>). That also covers a call inside a lookbehind, which runs the
+    /// other way and so can meet open calls the key does not hold.
+    /// </para>
+    /// <para>
+    /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a
+    /// witness, as <see cref="RepeatInfo.FailureMemo"/> does. A partial match does not use it either
+    /// (<c>MatchState.InitMatch</c>): a path that reaches the end of the text records a partial
+    /// result even if it then fails. See <c>docs/plan/2026-09-27-recursion-failure-memo-design.md</c>.
+    /// </para>
+    /// </remarks>
+    internal bool UseCallMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): how many <c>GROUP_CALL</c> nodes the pattern has. A pass
+    /// makes (slice length + 1) x this many calls before the memo starts to build keys, so ordinary
+    /// recursion, which makes about one call per character, pays one counter per call and nothing
+    /// more.
+    /// </summary>
+    internal int GroupCallSites;
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): whether a capture group or a group call sits inside an
+    /// atomic group, a possessive repeat, a lookaround or a conditional's lookaround test. Written by
+    /// <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
+    /// </summary>
+    internal bool CaptureInDiscardingConstruct;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the failed-call memo is off whatever
+    /// <see cref="UseCallMemo"/> says. Tests and <c>tools/probes/recursion-failure-memo/memo-grid.cs</c>
+    /// set it on a pattern compiled for one call, to compare every answer with the memo on and off.
+    /// </summary>
+    internal bool SkipCallMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the failed-call memo builds keys from
+    /// the first call of a pass rather than after (slice length + 1) x
+    /// <see cref="GroupCallSites"/> calls. Tests and the memo grid set it, since the small subjects
+    /// they use never reach that count and would otherwise never exercise the memo.
+    /// </summary>
+    internal bool EagerCallMemo;
+
+    /// <summary>
     /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
     /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
     /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which
@@ -664,6 +721,7 @@ internal sealed class PatternObject
         // puts a pointer (Node.Index). Last, because the optimiser has by now removed the
         // unreachable nodes from the list and the required-string node has been added to it.
         bool noNarrowing = false;
+        bool hasPrune = false;
         for (int i = 0; i < self.NodeList.Count; i++)
         {
             self.NodeList[i].Index = i;
@@ -694,9 +752,25 @@ internal sealed class PatternObject
             {
                 noNarrowing = true;
             }
+
+            // NOT UPSTREAM (the failed-call memo): see UseCallMemo.
+            hasPrune |= node.Op == Opcode.Prune;
+            if (node.Op == Opcode.GroupCall)
+            {
+                ++self.GroupCallSites;
+            }
         }
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+
+        // NOT UPSTREAM (the failed-call memo): see UseCallMemo.
+        self.UseCallMemo =
+            self.GroupCallSites > 0
+            && !self.CaptureInDiscardingConstruct
+            && !self.KeepInSubmatch
+            && !hasPrune
+            && !self.HasSkipVerb
+            && (self.Flags & RegexFlags.Posix) == 0;
 
         // NOT UPSTREAM (empty-iteration rule): the groups a repeat memo key must hold. A key has
         // room for two spans; with more tested groups the memo is off, which only costs pruning.

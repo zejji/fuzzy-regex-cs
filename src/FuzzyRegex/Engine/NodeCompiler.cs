@@ -75,6 +75,14 @@ internal struct CompileArgs
     /// </summary>
     internal bool WithinSubmatch;
 
+    /// <summary>
+    /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
+    /// lookaround test: a construct that throws away its body's undo entries when the body
+    /// succeeds. <b>Not upstream</b>; a capture group or a group call in here turns off the
+    /// failed-call memo (<see cref="PatternObject.CaptureInDiscardingConstruct"/>).
+    /// </summary>
+    internal bool WithinDiscardingConstruct;
+
     /// <summary>The opcode at the read position.</summary>
     internal readonly Opcode Op => (Opcode)CodeList[Code];
 
@@ -643,6 +651,7 @@ internal static class NodeCompiler
         // Compile the sequence and check that we've reached the end of it.
         CompileArgs subargs = args;
         subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
 
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -934,6 +943,7 @@ internal static class NodeCompiler
         // Compile the lookaround test and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
         subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -1082,6 +1092,9 @@ internal static class NodeCompiler
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
+        // NOT UPSTREAM: see PatternObject.UseCallMemo.
+        args.Pattern.CaptureInDiscardingConstruct |= args.WithinDiscardingConstruct;
+
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
         int status = BuildSequence(ref subargs);
@@ -1149,6 +1162,9 @@ internal static class NodeCompiler
 
         // Record that we used a call_ref.
         RecordCallRefUsed(args.Pattern, (int)callRef);
+
+        // NOT UPSTREAM: see PatternObject.UseCallMemo.
+        args.Pattern.CaptureInDiscardingConstruct |= args.WithinDiscardingConstruct;
 
         // Append the node.
         AddNode(args.End!, node);
@@ -1294,6 +1310,7 @@ internal static class NodeCompiler
         // Compile the sequence and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
         subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
         int status = BuildSequence(ref subargs);
         if (status != _success)

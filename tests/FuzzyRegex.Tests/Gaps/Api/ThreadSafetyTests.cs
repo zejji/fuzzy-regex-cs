@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names sixty-five, and under the JIT this set is exactly those sixty-five. A floor of
+        // The allowlist names seventy-one, and under the JIT this set is exactly those seventy-one. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names sixty-five writable fields, so a near-empty answer means the "
+                "the allowlist names seventy-one writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -675,7 +675,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all sixty-five, and it is the reason they are not readonly: the engine's
+            // ONE writer for all seventy-one, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -686,7 +686,7 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all sixty-five
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-one
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
@@ -739,6 +739,16 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
             "PatternObject.UseRepeatMemo",
+            // The failed-call memo added these three, written by Compile (GroupCallSites and
+            // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
+            // (CaptureInDiscardingConstruct).
+            "PatternObject.CaptureInDiscardingConstruct",
+            "PatternObject.GroupCallSites",
+            "PatternObject.UseCallMemo",
+            // And these two, never written by the library: FailedCallMemoTests and the memo grid
+            // set them on a pattern compiled for that one purpose.
+            "PatternObject.EagerCallMemo",
+            "PatternObject.SkipCallMemo",
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",

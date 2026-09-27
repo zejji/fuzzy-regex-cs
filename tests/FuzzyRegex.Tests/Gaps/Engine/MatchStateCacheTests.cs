@@ -301,8 +301,14 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int SstackDepth)> calls:
-                calls.Add((7, 7));
+            case List<(long Key, int SstackDepth, long[]? MemoKey)> calls:
+                calls.Add((7, 7, null));
+                break;
+            case List<long> numbers:
+                numbers.Add(7);
+                break;
+            case null when field.FieldType == typeof(HashSet<long[]>):
+                field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);
@@ -392,6 +398,13 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<long> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case HashSet<long[]> keys:
+                RenderItems(
+                    path,
+                    keys.Select(static key => string.Join(" ", key)).Order(StringComparer.Ordinal),
+                    lines
+                );
                 break;
             case Array array and (long[] or GroupData[] or RepeatData[]):
                 int index = 0;

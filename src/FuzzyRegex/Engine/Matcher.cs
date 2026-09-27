@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -3044,11 +3045,120 @@ internal static class Matcher
     /// <returns>The closed call's key.</returns>
     private static long PopOpenCall(MatchState state)
     {
-        (long key, _) = state.OpenCalls[^1];
+        (long key, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         state.ActiveCalls.Remove(key);
         return key;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): the entry key of the call about to be made, built in
+    /// <see cref="MatchState.CallMemoKey"/>. It holds everything the called group can read before it
+    /// writes it, so two calls with equal keys either both reach their <c>GROUP_RETURN</c> or both
+    /// run out of choices without doing so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A call of a fuzzy recursive pattern is reached under many different call stacks, because the
+    /// callers below it spent their errors in different ways, and the called group cannot see those
+    /// differences. <c>(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2&lt;=e&lt;=3}(?=b))){1&lt;=s&lt;=1,1&lt;=d&lt;=2}</c>
+    /// over <c>baxbax</c> made 889,000 calls at four characters, all of which failed, and only
+    /// 2,390 of them were different; at six characters it took over a minute. The design, the
+    /// proof and the measurements are in <c>docs/plan/2026-09-27-recursion-failure-memo-design.md</c>.
+    /// </para>
+    /// <para>
+    /// What the key holds, in order: the call target and the position; the open section's node and
+    /// counts, the pass limits and the whole-match totals, since every error the called group makes
+    /// is judged by them; the slice; the current span of each group a backreference or a
+    /// conditional reads; for each enclosing section, its node and how far it still is from each
+    /// minimum, counting the errors of the sections inside it, which is all
+    /// <see cref="RaisesUnmetMinimum"/> and <see cref="AllMinimumsMet"/> read of it; and the open
+    /// calls the called group can reach, those at or after the position (at or before it in a
+    /// reverse pattern), which the re-entry guard reads. A call inside a lookbehind could reach the
+    /// others, and <see cref="PatternObject.UseCallMemo"/> is off for it.
+    /// </para>
+    /// <para>
+    /// What it leaves out, and why that is safe: the caller's repeats, since the called group starts
+    /// every repeat it enters at its head and <c>GROUP_CALL</c> empties the guards; the capture
+    /// change and edit counters and the capture lists, which the called group only compares with
+    /// values it recorded itself or appends to; the rest of the saved stack, which the called group
+    /// reaches only through the section chain; the start of the attempt, which only <c>SUCCESS</c>
+    /// reads and a called group cannot reach; and the search anchor, which is fixed for the life of
+    /// the set (<see cref="MatchState.FailedCalls"/>). The exact-deletion narrowing
+    /// (<see cref="DeletionRepeatsAnEarlierAlternative"/>) reads the caller's last edit, but it
+    /// leaves out only a deletion whose state an earlier alternative reaches too, so it cannot
+    /// change whether the call has an exit.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="callIndex">The call-ref index the <c>GROUP_CALL</c> node carries.</param>
+    /// <returns>The key, valid until the next call of this method.</returns>
+    private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex)
+    {
+        List<long> key = state.CallMemoKey;
+        key.Clear();
+
+        long[] counts = state.FuzzyCounts;
+        key.Add(callIndex);
+        key.Add(state.TextPos);
+        key.Add(counts[FuzzyValue.Sub]);
+        key.Add(counts[FuzzyValue.Ins]);
+        key.Add(counts[FuzzyValue.Del]);
+        key.Add(state.FuzzyNode?.Index ?? -1);
+        key.Add(state.MaxErrors);
+        key.Add(state.MaxCost);
+        key.Add(state.TotalErrors);
+        key.Add(state.TotalCost);
+        key.Add(state.SliceStart);
+        key.Add(state.SliceEnd);
+
+        foreach (int group in state.Pattern.MemoGroups)
+        {
+            key.Add(PackedSpan(state.Groups[group - 1]));
+        }
+
+        // The enclosing sections, as RaisesUnmetMinimum walks them. Ends: MatchState.TryOuterSection
+        // only steps to a lower frame.
+        if (state.SectionFrame >= 0 && state.FuzzyNode is not null)
+        {
+            long sub = counts[FuzzyValue.Sub];
+            long ins = counts[FuzzyValue.Ins];
+            long del = counts[FuzzyValue.Del];
+            int frame = state.SectionFrame;
+            Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+            while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+            {
+                sub += outerCounts[FuzzyValue.Sub];
+                ins += outerCounts[FuzzyValue.Ins];
+                del += outerCounts[FuzzyValue.Del];
+
+                List<uint> values = outer.Values;
+                key.Add(outer.Index);
+                key.Add(Math.Max(0, values[FuzzyValue.MinSub] - sub));
+                key.Add(Math.Max(0, values[FuzzyValue.MinIns] - ins));
+                key.Add(Math.Max(0, values[FuzzyValue.MinDel] - del));
+                key.Add(Math.Max(0, values[FuzzyValue.MinErr] - (sub + ins + del)));
+            }
+        }
+
+        foreach ((long openCall, _, _) in state.OpenCalls)
+        {
+            int openPos = (int)(uint)openCall;
+            if (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
+            {
+                key.Add(openCall);
+            }
+        }
+
+        return CollectionsMarshal.AsSpan(key);
+    }
+
+    /// <summary>The most keys <see cref="MatchState.FailedCalls"/> records in one pass.</summary>
+    /// <remarks>
+    /// SHORTCUT: past 2^20 keys, about 100 MB, the set stops recording and only answers from what it
+    /// holds: correct, and slower only on a pass that fails that many different calls.
+    /// </remarks>
+    private const int _failedCallCap = 1 << 20;
 
     /// <summary>
     /// Closes every group call and every fuzzy section whose saved-stack frame has just been
@@ -9011,6 +9121,25 @@ internal static class Matcher
                     // infinite, and failing it leaves every other path alone.
                     long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
 
+                    // NOT UPSTREAM'S: a call with the same entry key as one that ran out of choices
+                    // without returning fails the same way, so it fails now. Nothing has been pushed
+                    // yet, so backtracking resumes where the call's own backtrack arm would have left
+                    // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
+                    ReadOnlySpan<long> groupCallMemoKey = default;
+                    bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
+                    if (groupCallKeyed)
+                    {
+                        groupCallMemoKey = FailedCallKey(state, groupCallIndex);
+                        if (
+                            state.FailedCalls is { } failedCalls
+                            && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(groupCallMemoKey)
+                        )
+                        {
+                            ++state.CallMemoHits;
+                            goto backtrack;
+                        }
+                    }
+
                     if (!state.ActiveCalls.Add(groupCallKey))
                     {
                         goto backtrack;
@@ -9026,7 +9155,15 @@ internal static class Matcher
                     // The call is open, and the frame it belongs to ends here. See
                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
                     // open calls it has just thrown away.
-                    state.OpenCalls.Add((groupCallKey, state.Sstack.Count));
+                    state.OpenCalls.Add(
+                        (
+                            groupCallKey,
+                            state.Sstack.Count,
+                            groupCallKeyed && (state.FailedCalls?.Count ?? 0) < _failedCallCap
+                                ? groupCallMemoKey.ToArray()
+                                : null
+                        )
+                    );
 
                     /* sstack: caller_groups caller_repeats capture_change return_node
                      *
@@ -11356,6 +11493,15 @@ internal static class Matcher
                      * bstack: -
                      */
 
+                    // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
+                    // returned, a later call with the same entry key fails the same way. See
+                    // FailedCallKey and MatchState.OpenCalls.
+                    if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
+                    {
+                        state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
+                        _ = state.FailedCalls.Add(failedCallKey);
+                    }
+
                     // The call is no longer open: backtracking past it means it never happened.
                     PopOpenCall(state);
 
@@ -11413,8 +11559,9 @@ internal static class Matcher
                         state.Sstack.PushNode(groupReturnBackNode);
 
                         // The frame is back, so the call is open again and ends where it now ends.
+                        // It has returned, so it is not one the failed-call memo may record.
                         state.ActiveCalls.Add(groupReturnBackKey);
-                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count));
+                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count, null));
 
                         /* sstack: caller_groups caller_repeats capture_change return_node
                          *

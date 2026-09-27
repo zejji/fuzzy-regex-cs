@@ -277,8 +277,62 @@ internal sealed class MatchState : IDisposable
     /// <see cref="Matcher"/>'s <c>start_match</c> clears both, which covers a whole attempt being
     /// abandoned.
     /// </para>
+    /// <para>
+    /// <c>MemoKey</c> is the call's entry key for the failed-call memo (<see cref="FailedCalls"/>),
+    /// or <see langword="null"/> when the call is not to be recorded: the memo is off or not yet
+    /// switched on, the memo is full, or the call has returned at least once. <c>GROUP_CALL</c>'s
+    /// backtrack arm records a key it finds here; a call that returned is re-opened by
+    /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int SstackDepth)> OpenCalls = [];
+    internal readonly List<(long Key, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
+    /// choices without ever returning, or <see langword="null"/> before the first is recorded. See
+    /// <c>Matcher.FailedCallKey</c> for what a key holds and why a call with a recorded key can be
+    /// failed at once.
+    /// </summary>
+    /// <remarks>
+    /// One set per pass: <see cref="InitMatch"/> empties it. A pass is one <c>basic_match</c>, with
+    /// one <see cref="SearchAnchor"/> and one search flag, and both are read by what a call can do
+    /// (<c>\G</c> and the rule against an insertion where a search began) but neither is in the
+    /// key. A set kept across the best-match walk's passes answered
+    /// <c>(?b)(?:.??(?1)|z)(?:q){e&lt;=1}(?(DEFINE)(\Ga))</c> over <c>zaq</c> with (0, 2) and a
+    /// substitution, where the right answer is (1, 3) with none.
+    /// </remarks>
+    internal HashSet<long[]>? FailedCalls;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): the calls made so far in this pass. The memo builds
+    /// keys only once this passes <see cref="CallMemoThreshold"/>.
+    /// </summary>
+    internal long CallsThisPass;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): how many calls a pass makes before the memo switches
+    /// on, set by <see cref="InitMatch"/>; <see cref="long.MaxValue"/> where it never does.
+    /// </summary>
+    /// <remarks>
+    /// The switch is lazy, as Perl's super-linear cache is: a pass that makes more calls than
+    /// (slice length + 1) x the pattern's call sites is doing more than one call per position
+    /// per site, which ordinary recursion does not. Below that the memo costs one counter per call.
+    /// A call made before the switch has no key and is never recorded, which is only lost pruning.
+    /// </remarks>
+    internal long CallMemoThreshold = long.MaxValue;
+
+    /// <summary>
+    /// Where <c>Matcher.FailedCallKey</c> builds a key, kept so a call that is failed at once
+    /// allocates nothing.
+    /// </summary>
+    internal readonly List<long> CallMemoKey = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): how many calls the memo has failed at once since the
+    /// state was last initialised. Nothing in the engine reads it; the memo's tests and grid do, to
+    /// tell a row the memo decided from one it never touched.
+    /// </summary>
+    internal long CallMemoHits;
 
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
@@ -855,6 +909,11 @@ internal sealed class MatchState : IDisposable
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
+        FailedCalls = null;
+        CallsThisPass = 0;
+        CallMemoThreshold = long.MaxValue;
+        CallMemoKey.Clear();
+        CallMemoHits = 0;
         SearchAnchor = 0;
         MatchPos = 0;
         BestMatchPos = 0;
@@ -1021,6 +1080,9 @@ internal sealed class MatchState : IDisposable
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
+
+        // The failed-call memo belongs to one pass, so a state waiting in the cache holds none.
+        FailedCalls = null;
     }
 
     /// <summary>
@@ -1172,6 +1234,41 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;
+
+        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. See FailedCalls and
+        // CallMemoThreshold.
+        ClearFailedCalls();
+        CallsThisPass = 0;
+        if (!Pattern.UseCallMemo || Pattern.SkipCallMemo || PartialSide != PartialNone)
+        {
+            CallMemoThreshold = long.MaxValue;
+        }
+        else
+        {
+            CallMemoThreshold = Pattern.EagerCallMemo ? 0 : ((long)SliceEnd - SliceStart + 1) * Pattern.GroupCallSites;
+        }
+    }
+
+    /// <summary>Empties <see cref="FailedCalls"/>, dropping a large one rather than clearing it.</summary>
+    /// <remarks>
+    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
+    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
+    /// </remarks>
+    private void ClearFailedCalls()
+    {
+        if (FailedCalls is not { Count: > 0 })
+        {
+            return;
+        }
+
+        if (FailedCalls.Count > 4096)
+        {
+            FailedCalls = null;
+        }
+        else
+        {
+            FailedCalls.Clear();
+        }
     }
 
     /// <summary>
