@@ -3,7 +3,11 @@
 
 Run from the repo root after a Release build of src/FuzzyRegex:
 
-    python tools/probes/skip-timing-grid.py [--rows 10000] [--seed 45]
+    python tools/probes/skip-timing-grid.py [--rows 10000] [--seed 45] [--ablate FIELD] [--any-verb]
+
+--ablate names the PatternObject switch the "before" run sets (default SkipMovesTheSliceWhenItRuns,
+ledger entry 45; VerbsAreConfinedToTheInnermostGroup is ledger entry 47's). --any-verb also keeps
+rows whose only verb is (*PRUNE), which ledger entry 47 changes as much as (*SKIP).
 
 PCRE2 is Git for Windows' libpcre2-8-0.dll, compiled with NO_START_OPTIMIZE, as
 tools/probes/skip-then-prune-perl-pcre2.py drives it. Perl (search rows only) reads the rows on
@@ -210,7 +214,7 @@ def perl_answers(rows):
 # ---- the port -------------------------------------------------------------------------------------
 
 
-def port_answers(rows, upstream_timing):
+def port_answers(rows, ablate=None):
     with tempfile.TemporaryDirectory() as d:
         src, dst = os.path.join(d, "rows.jsonl"), os.path.join(d, "out.txt")
         with open(src, "w", encoding="utf-8", newline="\n") as f:
@@ -218,8 +222,8 @@ def port_answers(rows, upstream_timing):
                 f.write(json.dumps({"pat": r["pat"], "subj": r["subj"], "op": r["op"]}) + "\n")
         here = os.path.dirname(os.path.abspath(__file__))
         args = ["pwsh", "-NoProfile", "-File", os.path.join(here, "skip-timing-grid-port.ps1"), src, dst]
-        if upstream_timing:
-            args.append("-UpstreamSkipTiming")
+        if ablate:
+            args += ["-Ablate", ablate]
         subprocess.run(args, check=True)
         with open(dst, encoding="utf-8") as f:
             return f.read().split("\n")[: len(rows)]
@@ -233,6 +237,8 @@ def main():
     ap.add_argument("--rows", type=int, default=10000)
     ap.add_argument("--seed", type=int, default=45)
     ap.add_argument("--show", type=int, default=40)
+    ap.add_argument("--ablate", default="SkipMovesTheSliceWhenItRuns")
+    ap.add_argument("--any-verb", action="store_true")
     a = ap.parse_args()
     rng = random.Random(a.seed)
     ops = ["search"] * 30 + ["finditer"] * 15 + ["overlapped"] * 15 + ["partial"] * 10
@@ -242,7 +248,10 @@ def main():
         op = rng.choice(ops)
         rev = op in ("rsearch", "rfinditer", "roverlapped")
         alt = gen(rng, rng.choice((1, 2)), lookarounds=not rev)
-        if not has(alt, "(*SKIP)") or (rng.random() < 0.7 and not has(alt, "(*PRUNE)")):
+        if a.any_verb:
+            if not (has(alt, "(*SKIP)") or has(alt, "(*PRUNE)")):
+                continue
+        elif not has(alt, "(*SKIP)") or (rng.random() < 0.7 and not has(alt, "(*PRUNE)")):
             continue
         pat = render(alt)
         subj = "".join(rng.choice("aabbc") for _ in range(rng.randint(0, 7)))
@@ -259,8 +268,8 @@ def main():
     plain, inst = perl_answers(fwd_search)
     for r, p, i in zip(fwd_search, plain, inst):
         r["perl"], r["perl_inst"] = p, i
-    after = port_answers(rows, False)
-    before = port_answers(rows, True)
+    after = port_answers(rows)
+    before = port_answers(rows, a.ablate)
     for r, x, y in zip(rows, after, before):
         r["after"], r["before"] = x, y
 

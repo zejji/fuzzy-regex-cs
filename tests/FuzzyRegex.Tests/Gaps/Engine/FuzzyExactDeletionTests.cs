@@ -248,19 +248,28 @@ public sealed class FuzzyExactDeletionTests
     // inside it, the entry that would have closed the section's frame, so when the lookaround fails
     // and the structure stack is cut back, the open-section link must be cut back with it. It was
     // not, and a later section read a stale link and took a node that is not a section for its
-    // enclosing one. Found by the blind review of 7277fb6 (2026-09-27). The first row answers
-    // with one deletion, as the pattern's last section does on its own under the "needed" rule and
-    // in the reference matcher; upstream and main give two for both. Upstream and main answer None
-    // to the second row.
+    // enclosing one. Found by the blind review of 7277fb6 (2026-09-27). Since ledger entry 47 the
+    // first pattern matches nothing by default, so the stale link is reachable only with the verb
+    // confined; there it answers with one deletion, as the pattern's last section does on its own
+    // under the "needed" rule and in the reference matcher. Upstream and main answer None to the
+    // second row.
     [Test]
     public void A_verb_inside_a_failed_lookaround_leaves_no_stale_section_behind()
     {
-        ShouldMatch(
-            new FuzzyRegex("(?=(?:a(*PRUNE)){e<=1}b)?(?=(?=(?=(?:y*){1<=d<=2})))").Match("c"),
-            0,
-            0,
-            new FuzzyCounts(0, 0, 1)
-        );
+        const string pruned = "(?=(?:a(*PRUNE)){e<=1}b)?(?=(?=(?=(?:y*){1<=d<=2})))";
+
+        // Ledger entry 47: a (*PRUNE) backtracked onto inside an unfinished positive lookaround
+        // ends the attempt, so nothing matches.
+        new FuzzyRegex(pruned)
+            .Match("c")
+            .Success.Should()
+            .BeFalse();
+
+        // With the verb confined to the lookaround, as before entry 47, the section the verb threw
+        // away must not be left behind.
+        var confined = new FuzzyRegex(pruned);
+        confined.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
+        ShouldMatch(confined.Match("c"), 0, 0, new FuzzyCounts(0, 0, 1));
         new FuzzyRegex("(|)((?=(?:(?:(x(a((*SKIP))))){1<=e<=2})?(?R)))").Match("").Success.Should().BeFalse();
     }
 

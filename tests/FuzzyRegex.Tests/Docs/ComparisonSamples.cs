@@ -551,4 +551,22 @@ public sealed class ComparisonSamples
         new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index.Should().Be(1);
         new FuzzyRegex(@"aa(*SKIP)x|a").Match("aab").Success.Should().BeFalse();
     }
+
+    /// <summary>"A verb, branch, group call or fuzzy section that starts every alternative stays in each one".</summary>
+    [Test]
+    public void A_verb_that_starts_every_alternative_stays_in_each_one()
+    {
+        Match m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 3));
+    }
+
+    /// <summary>"A verb that backtracking reaches inside an unfinished atomic group or positive lookaround ends the attempt".</summary>
+    [Test]
+    public void A_verb_reached_inside_an_unfinished_group_ends_the_attempt()
+    {
+        new FuzzyRegex(@"(?>a(*PRUNE)b)|a").Match("ac").Success.Should().BeFalse();
+        new FuzzyRegex(@"(?>aa(*SKIP)b)|a").Match("aaca").Index.Should().Be(3);
+        new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index.Should().Be(0);
+    }
 }

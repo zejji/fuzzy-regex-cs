@@ -723,6 +723,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 45 added SkipMovesTheSliceWhenItRuns, likewise set only by
             // OracleComparer.RunWithTheUpstreamSkipTiming.
             "PatternObject.SkipMovesTheSliceWhenItRuns",
+            // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
+            // OracleComparer.RunWithTheUpstreamVerbScope.
+            "PatternObject.VerbsAreConfinedToTheInnermostGroup",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

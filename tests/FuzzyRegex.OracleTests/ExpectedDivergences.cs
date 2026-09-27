@@ -492,11 +492,13 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "^\\K([^a-f]??)(?P<g2>[\\ ])(?:(?(2)(?<!(?&g2))\\S|.))*$", "flags": 266, "namedLists": {}, "subject": " \r", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial-sliced", "pattern": "(?r)\ud801\udc28\ud801\udc28[abz]??$", "flags": 8, "namedLists": {}, "subject": "\ud801\udc28\r", "operation": "search", "partial": true, "pos": 2, "endpos": 3, "codepointSlice": [1, 2], "oracle": "prefilter-free", "cutSubjectOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial-sliced", "pattern": "(?r)aab??$", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "partial": true, "oracle": "prefilter-free", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "(?r)[a][[:digit:]]*?$", "flags": 8, "namedLists": {}, "subject": "\n", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "(\\p{Ll}*?)a\\1\\b", "flags": 8, "namedLists": {}, "subject": "\r\naaA", "operation": "search", "partial": true, "codepointSpan": [2, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         """;
 
     /// <summary>
-    /// The seven rows of <c>overlapped-skip-extra-match-reversed</c>, as
-    /// <c>tools/record-oracle.py --rows</c> wrote them. All seven are listed rather than one,
+    /// The ten rows of <c>overlapped-skip-extra-match-reversed</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them. All ten are listed rather than one,
     /// because the entry has four tells, the third row is the one whose ground truth was
     /// suspected of depending on call order - a claim the staleness alarm should keep re-testing -
     /// and the fourth is the one that pays for the negative-lookaround clause in
@@ -520,6 +522,14 @@ internal static class ExpectedDivergences
     /// listed here without its field would be reported rather than classified, and the staleness
     /// alarm would go red on the entry's own example.
     /// </para>
+    /// <para>
+    /// <b>Rows 8 to 10 are the ones the <c>$</c> tell took in when it learned the WORD flag</b>
+    /// (2026-09-26): row 463 of seed 101's 1500-row <c>verbs</c> wave, then seed 7 row 74413 and
+    /// sweep row 30, which <c>end-of-line-reads-a-skip-moved-slice</c> had held by key because the
+    /// old tell refused a match ending before a CR. Each ends an extra match before a CR in a
+    /// pattern with no WORD flag, where <c>$</c> is false. The control is
+    /// <c>OracleWaveTests.A_trailing_dollar_before_a_carriage_return_is_false_only_without_the_word_flag</c>.
+    /// </para>
     /// </remarks>
     private const string _reversedExtraMatchRows = """
         {"generator": "verbs", "pattern": "(?r)(?:.{2}(*SKIP)A|x)$", "flags": 8, "namedLists": {}, "subject": "bxA", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
@@ -529,6 +539,9 @@ internal static class ExpectedDivergences
         {"generator": "verbs", "pattern": "(?r)[[:digit:]]*(*SKIP)a$", "flags": 16394, "namedLists": {}, "subject": "\r\nAAa\r\naaa", "operation": "finditer", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [9, 10]}, {"groups": [{"number": 0, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [8, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [7, 8]}]}}
         {"generator": "verbs", "pattern": "(?r)\\w{1,3}?(*SKIP).(?:\\p{L}(*SKIP)){2,3}", "flags": 8, "namedLists": {}, "subject": "_ ___𐐀𐐀𐐀", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 8, "captures": [[3, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 8]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 7]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 6]}]}, "anchoredScan": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 8, "captures": [[3, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 8]}]}
         {"generator": "verbs", "pattern": "(?r)(?:\\d*?(*SKIP)𝔘|a)$", "flags": 10, "namedLists": {}, "subject": "aa𝔘𝔘", "operation": "sub", "template": "<\\t", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "a<\t<\t<\t", "count": 3}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 4]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}
+        {"generator": "verbs", "pattern": "(?r)(?:.+?(*SKIP)[^\\p{L}]|\ud83d\ude00)$", "flags": 10, "namedLists": {}, "subject": "\ud83d\ude00\u00df\u00df\u00df\r\r\n\ud801\udc00\ud801\udc00", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [4, 6]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 5]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [4, 6]}]}}
+        {"generator": "interactions", "pattern": "(?r)^(?P<g1>\\D)(?:[^\\d](*SKIP)\\p{ASCII}|\\W)$", "flags": 8, "namedLists": {}, "subject": "𐐨𐐨a\r\n", "operation": "subf", "template": "-}}{g1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "-}𐐨\r\n", "count": 1}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 3]}], "pruneOutcome": {"kind": "sub", "text": "𐐨𐐨a\r\n", "count": 0}}
+        {"generator": "verbs", "pattern": "(?r)\\w{1,3}(*SKIP)[\\w\\s]$", "flags": 10, "namedLists": {}, "subject": "😀 AAa\ra𝔘a", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 3, "captures": [[7, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 8]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}]}}
         """;
 
     /// <summary>
@@ -838,6 +851,7 @@ internal static class ExpectedDivergences
         {"generator": "lookaround", "pattern": "I", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
         {"generator": "verbs", "pattern": "(?r)(?:[abz]*(*SKIP)a|[a-f])(?P<g1>(?:[^\\p{L}]*(*PRUNE)[A-Z]|[a]))", "flags": 10, "namedLists": {}, "subject": "\u0131a\u0130A\n\u0131", "operation": "sub", "template": "\\\\\\g<g1>\\g<g1>\\n", "count": 2, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u0131a\u0130\\\n\u0131\n\u0131\n", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [3, 6]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [3, 6]}], "pruneOutcome": {"kind": "sub", "text": "\u0131a\u0130\\\n\u0131\n\u0131\n", "count": 1}}
         {"generator": "verbs", "pattern": "I", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "x", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
+        {"generator": "interactions", "pattern": "\\b(?>(?:\u0130\u00df[^a]{2,2}){1i+2d+1s<=3:\\w})(?:[[:digit:]](*SKIP)[\\w\\s]|[^a])", "flags": 16394, "namedLists": {}, "subject": "\ufb00\ufb01a\u0130\u00df\u00df", "operation": "subf", "template": "{0[-1]}-{0[-1]}", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}}
         """;
 
     /// <summary>
@@ -908,6 +922,10 @@ internal static class ExpectedDivergences
         "split 1 '\\u0131'",
         "sub 0 '\\u0131a\\u0130A\\u000a\\u0131'",
         "sub 0 '\\u0131'",
+        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 103 row 3829.
+        // Swap the U+0130 for `A` or `g` in pattern and subject, or drop IGNORECASE, and the two engines
+        // agree, so the fold is the only variable. Measured 2026-09-26 on regex 2026.9.10 with `-Rows`.
+        "sub 0 '\\ufb00\\ufb01a\\u0130\\u00df\\u00df'",
     ];
 
     /// <summary>
@@ -1232,6 +1250,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "(?r)([^\\p{L}])(?:.{2,2}(*SKIP)\\D|\\p{Nd})(?(1)[[:alpha:]]|\\p{Ll})", "flags": 16394, "namedLists": {}, "subject": "aaa  \r", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r).(?:(*SKIP).|a)", "flags": 0, "namedLists": {}, "subject": " \n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "(?r)(?:a(*SKIP)\\W|Z)(a)", "flags": 0, "namedLists": {}, "subject": ".aab", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}}
+        {"generator": "partial", "pattern": "(?r)(\\D)[a\\d](?:\\p{Nd}(*SKIP)\\p{Lu}|[^\\d])", "flags": 2, "namedLists": {}, "subject": "\ud801\udc00\ud801\udc00\ud801\udc00\ud801\udc28\ud801\udc00\ud801\udc28\ud801\udc28\r", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1345,6 +1364,11 @@ internal static class ExpectedDivergences
         // that matches, answer this port's span; a reversed search owes the highest anchor that
         // matches. Measured 2026-09-25 on regex 2026.9.10.
         "match 0:(0,2)[(0,2)] 1:(1,1)[(1,1)] last=1/- partial",
+        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 101 row 2725.
+        // Upstream's (*PRUNE) and verb-free spellings both answer this port's partial, codepoints
+        // (0, 1), where its own drawn answer is the zero-width (0, 0). Measured 2026-09-26 on regex
+        // 2026.9.10.
+        "match 0:(0,2)[(0,2)] 1:unset last=-1/- partial",
     ];
 
     /// <summary>
@@ -1495,8 +1519,8 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The three rows of <c>end-of-line-reads-a-skip-moved-slice</c>, as <c>tools/record-oracle.py
-    /// --rows</c> wrote them on 2026-09-15.
+    /// The rows of <c>end-of-line-reads-a-skip-moved-slice</c>, as <c>tools/record-oracle.py
+    /// --rows</c> or the wave that drew them wrote them.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1517,15 +1541,19 @@ internal static class ExpectedDivergences
     /// <c>sub 0</c> this port answers. The <c>(?w)</c> control cannot run on it: 3 IS a <c>(?w)$</c>
     /// position, so this is a SECOND row where the phantom end is one the twin would create anyway.
     /// </para>
+    /// <para>
+    /// <b>Row 74413 and sweep row 30 are no longer here.</b> On 2026-09-26 the <c>$</c> tell of
+    /// <c>overlapped-skip-extra-match-reversed</c> learned that a CR ends a line only under the WORD
+    /// flag, and both rows moved to that entry's example, which its predicate now claims.
+    /// </para>
     /// </remarks>
     private const string _endOfLineReadsMovedSliceRows = """
         {"generator": "interactions", "pattern": "(?r)(?:\\s*?(*SKIP)\\W|[^a])(\\S{1,})$", "flags": 8, "namedLists": {}, "subject": "ﬀﬀ\r\nﬀﬀss\rS", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "S", "", "ﬀﬀss", "ﬀﬀ\r"]}, "pruneOutcome": {"kind": "split", "parts": ["", "S", "ﬀﬀ\r\nﬀﬀss"]}}
         {"generator": "verbs", "pattern": "(?r)(\\D+(*PRUNE)[^\\p{L}])(?:[^a-f](*PRUNE)){1,3}?((?>\\p{Lu}{1,3}?(*SKIP)\\D))$", "flags": 10, "namedLists": {}, "subject": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "operation": "subf", "template": "-{0[0]}{0[-1]}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "pruneOutcome": {"kind": "sub", "text": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "count": 0}}
-        {"generator": "interactions", "pattern": "(?r)^(?P<g1>\\D)(?:[^\\d](*SKIP)\\p{ASCII}|\\W)$", "flags": 8, "namedLists": {}, "subject": "𐐨𐐨a\r\n", "operation": "subf", "template": "-}}{g1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "-}𐐨\r\n", "count": 1}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 3]}], "pruneOutcome": {"kind": "sub", "text": "𐐨𐐨a\r\n", "count": 0}}
-        {"generator": "verbs", "pattern": "(?r)\\w{1,3}(*SKIP)[\\w\\s]$", "flags": 10, "namedLists": {}, "subject": "😀 AAa\ra𝔘a", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 3, "captures": [[7, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 8]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}]}}
         {"generator": "verbs", "pattern": "(?r)\\p{ASCII}{1,3}(*SKIP)ﬀ$", "flags": 8, "namedLists": {}, "subject": "sﬀﬀ", "operation": "subf", "template": "{0[2]}{0[2]}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "pruneOutcome": {"kind": "sub", "text": "sﬀﬀ", "count": 0}}
         {"generator": "interactions", "pattern": "(?r)^(?P<g1>[\\p{L}||\\p{N}]){1,}(?:[a\\d](*SKIP)[\\w\\s]|\\w)$", "flags": 264, "namedLists": {}, "subject": "\n\ud835\udfee\ud835\udd18\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "verbs", "pattern": "(?r)(?:\\w*?(*SKIP)\\p{ASCII}|\\p{ASCII})$", "flags": 8, "namedLists": {}, "subject": "_\r _", "operation": "split", "count": 3, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "", "", "_"]}, "pruneOutcome": {"kind": "split", "parts": ["", "_\r "]}}
+        {"generator": "verbs", "pattern": "(?r)((?>\\W+?(*SKIP)\\D))$", "flags": 16394, "namedLists": {}, "subject": "A\ud83d\ude00\ufb03\ud83d\ude00\n\u00df", "operation": "split", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "\n\u00df", "\ud83d\ude00", "\ud83d\ude00\ufb03", "A"]}, "atomicFreeOutcome": {"kind": "split", "parts": ["", "\n\u00df", "\ud83d\ude00", "\ud83d\ude00\ufb03", "A"]}, "pruneOutcome": {"kind": "split", "parts": ["", "\n\u00df", "A\ud83d\ude00\ufb03\ud83d\ude00"]}}
         """;
 
     /// <summary>
@@ -1537,15 +1565,14 @@ internal static class ExpectedDivergences
     /// <c>(*SKIP)</c> spelled <c>(*PRUNE)</c> - and every one is also upstream's answer when the
     /// trailing <c>$</c> is spelled out as what <c>$</c> is defined to be. Measured 2026-09-15 -
     /// rows 1 and 2 by <c>tools/probes/upstream-skip-carried-slice-doors.py</c>, which holds those
-    /// two and not the third, and row 3 by
+    /// two and not the third, and row 74413 (since moved to
+    /// <c>overlapped-skip-extra-match-reversed</c>) by
     /// <c>tools/probes/upstream-gate-drawn-skip-rows.py</c>.
     /// </remarks>
     private static readonly string[] _endOfLineReadsMovedSliceOurs =
     [
         "split 3 '' 'S' '\\ufb00\\ufb00\\u000d\\u000a\\ufb00\\ufb00ss'",
         "sub 0 'a\\u000d\\u000aa\\ud835\\udd18\\ud835\\udd18\\ud801\\udc28\\u000d\\ud801\\udc28\\ud835\\udd18'",
-        "sub 0 '\\ud801\\udc28\\ud801\\udc28a\\u000d\\u000a'",
-        "matches 1 | match 0:(7,4)[(7,4)] last=-1/-",
         "sub 0 's\\ufb00\\ufb00'",
         // Row 6 is S60 sitting 3's, row 3633 of seed 31337 - an EXTRA seed sitting 2 ran beyond the
         // gate, not one of `run-oracle.ps1`'s three defaults (`:256`) - and it is the FIRST PARTIAL
@@ -1557,6 +1584,11 @@ internal static class ExpectedDivergences
         // tools/probes/upstream-skip-partial-anchor-grid.py.
         "match 0:(0,0)[(0,0)] 1:unset last=-1/- partial",
         "split 2 '' '_\\u000d '",
+        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 104 row 1464,
+        // a reversed split again. Upstream's second separator ends at codepoint 3, where its own `$` is
+        // true at 4 and 6 alone; its (*PRUNE) spelling finds only the first, as this port does.
+        // Measured 2026-09-26 on regex 2026.9.10.
+        "split 3 '' '\\u000a\\u00df' 'A\\ud83d\\ude00\\ufb03\\ud83d\\ude00'",
     ];
 
     /// <summary>
@@ -2121,6 +2153,12 @@ internal static class ExpectedDivergences
         // 2026-09-25 against upstream's own greedy twin, no match: seed 500905607 row 34832; the minimal form of D4.
         "no match",
         "no match",
+        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 102 row 1750 and seed 103
+        // row 2314, both ledger entry 2's second door. Upstream's greedy twin of each,
+        // `(?r)[a][[:digit:]]*$` and `(\p{Ll}*)a\1\b`, answers the partial this port answers, (0, 0)
+        // and (5, 5). Measured 2026-09-26 on regex 2026.9.10.
+        "match 0:(0,0)[(0,0)] last=-1/- partial",
+        "match 0:(5,0)[(5,0)] 1:unset last=-1/- partial",
     ];
 
     /// <summary>
@@ -2229,6 +2267,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(?P<g1>[a-f]*?)(?:(?:(?P<g2>\\w)(?:\ufb00){e<=2,i<=1}){1<=e<=2}(*SKIP)[^a]|[A-Z])", "flags": 8, "namedLists": {}, "subject": "\u00dfA\ufb00a\u00df\ufb00\u0130", "operation": "subf", "template": ">{1}<>", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u00dfA\ufb00a\u00df\ufb00\u0130", "count": 0}, "subMatches": [], "bestmatchFreeOutcome": {"kind": "sub", "text": "\u00dfA\ufb00><>", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "\u00df><>\ufb00><>", "count": 2}}
         {"generator": "interactions", "pattern": "(?b)(b{i}){1<=e<2}(*SKIP)", "flags": 0, "namedLists": {}, "subject": "xyb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "interactions", "pattern": "(?b)\\p{Nd}*(?:(?:\\p{ASCII}\\d(?:([a-f])){e<=2}){1<=e<=2}(*SKIP)\\w|[abz])(?:\\p{L}?([\\p{L}\\p{N}])){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "a\r\ud835\udd18aa", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "anchoredScan": [], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": null, "partial": false, "codepointSpan": [3, 5]}]}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "interactions", "pattern": "(?b)(?r)\\b\\L<w1>{s<=1,i<=1,d<=1}\\b(?:.(*SKIP)[^\\d]|[\\p{L}\\p{N}])", "flags": 10, "namedLists": {"w1": ["A", "A\ud801\udc00a", "a\ud801\udc28", "\ud83d\ude00"]}, "subject": "A\ud83d\ude00\ud801\udc28A\n\n", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}}
         """;
 
     /// <summary>
@@ -2270,6 +2309,11 @@ internal static class ExpectedDivergences
         "sub 1 '\\u00dfA\\ufb00><>'",
         "match 0:(1,2)[(1,2)] 1:(1,2)[(1,2)] last=1/- fuzzy=(0,1,0)[s:][i:1][d:]",
         "matches 1 | match 0:(4,2)[(4,2)] 1:unset 2:(5,1)[(5,1)] last=2/-",
+        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 101 row 3063.
+        // Upstream's (*PRUNE) spelling reports this port's three matches, the first at codepoints
+        // (1, 4) for no error, where its drawn scan pays a substitution for (0, 4). Measured 2026-09-26
+        // on regex 2026.9.10.
+        "matches 3 | match 0:(1,5)[(1,5)] last=-1/- || match 0:(0,5)[(0,5)] last=-1/- || match 0:(0,3)[(0,3)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
     ];
 
     /// <summary>
@@ -3074,6 +3118,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The four rows of <c>verb-unwinds-through-unfinished-groups</c>, recorded 2026-09-26: an atomic
+    /// group, a (*SKIP) in one, a positive lookahead and a quantified atomic group. PCRE2 10.47 gives
+    /// this port's answer to each.
+    /// </summary>
+    private const string _verbScopeRows = """
+        {"generator": "rows", "pattern": "(?>a(*PRUNE)b)|a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?>aa(*SKIP)b)|a", "flags": 0, "namedLists": {}, "subject": "aaca", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?=a(*PRUNE)b)..|a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?>a(*PRUNE)b)?a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
     /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -3803,7 +3859,19 @@ internal static class ExpectedDivergences
                 + "three spans are codepoint (3, 4), (2, 3) and (1, 2), and the two beyond this "
                 + "port's need `$` at 3 and at 2, where the subject has a character. Making the verb "
                 + "`(*PRUNE)` leaves the (3, 4) replacement alone, which is this port's answer.\n"
-                + "Both are measured in that probe.",
+                + "Both are measured in that probe.\n"
+                + "THE `$` TELL READS THE WORD FLAG SINCE 2026-09-26, and that took three rows in. "
+                + "Until then it refused any extra match ending before a character SOME engine reads "
+                + "as a line end, CR included. Upstream's plain `$` knows only '\\n': under MULTILINE "
+                + "`a$` finds nothing in 'a\\r', and `(?w)a$` finds the 'a' (measured on regex "
+                + "2026.9.10; this port answers the same). So the tell now uses '\\n' alone for a row "
+                + "with no WORD flag anywhere, and the wide set otherwise. That claims seed 101 row "
+                + "463 of a `verbs` wave, `(?r)(?:.+?(*SKIP)[^\\p{L}]|\\U0001F600)$` over "
+                + "'\\U0001F600\\u00df\\u00df\\u00df\\r\\r\\n\\U00010400\\U00010400', whose extra match "
+                + "ends at codepoint 5, before a CR, where upstream's own `$` is true at 6 and 9 "
+                + "alone, and whose `(*PRUNE)` spelling reports only the first match, as this port "
+                + "does. It also claims two rows `end-of-line-reads-a-skip-moved-slice` had held by "
+                + "key for exactly this reason, seed 7 row 74413 and sweep row 30, which moved here.",
             PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_"
                 + "upstreams_own_extra_matches_refute_themselves",
             Example: _reversedExtraMatchRows,
@@ -4040,6 +4108,12 @@ internal static class ExpectedDivergences
                 + "Measured 2026-09-16 on regex 2026.9.10 with "
                 + "`python tools/probes/sweep-ablation-matrix.py --emit <file> --rows 30` then "
                 + "`pwsh -File tools/run-oracle.ps1 -Rows <file>`.\n"
+                + "[2026-09-26: THIS ROW AND ROW 74413 HAVE MOVED to "
+                + "`overlapped-skip-extra-match-reversed`, and the two paragraphs above are kept as "
+                + "the history of how they were judged. The clause they describe was changed to the "
+                + "rule upstream's own `$` follows, measured on regex 2026.9.10: a CR ends a line only "
+                + "under the WORD flag. Neither row is under WORD, so that entry's `$` tell now reads "
+                + "both.]\n"
                 + "AND A FIFTH ROW, drawn by the default wave AT A SEED NO SLICE HAD USED - "
                 + "`run-oracle.ps1`'s third default seed is the DATE, so every day's run is a fresh "
                 + "one, and 2026-09-16's drew `verbs` row 5721. It is the SECOND row in this entry on "
@@ -4085,7 +4159,12 @@ internal static class ExpectedDivergences
                 + "which is this entry's own caveat rather than a contradiction: a reversed walk "
                 + "passes `endpos`, and passing it sets `slice_end` and makes `$` true at the cut. "
                 + "Measured 2026-09-21 on regex 2026.9.10, "
-                + "`python tools/probes/gate-divergence-doors.py 20260921`, which reads that seed's RED report. The gate has been re-recorded green since, so re-run it as `... gate-divergence-doors.py --rows <file>` over the rows themselves.",
+                + "`python tools/probes/gate-divergence-doors.py 20260921`, which reads that seed's RED report. The gate has been re-recorded green since, so re-run it as `... gate-divergence-doors.py --rows <file>` over the rows themselves.\n"
+                + "SEED 104 ROW 1464 (2026-09-26) IS ONE MORE REVERSED SPLIT: `(?r)((?>\\W+?(*SKIP)\\D))$` "
+                + "over 'A\\U0001F600\\uFB03\\U0001F600\\n\\u00DF', IGNORECASE|MULTILINE|FULLCASE. "
+                + "Upstream's second separator ends at codepoint 3, where its own `$` is true at 4 and 6 "
+                + "alone, and its `(*PRUNE)` spelling finds only the first separator, as this port does. "
+                + "Measured on regex 2026.9.10.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_"
                 + "the_line_does_not_end, .A_reversed_substitution_of_a_skip_replaces_nothing_"
                 + "where_the_line_does_not_end and PartialMatchingTests.A_reversed_partial_search_of_"
@@ -4435,6 +4514,19 @@ internal static class ExpectedDivergences
                 + "from upstream too (tools/probes/upstream-bounded-lazy-partial.py, 2026-09-12) - and no complete match "
                 + "can exist, because '__' would have to be followed by the end of the subject and "
                 + "'aA ' already follows it.\n"
+                + "IT ALSO HOLDS LEDGER ENTRY 2's SECOND DOOR, where no maximum is involved. "
+                + "Upstream's CHARACTER arms of the LAZY_REPEAT_ONE backtrack guard one step AHEAD of "
+                + "the repeat (`pos + 1 >= text_end`, upstream/src/_regex.c:16546; "
+                + "`pos - 1 <= text_start`, :16621) before anything checks that the repeat can take "
+                + "that step, so a partial is reported when the repeat's item refuses the last "
+                + "character: `regex.match(r'(?r)ab??', 'c', partial=True)` is (0, 1) partial, and its "
+                + "greedy twin is None. This port's `Matcher.IsTailPartial` guards where the repeat "
+                + "stands (5cfb4a5). Its rows are judged the same way as the first door's: the greedy "
+                + "twin of the row, asked of upstream, answers what this port answers. Rows 5, 6 and 7 "
+                + "are this door: `(?r)aab??$` over 'c', and seed 102 row 1750 `(?r)[a][[:digit:]]*?$` "
+                + "over '\\n' and seed 103 row 2314 `(\\p{Ll}*?)a\\1\\b` over '\\r\\naaA', whose greedy "
+                + "twins answer (0, 0) and (5, 5), this port's partials (measured 2026-09-26 on regex "
+                + "2026.9.10).\n"
                 + "KEYED ON ROWS, NOT ON A PREDICATE, deliberately. S33 looked for a discriminator "
                 + "and found none that does not also swallow a genuine missed partial: every "
                 + "predicate over 'upstream answered a partial and this port did not' describes the "
@@ -6878,6 +6970,37 @@ internal static class ExpectedDivergences
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSkipTiming(row))
         ),
         new(
+            Id: "verb-unwinds-through-unfinished-groups",
+            Reason: "A (*PRUNE) OR (*SKIP) BACKTRACKED ONTO INSIDE AN UNFINISHED ATOMIC GROUP, "
+                + "POSSESSIVE REPEAT OR POSITIVE LOOKAROUND ENDS THE ATTEMPT HERE, AND FAILS ONLY THAT "
+                + "GROUP UPSTREAM. Ledger entry 47; fixed 2026-09-26 under the owner's no-known-bugs "
+                + "rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`. pcre2pattern "
+                + "10.47 (\"Verbs that act after backtracking\", \"Backtracking verbs in assertions\") "
+                + "unwinds to the innermost negative assertion (true) or conditional test (false if "
+                + "positive, true if negative), else fails the attempt; upstream's `top_bstack` "
+                + "(`_regex.c:2811`) stops at the innermost atomic group, lookaround or condition of "
+                + "any kind. Called groups stay transparent, as in Perl, Boost and upstream.\n"
+                + "THE ROWS, measured 2026-09-26 on PCRE2 10.47 (NO_START_OPTIMIZE) and Perl 5.42.3: "
+                + "(?>a(*PRUNE)b)|a over 'ac', (?=a(*PRUNE)b)..|a over 'ac' and (?>a(*PRUNE)b)?a over "
+                + "'ac' are None, and (?>aa(*SKIP)b)|a over 'aaca' is (3, 4), in both (Perl gives (0, 1) "
+                + "on the quantified row, against its own perlre); upstream answers (0, 1) to each.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamVerbScope`, which sets "
+                + "`PatternObject.VerbsAreConfinedToTheInnermostGroup`, alone or with ledger entry 45's "
+                + "switch, reproduces upstream's recorded answer exactly, AND this port's live answer "
+                + "is the one being judged. A verb row this port gets wrong for any other reason still "
+                + "diverges with upstream's scope and is reported.",
+            PinnedBy: "VerbScopeTests",
+            Example: _verbScopeRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamVerbScope(row))
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
+                )
+        ),
+        new(
             Id: "boundary-at-the-end-of-the-text",
             Reason: "Deliberate divergence, slice S57d, 2026-09-21 (upstream issue 589, ledger "
                 + "entry 21; docs/DIVERGENCES.md). Where a word or grapheme boundary is decided at "
@@ -7795,11 +7918,21 @@ internal static class ExpectedDivergences
     /// <param name="match">The match.</param>
     /// <returns><see langword="true"/> if it contradicts itself this way.</returns>
     /// <remarks>
-    /// Deliberately conservative at both ends. The <c>$</c> has to be the last thing in the pattern,
-    /// unescaped, so that it is the match END it constrains rather than some position inside it; and
-    /// the character the match ends on has to be one no engine reads as a line separator, so the
-    /// verdict does not depend on which set of them upstream recognises. <c>\Z</c> and <c>\z</c> are
-    /// not read: no row has needed them, and a row that does should red the run and be judged.
+    /// The <c>$</c> has to be the last thing in the pattern, unescaped, so that it is the match END it
+    /// constrains rather than some position inside it. <c>\Z</c> and <c>\z</c> are not read: no row
+    /// has needed them, and a row that does should red the run and be judged.
+    /// <para>
+    /// <b>Which characters end a line depends on the <c>WORD</c> flag, and this reads it.</b> Without
+    /// it, <c>$</c> compiles to <c>END_OF_LINE</c>, which knows only <c>\n</c>; with it, to
+    /// <c>END_OF_LINE_U</c>, which also knows <c>\r</c>, VT, FF, NEL, U+2028 and U+2029
+    /// (regex/_regex_core.py:506-510). Measured 2026-09-26 on regex 2026.9.10, all under MULTILINE:
+    /// <c>a$</c> finds nothing in 'a\r', 'a\x0b', 'a\x0c', 'a\x85' or 'a\u2028', finds the 'a' in
+    /// 'a\n', and <c>(?w)a$</c> finds it in 'a\r'. This port answers the same. Until 2026-09-26 the
+    /// check used the WORD set for every row, which refused seed 101 row 463 of a <c>verbs</c> wave:
+    /// its extra match ends before a CR in a pattern with no WORD flag, where <c>$</c> is false.
+    /// A row that may be under WORD anywhere, by its flags or by an inline <c>w</c>, still gets the
+    /// wider set, so a WORD line end is never read as a false <c>$</c>.
+    /// </para>
     /// </remarks>
     private static bool EndsWhereATrailingDollarIsFalse(OracleRow row, MatchOutcome match)
     {
@@ -7809,17 +7942,64 @@ internal static class ExpectedDivergences
         }
 
         int end = match.Groups[0].Index + match.Groups[0].Length;
+        if (end >= row.Subject.Length)
+        {
+            return false;
+        }
 
-        return end < row.Subject.Length && !IsALineSeparatorAnywhere(row.Subject[end]);
+        char next = row.Subject[end];
+
+        return MayBeUnderTheWordFlag(row) ? !IsAWordLineSeparator(next) : next != '\n';
+    }
+
+    /// <summary>Upstream's <c>WORD</c> flag bit, which is <c>regex.W</c>.</summary>
+    private const int _word = 0x800;
+
+    /// <summary>
+    /// Whether any part of the row's pattern may run under the <c>WORD</c> flag: the row's flags set
+    /// it, or an inline flag group anywhere in the pattern names <c>w</c>.
+    /// </summary>
+    /// <param name="row">The row.</param>
+    /// <returns><see langword="true"/> if it may.</returns>
+    /// <remarks>
+    /// The inline scan reads every <c>(?</c> followed by flag letters, a <c>-</c> or a <c>^</c>, and
+    /// does not check whether the <c>w</c> is being turned off or whether the group is escaped. Both
+    /// mistakes answer <see langword="true"/>, which only widens the set of line ends and so can
+    /// only refuse a row, never claim one.
+    /// </remarks>
+    private static bool MayBeUnderTheWordFlag(OracleRow row)
+    {
+        if ((row.Flags & _word) != 0)
+        {
+            return true;
+        }
+
+        string pattern = row.Pattern;
+        for (
+            int i = pattern.IndexOf("(?", StringComparison.Ordinal);
+            i >= 0;
+            i = pattern.IndexOf("(?", i + 2, StringComparison.Ordinal)
+        )
+        {
+            for (int j = i + 2; j < pattern.Length && (char.IsAsciiLetter(pattern[j]) || pattern[j] is '-' or '^'); j++)
+            {
+                if (pattern[j] == 'w')
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Whether a character is one that any engine might read as ending a line. The union rather than
-    /// upstream's own set, so a verdict above does not depend on which of them <c>$</c> recognises.
+    /// Whether a character ends a line under the <c>WORD</c> flag, which is the widest set upstream
+    /// recognises.
     /// </summary>
     /// <param name="character">The character.</param>
-    /// <returns><see langword="true"/> if some engine would treat it as a line separator.</returns>
-    private static bool IsALineSeparatorAnywhere(char character) =>
+    /// <returns><see langword="true"/> if <c>END_OF_LINE_U</c> would treat it as a line separator.</returns>
+    private static bool IsAWordLineSeparator(char character) =>
         character
             is '\n'
                 or '\r'

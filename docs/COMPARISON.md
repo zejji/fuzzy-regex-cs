@@ -1436,6 +1436,54 @@ Console.WriteLine(new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index);       
 A `(*SKIP)` that backtracking does reach behaves as before: `aa(*SKIP)x|a` over 'aab' finds
 nothing in either library, because the attempt after the one at 0 starts at 2.
 
+### A verb, branch, group call or fuzzy section that starts every alternative stays in each one
+
+When every alternative of a branch starts with the same item, the compiler may move that item out
+in front: `xab|xac` becomes `x(?:ab|ac)`, and `x` is tested once. That is safe for `x`, which
+matches in one way or not at all. It is not safe for an item that can match in more than one way,
+or that does something when the match backtracks through it. `(*SKIP)` and `(*PRUNE)` end the whole
+attempt at this start position when backtracked into, so inside the first alternative they stop the
+second from being tried; moved in front of the branch they are reached only after both alternatives
+have failed. A nested branch, a group call such as `(?1)`, and a fuzzy section can each match more
+than one way, and moving one out changes which way is tried first. Here those four kinds stay where
+the pattern put them, and the answers agree with PCRE2 and Perl. Upstream moves them, so its answer
+depends on whether two alternatives happen to start with the same verb.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Backtracking into (*SKIP) ends the attempt, so the \b alternative is never tried at 0 or 1.
+var m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+Console.WriteLine($"({m.Index}, {m.Index + m.Length})");  // (2, 3) - upstream: (0, 0)
+```
+
+Reversed, `(?r)`, the same holds for an item that ends every alternative. Items that match in one
+way, such as literals, sets, anchors, `\K`, lookarounds and atomic groups, are still moved out.
+
+### A verb that backtracking reaches inside an unfinished atomic group or positive lookaround ends the attempt
+
+An atomic group `(?>...)`, a possessive repeat such as `a*+`, and a positive lookaround promise that
+once they have matched, nothing backtracks into them. Before they have matched, that promise has not
+taken effect. So if a failure inside one backtracks onto a `(*PRUNE)` or `(*SKIP)` in it, the verb
+does what it always does and ends the whole attempt at this start position. This is PCRE2's rule,
+and Perl agrees in these cases. Upstream instead fails only the group, and matching carries on
+outside it. A negative lookaround or a conditional test still stops the verb, as in both libraries:
+there the failure is itself an answer (the negative lookaround becomes true, a positive condition
+false).
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// At 0, 'a' passes (*PRUNE) and 'b' fails against 'c', so the attempt at 0 ends; the second
+// branch is never tried there, and nothing matches at 1.
+Console.WriteLine(new FuzzyRegex(@"(?>a(*PRUNE)b)|a").Match("ac").Success);    // False - upstream: True, (0, 1)
+Console.WriteLine(new FuzzyRegex(@"(?>aa(*SKIP)b)|a").Match("aaca").Index);    // 3 - upstream: 0
+Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); // 0 - upstream: no match
+```
+
+A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
+Boost; PCRE2 alone makes the call fail instead.
+
 ### A fuzzy item that matched exactly can still be deleted, and that choice comes before any earlier one
 
 A deletion leaves a pattern character out of the match. Upstream tries that only for a character

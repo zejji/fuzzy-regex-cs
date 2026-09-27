@@ -516,6 +516,15 @@ internal sealed class PatternObject
     internal bool SkipMovesTheSliceWhenItRuns;
 
     /// <summary>
+    /// Oracle-only: a <c>(*PRUNE)</c> or <c>(*SKIP)</c> fails only the innermost atomic group,
+    /// possessive repeat or lookaround it is in, as upstream's <c>top_bstack</c> makes it
+    /// (<c>_regex.c:2811</c>), instead of unwinding through the unfinished atomic groups and positive
+    /// lookarounds to the innermost negative assertion, conditional test or attempt (ledger entry
+    /// 47). Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool VerbsAreConfinedToTheInnermostGroup;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
     /// group reference re-enters the comparison without first stepping past a folding the edit
     /// finished, which is upstream's rule. The oracle sets it on a pattern it compiled for one call,
