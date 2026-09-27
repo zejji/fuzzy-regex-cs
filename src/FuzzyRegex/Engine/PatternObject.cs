@@ -358,8 +358,12 @@ internal sealed class PatternObject
     /// repeat or a conditional's test does that, so a capture list keeps an entry from a path that
     /// later failed, and skipping the failed call would leave that entry out:
     /// <c>(?r)(a)(?:b(?:(?R)|)(?R)?(?:(?!.(?R)(?R))(?:a.))*?.){2&lt;=e&lt;=3}</c> over <c>aa</c>
-    /// changed group 1's capture list with the memo. So one of those constructs whose body holds a
-    /// capture group, a call or a <c>\K</c> turns the memo off (<see cref="CaptureInDiscardingConstruct"/>,
+    /// changed group 1's capture list with the memo. A fuzzy section that ends in there does the
+    /// same to the whole-match error total, which <c>END_FUZZY</c> restores only from the entry the
+    /// construct threw away: <c>(?e)((?=(?:a){e&lt;=1}))(((?&gt;a)){1}()?(.?(?1)|(?0))){d&lt;=1}((?0)(a))?</c>
+    /// over <c>xa</c> answered (0, 1) with two errors with the memo and (1, 1) with one without. So one
+    /// of those constructs whose body holds a capture group, a call, a fuzzy section or a
+    /// <c>\K</c> turns the memo off (<see cref="WritesInDiscardingConstruct"/>,
     /// <see cref="KeepInSubmatch"/>). That also covers a call inside a lookbehind, which runs the
     /// other way and so can meet open calls the key does not hold.
     /// </para>
@@ -381,11 +385,11 @@ internal sealed class PatternObject
     internal int GroupCallSites;
 
     /// <summary>
-    /// NOT UPSTREAM (the failed-call memo): whether a capture group or a group call sits inside an
-    /// atomic group, a possessive repeat, a lookaround or a conditional's lookaround test. Written by
-    /// <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
+    /// NOT UPSTREAM (the failed-call memo): whether a capture group, a group call or a fuzzy section
+    /// sits inside an atomic group, a possessive repeat, a lookaround or a conditional's lookaround
+    /// test. Written by <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
     /// </summary>
-    internal bool CaptureInDiscardingConstruct;
+    internal bool WritesInDiscardingConstruct;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether the failed-call memo is off whatever
@@ -766,7 +770,7 @@ internal sealed class PatternObject
         // NOT UPSTREAM (the failed-call memo): see UseCallMemo.
         self.UseCallMemo =
             self.GroupCallSites > 0
-            && !self.CaptureInDiscardingConstruct
+            && !self.WritesInDiscardingConstruct
             && !self.KeepInSubmatch
             && !hasPrune
             && !self.HasSkipVerb

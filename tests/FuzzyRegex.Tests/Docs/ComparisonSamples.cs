@@ -415,6 +415,22 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
+    /// "A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay
+    /// exponential, and `MatchTimeout` is their bound".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_recursive_pattern_whose_calls_fail_is_matched_in_milliseconds()
+    {
+        var regex = new FuzzyRegex(
+            "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        );
+
+        regex.Match("baxbax").Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// "In a branch reset, a group never takes a number another group in the same branch will use".
     /// </summary>
     [Test]

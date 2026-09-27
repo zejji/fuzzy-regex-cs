@@ -89,6 +89,25 @@ public sealed class FailedCallMemoTests
     }
 
     [Test]
+    [Arguments("aba")]
+    [Arguments("aaa")]
+    public void The_key_holds_the_call_target_and_the_position(string subject)
+    {
+        // (?R) and (?1) are both tried at 1 and at 2 on the way to the match. With the call target
+        // left out of the key a failed (?R) at a position fails the (?1) there too, and with the
+        // position left out a call that failed at one position fails at every other. Either way
+        // both subjects answered no match. Upstream: regex.search(r'(.)((?R)?((?1)))',
+        // subject) spans (0, 2), groups (0, 1), (1, 2) and (1, 2), on both, regex 2026.9.10.
+        FuzzyRegex regex = WithMemo("(.)((?R)?((?1)))", eager: true);
+
+        Match m = regex.Match(subject);
+
+        regex.PatternObject.UseCallMemo.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        (m.Groups[3].Index, m.Groups[3].Length).Should().Be((1, 1));
+    }
+
+    [Test]
     public void A_partial_search_does_not_inherit_the_failed_calls_of_the_full_pass_before_it()
     {
         // A partial search first tries for a whole match, then searches again allowing one that
@@ -121,6 +140,25 @@ public sealed class FailedCallMemoTests
 
         on.PatternObject.UseCallMemo.Should().BeFalse();
         CaptureLists(on.Match("aa")).Should().Equal(CaptureLists(off.Match("aa")));
+    }
+
+    [Test]
+    public void A_fuzzy_section_inside_a_lookaround_keeps_the_memo_off()
+    {
+        // END_FUZZY sets the whole-match error total and restores it only from its backtracking
+        // entry, which a lookaround that succeeds throws away. So a call that fails after such a
+        // lookaround leaves the total changed, and skipping the call leaves it as it was: with the
+        // memo this answered (0, 1) with a substitution and a deletion, where the memo off answers
+        // (1, 1) with one deletion. Found by the memo grid at seed 20260927 (2026-09-27); upstream
+        // regex 2026.9.10 raises MemoryError, so the expected value is the memo-off answer.
+        const string pattern = "(?e)((?=(?:a){e<=1}))(((?>a)){1}()?(.?(?1)|(?0))){d<=1}((?0)(a))?";
+
+        FuzzyRegex on = WithMemo(pattern, eager: true);
+        Match m = on.Match("xa");
+
+        on.PatternObject.UseCallMemo.Should().BeFalse();
+        (m.Index, m.Length).Should().Be((1, 0));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     [Test]

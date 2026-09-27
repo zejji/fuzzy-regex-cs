@@ -78,8 +78,8 @@ internal struct CompileArgs
     /// <summary>
     /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
     /// lookaround test: a construct that throws away its body's undo entries when the body
-    /// succeeds. <b>Not upstream</b>; a capture group or a group call in here turns off the
-    /// failed-call memo (<see cref="PatternObject.CaptureInDiscardingConstruct"/>).
+    /// succeeds. <b>Not upstream</b>; a capture group, a group call or a fuzzy section in here turns
+    /// off the failed-call memo (<see cref="PatternObject.WritesInDiscardingConstruct"/>).
     /// </summary>
     internal bool WithinDiscardingConstruct;
 
@@ -526,6 +526,9 @@ internal static class NodeCompiler
         // Create nodes for the start and end of the fuzzy sequence.
         Node startNode = CreateNode(args.Pattern, Opcode.Fuzzy, flags, 0, 13);
         Node endNode = CreateNode(args.Pattern, Opcode.EndFuzzy, flags, 0, 0);
+
+        // NOT UPSTREAM: see PatternObject.UseCallMemo.
+        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
 
         var index = (uint)args.Pattern.FuzzyCount++;
         startNode.Values[0] = index;
@@ -1093,7 +1096,7 @@ internal static class NodeCompiler
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
         // NOT UPSTREAM: see PatternObject.UseCallMemo.
-        args.Pattern.CaptureInDiscardingConstruct |= args.WithinDiscardingConstruct;
+        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
 
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
@@ -1164,7 +1167,7 @@ internal static class NodeCompiler
         RecordCallRefUsed(args.Pattern, (int)callRef);
 
         // NOT UPSTREAM: see PatternObject.UseCallMemo.
-        args.Pattern.CaptureInDiscardingConstruct |= args.WithinDiscardingConstruct;
+        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
 
         // Append the node.
         AddNode(args.End!, node);

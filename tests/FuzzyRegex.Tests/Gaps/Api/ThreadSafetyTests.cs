@@ -741,8 +741,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.UseRepeatMemo",
             // The failed-call memo added these three, written by Compile (GroupCallSites and
             // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
-            // (CaptureInDiscardingConstruct).
-            "PatternObject.CaptureInDiscardingConstruct",
+            // (WritesInDiscardingConstruct).
+            "PatternObject.WritesInDiscardingConstruct",
             "PatternObject.GroupCallSites",
             "PatternObject.UseCallMemo",
             // And these two, never written by the library: FailedCallMemoTests and the memo grid
