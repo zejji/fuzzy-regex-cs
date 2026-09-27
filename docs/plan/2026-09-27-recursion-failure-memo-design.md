@@ -162,13 +162,14 @@ read, and where each one comes from:
 | Whole-match totals `TotalErrors`, `TotalCost` | state | yes |
 | Enclosing sections, through every call level (read by `Matcher.RaisesUnmetMinimum`, which decides whether an empty iteration counts for the "needed" rule, and by `Matcher.AllMinimumsMet`) | saved stack, via `MatchState.TryOuterSection` | yes, reduced to each section's node plus how far it still is from each minimum, counting the errors of the sections inside it. That is all those two functions compute. |
 | Spans of groups read by a backreference or a group-exists conditional | state | yes, the current span of each such group |
-| The re-entry guard (`MatchState.ActiveCalls`: a group may not be called again at a position where a call of it is open) | open calls | yes, the open calls at positions the called group can reach: at or after p going forwards, at or before p under `(?r)`. If a call can happen inside a lookbehind, which runs the other way, it must be every open call. |
+| The re-entry guard (`MatchState.ActiveCalls`: a group may not be called again at a position where a call of it is open) | open calls | yes, the open calls at positions the called group can reach: at or after p going forwards, at or before p under `(?r)`. If a call can happen inside a lookbehind, which runs the other way, it must be every open call the lookbehind can reach, not only those at or after p. The prototype's `MinimalKey` does not build this yet: it keeps only the open calls at or after the position, so a call reached inside a lookbehind is under-keyed there. Upstream confirms the lookbehind direction matters: `(a)b(?<=(?1)b)` over `ab` gives `None` in regex 2026.9.10, because the lookbehind runs the pattern backwards and reaches the call from the far side. The implementation must either build the lookbehind-aware field or exclude a call that can happen inside a lookbehind, the same way the key excludes what it cannot yet describe. |
 | The caller's repeat counters, starts and guards | state | no. The called group starts each repeat it enters at its head (group boundaries nest, so it cannot reach a repeat's end without its head), `GROUP_CALL` empties the guard lists, and the repeat memo is emptied on each entry. |
 | Capture-change and edit counters | state | no. They are only compared with values recorded inside the same call. |
+| The exact-deletion narrowing (`Matcher.DeletionRepeatsAnEarlierAlternative`, `Matcher.cs:4816-4819`), which compares the item being deleted against the caller's last fuzzy change | state | no. It only narrows out a branch that repeats one already explored inside the same call, so it can change how a call reaches a given point but not whether the call as a whole succeeds or fails. No witness found where it changes a memo answer. |
 | Capture lists (history) | state | no. They are appended to, never read. See (b). |
 | Everything else on the saved stack: return points, saved groups and repeats, frames of lookarounds and atomic groups in the callers | saved stack | no. The called group's own frames balance, and it reaches the frames below only through the section chain above. |
-| Start of the attempt (`MatchPos`) | state | no. Only `SUCCESS` reads it, and a called group cannot reach `SUCCESS`. So the set can last for a whole matcher call, across start positions. |
-| Search anchor (no insertion where the search began) | fixed for one matcher call | no, if the set lasts for one matcher call |
+| Start of the attempt (`MatchPos`) | state | no. Only `SUCCESS` reads it, and a called group cannot reach `SUCCESS`, so this field itself need not be in the key. |
+| Search anchor (no insertion where the search began) | state | yes, unless the set is reset at every `InitMatch`. `InitMatch` sets `SearchAnchor = TextPos` on every pass (`MatchState.cs:1153`), not once per matcher call: a search tries a new start position by calling `InitMatch` again with the new `TextPos` (`Matcher.cs:12531`), and the best-match second walk calls it once per entry, offset and error limit with the same `MaxErrors` and slice (`Matcher.cs:13088-13099`, called from `12870` and `13098`). `\G` reads the anchor (`Matcher.cs:2502`), and so does the no-insert-at-search-start rule (`Matcher.cs:5021`, `!search \|\| TextPos != SearchAnchor`). Witness: search `(?b)(?:.??(?1)\|z)(?:q){e<=1}(?(DEFINE)(\Ga))` over `zaq` answers `(1,3)` with 0 substitutions, 0 insertions, 0 deletions with the memo off; a set kept across the best-match walk's second entry gives the wrong `(0,2)` with 1 substitution, 0 insertions, 0 deletions and 4 memo hits. The same happens with `(?:\|(\Ga))` in place of the `DEFINE` group, and both agree with the memo off, and agree with each other once `(?b)` is removed. **Design fix: the failed-call set is cleared inside `InitMatch`, so it is one set per pass, not per matcher call.** That keeps the anchor and the search flag constant for the whole life of any one set, at no cost to the measured rows, whose blow-up happens within a single pass. |
 
 **(b) A failed call leaves nothing behind.** Backtracking undoes everything the call wrote: the
 current capture of each group (restored by the backtrack arm's `PopGroups`), repeats, counts, edits,
@@ -182,7 +183,15 @@ path still leaves a mark:
   lookaround. One example: `(?r)(a)(?:b(?:(?R)|)(?R)?(?:(?!.(?R)(?R))(?:a.))*?.){2<=e<=3}` over
   `aa` gives the same spans with and without the memo, but group 1's capture list differs. Atomic
   groups, possessive repeats and conditional tests throw entries away the same way, so they are
-  excluded too, though the grid has no witness for them.
+  excluded too, as a precaution rather than on a witness: `(a)(?:(?>.(?1))x|.)+?b` over `aaab`
+  leaves no stray entry in either engine, so the mechanism exists but this shape does not trigger it.
+  This only happens when a group **call** writes the capture, not any group inside a lookaround:
+  `(a)(?:(?!.(?1))|.)+?b` over `aaab` gives group 1 captures `[0,1][2,1]` in both upstream regex
+  2026.9.10 and the port, and so does `(a)(?:(?=.(?1))x|.)+?b`, but `(a)(?:(?!.(a))|.)+?b`, which
+  captures directly rather than through a call, gives only `[0,1]` in both. Upstream is inconsistent
+  with itself here, so this looks like a bug it and the port both inherited, not a design choice;
+  it is queued separately for an upstream-bug check, and if it is fixed the capture-list exclusion
+  can go.
 - **`\K` inside such a construct.** This is the same mechanism that `PatternObject.KeepInSubmatch`
   already excludes from the failure memo.
 - **Partial matching.** A path that reaches the end of the text records a partial result
@@ -207,9 +216,12 @@ span or count. As `RepeatInfo.FailureMemo` does, keep them excluded without a wi
 version. The rows need neither verbs nor POSIX.
 
 **Best-match modes.** `(?b)` and `(?e)` run several passes. Each pass is an ordinary first-match
-search under tighter pass limits, and the limits are in the key, so a failure is still a plain
-failure within its pass. POSIX matching goes on after a success, but a called group never reaches
-`SUCCESS`. Exclude POSIX anyway (not needed, and the grid has no POSIX rows).
+search under tighter pass limits. The failed-call set must not survive from one pass to the next,
+because the search anchor (see the row above) is reset at the start of each pass and a stale entry
+keyed on the old anchor can misjudge the no-insert-at-search-start rule in the new one; clearing the
+set inside `InitMatch` gives each pass its own set, so a failure recorded in one pass is still a
+plain failure within that pass alone. POSIX matching goes on after a success, but a called group
+never reaches `SUCCESS`. Exclude POSIX anyway (not needed, and the grid has no POSIX rows).
 
 **How this relates to the existing memos.** `RepeatMemoHit` keys one run of one repeat. The run is
 emptied whenever a call enters the repeat again, so it never sees the other levels. `FailureMemo`
@@ -228,8 +240,9 @@ All sources below were read on 2026-09-27 unless marked.
 
 - **PCRE2** (`pcre2api`, pcre.org/current). It does not memoise; it counts. `match_limit` (default
   10 million) counts passes through the main matching loop and returns `PCRE2_ERROR_MATCHLIMIT`.
-  `depth_limit` and `heap_limit` bound nesting and memory. A pattern can lower them with
-  `(*LIMIT_MATCH=)` and similar. Measured today with libpcre2 10.47
+  The count restarts at each start position tried during a search, so it bounds one attempt, not
+  the whole search. `depth_limit` and `heap_limit` bound nesting and memory. A pattern can lower
+  them with `(*LIMIT_MATCH=)` and similar. Measured today with libpcre2 10.47
   (`pcre2-recursion-limits.py`): `(?:(?:a|a)+(?R)?)+c` over 10 to 30 `a`s answers "match limit
   exceeded" in about 100 ms. `PCRE2_ERROR_RECURSELOOP` ("nested recursion at the same subject
   position") is the guard this port already copies as ledger 14.
@@ -341,8 +354,9 @@ new: its calls return and their callers then fail, which C1 does not cover and C
 1. **Build C1**, with the key from section 2, the three exclusions (partial matching; a
    lookaround, atomic group, possessive repeat or conditional test whose body can reach a capture
    group, a call or `\K`; and, without a witness, verbs and POSIX), lazy switch-on, and the 2^20
-   cap. It is one set, a check and a record in `GROUP_CALL`, a mark in `GROUP_RETURN`, and a
-   record in the `GROUP_CALL` backtrack arm. It takes both reported rows from seconds to
+   cap. It is one set, reset inside `InitMatch` so it lives for one pass and not the whole matcher
+   call, a check and a record in `GROUP_CALL`, a mark in `GROUP_RETURN`, and a record in the
+   `GROUP_CALL` backtrack arm. It takes both reported rows from seconds to
    milliseconds, faster than main (151 ms and 57 ms), and costs the benchmark suite nothing.
 2. **For the exponential part that is left, document the limit; never return a wrong answer.**
    Write in `docs/DIVERGENCES.md` and in the `MatchTimeout` documentation that a fuzzy pattern with
@@ -356,23 +370,31 @@ new: its calls return and their callers then fail, which C1 does not cover and C
 
 1. **Failing tests first.** Row A over `baxbax` and row B over `xxaxabxx`, each with a 2 s
    timeout. Today they time out; with C1 they need about 40 ms on first run, which leaves 50 times
-   the headroom and keeps them stable. Growth test: row A over 15 characters in under 5 s.
+   the headroom and keeps them stable. Growth test: row A over 15 characters in under 5 s. Pin the
+   search-anchor witness too: search `(?b)(?:.??(?1)|z)(?:q){e<=1}(?(DEFINE)(\Ga))` over `zaq` must
+   answer `(1,3)` with the memo on, not `(0,2)`.
 2. **Witnesses, one per key field and per exclusion, each failing when its clause is deleted.**
    - Call target: the `(?e)()(?:a(?1)(?R)?...` row over `aa` above.
    - Capture lists inside a lookaround: the `(?r)(a)...` row over `aa` above, minimised.
    - Partial matching: minimise one of the 34,831 grid rows.
+   - Search anchor: the `(?b)(?:.??(?1)|z)(?:q){e<=1}(?(DEFINE)(\Ga))` row over `zaq` above, and the
+     `(?:|(\Ga))` variant; the set must be reset inside `InitMatch` or these fail.
+   - Open calls inside a lookbehind: `(a)b(?<=(?1)b)` over `ab`, which upstream answers `None`;
+     confirm the port agrees once the lookbehind-aware field exists, or is excluded until it does.
    - Still to be found: position; counts; the section chain's distance from its minimums (write a
      row where the "needed" rule decides); tested spans (a backreference inside the called group);
-     open calls; slice (a `(*SKIP)` that moves it); pass limits (a `(?b)` row whose second pass
-     reuses a first-pass failure).
+     open calls ahead of the position going forwards; slice (a `(*SKIP)` that moves it); pass limits
+     (a `(?b)` row whose second pass reuses a first-pass failure).
    - Where no witness exists, say so in the code comment with the argument, as
      `RepeatInfo.FailureMemo` does.
 3. **Ablation switch.** Add `PatternObject.SkipCallMemo`, which this library never sets, like
    `SkipExactDeletionRetry`. Turn `memo-grid.cs` into a test that compares memo on and off over
    every mode (search, match, fullmatch, partial) and every flag. Widen its grammar: calls inside a
-   lookbehind, `(?&name)`, `(?0)`, possessive repeats, `\K`, POSIX and bounded repeats. Run three
-   seeds of 3,000 patterns overnight (about 4 minutes each). It must show zero changes, capture
-   lists included.
+   lookbehind, `(?&name)`, `(?0)`, possessive repeats, `\K`, POSIX and bounded repeats, `\G`, and a
+   `(?b)`/`(?e)` second walk over several entries and offsets. Run one more grid with
+   `NarrowExactDeletions` on, to confirm the exact-deletion narrowing never changes a memo answer.
+   Run three seeds of 3,000 patterns overnight (about 4 minutes each). It must show zero changes,
+   capture lists included.
 4. **An independent grader.** Upstream answers MemoryError on both rows, so it cannot grade them.
    Extend `tools/probes/fuzzy-reference-matcher.py` with `(?R)`, `(?n)` and lookahead, and grade
    the rows' short prefixes and the grid's small rows against it. The owner rule is a search that
@@ -387,11 +409,39 @@ new: its calls return and their callers then fail, which C1 does not cover and C
 
 ## Open questions for the owner
 
-1. **Capture lists keep entries from failed paths inside a lookaround.** That is what makes the
-   capture-list exclusion necessary. Is it upstream's behaviour or a bug in this port? If it is a
-   bug, it falls under the rule that no known bug stays, and fixing it would remove the exclusion.
-   Not investigated here.
-2. **Is `MatchTimeout` enough as the documented limit,** or do you want a step limit like PCRE2's
+1. **Is `MatchTimeout` enough as the documented limit,** or do you want a step limit like PCRE2's
    `match_limit` (a new option and a new exception)?
-3. **Should C2 get a design now** because of the third residual shape, or wait until it turns up
+2. **Should C2 get a design now** because of the third residual shape, or wait until it turns up
    in real use?
+
+## Review findings (2026-09-27)
+
+A blind review found five points, folded in above, and reproduced the headline measurements:
+
+1. **HIGH, fixed.** The search anchor is not fixed for a whole matcher call: `InitMatch` resets it
+   on every pass, including each new start position tried in a search and each entry of a best-match
+   second walk, and both `\G` and the no-insert-at-search-start rule read it. Witnessed with search
+   `(?b)(?:.??(?1)|z)(?:q){e<=1}(?(DEFINE)(\Ga))` over `zaq`. The design now clears the failed-call
+   set inside `InitMatch`, so it lives for one pass, not one matcher call.
+2. **MEDIUM, fixed.** The key table was missing `DeletionRepeatsAnEarlierAlternative`, which reads
+   the caller's last fuzzy change. Added to the table with the argument that it only narrows a
+   branch already explored inside the same call, so it cannot change a call's success or failure; no
+   witness found, and a `NarrowExactDeletions`-on grid run is now in the test plan.
+3. **LOW, fixed.** The lookbehind clause is designed (every open call a lookbehind can reach, not
+   just those at or after the position) but the prototype's `MinimalKey` does not build it yet. Noted
+   as a gap the implementation must close, with upstream's `(a)b(?<=(?1)b)` over `ab` as the witness
+   that direction matters.
+4. **LOW, fixed.** The atomic-group exclusion has no witness; reworded to say so plainly, with
+   `(a)(?:(?>.(?1))x|.)+?b` over `aaab` recorded as a pattern that does not trigger the mechanism.
+5. **Answered.** Owner question 1 is resolved: upstream and the port agree with each other, but only
+   when the capture comes through a group call, and upstream disagrees with itself between the call
+   and non-call forms (`(a)(?:(?!.(?1))|.)+?b` vs `(a)(?:(?!.(a))|.)+?b` over `aaab`). This looks like
+   a bug inherited from upstream, queued separately, and the open question is replaced with this
+   finding.
+6. **Reproduced, no change needed.** Row A and B timings and the grid's zero-change result were
+   reproduced independently. Added: PCRE2's `match_limit` count restarts at each start position, so
+   it bounds one attempt, not a whole search.
+
+Also noted in passing, not part of this design: `(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))` over `zab` throws
+`NotImplementedException` ("needs:basic-matching - the matcher has no `SearchAnchor` yet") with the
+memo on and off alike. Not a memo bug; queued separately.
