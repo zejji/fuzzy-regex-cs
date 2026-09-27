@@ -126,14 +126,17 @@ public sealed class BacktrackingVerbTests
             .Should()
             .Equal((0, 4), (1, 3), (2, 2), (3, 1));
 
+        // DIVERGES FROM UPSTREAM, deliberately (ledger entry 47). Upstream's
         // [m.span() for m in regex.finditer(r'(?>abc(*SKIP)d)|abc', 'ABCABC', regex.I)] is
-        // [(0, 3), (3, 6)]: the SKIP is never reached, because 'd' fails inside the atomic group,
-        // and the fallback branch matches at both positions.
+        // [(0, 3), (3, 6)]: 'd' fails inside the atomic group, backtracking reaches the SKIP, and
+        // upstream fails only the group, so the fallback branch matches at both positions. The
+        // group has not finished, so here the SKIP ends the attempt and the next one starts at 3,
+        // where the same happens: no match, as PCRE2 10.47 and Perl 5.42.3 answer to
+        // (?i)(?>abc(*SKIP)d)|abc over 'ABCABC' (2026-09-26).
         new FuzzyRegex("(?>abc(*SKIP)d)|abc", FuzzyRegexOptions.IgnoreCase)
             .Matches("ABCABC")
-            .Select(static m => (m.Index, m.Length))
             .Should()
-            .Equal((0, 3), (3, 3));
+            .BeEmpty();
 
         // And reversed: regex.search(r'(?r)(?>[a-z]+(*SKIP))abc', 'abcabc', regex.I) spans (0, 6).
         // Under (?r) the verb moves slice_end rather than slice_start (:14553).

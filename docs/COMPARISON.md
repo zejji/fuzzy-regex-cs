@@ -1427,6 +1427,30 @@ Console.WriteLine($"({m.Index}, {m.Index + m.Length})");  // (2, 3) - upstream: 
 Reversed, `(?r)`, the same holds for an item that ends every alternative. Items that match in one
 way, such as literals, sets, anchors, `\K`, lookarounds and atomic groups, are still moved out.
 
+### A verb that backtracking reaches inside an unfinished atomic group or positive lookaround ends the attempt
+
+An atomic group `(?>...)`, a possessive repeat such as `a*+`, and a positive lookaround promise that
+once they have matched, nothing backtracks into them. Before they have matched, that promise has not
+taken effect. So if a failure inside one backtracks onto a `(*PRUNE)` or `(*SKIP)` in it, the verb
+does what it always does and ends the whole attempt at this start position. This is PCRE2's rule,
+and Perl agrees in these cases. Upstream instead fails only the group, and matching carries on
+outside it. A negative lookaround or a conditional test still stops the verb, as in both libraries:
+there the failure is itself an answer (the negative lookaround becomes true, a positive condition
+false).
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// At 0, 'a' passes (*PRUNE) and 'b' fails against 'c', so the attempt at 0 ends; the second
+// branch is never tried there, and nothing matches at 1.
+Console.WriteLine(new FuzzyRegex(@"(?>a(*PRUNE)b)|a").Match("ac").Success);    // False - upstream: True, (0, 1)
+Console.WriteLine(new FuzzyRegex(@"(?>aa(*SKIP)b)|a").Match("aaca").Index);    // 3 - upstream: 0
+Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); // 0 - upstream: no match
+```
+
+A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
+Boost; PCRE2 alone makes the call fail instead.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

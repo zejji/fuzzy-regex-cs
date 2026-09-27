@@ -1,8 +1,9 @@
 # The port's half of tools/probes/skip-timing-grid.py: one answer line per JSON row, in the same
 # spelling the Python side uses. Needs pwsh 7 (Windows PowerShell cannot load a net10.0 assembly) and
-# a Release build of src/FuzzyRegex. -UpstreamSkipTiming sets PatternObject.SkipMovesTheSliceWhenItRuns
-# by reflection, which is upstream's (*SKIP) timing (ledger entry 45).
-param([string]$Rows, [string]$Out, [switch]$UpstreamSkipTiming)
+# a Release build of src/FuzzyRegex. -Ablate sets the named PatternObject switch by reflection:
+# SkipMovesTheSliceWhenItRuns is upstream's (*SKIP) timing (ledger entry 45), and
+# VerbsAreConfinedToTheInnermostGroup is upstream's verb scope (ledger entry 47).
+param([string]$Rows, [string]$Out, [string]$Ablate)
 $ErrorActionPreference = 'Stop'
 Add-Type -Path (Join-Path $PSScriptRoot '../../src/FuzzyRegex/bin/Release/net10.0/FuzzyRegex.dll')
 $flags = [Reflection.BindingFlags]'NonPublic,Instance'
@@ -13,9 +14,9 @@ foreach ($line in [IO.File]::ReadLines($Rows)) {
     $r = $line | ConvertFrom-Json
     try {
         $re = [Fuzzy.Text.RegularExpressions.FuzzyRegex]::new($r.pat)
-        if ($UpstreamSkipTiming) {
+        if ($Ablate) {
             $po = $poProp.GetValue($re)
-            $po.GetType().GetField('SkipMovesTheSliceWhenItRuns', $flags).SetValue($po, $true)
+            $po.GetType().GetField($Ablate, $flags).SetValue($po, $true)
         }
         if ($r.op -eq 'search' -or $r.op -eq 'partial') {
             $m = $re.Match($r.subj, 0, -1, ($r.op -eq 'partial'), $timeout)

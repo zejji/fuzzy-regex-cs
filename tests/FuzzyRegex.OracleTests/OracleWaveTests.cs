@@ -681,6 +681,38 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_verb_scope_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `verb-unwinds-through-unfinished-groups` (ledger entry 47), built like
+        // ledger 45's. Upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a one-character match at 1, which neither upstream nor PCRE2
+        // gives on any example, stands in for an unrelated defect; and this port's live answer must
+        // be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "verb-unwinds-through-unfinished-groups", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                .Should()
+                .NotBeNull("this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_trailing_dollar_before_a_carriage_return_is_false_only_without_the_word_flag()
     {
         // The control for `EndsWhereATrailingDollarIsFalse` reading the WORD flag, added when seed

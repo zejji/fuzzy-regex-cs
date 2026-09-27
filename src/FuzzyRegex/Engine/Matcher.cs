@@ -3089,6 +3089,222 @@ internal static class Matcher
         }
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: whether the innermost construct open around a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> is one that backtracking onto the verb passes straight
+    /// through - an atomic group (which is also what a possessive repeat compiles to) or a positive
+    /// lookaround that has not finished.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PCRE2's model (pcre2pattern 10.47, "Verbs that act after backtracking" and "Backtracking verbs
+    /// in assertions"): backtracking onto the verb unwinds to the innermost enclosing negative
+    /// assertion, which becomes true, or conditional test, which becomes false if positive and true
+    /// if negative; with neither, the attempt fails. Upstream instead stops at the innermost pruning
+    /// mark of any kind (<see cref="TopBstack"/>), which makes every atomic group and lookaround a
+    /// scope. When the innermost mark is already a target the two agree, so the verb keeps
+    /// upstream's arm; only a transparent innermost mark takes the new path, and a pattern with no
+    /// verb never gets here.
+    /// </para>
+    /// <para>
+    /// The answer is read from the stacks rather than fixed when the pattern compiles, because a
+    /// group call pushes no pruning mark: a verb in a called group sees whatever is open around the
+    /// call, which only the running match knows. Called groups themselves stay transparent, as they
+    /// are in Perl, Boost and upstream (PCRE2 alone makes the call a target).
+    /// </para>
+    /// <para>
+    /// Asked when the verb runs and again when backtracking reaches it, with the same answer both
+    /// times: every construct opened after the verb has been backtracked out of, or has finished and
+    /// discarded the verb's entry with everything else it pushed, by the time backtracking gets back
+    /// to the entry.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the verb must unwind past the innermost mark.</returns>
+    private static bool VerbIsInsideATransparentGroup(MatchState state) =>
+        !state.Pattern.VerbsAreConfinedToTheInnermostGroup
+        && state.Pstack.TopSize(out long mark)
+        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+        && IsTransparentToVerbs(op, look);
+
+    /// <summary>Whether a construct is one ledger entry 47's unwind passes through.</summary>
+    /// <param name="op">The opcode that pushed the pruning mark.</param>
+    /// <param name="look">For a lookaround, what it parked; otherwise unused.</param>
+    /// <returns><see langword="true"/> for an atomic group or a positive lookaround.</returns>
+    private static bool IsTransparentToVerbs(Opcode op, LookaroundStateData look) =>
+        op == Opcode.Atomic || (op == Opcode.Lookaround && look.Node.Match);
+
+    /// <summary>
+    /// Reads which construct pushed a pruning mark, without disturbing either stack.
+    /// </summary>
+    /// <remarks>
+    /// Each of the four sites that push a mark (<c>start_match</c>, <c>ATOMIC</c>,
+    /// <c>CONDITIONAL</c>, <c>LOOKAROUND</c>) pushes its opcode byte immediately before it, so the
+    /// byte under the mark names the construct. A lookaround's entry holds the structure-stack depth
+    /// just below that byte, and the parked node there says whether it is negative. The reads move
+    /// <see cref="ByteStack.Count"/> down and put it back; nothing above a mark is overwritten, so
+    /// the bytes are still there to read.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The backtracking-stack size the mark holds.</param>
+    /// <param name="op">Receives the construct's opcode.</param>
+    /// <param name="look">Receives what a lookaround parked; default for anything else.</param>
+    /// <returns><see langword="false"/> if the stacks do not hold what the mark promises.</returns>
+    private static bool ReadPruningMark(MatchState state, int mark, out Opcode op, out LookaroundStateData look)
+    {
+        op = Opcode.Failure;
+        look = default;
+
+        int bstackCount = state.Bstack.Count;
+        if (mark > bstackCount)
+        {
+            return false;
+        }
+
+        state.Bstack.Count = mark;
+        bool read = state.Bstack.PopUInt8(out byte code);
+        long sstackCount = 0;
+        if (read && (Opcode)code == Opcode.Lookaround)
+        {
+            read = state.Bstack.PopSize(out sstackCount);
+        }
+
+        state.Bstack.Count = bstackCount;
+
+        if (!read)
+        {
+            return false;
+        }
+
+        op = (Opcode)code;
+        if (op != Opcode.Lookaround)
+        {
+            return op is Opcode.Failure or Opcode.Atomic or Opcode.Conditional;
+        }
+
+        int sstackTop = state.Sstack.Count;
+        if (sstackCount > sstackTop)
+        {
+            return false;
+        }
+
+        state.Sstack.Count = (int)sstackCount;
+        read = PopLookaroundStateData(state.Pattern, state.Sstack, out look);
+        state.Sstack.Count = sstackTop;
+        return read;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: backtracking has reached a <c>(*PRUNE)</c> or
+    /// <c>(*SKIP)</c> inside an unfinished atomic group or positive lookaround, so abandon everything
+    /// back to the innermost enclosing negative lookaround, conditional test or attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The pruning marks of the transparent constructs crossed are dropped, and the backtracking
+    /// stack is cut to the target's own mark, so the next pop is the target's entry and its own
+    /// failure arm runs exactly as it does when its body fails: a negative lookaround becomes true,
+    /// a condition picks its branch, and <c>FAILURE</c> starts the next attempt. Those arms put back
+    /// the structure-stack depth, close the group calls above it
+    /// (<see cref="CloseCallsAbove"/>), and restore the captures, fuzzy counts and slice they saved,
+    /// which covers everything the crossed constructs' own arms would have undone.
+    /// </para>
+    /// <para>
+    /// The one thing <c>FAILURE</c> does not restore is the slice, which each crossed lookaround
+    /// widened to the whole text. The outermost crossed lookaround parked the attempt's own slice,
+    /// so that goes back here.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="toAttempt">Receives whether the target is the attempt itself.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
+    private static bool UnwindToTheVerbTarget(MatchState state, out bool toAttempt)
+    {
+        toAttempt = false;
+        LookaroundStateData outermostLook = default;
+        bool crossedALookaround = false;
+
+        while (true)
+        {
+            if (
+                !state.Pstack.TopSize(out long mark)
+                || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            )
+            {
+                return false;
+            }
+
+            if (!IsTransparentToVerbs(op, look))
+            {
+                state.Bstack.Count = (int)mark;
+                toAttempt = op == Opcode.Failure;
+                if (toAttempt && crossedALookaround)
+                {
+                    state.SliceStart = outermostLook.SliceStart;
+                    state.SliceEnd = outermostLook.SliceEnd;
+                }
+
+                return true;
+            }
+
+            if (op == Opcode.Lookaround)
+            {
+                outermostLook = look;
+                crossedALookaround = true;
+            }
+
+            _ = state.Pstack.DropSize();
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: a <c>(*SKIP)</c> reached through transparent groups has
+    /// ended the attempt, so the next attempt starts where the verb was reached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The verb may sit in a lookaround whose direction is not the search's: a lookbehind body runs
+    /// right to left in a forward search, and a lookahead left to right under <c>(?r)</c>. So the
+    /// search direction picks the end that moves, not the verb's own. A position that is not ahead
+    /// of the attempt's start leaves the ordinary bump-along in charge, which is pcre2pattern's rule
+    /// ("If (*SKIP) is used to specify a new starting position that is the same as the starting
+    /// position of the current match, or (by being inside a lookbehind) earlier, the position
+    /// specified by (*SKIP) is ignored"); the slice never widens.
+    /// </para>
+    /// <para>
+    /// A lookaround can also reach past the far end of the slice: a lookbehind to the left of the
+    /// caller's start under <c>(?r)</c>, or a lookahead past a best-match refinement's narrowed end.
+    /// The next start is then outside the slice, so no attempt is left, and the attempt position is
+    /// put on the slice's end for <c>FAILURE</c>'s "can we advance?" test to say so.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with the attempt's slice already restored.</param>
+    /// <param name="skipPos">The text position the verb was reached at.</param>
+    private static void MoveTheSliceForAnUnwoundSkip(MatchState state, int skipPos)
+    {
+        if (state.Reverse)
+        {
+            if (skipPos < state.SliceStart)
+            {
+                state.SliceEnd = state.SliceStart;
+                state.MatchPos = state.SliceStart;
+            }
+            else if (skipPos < state.SliceEnd)
+            {
+                state.SliceEnd = skipPos;
+            }
+        }
+        else if (skipPos > state.SliceEnd)
+        {
+            state.SliceStart = state.SliceEnd;
+            state.MatchPos = state.SliceEnd;
+        }
+        else if (skipPos > state.SliceStart)
+        {
+            state.SliceStart = skipPos;
+        }
+    }
+
     /// <summary>Upstream's two slice lines in <c>RE_OP_SKIP</c> (<c>:14551-14555</c>).</summary>
     /// <remarks>
     /// Run when backtracking reaches the verb rather than when the verb runs (ledger entry 45), or
@@ -8619,13 +8835,28 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // Prune the backtracking back to an appropriate backtracking point.
-                    TopBstack(state);
+                    // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
+                    // positive lookaround the verb acts when backtracking reaches it, and then
+                    // unwinds past the group (see VerbIsInsideATransparentGroup). Upstream prunes
+                    // to the group's own mark here and so fails only the group:
+                    // `(?>a(*PRUNE)b)|a` over 'ac' is (0, 1) upstream and None in PCRE2 10.47 and
+                    // Perl 5.42.3. Pinned by VerbScopeTests.
+                    if (VerbIsInsideATransparentGroup(state))
+                    {
+                        state.Bstack.PushUInt8((byte)Opcode.Prune);
 
-                    /* bstack: ...
-                     *
-                     * pstack: bstack
-                     */
+                        /* bstack: ... | ... PRUNE */
+                    }
+                    else
+                    {
+                        // Prune the backtracking back to an appropriate backtracking point.
+                        TopBstack(state);
+
+                        /* bstack: ...
+                         *
+                         * pstack: bstack
+                         */
+                    }
 
                     node = node.Next1.Node!;
                     break;
@@ -9280,8 +9511,14 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // Prune the backtracking back to an appropriate backtracking point.
-                    TopBstack(state);
+                    // Prune the backtracking back to an appropriate backtracking point - unless the
+                    // verb is in an unfinished atomic group or positive lookaround, where it prunes
+                    // nothing until backtracking reaches it (ledger entry 47; see the Prune arm).
+                    bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
+                    if (!skipIsInsideATransparentGroup)
+                    {
+                        TopBstack(state);
+                    }
 
                     // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
                     // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
@@ -9301,6 +9538,13 @@ internal static class Matcher
                     if (state.Pattern.SkipMovesTheSliceWhenItRuns)
                     {
                         MoveTheSliceForASkip(state, node, state.TextPos);
+
+                        // Ledger 45's ablation on its own: the slice has moved already, and
+                        // backtracking onto the verb must still unwind (ledger entry 47).
+                        if (skipIsInsideATransparentGroup)
+                        {
+                            state.Bstack.PushUInt8((byte)Opcode.Prune);
+                        }
                     }
                     else
                     {
@@ -11331,13 +11575,42 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
+                    // Ledger entry 47: in an unfinished atomic group or positive lookaround the verb
+                    // unwinds to its target now. Only the attempt takes the skip position; a
+                    // negative lookaround or condition puts its own slice back.
+                    if (VerbIsInsideATransparentGroup(state))
+                    {
+                        if (!UnwindToTheVerbTarget(state, out bool skipEndsTheAttempt))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        if (skipEndsTheAttempt)
+                        {
+                            MoveTheSliceForAnUnwoundSkip(state, (int)skipPos);
+                        }
+
+                        break;
+                    }
+
                     // Everything the verb's arm pruned is gone, so what backtracking reaches next is
                     // the point the prune stopped at: FAILURE, which starts the next attempt from the
-                    // moved slice, or the start of the atomic group, lookaround or condition the verb
-                    // is in, which is upstream's confinement and is kept.
+                    // moved slice, or the start of the negative lookaround or condition the verb is
+                    // directly in.
                     MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
                     break;
                 }
+                case Opcode.Prune: // NOT UPSTREAM'S: backtracking has reached a (*PRUNE), ledger entry 47.
+                    /* bstack: - */
+
+                    // Pushed only inside an unfinished atomic group or positive lookaround, so the
+                    // unwind always has somewhere to go.
+                    if (!UnwindToTheVerbTarget(state, out _))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
                 default:
                     // Nothing else is ever pushed by the opcodes ported so far. CHARACTER, STRING,
                     // the ANY family, S17's PROPERTY, RANGE and SET_* and S22's _IGN and _FLD

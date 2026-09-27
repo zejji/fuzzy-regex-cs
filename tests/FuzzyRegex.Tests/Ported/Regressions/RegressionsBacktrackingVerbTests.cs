@@ -81,10 +81,9 @@ public sealed class RegressionsBacktrackingVerbTests
 
     [Test]
     [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "123zzd", "123zzd")]
-    [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=(*PRUNE)3)zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=2(*PRUNE)3)zzd|[3d]$", "124zzd", "d")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#188-191")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#188,190-191")]
     public void Prune_verb_placed_inside_a_possessive_lookbehind_still_blocks_the_failed_alternative_when_searching_right_to_left(
         string pattern,
         string subject,
@@ -127,13 +126,34 @@ public sealed class RegressionsBacktrackingVerbTests
 
     [Test]
     [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "123zzd", "123zzd")]
-    [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=(*SKIP)3)zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=2(*SKIP)3)zzd|[3d]$", "124zzd", "d")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#202-205")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#202,204-205")]
     public void Skip_verb_placed_inside_a_possessive_lookbehind_blocks_the_failed_alternative_when_searching_right_to_left(
         string pattern,
         string subject,
         string expected
     ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
+
+    /// <summary>
+    /// Upstream's rows 189 and 203, which this port answers differently.
+    /// </summary>
+    /// <remarks>
+    /// <b>DIVERGES FROM UPSTREAM, deliberately (ledger entry 47).</b> Upstream answers 'd'. The
+    /// lookbehind body runs right to left, so the verb runs first, then '3' fails against '4' and
+    /// backtracking reaches the verb inside a positive lookbehind that has not finished. That makes
+    /// the whole attempt fail (pcre2pattern 10.47, "Verbs that act after backtracking"), and under
+    /// <c>(?r)</c> the attempt it ends is the one at the end of the text, where <c>[4d]$</c> would
+    /// have matched. No later start can match either alternative. The forward rows keep 'd',
+    /// because there the 'd' match starts after the pruned attempts. The rows are KEPT to record the
+    /// divergence.
+    /// </remarks>
+    [Test]
+    [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "124zzd")]
+    [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "124zzd")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#189,203")]
+    public void A_verb_reached_in_a_possessive_lookbehind_ends_the_attempt_at_the_end_of_the_text_when_searching_right_to_left(
+        string pattern,
+        string subject
+    ) => Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

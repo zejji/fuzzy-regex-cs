@@ -4561,3 +4561,66 @@ kinds, half built from them) against upstream with the same five `can_be_affix` 
 every row, and the port before the fix agrees with unmodified upstream on every row; the two builds
 differ only on 272 rows, all in the half that uses the four kinds. `ledger-reproductions.jsonl`
 re-checks upstream's answer to the first row above.
+
+## 47. A `(*PRUNE)` or `(*SKIP)` inside an unfinished atomic group or positive lookaround fails only the group, where PCRE2 and Perl fail the attempt - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-47-verb-scope.md`, for the owner to
+approve. Found 2026-09-26 by the random verb grid behind ledger entry 45 ("family B"), then surveyed
+across engines in `docs/plan/2026-09-26-verb-confinement-survey.md` (reviewed blind twice).
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26 (expected = PCRE2 10.47 with
+`NO_START_OPTIMIZE`; Perl 5.42.3 agrees on every row but the quantified one, where it confines
+against its own perlre):
+
+```
+search(r'(?>a(*PRUNE)b)|a', 'ac')        -> span=(0, 1)   expected None
+search(r'(?>aa(*SKIP)b)|a', 'aaca')      -> span=(0, 1)   expected (3, 4)
+search(r'(?=a(*PRUNE)b)..|a', 'ac')      -> span=(0, 1)   expected None
+search(r'(?>a(*PRUNE)b)?a', 'ac')        -> span=(0, 1)   expected None
+search(r'(?!(?>a(*PRUNE)b)|a)a', 'ac')   -> None          expected (0, 1)
+search(r'(?r)\d++(?<=3(*PRUNE))zzd|[4d]$', '124zzd') -> 'd'   expected None (test_hg_bugs row 189;
+                                                          row 203 is the (*SKIP) twin)
+```
+
+**Why upstream is wrong.** A verb means "if backtracking reaches me, end this attempt"
+(pcre2pattern, perlre). An atomic group or positive lookaround only promises that nothing
+backtracks into it once it has matched; pcre2pattern says confinement holds "because once the group
+has been matched, there is never any backtracking into it". Before that, backtracking onto the verb
+is ordinary backtracking. PCRE2 unwinds to the innermost negative assertion (which becomes true) or
+conditional test (false if positive, true if negative), else fails the attempt, the same in its
+interpreter and in JIT once start optimisations are off. Upstream's `top_bstack` (`_regex.c:2811`)
+stops at the innermost pruning mark, which `push_bstack` sets at every atomic group, conditional and
+lookaround (`:12050`, `:12238`, `:13787`). The README (`README.rst:209-211`) documents confinement
+but does not tell a finished group from an unfinished one, and issue 153, the design record, never
+compared the unfinished case with PCRE or Perl. No engine surveyed (PCRE2, Perl 5.42 and 5.38,
+Boost) confines the way upstream does.
+
+**Rows 189 and 203 of upstream's own `test_hg_bugs`.** Under `(?r)` the lookbehind body runs right
+to left, so the verb runs first, '3' then fails against '4', and backtracking reaches the verb in an
+unfinished positive lookbehind. The attempt it ends is the first one, at the end of the text, where
+`[4d]$` would have matched, and no later start can match either alternative. The forward rows keep
+'d', because the 'd' match starts after the pruned attempts.
+
+**One deliberate exception: called groups.** PCRE2 alone makes a group called with `(?1)`,
+`(?&name)` or `(?R)` a scope ("Backtracking verbs in subroutines"); Perl, Boost and upstream treat it
+as transparent, and so does this port (survey rows rc1-rc5, sr1, sr3 unchanged). Where the call sits
+in an atomic group the engines split three ways: `(?>(?1))|a|(a(*PRUNE)b)` over 'ac' is `None` here
+and in Perl, and (0, 1) in PCRE2 (the call fails) and upstream (the atomic group fails);
+`(?>(?&g))?(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))` over 'aa' is `None` here and in
+Perl, (0, 2) in PCRE2 and upstream.
+
+**Proposed fix upstream:** in `RE_OP_PRUNE` and `RE_OP_SKIP`, when the innermost mark belongs to an
+atomic group or positive lookaround, push a backtrack entry instead of cutting; when backtracking
+reaches it, drop marks until one belongs to a negative lookaround, a conditional or the attempt,
+restore the slice the crossed lookarounds widened, and cut to it. Or state in the README that the
+scopes are deliberate and differ from PCRE2 and Perl.
+
+**This port.** `Matcher.VerbIsInsideATransparentGroup` and `UnwindToTheVerbTarget` in
+`src/FuzzyRegex/Engine/Matcher.cs`; a pattern without verbs never reaches them. Pinned by
+`Gaps/Engine/VerbScopeTests` (all 123 survey rows). Two 10,000-row grids against PCRE2
+(`tools/probes/skip-timing-grid.py --ablate VerbsAreConfinedToTheInnermostGroup --any-verb`, seeds
+47 and 7) moved 302 rows, 300 to PCRE2's answer and none away (the other two are partial searches, whose
+answer moves from one PCRE2 disagreement to another: this port's partial rule is not PCRE2's
+PARTIAL_SOFT, and about 80 partial rows per seed differ from it before and after). 20,000 verb-free rows answer identically before and after.
+`ledger-reproductions.jsonl` re-checks upstream's answer to the first row above, and the oracle entry
+`verb-unwinds-through-unfinished-groups` keys on `PatternObject.VerbsAreConfinedToTheInnermostGroup`.

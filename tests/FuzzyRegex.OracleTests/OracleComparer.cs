@@ -212,7 +212,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>
-    /// and <see cref="RunWithTheUpstreamSkipTiming"/> and by nothing else; the wave always passes
+    /// <see cref="RunWithTheUpstreamSkipTiming"/> and <see cref="RunWithTheUpstreamVerbScope"/> and by
+    /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -631,6 +632,37 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's verb scope: a <c>(*PRUNE)</c> or
+    /// <c>(*SKIP)</c> fails only the innermost atomic group, possessive repeat or lookaround it is in.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 47 made backtracking onto a verb unwind through unfinished atomic groups and
+    /// positive lookarounds to the innermost negative assertion, conditional test or attempt, as
+    /// PCRE2 does. Setting <c>PatternObject.VerbsAreConfinedToTheInnermostGroup</c> restores upstream's
+    /// <c>top_bstack</c> scope (<c>_regex.c:2811</c>). A row can need ledger entry 45's ablation as
+    /// well, when a (*SKIP) both moves and is scoped, so <paramref name="withUpstreamSkipTiming"/> sets
+    /// that switch too. The <c>verb-unwinds-through-unfinished-groups</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withUpstreamSkipTiming">Also set <c>SkipMovesTheSliceWhenItRuns</c>.</param>
+    /// <returns>What this port answers with upstream's scope, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamVerbScope(OracleRow row, bool withUpstreamSkipTiming = false)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: compiled =>
+            {
+                compiled.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
+                compiled.PatternObject.SkipMovesTheSliceWhenItRuns = withUpstreamSkipTiming;
+            }
         );
     }
 
