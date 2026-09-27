@@ -1560,3 +1560,19 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   out either: a lost optimisation, not a changed answer, and rare. A differential over 12,000 rows
   changed only the 272 answers in the half built from the four kinds; the half without them is
   unchanged.
+- 2026-09-26 (ledger entry 47): **a `(*PRUNE)` or `(*SKIP)` that backtracking reaches inside an
+  atomic group, possessive repeat or positive lookaround that has not finished ends the attempt**,
+  instead of failing only that group; it unwinds to the innermost negative lookaround (true) or
+  conditional test (false if positive, true if negative), and to the attempt when there is none.
+  This is PCRE2 10.47's documented model (pcre2pattern, "Verbs that act after backtracking",
+  "Backtracking verbs in assertions"); Perl agrees in the atomic, possessive and positive-lookaround
+  cells, and no surveyed engine confines as upstream's `top_bstack` does
+  (`docs/plan/2026-09-26-verb-confinement-survey.md`, 123 rows). It completes ledger 45, which
+  adopted "a verb acts when backtracked onto" on the same authority. Called groups stay transparent,
+  as in Perl, Boost and upstream: PCRE2 alone scopes them, and the agreement of three engines was
+  preferred to PCRE2's single rule (so `(?>(?1))|a|(a(*PRUNE)b)` over 'ac' is None here and in
+  Perl, (0, 1) in PCRE2 and upstream). The group kind is read from the stacks when the verb runs,
+  because a call pushes no mark, so it cannot be fixed at compile time. Lookbehinds are judged in
+  this port's right-to-left direction (b09r becomes None). Upstream's `test_hg_bugs` rows 189 and
+  203 change from 'd' to None and are pinned as a divergence. Grids: 302 rows moved over two seeds,
+  300 to PCRE2 and none away; 20,000 verb-free rows unchanged; verb-free timings within noise.

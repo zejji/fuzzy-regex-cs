@@ -3017,6 +3017,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The four rows of <c>verb-unwinds-through-unfinished-groups</c>, recorded 2026-09-26: an atomic
+    /// group, a (*SKIP) in one, a positive lookahead and a quantified atomic group. PCRE2 10.47 gives
+    /// this port's answer to each.
+    /// </summary>
+    private const string _verbScopeRows = """
+        {"generator": "rows", "pattern": "(?>a(*PRUNE)b)|a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?>aa(*SKIP)b)|a", "flags": 0, "namedLists": {}, "subject": "aaca", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?=a(*PRUNE)b)..|a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?>a(*PRUNE)b)?a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
     /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -6752,6 +6764,37 @@ internal static class ExpectedDivergences
             Example: _skipTimingRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSkipTiming(row))
+        ),
+        new(
+            Id: "verb-unwinds-through-unfinished-groups",
+            Reason: "A (*PRUNE) OR (*SKIP) BACKTRACKED ONTO INSIDE AN UNFINISHED ATOMIC GROUP, "
+                + "POSSESSIVE REPEAT OR POSITIVE LOOKAROUND ENDS THE ATTEMPT HERE, AND FAILS ONLY THAT "
+                + "GROUP UPSTREAM. Ledger entry 47; fixed 2026-09-26 under the owner's no-known-bugs "
+                + "rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`. pcre2pattern "
+                + "10.47 (\"Verbs that act after backtracking\", \"Backtracking verbs in assertions\") "
+                + "unwinds to the innermost negative assertion (true) or conditional test (false if "
+                + "positive, true if negative), else fails the attempt; upstream's `top_bstack` "
+                + "(`_regex.c:2811`) stops at the innermost atomic group, lookaround or condition of "
+                + "any kind. Called groups stay transparent, as in Perl, Boost and upstream.\n"
+                + "THE ROWS, measured 2026-09-26 on PCRE2 10.47 (NO_START_OPTIMIZE) and Perl 5.42.3: "
+                + "(?>a(*PRUNE)b)|a over 'ac', (?=a(*PRUNE)b)..|a over 'ac' and (?>a(*PRUNE)b)?a over "
+                + "'ac' are None, and (?>aa(*SKIP)b)|a over 'aaca' is (3, 4), in both (Perl gives (0, 1) "
+                + "on the quantified row, against its own perlre); upstream answers (0, 1) to each.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamVerbScope`, which sets "
+                + "`PatternObject.VerbsAreConfinedToTheInnermostGroup`, alone or with ledger entry 45's "
+                + "switch, reproduces upstream's recorded answer exactly, AND this port's live answer "
+                + "is the one being judged. A verb row this port gets wrong for any other reason still "
+                + "diverges with upstream's scope and is reported.",
+            PinnedBy: "VerbScopeTests",
+            Example: _verbScopeRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamVerbScope(row))
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
+                )
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",
