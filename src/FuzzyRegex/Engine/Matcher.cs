@@ -3068,9 +3068,8 @@ internal static class Matcher
     /// </para>
     /// <para>
     /// What the key holds, in order: the call target and the position; the open section's node and
-    /// counts, the pass limits and the whole-match totals, since every error the called group makes
-    /// is judged by them; the slice; the current span of each group a backreference or a
-    /// conditional reads; for each enclosing section, its node and how far it still is from each
+    /// counts, since every error the called group makes is judged by them; the current span of each
+    /// group a backreference or a conditional reads; for each enclosing section, its node and how far it still is from each
     /// minimum, counting the errors of the sections inside it, which is all
     /// <see cref="RaisesUnmetMinimum"/> and <see cref="AllMinimumsMet"/> read of it; and the open
     /// calls the called group can reach, those at or after the position (at or before it in a
@@ -3084,7 +3083,15 @@ internal static class Matcher
     /// values it recorded itself or appends to; the rest of the saved stack, which the called group
     /// reaches only through the section chain; the start of the attempt, which only <c>SUCCESS</c>
     /// reads and a called group cannot reach; and the search anchor, which is fixed for the life of
-    /// the set (<see cref="MatchState.FailedCalls"/>). The exact-deletion narrowing
+    /// the set (<see cref="MatchState.FailedCalls"/>). The pass limits and the slice are left out
+    /// because they cannot differ between two calls the set compares: the set is emptied by
+    /// <see cref="MatchState.InitMatch"/>, the limits are set only between passes, and within a
+    /// pass the slice moves only inside a lookaround or a conditional's test, which put it back
+    /// and where the memo is off, and at a <c>(*SKIP)</c>, which turns the memo off. The
+    /// whole-match totals are left out because a called group never reads them before writing
+    /// them: <c>END_FUZZY</c> keeps the old values only to put them back and overwrites them
+    /// before its limit check, and otherwise they are read
+    /// only after the pass, by the drivers that rank matches. The exact-deletion narrowing
     /// (<see cref="DeletionRepeatsAnEarlierAlternative"/>) reads the caller's last edit, but it
     /// leaves out only a deletion whose state an earlier alternative reaches too, so it cannot
     /// change whether the call has an exit.
@@ -3105,12 +3112,6 @@ internal static class Matcher
         key.Add(counts[FuzzyValue.Ins]);
         key.Add(counts[FuzzyValue.Del]);
         key.Add(state.FuzzyNode?.Index ?? -1);
-        key.Add(state.MaxErrors);
-        key.Add(state.MaxCost);
-        key.Add(state.TotalErrors);
-        key.Add(state.TotalCost);
-        key.Add(state.SliceStart);
-        key.Add(state.SliceEnd);
 
         foreach (int group in state.Pattern.MemoGroups)
         {
