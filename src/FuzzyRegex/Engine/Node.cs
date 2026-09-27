@@ -131,9 +131,11 @@ internal sealed class Node
 
     /// <summary>
     /// NOT UPSTREAM (finding F-A): whether this node is a fuzzy one-character item that is a whole
-    /// alternative of a branch, after an earlier alternative that is one too and goes on to the same
-    /// node, so that deleting either leaves the same state. Set by
-    /// <c>PatternObject.SetAlternativeDeletionTwins</c>; read by
+    /// alternative of an alternation, after an earlier alternative of the same alternation that is
+    /// one too. Both go on to the alternation's join, so deleting either leaves the same state. Set
+    /// by <c>NodeCompiler.BuildBranch</c>, where the alternatives are known: read back from the
+    /// compiled graph, an empty alternative or one that starts with a group looks like another
+    /// link of the chain (blind review of 6a39732). Read by
     /// <c>Matcher.DeletionRepeatsAnEarlierAlternative</c>.
     /// </summary>
     internal bool HasEarlierDeletionTwin;

@@ -769,8 +769,7 @@ public sealed class ThreadSafetyTests
             // once the nodes are numbered.
             "Node.FuzzyRunExit",
             "Node.FuzzyRunLength",
-            // Finding F-A: written by PatternObject.SetAlternativeDeletionTwins, which Compile calls
-            // straight after SetFuzzyRunLengths.
+            // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
             "Node.Match",
             "Node.Op",

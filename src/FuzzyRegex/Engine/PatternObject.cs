@@ -717,10 +717,6 @@ internal sealed class PatternObject
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index.
         SetFuzzyRunLengths(self);
-        if (self.NarrowExactDeletions)
-        {
-            SetAlternativeDeletionTwins(self);
-        }
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
@@ -778,58 +774,6 @@ internal sealed class PatternObject
             }
         }
     }
-
-    /// <summary>
-    /// Sets <see cref="Node.HasEarlierDeletionTwin"/> on every fuzzy one-character item that is a
-    /// whole alternative of a branch after an earlier alternative of the same kind going on to the
-    /// same node, as in <c>(?:a|b){e&lt;=1}</c>.
-    /// </summary>
-    /// <remarks>
-    /// A branch of n alternatives compiles to a chain of two-way <c>BRANCH</c> nodes, each with one
-    /// alternative on <c>next_1</c> and the rest of the chain on <c>next_2</c>, the last alternative
-    /// sitting on the last <c>next_2</c> itself. Starting from each <c>BRANCH</c> in turn marks
-    /// every later twin of its own <c>next_1</c>, which covers every pair.
-    /// </remarks>
-    /// <param name="pattern">The compiled pattern.</param>
-    private static void SetAlternativeDeletionTwins(PatternObject pattern)
-    {
-        foreach (Node branch in pattern.NodeList)
-        {
-            if (
-                branch.Op != Opcode.Branch
-                || branch.Next2.Node is null
-                || branch.Next1.Node is not { } first
-                || !IsOneCharacterFuzzyItem(first)
-            )
-            {
-                continue;
-            }
-
-            Node? rest = branch.Next2.Node;
-            while (rest is not null)
-            {
-                bool twoWay = rest.Op == Opcode.Branch && rest.Next2.Node is not null;
-                Node? alternative = twoWay ? rest.Next1.Node : rest;
-                if (
-                    alternative is not null
-                    && IsOneCharacterFuzzyItem(alternative)
-                    && alternative.Next1.Node is { } next
-                    && ReferenceEquals(next, first.Next1.Node)
-                )
-                {
-                    alternative.HasEarlierDeletionTwin = true;
-                }
-
-                rest = twoWay ? rest.Next2.Node : null;
-            }
-        }
-    }
-
-    /// <summary>Whether a node is a fuzzy item that matches exactly one character.</summary>
-    /// <param name="node">The node.</param>
-    /// <returns><see langword="true"/> if it is.</returns>
-    private static bool IsOneCharacterFuzzyItem(Node node) =>
-        (node.Status & NodeStatus.Fuzzy) != 0 && NodeQueries.MatchesOneCharacter(node);
 
     /// <summary>
     /// Whether a node is a fuzzy item that consumes exactly one subject character per pattern

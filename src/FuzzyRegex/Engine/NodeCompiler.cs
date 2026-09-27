@@ -743,6 +743,10 @@ internal static class NodeCompiler
 
         CompileArgs subargs = args;
 
+        // NOT UPSTREAM (finding F-A): the first alternative that is one fuzzy one-character item;
+        // see Node.HasEarlierDeletionTwin.
+        Node? firstItem = null;
+
         // A branch in the regular expression is compiled into a series of 2-way branches.
         do
         {
@@ -763,8 +767,26 @@ internal static class NodeCompiler
             args.HasGroups |= subargs.HasGroups;
             args.HasRepeats |= subargs.HasRepeats;
 
+            if (
+                subargs.Start!.Next1.Node is { } only
+                && ReferenceEquals(only, subargs.End)
+                && only.Next1.Node is null
+                && (only.Status & NodeStatus.Fuzzy) != 0
+                && NodeQueries.MatchesOneCharacter(only)
+            )
+            {
+                if (firstItem is null)
+                {
+                    firstItem = only;
+                }
+                else
+                {
+                    only.HasEarlierDeletionTwin = true;
+                }
+            }
+
             // Append the sequence.
-            AddNode(branchNode, subargs.Start!);
+            AddNode(branchNode, subargs.Start);
             AddNode(subargs.End!, joinNode);
 
             // Create a start node for the next sequence and append it.

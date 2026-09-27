@@ -296,4 +296,33 @@ public sealed class FuzzyExactDeletionTests
         ];
         items.Select(static node => node.HasEarlierDeletionTwin).Should().Equal(false, true, true, false, true);
     }
+
+    // The twins are only the true alternatives of one alternation. Read from the compiled graph,
+    // two empty alternatives made the item after them its own twin, and an alternative that starts
+    // with a group was walked into as if it continued the chain, so a needed deletion was left out
+    // (blind review of 6a39732, 2026-09-27). The first four rows are main's, upstream's and the
+    // reference matcher's answers; the rest are the port's before the twins were introduced.
+    [Test]
+    public void Only_the_alternatives_of_one_alternation_are_twins()
+    {
+        ShouldMatch(new FuzzyRegex("(?:(?:|)b){d<=1}c").FullMatch("c"), 0, 1, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:(?:|)b){e<=1}").FullMatch(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:a|(?:x|)a){d<=1}").FullMatch("x"), 0, 1, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:a|(?:|x)a){d<=1}").FullMatch("x"), 0, 1, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(
+            new FuzzyRegex("(?:(?:(?||c||Ac)b){1<=e<=2}){1<=e<=2}c").MatchAtStart("cAa"),
+            0,
+            1,
+            new FuzzyCounts(0, 0, 1)
+        );
+
+        Match reversed = new FuzzyRegex("(?r)(?:(b|b|b(?:|.|b))*(?:c){1<=s<=1,e<=2}){s<=1,d<=1}$").Match("baxbb");
+        ShouldMatch(reversed, 0, 5, new FuzzyCounts(1, 0, 1));
+        (reversed.Groups[1].Index, reversed.Groups[1].Length).Should().Be((0, 2));
+
+        new FuzzyRegex("(?:(?|aA|(?:c|ab))(?:|||(?:b|a|c)?)a){1<=d<=2}")
+            .Matches("AAcxxA", overlapped: true)
+            .Count.Should()
+            .Be(7);
+    }
 }

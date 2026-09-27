@@ -4808,7 +4808,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the deletion can be left out.</returns>
     private static bool DeletionRepeatsAnEarlierAlternative(MatchState state, Node node, sbyte step)
     {
-        if (!node.HasEarlierDeletionTwin || state.Pattern.SkipExactDeletionRetry)
+        if (!node.HasEarlierDeletionTwin || !state.Pattern.NarrowExactDeletions || state.Pattern.SkipExactDeletionRetry)
         {
             return false;
         }
