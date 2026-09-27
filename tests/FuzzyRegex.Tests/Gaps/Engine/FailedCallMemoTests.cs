@@ -175,6 +175,51 @@ public sealed class FailedCallMemoTests
         regex.Match("ab").Success.Should().BeFalse();
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void The_key_holds_the_open_sections_counts(bool eager)
+    {
+        // The call from z(?1) fails at b having spent its one error on the z, and the call from
+        // x(?1) at the same position has its error left for the d. Without the counts in the key
+        // the second call is skipped and the search finds nothing.
+        FuzzyRegex regex = WithMemo("(?:z(?1)|x(?1)){e<=1}(?(DEFINE)(bc))", eager);
+
+        Match m = regex.Match("xbd");
+
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void The_key_holds_the_open_sections_node(bool eager)
+    {
+        // Both calls are made at b with no errors spent, but only the second section allows the
+        // substitution the d needs. Without the node in the key the second call is skipped.
+        FuzzyRegex regex = WithMemo("(?:(?:x(?1)){i<=1}|(?:x(?1)){s<=1})(?(DEFINE)(bc))", eager);
+
+        Match m = regex.Match("xbd");
+
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void The_key_holds_the_spans_a_conditional_tests(bool eager)
+    {
+        // The called group tests group 1. With group 1 set the call wants b and fails on c; with
+        // it unset it wants c. Without the span in the key the second call is skipped.
+        FuzzyRegex regex = WithMemo("(?:(x)|x)(?2)(?(DEFINE)((?(1)b|c)))", eager);
+
+        Match m = regex.Match("xc");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+    }
+
     /// <summary>A pattern compiled for one test, with the memo on from the first call, or off.</summary>
     private static FuzzyRegex WithMemo(string pattern, bool eager)
     {
