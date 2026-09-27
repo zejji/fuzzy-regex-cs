@@ -156,10 +156,10 @@ read, and where each one comes from:
 | What the called group reads | Where it comes from | In the key? |
 |---|---|---|
 | Position, text, direction | the position | yes |
-| Slice bounds (moved by `(*SKIP)`) | state | yes |
+| Slice bounds (moved by `(*SKIP)`) | state | yes in the first key; dropped in the implementation, since the slice is constant wherever the memo is on |
 | Open section: node and its counts | state | yes |
-| Pass limits `MaxErrors`, `MaxCost` (each `(?b)` or `(?e)` pass sets them) | state | yes |
-| Whole-match totals `TotalErrors`, `TotalCost` | state | yes |
+| Pass limits `MaxErrors`, `MaxCost` (each `(?b)` or `(?e)` pass sets them) | state | yes in the first key; dropped in the implementation, since the set lives for one pass |
+| Whole-match totals `TotalErrors`, `TotalCost` | state | yes in the first key; dropped in the implementation, since `END_FUZZY` writes them before it reads them |
 | Enclosing sections, through every call level (read by `Matcher.RaisesUnmetMinimum`, which decides whether an empty iteration counts for the "needed" rule, and by `Matcher.AllMinimumsMet`) | saved stack, via `MatchState.TryOuterSection` | yes, reduced to each section's node plus how far it still is from each minimum, counting the errors of the sections inside it. That is all those two functions compute. |
 | Spans of groups read by a backreference or a group-exists conditional | state | yes, the current span of each such group |
 | The re-entry guard (`MatchState.ActiveCalls`: a group may not be called again at a position where a call of it is open) | open calls | yes, the open calls at positions the called group can reach: at or after p going forwards, at or before p under `(?r)`. If a call can happen inside a lookbehind, which runs the other way, it must be every open call the lookbehind can reach, not only those at or after p. The prototype's `MinimalKey` does not build this yet: it keeps only the open calls at or after the position, so a call reached inside a lookbehind is under-keyed there. Upstream confirms the lookbehind direction matters: `(a)b(?<=(?1)b)` over `ab` gives `None` in regex 2026.9.10, because the lookbehind runs the pattern backwards and reaches the call from the far side. The implementation must either build the lookbehind-aware field or exclude a call that can happen inside a lookbehind, the same way the key excludes what it cannot yet describe. |
@@ -455,8 +455,9 @@ ways:
 
 1. **An exact key, not a hash.** A `long[]` compared by content (`FailedCallKeyComparer`), looked up
    from a reused buffer so a call failed at once allocates nothing.
-2. **The key.** Call target, position, the open section's node and counts, `MaxErrors`, `MaxCost`,
-   `TotalErrors`, `TotalCost`, the slice, the current span of every tested group, each enclosing
+2. **The key.** Call target, position, the open section's node and counts, the current span of
+   every tested group (the pass limits, the totals and the slice were dropped after the blind
+   review; see the witnesses below), each enclosing
    section's node and distance from its four minimums, and the open calls at or after the position
    (at or before it under `(?r)`). The narrowing's read of the last edit is left out, on the argument
    in section 2; the grid below ran with the narrowing on and off.
@@ -480,10 +481,20 @@ ways:
 both search-anchor rows (no reset in `InitMatch`); the partial row (no reset and no partial
 exclusion); the lookaround capture-list row, `(?r)(((?R)?R(?!.(?)(?R))(.))){2<=e<3}` over `aa`
 (no discarding-construct exclusion); the error-total row above (no fuzzy-section exclusion); call
-target and position, `(.)((?R)?((?1)))` over `aba` and `aaa`. Deleting any other key field
-(counts, section node, limits, totals, slice, tested spans, section chain, open calls) changed nothing
-on a 300-pattern grid at seed 1, so those fields still have no witness. The lookbehind row
-`(a)b(?<=(?1)b)` over `ab` is pinned but does not go wrong with the memo forced on.
+target and position, `(.)((?R)?((?1)))` over `aba` and `aaa`; the open section's counts,
+`(?:z(?1)|x(?1)){e<=1}(?(DEFINE)(bc))` over `xbd`, (0, 3) with one substitution; its node,
+`(?:(?:x(?1)){i<=1}|(?:x(?1)){s<=1})(?(DEFINE)(bc))` over `xbd`, the same; and the tested spans,
+`(?:(x)|x)(?2)(?(DEFINE)((?(1)b|c)))` over `xc`, (0, 2). The section chain and the open calls still
+have no witness. The pass limits, the slice and the whole-match totals were in the first key and are
+now dropped, because no two calls one set compares can differ in them or read them, so by
+construction no witness exists: the set is emptied by `InitMatch`, the limits are set only between
+passes, the slice moves within a pass only inside a lookaround or conditional test (where the memo
+is off, and which put it back) or at a `(*SKIP)` (memo off), and `END_FUZZY` overwrites the totals
+before it reads them, the drivers reading them only after the pass. The grid at seed 31337 on the
+production switch changed no answer after the drop. The lookaround, lookaround-fuzzy-section and
+lookbehind tests pin the switch rather than a wrong answer: each asserts `UseCallMemo` is off, and
+with it off the memo cannot run, so their answers only go red when the exclusion is deleted. The
+lookbehind row `(a)b(?<=(?1)b)` over `ab` does not go wrong even with the memo forced on.
 
 **Grid** (`dotnet run -c Release tools/probes/recursion-failure-memo/memo-grid.cs -- <seed> 3000 40 <variant>`,
 memo on from the first call against memo off, capture lists included):
@@ -531,8 +542,8 @@ bytes. No change outside noise.
 **What stays exponential.** Calls that return and whose callers fail, as before, and now also every
 pattern the wider exclusion turns the memo off for. Example with the memo on:
 `(?b)((?:(?R)|)(?:(?R)|)(?:(?1)|))(?:(?:\1b(?:a){i<=1}|(?:.??(?1)|.(?1)a))(?R)?(?:(?R)|)){1<=d<=2}(?P<n>()b)?`
-over the empty string runs past a 3 s timeout with the memo on and off; upstream raises
-`MemoryError` in 0.6 s. The grids counted 231 to 961 rows per seed over 250 ms with the memo running.
+over the empty string runs past a 2 s timeout with the memo on and off; upstream raises
+`MemoryError` in 0.5 s (both re-measured 2026-09-27, and the same without the `\1`). The grids counted 231 to 961 rows per seed over 250 ms with the memo running.
 `MatchTimeout` is the documented bound (`FuzzyRegex.MatchTimeout`, `docs/DIVERGENCES.md`), and C2,
 call summaries, is a planned follow-up slice.
 
