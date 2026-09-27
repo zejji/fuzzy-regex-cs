@@ -357,6 +357,16 @@ public sealed class FuzzyRegex
     /// <summary>
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
     /// </summary>
+    /// <remarks>
+    /// Set one when a pattern mixes fuzzy sections with recursion (<c>(?R)</c>, <c>(?1)</c>,
+    /// <c>(?&amp;name)</c>). The engine remembers recursive calls that failed, which keeps most such
+    /// patterns fast, but a call that succeeds and whose caller then fails is tried again under
+    /// every way of reaching it, and some patterns of that shape take time exponential in the
+    /// length of the text. The timeout is their bound: a call that runs out of time throws
+    /// <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> and never returns a
+    /// wrong answer. Upstream raises <c>MemoryError</c> on these patterns. See the fuzzy recursion
+    /// row of <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
     public TimeSpan MatchTimeout { get; }
 
     /// <summary>

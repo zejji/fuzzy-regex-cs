@@ -992,6 +992,29 @@ Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
 Console.WriteLine((m.Index, m.Length));   // (0, 4)
 ```
 
+### A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay exponential, and `MatchTimeout` is their bound
+
+When a recursive call runs out of choices without ever returning, the engine remembers what the
+call could see when it started - its position, its error budget and a little more - and fails any
+later call that starts the same way at once. A fuzzy recursive pattern reaches the same call in
+many ways, because the callers spent their errors differently, so this turns searches that took
+minutes into ones that take milliseconds. Upstream raises `MemoryError` on the same patterns.
+
+It does not cover a call that returns and whose caller then fails, so some patterns of that shape
+still take time exponential in the length of the text. Give a pattern that mixes fuzzy sections
+with recursion a `matchTimeout`: a match that runs out of time throws
+`RegexMatchTimeoutException`, and never returns a wrong answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(
+    "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+    FuzzyRegexOptions.None,
+    TimeSpan.FromSeconds(2));
+Console.WriteLine(regex.Match("baxbax").Success);   // False, in milliseconds
+```
+
 ### In a branch reset, a group never takes a number another group in the same branch will use
 
 A branch-reset group `(?|...)` restarts the numbering at every `|`, so each branch hands out the

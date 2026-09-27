@@ -1,6 +1,6 @@
 # A failure memo for fuzzy recursion: design
 
-Date: 2026-09-27. Status: research only, nothing in the engine has changed. Branch
+Date: 2026-09-27. Status: C1 implemented (db18fac, 1c70266); see "Implementation results" at the end. Branch
 `maint/fuzzy-exact-deletion` at a3e878d. The measurements come from a Release build on the owner's
 laptop, one run per cell unless it says "median", so read them as orders of magnitude. The probes are
 in `tools/probes/recursion-failure-memo/`. The counting and prototype code is kept as
@@ -445,3 +445,96 @@ A blind review found five points, folded in above, and reproduced the headline m
 Also noted in passing, not part of this design: `(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))` over `zab` throws
 `NotImplementedException` ("needs:basic-matching - the matcher has no `SearchAnchor` yet") with the
 memo on and off alike. Not a memo bug; queued separately.
+
+## Implementation results (2026-09-27)
+
+C1 is in the engine: `Matcher.FailedCallKey`, `MatchState.FailedCalls`, `PatternObject.UseCallMemo`,
+with the ablation switches `PatternObject.SkipCallMemo` and `PatternObject.EagerCallMemo` (tests and
+the grid only). Tests: `Gaps/Engine/FailedCallMemoTests.cs`. It differs from the prototype in four
+ways:
+
+1. **An exact key, not a hash.** A `long[]` compared by content (`FailedCallKeyComparer`), looked up
+   from a reused buffer so a call failed at once allocates nothing.
+2. **The key.** Call target, position, the open section's node and counts, `MaxErrors`, `MaxCost`,
+   `TotalErrors`, `TotalCost`, the slice, the current span of every tested group, each enclosing
+   section's node and distance from its four minimums, and the open calls at or after the position
+   (at or before it under `(?r)`). The narrowing's read of the last edit is left out, on the argument
+   in section 2; the grid below ran with the narrowing on and off.
+3. **A wider exclusion, found by the grid.** A fuzzy section that ends inside a lookaround, atomic
+   group, possessive repeat or conditional test sets `TotalErrors` at `END_FUZZY` and restores it only
+   from the backtracking entry the construct throws away, so a failed call can leave the total
+   changed. `(?e)((?=(?:a){e<=1}))(((?>a)){1}()?(.?(?1)|(?0))){d<=1}((?0)(a))?` over `xa` answered
+   (0, 1) with two errors with the memo and (1, 1) with one without. A capture group, call or fuzzy
+   section inside one of those constructs now turns the memo off. The same exclusion also covers every
+   call inside a lookbehind, so the lookbehind field of section 2 is not needed. An instrumented grid
+   run (seed 20260927, 53,958 rows) then compared every recorded call's fuzzy counts, change list and
+   totals before and after it failed: no difference. It also means the three residual shapes of
+   section 4 now run with the memo off: each has a call inside a lookaround.
+4. **Partial matching.** With the set cleared in `InitMatch`, the 34,831 partial rows of the
+   prototype grid do not reappear: they came from the full pass's failures being reused in the
+   partial pass. Deleting both the reset and the partial exclusion reproduces them
+   (`(((b)(?R))){i<=1}` partial over `ba`: (1, 2) instead of (0, 2)); deleting only the partial
+   exclusion changed nothing on 50,394 rows. The exclusion stays, as a precaution.
+
+**Witnesses, each run red with its clause deleted:** rows A and B and the growth test (memo off);
+both search-anchor rows (no reset in `InitMatch`); the partial row (no reset and no partial
+exclusion); the lookaround capture-list row, `(?r)(((?R)?R(?!.(?)(?R))(.))){2<=e<3}` over `aa`
+(no discarding-construct exclusion); the error-total row above (no fuzzy-section exclusion); call
+target and position, `(.)((?R)?((?1)))` over `aba` and `aaa`. Deleting any other key field
+(counts, section node, limits, totals, slice, tested spans, section chain, open calls) changed nothing
+on a 300-pattern grid at seed 1, so those fields still have no witness. The lookbehind row
+`(a)b(?<=(?1)b)` over `ab` is pinned but does not go wrong with the memo forced on.
+
+**Grid** (`dotnet run -c Release tools/probes/recursion-failure-memo/memo-grid.cs -- <seed> 3000 40 <variant>`,
+memo on from the first call against memo off, capture lists included):
+
+| Seed | Variant | Patterns | Memo on | Rows | Memo fired | Changed |
+|---|---|---|---|---|---|---|
+| 7 | default | 1,745 | 502 | 285,279 | 28,368 | 0 |
+| 4242 | default | 1,840 | 551 | 301,934 | 33,339 | 0 |
+| 20260927 | default | 2,067 | 600 | 340,641 | 36,590 | 0 |
+| 11 | narrowing off | 1,965 | 562 | 324,643 | 34,617 | 0 |
+
+Runs were four in parallel, so the 250 ms per-row timeout also caught 5 to 11 rows per seed that
+timed out only with the memo on from the first call; they are counted apart and are not wrong
+answers. The first round of the same four runs found the error-total row above.
+
+**Timing** (Release, this laptop, quiet machine; `overhead.cs` in the scratchpad, the before side
+built from `git archive 73e213e`; median of 21 runs after 5 warm-ups, two sessions each):
+
+| Pattern | Before | After | After, memo from the first call |
+|---|---|---|---|
+| row A, search over `baxbax` | 71,228 ms (one cold run) | 21.5 ms cold, 4.8 ms warm | |
+| row B, fullmatch over `xxaxabxx` | 8,785 ms (one cold run) | 25.2 ms cold, 4.8 ms warm | |
+| `\((?:[^()]++\|(?R))*\)`, 300 deep | 1.148 / 1.186 ms | 1.151 / 1.183 ms | 1.368 / 1.433 ms |
+| `(?<x>\((?:[^()]\|(?&x))*\))`, 300 deep | 0.118 / 0.124 ms | 0.121 / 0.121 ms | 0.321 / 0.329 ms |
+| `^(a(?1)?b)$`, n = 60 | 0.0130 / 0.0131 ms | 0.0127 / 0.0129 ms | 0.0231 / 0.0236 ms |
+| `^((.)(?:(?1)\|.?)\2)$`, 20 characters | 0.0049 / 0.0050 ms | 0.0048 / 0.0048 ms | 0.0079 / 0.0084 ms |
+| `(?:a(?R)?b){e<=1}`, fullmatch, n = 60 | 0.0238 / 0.0255 ms | 0.0230 / 0.0236 ms | 0.0386 / 0.0425 ms |
+
+Cold is a fresh process, JIT included; row A's cold figure follows a run over `baxba` in the same
+process, whose own cold time is 56 ms. The lazy switch-on is what keeps ordinary recursion at its old
+cost: switched on from the first call the key costs 19% to 170%, more than the note's 4-15% estimate,
+because the production key is exact rather than a hash.
+
+**Benchmarks.** `pwsh -File tools/compare-benchmarks.ps1` against the committed baseline was RED,
+but the baseline dates from 2026-09-16 and the tree has changed a great deal since (LiteralPort
+17.4 ms then, 0.12 ms now), and the suite has no group call, so the memo never runs in it. The flagged
+benchmarks rerun before and after this change (`dotnet run -c Release --project FuzzyRegex.Benchmarks
+-- --filter '*ClassScan*' '*CompileLargePattern*' '*LiteralBclCompiled*' '*LiteralPort*'
+'*BacktrackingPort*' --memory` from `bench/`, the before tree from `git archive 73e213e`):
+ClassScanPort 28.57 to 31.03 ms (1.09x, inside the 1.13 noise floor), WorkloadBenchmarks.ClassScan
+29.96 to 29.38 ms, LiteralPort 88.7 to 91.4 us, BacktrackingPort 78.0 to 73.5 ns, LiteralBclCompiled
+(the built-in engine) 47.2 to 43.8 us, CompileLargePattern 240.0 to 240.1 us and 942,104 to 942,112
+bytes. No change outside noise.
+
+**What stays exponential.** Calls that return and whose callers fail, as before, and now also every
+pattern the wider exclusion turns the memo off for. Example with the memo on:
+`(?b)((?:(?R)|)(?:(?R)|)(?:(?1)|))(?:(?:\1b(?:a){i<=1}|(?:.??(?1)|.(?1)a))(?R)?(?:(?R)|)){1<=d<=2}(?P<n>()b)?`
+over the empty string runs past a 3 s timeout with the memo on and off; upstream raises
+`MemoryError` in 0.6 s. The grids counted 231 to 961 rows per seed over 250 ms with the memo running.
+`MatchTimeout` is the documented bound (`FuzzyRegex.MatchTimeout`, `docs/DIVERGENCES.md`), and C2,
+call summaries, is a planned follow-up slice.
+
+**Gates.** Ratchet GREEN, 7,072 tests. Oracle at seeds 7, 4242 and 20260927: GREEN, GREEN, and RED
+on row 3732 only, the known pre-existing divergence.
