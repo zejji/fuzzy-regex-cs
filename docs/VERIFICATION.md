@@ -46,6 +46,19 @@ design spec section 8 and amendments 9-10.
    and watch it fail.
 9. **Verify on real output.** Green tests alone are not enough: read the actual rows, the rendered
    file, the built artifact. State what you checked and what you saw.
+10. **Every engine assumption a change relies on is listed, cited and asserted.** Before the first
+    commit, the builder writes down each fact about the engine the change depends on ("the anchor
+    is fixed while the set lives", "only call frames sit above a call"), with the `file:line` that
+    makes it true, and adds a `Debug.Assert` that checks it at run time. Grids run on a Debug build
+    so the assertions fire. An assumption that cannot be asserted gets a witness test instead.
+11. **A grid is green only if it could have gone red.** For every construct the change reads - each
+    key field, each exclusion, each listed assumption - the grid reports how many rows had that
+    construct present AND the new mechanism active. A zero means the grid is blind to it, not that
+    it is safe: extend the grammar or write the row by hand, then rerun.
+12. **Every part is justified before the first commit, by the builder.** Each key field, exclusion,
+    guard and prune has either a witness test that goes red when the part is removed, or a written
+    argument with `file:line` that no witness can exist. "None found yet" is neither; it is an
+    open item and the change is not done.
 
 ## Reviewer brief
 
@@ -104,6 +117,7 @@ because the verifier happened to have built that file minutes earlier; nothing g
 | 6 | Two repair rounds against error tracebacks capture 76-95% of achievable improvement across seven models, no model regressing (arXiv:2604.10508). |
 | 7 | Only 72% of LLM-transpiled functions were semantically equivalent despite compiling and passing the existing tests; differential testing against the reference caught the rest at 85.7-88.2% precision, 100% recall (arXiv:2510.07604). |
 | 7a | Not from a study - from this repo. S33's blind review ran the generators at seeds no earlier slice had used and found three unjudged divergence families at once, none of them caused by S33 (DECISIONS 2026-09-12). A 2000-row generator run costs about fifteen seconds, so the third seed is not the expensive part of anything. |
+| 10-12 | Not from a study - from this repo, 2026-09-26/27. Six defects in the F-A and failed-call memo work reached blind review, each resting on an unchecked engine assumption (the search anchor "fixed for one call", only call frames above a call, END_FUZZY always restoring the totals) or on a grid that could not produce the case (no `\G` in the grammar; three key fields "with no witness" had witnesses a reviewer built in minutes). Every one was caught before main, but each cost a full review round. |
 
 ## Limits
 
