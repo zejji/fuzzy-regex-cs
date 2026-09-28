@@ -149,6 +149,8 @@ internal static class EngineWork
         }
         finally
         {
+            // Clears rather than restores: nesting two helpers of the same kind (steps in steps)
+            // is not supported, and no test does it.
             setLimit(0);
         }
 
