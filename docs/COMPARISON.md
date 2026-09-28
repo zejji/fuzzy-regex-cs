@@ -1451,6 +1451,21 @@ Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); /
 A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
 Boost; PCRE2 alone makes the call fail instead.
 
+### A `\G` inside a fuzzy section is answered where upstream raises an error
+
+`\G` holds only where the search started. An error cannot make it true, so inside a fuzzy section
+it means what it means outside one. When a `\G` fails there, the matcher may try an insertion after
+it, and if that insertion later has to be undone, upstream stops with `RuntimeError: invalid RE
+code` instead of answering. This port answers.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The first branch fails its \G at 1; the second holds it at 0 and inserts 'a' before 'b'.
+Console.WriteLine(new FuzzyRegex(@"(?:a\G|\Gb){i<=1}").MatchAtStart("ab").Length); // 2 - upstream: RuntimeError
+Console.WriteLine(new FuzzyRegex(@"(?:a\G){i<=1}").MatchAtStart("ab").Success);    // False - upstream: RuntimeError
+```
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,
