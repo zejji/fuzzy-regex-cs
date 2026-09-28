@@ -2460,6 +2460,62 @@ instrument that shows it does not. The earlier attempt to keep the cell by forci
 (`(?P<g1>A(?:Ab){C}(?&g1)?)`) is still not sufficient on its own and is not what landed: progress
 bounds the depth and does nothing about the branching.
 
+**The guard refined (2026-09-28): it refused a finite left recursion, a port bug.** Found by the
+2026-09-27 matrix wave (seed 4242 row 1719; `docs/plan/2026-09-27-matrix-wave-triage.md`, "The
+same-position call guard"). The guard as first made failed ANY call of group `i` at `p` while a call
+of `i` at `p` was open. That is not always infinite: with `G -> '' | G 'a'`, matching `'aa'` goes
+G(G('') 'a') 'a', two calls of G open at 0 at once, and the inner one returns at once. The port
+answered None for `(?:|(?R)a)` fullmatch `'aa'` and (1, 2) for `(?P<g>|(?&g)a)$`, where upstream and
+PCRE2 10.47 answer (0, 2).
+
+PCRE2's own check is narrower, and it is now the port's. `OP_RECURSE` (`pcre2_match.c` 10.47, lines
+5686-5709, re-read 2026-09-27) raises `PCRE2_ERROR_RECURSELOOP` only when the subject pointer AND
+`last_used_ptr`, the furthest character inspected, are both unchanged since the enclosing call of
+the same group; `last_used_ptr` is reset at each start position (line 7953). So an inner call is let
+through when the attempt has looked further into the text since the outer call opened: the outer
+call's first try failed further on, and the inner call is a genuinely different path. With nothing
+new reached it is failed as before.
+
+**That is still too strict: a new capture can make the inner call different (open, 2026-09-28).**
+A blind review found `(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))` over `'x'`: upstream answers (0, 1),
+the port None, PCRE2 "nested recursion at the same subject position". Two calls of the whole
+pattern are open at 0 and nothing new is reached, but the group set between them changes which
+branch the conditional takes, so the inner call is not a repeat and the path is finite. The same
+holds for backreferences: `(?:\1x|\2()(?R)|()(?R))` and its named form, (0, 1) upstream, None here.
+Red and `[Explicit]` as
+`OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`.
+
+The planned fix makes the key `(call, position, reach, captures read)`: the current spans of the
+groups a conditional or backreference reads (`GroupInfo.Referenced`), taken only when the pattern
+has such groups, saved on the backtracking stack at `GROUP_RETURN` so a re-opened call keeps its
+own. It still terminates: each such group's span is one of at most `(TextLength + 1)^2 + 1` values,
+so the entries per position stay finite. A capture-change COUNTER would be cheaper but does not
+terminate in principle - a group that alternates between two spans counts up for ever - so it is
+not the fix.
+
+In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
+touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.
+`Matcher.NoteReached` widens it at every group call and wherever a path fails; `start_match` resets
+it per attempt, as PCRE2 does. The reach is saved beside the call key at `GROUP_RETURN` and restored
+by its backtrack arm, so a re-opened call is the call it was. It terminates: the width only grows
+during an attempt and cannot pass the text length, so at most `TextLength + 1` calls of one group
+can be open at one position. The one difference from PCRE2 stays: the port fails the path, not the
+match.
+
+Measured on the new tests in `Gaps/Engine/GroupCallTests.cs`: left recursion nests to (0, n) for n up
+to 20 (upstream and PCRE2 agree); `(?:b.*x|(?<g>|(?&g)a)c)` over `'baac'` answers (1, 3), which needs
+the per-attempt reset (upstream MemoryError, PCRE2 RECURSELOOP, so neither has an answer); and the
+infinite shapes (`(?:|(?R)a)` over `'b'`, `(?:(?R))`) still answer no match inside 100 ms. Each part
+is load-bearing, shown by ablation on 2026-09-27: dropping the note at a failed path fails 5 of the
+19 group-call tests, dropping the low end (so reversed patterns never grow) fails 1, dropping the
+per-attempt reset fails 1, re-opening a call with the current reach instead of the saved one fails
+5, and removing the guard fails the 3 infinite-shape tests.
+
+One known difference in scope, not chased: PCRE2 compares only with the innermost enclosing call of
+the same group, at whatever position; the port refuses on a match with any open call of that group
+at that position, with the same reach. Whether any pattern answers differently because of that is
+not measured.
+
 **Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.
 
 ---

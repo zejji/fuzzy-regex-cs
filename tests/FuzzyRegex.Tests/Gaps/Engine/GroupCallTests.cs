@@ -590,6 +590,90 @@ public sealed class GroupCallTests
         }
     }
 
+    // Matrix wave triage (docs/plan/2026-09-27-matrix-wave-triage.md), seed 4242 row 1719,
+    // minimised; ledger entry 14, "The guard refined". The grammar G -> '' | G 'a' generates '',
+    // 'a', 'aa' and so on, so 'aa' is in its language. Matching it goes G(G('') 'a') 'a': two
+    // calls of G open at position 0 at once, and the inner one takes the empty branch, so the path
+    // is finite. Upstream answers
+    // (0, 2) for all three rows, and PCRE2 10.47's interpreter does for the first and third
+    // (`pcre2.compile(p, jit=False)`, 2026-09-27). The guard used to refuse any call of a group
+    // where a call of it was already open, and answered None, None and (1, 2). The second row is
+    // the reversed form, where the text reached grows to the LEFT.
+    [Test]
+    [Arguments("(?:|(?R)a)", false)]
+    [Arguments("(?r)(?:|a(?R))", false)]
+    [Arguments("(?P<g>|(?&g)a)$", true)]
+    public void A_left_recursive_call_nested_at_one_position_still_finds_its_match(string pattern, bool search)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget);
+        Match m = search ? regex.Match("aa") : regex.FullMatch("aa");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+    }
+
+    [Test]
+    public void A_left_recursion_nests_as_deep_as_the_text_it_has_reached()
+    {
+        // Each extra 'a' needs one more call of G open at position 0, and each one is let through
+        // only because the attempt has reached further into the text since the call outside it
+        // opened. PCRE2 10.47's interpreter and upstream both answer (0, n) here (2026-09-27).
+        foreach (int n in (int[])[3, 4, 8, 20])
+        {
+            string subject = new('a', n);
+
+            Match full = new FuzzyRegex("(?:|(?R)a)", FuzzyRegexOptions.None, _budget).FullMatch(subject);
+            Match anchored = new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, _budget).Match(subject);
+
+            (full.Success, full.Index, full.Length).Should().Be((true, 0, n));
+            (anchored.Success, anchored.Index, anchored.Length).Should().Be((true, 0, n));
+        }
+    }
+
+    [Test]
+    public void A_later_search_attempt_measures_its_progress_from_its_own_start()
+    {
+        // The text reached is reset for each attempt, as PCRE2 resets `last_used_ptr` at each start
+        // (pcre2_match.c 10.47, line 7953). The attempt at 0 runs `.*` to the end and fails, so if
+        // the reach carried over, the attempt at 1 would see no progress however far it got, refuse
+        // the second call of `g` at 1, and answer the shorter (2, 4). 'aac' at 1 is the leftmost
+        // match the grammar allows. Upstream raises MemoryError and PCRE2's interpreter raises
+        // "nested recursion at the same subject position" at attempt 0, so neither has an answer.
+        Match m = new FuzzyRegex("(?:b.*x|(?<g>|(?&g)a)c)", FuzzyRegexOptions.None, _budget).Match("baac");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 3));
+    }
+
+    [Test]
+    [Arguments("(?r)((?:ab|a(?R)))")]
+    [Arguments("(?r)(?p)((?:ab|a(?R)))")]
+    public void A_reversed_right_recursion_nests_at_one_position_once_it_has_reached_further(string pattern)
+    {
+        // Matrix wave triage row 7:2439, minimised. Reversed, 'a(?R)' is matched right to left, so
+        // the call comes first and is a left recursion at the same position. Each nests only after
+        // the 'ab' branch has failed further left, so the text reached has grown. Upstream answers
+        // (0, 4) for the POSIX-free form (2026-09-27); the old guard answered None for both.
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).FullMatch("aaab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 4));
+    }
+
+    [Test]
+    public void A_nested_call_that_reaches_no_further_is_still_refused()
+    {
+        // The genuinely infinite shapes: the inner call of G at 0 is made with nothing reached
+        // since the outer one opened, so it can only repeat the outer call's failure one level
+        // deeper, for ever. PCRE2 10.47's interpreter raises "nested recursion at the same subject
+        // position" on every row (2026-09-27); upstream raises MemoryError. The guard fails the
+        // path, so each answers no match, and quickly: the budget is a tenth of a second.
+        TimeSpan tight = TimeSpan.FromMilliseconds(100);
+
+        new FuzzyRegex("(?:|(?R)a)", FuzzyRegexOptions.None, tight).FullMatch("b").Success.Should().BeFalse();
+        new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, tight).Match("b").Success.Should().BeFalse();
+        new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, tight).Match("aaaaaaaab").Success.Should().BeFalse();
+        new FuzzyRegex("(?:(?R))", FuzzyRegexOptions.None, tight).Match("ab").Success.Should().BeFalse();
+    }
+
     [Test]
     public void A_verb_that_cuts_the_backtracking_inside_a_call_does_not_leave_the_call_open()
     {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -3040,13 +3041,37 @@ internal static class Matcher
     /// so an empty list would be a bug in the bookkeeping rather than a state to handle.
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <returns>The closed call's key.</returns>
-    private static long PopOpenCall(MatchState state)
+    /// <returns>The closed call's key, and the text reached when it was made.</returns>
+    private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, _) = state.OpenCalls[^1];
+        (long key, int reach, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
-        state.ActiveCalls.Remove(key);
-        return key;
+        bool removed = state.ActiveCalls.Remove((key, reach));
+        Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
+        return (key, reach);
+    }
+
+    /// <summary>
+    /// Widens the text this attempt has reached to take in <paramref name="textPos"/>. See
+    /// <see cref="MatchState.ReachedLow"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">A position matching has just been at.</param>
+    private static void NoteReached(MatchState state, int textPos)
+    {
+        // The termination argument in MatchState.ActiveCalls counts on this: a width no greater
+        // than the text, because positions never leave it.
+        Debug.Assert(textPos >= 0 && textPos <= state.TextLength, "a text position lies within the text");
+
+        if (textPos < state.ReachedLow)
+        {
+            state.ReachedLow = textPos;
+        }
+
+        if (textPos > state.ReachedHigh)
+        {
+            state.ReachedHigh = textPos;
+        }
     }
 
     /// <summary>
@@ -6696,6 +6721,10 @@ internal static class Matcher
         PatternObject pattern = state.Pattern;
         Node startNode = pattern.StartNode!;
 
+        // NOT UPSTREAM'S: only the call guard reads the text reached, so a pattern without group
+        // calls skips tracking it. See PatternObject.HasGroupCalls.
+        bool tracksReach = pattern.HasGroupCalls;
+
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
@@ -6852,6 +6881,8 @@ internal static class Matcher
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
+        state.ReachedLow = int.MaxValue;
+        state.ReachedHigh = int.MinValue;
 
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
@@ -8448,11 +8479,18 @@ internal static class Matcher
                     Node groupCallReturnNode = node.Next1.Node!;
 
                     // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
-                    // already open. See MatchState.ActiveCalls and ledger entry 14 - the path is
-                    // infinite, and failing it leaves every other path alone.
+                    // already open, when the attempt has reached no further since that call was made.
+                    // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
+                    // and failing it leaves every other path alone.
                     long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
+                    NoteReached(state, state.TextPos);
+                    int groupCallReach = state.ReachedWidth;
+                    Debug.Assert(
+                        groupCallReach >= 0 && groupCallReach <= state.TextLength,
+                        "the text reached is measured and fits in the text"
+                    );
 
-                    if (!state.ActiveCalls.Add(groupCallKey))
+                    if (!state.ActiveCalls.Add((groupCallKey, groupCallReach)))
                     {
                         goto backtrack;
                     }
@@ -8467,7 +8505,11 @@ internal static class Matcher
                     // The call is open, and the frame it belongs to ends here. See
                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
                     // open calls it has just thrown away.
-                    state.OpenCalls.Add((groupCallKey, state.Sstack.Count));
+                    Debug.Assert(
+                        state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
+                        "the text reached never shrinks, so an inner call's reach is at least its caller's"
+                    );
+                    state.OpenCalls.Add((groupCallKey, groupCallReach, state.Sstack.Count));
 
                     /* sstack: caller_groups caller_repeats capture_change return_node
                      *
@@ -8553,13 +8595,14 @@ internal static class Matcher
                         // The call is closed, so it is no longer one this position may not re-enter.
                         // It is the innermost open one - calls nest - and its key goes on the
                         // backtracking stack so the arm below can re-open it.
-                        long groupReturnCallKey = PopOpenCall(state);
+                        (long groupReturnCallKey, int groupReturnCallReach) = PopOpenCall(state);
 
                         // For the callee.
                         PushGroups(state, state.Bstack);
                         PushRepeats(state, state.Bstack);
                         state.Bstack.PushSize(state.CaptureChange);
                         state.Bstack.PushSize(groupReturnCallKey);
+                        state.Bstack.PushSize(groupReturnCallReach);
                         state.Bstack.PushNode(groupReturnNode);
                         state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
 
@@ -8591,7 +8634,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
                      *         GROUP_RETURN
                      *
                      * else:
@@ -10211,6 +10254,13 @@ internal static class Matcher
         }
 
         backtrack:
+        // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
+        // MatchState.ReachedLow. Only a pattern with group calls reads it.
+        if (tracksReach)
+        {
+            NoteReached(state, state.TextPos);
+        }
+
         while (true)
         {
             // Should we abort the matching?
@@ -10748,7 +10798,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
                      *
                      * else:
                      *
@@ -10764,9 +10814,12 @@ internal static class Matcher
 
                     if (groupReturnBackNode is not null)
                     {
-                        // Backtracking into the call re-opens it, so its key comes back off the
-                        // backtracking stack.
-                        if (!state.Bstack.PopSize(out long groupReturnBackKey))
+                        // Backtracking into the call re-opens it, so its key and reach come back
+                        // off the backtracking stack.
+                        if (
+                            !state.Bstack.PopSize(out long groupReturnBackReach)
+                            || !state.Bstack.PopSize(out long groupReturnBackKey)
+                        )
                         {
                             return MatchStatus.Illegal;
                         }
@@ -10780,8 +10833,13 @@ internal static class Matcher
                         state.Sstack.PushNode(groupReturnBackNode);
 
                         // The frame is back, so the call is open again and ends where it now ends.
-                        state.ActiveCalls.Add(groupReturnBackKey);
-                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count));
+                        bool reopened = state.ActiveCalls.Add((groupReturnBackKey, (int)groupReturnBackReach));
+                        Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
+                        Debug.Assert(
+                            state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
+                            "a re-opened call is still inside the calls that were open when it returned"
+                        );
+                        state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count));
 
                         /* sstack: caller_groups caller_repeats capture_change return_node
                          *

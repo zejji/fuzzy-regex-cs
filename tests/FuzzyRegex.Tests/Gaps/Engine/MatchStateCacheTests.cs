@@ -306,14 +306,14 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 stack.Push(7);
                 break;
-            case HashSet<long> set:
-                set.Add(7);
+            case HashSet<(long Key, int Reach)> set:
+                set.Add((7, 7));
                 break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int SstackDepth)> calls:
-                calls.Add((7, 7));
+            case List<(long Key, int Reach, int SstackDepth)> calls:
+                calls.Add((7, 7, 7));
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);
@@ -401,7 +401,7 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
                 break;
-            case HashSet<long> set:
+            case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
                 break;
             case Array array and (long[] or GroupData[] or RepeatData[]):

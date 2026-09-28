@@ -180,6 +180,13 @@ internal sealed class PatternObject
     /// <summary>Upstream <c>call_ref_info</c> and <c>call_ref_info_count</c>.</summary>
     internal readonly List<CallRefInfo> CallRefInfoList = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S: whether the pattern holds a group call. Only then does the matcher track the
+    /// text an attempt has reached (<see cref="MatchState.ReachedLow"/>), so a pattern without
+    /// calls pays nothing for the call guard on its backtracking path.
+    /// </summary>
+    internal bool HasGroupCalls;
+
     /// <summary>Upstream <c>repeat_info</c>.</summary>
     internal readonly List<RepeatInfo> RepeatInfoList = [];
 
