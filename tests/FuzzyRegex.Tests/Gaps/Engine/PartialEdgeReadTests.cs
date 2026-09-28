@@ -179,6 +179,65 @@ public sealed class PartialEdgeReadTests
             .Be((one, one, one, 0L));
     }
 
+    /// <summary>
+    /// The six rows of the seed-7 oracle wave of 2026-09-29 that M1 moved away from upstream, kept
+    /// as the wave generated them (ExpectedDivergences <c>partial-edge-read</c>, which judges each).
+    /// </summary>
+    /// <remarks>
+    /// Rows 4841 and 5367 are real completions upstream refuses; rows 6399 and 6589 are partials
+    /// upstream answers that no text completes, because <c>\A</c> and <c>\Z</c> at the edge are
+    /// false for every continuation. Rows 5098 and 5310 are phantoms of the design's limit C2 (known
+    /// defect D19), pinned so that the day D19 is fixed they move on purpose: the brute-force judge
+    /// answers None to both.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on every row, deliberately on four and as a registered limit on two.
+    [Test]
+    public void The_rows_the_seed_7_wave_found()
+    {
+        const FuzzyRegexOptions v1 = FuzzyRegexOptions.Version1;
+        const FuzzyRegexOptions fim =
+            FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline;
+
+        // Row 4841: '' + 'B\n' matches.
+        Match m4841 = new FuzzyRegex(
+            @"\b(?:[^\p{L}]{0}(*PRUNE)\D|[^a])[^a]+\B",
+            fim | FuzzyRegexOptions.Version0
+        ).MatchAtStart("", partial: true);
+
+        (m4841.PartialMatch, m4841.Index, m4841.Length).Should().Be((true, 0, 0));
+
+        // Row 5098, a phantom of limit C2.
+        Match m5098 = new FuzzyRegex(
+            @"(?r)^(?P<g1>\p{Nd}*)*(?P<g2>[\ ]+)(?:(?(2)(?<=(?P>g2))[^\d]))*?\M",
+            fim | v1
+        ).Match("     ", partial: true);
+
+        (m5098.PartialMatch, m5098.Index, m5098.Length).Should().Be((true, 0, 0));
+
+        // Row 5310, a phantom of limit C2: the skin-tone modifier is no word character.
+        Match m5310 = new FuzzyRegex(
+            "\\b(?P<g1>[\U0001F3FB]{2,}?)\\1",
+            FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | v1
+        ).FullMatch("\U0001F3FB\r\n", 3, 0, partial: true);
+
+        (m5310.PartialMatch, m5310.Index, m5310.Length).Should().Be((true, 3, 0));
+
+        // Row 5367: the empty slice + 'AA' is a full match.
+        Match m5367 = new FuzzyRegex(@"\b([A]*){1}\1", v1).FullMatch("\r\n", 0, 0, partial: true);
+
+        (m5367.PartialMatch, m5367.Index, m5367.Length).Should().Be((true, 0, 0));
+
+        // Rows 6399 and 6589: upstream's partials, which no continuation completes.
+        new FuzzyRegex(@"(?fi)(?r)\m(?:(?:b+?\A){e<=3}){e<=2}", FuzzyRegexOptions.Version0)
+            .FullMatch("BB", partial: true)
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex(@"(?b)\B(?:\Z[a-f]\p{L}\Wa+){e<=2}", FuzzyRegexOptions.Version0)
+            .Match("bb.aa", partial: true)
+            .Success.Should()
+            .BeFalse();
+    }
+
     private static MatchState RunPartial(string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

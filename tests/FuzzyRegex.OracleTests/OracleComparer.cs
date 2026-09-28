@@ -721,6 +721,30 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with the second pass of a partial call reading the word,
+    /// line and string tests against the held text, as it did before D11 M1 and as upstream does.
+    /// </summary>
+    /// <remarks>
+    /// D11 M1 decides such a test at the edge for the text to come: false where every continuation
+    /// fails it (<c>\Z</c>, <c>\m</c> after a word character), passed with a touch mark where some
+    /// continuation passes it (<c>\b</c>). Setting <c>PatternObject.EdgeReadsTheHeldText</c> puts
+    /// the held-text reading back. The <c>partial-edge-read</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without M1, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheEdgeReadAgainstTheHeldText(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.EdgeReadsTheHeldText = true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with a fuzzy full-folded string editing a subject
     /// character that expands under full case folding one folded character at a time, as upstream
     /// does, and never whole.

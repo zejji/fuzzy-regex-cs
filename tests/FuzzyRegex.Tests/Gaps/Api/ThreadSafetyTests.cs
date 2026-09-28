@@ -768,6 +768,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
+            // D11 added EdgeReadsTheHeldText, likewise set only by
+            // OracleComparer.RunWithTheEdgeReadAgainstTheHeldText.
+            "PatternObject.EdgeReadsTheHeldText",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

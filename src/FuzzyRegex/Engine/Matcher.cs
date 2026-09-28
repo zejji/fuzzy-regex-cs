@@ -2763,7 +2763,55 @@ internal static class Matcher
     /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
     /// <param name="textPos">The position to ask about.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
+    internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos)
+    {
+        if (state.PartialSide != MatchState.PartialNone && state.Pattern.EdgeReadsTheHeldText)
+        {
+            return ZeroWidthAgainstTheHeldText(state, node, textPos);
+        }
+
+        return ZeroWidth(state, node, textPos);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.EdgeReadsTheHeldText"/>):
+    /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
+    /// the held text, with S57d noting a word or grapheme test at the truncation point.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns><see cref="MatchStatus.Success"/> or <see cref="MatchStatus.Failure"/>.</returns>
+    private static int ZeroWidthAgainstTheHeldText(MatchState state, Node node, int textPos)
+    {
+        if (
+            node.Op
+            is Opcode.Boundary
+                or Opcode.StartOfWord
+                or Opcode.EndOfWord
+                or Opcode.DefaultBoundary
+                or Opcode.DefaultEndOfWord
+                or Opcode.DefaultStartOfWord
+                or Opcode.GraphemeBoundary
+        )
+        {
+            NoteBoundaryAtTruncationPoint(state, textPos);
+        }
+
+        int partialSide = state.PartialSide;
+        state.PartialSide = MatchState.PartialNone;
+        int status = ZeroWidth(state, node, textPos);
+        state.PartialSide = partialSide;
+
+        return status;
+    }
+
+    /// <summary>The dispatch of <see cref="TryMatchZeroWidth"/>.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int ZeroWidth(MatchState state, Node node, int textPos) =>
         node.Op switch
         {
             Opcode.Boundary => TryMatchBoundary(state, node, textPos),
