@@ -6707,6 +6707,10 @@ internal static class Matcher
         PatternObject pattern = state.Pattern;
         Node startNode = pattern.StartNode!;
 
+        // NOT UPSTREAM'S: only the call guard reads the text reached, so a pattern without group
+        // calls skips tracking it. See PatternObject.HasGroupCalls.
+        bool tracksReach = pattern.HasGroupCalls;
+
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
@@ -10237,8 +10241,11 @@ internal static class Matcher
 
         backtrack:
         // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
-        // MatchState.ReachedLow.
-        NoteReached(state, state.TextPos);
+        // MatchState.ReachedLow. Only a pattern with group calls reads it.
+        if (tracksReach)
+        {
+            NoteReached(state, state.TextPos);
+        }
 
         while (true)
         {

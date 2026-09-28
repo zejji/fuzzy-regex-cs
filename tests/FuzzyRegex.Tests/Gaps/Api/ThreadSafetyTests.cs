@@ -730,6 +730,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.FuzzyLiteralFilter",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
+            // Ledger entry 14's refined call guard added HasGroupCalls, set by the node compiler
+            // while the pattern is built and only read afterwards.
+            "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
             "PatternObject.IsFuzzy",
