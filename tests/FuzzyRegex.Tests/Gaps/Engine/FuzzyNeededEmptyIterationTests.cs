@@ -129,6 +129,25 @@ public sealed class FuzzyNeededEmptyIterationTests
         watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
     }
 
+    // Deletions never consume text, so a full match of 'aaaaba' cannot take the 'b', and the text
+    // after the lazy repeat ('ﬁİßx') is not in 'cabcatX'. Main (5e0a2cd) exhausted the 1 GB
+    // backtracking stack on the first after 3.6 s (matrix row 20260927:1893); upstream gives None
+    // for the second.
+    [Test]
+    public void A_lazy_repeat_of_a_fuzzy_section_that_cannot_reach_the_rest_fails_at_once()
+    {
+        var watch = Stopwatch.StartNew();
+        new FuzzyRegex("(?:(?:a){d<=1})+?", FuzzyRegexOptions.None, TimeSpan.FromSeconds(10))
+            .FullMatch("aaaaba")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("(?V0i)(?:(?:ẞ){e<=1})*?ﬁİßx", FuzzyRegexOptions.None, TimeSpan.FromSeconds(10))
+            .Match("cabcatX")
+            .Success.Should()
+            .BeFalse();
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+    }
+
     // The repeat memo: each empty iteration can delete a, b, c or d, and all four lead to the same
     // state, so without it the search explores 4^n paths. Upstream takes 1.28 s at n = 11.
     [Test]
