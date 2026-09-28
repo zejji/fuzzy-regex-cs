@@ -4740,7 +4740,7 @@ internal static class Matcher
         // substitute or insert and still leave the position where the iteration began.
         Span<long> edits = stackalloc long[FuzzyValue.Count];
         List<FuzzyChange> changes = state.FuzzyChanges;
-        for (int i = (int)rpData.ChangesAtStart; i < changes.Count; i++)
+        for (int i = IterationChanges(rpData); i < changes.Count; i++)
         {
             edits[changes[i].Type]++;
         }
@@ -4807,7 +4807,8 @@ internal static class Matcher
         state.OptionalPasses[slot] = new OptionalPassStart(
             state.TextPos,
             state.FuzzyChanges.Count,
-            state.CaptureChange
+            state.CaptureChange,
+            state.VerbsCrossed
         );
     }
 
@@ -4834,6 +4835,7 @@ internal static class Matcher
         && pass.TextPos == state.TextPos
         && pass.Changes == state.FuzzyChanges.Count
         && MatchState.GroupChanges(pass.CaptureChange) == MatchState.GroupChanges(state.CaptureChange)
+        && pass.Verbs == state.VerbsCrossed
         && !RaisesUnmetMinimum(state, _oneDeletion, counted: false);
 
     /// <summary>
@@ -4849,6 +4851,17 @@ internal static class Matcher
     /// <see cref="EmptyIterationAdmitted"/> applies to a repeat: they raise an open section's unmet
     /// minimum, or the pass changed the span of a group a backreference or conditional tests.
     /// <c>(?:a|){d&lt;=1}</c> over <c>''</c> then has no errors, as <c>(?:a?){d&lt;=1}</c> has.
+    /// </para>
+    /// <para>
+    /// A pass that crossed a <c>(*PRUNE)</c> or <c>(*SKIP)</c> stands, in plain order. The rule is this
+    /// port's own pruning, so it must never do more than an ordinary failure would, and a verb cuts
+    /// the backtracking stack when it is crossed (the empty exit's choice goes with it) or unwinds
+    /// past it when backtracking reaches it (ledger entry 47): failing the pass would then end the
+    /// attempt, and <c>(?:b(*SKIP)|){d&lt;=1}</c> over <c>''</c> answered None where upstream has
+    /// (0, 0) with one deletion. Deciding before the verb is crossed would need to know that nothing
+    /// after it in the pass consumes text, which only the pass's end knows. A verb confined to a
+    /// negative lookaround inside the pass cuts nothing past it, and the pass stands there too,
+    /// with upstream's answer: a missed prune, never a lost match.
     /// </para>
     /// <para>
     /// Off under <see cref="PatternObject.UpstreamEmptyIterations"/>, the oracle's ablation, which
@@ -4867,6 +4880,7 @@ internal static class Matcher
             || changes.Count == pass.Changes
             || state.Pattern.UpstreamEmptyIterations
             || MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(pass.CaptureChange)
+            || state.VerbsCrossed != pass.Verbs
         )
         {
             return true;
@@ -4880,6 +4894,42 @@ internal static class Matcher
 
         return RaisesUnmetMinimum(state, edits, counted: true);
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44 and its addendum): what an iteration records as its start,
+    /// <see cref="RepeatData.ChangesAtStart"/>: how many fuzzy changes had been made, and in the
+    /// high 32 bits how many verbs had been crossed (<see cref="MatchState.VerbsCrossed"/>), so
+    /// both ride every save and restore the change count already has.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The packed start.</returns>
+    private static long IterationStart(MatchState state) =>
+        (uint)state.FuzzyChanges.Count | ((long)state.VerbsCrossed << 32);
+
+    /// <summary>The change count half of <see cref="IterationStart"/>.</summary>
+    /// <param name="rpData">The repeat.</param>
+    /// <returns>How many fuzzy changes had been made when the iteration began.</returns>
+    private static int IterationChanges(RepeatData rpData) => (int)rpData.ChangesAtStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether the iteration now ending crossed a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>. Then an empty iteration the needed rule would fail stands,
+    /// but the repeat takes no further iteration from it and the memo does not record it.
+    /// </summary>
+    /// <remarks>
+    /// Failing it would do more than an ordinary failure: the verb has cut the choice of leaving the
+    /// repeat, so backtracking would end the attempt (see <see cref="OptionalPassAdmitted"/>);
+    /// <c>(?:(?:b(*SKIP))?){d&lt;=1}</c> over <c>''</c> answered None where upstream has (0, 0) with
+    /// one deletion. Standing without another iteration is upstream's answer wherever the budget ends
+    /// the loop, and it keeps the loop finite where a section inside the body restarts its budget,
+    /// which in upstream goes on to MemoryError (entry 33): <c>(?:(?:(*PRUNE)a){1&lt;=d&lt;=1})+</c> over
+    /// <c>'c'</c> now matches (0, 0) with two deletions.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, whose iteration start <see cref="IterationStart"/> recorded.</param>
+    /// <returns><see langword="true"/> if it did.</returns>
+    private static bool CrossedAVerb(MatchState state, RepeatData rpData) =>
+        (int)(rpData.ChangesAtStart >> 32) != state.VerbsCrossed;
 
     /// <summary>
     /// Whether <paramref name="edits"/>, counted by kind, raise a count that an open fuzzy section
@@ -8572,19 +8622,27 @@ internal static class Matcher
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
                         {
-                            bool edited = state.FuzzyChanges.Count > rpData.ChangesAtStart;
+                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
                             bool groupChanged =
                                 MatchState.GroupChanges(state.CaptureChange)
                                 != MatchState.GroupChanges(rpData.CaptureChange);
                             if (edited)
                             {
-                                if (!EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                                {
+                                    changed = true;
+                                }
+                                else if (CrossedAVerb(state, rpData))
+                                {
+                                    // It stands, but no iteration follows it; see CrossedAVerb.
+                                    changed = false;
+                                    keyed = false;
+                                }
+                                else
                                 {
                                     --rpData.Count;
                                     goto backtrack;
                                 }
-
-                                changed = true;
                             }
                             else
                             {
@@ -8730,7 +8788,7 @@ internal static class Matcher
 
                         rpData.CaptureChange = state.CaptureChange;
 
-                        rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                        rpData.ChangesAtStart = IterationStart(state);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -8786,19 +8844,27 @@ internal static class Matcher
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
                         {
-                            bool edited = state.FuzzyChanges.Count > rpData.ChangesAtStart;
+                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
                             bool groupChanged =
                                 MatchState.GroupChanges(state.CaptureChange)
                                 != MatchState.GroupChanges(rpData.CaptureChange);
                             if (edited)
                             {
-                                if (!EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                                {
+                                    changed = true;
+                                }
+                                else if (CrossedAVerb(state, rpData))
+                                {
+                                    // It stands, but no iteration follows it; see CrossedAVerb.
+                                    changed = false;
+                                    keyed = false;
+                                }
+                                else
                                 {
                                     --rpData.Count;
                                     goto backtrack;
                                 }
-
-                                changed = true;
                             }
                             else
                             {
@@ -8953,7 +9019,7 @@ internal static class Matcher
 
                         rpData.CaptureChange = state.CaptureChange;
 
-                        rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                        rpData.ChangesAtStart = IterationStart(state);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -9294,7 +9360,7 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                    rpData.ChangesAtStart = IterationStart(state);
                     rpData.ClearMemo();
 
                     // Could the body or tail match?
@@ -9729,7 +9795,7 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                    rpData.ChangesAtStart = IterationStart(state);
                     rpData.ClearMemo();
 
                     // Could the body or tail match?
@@ -9938,6 +10004,9 @@ internal static class Matcher
                      *
                      * pstack: bstack
                      */
+
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbsCrossed.
+                    ++state.VerbsCrossed;
 
                     // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
                     // positive lookaround the verb acts when backtracking reaches it, and then
@@ -10664,6 +10733,9 @@ internal static class Matcher
                      *
                      * pstack: bstack
                      */
+
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbsCrossed.
+                    ++state.VerbsCrossed;
 
                     // Prune the backtracking back to an appropriate backtracking point - unless the
                     // verb is in an unfinished atomic group or positive lookaround, where it prunes

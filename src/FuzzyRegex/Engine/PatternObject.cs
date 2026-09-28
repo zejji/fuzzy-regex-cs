@@ -436,11 +436,11 @@ internal sealed class PatternObject
     internal bool IsFuzzy;
 
     /// <summary>
-    /// NOT UPSTREAM (ledger entry 44's addendum): the code offsets of the <c>BRANCH</c> words that
-    /// <c>Branch.OptionalBranchWord</c> marks (<see cref="CompiledPattern.OptionalBranches"/>). Read
+    /// NOT UPSTREAM (ledger entry 44's addendum): the code offsets of the <c>NEXT</c> words that
+    /// <c>Branch.OptionalPassEndWord</c> marks (<see cref="CompiledPattern.OptionalPassEnds"/>). Read
     /// by <c>NodeCompiler.BuildBranch</c>.
     /// </summary>
-    internal HashSet<int> OptionalBranches { get; private init; } = [];
+    internal HashSet<int> OptionalPassEnds { get; private init; } = [];
 
     /// <summary>
     /// NOT UPSTREAM (ledger entry 44's addendum): how many alternations have an
@@ -673,7 +673,7 @@ internal sealed class PatternObject
             ReqOffset = compiled.ReqOffset,
             RequiredChars = reqChars,
             ReqFlags = compiled.ReqFlags,
-            OptionalBranches = [.. compiled.OptionalBranches],
+            OptionalPassEnds = [.. compiled.OptionalPassEnds],
         };
 
         // Compile the regular expression code to nodes.

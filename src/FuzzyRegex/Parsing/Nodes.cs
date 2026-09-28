@@ -1257,44 +1257,80 @@ internal class Branch : RegexBase
 {
     /// <summary>Initializes an alternation.</summary>
     /// <param name="branches">The alternatives, in pattern order.</param>
-    internal Branch(List<RegexBase> branches)
+    /// <param name="writtenEmpty">
+    /// NOT UPSTREAM: per alternative, whether the parser read it as nothing at all; see
+    /// <see cref="_writtenEmpty"/>.
+    /// </param>
+    internal Branch(List<RegexBase> branches, bool[]? writtenEmpty = null)
     {
         Branches = branches;
+        _writtenEmpty = writtenEmpty;
     }
 
     /// <summary>The alternatives. Upstream <c>branches</c>.</summary>
     internal List<RegexBase> Branches { get; private protected set; }
 
     /// <summary>
-    /// NOT UPSTREAM (ledger entry 44's addendum): whether this alternation is what is left of one
-    /// whose common prefix or suffix <see cref="Optimise"/> moved out, so that an empty alternative
-    /// in it is one the compiler made rather than one the pattern wrote.
+    /// NOT UPSTREAM (ledger entry 44's addendum): per alternative, whether the parser read it as
+    /// nothing at all, as in <c>(?:a|)</c>: an alternative written empty. Null for an alternation the
+    /// parser did not build.
     /// </summary>
     /// <remarks>
-    /// <c>(?:a(?:b){d&lt;=1}|a)</c> is compiled as <c>a</c> followed by an alternation of
-    /// <c>(?:b){d&lt;=1}</c> and an empty alternative (<see cref="SplitCommonPrefix"/>), the same
-    /// bytecode as <c>(?:a(?:(?:b){d&lt;=1}|))</c>. It is still a choice between two alternatives
-    /// that are not empty, which stays first-match (<c>upstream/README.rst</c>:609), so its empty
-    /// alternative must not become an optional's exit (<see cref="CompileCore"/>); otherwise the
-    /// answer would depend on whether the factoring ran. Factoring never runs inside a fuzzy section,
-    /// since <see cref="Fuzzy"/> does not optimise its subpattern, so <c>(?:cats|cat){e&lt;=1}</c>
-    /// stays two alternatives in upstream's bytecode and here.
+    /// Only this spelling is the exit of an optional. An empty group <c>(?:a|(?:))</c> or a zero
+    /// repeat <c>(?:a|b{0})</c> is an alternative that happens to match nothing, and stays
+    /// first-match as upstream has it, so the three spellings do not have to be told apart after
+    /// optimising has made them all an empty sequence. A comment or verbose-mode space is no item,
+    /// so <c>(?:a|(?#c))</c> is written empty.
     /// </remarks>
-    internal bool EmptyAlternativeIsFactored { get; private init; }
+    private readonly bool[]? _writtenEmpty;
 
     /// <summary>
-    /// NOT UPSTREAM (ledger entry 44's addendum): the <c>BRANCH</c> word of an alternation with an
-    /// alternative written empty after one that is not, such as <c>(?:a|)</c> or <c>(?:a|b|)</c>.
-    /// The empty alternative is the exit of an optional, as the zero iterations of <c>a?</c> are.
+    /// NOT UPSTREAM (ledger entry 44's addendum): per alternative, after <see cref="Optimise"/>,
+    /// whether an alternative written empty follows it in the alternation it was written in or in
+    /// one that encloses that, so that the empty alternative is its exit: <c>a</c> and <c>b</c> in
+    /// <c>(?:a|b|)</c> and in <c>(?:(?:a|b)|)</c>, <c>b</c> alone in <c>(?:a|(?:b|))</c>. Null when
+    /// none is.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Kept per alternative because flattening merges nested alternations: <c>(?:x|(?:b|))</c>
+    /// becomes <c>x|b|</c>, where the empty alternative is <c>b</c>'s exit and not <c>x</c>'s, as in
+    /// the spelling <c>(?:x|(?:b)?)</c>. <see cref="CompileCore"/> marks the end of each covered
+    /// alternative (<see cref="OptionalPassEndWord"/>).
+    /// </para>
+    /// <para>
+    /// An empty alternative the compiler makes is never written empty. <c>(?:a(?:b){d&lt;=1}|a)</c> is
+    /// compiled as <c>a</c> followed by an alternation of <c>(?:b){d&lt;=1}</c> and an empty
+    /// alternative (<see cref="SplitCommonPrefix"/>), the same bytecode as
+    /// <c>(?:a(?:(?:b){d&lt;=1}|))</c>, but it is still a choice between two alternatives that are
+    /// not empty, which stays first-match (<c>upstream/README.rst</c>:609). Factoring never runs
+    /// inside a fuzzy section, since <see cref="Fuzzy"/> does not optimise its subpattern, so
+    /// <c>(?:cats|cat){e&lt;=1}</c> stays two alternatives in upstream's bytecode and here.
+    /// </para>
+    /// </remarks>
+    private bool[]? _covered;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the <c>NEXT</c> word that ends an alternative
+    /// <see cref="_covered"/> marks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// It is upstream's word, so the bytecode stays upstream's (the compile-parity corpus pins it);
     /// the mark is which instance it is. <c>PatternCompiler.Compile</c> finds this instance in the
-    /// code before flattening it and records its offset (<see cref="CompiledPattern.OptionalBranches"/>),
-    /// and <c>NodeCompiler.BuildBranch</c> closes each alternative before the empty one with an
-    /// <c>END_OPTIONAL_PASS</c> node. Nothing writes to a code word once it is emitted.
+    /// code before flattening it and records its offset (<see cref="CompiledPattern.OptionalPassEnds"/>),
+    /// and <c>NodeCompiler.BuildBranch</c> ends the alternative with an <c>END_OPTIONAL_PASS</c> node.
+    /// Nothing writes to a code word once it is emitted.
+    /// </para>
+    /// <para>
+    /// A node of its own rather than the ruling's other route, rewriting <c>(?:X|)</c> as a
+    /// <c>{0,1}</c> repeat, which gives the same answers: a fuzzy repeat costs about 1.9 times a fuzzy
+    /// alternation (58.7 against 31.3 ms on the ruling's benchmark,
+    /// <c>docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md</c> section 5), and the
+    /// rewrite would put that on every fuzzy pattern with an empty alternative.
+    /// </para>
     /// </remarks>
-    internal static readonly uint[] OptionalBranchWord = [(uint)Opcode.Branch];
+    internal static readonly uint[] OptionalPassEndWord = [(uint)Opcode.Next];
 
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
@@ -1314,8 +1350,7 @@ internal class Branch : RegexBase
         }
 
         // Flatten branches within branches.
-        List<RegexBase> branches = FlattenBranches(info, reverse, Branches);
-        bool hasEmptyAlternative = branches.Exists(static b => b is Sequence { Items.Count: 0 });
+        (List<RegexBase> branches, List<bool> covered) = FlattenBranches(info, reverse, Branches, _writtenEmpty);
 
         // Move any common prefix or suffix out of the branches.
         List<RegexBase> prefix;
@@ -1331,26 +1366,21 @@ internal class Branch : RegexBase
             suffix = [];
         }
 
-        // Try to reduce adjacent single-character branches to sets.
-        branches = ReduceToSet(info, reverse, branches);
-
-        // An empty alternative stops the factoring, since it has no prefix or suffix to share, so
-        // the alternatives factored here were all written non-empty and any empty one left is the
-        // compiler's. A nested alternation is flattened only if nothing was factored out of it.
+        // An empty alternative stops the factoring, since it has no prefix or suffix to share, and a
+        // covered alternative has one after it, so nothing factored here is covered and the empty
+        // alternatives factoring leaves are no alternative's exit.
         Debug.Assert(
-            (prefix.Count == 0 && suffix.Count == 0) || !hasEmptyAlternative,
-            "a written empty alternative was factored"
+            (prefix.Count == 0 && suffix.Count == 0) || !covered.Contains(true),
+            "an alternative with an empty one after it was factored"
         );
+
+        // Try to reduce adjacent single-character branches to sets.
+        (branches, covered) = ReduceToSet(info, reverse, branches, covered);
+
         List<RegexBase> sequence;
         if (branches.Count > 1)
         {
-            sequence =
-            [
-                new Branch(branches)
-                {
-                    EmptyAlternativeIsFactored = EmptyAlternativeIsFactored || prefix.Count > 0 || suffix.Count > 0,
-                },
-            ];
+            sequence = [new Branch(branches) { _covered = covered.Contains(true) ? [.. covered] : null }];
 
             if (prefix.Count == 0 || suffix.Count == 0)
             {
@@ -1470,54 +1500,87 @@ internal class Branch : RegexBase
             [(uint)Opcode.Branch],
         ];
 
-        // NOT UPSTREAM (ledger entry 44's addendum): an alternative written empty after one that is
-        // not is the exit of an optional; see OptionalBranchWord. Marked whether or not this
+        // NOT UPSTREAM (ledger entry 44's addendum): the end of an alternative whose exit is an
+        // alternative written empty after it; see OptionalPassEndWord. Marked whether or not this
         // alternation is inside a section, since a section inside an alternative spends errors too:
         // (?:(?:a){d<=1}|) is (?:(?:a){d<=1})? spelt as an alternation. The node compiler drops the
-        // mark from a pattern that has no fuzzy section (NodeCompiler.CompileToNodes).
-        bool seenNonEmpty = false;
-        bool emptyExit = false;
-        foreach (RegexBase b in Branches)
+        // mark from a pattern that has no fuzzy section (NodeCompiler.CompileToNodes). An
+        // alternative that compiles to nothing has no pass to judge.
+        // A section's subpattern is compiled without being optimised, so an alternation inside one
+        // has only its own marks.
+        bool[] covered = _covered ?? OwnCovered(_writtenEmpty, Branches.Count);
+        for (int i = 0; i < Branches.Count; i++)
         {
-            List<uint[]> alternative = b.Compile(reverse, fuzzy);
-            emptyExit |= seenNonEmpty && alternative.Count == 0;
-            seenNonEmpty |= alternative.Count > 0;
+            List<uint[]> alternative = Branches[i].Compile(reverse, fuzzy);
             code.AddRange(alternative);
-            code.Add([(uint)Opcode.Next]);
+            code.Add(covered[i] && alternative.Count > 0 ? OptionalPassEndWord : [(uint)Opcode.Next]);
         }
 
+        Debug.Assert(!covered[^1], "an alternative with an empty one after it is not the last");
         code[^1] = [(uint)Opcode.End];
-
-        if (emptyExit && !EmptyAlternativeIsFactored)
-        {
-            code[0] = OptionalBranchWord;
-        }
 
         return code;
     }
 
-    /// <summary>Upstream <c>Branch._flatten_branches</c> (lines 2237-2248).</summary>
-    private static List<RegexBase> FlattenBranches(Info info, bool reverse, List<RegexBase> branches)
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): which alternatives have one written empty after
+    /// them in this alternation (<see cref="_covered"/>).
+    /// </summary>
+    /// <param name="writtenEmpty">The parser's flags, or null.</param>
+    /// <param name="count">How many alternatives.</param>
+    /// <returns>One flag per alternative.</returns>
+    private static bool[] OwnCovered(bool[]? writtenEmpty, int count)
     {
+        // Which alternatives have one written empty after them, in this alternation.
+        bool[] own = new bool[count];
+        bool emptyAfter = false;
+        for (int i = count - 1; i >= 0; i--)
+        {
+            own[i] = emptyAfter;
+            emptyAfter |= writtenEmpty is not null && writtenEmpty[i];
+        }
+
+        return own;
+    }
+
+    /// <summary>Upstream <c>Branch._flatten_branches</c> (lines 2237-2248).</summary>
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 44's addendum): also works out which of the flattened alternatives
+    /// have an alternative written empty after them (<see cref="_covered"/>). An alternative is
+    /// covered by a later one written empty in its own alternation, and a nested alternation's
+    /// alternatives also by whatever covered the nested alternation as a whole.
+    /// </remarks>
+    private static (List<RegexBase> Branches, List<bool> Covered) FlattenBranches(
+        Info info,
+        bool reverse,
+        List<RegexBase> branches,
+        bool[]? writtenEmpty
+    )
+    {
+        bool[] own = OwnCovered(writtenEmpty, branches.Count);
+
         // Flatten the branches so that there aren't branches of branches.
         List<RegexBase> newBranches = [];
-        foreach (RegexBase branch in branches)
+        List<bool> covered = [];
+        for (int i = 0; i < branches.Count; i++)
         {
-            RegexBase b = branch.Optimise(info, reverse);
+            RegexBase b = branches[i].Optimise(info, reverse);
             if (b is Branch nested)
             {
-                // Optimise returns a bare alternation only when it factored nothing out of it; one
-                // it factored comes back inside a sequence, after or before what it moved out.
-                Debug.Assert(!nested.EmptyAlternativeIsFactored, "a factored alternation was flattened");
                 newBranches.AddRange(nested.Branches);
+                for (int k = 0; k < nested.Branches.Count; k++)
+                {
+                    covered.Add(own[i] || (nested._covered is not null && nested._covered[k]));
+                }
             }
             else
             {
                 newBranches.Add(b);
+                covered.Add(own[i]);
             }
         }
 
-        return newBranches;
+        return (newBranches, covered);
     }
 
     /// <summary>Upstream <c>Branch._split_common_prefix</c> (lines 2250-2290).</summary>
@@ -1714,38 +1777,68 @@ internal class Branch : RegexBase
         alternative.Exists(static i => i is Character c && (c.CaseFlags & RegexFlags.Unicode) != 0);
 
     /// <summary>Upstream <c>Branch._reduce_to_set</c> (lines 2417-2443).</summary>
-    private static List<RegexBase> ReduceToSet(Info info, bool reverse, List<RegexBase> branches)
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 44's addendum): carries <see cref="_covered"/> through. Members
+    /// merge as upstream merges them, so the bytecode stays upstream's, and a set is covered only
+    /// if every member was. That loses nothing: covered alternatives are followed by an empty one in
+    /// their own alternation, so a covered member can only follow an uncovered one in a set, as
+    /// <c>b</c> follows <c>a</c> in <c>(?:a|(?:b|))</c>, and deleting <c>b</c> there reaches the state
+    /// deleting <c>a</c> reached first, with the same errors.
+    /// </remarks>
+    private static (List<RegexBase> Branches, List<bool> Covered) ReduceToSet(
+        Info info,
+        bool reverse,
+        List<RegexBase> branches,
+        List<bool> covered
+    )
     {
         // Can the branches be reduced to a set?
         List<RegexBase> newBranches = [];
+        List<bool> newCovered = [];
         HashSet<RegexBase> items = [];
+        bool itemsCovered = true;
         int caseFlags = RegexFlags.NoCase;
-        foreach (RegexBase b in branches)
+
+        void Flush()
         {
+            if (items.Count > 0)
+            {
+                newCovered.Add(itemsCovered);
+            }
+
+            FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+            itemsCovered = true;
+        }
+
+        for (int i = 0; i < branches.Count; i++)
+        {
+            RegexBase b = branches[i];
             if (b is Character or Property or SetBase)
             {
                 // Branch starts with a single character.
                 if (b.CaseFlags != caseFlags)
                 {
                     // Different case sensitivity, so flush.
-                    FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+                    Flush();
 
                     caseFlags = b.CaseFlags;
                 }
 
                 items.Add(b.WithFlags(caseFlags: RegexFlags.NoCase));
+                itemsCovered &= covered[i];
             }
             else
             {
-                FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+                Flush();
 
                 newBranches.Add(b);
+                newCovered.Add(covered[i]);
             }
         }
 
-        FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+        Flush();
 
-        return newBranches;
+        return (newBranches, newCovered);
     }
 
     /// <summary>Upstream <c>Branch._flush_set_members</c> (lines 2471-2484).</summary>

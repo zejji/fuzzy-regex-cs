@@ -361,6 +361,7 @@ internal sealed class RepeatData
     /// (<c>MatchState.FuzzyChanges</c>) when this iteration started, so the end of the iteration
     /// can tell whether it spent any. The list is exact along the path, because every backtrack over
     /// an edit unrecords it, where upstream's <c>capture_change</c> also counts edits since undone.
+    /// The high 32 bits hold how many verbs had been crossed (<c>Matcher.IterationStart</c>).
     /// </summary>
     internal long ChangesAtStart;
 

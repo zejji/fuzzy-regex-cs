@@ -511,6 +511,15 @@ internal sealed class MatchState : IDisposable
     internal long CaptureChange;
 
     /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): how many times this attempt has crossed a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>. Only ever compared with an earlier reading, to tell whether a
+    /// pass or an iteration crossed one (<c>Matcher.OptionalPassAdmitted</c>,
+    /// <c>Matcher.CrossedAVerb</c>); it only grows, so a reading taken where the pass began is the
+    /// whole of what it needs.
+    /// </summary>
+    internal int VerbsCrossed;
+
+    /// <summary>
     /// NOT UPSTREAM (ledger 33): what a fuzzy edit adds to <see cref="CaptureChange"/>, where
     /// upstream adds 1. A referenced group's span change still adds 1, so the low 32 bits count
     /// group changes alone and come back with every save and restore upstream already makes -
@@ -926,6 +935,7 @@ internal sealed class MatchState : IDisposable
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
         CallMemoKey.Clear();
+        VerbsCrossed = 0;
         CallMemoHits = 0;
         SearchAnchor = 0;
         MatchPos = 0;
@@ -1647,5 +1657,8 @@ internal sealed class MatchState : IDisposable
 /// <param name="TextPos">The text position the pass began at.</param>
 /// <param name="Changes">How many fuzzy changes had been made when it began.</param>
 /// <param name="CaptureChange">The state's capture change counter when it began.</param>
+/// <param name="Verbs">
+/// <see cref="MatchState.VerbsCrossed"/> when it began, so its end can tell whether it crossed one.
+/// </param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange);
+internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange, int Verbs);

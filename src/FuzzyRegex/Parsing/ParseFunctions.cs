@@ -247,8 +247,18 @@ internal static class ParseFunctions
             return branches[0];
         }
 
-        return new Branch(branches);
+        return new Branch(branches, WrittenEmpty(branches));
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): which alternatives the parser read as nothing at
+    /// all. <see cref="ParseSequence"/> returns a sequence of the items it read, so these are the
+    /// empty ones; an empty group or a zero repeat is an item.
+    /// </summary>
+    /// <param name="branches">The alternatives as parsed.</param>
+    /// <returns>One flag per alternative.</returns>
+    private static bool[] WrittenEmpty(List<RegexBase> branches) =>
+        [.. branches.Select(static b => b is Sequence { Items.Count: 0 })];
 
     /// <summary>Upstream <c>parse_sequence</c> (lines 462-546).</summary>
     /// <param name="source">The scanner.</param>
@@ -1525,7 +1535,7 @@ internal static class ParseFunctions
         info.GroupCount = finalGroupCount;
         source.Expect(")");
 
-        return branches.Count == 1 ? branches[0] : new Branch(branches);
+        return branches.Count == 1 ? branches[0] : new Branch(branches, WrittenEmpty(branches));
     }
 
     /// <summary>Upstream <c>parse_call_group</c> (lines 1100-1109).</summary>

@@ -762,9 +762,6 @@ internal static class NodeCompiler
             return _illegal;
         }
 
-        // NOT UPSTREAM (ledger entry 44's addendum): see Branch.OptionalBranchWord.
-        bool optional = args.Pattern.OptionalBranches.Contains(args.Code);
-
         // Create nodes for the start and end of the branch sequence.
         Node branchNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
         Node joinNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
@@ -783,7 +780,7 @@ internal static class NodeCompiler
 
         // NOT UPSTREAM: each alternative's 2-way branch and last node, joined up once it is known
         // which alternatives have an empty one after them.
-        List<(Node Branch, Node End, bool Empty)> alternatives = [];
+        List<(Node Branch, Node End, bool Covered)> alternatives = [];
 
         // A branch in the regular expression is compiled into a series of 2-way branches.
         do
@@ -825,7 +822,15 @@ internal static class NodeCompiler
 
             // Append the sequence.
             AddNode(branchNode, subargs.Start);
-            alternatives.Add((branchNode, subargs.End!, ReferenceEquals(subargs.Start, subargs.End)));
+            // NOT UPSTREAM (ledger entry 44's addendum): the word that ends the alternative says
+            // whether an alternative written empty after it is its exit; see
+            // Branch.OptionalPassEndWord.
+            bool covered = args.Pattern.OptionalPassEnds.Contains(subargs.Code);
+            Debug.Assert(
+                !covered || !ReferenceEquals(subargs.Start, subargs.End),
+                "an alternative with a pass to judge has nodes"
+            );
+            alternatives.Add((branchNode, subargs.End!, covered));
 
             // Create a start node for the next sequence and append it.
             Node nextBranchNode = CreateNode(subargs.Pattern, Opcode.Branch, 0, 0, 0);
@@ -840,16 +845,14 @@ internal static class NodeCompiler
             return _illegal;
         }
 
-        // An alternative with an empty one after it ends its pass with END_OPTIONAL_PASS, which its
-        // 2-way branch opens (Node.OptionalPassEnd). The compiler marks only an alternation with
-        // such a pair; see Branch.CompileCore.
-        int lastEmpty = optional ? alternatives.FindLastIndex(static a => a.Empty) : -1;
-        Debug.Assert(!optional || lastEmpty > 0, "an optional branch has an empty alternative after one that is not");
+        // An alternative whose exit is an empty one after it ends its pass with END_OPTIONAL_PASS,
+        // which its 2-way branch opens (Node.OptionalPassEnd); see Branch.CompileCore.
+        bool optional = alternatives.Exists(static a => a.Covered);
         uint slot = optional ? (uint)args.Pattern.OptionalPassCount++ : 0;
         for (int i = 0; i < alternatives.Count; i++)
         {
-            (Node alternativeBranch, Node end, bool empty) = alternatives[i];
-            if (i < lastEmpty && !empty)
+            (Node alternativeBranch, Node end, bool covered) = alternatives[i];
+            if (covered)
             {
                 // Every alternative of one alternation shares its slot: only one is being matched.
                 // The second value says whether a pass's start must be restored on backtracking;

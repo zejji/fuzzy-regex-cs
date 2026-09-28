@@ -327,7 +327,7 @@ internal enum Opcode : uint
 
     /// <summary>
     /// NOT UPSTREAM (ledger entry 44's addendum). Engine-only: the end of a pass through an
-    /// alternative that has an alternative written empty after it (<c>Branch.OptionalBranchWord</c>).
+    /// alternative that has an alternative written empty after it (<c>Branch.OptionalPassEndWord</c>).
     /// The pass fails if it consumed no text and spent errors that nothing needs, by the rule a
     /// repeat applies to an empty iteration (<c>Matcher.OptionalPassAdmitted</c>).
     /// </summary>

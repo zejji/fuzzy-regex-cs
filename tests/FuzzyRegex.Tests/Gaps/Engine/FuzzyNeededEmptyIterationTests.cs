@@ -158,23 +158,31 @@ public sealed class FuzzyNeededEmptyIterationTests
     // The walk out through the enclosing sections that rule (b) and the narrowing make read each
     // entry from the section's own frame on the structure stack. It looped for ever, ignoring the
     // match timeout, when a verb dropped the frames that restored a per-section record, or a
-    // recursive call entered a section inside itself (blind review of af59be7, 2026-09-26). The
-    // verb rows answer None: the second iteration's empty deletion is not needed, it fails, and
-    // backtracking into its (*PRUNE) or (*SKIP) ends the attempt at every start, which is also the
-    // reference matcher's answer. Upstream raises MemoryError on the recursion rows.
+    // recursive call entered a section inside itself (blind review of af59be7, 2026-09-26). In the
+    // verb rows the last iteration's empty deletion is not needed, but it crossed a verb, which cut
+    // the choice of leaving the repeat, so it stands and no iteration follows it (CrossedAVerb).
+    // They answered None until the blind review of 4349153: failing that iteration backtracked into
+    // the verb and ended the attempt, which the reference matcher also does, but the rule is this
+    // port's own pruning and must not turn a match within the budget into none. Upstream raises
+    // MemoryError on all five rows.
     [Test]
     public async Task Verbs_and_recursion_in_sections_with_a_minimum_answer_in_bounded_time()
     {
         foreach (
-            string pattern in new[]
+            (string pattern, int end, FuzzyCounts counts) in new[]
             {
-                "(?:(?:(*PRUNE)a){1<=d<=1})+",
-                "(?:(?:(*SKIP)a){1<=e<=2})+",
-                "(?:(?:(*SKIP)a){1<=e<=2}){2,}",
+                ("(?:(?:(*PRUNE)a){1<=d<=1})+", 0, new FuzzyCounts(0, 0, 2)),
+                ("(?:(?:(*SKIP)a){1<=e<=2})+", 1, new FuzzyCounts(1, 0, 1)),
+                ("(?:(?:(*SKIP)a){1<=e<=2}){2,}", 1, new FuzzyCounts(1, 0, 2)),
             }
         )
         {
-            (await Answer(pattern, "c").ConfigureAwait(false)).Should().BeNull(pattern);
+            Match? m = await Answer(pattern, "c").ConfigureAwait(false);
+            m.Should().NotBeNull(pattern);
+            if (m is not null)
+            {
+                ShouldMatch(m, 0, end, counts);
+            }
         }
 
         (await Answer("(?:b(?R)?){d<=1}(?:a){1<=d<=1}", "bb").ConfigureAwait(false)).Should().NotBeNull();
@@ -435,5 +443,59 @@ public sealed class FuzzyNeededEmptyIterationTests
     {
         // search('(?:(?:(?:a?b|)x)*y){e<=1}', 'bbx')   (0, 1) (1, 0, 0), the same
         ShouldMatch(new FuzzyRegex("(?:(?:(?:a?b|)x)*y){e<=1}").Match("bbx"), 0, 1, new FuzzyCounts(1, 0, 0));
+    }
+
+    // AGREES WITH UPSTREAM 2026.9.10: the needed rule is this port's own pruning, so it must never
+    // do more than an ordinary failure would. A (*PRUNE) or (*SKIP) cuts the backtracking stack when
+    // it is crossed, and the choice of the empty exit goes with it, so failing a pass or iteration
+    // that crossed one would end the attempt: these rows answered None (blind review of 4349153).
+    // Such a pass stands, in plain order, which is upstream's answer; an iteration stands too, but
+    // is not followed by another, so a loop still ends. (*COMMIT) is not a verb in this dialect.
+    [Test]
+    [Arguments("(?:b(*SKIP)|){d<=1}")]
+    [Arguments("(?:(?:b(*SKIP))?){d<=1}")]
+    [Arguments("(?:b(*PRUNE)|){d<=1}")]
+    [Arguments("(?:(?:b(*PRUNE))?){d<=1}")]
+    [Arguments("(?:(*SKIP)b|){d<=1}")]
+    [Arguments("(?:(?:(*PRUNE)b)?){d<=1}")]
+    public void A_pass_that_crossed_a_verb_is_not_failed_by_the_rule(string pattern)
+    {
+        // search(pattern, '') and search(pattern, 'x')   (0, 0) (0, 0, 1)
+        ShouldMatch(new FuzzyRegex(pattern).Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex(pattern).Match("x"), 0, 0, new FuzzyCounts(0, 0, 1));
+        FluentActions
+            .Invoking(() => new FuzzyRegex(pattern.Replace("(*PRUNE)", "(*COMMIT)").Replace("(*SKIP)", "(*COMMIT)")))
+            .Should()
+            .Throw<FuzzyRegexParseException>();
+    }
+
+    // Only the written form is an exit. An empty group or a zero repeat is not an alternative written
+    // empty, and an empty alternative of a nested alternation is the exit of that alternation alone,
+    // not of its outer siblings, as (?:b)? is the exit of b alone. Before, flattening the alternations
+    // made the inner exit cover the outer ones (blind review of 4349153).
+    [Test]
+    [Arguments("(?:(?:a){d<=1}|(?:b|))", "(?:(?:a){d<=1}|(?:b)?)")]
+    [Arguments("(?:a|(?:)){d<=1}", "(?:a|b{0}){d<=1}")]
+    [Arguments("(?:a|(?:)){d<=1}", "(?:a|(?#c)(?:)){d<=1}")]
+    [Arguments("(?:(?:x|(?:a|b|)){d<=1})", "(?:(?:x|(?:a|b)?){d<=1})")]
+    public void Equivalent_spellings_of_an_empty_path_agree(string pattern, string twin)
+    {
+        // fullmatch(each, '')   (0, 0) (0, 0, 1)
+        ShouldMatch(new FuzzyRegex(pattern).FullMatch(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex(twin).FullMatch(""), 0, 0, new FuzzyCounts(0, 0, 1));
+    }
+
+    // The nested alternation's own alternatives are covered by its exit, and an outer exit covers
+    // the whole of an inner alternation, as (?:(?:a|b)?) makes both optional.
+    [Test]
+    [Arguments("(?:x(?:a|b|)){d<=1}", "x")]
+    [Arguments("(?:(?:a|b)|){d<=1}", "")]
+    [Arguments("(?:(?:a|(?:b|))|){d<=1}", "")]
+    [Arguments("(?:(?:(?:a){d<=1}|b)|)", "")]
+    [Arguments("(?:x|(?:(?:a){d<=1}|))", "")]
+    [Arguments("(?:(?:(?:a){d<=1})?|x)", "")]
+    public void A_nested_or_outer_exit_covers_its_own_alternatives(string pattern, string subject)
+    {
+        ShouldMatch(new FuzzyRegex(pattern).FullMatch(subject), 0, subject.Length, new FuzzyCounts(0, 0, 0));
     }
 }

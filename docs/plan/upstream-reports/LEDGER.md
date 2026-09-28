@@ -4635,14 +4635,28 @@ compiler makes by factoring: `(?:a(?:b){d<=1}|a)` compiles to the same bytecode 
 form has none. Factoring never runs inside a fuzzy section (a section's subpattern is not
 optimised), which is why `(?:cats|cat){e<=1}` stays two alternatives.
 
-This port: `Branch.OptionalBranchWord` marks the alternation while the parser's tree still says
-which empty alternatives were written. The bytecode stays upstream's, and the mark travels beside
-it (`CompiledPattern.OptionalBranches`). `NodeCompiler.BuildBranch` ends each alternative before the
-empty one with an `END_OPTIONAL_PASS` node. Taking the alternative's 2-way branch records where
+This port: the parser records which alternatives it read as nothing at all, and
+`Branch.OptionalPassEndWord` marks the end of each alternative that has one of them after it in
+its own alternation, or in one enclosing it. An empty group `(?:)` or a zero repeat `b{0}` is not
+written empty, and flattening `(?:x|(?:b|))` into `x|b|` keeps `b` as the only alternative the
+empty one covers, as in `(?:x|(?:b)?)`. The bytecode stays upstream's, and the marks travel beside
+it (`CompiledPattern.OptionalPassEnds`). `NodeCompiler.BuildBranch` ends each marked alternative
+with an `END_OPTIONAL_PASS` node. Taking the alternative's 2-way branch records where
 the pass began in a slot the alternation owns (`MatchState.OptionalPasses`, saved with the repeats
 across a group call), `Matcher.OptionalPassAdmitted` applies the rule at the pass's end, and
 `DeletionEmptiesAnOptionalPass` leaves out a deletion of the alternative's last item that would
 only make such a pass. `UpstreamEmptyIterations` turns it off with the repeat's rule.
+
+**A pass or iteration that crossed a verb (blind review of 4349153).** The rule is this port's own
+pruning, so it must never do more than an ordinary failure would. A `(*PRUNE)` or `(*SKIP)` cuts
+the backtracking stack when it is crossed, and the choice of the empty exit, or of leaving the
+repeat, goes with it: failing the pass then ended the attempt, and `(?:b(*SKIP)|){d<=1}` and
+`(?:(?:b(*SKIP))?){d<=1}` over `''` answered None where upstream has (0, 0) with one deletion. A
+pass that crossed a verb (`MatchState.VerbsCrossed`) now stands in plain order, which is
+upstream's answer; an empty iteration that crossed one stands but is not followed by another, so
+the loop still ends where upstream's goes on to MemoryError. `(?:(?:(*PRUNE)a){1<=d<=1})+` over
+`'c'`, None until then, is (0, 0) with two deletions. Deciding before the verb is crossed would need
+to know that nothing after it in the pass consumes text, which only the pass's end knows.
 
 Evidence, 2026-09-28, on a Debug build so the assertions ran: the ruling's sweep of `X?` against
 `(?:X|)` spellings, 40,320 pairs, 0 differ (600 before); a second grid of 38,880 pairs that adds
@@ -4651,8 +4665,8 @@ alternatives, 0 differ (1,204 before); 3,072 rows of factored alternations, none
 their written twins changed on 570; 7,776 rows with verbs and 9,680 with recursion inside the
 alternatives, none differing from the `X?` spelling. Pinned by `FuzzyNeededEmptyIterationTests`: the
 rule off turns 24 tests red, and each of its conditions, each condition of the deletion prune, the
-factoring mark, the first-set offset and the slot's save across a call has a row that goes red
-without it. The two deletion prunes change no answer (they skip only what the pass's end would
+factoring mark, the first-set offset, the slot's save across a call, the verb exemptions and both
+halves of the flattened marks has a row that goes red without it. The two deletion prunes change no answer (they skip only what the pass's end would
 fail) and are there for speed.
 
 Cost, 2026-09-28, Release, both builds loaded into one process and timed in turn (best of 84 runs

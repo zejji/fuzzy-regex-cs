@@ -288,7 +288,7 @@ public sealed class MatchStateCacheTests
 
                 break;
             case OptionalPassStart[] passes:
-                Array.Fill(passes, new OptionalPassStart(7, 7, 7));
+                Array.Fill(passes, new OptionalPassStart(7, 7, 7, 7));
                 break;
             case RepeatData[] repeats:
                 foreach (RepeatData repeat in repeats)

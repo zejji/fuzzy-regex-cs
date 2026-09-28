@@ -311,14 +311,14 @@ internal static class PatternCompiler
         // Flatten the code into a list of ints.
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
-        // NOT UPSTREAM (ledger entry 44's addendum): where the marked BRANCH words landed.
-        List<int> optionalBranches = [];
+        // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
+        List<int> optionalPassEnds = [];
         int offset = 0;
         foreach (uint[] word in code)
         {
-            if (ReferenceEquals(word, Branch.OptionalBranchWord))
+            if (ReferenceEquals(word, Branch.OptionalPassEndWord))
             {
-                optionalBranches.Add(offset);
+                optionalPassEnds.Add(offset);
             }
 
             offset += word.Length;
@@ -333,7 +333,7 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
-                optionalBranches = [.. optionalBranches.Select(o => o + firstsetCode.Count)];
+                optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
             }
             catch (FirstSetErrorException)
             {
@@ -342,8 +342,8 @@ internal static class PatternCompiler
         }
 
         Debug.Assert(
-            optionalBranches.TrueForAll(o => flatCode[o] == (uint)Opcode.Branch),
-            "every recorded offset is a BRANCH word"
+            optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            "every recorded offset is a NEXT word"
         );
 
         // NOT PORTED: index_group, which CompiledPattern derives from GroupIndex on demand.
@@ -360,7 +360,7 @@ internal static class PatternCompiler
             info.GroupCount
         )
         {
-            OptionalBranches = optionalBranches,
+            OptionalPassEnds = optionalPassEnds,
         };
     }
 
