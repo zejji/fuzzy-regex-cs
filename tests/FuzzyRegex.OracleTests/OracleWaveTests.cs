@@ -1435,21 +1435,19 @@ public sealed class OracleWaveTests
         // against the 0.25s the rows carry - a margin over 20x, so no plausible machine turns one
         // verdict into the other. See `tools/probes/timeout-row-margin.py` and its port half.
         //
-        // THE SUBJECT BELOW IS 32 'a's, which is SHORTER than the generator draws and is not a
-        // measurement of the family: `--knee` puts the shapes' knees between 24 and 36, so 32 is
-        // past this pattern's (24) and short of `(?:a|aa)+$`'s (36). It is chosen to keep this test
-        // cheap, and it is sound here only because the one shape it uses blows up well below it.
+        // THE ROW BELOW IS SYNTHETIC, and not a measurement of the family: 16 'a's is far SHORTER
+        // than the generator draws, and the budget is a millisecond rather than a quarter of a
+        // second. Both are chosen so that the last assertion below needs no stopwatch - see there.
         // The shape was `(a|a)+$` until 2026-09-26, when this port's failure memo made it answer
-        // at once; `(a|a){1,999}$` is the generator's bounded twin, still running after 8 s on
-        // upstream over this subject.
+        // at once; `(a|a){1,999}$` is the generator's bounded twin.
         OracleRow budgeted = OracleWave.ParseRows(
             """
-            {"generator": "timeout", "pattern": "(a|a){1,999}$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.05, "outcome": {"kind": "timeout", "seconds": 0.05}}
+            {"generator": "timeout", "pattern": "(a|a){1,999}$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.001, "outcome": {"kind": "timeout", "seconds": 0.001}}
             """
         )[0];
 
-        budgeted.Timeout.Should().Be(0.05);
-        budgeted.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(0.05);
+        budgeted.Timeout.Should().Be(0.001);
+        budgeted.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(0.001);
 
         // This port running out of the same budget is the agreement. `ErrorOutcome` rather than a
         // `TimeoutOutcome` of our own, because that is what the engine actually produces and inventing
@@ -1458,7 +1456,7 @@ public sealed class OracleWaveTests
             new System.Text.RegularExpressions.RegexMatchTimeoutException(
                 "aaa",
                 "(a|a){1,999}$",
-                TimeSpan.FromSeconds(0.05)
+                TimeSpan.FromSeconds(0.001)
             ),
             whileMatching: true
         );
@@ -1480,20 +1478,18 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(budgeted, new NoMatchOutcome()).Should().Be(OracleVerdict.Diverge);
 
         // The port IS asked, unlike every other timeout row, and it is asked with the ROW'S budget
-        // rather than `RowTimeout`. The wall clock is the only thing that can tell those apart, and
-        // this pattern does not stop on its own: at `RowTimeout` the call takes ten seconds, so
-        // returning well inside that is the proof the row's own field reached the engine.
-        var watch = System.Diagnostics.Stopwatch.StartNew();
+        // rather than `RowTimeout`. The verdict alone tells those apart, with no stopwatch, because
+        // this row DOES stop on its own: 1,704,238 steps, 233 ms in a Debug build (2026-09-28). So
+        // under the row's millisecond it runs out and agrees, and under `RowTimeout`, forty times
+        // longer than it needs, it answers no match and diverges. Until 2026-09-28 the row never
+        // stopped and this was a bound on the wall clock, which a busy machine can break (D13).
         OracleRunSummary run = OracleComparer.RunWave([budgeted], OracleComparer.Run);
-        watch.Stop();
 
-        watch
-            .Elapsed.Should()
-            .BeLessThan(
-                OracleComparer.RowTimeout / 2,
+        run.Tally.Should()
+            .Equal(
+                new Dictionary<OracleVerdict, int> { [OracleVerdict.Agree] = 1 },
                 "the row's own deadline reached the engine, not the comparer's blanket one"
             );
-        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Agree] = 1 });
         run.Divergences.Should().BeEmpty();
     }
 

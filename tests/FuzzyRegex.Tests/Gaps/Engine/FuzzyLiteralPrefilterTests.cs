@@ -201,21 +201,21 @@ public sealed class FuzzyLiteralPrefilterTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
-    [SkipUnderStryker]
     public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
     {
         // 6,165 ms without the filter on Release, 1.7 ms before ledger entry 49 (the blind review
-        // of 251afa0). The budget is loose enough for a Debug build under load.
-        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}");
+        // of 251afa0). Counted in engine steps rather than timed, because a busy machine is not a
+        // slow engine (D13): the filter refuses every position, so the matching loop takes no
+        // steps at all (Debug, 2026-09-28), and without it every position is a fuzzy attempt.
+        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}", FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-
-        int count = regex.Matches(subject).Count;
-
-        clock.Stop();
-        count.Should().Be(0);
-        clock.ElapsedMilliseconds.Should().BeLessThan(500);
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Matches(subject).Count.Should().Be(0),
+            100_000,
+            "the filter, not the matcher, rules out the positions"
+        );
     }
 
     [Test]
@@ -490,9 +490,8 @@ public sealed class FuzzyLiteralPrefilterTests
     // ---------------------------------------------------------------------------------------
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
-    [SkipUnderStryker]
-    [NotInParallel]
     // ' works' never occurs, so the piece search ran to the end of the subject on every step of
     // the walk. Release, 1,000,000 characters: 2,303 ms before D14, 234 ms after.
     [Arguments("(?:amber lantern works){e<=2}", "amber lantern wxrks ...... ")]
@@ -500,66 +499,43 @@ public sealed class FuzzyLiteralPrefilterTests
     [Arguments("(?:amber lantern works|violet stone archive){e<=2}", "amber lantern works ...... ")]
     public void A_matches_walk_over_a_long_subject_is_linear_when_a_piece_never_occurs(string pattern, string unit)
     {
-        // The ratio between two subject sizes, as IterationTests' scan guard does, so that it does
-        // not depend on the machine. A subject 16 times as long costs a linear walk about 16x. Each
-        // size is warmed up and timed three times, keeping the fastest, so a cold JIT or one slow
-        // run does not decide it. Debug, 125,000 then 2,000,000 characters, 2026-09-28, first row
-        // then second: 14.5-15.0x and 15.2-15.5x idle; 12.3-15.0x and 12.6-21.1x beside 16 and 28
-        // CPU burners on 28 logical processors. The code before D14 (f1f0989): 80.7x and 217x
-        // warm, 68.9x and 253x cold. The limit of 32 sits about 1.5x above the worst linear
-        // answer and 2x below the best quadratic one.
-        // [NotInParallel] because the rest of the suite running alongside swamps any timing.
-        var regex = new FuzzyRegex(pattern);
-        TimeSpan small = TimeWalk(regex, unit, 125_000);
-        TimeSpan large = TimeWalk(regex, unit, 2_000_000);
-
-        (large / small).Should().BeLessThan(32, "a linear walk costs about 16x; {0} then {1}", small, large);
-    }
-
-    private static TimeSpan TimeWalk(FuzzyRegex regex, string unit, int length)
-    {
-        string subject = string.Concat(Enumerable.Repeat(unit, length / unit.Length));
-        regex.Matches(subject[..(unit.Length * 100)]).Count.Should().Be(100);
-        TimeSpan fastest = TimeSpan.MaxValue;
-        for (int run = 0; run < 3; run++)
-        {
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            regex.Matches(subject).Count.Should().Be(length / unit.Length);
-            fastest = TimeSpan.FromTicks(Math.Min(fastest.Ticks, clock.Elapsed.Ticks));
-        }
-
-        return fastest;
+        // Counted, not timed (D13): the characters the filter hands to its searches, which is the
+        // quantity D14 made linear. Until 2026-09-28 this was a ratio of two timings, which needed
+        // [NotInParallel], warm-up and three runs, and still moved from 15x to 21x beside a CPU
+        // burner. Over 99,981 characters the two rows search 625,807 and 325,864 characters
+        // (Debug, 2026-09-28), a few per character of the subject; the filter before D14 searches
+        // the rest of the subject on every step, about n^2 / 27.
+        string subject = string.Concat(Enumerable.Repeat(unit, 100_000 / unit.Length));
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
-    [SkipUnderStryker]
-    [NotInParallel]
     public void A_reverse_walk_over_a_long_subject_does_not_search_again_what_it_has_searched()
     {
-        // The reverse Matches walk itself costs about 3 s on a Debug build whatever the filter
-        // does, because a reverse search tries every position, so the filter's own share is timed
-        // here: the reverse filter's calls for one walk over a million characters, stepping back a
-        // record at a time. Before D14 each call read the whole subject before it, searching for
-        // the first branch's pieces and checking for ASCII: 4,416 ms of a 4.4 s Release walk,
-        // 293 ms after (.scratch bench, 2026-09-28).
-        FuzzyLiteralFilter filter = Build("(?r)(?:violet stone archive|amber lantern works){e<=2}").FuzzyLiteralFilter!;
+        // Counted, not timed (D13), as in the forward test above: the reverse filter's calls read
+        // the whole subject before each position before D14 (4,416 ms of a 4.4 s Release walk over a
+        // million characters, 293 ms after). Now 399,924 characters searched over 99,981, the whole
+        // reverse walk included (Debug, 2026-09-28). Until 2026-09-28 this was a 500 ms budget on
+        // the filter's own calls, marked as waiting for this counter.
         const string unit = "amber lantern works ...... ";
-        string subject = string.Concat(Enumerable.Repeat(unit, 1_000_000 / unit.Length));
-        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-
-        bool always = true;
-        for (int pos = subject.Length; pos > 0; pos -= unit.Length)
-        {
-            always &= filter.MayMatchBefore(subject, 0, pos, memory);
-        }
-
-        clock.Stop();
-        always.Should().BeTrue();
-        // SHORTCUT: a wall-clock budget, because main has no work counter to count the characters read.
-        // D13 is moving timing tests like this one onto such a counter.
-        clock.ElapsedMilliseconds.Should().BeLessThan(500);
+        string subject = string.Concat(Enumerable.Repeat(unit, 100_000 / unit.Length));
+        var regex = new FuzzyRegex(
+            "(?r)(?:violet stone archive|amber lantern works){e<=2}",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
     }
 
     [Test]

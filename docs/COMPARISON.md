@@ -891,7 +891,7 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // T
 `(?i)(?a:k)` means exactly what `(?ai)k` means, for every construct whose answer depends on the
 encoding: case-insensitive letters, ranges, sets, backreferences and named lists, fuzzy matching,
 `\m` and `\M`, the `(?w)` word and line rules, `\X`, and full case folding. So under ASCII rules the
-Kelvin sign U+212A is not a 'k', whether ASCII is set for the whole pattern or only for a group.
+Kelvin sign U+212A never matches 'k', whether ASCII is set for the whole pattern or only for a group.
 Python's `re` and Perl answer this way. Upstream applies a scoped encoding only to `\p{...}`
 properties and `\b`, and reads the pattern's encoding everywhere else.
 
@@ -1322,8 +1322,8 @@ A lazy repeat such as `[^k]??` first tries to match nothing, then one character.
 version 1 the literal after it is matched with full folding, and upstream, looking ahead for that
 literal, stops reading at the last position the repeat can reach. A literal that starts there is
 never read to its end, so the match at the start of the text is lost and the search reports a later
-one or none at all. Upstream finds the match in version 0, which folds simply, and with a greedy
-repeat. Python's `re` and Perl agree with this port.
+one or none at all. Upstream finds the match in version 0, which uses simple case folding, and with
+a greedy repeat. Python's `re` and Perl agree with this port.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;

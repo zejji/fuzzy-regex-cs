@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
@@ -142,29 +141,34 @@ public sealed class LazyEnumerationTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void An_early_exit_does_not_pay_for_the_rest_of_the_subject()
     {
         // Not a stopwatch ratio, which would be a statement about the machine. The subject has two
-        // easy matches and then a cliff the pattern can only fail on exponentially, and both calls
-        // get the same budget: the eager one has to walk past the two matches and reach the cliff,
-        // so it times out, and the lazy one stops at the second match, so it answers. A lazy call
-        // that secretly ran eagerly would throw here, which is what makes the eager assertion part
-        // of the test rather than decoration.
+        // easy matches and then a cliff the pattern can only fail on exponentially: the eager call
+        // has to walk past the two matches and reach the cliff, so it times out, and the lazy one
+        // stops at the second match, so it answers. The eager call's timing out is what shows the
+        // cliff is really there, which makes it part of the test rather than decoration.
         FuzzyRegex pattern = new(_slowPattern);
         TimeSpan budget = TimeSpan.FromMilliseconds(250);
 
         Action eager = () => pattern.Matches(_twoMatchesThenACliff, timeout: budget);
         eager.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
 
-        var stopwatch = Stopwatch.StartNew();
-        List<int> first =
-        [
-            .. pattern.EnumerateMatches(_twoMatchesThenACliff, timeout: budget).Take(2).Select(static m => m.Index),
-        ];
-        stopwatch.Stop();
-
-        first.Should().Equal(0, 2);
-        stopwatch.Elapsed.Should().BeLessThan(budget, "two matches at the front of the subject are not the cliff");
+        // And the lazy call's cost is counted in engine steps rather than timed, because a busy
+        // machine is not a slow engine (D13): 36 steps for the two matches (Debug, 2026-09-28),
+        // where the cliff is about 2^26.
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+                pattern
+                    .EnumerateMatches(_twoMatchesThenACliff, timeout: budget)
+                    .Take(2)
+                    .Select(static m => m.Index)
+                    .Should()
+                    .Equal(0, 2),
+            10_000,
+            "two matches at the front of the subject are not the cliff"
+        );
     }
 
     [Test]
