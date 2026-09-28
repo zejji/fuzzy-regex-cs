@@ -726,7 +726,7 @@ public sealed class ThreadSafetyTests
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
             // S60b added FuzzyLiteralFilter, written once by Compile after node numbering. The
-            // filter itself is immutable; the per-search piece cache lives on the stack.
+            // filter itself is immutable; what a scan learns lives on its MatchState (D14).
             "PatternObject.FuzzyLiteralFilter",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
