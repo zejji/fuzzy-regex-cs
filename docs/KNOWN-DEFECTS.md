@@ -58,8 +58,8 @@ such test is a mistake: reopen it.
 | F7 | Test tooling: 20 `tools/controls.json` entries had lost their code site; `run-controls.py` crashed on a cp1252 console and no longer parsed the oracle summary (was D15) | main 017f578 |
 | F8 | Test harness: `_generate_matrix` drew `(?b)`/`(?e)` with weighted-cost constraints (was D16) | main 017f578 |
 | F9 | Performance: FuzzyLiteralFilter searched an absent piece to the end of the subject on every Matches step (quadratic, forward and reverse). It now keeps a per-scan memory on MatchState. 1M characters: 2303 to 234 ms; absent branch 4951 to 30 ms. Its two timing tests move to D13's work counter when D13 merges (was D14) | main 1b76748 |
-| F10 | Test tooling: `record-oracle.py` and `run-oracle.ps1` shared one wave file, so an ad hoc recording could replace a running oracle's wave. A multi-seed run also reused the first seed's file name (`$wavePath` clobbered `-WavePath`). Now every run has its own `-run-` scratch files, cleaned up in a finally block (was D20) | main (D20/D21 merge) |
-| F11 | Test tooling: controls S22-D and S42-2G never fired. S22-D now names its 10 red tests; S42-2G fires through `Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion` (`(?b)((?:a){1s+2i<=2})(?1)$` over 'bab') (was D21) | main (D20/D21 merge) |
+| F10 | Test tooling: `record-oracle.py` and `run-oracle.ps1` shared one wave file, so an ad hoc recording could replace a running oracle's wave. A multi-seed run also reused the first seed's file name (`$wavePath` clobbered `-WavePath`). Now every run has its own `-run-` scratch files, cleaned up in a finally block (was D20) | main 47ea792 |
+| F11 | Test tooling: controls S22-D and S42-2G never fired. S22-D now names its 10 red tests; S42-2G fires through `Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion` (`(?b)((?:a){1s+2i<=2})(?1)$` over 'bab') (was D21) | main 47ea792 |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
