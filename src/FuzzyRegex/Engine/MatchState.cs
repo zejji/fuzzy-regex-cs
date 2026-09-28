@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -777,7 +778,7 @@ internal sealed class MatchState : IDisposable
             Repeats[r] = new RepeatData();
         }
 
-        OptionalPasses = new OptionalPassStart[pattern.OptionalPassCount];
+        OptionalPasses = pattern.OptionalPassCount == 0 ? [] : new OptionalPassStart[pattern.OptionalPassCount];
     }
 
     /// <summary>
@@ -1261,11 +1262,28 @@ internal sealed class MatchState : IDisposable
         CaptureChange = 0;
         Iterations = 0;
 
-        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. See FailedCalls and
-        // CallMemoThreshold.
-        ClearFailedCalls();
+        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
+        // the memo never leaves the threshold or the set other than Reset leaves them, so it pays
+        // one test here. See FailedCalls and CallMemoThreshold.
         CallsThisPass = 0;
-        if (!Pattern.UseCallMemo || Pattern.SkipCallMemo || PartialSide != PartialNone)
+        if (Pattern.UseCallMemo)
+        {
+            InitCallMemo();
+        }
+    }
+
+    /// <summary>
+    /// The failed-call memo's part of <see cref="InitMatch"/>, for a pattern that can use it: empties
+    /// <see cref="FailedCalls"/> and sets <see cref="CallMemoThreshold"/> for the pass.
+    /// </summary>
+    /// <remarks>
+    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
+    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void InitCallMemo()
+    {
+        if (Pattern.SkipCallMemo || PartialSide != PartialNone)
         {
             CallMemoThreshold = long.MaxValue;
         }
@@ -1273,15 +1291,7 @@ internal sealed class MatchState : IDisposable
         {
             CallMemoThreshold = Pattern.EagerCallMemo ? 0 : ((long)SliceEnd - SliceStart + 1) * Pattern.GroupCallSites;
         }
-    }
 
-    /// <summary>Empties <see cref="FailedCalls"/>, dropping a large one rather than clearing it.</summary>
-    /// <remarks>
-    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
-    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
-    /// </remarks>
-    private void ClearFailedCalls()
-    {
         if (FailedCalls is not { Count: > 0 })
         {
             return;

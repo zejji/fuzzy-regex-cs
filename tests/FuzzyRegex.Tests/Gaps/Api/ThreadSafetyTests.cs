@@ -741,6 +741,14 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
+            // Its repair round added ExactDeletionCeiling, written by Compile after the node loop,
+            // and moved two node fields onto the pattern as tables written by Compile once the
+            // nodes are numbered: FuzzyRunExits (SetFuzzyRunLengths) and OptionalPassEndOf, built
+            // from OptionalPassBranches, which NodeCompiler.BuildBranch fills and Compile empties.
+            "PatternObject.ExactDeletionCeiling",
+            "PatternObject.FuzzyRunExits",
+            "PatternObject.OptionalPassBranches",
+            "PatternObject.OptionalPassEndOf",
             // The empty-iteration rule added these three, written by Compile after the node loop.
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
@@ -781,15 +789,11 @@ public sealed class ThreadSafetyTests
             // Node and NextNode: the opcode graph. Nodes are emitted before their successors exist,
             // so the links are patched up afterwards - upstream's own two-pass shape.
             "Node.Index",
-            // Finding F-A: both written by PatternObject.SetFuzzyRunLengths, which Compile calls
-            // once the nodes are numbered.
-            "Node.FuzzyRunExit",
+            // Finding F-A: written by PatternObject.SetFuzzyRunLengths, which Compile calls once
+            // the nodes are numbered.
             "Node.FuzzyRunLength",
             // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
-            // Ledger entry 44's addendum: written by NodeCompiler.BuildBranch while the graph is
-            // built, and cleared by CompileToNodes in a pattern with no fuzzy section.
-            "Node.OptionalPassEnd",
             "Node.Match",
             "Node.Op",
             "Node.Status",

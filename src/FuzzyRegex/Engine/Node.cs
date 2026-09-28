@@ -116,18 +116,18 @@ internal sealed class Node
     /// pattern is compiled; read by <c>Matcher.ExactDeletionMayMatch</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A run is a chain, by <see cref="Next1"/>, of fuzzy one-character items and fuzzy
     /// <c>STRING</c> and <c>STRING_IGN</c> nodes, either way round: items that each consume exactly
     /// one subject character per pattern character when they match. Anything else ends the run.
+    /// </para>
+    /// <para>
+    /// The run's exit is kept on the pattern (<c>PatternObject.FuzzyRunExits</c>), not here: this
+    /// field and <see cref="HasEarlierDeletionTwin"/> fit in the padding a node already has, where
+    /// a reference would add 8 bytes to every node of every pattern.
+    /// </para>
     /// </remarks>
     internal int FuzzyRunLength;
-
-    /// <summary>
-    /// NOT UPSTREAM (finding F-A): the first node after the fuzzy run through this node that is not
-    /// an <c>END_FUZZY</c>, <c>START_GROUP</c> or <c>END_GROUP</c>, which read no text; null if this
-    /// node is in no run or the chain ends. Read by <c>Matcher.ExactDeletionMayMatch</c>.
-    /// </summary>
-    internal Node? FuzzyRunExit;
 
     /// <summary>
     /// NOT UPSTREAM (finding F-A): whether this node is a fuzzy one-character item that is a whole
@@ -139,15 +139,6 @@ internal sealed class Node
     /// <c>Matcher.DeletionRepeatsAnEarlierAlternative</c>.
     /// </summary>
     internal bool HasEarlierDeletionTwin;
-
-    /// <summary>
-    /// NOT UPSTREAM (ledger entry 44's addendum): on the 2-way branch of an alternative that has an
-    /// alternative written empty after it, the <c>END_OPTIONAL_PASS</c> node that ends its pass;
-    /// otherwise null. Taking the branch records where the pass began in the node's slot, and
-    /// that node reads it back (<c>Matcher.OptionalPassAdmitted</c>). Set by
-    /// <c>NodeCompiler.BuildBranch</c>.
-    /// </summary>
-    internal Node? OptionalPassEnd;
 
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -3172,6 +3173,104 @@ internal static class Matcher
     private const int _failedCallCap = 1 << 20;
 
     /// <summary>
+    /// Builds the entry key of the group call about to be made (<see cref="FailedCallKey"/>) and
+    /// reports whether the failed-call memo holds it, counting a hit.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c>, whose every call pays to zero its frame: the lookup's locals
+    /// would otherwise live there.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="callIndex">The called group's index.</param>
+    /// <returns><see langword="true"/> if a call with this key has already failed in this pass.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool CallAlreadyFailed(MatchState state, int callIndex)
+    {
+        ReadOnlySpan<long> key = FailedCallKey(state, callIndex);
+        if (state.FailedCalls is { } failedCalls && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(key))
+        {
+            ++state.CallMemoHits;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The key <see cref="CallAlreadyFailed"/> has just built, copied for <see cref="MatchState.OpenCalls"/>,
+    /// or <see langword="null"/> when the memo is full.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The key to record if the call fails, or <see langword="null"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long[]? FailedCallKeyToRecord(MatchState state) =>
+        (state.FailedCalls?.Count ?? 0) < _failedCallCap ? [.. state.CallMemoKey] : null;
+
+    /// <summary>
+    /// A group call has run out of choices: records its entry key in the failed-call memo, if the
+    /// call was given one (<see cref="MatchState.OpenCalls"/>). Kept out of <c>BasicMatch</c> for
+    /// the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state, with the call still open.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecordFailedCall(MatchState state)
+    {
+        if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
+        {
+            state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
+            _ = state.FailedCalls.Add(failedCallKey);
+        }
+    }
+
+    /// <summary>
+    /// Pops the link to the enclosing section's frame that <c>FUZZY</c> pushed for a pattern with a
+    /// minimum error count, into <see cref="MatchState.SectionFrame"/>. Kept out of
+    /// <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool PopSectionFrame(MatchState state)
+    {
+        if (!state.Sstack.PopSize(out long outerFrame))
+        {
+            return false;
+        }
+
+        state.SectionFrame = (int)outerFrame;
+        return true;
+    }
+
+    /// <summary>
+    /// <c>END_OPTIONAL_PASS</c>'s backtrack arm: pops the entry <see cref="OpenOptionalPass"/>
+    /// pushed, gives the slot its previous value and moves to where the branch's next alternative
+    /// begins. Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The next alternative, or <see langword="null"/> if the stack is malformed.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node? PopOptionalPass(MatchState state)
+    {
+        /* bstack: previous_start slot text_pos node */
+
+        if (
+            !state.Bstack.PopNode(state.Pattern, out Node? nextAlternative)
+            || !state.Bstack.PopSize(out long branchTextPos)
+            || !state.Bstack.PopCode(out uint slot)
+            || slot >= state.OptionalPasses.Length
+            || !state.Bstack.PopBlock(
+                MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
+            )
+        )
+        {
+            return null;
+        }
+
+        state.TextPos = (int)branchTextPos;
+        return nextAlternative;
+    }
+
+    /// <summary>
     /// Closes every group call and every fuzzy section whose saved-stack frame has just been
     /// discarded by a restore of <see cref="ByteStack.Count"/>.
     /// </summary>
@@ -5202,7 +5301,9 @@ internal static class Matcher
     /// </returns>
     private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next, Node? item = null)
     {
-        if (state.Pattern.SkipExactDeletionRetry)
+        // The common case, more of the item left than any section has deletions: see
+        // PatternObject.ExactDeletionCeiling.
+        if (remaining > state.Pattern.ExactDeletionCeiling || state.Pattern.SkipExactDeletionRetry)
         {
             return false;
         }
@@ -5238,7 +5339,7 @@ internal static class Matcher
         if (next is { FuzzyRunLength: > 0 })
         {
             count += next.FuzzyRunLength;
-            exit = next.FuzzyRunExit;
+            exit = state.Pattern.FuzzyRunExits![next.Index];
         }
         else
         {
@@ -8394,7 +8495,7 @@ internal static class Matcher
                         // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
                         // one after it opens a pass, whose entry does the branch's job too; see
                         // OpenOptionalPass.
-                        if (node.OptionalPassEnd is { } passEnd)
+                        if (pattern.OptionalPassEndOf is { } passEnds && passEnds[node.Index] is { } passEnd)
                         {
                             OpenOptionalPass(state, node, passEnd);
                         }
@@ -8530,14 +8631,9 @@ internal static class Matcher
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
                     long closedFrame = state.SectionFrame;
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
                     {
-                        if (!state.Sstack.PopSize(out long outerFrame))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.SectionFrame = (int)outerFrame;
+                        return MatchStatus.Illegal;
                     }
 
                     /* sstack: - */
@@ -9614,19 +9710,10 @@ internal static class Matcher
                     // without returning fails the same way, so it fails now. Nothing has been pushed
                     // yet, so backtracking resumes where the call's own backtrack arm would have left
                     // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
-                    ReadOnlySpan<long> groupCallMemoKey = default;
                     bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
-                    if (groupCallKeyed)
+                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
                     {
-                        groupCallMemoKey = FailedCallKey(state, groupCallIndex);
-                        if (
-                            state.FailedCalls is { } failedCalls
-                            && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(groupCallMemoKey)
-                        )
-                        {
-                            ++state.CallMemoHits;
-                            goto backtrack;
-                        }
+                        goto backtrack;
                     }
 
                     if (!state.ActiveCalls.Add(groupCallKey))
@@ -9645,13 +9732,7 @@ internal static class Matcher
                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
                     // open calls it has just thrown away.
                     state.OpenCalls.Add(
-                        (
-                            groupCallKey,
-                            state.Sstack.Count,
-                            groupCallKeyed && (state.FailedCalls?.Count ?? 0) < _failedCallCap
-                                ? groupCallMemoKey.ToArray()
-                                : null
-                        )
+                        (groupCallKey, state.Sstack.Count, groupCallKeyed ? FailedCallKeyToRecord(state) : null)
                     );
 
                     /* sstack: caller_groups caller_repeats capture_change return_node
@@ -10858,7 +10939,10 @@ internal static class Matcher
                                 && SameChar(state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
                                 {
                                     PushExactStringDeletion(state, node, stringPos, 1);
                                 }
@@ -11107,7 +11191,10 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
                                 {
                                     PushExactStringDeletion(state, node, stringPos, 1);
                                 }
@@ -11179,7 +11266,7 @@ internal static class Matcher
                                 && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
                                 {
                                     PushExactStringDeletion(state, node, stringPos, -1);
                                 }
@@ -11254,7 +11341,7 @@ internal static class Matcher
                                 )
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
                                 {
                                     PushExactStringDeletion(state, node, stringPos, -1);
                                 }
@@ -12029,11 +12116,7 @@ internal static class Matcher
                     // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
                     // returned, a later call with the same entry key fails the same way. See
                     // FailedCallKey and MatchState.OpenCalls.
-                    if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
-                    {
-                        state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
-                        _ = state.FailedCalls.Add(failedCallKey);
-                    }
+                    RecordFailedCall(state);
 
                     // The call is no longer open: backtracking past it means it never happened.
                     PopOpenCall(state);
@@ -12151,21 +12234,12 @@ internal static class Matcher
 
                     // Leaving the pass through its 2-way branch: the slot gets its previous value,
                     // and the branch tries its next alternative, as BRANCH's arm below does.
-                    if (
-                        !state.Bstack.PopNode(pattern, out Node? nextAlternative)
-                        || !state.Bstack.PopSize(out long branchTextPos)
-                        || !state.Bstack.PopCode(out uint slot)
-                        || slot >= state.OptionalPasses.Length
-                        || !state.Bstack.PopBlock(
-                            MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
-                        )
-                    )
+                    if (PopOptionalPass(state) is not { } nextAlternative)
                     {
                         return MatchStatus.Illegal;
                     }
 
-                    node = nextAlternative!;
-                    state.TextPos = (int)branchTextPos;
+                    node = nextAlternative;
                     goto advance;
                 }
                 case Opcode.BodyEnd:
@@ -12398,14 +12472,9 @@ internal static class Matcher
                     state.FuzzyNode = outerFuzzyNode;
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
                     {
-                        if (!state.Sstack.PopSize(out long outerFrame))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.SectionFrame = (int)outerFrame;
+                        return MatchStatus.Illegal;
                     }
 
                     break;

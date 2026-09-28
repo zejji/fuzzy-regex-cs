@@ -312,13 +312,14 @@ internal static class PatternCompiler
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
         // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
-        List<int> optionalPassEnds = [];
+        // None in most patterns, so the list is made only for the first.
+        List<int>? optionalPassEnds = null;
         int offset = 0;
         foreach (uint[] word in code)
         {
             if (ReferenceEquals(word, Branch.OptionalPassEndWord))
             {
-                optionalPassEnds.Add(offset);
+                (optionalPassEnds ??= []).Add(offset);
             }
 
             offset += word.Length;
@@ -333,7 +334,10 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
-                optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                if (optionalPassEnds is not null)
+                {
+                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                }
             }
             catch (FirstSetErrorException)
             {
@@ -342,7 +346,7 @@ internal static class PatternCompiler
         }
 
         Debug.Assert(
-            optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            optionalPassEnds is null || optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
             "every recorded offset is a NEXT word"
         );
 
@@ -360,7 +364,7 @@ internal static class PatternCompiler
             info.GroupCount
         )
         {
-            OptionalPassEnds = optionalPassEnds,
+            OptionalPassEnds = optionalPassEnds ?? [],
         };
     }
 

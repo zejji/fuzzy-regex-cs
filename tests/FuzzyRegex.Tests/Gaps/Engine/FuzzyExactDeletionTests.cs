@@ -56,6 +56,28 @@ public sealed class FuzzyExactDeletionTests
     }
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    // The witness for PatternObject.ExactDeletionCeiling, which refuses the deletion choice of a
+    // string character when more of the string is left than any section has deletions. Each row
+    // needs a choice with exactly the ceiling's count left: the whole string deleted, where the
+    // ceiling is the deletion limit, the cost limit over a deletion's cost, the larger of two
+    // sections' limits, and a reverse string's count. One fewer, or the least of the sections,
+    // loses the row. The last row is the control: the budget itself refuses a third of a cost.
+    [Test]
+    public void A_string_is_deleted_whole_when_the_budget_covers_exactly_its_length()
+    {
+        // fullmatch('(?:ab){d<=2}ab', 'ab')             None
+        // fullmatch('(?:ab){2d<=4}ab', 'ab')            None
+        // fullmatch('(?:x){s<=1}(?:ab){d<=2}ab', 'xab') None
+        // fullmatch('(?r)ab(?:ab){d<=2}', 'ab')         None
+        // fullmatch('(?:ab){2d<=3}ab', 'ab')            None
+        ShouldMatch(new FuzzyRegex("(?:ab){d<=2}ab").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?:ab){2d<=4}ab").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?:x){s<=1}(?:ab){d<=2}ab").FullMatch("xab"), 0, 3, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?r)ab(?:ab){d<=2}").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        new FuzzyRegex("(?:ab){2d<=3}ab").FullMatch("ab").Success.Should().BeFalse();
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     [Test]
     public void Every_item_after_the_exact_one_may_be_deleted_too()
     {
@@ -202,8 +224,9 @@ public sealed class FuzzyExactDeletionTests
 
         ab.FuzzyRunLength.Should().Be(4, "'ab', the set, and the 'e' the compiler writes before e*");
         set.FuzzyRunLength.Should().Be(2);
-        ab.FuzzyRunExit.Should().NotBeNull();
-        ab.FuzzyRunExit.Op.Should().Be(Opcode.GreedyRepeat);
+        Node? exit = regex.PatternObject.FuzzyRunExits![ab.Index];
+        exit.Should().NotBeNull();
+        exit.Op.Should().Be(Opcode.GreedyRepeat);
     }
 
     // The narrowing is off where its exchange argument fails: a test on which characters an error

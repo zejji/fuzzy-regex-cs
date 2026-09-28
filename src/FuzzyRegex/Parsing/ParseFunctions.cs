@@ -256,9 +256,23 @@ internal static class ParseFunctions
     /// empty ones; an empty group or a zero repeat is an item.
     /// </summary>
     /// <param name="branches">The alternatives as parsed.</param>
-    /// <returns>One flag per alternative.</returns>
-    private static bool[] WrittenEmpty(List<RegexBase> branches) =>
-        [.. branches.Select(static b => b is Sequence { Items.Count: 0 })];
+    /// <returns>
+    /// One flag per alternative, or <see langword="null"/> when none is empty, which is most
+    /// alternations and costs nothing.
+    /// </returns>
+    private static bool[]? WrittenEmpty(List<RegexBase> branches)
+    {
+        bool[]? empty = null;
+        for (int i = 0; i < branches.Count; i++)
+        {
+            if (branches[i] is Sequence { Items.Count: 0 })
+            {
+                (empty ??= new bool[branches.Count])[i] = true;
+            }
+        }
+
+        return empty;
+    }
 
     /// <summary>Upstream <c>parse_sequence</c> (lines 462-546).</summary>
     /// <param name="source">The scanner.</param>
