@@ -572,6 +572,8 @@ internal sealed class FuzzyLiteralFilter
     /// <returns>A position, <see cref="NoMatch"/> or <see cref="CannotTell"/>.</returns>
     internal int NextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, ScanMemory memory)
     {
+        int searchedWithoutFinding(int j) => _asciiPiece[j] ? Math.Max(0, sliceEnd - textPos) : 0;
+
         // A piece remembered as absent was searched for up to the old slice end only.
         if (memory.SliceEnd != sliceEnd)
         {
@@ -593,6 +595,8 @@ internal sealed class FuzzyLiteralFilter
                     textPos < sliceEnd && _asciiPiece[j]
                         ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison)
                         : -1;
+                // What the search read: up to the occurrence, or all of it.
+                WorkCounter.Searched(at >= 0 ? at + piece.Length : searchedWithoutFinding(j));
                 memory.From[j] = textPos;
                 memory.Found[j] = at < 0 ? Absent : textPos + at;
             }
@@ -656,6 +660,7 @@ internal sealed class FuzzyLiteralFilter
 
             // The last occurrence, so that the search reads back only as far as it must.
             int at = stretch.LastIndexOf(Pieces[j].AsSpan(), _comparison);
+            WorkCounter.Searched(at >= 0 ? stretch.Length - at : stretch.Length);
             if (at >= 0)
             {
                 memory.WitnessEnd = sliceStart + at + Pieces[j].Length;
@@ -692,6 +697,7 @@ internal sealed class FuzzyLiteralFilter
     /// scan moves forward, when <c>(?r)</c> moves it backward, and when <c>BESTMATCH</c> goes back to
     /// an earlier position or narrows the slice.
     /// </remarks>
+    // Any new search of the subject in this filter must call WorkCounter.Searched with what it read.
     internal sealed class ScanMemory
     {
         /// <summary>Makes a memory for <paramref name="pieces"/> pieces.</summary>
@@ -775,6 +781,8 @@ internal sealed class FuzzyLiteralFilter
             {
                 return true;
             }
+
+            WorkCounter.Searched(to - AsciiEnd);
 
             // The ushort form: the char form of the except-in-range searches boxes its bounds, 96 B
             // a call on .NET 10 (probe, 2026-09-23), and AllocationTests catch it.

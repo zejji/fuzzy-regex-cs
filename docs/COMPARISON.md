@@ -891,7 +891,7 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // T
 `(?i)(?a:k)` means exactly what `(?ai)k` means, for every construct whose answer depends on the
 encoding: case-insensitive letters, ranges, sets, backreferences and named lists, fuzzy matching,
 `\m` and `\M`, the `(?w)` word and line rules, `\X`, and full case folding. So under ASCII rules the
-Kelvin sign U+212A is not a 'k', whether ASCII is set for the whole pattern or only for a group.
+Kelvin sign U+212A never matches 'k', whether ASCII is set for the whole pattern or only for a group.
 Python's `re` and Perl answer this way. Upstream applies a scoped encoding only to `\p{...}`
 properties and `\b`, and reads the pattern's encoding everywhere else.
 
@@ -1322,8 +1322,8 @@ A lazy repeat such as `[^k]??` first tries to match nothing, then one character.
 version 1 the literal after it is matched with full folding, and upstream, looking ahead for that
 literal, stops reading at the last position the repeat can reach. A literal that starts there is
 never read to its end, so the match at the start of the text is lost and the search reports a later
-one or none at all. Upstream finds the match in version 0, which folds simply, and with a greedy
-repeat. Python's `re` and Perl agree with this port.
+one or none at all. Upstream finds the match in version 0, which uses simple case folding, and with
+a greedy repeat. Python's `re` and Perl agree with this port.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -1502,6 +1502,21 @@ using Fuzzy.Text.RegularExpressions;
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ß){s<=1}x").Match("ax").Length); // 2 - upstream: 2
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){s<=1}").Match("ax").Length); // 2 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){d<=1}").Match("x").Length);  // 1 - upstream: no match
+```
+
+### A fuzzy run can edit an expanding subject character as one character
+
+The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a
+combining caron, and upstream edits a folding one folded character at a time, so replacing a letter
+of a run with `ǰ` costs two edits, although it costs one where the fuzzy section covers only that
+letter. This port also lets the run substitute or insert the whole subject character.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:s){s<=1}sx").Match("ǰsx").Length);  // 3 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ssx){s<=1}").Match("ǰsx").Length);  // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:fst){i<=1}").FullMatch("fßst").Length); // 4 - upstream: no match
 ```
 
 ### `BestMatch` keeps a fit that ends in trailing insertions

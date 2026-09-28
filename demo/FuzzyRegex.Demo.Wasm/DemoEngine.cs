@@ -188,6 +188,29 @@ internal static class DemoEngine
         string mode,
         string replacement,
         string namedLists
+    ) => Run(pattern, flags, subject, mode, replacement, namedLists, MatchTimeout);
+
+    /// <summary>
+    /// <see cref="Run(string, string, string, string, string, string)"/> with a budget other than
+    /// <see cref="MatchTimeout"/>. For the test suite: a test of a size cap should not also be a
+    /// race with a two-second clock on a busy machine (D13 in <c>docs/KNOWN-DEFECTS.md</c>).
+    /// </summary>
+    /// <param name="pattern">See the overload without a budget.</param>
+    /// <param name="flags">See the overload without a budget.</param>
+    /// <param name="subject">See the overload without a budget.</param>
+    /// <param name="mode">See the overload without a budget.</param>
+    /// <param name="replacement">See the overload without a budget.</param>
+    /// <param name="namedLists">See the overload without a budget.</param>
+    /// <param name="budget">The time budget, in place of <see cref="MatchTimeout"/>.</param>
+    /// <returns>See the overload without a budget.</returns>
+    internal static string Run(
+        string pattern,
+        string flags,
+        string subject,
+        string mode,
+        string replacement,
+        string namedLists,
+        TimeSpan budget
     )
     {
         try
@@ -200,6 +223,7 @@ internal static class DemoEngine
                     mode,
                     replacement,
                     namedLists,
+                    budget,
                     out DemoMode parsedMode,
                     out FuzzyRegex? regex,
                     out string? refusal
@@ -211,19 +235,18 @@ internal static class DemoEngine
 
             return parsedMode switch
             {
-                DemoMode.Partial => Partial(regex, subject),
-                DemoMode.Replace => Replace(regex, subject, replacement),
-                _ => Search(regex, subject),
+                DemoMode.Partial => Partial(regex, subject, budget),
+                DemoMode.Replace => Replace(regex, subject, replacement, budget),
+                _ => Search(regex, subject, budget),
             };
         }
         catch (FuzzyRegexParseException parseError)
         {
             return Failed(parseError.Message, parseError.Offset >= 0 ? parseError.Offset : null);
         }
-        // A replacement template naming a group the pattern does not have arrives as an
-        // ArgumentException whose message carries the .NET parameter name ("unknown group (Parameter
-        // 'replacement')"). The page shows the sentence and not the plumbing: a stranger typing a
-        // template has no idea what a parameter called 'replacement' is (blind review, 2026-09-19).
+        // A template naming a group the pattern lacks arrives as an ArgumentException whose message
+        // carries the .NET parameter name ("unknown group (Parameter 'replacement')"). The page shows
+        // the sentence, not the plumbing: a stranger has no idea what that is (blind review, 2026-09-19).
         catch (ArgumentException badArgument)
         {
             return Failed(badArgument.Message.Split(" (Parameter", StringSplitOptions.None)[0]);
@@ -267,6 +290,7 @@ internal static class DemoEngine
         string mode,
         string replacement,
         string namedLists,
+        TimeSpan budget,
         out DemoMode parsedMode,
         [NotNullWhen(true)] out FuzzyRegex? regex,
         out string? refusal
@@ -302,7 +326,7 @@ internal static class DemoEngine
             return false;
         }
 
-        regex = new FuzzyRegex(pattern, options, MatchTimeout, lists);
+        regex = new FuzzyRegex(pattern, options, budget, lists);
         refusal = null;
         return true;
     }
@@ -353,8 +377,8 @@ internal static class DemoEngine
     /// longer matters. A stopwatch this loop polls itself needs nothing but the loop.
     /// </para>
     /// </remarks>
-    private static string Search(FuzzyRegex regex, string subject) =>
-        TryWalk(regex, subject, Deadline(), out List<DemoMatch> matches, out bool truncated)
+    private static string Search(FuzzyRegex regex, string subject, TimeSpan budget) =>
+        TryWalk(regex, subject, Deadline(budget), out List<DemoMatch> matches, out bool truncated)
             ? JsonSerializer.Serialize(new DemoAnswer(matches, truncated, null, null), DemoJson.Default.DemoAnswer)
             : TimedOut();
 
@@ -363,8 +387,8 @@ internal static class DemoEngine
     /// operation made of two passes - <see cref="Replace"/> is - spends one budget between them
     /// rather than one each.
     /// </summary>
-    private static long Deadline() =>
-        Stopwatch.GetTimestamp() + (long)(MatchTimeout.TotalSeconds * Stopwatch.Frequency);
+    private static long Deadline(TimeSpan budget) =>
+        Stopwatch.GetTimestamp() + (long)(budget.TotalSeconds * Stopwatch.Frequency);
 
     /// <summary>
     /// The walk itself, shared by <see cref="Search"/> and <see cref="Replace"/>.
@@ -374,7 +398,11 @@ internal static class DemoEngine
     /// <see cref="TimedOut"/> and the matches found so far are discarded - a partial answer
     /// presented as a whole one would be a lie about what the engine found.
     /// </returns>
-    private static bool TryWalk(
+    /// <remarks>
+    /// Internal rather than private so that the test suite can hand it a deadline that has already
+    /// passed, which proves the loop polls the clock without timing anything.
+    /// </remarks>
+    internal static bool TryWalk(
         FuzzyRegex regex,
         string subject,
         long deadline,
@@ -427,9 +455,9 @@ internal static class DemoEngine
     /// that walked on from a partial match would be asking the engine to continue past the end of
     /// the subject, which is where the partial match came from.
     /// </remarks>
-    private static string Partial(FuzzyRegex regex, string subject)
+    private static string Partial(FuzzyRegex regex, string subject, TimeSpan budget)
     {
-        Match match = regex.Match(subject, partial: true, timeout: MatchTimeout);
+        Match match = regex.Match(subject, partial: true, timeout: budget);
         bool clipped = false;
         List<DemoMatch> matches = match.Success ? [Describe(match, MaxSpans, out clipped)] : [];
 
@@ -479,13 +507,13 @@ internal static class DemoEngine
     /// any other bad input.
     /// </para>
     /// </remarks>
-    private static string Replace(FuzzyRegex regex, string subject, string replacement)
+    private static string Replace(FuzzyRegex regex, string subject, string replacement, TimeSpan budget)
     {
-        long deadline = Deadline();
+        long deadline = Deadline(budget);
         string replaced;
         try
         {
-            replaced = regex.Replace(subject, replacement, count: MaxMatches, timeout: MatchTimeout);
+            replaced = regex.Replace(subject, replacement, count: MaxMatches, timeout: budget);
         }
         // Caught HERE rather than beside the pattern's own parse failure, which is the only way to
         // tell the two apart: upstream parses a replacement template with the pattern parser, so a

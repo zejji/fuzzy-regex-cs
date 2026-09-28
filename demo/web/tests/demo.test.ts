@@ -19,7 +19,16 @@ import { FakeWorker, type FakeWorkerOptions } from './fake-worker';
 /** Long enough for Vue's watcher to run and for the debounce to fire, and no longer. */
 const DEBOUNCE_MS = 250;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Moves the fake clock on, running every timer that falls due and the promises they settle.
+ *
+ * Until 2026-09-28 this was a real sleep, and `DEBOUNCE_MS + 60` gave a loaded machine 60 ms of
+ * margin between the page's debounce firing and the test looking (D13). On the fake clock the
+ * debounce fires exactly when the test says it has, whatever the machine is doing.
+ */
+const sleep = async (ms: number): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(ms);
+};
 
 const replaced: (string | URL | null | undefined)[] = [];
 
@@ -48,6 +57,7 @@ const track = (demo: Demo): Demo => {
 };
 
 beforeEach(() => {
+    vi.useFakeTimers();
     replaced.length = 0;
     FakeWorker.killed = 0;
     // The composable reads the fragment as it starts, so a fragment left behind by the previous
@@ -67,6 +77,7 @@ beforeEach(() => {
 afterEach(() => {
     for (const demo of started.splice(0)) demo.dispose();
     vi.restoreAllMocks();
+    vi.useRealTimers();
 });
 
 /**

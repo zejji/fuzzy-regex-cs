@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
@@ -48,9 +47,10 @@ public sealed class CompileBudgetTests
         // bytes each is about 840 MB of nodes, and the cubed {1000} pattern that prompted the slice
         // passed 15 GB. The budget stops it at 1,000,000 nodes - 249 MB and about 0.7 s (681 ms
         // and 763 ms on two Debug-build runs, 2026-09-18) - so the
-        // assertion that matters is the exception type, and the time bound is here to catch a check
-        // that lets the compile run on.
-        var clock = Stopwatch.StartNew();
+        // assertion that matters is the exception type, and the allocation bound is here to catch a
+        // check that lets the compile run on. It is bytes rather than seconds because a busy
+        // machine is not a slow compiler (D13): until 2026-09-28 it was a thirty-second bound.
+        long before = GC.GetAllocatedBytesForCurrentThread();
 
         Action compile = static () => _ = new FuzzyRegex(_cubedRepeat);
 
@@ -59,7 +59,12 @@ public sealed class CompileBudgetTests
             .Throw<FuzzyRegexParseException>()
             .Which.Message.Should()
             .Contain(FuzzyRegex.DefaultMaxCompiledNodes.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30), "the budget bounds the cost of a refused pattern");
+        (GC.GetAllocatedBytesForCurrentThread() - before)
+            .Should()
+            .BeLessThan(
+                500_000_000,
+                "the budget bounds the cost of a refused pattern; the whole compile is about 840 MB"
+            );
     }
 
     [Test]

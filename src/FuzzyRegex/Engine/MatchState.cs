@@ -858,6 +858,8 @@ internal sealed class MatchState : IDisposable
         bool? oneUnitPerCharacter
     )
     {
+        WorkCounter.StateInitialised();
+
         PatternObject pattern = Pattern;
 
         Text = text;
@@ -1105,6 +1107,8 @@ internal sealed class MatchState : IDisposable
     /// <returns>The next position.</returns>
     internal int NextPos(int pos)
     {
+        WorkCounter.CharacterWalked();
+
         ReadOnlySpan<char> text = Text.Span;
         return
             pos + 1 < TextEnd
@@ -1157,6 +1161,8 @@ internal sealed class MatchState : IDisposable
     /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
     internal int PrevPos(int pos)
     {
+        WorkCounter.CharacterWalked();
+
         ReadOnlySpan<char> text = Text.Span;
         return
             pos >= 2

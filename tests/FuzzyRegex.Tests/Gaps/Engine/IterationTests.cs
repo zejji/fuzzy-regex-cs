@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
@@ -15,62 +14,48 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class IterationTests
 {
     [Test]
-    [NotInParallel]
-    public void A_scan_over_a_long_subject_costs_time_proportional_to_its_length()
+    [Category(EngineWork.Category)]
+    public void A_scan_over_a_long_subject_does_work_linear_in_its_length()
     {
         // The complexity guard for the whole iteration surface. Since the 2026-09-01 quadratic fix
         // a MatchState costs one vectorised pass over the subject to build, so a scan that builds
         // one per match is superlinear in the subject while every correctness test stays green -
         // which is exactly why this is a test and not a comment. DECISIONS 2026-09-01.
         //
-        // The assertion is the RATIO between two subject sizes, not a wall-clock ceiling, because
-        // the ratio is what "proportional to its length" claims and it does not depend on how fast
-        // the machine is. Measured 2026-09-01, inside the full suite and in Debug, which is what
-        // the ratchet runs: 468ms for the three scans at 480,000 code units and 970ms at 960,000,
-        // a ratio of 2.07. A scan that builds a state per match costs 10.8x for the same doubling
-        // (Release, 2,670ms at 480,000 then 28,718ms at 960,000, and 208,922ms at 1,920,000), so
-        // the threshold of 5 sits about 2.4x above the linear answer and 2.2x below the quadratic
-        // one, and neither margin moves with the machine.
+        // What it counts is the states, which is the mechanism itself, rather than the time it
+        // costs: until 2026-09-28 this was a ratio of two timings, and a busy machine is not a slow
+        // engine (D13). Measured 2026-09-01 in Release: a scan that builds a state per match cost
+        // 10.8x for a doubling of the subject, and a linear one 2.2x. Now, in Debug: the three
+        // scans initialise three states between them at 1,000 matches and at 2,000 (2026-09-28).
         //
-        // [NotInParallel] because it must be: without it the suite's other 5,700 tests run
-        // alongside and the same three scans took 7.5s instead of 2.1s, which is enough contention
-        // to swamp any threshold.
-        //
-        // The engine's own MatchTimeout cannot enforce this one, which is why it is timed at all: a
-        // state carries its own start time, so a scan that built a state per match would reset the
-        // budget on every match and never time out however long it ran.
-        TimeSpan small = TimeThreeScans(160000);
-        TimeSpan large = TimeThreeScans(320000);
-
-        (large / small)
-            .Should()
-            .BeLessThan(
-                5,
-                "doubling the subject costs a linear scan about 2.2x and a state-per-match scan "
-                    + "10.8x; {0} then {1}",
-                small,
-                large
-            );
-    }
-
-    /// <summary>
-    /// How long the three scanning entry points take over a subject of <paramref name="matches"/>
-    /// matches, checking on the way that each found them all.
-    /// </summary>
-    /// <param name="matches">How many matches the subject should hold.</param>
-    /// <returns>The elapsed time.</returns>
-    private static TimeSpan TimeThreeScans(int matches)
-    {
+        // The states are one way to be quadratic, not the only one, so the loop steps and the
+        // characters walked are bounded as well: 18,000 and 18,003 over this 6,000-character
+        // subject, three per character. Any pass over the subject per match is millions. In a
+        // Release build there is no counter, so what is left is the answers.
+        const int matches = 2_000;
         string subject = string.Concat(Enumerable.Repeat("ab ", matches));
-        var pattern = new FuzzyRegex(@"\w+", FuzzyRegexOptions.None, FuzzyRegex.InfiniteMatchTimeout);
+        var pattern = new FuzzyRegex(@"\w+", FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        var elapsed = Stopwatch.StartNew();
-
-        pattern.Count(subject).Should().Be(matches);
-        pattern.Matches(subject).Count.Should().Be(matches);
-        pattern.Split(subject).Should().HaveCount(matches + 1);
-
-        return elapsed.Elapsed;
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+                EngineWork.ShouldWalkAtMostCharacters(
+                    () =>
+                        EngineWork.ShouldInitialiseStates(
+                            () =>
+                            {
+                                pattern.Count(subject).Should().Be(matches);
+                                pattern.Matches(subject).Count.Should().Be(matches);
+                                pattern.Split(subject).Should().HaveCount(matches + 1);
+                            },
+                            3,
+                            "one state for each of the three scans, not one for each match"
+                        ),
+                    6L * subject.Length,
+                    "a scan walks each character a few times, not once per match"
+                ),
+            6L * subject.Length,
+            "a scan's matching loops run a few steps per character, not a pass per match"
+        );
     }
 
     [Test]
