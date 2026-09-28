@@ -41,8 +41,8 @@ such test is a mistake: reopen it.
 | D3 | A same-position group call is refused when a capture read by a conditional or backreference has changed | `(?(a)(?(b)x\|(?<b>)(?R))\|(?<a>)(?R))` over 'x': None vs (0,1) | design reviewed; the build waits for D1 (it needs C1) | `maint/call-guard` 28a057e, `docs/plan/2026-09-28-capture-dependent-recursion-design.md`; red test on main |
 | D8 | A fuzzy insertion is never tried before a failing lookaround (S3-F2) | `(?:b(?=c)){i<=1}` over 'bxc': None vs (0,2) with 1 insertion | fixed (upstream wrong, ledger 50, pinned); blind review next, merges after D1 | `maint/d8-insert-before-lookaround` 9fed032 (on D1's branch). At merge, delete its OpenDefectTests row |
 | D11 | Phantom partial matches at a boundary (F2; includes S3-F1 and oracle cluster A). The biggest item; design first. Owner rulings: Q1 = B, Q2 = B | see the 2026-09-26 handover | design written (5 root causes, 22 red rows); 4 semantic questions to decide, then blind review, then build | `design/d11-partial-boundary` 0d3e033, `docs/plan/2026-09-28-partial-boundary-design.md` §10 |
-| D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fix started | `maint/d15-d16-tooling` |
-| D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fix started | `maint/d15-d16-tooling` |
+| D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fixed on branch (117/117 controls resolve, 20 retargeted and fire); blind review next | `maint/d15-d16-tooling` 1c509db |
+| D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fixed on branch (26/3000 rows change, all b/e strips); blind review next; check why row 3732 went green | `maint/d15-d16-tooling` 0cb732e |
 
 ## Completed
 
