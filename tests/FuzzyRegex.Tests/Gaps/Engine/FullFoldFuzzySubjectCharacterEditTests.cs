@@ -174,6 +174,91 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
         ShouldMatch("(?fi)(?:fßt){s<=1}", "fǰt", "fullmatch", 0, 3, new FuzzyCounts(1, 0, 0));
     }
 
+    // D22, the backreference twin: REF_GROUP_FLD edits the subject character's folding one folded
+    // character at a time too (next_fuzzy_match_group_fld, upstream/src/_regex.c:10824-10877), so
+    // a fuzzy backreference could not replace a group letter with ǰ, although it replaces it with
+    // an a ('ssxas' is (0, 5) with one substitution in both engines) and the literal it stands for
+    // does (the first test above). The ß rows need the edit after the first folded s matched
+    // (Matcher.OfferWholeFoldedGroupCharEdit). Upstream: None for every row.
+    [Test]
+    [Arguments(@"(?fi)(ss)x(?:\1){s<=1}", "ssxǰs", "fullmatch", 0, 5, 1, 0, 0)]
+    [Arguments(@"(?fi)(ss)x(?:\1){s<=1}", "ssxsǰ", "search", 0, 5, 1, 0, 0)]
+    [Arguments(@"(?fi)(ss)x(?:\1){e<=1}", "ssxǰs", "fullmatch", 0, 5, 1, 0, 0)]
+    [Arguments(@"(?fi)(ss)x(?:\1){i<=1}", "ssxsǰs", "fullmatch", 0, 6, 0, 1, 0)]
+    [Arguments(@"(?fi)(fst)x(?:\1){s<=1}", "fstxfßt", "fullmatch", 0, 7, 1, 0, 0)]
+    [Arguments(@"(?fi)(fst)x(?:\1){i<=1}", "fstxfßst", "fullmatch", 0, 8, 0, 1, 0)]
+    [Arguments(@"(?fi)(sst)x(?:\1){i<=1}", "sstxsǰst", "fullmatch", 0, 8, 0, 1, 0)]
+    [Arguments(@"(?rfi)(?:\1){s<=1}x(ss)", "ǰsxss", "fullmatch", 0, 5, 1, 0, 0)]
+    [Arguments(@"(?rfi)(?:\1){s<=1}-(ssx)", "sßx-ssx", "fullmatch", 0, 7, 1, 0, 0)]
+    [Arguments(@"(?rfi)(?:\1){i<=1}-(ssx)", "sßsx-ssx", "fullmatch", 0, 8, 0, 1, 0)]
+    public void An_expanding_subject_character_in_a_fuzzy_backreference_can_be_edited_as_one_character(
+        string pattern,
+        string text,
+        string operation,
+        int index,
+        int length,
+        int substitutions,
+        int insertions,
+        int deletions
+    ) => ShouldMatch(pattern, text, operation, index, length, new FuzzyCounts(substitutions, insertions, deletions));
+
+    // A whole substitution replaces a whole group character, so ǰ for a captured ß is one edit;
+    // part way through the ß it is refused, because the s already matched is half of that ß and
+    // 'sǰ' is two characters for one. Upstream: None for all four.
+    [Test]
+    [Arguments(@"(?fi)(ß)x(?:\1){s<=1}", "ßxǰ", true)]
+    [Arguments(@"(?rfi)(?:\1){s<=1}x(ß)", "ǰxß", true)]
+    [Arguments(@"(?fi)(ß)x(?:\1){s<=1}", "ßxsǰ", false)]
+    [Arguments(@"(?rfi)(?:\1){s<=1}x(ß)", "ǰsxß", false)]
+    public void A_whole_substitution_in_a_backreference_takes_a_whole_group_character(
+        string pattern,
+        string text,
+        bool matches
+    )
+    {
+        Match m = new FuzzyRegex(pattern).FullMatch(text);
+
+        m.Success.Should().Be(matches);
+
+        if (matches)
+        {
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        }
+    }
+
+    [Test]
+    public void A_backreference_tries_the_whole_substitution_when_the_folded_edits_fail_at_once()
+    {
+        // ŉ (U+0149) is a lowercase letter and folds to ʼ (U+02BC, a modifier letter) and n, so the
+        // test refuses the folded substitution and passes the whole one, on the first attempt.
+        // Upstream: None; its (?fi)(ss)x(?:s){s<=1:\p{Ll}}s gives (0, 5) with one substitution.
+        ShouldMatch(@"(?fi)(ss)x(?:\1){s<=1:\p{Ll}}", "ssxŉs", "fullmatch", 0, 5, new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void A_backreference_makes_no_whole_character_insertion_at_the_search_anchor()
+    {
+        // As for a literal, a search does not start a match with an insertion. Upstream: None.
+        new FuzzyRegex(@"(?fi)(?=.(ssx))(?:\1){i<=1}")
+            .Match("ǰssx")
+            .Success.Should()
+            .BeFalse();
+    }
+
+    // Controls for the backreference edits, each None in both engines: the constraint's test sees
+    // the whole subject character, which is not in [a-z]; an edit does not start part way through
+    // ﬃ; and deletions alone cannot absorb a subject character.
+    [Test]
+    [Arguments(@"(?fi)(ss)x(?:\1){s<=1:[a-z]}", "ssxǰs")]
+    [Arguments(@"(?rfi)(?:\1){s<=1:[a-z]}x(ss)", "ǰsxss")]
+    [Arguments(@"(?fi)(sst)x(?:\1){i<=1:[a-z]}", "sstxsǰst")]
+    [Arguments(@"(?fi)(fi)x(?:\1){i<=1}", "fixﬃi")]
+    [Arguments(@"(?fi)(ssx)-(?:\1){d<=1}", "ssx-ǰsx")]
+    public void A_fuzzy_backreference_keeps_the_limits_of_a_whole_character_edit(string pattern, string text)
+    {
+        new FuzzyRegex(pattern).FullMatch(text).Success.Should().BeFalse();
+    }
+
     private static void ShouldMatch(
         string pattern,
         string text,
