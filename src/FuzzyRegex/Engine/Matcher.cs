@@ -5018,7 +5018,9 @@ internal static class Matcher
     /// <summary>
     /// NOT UPSTREAM (D7): a substitution of one whole subject character that expands under full case
     /// folding, such as U+01F0, for one pattern character. A <c>STRING_FLD</c> error kind after
-    /// upstream's three; it is counted and recorded as <see cref="FuzzyValue.Sub"/>.
+    /// upstream's three, and since D22 a <c>REF_GROUP_FLD</c> one (where it replaces one whole group
+    /// character; see <see cref="NextFuzzyMatchGroupFld"/>); it is counted and recorded as
+    /// <see cref="FuzzyValue.Sub"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -6224,6 +6226,7 @@ internal static class Matcher
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
+        state.RetriedAWholeFoldEdit = data.FuzzyType >= FoldWholeSub;
         node = newNode!;
         groupPos = newGroupPos;
         foldedPos = data.NewFoldedPos;
@@ -9571,7 +9574,7 @@ internal static class Matcher
                                 ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
                                 : 0;
 
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos <= 0 && foldedLen > 0)
                             {
@@ -9771,7 +9774,7 @@ internal static class Matcher
                         // follow a fuzzy call in its body, so a retried edit that finishes a folding
                         // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
                         // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos >= foldedLen && foldedLen > 0)
                             {

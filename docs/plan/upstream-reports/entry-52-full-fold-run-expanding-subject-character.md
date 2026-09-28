@@ -44,5 +44,20 @@ half of the character does not rule out editing all of it. No match the current 
 lost, although the first answer's mix of edits can change: `(?fi)(?:ss){e<=3}` fullmatched over
 'jßsß' then reports one substitution and two insertions instead of three insertions.
 
+A fuzzy full-folded backreference has the same problem, in `next_fuzzy_match_group_fld` (lines
+10824-10877). It is edited fuzzily in general, but not across such a character:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxas')
+<regex.Match object; span=(0, 5), match='ssxas', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')
+>>> regex.fullmatch(r'(?fi)(fst)x(?:\1){s<=1}', 'fstxfßt')
+>>>
+```
+
+The same two edits fix it there. A whole substitution should replace a whole character of the
+group, so it applies only at the start of one and uses up all of its folding: then ǰ for a captured
+'ß' is one edit, and ǰ after the first s of that 'ß' has matched is not offered.
+
 None of PCRE2, Python `re`, .NET, JavaScript or Perl has fuzzy matching, so there is no second
 answer to compare with.

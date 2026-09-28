@@ -4936,7 +4936,27 @@ changes. Pinned by `Gaps/Engine/FullFoldFuzzySubjectCharacterEditTests` and
 the oracle entry `full-fold-run-edits-an-expanding-subject-character-whole` classifies rows by
 switching the edits off (`PatternObject.SkipWholeFoldedCharEdits`).
 
-**Not covered, and open:** `REF_GROUP_FLD`, a full-folded backreference, edits its subject the same
-way (`next_fuzzy_match_group_fld`, `upstream/src/_regex.c:10824`) and was not changed here:
-`fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')` is None in both engines, while 'ssxas' is (0, 5) with
-one substitution (measured 2026-09-28).
+**The backreference (known defect D22, fixed 2026-09-29).** `REF_GROUP_FLD`, a full-folded
+backreference, edits its subject the same way (`next_fuzzy_match_group_fld`,
+`upstream/src/_regex.c:10824-10877`). Upstream does edit such a backreference fuzzily; only the
+expanding subject character costs two:
+
+```
+fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxas')    -> (0, 5), one substitution     (the control)
+fullmatch(r'(?fi)(ss)x(?:\1){i<=1}', 'ssxsas')   -> (0, 6), one insertion        (the control)
+fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')    -> None                         expected (0, 5), one substitution
+fullmatch(r'(?fi)(ss)x(?:\1){i<=1}', 'ssxsǰs')   -> None                         expected (0, 6), one insertion
+fullmatch(r'(?fi)(fst)x(?:\1){s<=1}', 'fstxfßt') -> None                         expected (0, 7), one substitution
+fullmatch(r'(?fi)(ß)x(?:\1){s<=1}', 'ßxǰ')       -> None                         expected (0, 3), one substitution
+```
+
+The same two kinds and the same backtrack point now apply in the `REF_GROUP_FLD` frame
+(`Matcher.NextFuzzyMatchGroupFld`, `OfferWholeFoldedGroupCharEdit`), behind the same switch. A whole
+substitution there replaces a whole group character: it needs the group at the start of one and
+takes all of its folding, so ǰ for a captured ß is one edit and ǰ after half of that ß is refused.
+Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzySubjectCharacterEditTests`.
+
+**Not covered, and open:** the group side. A group character that expands is still edited one
+folded character at a time, as a pattern `ß` was before entry 49: `fullmatch(r'(?fi)(ß)x(?:\1){s<=1}',
+'ßxa')` is None in both engines, while `(?fi)(ß)x(?:ß){s<=1}` gives (0, 3) with one substitution
+(measured 2026-09-29).
