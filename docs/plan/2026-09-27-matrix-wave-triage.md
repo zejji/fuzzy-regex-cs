@@ -39,6 +39,11 @@ binding `pcre2` 0.7.1) was asked the same question without the fuzzy parts.
 
 ### The same-position call guard
 
+**Fixed 2026-09-28 on `maint/call-guard`:** the guard now also requires that the attempt has
+reached no new text since the enclosing call, PCRE2's rule. Details in ledger entry 14, "The guard
+refined". The red test moved from `OpenDefects/OpenDefectTests.cs` to `Gaps/Engine/GroupCallTests.cs`.
+Row 7:2439 was not re-run against the fix.
+
 Ledger entry 14's guard fails any call of a group at a text position where a call of the same group
 is already open. Its justification (`MatchState.cs:238-256`, and the comment in
 `GroupCallTests.A_call_re_entered_at_the_position_it_is_already_at_fails_instead_of_recursing_for_ever`)

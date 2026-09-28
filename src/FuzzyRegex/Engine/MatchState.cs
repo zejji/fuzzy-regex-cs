@@ -235,25 +235,55 @@ internal sealed class MatchState : IDisposable
     internal readonly ByteStack Pstack;
 
     /// <summary>
-    /// NOT UPSTREAM'S: the group calls that are open right now, one key per call, as
-    /// <c>(call index &lt;&lt; 32) | text position</c>.
+    /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
+    /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
+    /// call was made.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Ledger entry 14's guard, and PCRE2's: a call that re-enters a group at a text position where
-    /// a call of that same group is already open cannot consume anything before it arrives back
-    /// where it started, so that path recurses for ever. PCRE2 answers the whole match with
-    /// <c>PCRE2_ERROR_RECURSELOOP</c>, "nested recursion at the same subject position"; upstream has
-    /// no guard at all and allocates until <c>MemoryError</c>.
+    /// Ledger entry 14: the guard against a recursion that can never finish. A call that
+    /// re-enters a group at the text position where a call of that group is already open, when the
+    /// attempt has reached no text since that call opened, can only repeat the open call's work
+    /// one level deeper, so that path recurses for ever and is failed. If the attempt HAS reached
+    /// further, the inner call is let through: that is left recursion, <c>G -&gt; '' | G 'a'</c>,
+    /// where the outer call's first try failed further on and the inner call is how 'aa' gets
+    /// matched. The rule is PCRE2's (<c>OP_RECURSE</c> in <c>pcre2_match.c</c> 10.47, lines
+    /// 5686-5709: same group, same subject pointer and the same <c>last_used_ptr</c>). PCRE2 then
+    /// fails the whole match with <c>PCRE2_ERROR_RECURSELOOP</c>; this port fails only the path.
+    /// Upstream has no guard at all and allocates until <c>MemoryError</c>.
     /// </para>
     /// <para>
-    /// A set rather than a counter, because a key is only ever added when it is absent - that is
+    /// Why it terminates: the width only grows during an attempt and never passes the text length,
+    /// and the set holds each entry once, so at most <c>TextLength + 1</c> calls of one group can be
+    /// open at one position.
+    /// </para>
+    /// <para>
+    /// A set rather than a counter, because an entry is only ever added when it is absent - that is
     /// what the guard tests. <see cref="OpenCalls"/> is the same information as a stack, and is what
     /// keeps the two in step; this is only here so the test itself costs O(1) on a recursion ten
     /// thousand deep.
     /// </para>
     /// </remarks>
-    internal readonly HashSet<long> ActiveCalls = [];
+    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
+    /// match path fails and where a group call is made. Only the guard in
+    /// <see cref="ActiveCalls"/> reads them.
+    /// </summary>
+    /// <remarks>
+    /// Both ends, so the measure works the same in a reversed pattern, where the text reached grows
+    /// to the left. <see cref="ReachedLow"/> starts above <see cref="ReachedHigh"/>, meaning nothing
+    /// reached yet; the first group call of the attempt records its own position before it reads
+    /// the width.
+    /// </remarks>
+    internal int ReachedLow = int.MaxValue;
+
+    /// <inheritdoc cref="ReachedLow"/>
+    internal int ReachedHigh = int.MinValue;
+
+    /// <summary>How much text this attempt has reached; see <see cref="ReachedLow"/>.</summary>
+    internal int ReachedWidth => ReachedHigh - ReachedLow;
 
     /// <summary>
     /// NOT UPSTREAM'S: the same open calls as <see cref="ActiveCalls"/>, innermost last, each with
@@ -278,7 +308,7 @@ internal sealed class MatchState : IDisposable
     /// abandoned.
     /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int SstackDepth)> OpenCalls = [];
+    internal readonly List<(long Key, int Reach, int SstackDepth)> OpenCalls = [];
 
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
@@ -817,6 +847,8 @@ internal sealed class MatchState : IDisposable
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
+        ReachedLow = int.MaxValue;
+        ReachedHigh = int.MinValue;
         SearchAnchor = 0;
         MatchPos = 0;
         BestMatchPos = 0;
