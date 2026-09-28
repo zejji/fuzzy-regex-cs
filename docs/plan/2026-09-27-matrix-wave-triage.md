@@ -42,7 +42,10 @@ binding `pcre2` 0.7.1) was asked the same question without the fuzzy parts.
 **Fixed 2026-09-28 on `maint/call-guard`:** the guard now also requires that the attempt has
 reached no new text since the enclosing call, PCRE2's rule. Details in ledger entry 14, "The guard
 refined". The red test moved from `OpenDefects/OpenDefectTests.cs` to `Gaps/Engine/GroupCallTests.cs`.
-Row 7:2439 was not re-run against the fix.
+Re-run 2026-09-28 in Release: the matrix wave at seed 7 (3000 rows) no longer reports row 2439
+and still counts agree 2961, diverge 4 (7:52, 1367, 1447, 2677, all known above); its minimised
+shape is pinned in `GroupCallTests`. The default wave is GREEN at seeds 7 and 4242, and at
+20260927 only row 3732 diverges.
 
 Ledger entry 14's guard fails any call of a group at a text position where a call of the same group
 is already open. Its justification (`MatchState.cs:238-256`, and the comment in

@@ -645,6 +645,20 @@ public sealed class GroupCallTests
     }
 
     [Test]
+    [Arguments("(?r)((?:ab|a(?R)))")]
+    [Arguments("(?r)(?p)((?:ab|a(?R)))")]
+    public void A_reversed_right_recursion_nests_at_one_position_once_it_has_reached_further(string pattern)
+    {
+        // Matrix wave triage row 7:2439, minimised. Reversed, 'a(?R)' is matched right to left, so
+        // the call comes first and is a left recursion at the same position. Each nests only after
+        // the 'ab' branch has failed further left, so the text reached has grown. Upstream answers
+        // (0, 4) for the POSIX-free form (2026-09-27); the old guard answered None for both.
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).FullMatch("aaab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 4));
+    }
+
+    [Test]
     public void A_nested_call_that_reaches_no_further_is_still_refused()
     {
         // The genuinely infinite shapes: the inner call of G at 0 is made with nothing reached
