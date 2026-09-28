@@ -24,7 +24,8 @@ always the smallest possible.
 
 A second, separate question came out of the review: in exact matching, upstream counts an empty
 iteration that changed a tested group as progress, where Perl, PCRE2, Python `re`, Java and .NET do
-not. That is set out at the end as an open question with a provisional lean.
+not. It was surveyed further and decided on 2026-09-28 (D12, at the end): upstream's rule is kept,
+because it is the one whose termination check loses no match.
 
 ## What the decisions mean in practice
 
@@ -70,7 +71,7 @@ Rule B refuses it, so the only way left to spend an error is to delete the singl
 match nothing. Upstream's end-of-text exception makes it skip the match at the start of `42`
 altogether and report `2`.
 
-**5. The open question, in exact matching (no errors at all).** Take `^(?:(?(1)c|z)|())*$` over `c`.
+**5. The D12 question, in exact matching (no errors at all).** Take `^(?:(?(1)c|z)|())*$` over `c`.
 In words: "repeat: if the marker (group 1) is set, read a `c`; otherwise read a `z`, or set the marker
 without reading anything; the whole text must be used". The first pass cannot read `c` (no marker
 yet), so it sets the marker and reads nothing. The engines then disagree about whether the loop may
@@ -282,7 +283,7 @@ problems, all verified by this revision:
 3. **Exact matching is not identical across engines.** Upstream counts a changed referenced group
    as progress, so `^(?:(?(1)c|z)|())*$` over `c` matches in upstream but not in `re`, PCRE2 or Perl.
    The draft's claim that exact matching was "identical to upstream and re/PCRE2/Perl" was false.
-   See the open question.
+   See the D12 decision at the end.
 4. **The POSIX quote was misattributed.** The subexpression wording is BRE 9.3.6; ERE 9.4.6 covers
    only single-character EREs (quoted above).
 5. **A citation was wrong.** Fuzzy edits increment `capture_change` at `_regex.c:10250`, `:10487`
@@ -703,7 +704,7 @@ Measure the cost in the port's engine with the benchmark suite; the reference ti
 where to look (nested repeats under a minimum error count, and lazy nested repeats under
 `search`).
 
-Keep upstream's behaviour for error-free empty iterations (see the open question). Record the
+Keep upstream's behaviour for error-free empty iterations (decided under D12, at the end). Record the
 change as a port-right divergence in the ledger alongside entry 33, replacing the narrower entry 33
 stop, with the sweeps above as its evidence and the rows above as pinned tests.
 
@@ -714,46 +715,119 @@ example still holds. What it does not do: it does not return the minimum-cost
 match (use `(?e)` or `(?b)` for that), and its counts differ from upstream's plain counts wherever
 upstream took an unneeded deleted iteration.
 
-## Open question: does a changed group count as progress in exact matching?
+## Decision (D12, 2026-09-28): a changed tested group is progress
 
-Upstream counts an empty iteration that changed a referenced group as progress, so the loop goes
-round again (`_regex.c:12550-12553`, `:12726-12728`). Most backtracking engines check only the
-position. `capture_progress.py`, search, 2026-09-26 (`span`, and group 1 where the engine reports
-it):
+The question: in exact matching, an iteration of a repeat reads no text but changes the span of a
+group that a conditional or a backreference tests. Does the repeat go round again? Upstream says
+yes (`_regex.c:12550-12553`, `:12787-12793`; a referenced group bumps `capture_change` only when
+its span changes, `same_span_as_group`, `:12726-12728`). Most backtracking engines check the
+position only.
 
-| pattern over `c` | regex | re | PCRE2 | Perl | .NET | Onigmo | Java | Node |
-|---|---|---|---|---|---|---|---|---|
-| `^(?:(?(1)c\|z)\|())*$` | 0,1 | none | none | none | none | 0,1 | no conditionals | no conditionals |
-| `(?:(?(1)c\|z)\|())*$` | 0,1 | 1,1 | 1,1 | 1,1 | 1,1 | 0,1 | no conditionals | no conditionals |
-| `^(?:(?(1)c\|z)\|())+$` | 0,1 | 0,1 | none | none | none | 0,1 | no conditionals | no conditionals |
-| `^(?:(?(1)c\|z)\|()){2,}$` | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | no conditionals | no conditionals |
-| `^(?:\1c\|())*$` | 0,1 | rejected | none | none | none | 0,1 | none | 0,1 * |
-| `^(?:(?(2)c\|z)\|(a)\|())*$` | 0,1 | none | none | none | none | 0,1 | no conditionals | no conditionals |
+**The survey.** `capture_progress.py`, search, run 2026-09-28 (Python 3.14.7 `re`, `regex`
+2026.9.10, PCRE2 10.47 via pip `pcre2` 0.7.1, Perl 5.42.3, Node 24.16.0, OpenJDK 26.0.2.1, .NET
+10.0.12, Ruby 3.2.3 in WSL, and the port through `port-probe.cs`). Each cell is the match span, or
+`none`, or `err` where the engine rejects the syntax (no conditionals in Java or JavaScript, no
+possessive `*+` in .NET or JavaScript, `re` rejects `\1` before group 1 is defined). `k` rows test
+the group with a conditional, `b` rows with a backreference, `u` rows are controls whose group
+nothing tests.
 
-\* In ECMAScript a reference to an unset group matches the empty string, so `\1c` matches on the
-first pass; that says nothing about progress. ECMAScript also clears a repeated atom's groups on
-each pass and fails any empty pass beyond the minimum (22.2.2.3.1), so it has no group progress.
-`re` rejects `\1` before group 1 is defined, and its `+` row matches where PCRE2 and Perl do not.
+| id | pattern | subject | re | regex | PCRE2 | perl | node | java | .NET | ruby | port |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| k01 | `^(?:(?(1)c\|z)\|())*$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k02 | `(?:(?(1)c\|z)\|())*$` | `c` | 1,1 | 0,1 | 1,1 | 1,1 | err | err | 1,1 | 0,1 | 0,1 |
+| k03 | `^(?:(?(1)c\|z)\|())+$` | `c` | 0,1 | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k04 | `^(?:(?(1)c\|z)\|()){2,}$` | `c` | 0,1 | 0,1 | 0,1 | 0,1 | err | err | 0,1 | 0,1 | 0,1 |
+| k05 | `^(?:(?(1)c\|z)\|()){0,5}$` | `c` | none | 0,1 | 0,1 | none | err | err | none | 0,1 | 0,1 |
+| k06 | `^(?:(?(1)c\|z)\|())*$` | `cc` | none | 0,2 | none | none | err | err | none | 0,2 | 0,2 |
+| k07 | `^(?:(?(2)c\|z)\|(a)\|())*$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k08 | `^(?:()\|(?(1)c\|z))*$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k09 | `^(?:(?(1)c\|z)\|())*?$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k10 | `^(?:(?(1)c\|z)\|())+?$` | `c` | 0,1 | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k11 | `^(?:(?(1)c\|z)\|())*+$` | `c` | none | 0,1 | none | none | err | err | err | 0,1 | 0,1 |
+| k12 | `^(?>(?:(?(1)c\|z)\|())*)$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k13 | `^(?:(?:(?(1)c\|z)\|())*)*$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k14 | `^(?:(?:(?(1)c\|z)\|())+)*$` | `c` | 0,1 | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k15 | `^(?:(?(1)c\|z)\|(()))*$` | `c` | none | 0,1 | none | none | err | err | none | 0,1 | 0,1 |
+| k16 | `^(?:(?(1)c\|z)\|())*$` | `` | 0,0 | 0,0 | 0,0 | 0,0 | err | err | 0,0 | 0,0 | 0,0 |
+| b01 | `^(?:\1c\|())*$` | `c` | err | 0,1 | none | none | 0,1 | none | none | 0,1 | 0,1 |
+| b02 | `^(?:(?=(c))\|\1)*$` | `c` | none | 0,1 | none | none | none | 0,1 | none | none | 0,1 |
+| b03 | `^(?:\1\|(?=(c)))*$` | `c` | err | 0,1 | none | none | none | none | none | none | 0,1 |
+| b04 | `^(?:\1\|(?=(c)))*?$` | `c` | err | 0,1 | none | none | none | none | none | none | 0,1 |
+| b05 | `^(?:\1\|(?=(c)))*+$` | `c` | err | 0,1 | none | none | err | none | err | none | 0,1 |
+| b06 | `^(?:(?:\1\|(?=(c)))*)*$` | `c` | err | 0,1 | none | none | none | none | none | none | 0,1 |
+| b07 | `^(?:\1\|(?=(c))){2,}$` | `c` | err | 0,1 | 0,1 | 0,1 | none | none | 0,1 | 0,1 | 0,1 |
+| b08 | `^(?:\1\|(?=(c)))+$` | `c` | err | 0,1 | none | none | none | none | none | 0,1 | 0,1 |
+| u01 | `^(?:(c)\|())*$` | `c` | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 |
+| u02 | `(?:(b\|))*` | `bba` | 0,2 | 0,2 | 0,2 | 0,2 | 0,2 | 0,2 | 0,2 | 0,2 | 0,2 |
+| u03 | `^(?:(?=(c))\|c)*$` | `c` | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 | 0,1 |
 
-So upstream and Onigmo form one camp (a pass that set a tested group somewhere new is not empty;
-Onigmo's `STACK_NULL_CHECK_MEMST`, `regexec.c:993`), and Perl, PCRE2, .NET and, apart from one row,
-`re` form the other. The patterns involved need a group that is set in one pass and tested in a
-later pass at the same position, which is rare in practice.
+Over the 23 `k` and `b` rows (k16 and the `u` rows are controls, where every engine that runs them
+agrees):
 
-Options:
+| engine | rows it runs | same answer as upstream | different |
+|---|---|---|---|
+| upstream `regex` | 23 | 23 | 0 |
+| the port | 23 | 23 | 0 |
+| Onigmo (Ruby) | 23 | 18 | 5 (b02-b06: a group set inside a lookahead does not count) |
+| PCRE2 | 23 | 3 | 20 |
+| Perl | 23 | 2 | 21 |
+| .NET | 21 | 2 | 19 |
+| Python `re` | 16 | 4 | 12 |
+| Java | 8 | 1 | 7 |
+| Node | 7 | 1 | 6 (rule B, and it clears a repeated atom's groups on every pass) |
 
-- **Keep upstream's rule.** Pros: the port stays faithful to upstream, which is its contract;
-  Onigmo agrees; the rule terminates because only a span change counts; it is what makes entry 33's
-  conditional case work, and the fuzzy recommendation above reuses it. Cons: differs from Perl,
-  PCRE2 and .NET, so a pattern ported from those engines can match where it did not.
-- **Follow Perl and PCRE2 (position only).** Pros: matches the most widely used engines. Cons:
-  changes exact-matching answers upstream gives, so it is a divergence the port would have to
-  justify as a bug fix, and it is not clearly a bug: upstream counts the change on purpose
-  (`same_span_as_group`), and no specification forbids it.
+So two engines count the change as progress and five do not. A head count is not the answer,
+though: the position-only engines do not agree with each other (PCRE2 matches k05 and Perl does
+not; `re` matches k03, k10 and k14 and PCRE2 does not), and they disagree with themselves across
+quantifiers.
 
-Provisional lean: keep upstream's rule and pin the table above as tests, since this is a
-difference of design rather than a demonstrable bug. No decision is needed for the fuzzy
-recommendation, which works under either answer.
+**The principle.** Every engine's empty-iteration check exists to stop an infinite loop (perlre
+"Repeated Patterns Matching a Zero-length Substring"; ECMA-262 22.2.2.3.1 Note 4; pcre2pattern). A
+termination check is exact when it drops only paths that cannot lead anywhere new. After an
+empty pass that changed nothing the rest of the pattern can observe, the next pass starts from the
+same position with the same tested groups, so it can only repeat itself, and dropping it loses
+nothing. After an empty pass that changed a tested group, the next pass starts from a different
+state and can match something new: in k01 the second pass can read the `c` that the first could
+not. Dropping it loses a real match.
+
+The check also has to respect a basic law of repetition: whatever `X{2,}`, `X+` or `X{0,5}`
+matches, `X*` matches too, since `*` allows every count those allow. Position-only checking breaks
+that law. Over `c`, Perl, PCRE2 and .NET match `^(?:(?(1)c|z)|()){2,}$` (k04) and
+`^(?:\1|(?=(c))){2,}$` (b07) but not the same bodies under `*` (k01, b03); PCRE2 matches the
+`{0,5}` form (k05) but not `*`; `re` matches `+` (k03) but not `*`. Upstream and the port give the
+same answer for every quantifier on every row.
+
+Perl documents its behaviour: `(?: NON_ZERO_LENGTH | ZERO_LENGTH )*` "is made equivalent to"
+`(?: NON_ZERO_LENGTH )* (?: ZERO_LENGTH )?`. That equivalence is exactly what loses k01's match,
+because the zero-length branch is what makes the non-zero-length branch possible. So Perl's answer
+is a deliberate design, but one that trades correctness for simplicity; .NET's "never repeat after
+an empty match when the minimum number of captures has been found" is the same trade.
+
+**The decision.** Keep upstream's rule: in exact matching, an empty iteration that changed the
+span of a tested group is progress, and the repeat may go round again. It is the rule that loses
+no match through its termination check, keeps `X*` a superset of `X{n,}`, and is also the rule the
+fuzzy "needed" recommendation above builds on (its part (c)). The port already implements it
+(`src/FuzzyRegex/Engine/Matcher.cs:7606`, greedy, and `:7817`, lazy), so D12 needs no engine
+change. The port differs from Perl, PCRE2, .NET and `re` on these patterns and says so in
+`docs/COMPARISON.md`; it does not differ from upstream, so there is no ledger or DIVERGENCES entry.
+
+Pinned by `tests/FuzzyRegex.Tests/Gaps/Engine/EmptyIterationGroupProgressTests.cs` (the k and b
+rows, the `*`-superset law and the controls). Witness: with the group half removed from the greedy
+check (`bool changed = state.TextPos != rpData.Start;` at `:7606`) 19 of its 27 cases fail; with it
+removed from the lazy check (`:7817`) 4 fail (the `*?` rows and the law test); the controls pass
+under both.
+
+**What the rule still lacks: termination when a group cycles (D17).** Upstream's rule counts any
+span change, so a pass that flips a tested group between two spans at one position is progress
+for ever. `^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a)))*$` over `ab` sets `g` to (0,1), then (0,2),
+then (0,1) again, and so on. Upstream raises MemoryError after 1.4 s; the port exhausts its 1 GB
+backtrack stack after 9 s; PCRE2 (with `(?J)`) and Perl answer no match at once, which is right,
+since no pass reads text and `$` cannot hold at 0. This is the lookaround case part (c) of the
+"needed" rule predicted above. The right rule is the one the reference matcher already uses: a
+tested group state already seen in the current run of empty iterations at this position is not a
+change. It is a separate defect (D17 in `docs/KNOWN-DEFECTS.md`, red test in `OpenDefectTests`),
+because it needs a per-run record of group states, which is the same machinery as the fuzzy repeat
+memo and should be designed with it.
 
 ## Reproducing
 
@@ -762,7 +836,8 @@ recommendation, which works under either answer.
 - `python tools/probes/empty-iteration-survey/needed_sweeps.py [s1 s2 s3 s4 s5 s4cap rand modes counts tre]`:
   the sweeps, the rule comparison, the count comparison (also written to `needed_counts.tsv`) and
   the TRE comparison (`tre_batch.c`, built in WSL).
-- `python tools/probes/empty-iteration-survey/capture_progress.py`: the open-question table.
+- `python tools/probes/empty-iteration-survey/capture_progress.py`: the D12 table. Set `PORT_PROBE` to the
+  path of `port-probe.cs` (`git show 8dda4d9:tools/probes/port-probe.cs`) to add the port's column.
 - The reference matcher's modes: set `EMPTY_DELETION_ITERATIONS` to `"perl"` (the default, rule A),
   `"reject"` (C), `"minimum"` (B), `"needed"` (N) or `"unrestricted"`.
 

@@ -6,14 +6,39 @@ on every engine available here; each line is: engine <TAB> pattern over subject 
 """
 import json, os, re, shutil, subprocess, sys, tempfile
 
+# (id, pattern, subject). k = tested by a conditional, b = tested by a backreference, u = untested
+# group (a control: every engine should agree). The {2,} and {0,5} rows check the law that X{2,}
+# and X{0,5} match nothing X* cannot.
 CASES = [
-    (r"^(?:(?(1)c|z)|())*$", "c"),
-    (r"(?:(?(1)c|z)|())*$", "c"),
-    (r"^(?:(?(1)c|z)|())+$", "c"),
-    (r"^(?:(?(1)c|z)|()){2,}$", "c"),
-    (r"^(?:\1c|())*$", "c"),
-    (r"^(?:(?(2)c|z)|(a)|())*$", "c"),
+    ("k01", r"^(?:(?(1)c|z)|())*$", "c"),
+    ("k02", r"(?:(?(1)c|z)|())*$", "c"),
+    ("k03", r"^(?:(?(1)c|z)|())+$", "c"),
+    ("k04", r"^(?:(?(1)c|z)|()){2,}$", "c"),
+    ("k05", r"^(?:(?(1)c|z)|()){0,5}$", "c"),
+    ("k06", r"^(?:(?(1)c|z)|())*$", "cc"),
+    ("k07", r"^(?:(?(2)c|z)|(a)|())*$", "c"),
+    ("k08", r"^(?:()|(?(1)c|z))*$", "c"),
+    ("k09", r"^(?:(?(1)c|z)|())*?$", "c"),
+    ("k10", r"^(?:(?(1)c|z)|())+?$", "c"),
+    ("k11", r"^(?:(?(1)c|z)|())*+$", "c"),
+    ("k12", r"^(?>(?:(?(1)c|z)|())*)$", "c"),
+    ("k13", r"^(?:(?:(?(1)c|z)|())*)*$", "c"),
+    ("k14", r"^(?:(?:(?(1)c|z)|())+)*$", "c"),
+    ("k15", r"^(?:(?(1)c|z)|(()))*$", "c"),
+    ("k16", r"^(?:(?(1)c|z)|())*$", ""),
+    ("b01", r"^(?:\1c|())*$", "c"),
+    ("b02", r"^(?:(?=(c))|\1)*$", "c"),
+    ("b03", r"^(?:\1|(?=(c)))*$", "c"),
+    ("b04", r"^(?:\1|(?=(c)))*?$", "c"),
+    ("b05", r"^(?:\1|(?=(c)))*+$", "c"),
+    ("b06", r"^(?:(?:\1|(?=(c)))*)*$", "c"),
+    ("b07", r"^(?:\1|(?=(c))){2,}$", "c"),
+    ("b08", r"^(?:\1|(?=(c)))+$", "c"),
+    ("u01", r"^(?:(c)|())*$", "c"),
+    ("u02", r"(?:(b|))*", "bba"),
+    ("u03", r"^(?:(?=(c))|c)*$", "c"),
 ]
+PAIRS = [(p, s) for _, p, s in CASES]
 
 
 def show(span, g1):
@@ -23,7 +48,7 @@ def show(span, g1):
 def py_engines():
     import regex
     for name, mod in (("re " + sys.version.split()[0], re), ("regex " + regex.__version__, regex)):
-        for p, s in CASES:
+        for p, s in PAIRS:
             try:
                 m = mod.search(p, s)
                 r = show(m and m.span(), m and (repr(m.group(1)) if m.group(1) is not None else "unset"))
@@ -32,10 +57,10 @@ def py_engines():
             print(f"{name}\t{p} over {s!r}\t{r}")
     try:
         import pcre2
-        for p, s in CASES:
+        for p, s in PAIRS:
             try:
                 m = pcre2.compile(p).search(s)
-                r = "nomatch" if m is None else f"span={m.start()},{m.end()}"
+                r = show(m and m.span(), m and (repr(m.group(1)) if m.group(1) is not None else "unset"))
             except Exception as e:
                 r = "error: " + str(e)[:60]
             print(f"PCRE2 (pip pcre2)\t{p} over {s!r}\t{r}")
@@ -58,7 +83,7 @@ def main():
     tmp = tempfile.mkdtemp()
     data = os.path.join(tmp, "cases.json")
     with open(data, "w", encoding="utf-8") as f:
-        json.dump(CASES, f)
+        json.dump(PAIRS, f)
     perl = r'''
 use JSON::PP; local $/; open my $f, "<", $ARGV[0]; my $c = decode_json(<$f>);
 for my $x (@$c) { my ($p, $s) = @$x; my $r;
@@ -83,12 +108,12 @@ public class Cp { public static void main(String[] a) throws Exception {
           r = m.find() ? "span=" + m.start() + "," + m.end() + " g1=" + (m.group(1) == null ? "unset" : "'" + m.group(1) + "'") : "nomatch"; }
     catch (Exception e) { r = "error: " + e.getMessage().split("\\R")[0]; }
     System.out.println("java " + System.getProperty("java.version") + "\t" + x[0] + " over '" + x[1] + "'\t" + r); } } }
-''' % ", ".join("{%s, %s}" % (json.dumps(p), json.dumps(s)) for p, s in CASES))
+''' % ", ".join("{%s, %s}" % (json.dumps(p), json.dumps(s)) for p, s in PAIRS))
     run(["java", java])
     cs = os.path.join(tmp, "Cp.cs")
     with open(cs, "w", encoding="utf-8") as f:
         f.write('using System.Text.RegularExpressions;\nvar c = new (string, string)[] { %s };\n' %
-                ", ".join("(%s, %s)" % (json.dumps(p), json.dumps(s)) for p, s in CASES) + r'''
+                ", ".join("(%s, %s)" % (json.dumps(p), json.dumps(s)) for p, s in PAIRS) + r'''
 foreach (var (p, s) in c) { string r;
   try { var m = new Regex(p).Match(s);
         r = m.Success ? $"span={m.Index},{m.Index + m.Length} g1={(m.Groups[1].Success ? "'" + m.Groups[1].Value + "'" : "unset")}" : "nomatch"; }
@@ -100,8 +125,48 @@ foreach (var (p, s) in c) { string r;
         rb = ('require "json"; JSON.parse(STDIN.read).each { |p, s| r = begin m = Regexp.new(p).match(s); '
               'm.nil? ? "nomatch" : "span=#{m.begin(0)},#{m.end(0)} g1=#{m[1].nil? ? "unset" : "\'" + m[1] + "\'"}"\n'
               'rescue => e; "error: #{e.message[0, 60]}" end; puts "ruby #{RUBY_VERSION} (Onigmo)\\t#{p} over \'#{s}\'\\t#{r}" }')
-        run(["wsl", "-d", "Ubuntu", "--", "ruby", "-e", rb], input=json.dumps(CASES))
+        run(["wsl", "-d", "Ubuntu", "--", "ruby", "-e", rb], input=json.dumps(PAIRS))
+
+    probe = os.environ.get("PORT_PROBE")  # path to port-probe.cs (git show 8dda4d9:tools/probes/port-probe.cs)
+    if probe:
+        rows = os.path.join(tmp, "rows.jsonl")
+        with open(rows, "w", encoding="utf-8") as f:
+            for p, s in PAIRS:
+                f.write(json.dumps({"pattern": p, "subject": s, "operation": "search"}) + "\n")
+        r = subprocess.run(["dotnet", "run", probe, "--", rows], capture_output=True, text=True, timeout=600)
+        for line in r.stdout.splitlines():
+            op, p, s, ans = line.split("\t")[:4]
+            p, s = json.loads(p), json.loads(s)
+            m = re.match(r"\((\d+),(\d+)\)", ans)
+            res = "nomatch" if ans == "None" else f"span={m.group(1)},{m.group(2)}" if m else "error: " + ans[:60]
+            print(f"port FuzzyRegex\t{p} over {s!r}\t{res}")
+
+
+def table(raw):
+    """Pivots the raw lines into a markdown table: one row per case, one column per engine."""
+    ids = {f"{p} over {s!r}": i for i, p, s in CASES}
+    cols, cells = [], {}
+    for line in raw.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or parts[1] not in ids:
+            continue
+        eng = parts[0].split()[0]
+        if eng not in cols:
+            cols.append(eng)
+        r = parts[2]
+        cells[ids[parts[1]], eng] = "none" if r == "nomatch" else "err" if r.startswith("error") else r.split()[0][5:]
+    print("| id | pattern | subject | " + " | ".join(cols) + " |")
+    print("|---" * (3 + len(cols)) + "|")
+    for i, p, s in CASES:
+        pe = p.replace("|", "\\|")
+        print(f"| {i} | `{pe}` | `{s}` | " + " | ".join(cells.get((i, c), "?") for c in cols) + " |")
 
 
 if __name__ == "__main__":
-    main()
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        main()
+    sys.stdout.write(buf.getvalue())
+    print()
+    table(buf.getvalue())

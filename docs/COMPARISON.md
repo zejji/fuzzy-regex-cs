@@ -420,6 +420,26 @@ folding itself belongs to version 1, so either of those turns it off and leaves 
 folding behind. The Turkic `I` pairings are the one fold upstream applies that this port does not;
 see "**The Turkic `I` pairings are not applied by default**" below.
 
+### A repeat pass that matched nothing but changed a tested group goes round again
+
+Every backtracking engine stops a repeat whose pass matched no text, or `(a?)*` would loop for
+ever. The built-in engine, like Perl and PCRE2, looks only at the position: a pass that read nothing
+ends the repeat. Here, as upstream, a pass that read nothing but changed a group that a conditional
+or backreference later tests counts as progress, because the next pass can now match something the
+first could not.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Pass 1 cannot read 'c' (group 1 unset), so it sets group 1 and reads nothing; pass 2 reads 'c'.
+Console.WriteLine(FuzzyRegex.Match("c", @"^(?:(?(1)c|z)|())*$").Success);   // True
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("c", @"^(?:(?(1)c|z)|())*$"));   // False - the repeat stops after pass 1
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("c", @"^(?:(?(1)c|z)|()){2,}$"));   // True - so there, {2,} matches what * does not
+```
+
+The rule keeps `X*` matching everything `X{2,}` matches, which position-only checking does not.
+The survey and the reasoning are in `docs/plan/2026-09-26-empty-iteration-survey.md` (D12).
+
 ## Behaviour that differs and why
 
 One section per SHIPPED row in `docs/DIVERGENCES.md`, quoting each row's heading exactly. See that
