@@ -142,7 +142,8 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
     // the maximum check alone ((1, 4) found first), the third with the equal-cost check alone
     // (None), and the fourth with the only-section check alone (None). The minimum check has no
     // witness yet: `(?fi)(?:st){1<=s,e<=1}` fullmatched over 'ßt' finds nothing with or without
-    // it, which is known defect D9's order of meeting a minimum.
+    // it, which is known defect D9's order of meeting a minimum. Upstream: None for the first,
+    // third and fourth rows; (1, 4) with (2, 0, 0) for the second, a different valid match.
     [Test]
     [Arguments("(?efi)(?:stst){s<=2,i<=1}", "ßfﬆﬁ", "fullmatch", 0, 4, 2, 1, 0)]
     [Arguments("(?fi)(?:sstt){s<=2,i<=1}", "ﬆxﬆǰx", "search", 0, 4, 2, 1, 0)]
