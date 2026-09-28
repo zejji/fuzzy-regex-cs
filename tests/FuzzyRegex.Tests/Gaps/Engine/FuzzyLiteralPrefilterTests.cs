@@ -143,10 +143,11 @@ public sealed class FuzzyLiteralPrefilterTests
     public void Text_the_branches_share_is_part_of_every_branch_s_literal()
     {
         // The optimiser moves a common prefix out of the branches, and a branch can sit inside the
-        // literal; either way each whole literal is cut, not the branch alone.
+        // literal; either way each whole literal is cut, not the branch alone. A piece two literals
+        // share, 'amber ' here, is searched for once.
         Build("(?:amber lantern works|amber stone archive){e<=2}")
             .FuzzyLiteralFilter!.Pieces.Should()
-            .Equal("amber ", "lanter", "n works", "amber ", "stone ", "archive");
+            .Equal("amber ", "lanter", "n works", "stone ", "archive");
         Build("(?:amber (?:lantern|stone) works){e<=1}")
             .FuzzyLiteralFilter!.Pieces.Should()
             .Equal("amber lan", "tern works", "amber st", "one works");
@@ -174,7 +175,89 @@ public sealed class FuzzyLiteralPrefilterTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
+    public void A_fuzzy_run_holding_a_sharp_s_keeps_its_filter()
+    {
+        // Ledger entry 49 gives the run a second arm that reads the 'ß' as one character. Both arms
+        // are the one literal 'strasse lane', cut only between pattern characters, so never inside
+        // the 'ss' that is the 'ß'.
+        FuzzyLiteralFilter? filter = Build("(?fi)(?:straße lane){e<=1}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter.Pieces.Should().Equal("strass", "e lane");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_run_of_many_expanding_characters_is_one_literal_cut_between_them()
+    {
+        // Enumerating each 'ß's choice of itself or its folding gave 2^8 + 1 literals, more pieces
+        // than MaxPieces, and the filter went off from four on (the blind review of 251afa0). Eight
+        // characters, k = 2: three pieces of 2, 3 and 3 characters, never half an 'ss'.
+        FuzzyLiteralFilter? filter = Build("(?fi)(?:ßßßßßßßß){e<=2}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter.Pieces.Should().Equal("ssss", "ssssss");
+        filter.Offsets.Should().Equal(0, 10);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [SkipUnderStryker]
+    public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
+    {
+        // 6,165 ms without the filter on Release, 1.7 ms before ledger entry 49 (the blind review
+        // of 251afa0). The budget is loose enough for a Debug build under load.
+        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}");
+        string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        int count = regex.Matches(subject).Count;
+
+        clock.Stop();
+        count.Should().Be(0);
+        clock.ElapsedMilliseconds.Should().BeLessThan(500);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    // Ledger entry 49; the expected values are this port's, argued there. Upstream: None for the
+    // first three, and (0, 12) with one substitution for the last, regex 2026.9.10, 2026-09-28.
+    // The whole 'ß' substituted, next to a piece the search finds.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "straxe lane", "(0,11) 1,0,0")]
+    // The whole 'ß' deleted.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "strae lane", "(0,10) 0,0,1")]
+    // The only untouched piece is on the one-character path, and it is not the one holding 'ß'.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "a strae lane", "(2,12) 0,0,1")]
+    [Arguments("(?fi)(?:straße lane){e<=1}", "xtrasse lane", "(0,12) 1,0,0")]
+    public void A_sharp_s_edited_as_one_character_is_found_through_the_filter(
+        string pattern,
+        string subject,
+        string expected
+    )
+    {
+        Build(pattern).FuzzyLiteralFilter.Should().NotBeNull();
+        Search(pattern, subject).Should().Be(expected);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_lone_character_an_ascii_letter_equals_ignoring_case_switches_the_filter_off()
+    {
+        // Full case folding cuts 'oak strassK' after its 'ss', so KELVIN SIGN is a CHARACTER_IGN node
+        // of its own, and the engine pairs it with 'k'. The only piece the subject holds untouched is
+        // 'trassK', which an ordinal search does not see in 'trassk', so a filter would refuse the
+        // subject. Upstream: regex.search('(?i)(?:oak strassK){e<=1}', 'xak strassk', V1) ->
+        // span=(0, 11) counts=(1, 0, 0), regex 2026.9.10, 2026-09-28. 'é', which no ASCII letter
+        // equals, keeps the filter.
+        Build("(?i)(?:oak strassK){e<=1}").FuzzyLiteralFilter.Should().BeNull();
+        Search("(?i)(?:oak strassK){e<=1}", "xak strassk").Should().Be("(0,11) 1,0,0");
+        Build("(?i)(?:oak strassé){e<=1}").FuzzyLiteralFilter.Should().NotBeNull();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
     [Arguments("(?:café au lait){e<=1}")] // a literal that is not ASCII
+    [Arguments("(?i)(?:oak strass😀){e<=1}")] // a lone character outside the BMP is two code units
     [Arguments("(?:abcdef){e<=3}")] // pieces too short to be worth searching for
     [Arguments("(?:abcdefghijkl){i}")] // no bound on the errors at all
     [Arguments("(?:abcdefghijkl){2i+0d<=4}")] // a free deletion leaves the budget unbounded

@@ -87,6 +87,14 @@ internal sealed class Info
     /// </summary>
     internal bool UpstreamReverseGrapheme { get; init; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy full-case-folded run compiles
+    /// to its folding alone, as upstream's does, without the character-by-character reading of
+    /// ledger entry 49. The oracle sets it to show that the fix is the whole of a divergence; see
+    /// <see cref="String.UpstreamFoldingOnly"/>.
+    /// </summary>
+    internal bool UpstreamFoldedRuns { get; init; }
+
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
 

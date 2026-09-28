@@ -1469,6 +1469,21 @@ Console.WriteLine(new FuzzyRegex(@"(?:a\G|\Gb){i<=1}").MatchAtStart("ab").Length
 Console.WriteLine(new FuzzyRegex(@"(?:a\G){i<=1}").MatchAtStart("ab").Success);    // False - upstream: RuntimeError
 ```
 
+### A fuzzy run can edit `ß` or a ligature as one character
+
+Under full case folding `ß` matches `ss`, and a fuzzy section can also treat it as the one character
+it is: substitute it with one other character, or delete it. Upstream allows that only when the `ß`
+stands alone. Written next to other letters, it becomes its two-letter folding, and replacing it
+costs two edits. This port treats both the same way.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ß){s<=1}x").Match("ax").Length); // 2 - upstream: 2
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){s<=1}").Match("ax").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){d<=1}").Match("x").Length);  // 1 - upstream: no match
+```
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

@@ -35,16 +35,22 @@ public sealed class OpenDefectTests
         new FuzzyRegex("(?:(?:b?)*){d<=1}").FullMatch("a").Success.Should().BeFalse();
     }
 
-    // Queue item 6 (checklist item 17). Upstream lets the fully folded 'ß' item be substituted by
-    // one character: `(?fi)(?:ß){s<=1}` over 'a' is (0, 1) with counts (1, 0, 0). The same
-    // substitution followed by an exact 'x' must then match 'ax'. Upstream: None.
+    // Found 2026-09-28 beside ledger entry 49, the subject-side twin of that fix. U+01F0 folds to
+    // two characters, j and U+030C, and a STRING_FLD substitution consumes one folded character of
+    // the subject, so replacing the first pattern letter with it costs two edits. The same
+    // substitution in a section that covers only that letter is one: `(?fi)(?:s){s<=1}sx` over
+    // 'ǰsx' and `(?fi)s(?:s){s<=1}x` over 'sǰx' are (0, 3) with counts (1, 0, 0) in both engines,
+    // and a wider section cannot match less. Upstream: None for both rows below (regex 2026.9.10,
+    // 2026-09-28).
     [Test]
-    public void A_substituted_fully_folded_sharp_s_can_be_followed_by_more_pattern()
+    [Arguments("ǰsx")]
+    [Arguments("sǰx")]
+    public void A_substituted_expanding_subject_character_costs_one_edit_in_a_folded_run(string text)
     {
-        Match m = new FuzzyRegex("(?fi)(?:ßx){s<=1}").Match("ax");
+        Match m = new FuzzyRegex("(?fi)(?:ssx){s<=1}").Match(text);
 
         m.Success.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 2));
+        (m.Index, m.Length).Should().Be((0, 3));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
 
