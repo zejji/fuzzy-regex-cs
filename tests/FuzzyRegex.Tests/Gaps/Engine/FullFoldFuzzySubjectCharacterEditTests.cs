@@ -135,6 +135,30 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
         int deletions
     ) => ShouldMatch(pattern, text, "fullmatch", index, length, new FuzzyCounts(substitutions, insertions, deletions));
 
+    // Matcher.WholeSubstitutionRepeatsAFoldedInsertion leaves out a whole substitution only when
+    // nothing can tell it from the folded insertion already tried. Each row goes red with one of
+    // its checks removed (measured 2026-09-28): the first when the section's limits are not both
+    // at least the error maximum and the ENHANCEMATCH check is gone too (None), the second with
+    // the maximum check alone ((1, 4) found first), the third with the equal-cost check alone
+    // (None), and the fourth with the only-section check alone (None). The minimum check has no
+    // witness yet: `(?fi)(?:st){1<=s,e<=1}` fullmatched over 'ßt' finds nothing with or without
+    // it, which is known defect D9's order of meeting a minimum.
+    [Test]
+    [Arguments("(?efi)(?:stst){s<=2,i<=1}", "ßfﬆﬁ", "fullmatch", 0, 4, 2, 1, 0)]
+    [Arguments("(?fi)(?:sstt){s<=2,i<=1}", "ﬆxﬆǰx", "search", 0, 4, 2, 1, 0)]
+    [Arguments("(?fi)(?:stsst){1s+2i<=4}", "ßßisß", "fullmatch", 0, 5, 4, 0, 0)]
+    [Arguments("(?fi)(?:(?:st){e<=2}){1<=s<=2,e<=3}", "ßs", "fullmatch", 0, 2, 2, 0, 0)]
+    public void A_whole_substitution_is_left_out_only_where_it_repeats_a_folded_insertion(
+        string pattern,
+        string text,
+        string operation,
+        int index,
+        int length,
+        int substitutions,
+        int insertions,
+        int deletions
+    ) => ShouldMatch(pattern, text, operation, index, length, new FuzzyCounts(substitutions, insertions, deletions));
+
     // Controls, where upstream is already right: deletions alone cannot absorb a subject character,
     // and a pattern ß replaced by a subject ǰ is ledger entry 49's character reading.
     [Test]

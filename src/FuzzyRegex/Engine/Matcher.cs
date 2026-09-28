@@ -5048,7 +5048,9 @@ internal static class Matcher
     /// 21.4 ms, so running an attempt twice would cost about 96, 312 and 47 ms. Over ASCII text,
     /// where no folding is longer than one character, the two fuzzy searches take 4.47 against
     /// 4.27 ms and 30.7 against 28.8 ms, the same spread as an exact search this change does not
-    /// touch (8.66 against 8.34 ms).
+    /// touch (8.66 against 8.34 ms). Denser text costs more: where 8 of every 11 characters
+    /// expand, <c>{e&lt;=2}</c> is 35% slower and <c>{s&lt;=1}</c> 19% (the blind review's
+    /// measurement, 2026-09-28).
     /// </para>
     /// </remarks>
     internal const int FoldWholeSub = FuzzyValue.Count;
