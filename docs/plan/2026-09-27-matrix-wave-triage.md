@@ -97,6 +97,23 @@ A side observation, not a wave row: without `(?p)` or `(?e)`, `(?:a?){d<=1}` ove
 deletion on upstream and on `main`, and none on the F-A tree. The F-A branch's own oracle run should
 account for that change.
 
+## After the `\G` fix (2026-09-28)
+
+Q2 is fixed on `maint/g-anchor` (ledger 48), and the oracle entry `fuzzy-search-anchor-backtracked`
+classifies its rows. The same three matrix waves (`-Generator matrix -Count 3000`), re-run with it:
+
+| Seed | "invalid RE code" rows, before / after | DIVERGE, before / after | EXPECTED, before / after |
+|---|---|---|---|
+| 7 | 3 / 3 | 4 / 1 | 7 / 10 |
+| 4242 | 2 / 2 | 4 / 2 | 4 / 6 |
+| 20260927 | 2 / 2 | 3 / 1 | 3 / 5 |
+
+Upstream still raises on every Q2 row, so their count is unchanged. None of them diverges now: each
+is EXPECTED. The four DIVERGE rows left are all in the table above: 7:2677 (BESTMATCH cost), 4242:1352 and
+20260927:197 (ledger 9), and 4242:1719 (the call guard).
+The default wave at seeds 7, 4242 and 20260927 gives diverge 0, 0 and 1, the 1 being row 3732 at
+20260927.
+
 ## Resource rows
 
 107 rows, every one upstream `MemoryError`. By shape: 105 contain a group call or `(?R)` (ledger

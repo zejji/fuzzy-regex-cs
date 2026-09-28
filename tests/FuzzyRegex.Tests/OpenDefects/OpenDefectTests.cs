@@ -17,16 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 [Explicit]
 public sealed class OpenDefectTests
 {
-    // Queue item 2. `\G` holds only at the search anchor, 0 here, where the text is 'z', so the exact
-    // tail `(?:x|(\Gab))` matches nowhere and nothing can match. The port throws
-    // NotImplementedException; upstream raises "RuntimeError: invalid RE code" for any `\G` inside a
-    // fuzzy section, so it has no answer to copy.
-    [Test]
-    public void A_search_anchor_inside_a_called_group_in_a_fuzzy_section_is_answered()
-    {
-        new FuzzyRegex(@"(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))").Match("zab").Success.Should().BeFalse();
-    }
-
     // Queue item 4 (checklist item 11). Neither subject contains the text the pattern needs after
     // the lazy repeat ('c'; 'ﬁİßx' under simple folding), so the answer is no match. Upstream:
     // MemoryError for the first, None for the second. The port exhausts its backtrack stack.

@@ -838,6 +838,69 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_search_anchor_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-search-anchor-backtracked`, named in that entry's own Reason. The
+        // entry accounts for one thing: upstream raised "invalid RE code" while matching a fuzzy
+        // pattern holding `\G`, and this port answered. Each refusal below changes exactly one of
+        // those, so a port error, a different upstream error, or the same error on a pattern the
+        // fix cannot reach all come back unaccounted.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "fuzzy-search-anchor-backtracked", StringComparison.Ordinal))
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            // The live half: the port answers, the row diverges, and this entry is what accounts for it.
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull("{0} -> [{1}]", row.Pattern, ours.Describe())
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("fuzzy-search-anchor-backtracked");
+
+            ExpectedDivergences
+                .For(
+                    row,
+                    new ErrorOutcome(
+                        "NotImplementedException",
+                        "the matcher has no SearchAnchor yet",
+                        WhileMatching: true
+                    )
+                )
+                .Should()
+                .BeNull("a port that throws has not answered");
+            ExpectedDivergences
+                .For(row, new CompiledButUnmatched())
+                .Should()
+                .BeNull("an unported seam is not an answer");
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new ErrorOutcome("RuntimeError", "internal error", WhileMatching: true),
+                    },
+                    ours
+                )
+                .Should()
+                .BeNull("upstream raised a different error");
+            ExpectedDivergences
+                .For(row with { Expected = new ErrorOutcome("RuntimeError", "invalid RE code") }, ours)
+                .Should()
+                .BeNull("upstream raised it compiling, not matching");
+            ExpectedDivergences
+                .For(row with { Pattern = row.Pattern.Replace(@"\G", @"\\G", StringComparison.Ordinal) }, ours)
+                .Should()
+                .BeNull("an escaped backslash before G is not a search anchor");
+        }
+    }
+
+    [Test]
     public void An_accounted_divergence_is_reported_but_does_not_fail_the_run()
     {
         // Half one: the wave loop reclassifies, tallies and renders it as EXPECTED rather than

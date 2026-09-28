@@ -4642,6 +4642,20 @@ internal static class Matcher
             return MatchStatus.Illegal;
         }
 
+        // The frame is fuzzy_match_item's, pushed with the item's own opcode (FuzzyMatchItem's
+        // PushUInt8((byte)node.Op)). A zero-width item pushed a step of 0 (the forward zero-width
+        // case's 'FuzzyMatchItem(state, search, ref node, 0)'), and with a step of 0 an insertion is
+        // the only error NextFuzzyMatchItem can take, so that is what the frame holds.
+        System.Diagnostics.Debug.Assert(
+            currNode is not null && (byte)currNode.Op == op,
+            "a fuzzy item frame carries its own opcode"
+        );
+        System.Diagnostics.Debug.Assert(advance || step == 0, "a zero-width item's frame carries a step of 0");
+        System.Diagnostics.Debug.Assert(
+            advance || poppedType == FuzzyValue.Ins,
+            "the only error a zero-width item can take is an insertion"
+        );
+
         state.TextPos = (int)poppedTextPos;
 
         FuzzyData data = default;
@@ -10266,6 +10280,9 @@ internal static class Matcher
                     break;
                 // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
                 // puts a step of 0 back into next_fuzzy_match_item.
+                // NOT UPSTREAM: SEARCH_ANCHOR is here too, ledger entry 48. Upstream's forward case
+                // (:14431) fuzzes a failed \G exactly like the others, but its list here omits it, so
+                // backtracking over that insertion raises "invalid RE code".
                 case Opcode.Boundary:
                 case Opcode.DefaultBoundary:
                 case Opcode.DefaultEndOfWord:
@@ -10277,6 +10294,7 @@ internal static class Matcher
                 case Opcode.EndOfStringLineU:
                 case Opcode.EndOfWord:
                 case Opcode.GraphemeBoundary:
+                case Opcode.SearchAnchor:
                 case Opcode.StartOfLine:
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:

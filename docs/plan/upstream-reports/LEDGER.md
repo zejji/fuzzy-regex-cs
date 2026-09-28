@@ -4624,3 +4624,37 @@ answer moves from one PCRE2 disagreement to another: this port's partial rule is
 PARTIAL_SOFT, and about 80 partial rows per seed differ from it before and after). 20,000 verb-free rows answer identically before and after.
 `ledger-reproductions.jsonl` re-checks upstream's answer to the first row above, and the oracle entry
 `verb-unwinds-through-unfinished-groups` keys on `PatternObject.VerbsAreConfinedToTheInnermostGroup`.
+
+## 48. A `\G` that fails inside a fuzzy section raises "invalid RE code" once its insertion is backtracked over - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found 2026-09-27 by the interaction-matrix wave: 7
+rows over seeds 7, 4242 and 20260927, every "invalid RE code" row the saved waves hold, all with
+`\G` in a fuzzy section.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+match(r'(?:a\G){i<=1}', 'ab')                  -> RuntimeError: invalid RE code   expected None
+match(r'(?:a\G|\Gb){i<=1}', 'ab')              -> RuntimeError: invalid RE code   expected (0, 2), one insertion
+search(r'(?:a\Gb|\Gab){i<=1}', 'zab', pos=1)   -> RuntimeError: invalid RE code   expected (1, 3)
+search(r'(?r)(?:\Gab|ab\G){i<=1}', 'xab')      -> RuntimeError: invalid RE code   expected (1, 3)
+search(r'(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))', 'zab') -> RuntimeError: invalid RE code   expected None
+match(r'(?:\Gb){i<=1}', 'ab')                  -> (0, 2), one insertion (the control: no backtrack over the insertion)
+```
+
+**Why upstream is wrong.** The forward matcher fuzzes a failed `SEARCH_ANCHOR` like every other
+zero-width item (`_regex.c:14431`), pushing a retry frame, but the backtrack switch's zero-width
+list (`:15330-15344`) omits `SEARCH_ANCHOR`, so popping that frame reaches the switch's default and
+raises. There is no semantic question to settle: PCRE2 10.47, .NET 10.0.12 and upstream's own exact
+matcher agree that `\G` holds only at the position the search started from, honours `pos`, and
+holds at the end under right-to-left (`tools/probes/search-anchor-survey/`, measured 2026-09-27). An
+error cannot make a zero-width assertion true - deletion and substitution need a character, and an
+insertion only moves away from the anchor - so a fuzzy `\G` means what an exact one does.
+
+**Proposed fix upstream:** add `case RE_OP_SEARCH_ANCHOR:` to the zero-width block at `:15330`.
+
+**This port.** `Opcode.SearchAnchor` joins the zero-width block of the backtrack switch in
+`src/FuzzyRegex/Engine/Matcher.cs`. Pinned by the seven `\G` cases in
+`Gaps/Engine/FuzzyMatchingTests`; the oracle entry `fuzzy-search-anchor-backtracked` classifies
+rows where upstream raises this error and this port answers.
