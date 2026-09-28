@@ -595,6 +595,19 @@ internal sealed class PatternObject
     internal bool SkipExactDeletionRetry;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a lookaround that fails in a fuzzy
+    /// section is never passed by an insertion, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the ledger entry 50 fix is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes a failing <c>\b</c> or <c>$</c> (<c>upstream/src/_regex.c</c>:12060-12075) but
+    /// not a failing lookaround (:12918-13000, :17115-17168), so <c>(?:b(?=c)){i&lt;=1}</c> finds
+    /// nothing in <c>bxc</c>. See <c>Matcher.InsertBeforeAFailedLookaround</c>.
+    /// </remarks>
+    internal bool SkipLookaroundInsertion;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a repeat's end reads progress as
     /// upstream does, counting any fuzzy edit, even one since undone, and stopping at the end of the
     /// slice, instead of the "needed" rule and the repeat memo. The oracle sets it on a pattern it

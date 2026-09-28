@@ -213,7 +213,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
-    /// <see cref="RunWithTheUpstreamSkipTiming"/> and <see cref="RunWithTheUpstreamVerbScope"/> and by
+    /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/> and
+    /// <see cref="RunWithoutTheLookaroundInsertion"/> and by
     /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
@@ -671,6 +672,30 @@ internal static class OracleComparer
                 compiled.PatternObject.UpstreamEmptyIterations = true;
                 compiled.PatternObject.SkipExactDeletionRetry = true;
             }
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the ledger entry 50 lookaround insertion switched off.
+    /// </summary>
+    /// <remarks>
+    /// Upstream never fuzzes a lookaround that fails, so <c>(?:b(?=c)){i&lt;=1}</c> finds nothing in
+    /// 'bxc'. Setting <c>PatternObject.SkipLookaroundInsertion</c> stops every such insertion, which
+    /// is the whole of the fix. The <c>fuzzy-insertion-before-a-failing-lookaround</c> entry keys on
+    /// this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheLookaroundInsertion(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true
         );
     }
 

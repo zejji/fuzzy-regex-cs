@@ -332,4 +332,12 @@ internal enum Opcode : uint
     /// repeat applies to an empty iteration (<c>Matcher.OptionalPassAdmitted</c>).
     /// </summary>
     EndOptionalPass = 98,
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 50). Engine-only, and never a node: the backtrack tag of an
+    /// insertion made in front of a lookaround that failed in a fuzzy section. The lookaround's own
+    /// opcode already tags its frame, so the insertion needs a tag of its own
+    /// (<c>Matcher.FuzzyFrameOp</c>).
+    /// </summary>
+    FuzzyLookaround = 99,
 }

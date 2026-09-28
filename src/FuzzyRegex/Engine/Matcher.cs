@@ -5616,7 +5616,7 @@ internal static class Matcher
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(state.TextPos);
         state.Bstack.PushUInt8((byte)data.FuzzyType);
-        state.Bstack.PushUInt8((byte)node.Op);
+        state.Bstack.PushUInt8(FuzzyFrameOp(node));
 
         /* bstack: node step text_pos fuzzy_type op */
 
@@ -5629,6 +5629,61 @@ internal static class Matcher
         node = data.NewNode!;
 
         return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// The tag <see cref="FuzzyMatchItem"/> pushes above its frame: the item's own opcode, except for
+    /// a lookaround, whose opcode already tags the lookaround's frame (ledger entry 50).
+    /// </summary>
+    /// <param name="node">The item being fuzzed.</param>
+    /// <returns>The opcode the backtrack switch dispatches the frame on.</returns>
+    private static byte FuzzyFrameOp(Node node) =>
+        node.Op == Opcode.Lookaround ? (byte)Opcode.FuzzyLookaround : (byte)node.Op;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 50): a lookaround in a fuzzy section that has failed as a whole is
+    /// fuzzed as the zero-width item it is, so an inserted text character can move it one place on.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes every other failing zero-width assertion this way (<c>\b</c> at
+    /// <c>upstream/src/_regex.c</c>:12060-12075, <c>$</c> at :13052-13062), but a positive lookaround
+    /// whose body has run out of choices just carries on backtracking (:17115-17168), and a negative
+    /// one whose body matched goes straight to <c>backtrack</c> (:12918-13000). Called at those two
+    /// places, after the lookaround's block is popped, so the text position, the fuzzy counts and the
+    /// captures are what they were when the lookaround started. On success the insertion leaves
+    /// <paramref name="node"/> on the lookaround, which then starts again one character on; its retry
+    /// is the zero-width one (<see cref="Opcode.FuzzyLookaround"/> in the backtrack switch), where
+    /// only deletion and substitution are left, and neither applies to a step of 0.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, the lookaround, to be matched again.</param>
+    /// <param name="lookaround">The lookaround that failed, in a fuzzy section.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int InsertBeforeAFailedLookaround(MatchState state, bool search, ref Node node, Node lookaround)
+    {
+        // The callers test the fuzzy flag themselves, so a lookaround outside a fuzzy section pays a
+        // bit test and no call.
+        Debug.Assert(lookaround.Op == Opcode.Lookaround, "only a lookaround's own node is fuzzed here");
+        Debug.Assert((lookaround.Status & NodeStatus.Fuzzy) != 0, "the caller tested the fuzzy flag");
+
+        if (state.Pattern.SkipLookaroundInsertion)
+        {
+            return MatchStatus.Failure;
+        }
+
+        Node at = lookaround;
+        int status = FuzzyMatchItem(state, search, ref at, 0);
+
+        if (status == MatchStatus.Success)
+        {
+            // A step of 0 rules out deletion and substitution (NextFuzzyMatchItem), so the error was
+            // an insertion, which leaves the item where it was.
+            Debug.Assert(ReferenceEquals(at, lookaround), "an insertion does not move past the item");
+            node = at;
+        }
+
+        return status;
     }
 
     /// <summary>Upstream <c>retry_fuzzy_match_item</c> (line 10262): the next kind of error.</summary>
@@ -9151,6 +9206,22 @@ internal static class Matcher
                             return MatchStatus.Illegal;
                         }
 
+                        // NOT UPSTREAM (ledger entry 50): try an insertion in front of it first.
+                        if ((endLookNode.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            status = InsertBeforeAFailedLookaround(state, search, ref node, endLookNode);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Success)
+                            {
+                                break;
+                            }
+                        }
+
                         // Go to the 'false' branch.
                         goto backtrack;
                     }
@@ -11578,6 +11649,7 @@ internal static class Matcher
                     break;
                 // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
                 // puts a step of 0 back into next_fuzzy_match_item.
+                case Opcode.FuzzyLookaround: // NOT UPSTREAM (ledger entry 50).
                 case Opcode.Boundary:
                 case Opcode.DefaultBoundary:
                 case Opcode.DefaultEndOfWord:
@@ -12842,6 +12914,23 @@ internal static class Matcher
                         // whole has succeeded.
                         node = lookNode.Next2.Node!;
                         goto advance;
+                    }
+
+                    // It's a positive lookaround that's failed. NOT UPSTREAM (ledger entry 50): try
+                    // an insertion in front of it before backtracking further.
+                    if ((lookNode.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        status = InsertBeforeAFailedLookaround(state, search, ref node, lookNode);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Success)
+                        {
+                            goto advance;
+                        }
                     }
 
                     break;

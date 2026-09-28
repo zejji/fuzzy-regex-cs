@@ -4855,3 +4855,56 @@ answer moves from one PCRE2 disagreement to another: this port's partial rule is
 PARTIAL_SOFT, and about 80 partial rows per seed differ from it before and after). 20,000 verb-free rows answer identically before and after.
 `ledger-reproductions.jsonl` re-checks upstream's answer to the first row above, and the oracle entry
 `verb-unwinds-through-unfinished-groups` keys on `PatternObject.VerbsAreConfinedToTheInnermostGroup`.
+
+## 50. A lookaround that fails inside a fuzzy section is never passed by an insertion - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D8, finding S3-F2 of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-50-lookaround-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?:b(?=c)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?!x)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?<=x)c){i<=1}', 'bxc')   -> None                       expected (0, 3), one insertion
+search(r'(?:b(?=c)){e<=1}', 'bxc')     -> (1, 2), one substitution   expected (0, 2), one insertion
+match(r'(?:(?=b)b){i<=1}', 'xb')       -> None                       expected (0, 2), one insertion
+search(r'(?r)(?:(?<=c)b){i<=1}', 'cxb') -> None                      expected (1, 3), one insertion
+search(r'(?:b\b){i<=1}', 'bx c')       -> (0, 2), one insertion      (the control: a \b is fuzzed)
+search(r'(?:ab(?=c)){i<=1}', 'abxc')   -> (0, 3), one insertion      (upstream passes it after a string)
+```
+
+**Why upstream is wrong.** An insertion is a text character the pattern does not account for
+(`upstream/README.rst:538-566`), and nothing restricts where it may stand. A lookaround consumes
+nothing, so it can be neither substituted nor deleted, and an insertion in front of it is the one
+error that can make it hold. Upstream applies exactly this to every other zero-width assertion: a
+failing `\b`, `$` or `\G` in a fuzzy section goes to `fuzzy_match_item` with a step of 0
+(`_regex.c:12060-12075`, `:13052-13062`), whose only possible error is an insertion. A lookaround
+never gets there: a positive one whose body has run out of choices just carries on backtracking
+(`RE_OP_LOOKAROUND` in the backtrack switch, `:17115-17168`), and a negative one whose body matched
+goes straight to `backtrack` (`RE_OP_END_LOOKAROUND`, `:12918-13000`). Upstream is not even
+consistent about lookarounds: after a multi-character string the string's own retry reaches the
+insertion, so `(?:ab(?=c)){i<=1}` over 'abxc' is (0, 3) with one insertion while `(?:b(?=c)){i<=1}`
+over 'bxc' is None. None of the engines the port's correctness survey uses (PCRE2, Python `re`,
+.NET, Perl, JavaScript) has fuzzy matching, so the question is settled from the definition and
+upstream's own `\b` rule.
+
+**Proposed fix upstream:** when a lookaround in a fuzzy section fails as a whole (the two places
+above), restore its text position, fuzzy counts and captures, as both places already do, then call
+`fuzzy_match_item(state, search, &node, 0)` with `node` the lookaround, and on success start the
+lookaround again at the new position. The retry frame needs a tag of its own, since
+`RE_OP_LOOKAROUND` already tags the lookaround's frame, and joins the zero-width block of the
+backtrack switch (`:15330-15344`).
+
+**This port.** `Matcher.InsertBeforeAFailedLookaround` in `src/FuzzyRegex/Engine/Matcher.cs`, called
+from both places; its retry frame is tagged `Opcode.FuzzyLookaround`. A lookaround outside a fuzzy
+section pays one bit test. Pinned by `Gaps/Engine/FuzzyLookaroundInsertionTests` (lookahead,
+lookbehind, positive and negative, reversed, captures, two insertions, every error kind, the search
+anchor rule). `tools/probes/fuzzy-reference-matcher.py` gained lookarounds (its rule 10), and
+`tools/probes/lookaround-insertion-grid.py` compares the port with it on a Debug build: 6,000 rows
+at seeds 50 and 7, 0 disagreements. The rule moves 16 to 36 rows of each of the four lookaround
+kinds at each seed, and all but 3 of the moved rows are upstream's answer once the reference drops
+rule 10 and entry 42's deletion (one is the string case above, two are entry 44's needed rule). The default oracle waves at seeds 7, 4242
+and 20260927 draw about 27 fuzzy lookaround rows each and move none. The oracle entry
+`fuzzy-insertion-before-a-failing-lookaround` keys on `PatternObject.SkipLookaroundInsertion`.

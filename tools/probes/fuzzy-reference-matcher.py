@@ -21,8 +21,9 @@ classes [abc] [^a] [a-c] and \d, '|', (?:...) and (...), greedy and lazy ?,
 {i<=a,s<=b,d<=c}, {d}, {1<=e<=2}, exclusive '<', cost equations
 {2i+2d+1s<=4}, the anchors ^ and $ (no MULTILINE), backreferences \1-\9
 (matched item by item, so a fuzzy section can edit them), conditionals
-(?(1)yes|no), and the verbs (*SKIP), (*PRUNE), (*FAIL) / (*F). No flags,
-lookarounds, atomic groups or fuzzy tests ({s<=1:[a-z]}).
+(?(1)yes|no), the verbs (*SKIP), (*PRUNE), (*FAIL) / (*F), and the
+lookarounds (?=...), (?!...), (?<=...) and (?<!...) (rule 10). No flags,
+atomic groups or fuzzy tests ({s<=1:[a-z]}).
 
 Order rules (citations are to upstream/src/_regex.c and upstream/README.rst
 of mrab-regex 2026.9.10):
@@ -72,6 +73,17 @@ of mrab-regex 2026.9.10):
    starts where the verb was executed (README.rst:209; perlre v5.42), or one
    character later if that is not past the current start. (*PRUNE) ends the
    attempt and the next starts one character later. (*FAIL) fails.
+10. A lookaround is atomic, and its body is exact even inside a fuzzy section
+   (the port compiles it so, src/FuzzyRegex/Parsing/Nodes.cs, and upstream
+   likewise, measured 2026-09-28: search "(?:b(?=c)){s<=1}" "bxc" is (1, 2)).
+   A lookbehind's body must end where the lookbehind stands; a capture-free
+   body is assumed, since the order of its candidate starts is not modelled.
+   THE REFERENCE RULE THAT UPSTREAM BREAKS (ledger entry 50): a lookaround
+   that fails is a zero-width item that failed, so inside a fuzzy section an
+   insertion is tried in front of it and the lookaround is tried again one
+   character on, as upstream does for  and $ (_regex.c:12060-12075). Rule 5
+   applies. Upstream never fuzzes a lookaround (_regex.c:12918-13000,
+   :17115-17168). LOOKAROUND_INSERTION = False gives upstream's behaviour.
 """
 
 import re
@@ -108,6 +120,9 @@ DELETE_AFTER_EXACT = True
 # as in "needed"); only the error budget stops it, so use it with finite limits.
 # It is the oracle the "needed" sweeps compare against.
 EMPTY_DELETION_ITERATIONS = "perl"
+# Rule 10 switch: False gives upstream's behaviour (a failing lookaround is
+# never passed by an insertion).
+LOOKAROUND_INSERTION = True
 # "unrestricted" only: the most empty iterations in a row at one position, for
 # patterns whose budget does not bound them (a fuzzy section inside the
 # repeat body restarts its counts each iteration). None = no cap.
@@ -168,6 +183,13 @@ class Cond:
     index: int
     yes: object
     no: object
+
+
+@dataclass(frozen=True)
+class Look:
+    ahead: bool
+    positive: bool
+    body: object
 
 
 @dataclass(frozen=True)
@@ -315,7 +337,14 @@ class Parser:
             index = 0
             if self.peek(3) == "(?:":
                 self.take("(?:")
-            elif self.peek(2) == "(?":  # lookarounds, flags, named groups, atomic groups ...
+            elif self.peek(3) in ("(?=", "(?!") or self.peek(4) in ("(?<=", "(?<!"):
+                ahead = self.peek(3) in ("(?=", "(?!")
+                self.i += 3 if ahead else 4
+                positive = self.p[self.i - 1] == "="
+                body = self.alternation()
+                self.take(")")
+                return Look(ahead, positive, body)
+            elif self.peek(2) == "(?":  # flags, named groups, atomic groups ...
                 raise ValueError(f"unsupported construct {self.p[self.i:self.i + 4]!r} at {self.i} in {self.p!r}")
             else:
                 self.take("(")
@@ -457,7 +486,32 @@ def run(node, st, ctx, k):
         return backref(node, st, ctx, k)
     if kind is Cond:
         return run(node.yes if st.groups[node.index] != (-1, -1) else node.no, st, ctx, k)
+    if kind is Look:
+        return lookaround(node, st, ctx, k)
     return verb(node, st, ctx, k)
+
+
+def look_groups(node, st, ctx):
+    """Rule 10: the groups after the body's first match, or None if it has none."""
+    inner = replace(st, counts=None, limits=None, outer=())
+    if node.ahead:
+        for s in run(node.body, inner, ctx, lambda s: iter([s])):
+            return s.groups
+        return None
+    for start in range(st.pos, -1, -1):
+        for s in run(node.body, replace(inner, pos=start), ctx, lambda s: iter([s]) if s.pos == st.pos else iter(())):
+            return s.groups
+    return None
+
+
+def lookaround(node, st, ctx, k):
+    groups = look_groups(node, st, ctx)
+    if (groups is not None) == node.positive:
+        yield from k(replace(st, groups=groups) if node.positive else st)
+        return
+    if LOOKAROUND_INSERTION and st.counts is not None:
+        if st.pos < len(ctx.text) and st.pos != st.anchor and permitted(st, 1):  # rule 5
+            yield from lookaround(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
 def anchor(node, st, ctx, k):

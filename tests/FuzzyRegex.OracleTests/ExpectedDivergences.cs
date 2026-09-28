@@ -3101,6 +3101,21 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The six rows of <c>fuzzy-insertion-before-a-failing-lookaround</c>, recorded 2026-09-28 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/lookaround-insertion-rows.jsonl</c>: a
+    /// positive and a negative lookahead, a lookbehind, an insertion that comes before a substitution
+    /// at a later start, an anchored match with the lookaround first, and a reversed lookbehind.
+    /// </summary>
+    private const string _lookaroundInsertionRows = """
+        {"generator": "rows", "pattern": "(?:b(?=c)){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?!x)){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?<=x)c){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?=c)){e<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?:(?=b)b){i<=1}", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?r)(?:(?<=c)b){i<=1}", "flags": 0, "namedLists": {}, "subject": "cxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The five rows of <c>default-word-boundary-follows-uax29</c>, from the <c>boundaries</c> wave
     /// generator; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -3259,6 +3274,36 @@ internal static class ExpectedDivergences
             Example: _neededEmptyIterationRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithUpstreamEmptyIterations(row))
+        ),
+        new(
+            Id: "fuzzy-insertion-before-a-failing-lookaround",
+            Reason: "THIS PORT PASSES A LOOKAROUND THAT FAILS INSIDE A FUZZY SECTION BY INSERTING A TEXT "
+                + "CHARACTER IN FRONT OF IT, and upstream never does. Ledger entry 50, known defect D8 "
+                + "(finding S3-F2), fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as "
+                + "a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: every other zero-width assertion that fails in a fuzzy section is "
+                + "fuzzed with a step of 0, which leaves an insertion as the only error "
+                + "(`fuzzy_match_item` for `\\b` at upstream/src/_regex.c:12060-12075), but a positive "
+                + "lookaround whose body runs out of choices only backtracks (:17115-17168) and a negative "
+                + "one whose body matched goes straight to `backtrack` (:12918-13000). So "
+                + "`regex.search(r'(?:b\\b){i<=1}', 'bx c')` is (0, 2) with one insertion while "
+                + "`regex.search(r'(?:b(?=c)){i<=1}', 'bxc')` is None.\n"
+                + "THE FIX fuzzes the lookaround's own node at both places, after its block is popped, so "
+                + "the insertion is tried at the position, counts and captures the lookaround started "
+                + "from and the lookaround then starts again one character on "
+                + "(`Matcher.InsertBeforeAFailedLookaround`). Answers move from None to a match, and to "
+                + "an earlier start: `(?:b(?=c)){e<=1}` over 'bxc' is (0, 2) with an insertion where "
+                + "upstream finds a substitution at 1.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithoutTheLookaroundInsertion`, which sets "
+                + "`PatternObject.SkipLookaroundInsertion` with entries 42 and 44 off, reproduces "
+                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
+                + "judged. The control is "
+                + "`A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FuzzyLookaroundInsertionTests",
+            Example: _lookaroundInsertionRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
         ),
         new(
             Id: "search-start-partial",

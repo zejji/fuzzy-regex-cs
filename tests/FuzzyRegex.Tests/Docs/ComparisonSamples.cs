@@ -529,6 +529,20 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
+    /// "A lookaround that fails inside a fuzzy section can be passed by inserting a text character in
+    /// front of it".
+    /// </summary>
+    [Test]
+    public void A_failing_lookaround_in_a_fuzzy_section_can_be_passed_by_an_insertion()
+    {
+        Match m = FuzzyRegex.Match("bxc", "(?:b(?=c)){i<=1}");
+        (m.Index, m.Length, m.FuzzyCounts.Insertions).Should().Be((0, 2, 1));
+
+        Match e = FuzzyRegex.Match("bxc", "(?:b(?=c)){e<=1}");
+        (e.Index, e.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
     /// "A fuzzy repeat takes an iteration that matches no text by deleting only when something
     /// needs it".
     /// </summary>

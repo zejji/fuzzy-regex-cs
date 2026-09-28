@@ -1512,6 +1512,29 @@ Upstream finds such a match when the character happens to fail first: `(?:a|b){d
 `a`, because its `b` branch fails and tries the deletion. There is no option to restore the
 upstream answer. Ledger entry 42.
 
+### A lookaround that fails inside a fuzzy section can be passed by inserting a text character in front of it
+
+An insertion is a text character the pattern does not account for. Upstream lets one stand in front
+of a failing `\b` or `$`, which moves the assertion one character on, but never in front of a
+failing lookaround. Here a lookaround is treated like every other zero-width assertion: when it
+fails, one inserted character is tried in front of it and the lookaround is tried again.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The inserted x puts the lookahead in front of the c.
+Match m = FuzzyRegex.Match("bxc", "(?:b(?=c)){i<=1}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 2, 1) - upstream: no match
+
+// With any error allowed, the insertion at 0 comes before upstream's substitution at 1.
+Match e = FuzzyRegex.Match("bxc", "(?:b(?=c)){e<=1}");
+Console.WriteLine((e.Index, e.Length));   // (0, 2) - upstream: (1, 1)
+```
+
+Negative lookarounds and lookbehinds work the same way. A lookaround can still be neither
+substituted nor deleted, since it matches no character. There is no option to restore the upstream
+answer. Ledger entry 50.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

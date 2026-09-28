@@ -1,0 +1,6 @@
+{"pattern":"(?:b(?=c)){i<=1}","flags":0,"subject":"bxc","operation":"search"}
+{"pattern":"(?:b(?!x)){i<=1}","flags":0,"subject":"bxc","operation":"search"}
+{"pattern":"(?:b(?<=x)c){i<=1}","flags":0,"subject":"bxc","operation":"search"}
+{"pattern":"(?:b(?=c)){e<=1}","flags":0,"subject":"bxc","operation":"search"}
+{"pattern":"(?:(?=b)b){i<=1}","flags":0,"subject":"xb","operation":"match"}
+{"pattern":"(?r)(?:(?<=c)b){i<=1}","flags":0,"subject":"cxb","operation":"search"}
