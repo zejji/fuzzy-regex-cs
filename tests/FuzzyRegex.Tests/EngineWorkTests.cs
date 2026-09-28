@@ -10,12 +10,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests;
 public sealed class EngineWorkTests
 {
     [Test]
+    [Category(EngineWork.Category)]
     public void A_step_limit_stops_the_engine_again_after_a_caller_swallows_it()
     {
-        if (!WorkCounter.Enabled)
-        {
-            return;
-        }
+        EngineWork.SkipUnlessCounting();
 
         // The demo's interop boundary catches every exception, so the first stop can be swallowed
         // and matching can go on. The limit must fire at every step past it, not only at the step
@@ -39,12 +37,10 @@ public sealed class EngineWorkTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_character_limit_stops_the_engine_again_after_a_caller_swallows_it()
     {
-        if (!WorkCounter.Enabled)
-        {
-            return;
-        }
+        EngineWork.SkipUnlessCounting();
 
         // The same rule for the walk limit. Without it, the second call walked the subject to the
         // end and answered.

@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -15,6 +14,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class IterationTests
 {
     [Test]
+    [Category(EngineWork.Category)]
     public void A_scan_over_a_long_subject_does_work_linear_in_its_length()
     {
         // The complexity guard for the whole iteration surface. Since the 2026-09-01 quadratic fix
@@ -54,10 +54,7 @@ public sealed class IterationTests
             "a scan's matching loops run a few steps per character, not a pass per match"
         );
 
-        if (WorkCounter.Enabled)
-        {
-            states.Should().Be(3, "one state for each of the three scans, not one for each match");
-        }
+        states.Should().Be(3, "one state for each of the three scans, not one for each match");
     }
 
     [Test]

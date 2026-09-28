@@ -9,12 +9,27 @@ namespace Fuzzy.Text.RegularExpressions.Tests;
 /// <c>docs/KNOWN-DEFECTS.md</c>: a wall-clock bound goes red when the machine is busy.
 /// </summary>
 /// <remarks>
-/// The counter exists in a Debug build only, which is what the ratchet runs by default. A Release
-/// run still makes the call, so what is left of the test there is its answer and the
-/// <see cref="HangGuard"/>; the step bound is checked wherever a developer runs the suite.
+/// The counters exist in a Debug build only. In Release every helper here reports the test as
+/// skipped, with <see cref="DebugOnly"/> as the reason, before it runs anything: a bound on a
+/// counter that is always 0 would pass for nothing. CI runs the Release suite through the ratchet,
+/// which accepts that skip, and runs every test of <see cref="Category"/> again in Debug, where the
+/// bounds hold (.github/workflows/ci.yml). A test that uses a helper here carries that category.
 /// </remarks>
 internal static class EngineWork
 {
+    /// <summary>The category of every test that bounds a <see cref="WorkCounter"/> count.</summary>
+    internal const string Category = "WorkCounter";
+
+    /// <summary>
+    /// The reason a counter test gives when it is skipped in Release. <c>tools/PortTools.psm1</c>
+    /// matches its opening words, so the ratchet does not count the skip as a regression.
+    /// </summary>
+    internal const string DebugOnly =
+        "Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here";
+
+    /// <summary>Skips the test unless this build counts, so that no bound passes vacuously.</summary>
+    internal static void SkipUnlessCounting() => Skip.Unless(WorkCounter.Enabled, DebugOnly);
+
     /// <summary>
     /// A match timeout for a test whose real bound is a step count or a correct answer: it only has
     /// to stop a runaway, so it is set far above anything a busy machine adds. Under the assembly's
@@ -24,9 +39,10 @@ internal static class EngineWork
 
     /// <summary>How many characters the fuzzy literal filter searched during <paramref name="action"/>.</summary>
     /// <param name="action">The call to measure. It runs on this thread.</param>
-    /// <returns>The count, which is 0 in a Release build.</returns>
+    /// <returns>The count, which a Release build does not reach: the test is skipped there.</returns>
     internal static long CharactersSearchedBy(Action action)
     {
+        SkipUnlessCounting();
         long before = WorkCounter.CharactersSearched;
         action();
         return WorkCounter.CharactersSearched - before;
@@ -34,16 +50,17 @@ internal static class EngineWork
 
     /// <summary>How many match states <paramref name="action"/> initialised.</summary>
     /// <param name="action">The call to measure. It runs on this thread.</param>
-    /// <returns>The count, which is 0 in a Release build.</returns>
+    /// <returns>The count, which a Release build does not reach: the test is skipped there.</returns>
     internal static long StatesInitialisedBy(Action action)
     {
+        SkipUnlessCounting();
         long before = WorkCounter.StatesInitialised;
         action();
         return WorkCounter.StatesInitialised - before;
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> and, in a Debug build, asserts it took at most
+    /// Runs <paramref name="action"/> and asserts it took at most
     /// <paramref name="maxSteps"/> steps of the matching loops.
     /// </summary>
     /// <param name="action">The call to measure.</param>
@@ -68,7 +85,7 @@ internal static class EngineWork
         );
 
     /// <summary>
-    /// Runs <paramref name="action"/> and, in a Debug build, asserts it walked at most
+    /// Runs <paramref name="action"/> and asserts it walked at most
     /// <paramref name="maxCharacters"/> characters one at a time, stopping it there.
     /// </summary>
     /// <param name="action">The call to measure.</param>
@@ -95,6 +112,7 @@ internal static class EngineWork
         Action<long> setLimit
     )
     {
+        SkipUnlessCounting();
         long before = count();
         long previousLimit = getLimit();
         setLimit(before + max + 1);
@@ -111,9 +129,6 @@ internal static class EngineWork
             setLimit(previousLimit);
         }
 
-        if (WorkCounter.Enabled)
-        {
-            (count() - before).Should().BeLessThanOrEqualTo(max, because);
-        }
+        (count() - before).Should().BeLessThanOrEqualTo(max, because);
     }
 }

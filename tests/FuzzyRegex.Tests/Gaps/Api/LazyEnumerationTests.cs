@@ -141,6 +141,7 @@ public sealed class LazyEnumerationTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void An_early_exit_does_not_pay_for_the_rest_of_the_subject()
     {
         // Not a stopwatch ratio, which would be a statement about the machine. The subject has two

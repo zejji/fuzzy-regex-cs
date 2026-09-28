@@ -309,6 +309,7 @@ public sealed class DemoEngineContractTests
     /// harness proves that half in a browser.
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_runaway_pattern_comes_back_as_a_timeout_error_not_as_an_exception()
     {
         // S60 changed the tail from 'b': the required-string prefilter refuses a subject with no
@@ -872,6 +873,7 @@ public sealed class DemoEngineContractTests
     /// </para>
     /// </remarks>
     [Test]
+    [Category(EngineWork.Category)]
     public void Replace_mode_answers_inside_one_budget_when_the_pattern_runs_away()
     {
         string subject = string.Concat(Enumerable.Repeat(new string('a', 22) + "c", 10)) + "aaab";

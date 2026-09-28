@@ -201,6 +201,7 @@ public sealed class FuzzyLiteralPrefilterTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
     public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
     {
@@ -493,6 +494,7 @@ public sealed class FuzzyLiteralPrefilterTests
     // ---------------------------------------------------------------------------------------
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
     // ' works' never occurs, so the piece search ran to the end of the subject on every step of
     // the walk. Release, 1,000,000 characters: 2,303 ms before D14, 234 ms after.
@@ -518,6 +520,7 @@ public sealed class FuzzyLiteralPrefilterTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "none - gap test")]
     public void A_reverse_walk_over_a_long_subject_does_not_search_again_what_it_has_searched()
     {

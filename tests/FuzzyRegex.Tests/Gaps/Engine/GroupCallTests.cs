@@ -659,6 +659,7 @@ public sealed class GroupCallTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_nested_call_that_reaches_no_further_is_still_refused()
     {
         // The genuinely infinite shapes: the inner call of G at 0 is made with nothing reached

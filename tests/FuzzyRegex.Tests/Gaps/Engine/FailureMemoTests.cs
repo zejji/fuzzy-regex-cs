@@ -23,6 +23,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class FailureMemoTests
 {
     [Test]
+    [Category(EngineWork.Category)]
     [Arguments("(?:a|a)+c")]
     [Arguments("(a|aa)+c")]
     [Arguments("(?:a|aa)+?c")]

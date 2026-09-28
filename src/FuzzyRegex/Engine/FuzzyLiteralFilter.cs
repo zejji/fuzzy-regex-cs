@@ -697,6 +697,7 @@ internal sealed class FuzzyLiteralFilter
     /// scan moves forward, when <c>(?r)</c> moves it backward, and when <c>BESTMATCH</c> goes back to
     /// an earlier position or narrows the slice.
     /// </remarks>
+    // Any new search of the subject in this filter must call WorkCounter.Searched with what it read.
     internal sealed class ScanMemory
     {
         /// <summary>Makes a memory for <paramref name="pieces"/> pieces.</summary>

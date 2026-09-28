@@ -271,6 +271,7 @@ public sealed class RepeatTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
     {
         // The complexity guard for LAZY_REPEAT_ONE and GREEDY_REPEAT_ONE. Both backtrack arms
@@ -300,6 +301,7 @@ public sealed class RepeatTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_astral_subject_costs_time_proportional_to_its_length()
     {
         // The same guard for a subject whose characters do not each occupy one UTF-16 code unit, so
