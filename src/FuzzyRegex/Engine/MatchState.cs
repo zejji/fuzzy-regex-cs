@@ -507,15 +507,15 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
 
+    /// <summary>Upstream <c>req_end</c>.</summary>
+    internal int ReqEnd;
+
     /// <summary>
     /// NOT UPSTREAM (D14): what the pattern's <see cref="FuzzyLiteralFilter"/> has learned about
     /// this scan's subject, kept across the scan's steps; <see langword="null"/> when the pattern
     /// has no filter.
     /// </summary>
     internal readonly FuzzyLiteralFilter.ScanMemory? FilterMemory;
-
-    /// <summary>Upstream <c>req_end</c>.</summary>
-    internal int ReqEnd;
 
     /// <summary>
     /// NOT UPSTREAM: the slice start <see cref="RequiredStringScreen"/> last scanned, part of its

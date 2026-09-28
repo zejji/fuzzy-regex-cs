@@ -501,25 +501,34 @@ public sealed class FuzzyLiteralPrefilterTests
     public void A_matches_walk_over_a_long_subject_is_linear_when_a_piece_never_occurs(string pattern, string unit)
     {
         // The ratio between two subject sizes, as IterationTests' scan guard does, so that it does
-        // not depend on the machine. An eightfold subject costs a linear walk at most 8x. Debug,
-        // 125,000 then 1,000,000 characters, 2026-09-28: 5.3x and 5.7x for the first row, 7.6x and
-        // 8.2x for the second; with the memory cleared on every step, as before D14, 18.4x and
-        // 53.7x. [NotInParallel] because the rest of the suite running alongside swamps any timing.
+        // not depend on the machine. A subject 16 times as long costs a linear walk about 16x. Each
+        // size is warmed up and timed three times, keeping the fastest, so a cold JIT or one slow
+        // run does not decide it. Debug, 125,000 then 2,000,000 characters, 2026-09-28, first row
+        // then second: 14.5-15.0x and 15.2-15.5x idle; 12.3-15.0x and 12.6-21.1x beside 16 and 28
+        // CPU burners on 28 logical processors. The code before D14 (f1f0989): 80.7x and 217x
+        // warm, 68.9x and 253x cold. The limit of 32 sits about 1.5x above the worst linear
+        // answer and 2x below the best quadratic one.
+        // [NotInParallel] because the rest of the suite running alongside swamps any timing.
         var regex = new FuzzyRegex(pattern);
         TimeSpan small = TimeWalk(regex, unit, 125_000);
-        TimeSpan large = TimeWalk(regex, unit, 1_000_000);
+        TimeSpan large = TimeWalk(regex, unit, 2_000_000);
 
-        (large / small).Should().BeLessThan(12, "a linear walk costs at most 8x; {0} then {1}", small, large);
+        (large / small).Should().BeLessThan(32, "a linear walk costs about 16x; {0} then {1}", small, large);
     }
 
     private static TimeSpan TimeWalk(FuzzyRegex regex, string unit, int length)
     {
         string subject = string.Concat(Enumerable.Repeat(unit, length / unit.Length));
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        regex.Matches(subject[..(unit.Length * 100)]).Count.Should().Be(100);
+        TimeSpan fastest = TimeSpan.MaxValue;
+        for (int run = 0; run < 3; run++)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            regex.Matches(subject).Count.Should().Be(length / unit.Length);
+            fastest = TimeSpan.FromTicks(Math.Min(fastest.Ticks, clock.Elapsed.Ticks));
+        }
 
-        regex.Matches(subject).Count.Should().Be(length / unit.Length);
-
-        return clock.Elapsed;
+        return fastest;
     }
 
     [Test]
@@ -548,6 +557,8 @@ public sealed class FuzzyLiteralPrefilterTests
 
         clock.Stop();
         always.Should().BeTrue();
+        // SHORTCUT: a wall-clock budget, because main has no work counter to count the characters read.
+        // D13 is moving timing tests like this one onto such a counter.
         clock.ElapsedMilliseconds.Should().BeLessThan(500);
     }
 
