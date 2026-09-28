@@ -1466,6 +1466,23 @@ Console.WriteLine(new FuzzyRegex(@"(?:a\G|\Gb){i<=1}").MatchAtStart("ab").Length
 Console.WriteLine(new FuzzyRegex(@"(?:a\G){i<=1}").MatchAtStart("ab").Success);    // False - upstream: RuntimeError
 ```
 
+### `BestMatch` keeps a fit that ends in trailing insertions
+
+`(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
+Upstream can lose a match whose best fit ends in inserted characters, because the check that
+allows one more trailing insertion counts the errors made so far twice. The match is lost
+wherever the fit has to reach the end of the text: `FullMatch`, or a pattern ending in `$`. This
+port counts each error once, so it answers what upstream answers without the flag.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'b' matches the first character and the other two are insertions.
+Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}").FullMatch("bba").Length);      // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}$").MatchAtStart("bba").Length);  // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?:b){e<=2}").FullMatch("bba").Length);          // 3 - upstream: 3
+```
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

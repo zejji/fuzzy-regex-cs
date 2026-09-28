@@ -2114,6 +2114,51 @@ walk on and none do with it off, and all nine are `fullmatch` rows whose cheapes
 insertion-heavy. That is the honest price of the ranking change until this is fixed, and it is why
 the example row for that entry uses substitutions.
 
+**A CANDIDATE "NEW" BUG TRIAGED ON 2026-09-28 IS THIS ENTRY, AND LEDGER NUMBER 49 WAS NOT TAKEN.**
+It came in as "`BESTMATCH` retries under `fullmatch` lose a match": `regex.fullmatch(r'(?b)(?:b){e<=2}',
+'bba')` and `{i<=2}` are None, while the flagless and `(?e)` forms are (0, 3) at `(0, 2, 0)`. That
+is row 1 of this entry with `x` spelled `b`. `python tools/probes/bestmatch-fullmatch-trailing-insertions.py`
+(regex 2026.9.10, 2026-09-28) isolates it:
+
+- **The door is not the cause.** `match` and `search` are (0, 1) with no error under both flags,
+  which is right. `fullmatch` loses the fit, and so does a plain `match` of `(?b)(?:b){e<=2}$`,
+  so `fullmatch`'s retries are not where it goes wrong: anything that makes the fit reach the end
+  of the text needs trailing insertions, and those are what the flag loses.
+- **The budget is not the cause.** `{e<=9}` is None too.
+- **The count is this entry's k <= 1 boundary.** 'bb' (one trailing insertion) survives `(?b)`;
+  'bba', 'baa' and 'bbb' (two) do not. 'abb' is lost as well: its flagless fit is insertions at
+  0 and 2, and the one at 2 is trailing. Substitution and deletion budgets cannot fullmatch these
+  subjects at all, with the flag or without.
+- **`pos`/`endpos` and `(?r)` move nothing.** The slice `'xbbay'[1:4]` is None under `(?b)` and
+  (1, 4) without it; `(?b)(?r)` is None where `(?r)` and `(?e)(?r)` are (0, 3).
+
+**The claim, stated so that a blind reviewer can check it.** Under `(?b)`, upstream fullmatches
+`(?:b){e<=2}` against 'bba' with no answer because (1) the first pass of `do_best_fuzzy_match`
+(`:17590`) runs with unbounded `max_errors`, finds the two-insertion fit and sets `fewest_errors = 2`
+(`:17653-17655`); (2) the second pass sets `error_limit = fewest_errors` (`:17703`) and climbs
+`state->max_errors` from 1 to 2 (`:17736-17738`), and the widened-slice fallback also uses 2
+(`:17832`); (3) the second insertion can only come from `END_FUZZY`'s backtrack arm, whose guard
+`total_errors(state->fuzzy_counts) + total_errors(inner_counts) < state->max_errors`
+(`:15516-15517`) adds the section's errors to counts they have already been merged into (`:12475`),
+so after one insertion it computes 1 + 1 < 2 and refuses. So the whole call returns None. The claim
+is falsified if any of these fail:
+
+1. The probe's blocks do not reproduce on regex 2026.9.10.
+2. This port, with `PatternObject.DoubleCountTrailingInsertions` set (the doubled term restored and
+   nothing else changed), does NOT answer None on 'bba' and a match on 'bb'. Asserted in
+   `Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end`.
+3. A build of upstream with the second term deleted from `:15517` still answers None. **Run, and it
+   does not:** `python tools/probes/bestmatch-fullmatch-trailing-insertions.py --patched`
+   (2026-09-28, MSVC `/Od` build of the pinned submodule) answers (0, 3) at `(0, 2, 0)` with
+   insertions at 1 and 2 on the `{e<=2}`, `{i<=2}` and `$` rows, (0, 3) on `(?r)` and on 'abb',
+   leaves the flagless row unchanged, and still refuses `(?b)(?:b){e<=1}` - this port's answer on
+   every row, so deleting the term lets through exactly what the budget allows and nothing more.
+
+Pinned as rows 35 to 38 of `bestmatch-loses-a-candidate`, recorded from
+`tools/probes/bestmatch-fullmatch-rows.jsonl`; `docs/DIVERGENCES.md` and `docs/COMPARISON.md` gained
+this entry's own row and section, which it had not had. The draft report is
+`entry-12-bestmatch-trailing-insertions.md`.
+
 **Related:** entries 9 and 11, the other inherited fuzzy bugs the oracle cannot see, and Phase 6's
 inherited-bug sweep.
 
