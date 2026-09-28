@@ -56,6 +56,15 @@ import time
 from xml.etree import ElementTree
 from pathlib import Path
 
+# A default Windows console is cp1252, and both a control's own name (free text in controls.json)
+# and a mutated build's log tail (dotnet/csharpier output, read with errors="replace" so it never
+# raises) can carry characters outside that codepage. Without this, print() raises
+# UnicodeEncodeError partway through a run and the mutation marker is left applied - "reconfigure"
+# needs Python 3.7+, which this repo's tooling already requires.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 # Tracked rather than left in .scratch/, which slice sessions clear. S18's controls were lost
 # that way and are permanently unreproducible; tools/launch-slice.ps1 and tools/heartbeat.sh
 # were promoted for the same reason on 2026-09-01. The waves and the consumer log this
@@ -66,11 +75,13 @@ WAVES = REPO / ".scratch" / "control-waves"
 LIVE_WAVE = REPO / "TestResults" / "oracle" / "wave.jsonl"
 REPORT = REPO / "TestResults" / "oracle" / "report.txt"
 # `expected` is optional so a report written before S33 added the accounted-for list still parses.
+# The columns between `expected` and `diverge` (timeout, resource, undefined, fault) are skipped:
+# they were added after this pattern was written and made every summary fail to parse.
 # Counted and printed rather than folded into `diverge`: a mutation whose damage happens to look like
 # an entry in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs lands here instead of there, and a
 # control whose expected count moved is as much a finding as one whose diverge count did.
 SUMMARY = re.compile(
-    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
+    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?(?:[a-z]+ \d+\s+)*?diverge (\d+)\s+of (\d+) rows"
 )
 CONSUME_TIMEOUT = 240
 # A suite control's signal is named test failures, not a diverge column: S50's control C reverts a

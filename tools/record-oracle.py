@@ -6762,6 +6762,8 @@ def _generate_matrix(rng: random.Random, count: int):
         flags = rng.sample(MATRIX_INLINE_FLAGS, rng.choice((0, 1, 1, 2)))
         if "b" in flags and "e" in flags:
             flags.remove("e")
+        if _has_weighted_cost(fragment):
+            flags = [f for f in flags if f not in ("b", "e")]
         pattern = "".join(f"(?{f})" for f in flags) + fragment
 
         length = rng.randrange(MAX_MATRIX_SUBJECT_LENGTH + 1)

@@ -299,15 +299,15 @@ public sealed class DemoEngineContractTests
         Error(Run("(", "", "abc")).Should().Contain("missing )");
     }
 
+    /// <summary>A budget no runaway fits in on any machine; see the runaway test.</summary>
+    private static readonly TimeSpan _oneMillisecond = TimeSpan.FromMilliseconds(1);
+
     /// <summary>
     /// The pathological pattern <c>TimeoutAndCancellationTests</c> and
     /// <c>LazyEnumerationTests</c> already use: exponential backtracking with no way to succeed.
     /// This is the fast common-case exit; <c>worker.terminate()</c> is the real safety net, and the
     /// harness proves that half in a browser.
     /// </summary>
-    /// <summary>A budget no runaway fits in on any machine; see the runaway test.</summary>
-    private static readonly TimeSpan _oneMillisecond = TimeSpan.FromMilliseconds(1);
-
     [Test]
     public void A_runaway_pattern_comes_back_as_a_timeout_error_not_as_an_exception()
     {

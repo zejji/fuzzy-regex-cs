@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -96,10 +97,7 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>Returned by <see cref="NextStart"/> when the stretch it searched is not ASCII.</summary>
     internal const int CannotTell = -2;
 
-    /// <summary>A cached piece position the next search must refresh.</summary>
-    internal const int Unknown = -1;
-
-    /// <summary>A cached piece position meaning the piece is not in the rest of the slice.</summary>
+    /// <summary>A remembered piece position meaning the piece is not in the rest of the slice.</summary>
     internal const int Absent = int.MaxValue;
 
     private FuzzyLiteralFilter(string[] pieces, int[] offsets, int maxErrors, bool ignoreCase, bool reverse)
@@ -115,9 +113,7 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>
     /// Per piece, whether it is ASCII. One that is not holds a lone character no ASCII character
     /// equals (see the class remarks), so it is never in the ASCII stretch the search accepts, and
-    /// is not searched for: an absent piece is searched to the end of the slice, and on every call
-    /// of a <c>Matches</c> walk that cost the whole rest of the subject each time - ten times the
-    /// search's cost on a 200,000-character subject (measured 2026-09-28).
+    /// is not searched for: it would be searched to the end of the slice for nothing.
     /// </summary>
     private readonly bool[] _asciiPiece;
 
@@ -566,54 +562,56 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>
     /// The earliest position at or after <paramref name="textPos"/> where a forward match could
     /// start, or <see cref="NoMatch"/> when none can, or <see cref="CannotTell"/> when the stretch
-    /// this call had to search is not all ASCII.
+    /// this call had to search is not all ASCII. The answer depends only on the subject and the two
+    /// positions; <paramref name="memory"/> only saves searching again.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="textPos">Where the next attempt would start.</param>
     /// <param name="sliceEnd">The end of the slice; no piece is searched for beyond it.</param>
-    /// <param name="found">
-    /// Per piece, where it was last found, carried between the attempts of one search. Starts as
-    /// <see cref="Unknown"/>; a position behind <paramref name="textPos"/> is searched again.
-    /// </param>
-    /// <param name="asciiEnd">
-    /// How far past the search's first position the subject is known to be ASCII, carried with
-    /// <paramref name="found"/>. Starts at the search's first position.
-    /// </param>
+    /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
     /// <returns>A position, <see cref="NoMatch"/> or <see cref="CannotTell"/>.</returns>
-    internal int NextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, Span<int> found, ref int asciiEnd)
+    internal int NextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, ScanMemory memory)
     {
+        int searchedWithoutFinding(int j) => _asciiPiece[j] ? Math.Max(0, sliceEnd - textPos) : 0;
+
+        // A piece remembered as absent was searched for up to the old slice end only.
+        if (memory.SliceEnd != sliceEnd)
+        {
+            memory.From.AsSpan().Fill(int.MaxValue);
+            memory.SliceEnd = sliceEnd;
+        }
+
         long start = long.MaxValue;
         for (int j = 0; j < Pieces.Length; j++)
         {
             string piece = Pieces[j];
-            if (found[j] < textPos)
+
+            // A search from From[j] that found the piece at Found[j] answers for every position
+            // between the two, since nothing in that stretch is an earlier occurrence. Outside it -
+            // the scan has moved past the occurrence, or back before the search began - search again.
+            if (textPos < memory.From[j] || textPos > memory.Found[j])
             {
                 int at =
                     textPos < sliceEnd && _asciiPiece[j]
                         ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison)
                         : -1;
-                found[j] = at < 0 ? Absent : textPos + at;
+                // What the search read: up to the occurrence, or all of it.
+                WorkCounter.Searched(at >= 0 ? at + piece.Length : searchedWithoutFinding(j));
+                memory.From[j] = textPos;
+                memory.Found[j] = at < 0 ? Absent : textPos + at;
             }
 
             // Everything this piece's search looked at must be ASCII, or its answer is not the
             // engine's. The found piece's own characters are part of that.
-            int searched = found[j] == Absent ? sliceEnd : found[j] + piece.Length;
-            if (searched > asciiEnd)
+            int searched = memory.Found[j] == Absent ? sliceEnd : memory.Found[j] + piece.Length;
+            if (searched > textPos && !memory.IsAscii(text, textPos, searched))
             {
-                int from = Math.Max(asciiEnd, textPos);
-                // Ascii.IsValid, not ContainsAnyExceptInRange: that boxes its bounds, 96 B a
-                // call on .NET 10 (probe, 2026-09-23), and AllocationTests catch it.
-                if (!Ascii.IsValid(text[from..searched]))
-                {
-                    return CannotTell;
-                }
-
-                asciiEnd = searched;
+                return CannotTell;
             }
 
-            if (found[j] != Absent)
+            if (memory.Found[j] != Absent)
             {
-                start = Math.Min(start, (long)found[j] - Offsets[j] - MaxErrors);
+                start = Math.Min(start, (long)memory.Found[j] - Offsets[j] - MaxErrors);
             }
         }
 
@@ -622,33 +620,176 @@ internal sealed class FuzzyLiteralFilter
 
     /// <summary>
     /// Whether a reverse match could lie anywhere in <c>[sliceStart, textPos)</c>: <see langword="false"/>
-    /// only when that stretch is all ASCII and holds no piece.
+    /// only when that stretch is all ASCII and holds no piece. As with <see cref="NextStart"/>, the
+    /// answer depends only on the subject and the two positions.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="sliceStart">The start of the slice.</param>
     /// <param name="textPos">Where the reverse search starts.</param>
+    /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
     /// <returns>Whether the engine must search at all.</returns>
-    internal bool MayMatchBefore(ReadOnlySpan<char> text, int sliceStart, int textPos)
+    internal bool MayMatchBefore(ReadOnlySpan<char> text, int sliceStart, int textPos, ScanMemory memory)
     {
         if (textPos <= sliceStart)
         {
             return true;
         }
 
-        ReadOnlySpan<char> stretch = text[sliceStart..textPos];
-        if (!Ascii.IsValid(stretch))
+        // Both facts below are about [sliceStart, x), so they hold for one slice start only.
+        if (memory.SliceStart != sliceStart)
+        {
+            memory.AbsentBelow.AsSpan().Fill(int.MinValue);
+            memory.WitnessEnd = int.MaxValue;
+            memory.SliceStart = sliceStart;
+        }
+
+        // A piece or a non-ASCII character already seen inside the stretch settles it.
+        if (textPos >= memory.WitnessEnd)
         {
             return true;
         }
 
-        foreach (string piece in Pieces)
+        ReadOnlySpan<char> stretch = text[sliceStart..textPos];
+        for (int j = 0; j < Pieces.Length; j++)
         {
-            if (stretch.Contains(piece.AsSpan(), _comparison))
+            // Not in [sliceStart, AbsentBelow[j]), so not in any shorter stretch either.
+            if (textPos <= memory.AbsentBelow[j])
             {
+                continue;
+            }
+
+            // The last occurrence, so that the search reads back only as far as it must.
+            int at = stretch.LastIndexOf(Pieces[j].AsSpan(), _comparison);
+            WorkCounter.Searched(at >= 0 ? stretch.Length - at : stretch.Length);
+            if (at >= 0)
+            {
+                memory.WitnessEnd = sliceStart + at + Pieces[j].Length;
                 return true;
             }
+
+            memory.AbsentBelow[j] = textPos;
+        }
+
+        if (!memory.IsAscii(text, sliceStart, textPos))
+        {
+            memory.WitnessEnd = memory.AsciiEnd + 1;
+            return true;
         }
 
         return false;
+    }
+
+    /// <summary>A fresh <see cref="ScanMemory"/> sized for this filter's pieces.</summary>
+    /// <returns>The memory, knowing nothing yet.</returns>
+    internal ScanMemory NewScanMemory() => new(Pieces.Length);
+
+    /// <summary>
+    /// What the filter has learned about one scan's subject, kept across every step of the scan so
+    /// that no step searches again what an earlier one searched. D14: the memory used to live for
+    /// one step, so a <c>Matches</c> walk searched a piece that never occurs to the end of the
+    /// subject on every step, and a reverse walk re-read the whole subject before it on every step.
+    /// That was quadratic: 2.3 s over a million characters (measured 2026-09-28).
+    /// </summary>
+    /// <remarks>
+    /// One per <see cref="MatchState"/>, which serves one scan on one thread at a time, and cleared
+    /// by <see cref="Reset"/> whenever the state starts a scan of a new subject. Every fact is kept
+    /// with the range it is true over and checked against each query, so it stays right when the
+    /// scan moves forward, when <c>(?r)</c> moves it backward, and when <c>BESTMATCH</c> goes back to
+    /// an earlier position or narrows the slice.
+    /// </remarks>
+    internal sealed class ScanMemory
+    {
+        /// <summary>Makes a memory for <paramref name="pieces"/> pieces.</summary>
+        /// <param name="pieces">How many pieces the filter has.</param>
+        internal ScanMemory(int pieces)
+        {
+            From = new int[pieces];
+            Found = new int[pieces];
+            AbsentBelow = new int[pieces];
+            Reset();
+        }
+
+        /// <summary>Forward: where each piece's last search began; <c>int.MaxValue</c> for never.</summary>
+        internal int[] From { get; }
+
+        /// <summary>
+        /// Forward: where each piece's last search found it, or <see cref="Absent"/> for nowhere
+        /// before <see cref="SliceEnd"/>.
+        /// </summary>
+        internal int[] Found { get; }
+
+        /// <summary>Forward: the slice end <see cref="Found"/> was searched up to.</summary>
+        internal int SliceEnd { get; set; }
+
+        /// <summary>
+        /// Reverse: per piece, a position <c>x</c> such that the piece is not in
+        /// <c>[SliceStart, x)</c>; <c>int.MinValue</c> for unknown.
+        /// </summary>
+        internal int[] AbsentBelow { get; }
+
+        /// <summary>
+        /// Reverse: a position <c>x</c> such that <c>[SliceStart, x)</c> holds a piece or a
+        /// character that is not ASCII; <c>int.MaxValue</c> for none known.
+        /// </summary>
+        internal int WitnessEnd { get; set; }
+
+        /// <summary>Reverse: the slice start <see cref="AbsentBelow"/> and <see cref="WitnessEnd"/> are about.</summary>
+        internal int SliceStart { get; set; }
+
+        /// <summary>Both directions: <c>[AsciiFrom, AsciiEnd)</c> is known to be all ASCII.</summary>
+        internal int AsciiFrom { get; private set; }
+
+        /// <summary>
+        /// The end of the stretch known to be ASCII. When a check stopped at a character that is
+        /// not ASCII, this is that character.
+        /// </summary>
+        internal int AsciiEnd { get; private set; }
+
+        /// <summary>Forgets everything, for a scan of a new subject.</summary>
+        internal void Reset()
+        {
+            From.AsSpan().Fill(int.MaxValue);
+            Found.AsSpan().Fill(Absent);
+            SliceEnd = -1;
+            AbsentBelow.AsSpan().Fill(int.MinValue);
+            WitnessEnd = int.MaxValue;
+            SliceStart = -1;
+            AsciiFrom = 0;
+            AsciiEnd = 0;
+        }
+
+        /// <summary>
+        /// Whether <c>[from, to)</c> is all ASCII, reading only what the known stretch does not
+        /// already cover. On <see langword="false"/>, <see cref="AsciiEnd"/> is the first character
+        /// at or after <paramref name="from"/> that is not ASCII.
+        /// </summary>
+        /// <param name="text">The whole subject.</param>
+        /// <param name="from">The start of the stretch.</param>
+        /// <param name="to">Its end, at least <paramref name="from"/>.</param>
+        /// <returns>Whether the stretch is all ASCII.</returns>
+        internal bool IsAscii(ReadOnlySpan<char> text, int from, int to)
+        {
+            // The known stretch must reach back to 'from' without a gap, or it says nothing here.
+            if (from < AsciiFrom || from > AsciiEnd)
+            {
+                AsciiFrom = from;
+                AsciiEnd = from;
+            }
+
+            if (to <= AsciiEnd)
+            {
+                return true;
+            }
+
+            WorkCounter.Searched(to - AsciiEnd);
+
+            // The ushort form: the char form of the except-in-range searches boxes its bounds, 96 B
+            // a call on .NET 10 (probe, 2026-09-23), and AllocationTests catch it.
+            int other = MemoryMarshal
+                .Cast<char, ushort>(text[AsciiEnd..to])
+                .IndexOfAnyExceptInRange((ushort)0, (ushort)0x7F);
+            AsciiEnd = other < 0 ? to : AsciiEnd + other;
+            return other < 0;
+        }
     }
 }

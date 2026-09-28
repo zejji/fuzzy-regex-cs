@@ -46,6 +46,14 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long CharactersWalked { get; private set; }
 
+    /// <summary>
+    /// Characters the fuzzy literal filter handed to a vectorised search on this thread: the
+    /// length of every stretch it searched for a piece or checked for ASCII. A filter that searched
+    /// the same text again on every step of a scan would make the scan quadratic in this count.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CharactersSearched { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -97,6 +105,11 @@ internal static class WorkCounter
             throw new StepLimitReachedException();
         }
     }
+
+    /// <summary>Counts a stretch of text handed to a search.</summary>
+    /// <param name="length">The stretch's length.</param>
+    [Conditional("DEBUG")]
+    internal static void Searched(int length) => CharactersSearched += length;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

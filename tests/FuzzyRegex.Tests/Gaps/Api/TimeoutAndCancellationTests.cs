@@ -327,8 +327,9 @@ public sealed class TimeoutAndCancellationTests
         //
         // Half a second, not 50 ms, since 2026-09-28: beside a CPU burner the 50 ms version failed
         // one run in twenty, because a step that takes microseconds can still wait longer than
-        // 50 ms for the processor (D13). Each spin is one and a half budgets, so the four spins
-        // are still three budgets of caller time more than a walk charged for them could survive.
+        // 50 ms for the processor (D13). Each spin is 1.2 budgets, so one spin alone already
+        // exceeds the budget, and the four together are nearly five budgets of caller time that a
+        // walk charging them to itself could not survive.
         FuzzyRegex pattern = new(@"\w+");
         TimeSpan budget = TimeSpan.FromMilliseconds(500);
         IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
@@ -342,7 +343,7 @@ public sealed class TimeoutAndCancellationTests
             {
                 steps++;
                 long started = Stopwatch.GetTimestamp();
-                while (Stopwatch.GetElapsedTime(started) < budget * 1.5)
+                while (Stopwatch.GetElapsedTime(started) < budget * 1.2)
                 {
                     Thread.SpinWait(1_000);
                 }

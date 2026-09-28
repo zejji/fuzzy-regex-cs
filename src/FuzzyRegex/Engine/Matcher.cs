@@ -6809,12 +6809,10 @@ internal static class Matcher
 
         // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
         // withheld from a partial match, which can be a prefix of the literal holding no whole
-        // piece. Its per-piece cache lives for this call, across every attempt. See FuzzyLiteralFilter.
+        // piece. What it learns lives on the state, across every attempt of every call of the scan
+        // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
-        Span<int> fuzzyFilterFound = stackalloc int[FuzzyLiteralFilter.MaxPieces];
-        fuzzyFilterFound.Fill(FuzzyLiteralFilter.Unknown);
-        int fuzzyFilterAsciiEnd = state.TextPos;
 
         Node node;
         int status;
@@ -6907,7 +6905,7 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos))
+                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos, state.FilterMemory!))
                 {
                     return MatchStatus.Failure;
                 }
@@ -6916,13 +6914,7 @@ internal static class Matcher
             }
             else
             {
-                int next = fuzzyFilter.NextStart(
-                    state.Text.Span,
-                    foundPos,
-                    state.SliceEnd,
-                    fuzzyFilterFound,
-                    ref fuzzyFilterAsciiEnd
-                );
+                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!);
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;

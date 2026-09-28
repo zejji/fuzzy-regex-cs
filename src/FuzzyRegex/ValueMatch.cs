@@ -50,7 +50,7 @@ public readonly ref struct ValueMatch
 /// The copy is needed because the engine keeps the subject between steps and a span cannot be
 /// kept. The built-in enumerator reads the span in place. The timeout, as on
 /// <see cref="FuzzyRegex.EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>,
-/// bounds each step and not the walk.
+/// bounds each step rather than the whole walk.
 /// </para>
 /// </remarks>
 [StructLayout(LayoutKind.Auto)]

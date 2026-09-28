@@ -511,6 +511,13 @@ internal sealed class MatchState : IDisposable
     internal int ReqEnd;
 
     /// <summary>
+    /// NOT UPSTREAM (D14): what the pattern's <see cref="FuzzyLiteralFilter"/> has learned about
+    /// this scan's subject, kept across the scan's steps; <see langword="null"/> when the pattern
+    /// has no filter.
+    /// </summary>
+    internal readonly FuzzyLiteralFilter.ScanMemory? FilterMemory;
+
+    /// <summary>
     /// NOT UPSTREAM: the slice start <see cref="RequiredStringScreen"/> last scanned, part of its
     /// cache key.
     /// </summary>
@@ -718,6 +725,7 @@ internal sealed class MatchState : IDisposable
         }
 
         SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+        FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
     }
 
     /// <summary>The edits <paramref name="section"/> has charged so far, or 0 outside any section.</summary>
@@ -896,6 +904,7 @@ internal sealed class MatchState : IDisposable
         ScreenFoundFarthest = false;
         ScreenClearedLow = 1;
         ScreenClearedHigh = 0;
+        FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
 
         // Adjust boundaries.

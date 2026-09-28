@@ -22,6 +22,16 @@ internal static class EngineWork
     /// </summary>
     internal static readonly TimeSpan HangGuard = TimeSpan.FromMinutes(1);
 
+    /// <summary>How many characters the fuzzy literal filter searched during <paramref name="action"/>.</summary>
+    /// <param name="action">The call to measure. It runs on this thread.</param>
+    /// <returns>The count, which is 0 in a Release build.</returns>
+    internal static long CharactersSearchedBy(Action action)
+    {
+        long before = WorkCounter.CharactersSearched;
+        action();
+        return WorkCounter.CharactersSearched - before;
+    }
+
     /// <summary>How many match states <paramref name="action"/> initialised.</summary>
     /// <param name="action">The call to measure. It runs on this thread.</param>
     /// <returns>The count, which is 0 in a Release build.</returns>
