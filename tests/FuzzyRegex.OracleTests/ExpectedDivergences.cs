@@ -894,7 +894,10 @@ internal static class ExpectedDivergences
         "split 1 '\\u00df\\u00df\\u0131\\u0131'",
         "sub 0 'A\\u0130\\ufb00\\u0131\\u000d\\u000aS'",
         "split 9 '' <null> '\\u0130' <null> '' <null> '\\u0131' <null> ''",
-        "split 3 ' \\u0130\\u0130\\u0131\\u0131' '\\ufb00' ''",
+        // Row 9 moved with ledger entry 51 (2026-09-28): its '{1<=e<=2}' section now meets its minimum
+        // with a trailing insertion, and with CheckMinimumBeforeTrailingInsertions set this port gives
+        // the old judged answer, split 3 ' \u0130\u0130\u0131\u0131' '\ufb00' '', again.
+        "split 3 '\\u0130\\u0131\\u0131' '\\u0130' ''",
         "split 1 '\\u0131\\u0131SS\\u00df\\u00df\\ufb00'",
         "sub 0 '\\u0131A\\u0131\\u0131a \\ufb00'",
         "sub 0 '\\u0131\\u0131a'",

@@ -38,6 +38,10 @@ public sealed class FuzzyMinimumErrorTests
     [Arguments(@"(?:a){1<=e<=2}c", "axc", 3, 1)]
     [Arguments(@"(?:(?:a){1<=e<=1}){1<=e<=2}b", "aab", 3, 1)]
     [Arguments(@"(?:(?:a){1<=e<=1}b){e<=1}", "aab", 3, 1)]
+    // The enclosing sections take exactly the one insertion, so Matcher.InsertionsCanMeetMinimum,
+    // which refuses the insertions an enclosing section cannot absorb, must let these through.
+    [Arguments(@"(?:(?:a){1<=e<=1}b){i<=1}", "aab", 3, 1)]
+    [Arguments(@"(?:(?:(?:a){1<=i<=1}){e<=1}b){e<=1}", "aab", 3, 1)]
     public void A_minimum_is_met_by_an_insertion_at_the_end_of_the_section(
         string pattern,
         string text,
@@ -128,13 +132,15 @@ public sealed class FuzzyMinimumErrorTests
     // Upstream and this port agree on every row: the controls. An insertion raises neither the
     // substitution nor the deletion count, so it cannot meet an s or d minimum; the fuzzy test
     // [x] refuses the 'a' the insertion would take; one error allows one insertion, not the two
-    // 'aaab' needs; and where the minimum is already met the insertion comes on backtracking,
+    // 'aaab' needs; an enclosing section that permits no insertion refuses it too; and where the minimum is already met the insertion comes on backtracking,
     // after a substitution, as it always has.
     [Test]
     [Arguments(@"(?:a){1<=s<=1,i<=1}b", "aab")]
     [Arguments(@"(?:a){1<=d<=1,i<=1}b", "aab")]
     [Arguments(@"(?:a){1<=e<=2:[x]}b", "aab")]
     [Arguments(@"(?:a){1<=e<=1}b", "aaab")]
+    [Arguments(@"(?:(?:a){1<=e<=1}b){s<=1}", "aab")]
+    [Arguments(@"(?:(?:(?:a){1<=i<=1}){s<=1}b){e<=1}", "aab")]
     public void An_insertion_that_cannot_meet_the_minimum_is_not_a_match(string pattern, string text)
     {
         new FuzzyRegex(pattern).MatchAtStart(text).Success.Should().BeFalse();

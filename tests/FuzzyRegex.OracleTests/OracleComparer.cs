@@ -234,6 +234,12 @@ internal static class OracleComparer
     /// with entry 42 (see the comment where they are applied). Used by
     /// <see cref="RunWithoutTheExactDeletion"/> and by nothing else.
     /// </param>
+    /// <param name="keepMinimumOrderFix">
+    /// Leave ledger entry 51's minimum order on in an ablated run, which otherwise switches it off
+    /// with entries 42 and 44. The three fuzzy-search entries that sit before entry 51's in
+    /// <c>ExpectedDivergences</c> keep it on, so that none of them claims a row entry 51 alone
+    /// explains.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
@@ -242,7 +248,8 @@ internal static class OracleComparer
         Action<FuzzyRegex>? ablate = null,
         bool upstreamReverseGrapheme = false,
         bool withoutTheFuzzySearchFixes = false,
-        bool keepEmptyIterationRule = false
+        bool keepEmptyIterationRule = false,
+        bool keepMinimumOrderFix = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -306,6 +313,11 @@ internal static class OracleComparer
         {
             compiled.PatternObject.SkipExactDeletionRetry = true;
             compiled.PatternObject.UpstreamEmptyIterations = !keepEmptyIterationRule;
+
+            // Ledger entry 51 widens the fuzzy search the same way: a section below its minimum
+            // now tries trailing insertions, so with it on, taking another fix away need not bring
+            // back upstream's answer on a pattern with a minimum.
+            compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = !keepMinimumOrderFix;
         }
 
         ablate?.Invoke(compiled);
@@ -639,7 +651,8 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipExactDeletionRetry = true,
-            keepEmptyIterationRule: true
+            keepEmptyIterationRule: true,
+            keepMinimumOrderFix: true
         );
     }
 
@@ -671,7 +684,8 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.UpstreamEmptyIterations = true;
                 compiled.PatternObject.SkipExactDeletionRetry = true;
-            }
+            },
+            keepMinimumOrderFix: true
         );
     }
 
@@ -695,7 +709,8 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             withoutTheFuzzySearchFixes: true,
-            ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true
+            ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true,
+            keepMinimumOrderFix: true
         );
     }
 

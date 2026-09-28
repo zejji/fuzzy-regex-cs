@@ -4387,12 +4387,20 @@ internal static class Matcher
     /// an unmet substitution or deletion minimum, or bring back a maximum already passed. Adding the
     /// fewest insertions that would meet the minimums and asking the constraints again answers both:
     /// with more than that, every count limited above is only higher.
+    /// <para>
+    /// The same holds for each enclosing section, whose counts will include these insertions once
+    /// this section closes (END_FUZZY adds the inner counts to the outer ones,
+    /// <c>upstream/src/_regex.c</c>:12475-12481). Where one of them cannot take that many more
+    /// insertions or errors, the insertions only lead to its own END_FUZZY failing. Row A of
+    /// <c>FailedCallMemoTests</c>, whose outer section permits no insertion at all, spent a quarter
+    /// more time on them without that check (2026-09-28).
+    /// </para>
     /// </remarks>
+    /// <param name="state">The match state, for the enclosing sections.</param>
     /// <param name="fuzzyCounts">The section's counts.</param>
     /// <param name="fuzzyNode">The section.</param>
-    /// <param name="maxErrors">Upstream's <c>max_errors</c>.</param>
     /// <returns><see langword="true"/> if trailing insertions can make the section legal.</returns>
-    private static bool InsertionsCanMeetMinimum(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode, long maxErrors)
+    private static bool InsertionsCanMeetMinimum(MatchState state, ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
     {
         List<uint> values = fuzzyNode.Values;
         long needed = Math.Max(
@@ -4407,7 +4415,39 @@ internal static class Matcher
         Span<long> raised = stackalloc long[FuzzyValue.Count];
         fuzzyCounts.CopyTo(raised);
         raised[FuzzyValue.Ins] += needed;
-        return FuzzyWithinConstraints(raised, fuzzyNode, maxErrors);
+        if (!FuzzyWithinConstraints(raised, fuzzyNode, state.MaxErrors))
+        {
+            return false;
+        }
+
+        // The enclosing sections: see the remarks. Their counts at entry plus this section's.
+        int frame = state.SectionFrame;
+        if (frame < 0)
+        {
+            return true;
+        }
+
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+        {
+            for (int kind = 0; kind < FuzzyValue.Count; kind++)
+            {
+                raised[kind] += outerCounts[kind];
+            }
+
+            List<uint> outerValues = outer.Values;
+            if (
+                raised[FuzzyValue.Ins] > outerValues[FuzzyValue.MaxIns]
+                || TotalErrors(raised) > outerValues[FuzzyValue.MaxErr]
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -8613,7 +8653,7 @@ internal static class Matcher
                     {
                         if (
                             pattern.CheckMinimumBeforeTrailingInsertions
-                            || !InsertionsCanMeetMinimum(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors)
+                            || !InsertionsCanMeetMinimum(state, state.FuzzyCounts, state.FuzzyNode!)
                         )
                         {
                             goto backtrack;
@@ -12113,7 +12153,8 @@ internal static class Matcher
                             {
                                 Debug.Assert(
                                     !pattern.CheckMinimumBeforeTrailingInsertions
-                                        && InsertionsCanMeetMinimum(innerCounts, innerNode, state.MaxErrors),
+                                        && innerCounts[FuzzyValue.Sub] >= innerNode.Values[FuzzyValue.MinSub]
+                                        && innerCounts[FuzzyValue.Del] >= innerNode.Values[FuzzyValue.MinDel],
                                     "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
                                 );
                                 goto backtrack;

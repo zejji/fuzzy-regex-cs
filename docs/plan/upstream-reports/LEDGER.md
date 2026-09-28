@@ -4950,7 +4950,10 @@ into the frame just pushed while they still fail. A substitution or deletion min
 by insertions, and neither can a maximum already passed, so those still fail at once.
 
 **This port.** The forward and backtrack `END_FUZZY` arms of `src/FuzzyRegex/Engine/Matcher.cs`, with
-`Matcher.InsertionsCanMeetMinimum` deciding which sections wait. A pattern with no minimum pays
+`Matcher.InsertionsCanMeetMinimum` deciding which sections wait: only those that enough insertions
+would make legal, and whose enclosing sections can absorb them (without the second check row A of
+`FailedCallMemoTests`, whose outer section permits no insertion, ran about 25% slower; with it, base and
+fix are within noise, 134-140 ms against 135-145 ms at 15 characters, Release, 2026-09-28). A pattern with no minimum pays
 nothing: the forward arm's new work runs only where the constraint check already failed, and the
 backtrack arm's re-check is behind `PatternObject.HasFuzzyMinimum`. Pinned by
 `Gaps/Engine/FuzzyMinimumErrorTests` (e and i minimums, two insertions, a group reference, nested
@@ -4964,4 +4967,10 @@ construct (e, i, d, s, mixed, nested, `(?r)`, `(?b)`, `(?e)`) at each seed; a d 
 own moves none (every moved d or s row at seed 51 also holds an e, i or mixed section). All but 8 of the moved flag-free rows are upstream's answer once the
 reference drops rules 6, 3 and 10, and upstream already gives the reference's answer on those 8, each
 through a string's own insertion retry. The oracle entry `fuzzy-minimum-met-by-a-trailing-insertion`
-keys on `PatternObject.CheckMinimumBeforeTrailingInsertions`.
+keys on `PatternObject.CheckMinimumBeforeTrailingInsertions`. Every other named ablation switches entry 51
+off with entries 42 and 44, except the three fuzzy-search ablations that sit before it (42, 44 and 50),
+so a row entry 51 alone explains is claimed by its own entry; without that, seed 7 row 7203
+(`full-fold-backreference-retry`) went unclassified. One judged answer of
+`turkic-default-folding-without-spans` moved with the fix (row 9, a `{1<=e<=2}` split) and returns
+to the old one with the ablation set. Default oracle waves at seeds 7, 4242 and 20260927: only the
+known row 3732 at 20260927 diverges.
