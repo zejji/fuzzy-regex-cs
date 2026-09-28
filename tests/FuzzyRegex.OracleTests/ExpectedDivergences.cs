@@ -142,7 +142,7 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The thirty-four rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The thirty-eight rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -350,6 +350,20 @@ internal static class ExpectedDivergences
     /// recorded <c>bestmatchFreeOutcome</c>, and the recorder flags <c>bestmatch-no-worse</c>. This
     /// port answers that fit to the position. Measured 2026-09-25 on regex 2026.9.10.
     /// </para>
+    /// <para>
+    /// Rows 35 to 38 came in on 2026-09-28 as a candidate new bug, "BESTMATCH retries under
+    /// fullmatch lose a match", and are this entry's row 1 with a different letter:
+    /// <c>(?b)(?:b){e&lt;=2}</c> and <c>{i&lt;=2}</c> fullmatched against 'bba', the first reversed,
+    /// and a plain <c>match</c> of <c>(?b)(?:b){e&lt;=2}$</c>. Upstream answers no match to all four;
+    /// its flagless answer is (0, 3) with insertions at 1 and 2, which is this port's. Row 38 is why
+    /// the candidate's framing was wrong: a trailing <c>$</c> loses the fit with no fullmatch in the
+    /// question. Setting <c>PatternObject.DoubleCountTrailingInsertions</c> makes this port answer
+    /// None, pinned in
+    /// <c>FuzzyBestMatchTests.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end</c>.
+    /// Recorded by <c>pwsh -File tools/run-oracle.ps1 -Rows tools/probes/bestmatch-fullmatch-rows.jsonl</c>
+    /// and isolated by <c>python tools/probes/bestmatch-fullmatch-trailing-insertions.py</c>, both
+    /// on regex 2026.9.10, 2026-09-28.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -386,6 +400,10 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?b)(?r)\\m(?:\ud83d\ude00\\d\ud83d\ude00){e:[a-z]}", "flags": 0, "namedLists": {}, "subject": "b\ud83d\ude00\ud83d\ude00", "operation": "subf", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<><>\ud83d\ude00", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>", "count": 2}}
         {"generator": "rows", "pattern": "(?b)(\\p{L}){i,d}c", "flags": 0, "namedLists": {}, "subject": "\nc", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": [0]}}}
         {"generator": "fuzzy", "pattern": "(?b)(?e)(?fi)(?:[ab]+\\s(?:0\u00dfa){e<=2,s<=1}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "BAa 0SsTA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [7], "insertions": [8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){i<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?r)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}$", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -5244,8 +5262,9 @@ internal static class ExpectedDivergences
                 + ".Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds, and for S89's rows, "
                 + ".Bestmatch_keeps_a_match_that_is_all_trailing_insertions, "
                 + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
-                + ".Bestmatch_reversed_replaces_the_whole_emoji_run",
-            // Thirty-four rows rather than one, because each is a judged member of the family and the
+                + ".Bestmatch_reversed_replaces_the_whole_emoji_run, and for the 2026-09-28 'bba' rows, "
+                + ".Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end",
+            // Thirty-eight rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
