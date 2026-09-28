@@ -243,8 +243,12 @@ internal sealed class MatchState : IDisposable
     /// <para>
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
-    /// attempt has reached no text since that call opened, can only repeat the open call's work
-    /// one level deeper, so that path recurses for ever and is failed. If the attempt HAS reached
+    /// attempt has reached no text since that call opened, is failed. Usually such a call can only
+    /// repeat the open call's work one level deeper, but NOT always: a conditional or
+    /// backreference that reads a group set between the two calls can make the inner call do
+    /// something different, and then the path is finite and this guard wrongly fails it
+    /// (<c>OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
+    /// PCRE2 refuses the same shapes, upstream answers them). If the attempt HAS reached
     /// further, the inner call is let through: that is left recursion, <c>G -&gt; '' | G 'a'</c>,
     /// where the outer call's first try failed further on and the inner call is how 'aa' gets
     /// matched. The rule is PCRE2's (<c>OP_RECURSE</c> in <c>pcre2_match.c</c> 10.47, lines
