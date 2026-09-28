@@ -536,3 +536,42 @@ in `Gaps/Engine/FuzzyNeededEmptyIterationTests.cs` are rewritten to these values
 - Mode `order` exists only in the scratch copy. The builder should add it to
   `tools/probes/fuzzy-reference-matcher.py` together with the ledger 44 sweeps, and check that it
   loses no match that mode `unrestricted` finds on the finite-budget grids.
+
+## Final decision (2026-09-28 06:37): option A, not B
+
+A blind review found B "sound with changes": B's cycle stop never ends a search when the budget
+has no upper limit (`(?:Q+){e}`), so B needs a new termination clip. B would also make this
+pinned test hang: test_regex.py:2767-2769.
+
+The deciding point is what B does to common patterns. Measured on upstream 2026.9.10 in plain mode:
+
+| Call | Upstream | Under B |
+|---|---|---|
+| `fullmatch (?:[a-z]+){e<=2}` over `hello` | (0,0,0) | (0,0,2) |
+| `search (?:[0-9]{3}-[0-9]+){e<=1}` over `555-1234` | (0,0,0) | (0,0,1) |
+
+Charging errors for an exact match is a divergence in which the port would be wrong, not upstream.
+So B fails the bar that justifies a divergence.
+
+Section 4 of the review shows that no rule gives all three of these at once:
+- rewrites that keep the order of choices give the same answer;
+- `cats|cat` gives 1 deletion (README.rst:609, test_regex.py:2784);
+- no errors are charged that nothing needs.
+
+Only `(?e)` and `(?b)` give the third. So one seam has to stay, and A puts it in the most defensible
+place:
+
+- **An optional exit is free.** That covers `?`, `*`, `{0,n}` and an explicit empty alternative
+  `(?:X|)`. Ledger 44's needed rule covers all of them alike.
+- **A choice between non-empty branches stays first-match**, as README documents.
+
+What remains is that `cats|cat` gives 1 deletion while `cat(?:s|)` and `cats?` give 0. We accept it.
+Upstream breaks this kind of equivalence too, at the end of the text: `(?:b{0,3}){d<=2}` over `bb`
+gives 0, but `(?:b?b?b?){d<=2}` gives 1.
+
+Build this as the next F-A slice:
+- Start from the red rows in section 6 (option A).
+- Check that `SplitCommonPrefix` (Nodes.cs:1459) cannot mark an empty alternative that the compiler
+  made itself.
+- Make `UpstreamEmptyIterations` switch the new rule off.
+- The performance gate is 10% over 31.3 ms and 41.4 ms.
