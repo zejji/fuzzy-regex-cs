@@ -4655,6 +4655,13 @@ factoring mark, the first-set offset and the slot's save across a call has a row
 without it. The two deletion prunes change no answer (they skip only what the pass's end would
 fail) and are there for speed.
 
+Cost, 2026-09-28, Release, both builds loaded into one process and timed in turn (best of 84 runs
+each, all matches over the ruling's 200,000-character text): `(?:x(?:a|)y){e<=1}` 33.3 ms against
+31.9 before (+4%), `(?:x(?:a|b|)y){e<=1}` 36.1 against 34.0 (+6%), and `(?:x(?:a|b)y){e<=1}`, with no
+empty alternative, 32.5 against 30.9 (+5%), which puts the machine's noise at about the size of the
+change. The exact rows `x(?:a|)y` and `x(?:a|b|)y` stay within 1%. A first version that kept each
+start on the structure stack cost 25 to 30 per cent.
+
 ---
 
 ## 45. `(*SKIP)` acts when it runs, not when backtracking reaches it, so a later `(*PRUNE)` cannot undo it - FIXED HERE (2026-09-26)
