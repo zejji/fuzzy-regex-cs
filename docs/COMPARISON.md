@@ -827,13 +827,16 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success);  
 Under `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}` and `\p{Lower}` mean "any cased letter"
 wherever they appear, which is what Perl and .NET's `Regex` do. Upstream uses that rule for a bare
 property and a different one inside a set, so wrapping a property in brackets changed its answer.
-`\p{Upper=No}` is the complement of `\p{Upper}`.
+It also changes when the property can start the match after an optional item, because upstream
+then checks each start position against a set of the possible first items. `\p{Upper=No}` is
+the complement of `\p{Upper}`.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 Console.WriteLine(FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success);  // True - upstream's set form refuses
 Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success);     // False - upstream matches
+Console.WriteLine(FuzzyRegex.Match("\u2102aa", @"(?i)\p{Ll}?a{2}", FuzzyRegexOptions.Version0).Index);  // 0 - upstream: 1, skipping U+2102
 ```
 
 ### A case-insensitive set matches each member first, then combines them
