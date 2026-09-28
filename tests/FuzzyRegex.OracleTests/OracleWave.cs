@@ -469,8 +469,19 @@ internal static class OracleWave
     }
 
     /// <summary>Where the consumer exports every expected divergence's example rows for <c>record-oracle.py --recheck</c>.</summary>
+    /// <remarks>
+    /// Named from <see cref="ReportPath"/>'s own filename, the same as <see cref="ScreenCandidatesPath"/>
+    /// below, rather than the fixed <c>expected-examples.jsonl</c> this used to be: two overlapping
+    /// runs' consumers used to write the same sibling file, so whichever finished last could hand
+    /// <c>record-oracle.py --recheck</c> the other run's rows (D20/D21 repair round 1; the content is
+    /// the same fixed ledger for every run, so the only cost of this is one identical copy per run
+    /// rather than a shared name to race on).
+    /// </remarks>
     public static string ExpectedExamplesPath =>
-        Path.Combine(Path.GetDirectoryName(ReportPath)!, "expected-examples.jsonl");
+        Path.Combine(
+            Path.GetDirectoryName(ReportPath)!,
+            Path.GetFileNameWithoutExtension(ReportPath) + ".expected-examples.jsonl"
+        );
 
     /// <summary>
     /// Every example row of every entry, one JSON object per line: the entry's id and the row as the

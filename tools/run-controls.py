@@ -72,8 +72,14 @@ for _stream in (sys.stdout, sys.stderr):
 REPO = Path(__file__).resolve().parent.parent
 CONTROLS = Path(__file__).resolve().parent / "controls.json"
 WAVES = REPO / ".scratch" / "control-waves"
-LIVE_WAVE = REPO / "TestResults" / "oracle" / "wave.jsonl"
-REPORT = REPO / "TestResults" / "oracle" / "report.txt"
+# Per-process, not the fixed wave.jsonl/report.txt this used to be (D20/D21 repair round 1): this
+# runner is itself sequential, but the fixed names are also OracleWave.cs's own un-overridden
+# default, so a run-oracle.ps1 sweep or another run-controls.py in the same worktree at the same
+# time used to race this one on exactly the file it is mid-comparison against. consume() below
+# passes FUZZYREGEX_ORACLE_WAVE_PATH/REPORT_PATH so the consumer actually reads and writes here
+# instead of falling back to that shared default.
+LIVE_WAVE = REPO / "TestResults" / "oracle" / f"wave-{os.getpid()}.jsonl"
+REPORT = REPO / "TestResults" / "oracle" / f"report-{os.getpid()}.txt"
 # `expected` is optional so a report written before S33 added the accounted-for list still parses.
 # The columns between `expected` and `diverge` (timeout, resource, undefined, fault) are skipped:
 # they were added after this pattern was written and made every summary fail to parse.
@@ -245,10 +251,14 @@ def consume(wave: Path) -> tuple[str, str]:
         # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
         # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
         # later build can replace it (two such orphans on 2026-09-13, killed by hand).
+        env = os.environ | {
+            "FUZZYREGEX_ORACLE_WAVE_PATH": str(LIVE_WAVE),
+            "FUZZYREGEX_ORACLE_REPORT_PATH": str(REPORT),
+        }
         proc = subprocess.Popen(
             ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
              "--configuration", "Debug"],
-            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
+            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT, env=env,
             **({} if sys.platform == "win32" else {"start_new_session": True}),
         )
         try:

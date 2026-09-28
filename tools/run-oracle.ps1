@@ -317,7 +317,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $legacyWavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
 # The fixed name: refreshed at the end of every seed below for tools/sweep-seeds.ps1 and a human
-# tailing it, never read from mid-run any more - see the -Screen .NOTES above (D20).
+# tailing it, never read from mid-run any more - see .NOTES above (D20).
 $legacyReportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
 
 # A run of explicit rows, and a re-run of the wave already on disk, are both a single wave by
@@ -345,6 +345,13 @@ $failed = @()
 $recheckDone = $false
 $recheckFailed = $false
 
+# try/finally, not a bare loop: every early exit below (a failed recorder, a missing wave) used to
+# skip the env var restore after the loop, and so did Ctrl+C - PowerShell unwinds a terminating
+# `exit` or a same-console Ctrl+C through an enclosing finally the same way (confirmed 2026-09-28:
+# `exit` inside a try still runs its finally), so this is the one place that guarantees
+# FUZZYREGEX_ORACLE_WAVE_PATH/REPORT_PATH never leak into the caller's shell whichever way this
+# script stops (D20/D21 repair round 1).
+try {
 foreach ($seed in $runs) {
     if ($seed -ge 0) {
         Write-Host ''
@@ -419,8 +426,11 @@ foreach ($seed in $runs) {
 
     # Upstream's half of every known-divergence example, asked again: the consumer exported them,
     # and an answer upstream no longer gives means a bug an entry describes may have been fixed. The
-    # examples do not depend on the wave, so once per invocation is enough.
-    $examples = Join-Path $repoRoot 'TestResults/oracle/expected-examples.jsonl'
+    # examples do not depend on the wave, so once per invocation is enough. Named from $reportPath,
+    # the same as $candidatesPath below, not the fixed expected-examples.jsonl this used to be: two
+    # overlapping runs used to share that name (D20/D21 repair round 1, tests/.../OracleWave.cs's
+    # ExpectedExamplesPath).
+    $examples = Join-Path (Split-Path -Parent $reportPath) ((Split-Path -LeafBase $reportPath) + '.expected-examples.jsonl')
     if (-not $recheckDone -and (Test-Path -LiteralPath $examples)) {
         Write-Host ''
         Write-Host "Re-asking upstream every known-divergence example..." -ForegroundColor Cyan
@@ -473,8 +483,8 @@ foreach ($seed in $runs) {
         $failed += $seed
     }
 
-    # report-<seed>.txt is the archive of THIS run's own report (now a per-run file - see the -Screen
-    # .NOTES above), so this copy is race-free even while another seed's run-oracle.ps1 is mid-run.
+    # report-<seed>.txt is the archive of THIS run's own report (now a per-run file - see .NOTES
+    # above), so this copy is race-free even while another seed's run-oracle.ps1 is mid-run.
     #
     # S57: this copy is UNCONDITIONAL, and it used to happen only on a red seed. That made
     # report-<seed>.txt mean "the last time this seed was red" rather than "what this seed did",
@@ -492,30 +502,41 @@ foreach ($seed in $runs) {
     }
 
     # The fixed name, refreshed last so tools/sweep-seeds.ps1 and a human tailing report.txt still see
-    # this seed's report the moment this invocation finishes - see the -Screen .NOTES above (D20).
+    # this seed's report the moment this invocation finishes - see .NOTES above (D20).
     if (Test-Path -LiteralPath $reportPath) {
         Copy-Item -LiteralPath $reportPath -Destination $legacyReportPath -Force
     }
 
-    # D20: a per-run wave and report this invocation both named and wrote are scratch once the run is
-    # GREEN - their content lives on in wave-<seed>.jsonl/report-<seed>.txt above (when seeded) or
-    # nowhere else (when not, e.g. -Rows), and either way a repeat invocation must not litter
-    # TestResults/oracle/ with one pair of files per run forever. Left in place on RED, for the same
-    # reason $runWavePath is.
-    if ($ownsWavePath -and -not $SkipRecord -and ($failed -notcontains $seed) -and (Test-Path -LiteralPath $runWavePath)) {
+    # D20: a per-run wave and report this invocation both named and wrote are scratch once a seeded
+    # run has archived them above (wave-<seed>.jsonl/report-<seed>.txt already hold the identical
+    # bytes) - so, seeded, they are deleted unconditionally, RED included (D21 repair round 1: a RED
+    # seeded run used to keep this exact duplicate of wave-<seed>.jsonl beside it for no reason).
+    # Unseeded (-Rows/-SkipRecord with no seed to archive under), there is no other copy, so the
+    # GREEN-only rule still applies: a RED run's only evidence is this file, and it stays.
+    if ($ownsWavePath -and -not $SkipRecord -and (Test-Path -LiteralPath $runWavePath) -and ($seed -ge 0 -or ($failed -notcontains $seed))) {
         Remove-Item -LiteralPath $runWavePath -Force
     }
-    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $reportPath)) {
+    if ((Test-Path -LiteralPath $reportPath) -and ($seed -ge 0 -or ($failed -notcontains $seed))) {
         Remove-Item -LiteralPath $reportPath -Force
     }
     if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $candidatesPath)) {
         Remove-Item -LiteralPath $candidatesPath -Force
     }
+    # Per-run since OracleWave.cs's ExpectedExamplesPath fix above; scratch the same way as
+    # $candidatesPath, since nothing archives a copy of it under the seed's own name.
+    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $examples)) {
+        Remove-Item -LiteralPath $examples -Force
+    }
 }
-
-Remove-Item Env:FUZZYREGEX_ORACLE_REPORT_PATH -ErrorAction SilentlyContinue
-
-Remove-Item Env:FUZZYREGEX_ORACLE_WAVE_PATH -ErrorAction SilentlyContinue
+}
+finally {
+    # Always, whichever way the loop above stopped - normal completion, a recorder/consumer `exit 1`,
+    # or a same-console Ctrl+C (D20/D21 repair round 1, item 4: these two used to leak into the
+    # caller's shell on every early exit, so a later plain `run-oracle.ps1` inside the same session
+    # silently read/wrote the last seed's per-run paths instead of its own).
+    Remove-Item Env:FUZZYREGEX_ORACLE_REPORT_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:FUZZYREGEX_ORACLE_WAVE_PATH -ErrorAction SilentlyContinue
+}
 
 Write-Host ''
 if ($failed.Count -eq 0) {

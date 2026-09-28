@@ -75,7 +75,6 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runOracle = Join-Path $PSScriptRoot 'run-oracle.ps1'
 $reportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
-$wavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
 $logPath = if ([System.IO.Path]::IsPathRooted($Log)) { $Log } else { Join-Path $repoRoot $Log }
 
 # Drawn from an explicitly seeded generator rather than from Get-Random's implicit state, so that
@@ -187,8 +186,12 @@ foreach ($seed in $planned) {
     $keep = Join-Path $repoRoot "TestResults/oracle/sweep-$seed"
     New-Item -ItemType Directory -Force -Path $keep | Out-Null
     if (Test-Path -LiteralPath $reportPath) { Copy-Item -LiteralPath $reportPath -Destination (Join-Path $keep 'report.txt') -Force }
-    if (-not $green -and (Test-Path -LiteralPath $wavePath)) {
-        Copy-Item -LiteralPath $wavePath -Destination (Join-Path $keep 'wave.jsonl') -Force
+    # run-oracle.ps1 no longer records to the legacy fixed wave.jsonl (D20, docs/KNOWN-DEFECTS.md);
+    # it archives this seed's own wave, unconditionally, to wave-<seed>.jsonl - so that is the copy
+    # to read here, not the legacy name nothing writes to any more.
+    $seedWavePath = Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl"
+    if (-not $green -and (Test-Path -LiteralPath $seedWavePath)) {
+        Copy-Item -LiteralPath $seedWavePath -Destination (Join-Path $keep 'wave.jsonl') -Force
     }
 
     # THE PARSING IS THE ONE THING HERE THAT CAN BE SILENTLY WRONG, so it is checked rather than
