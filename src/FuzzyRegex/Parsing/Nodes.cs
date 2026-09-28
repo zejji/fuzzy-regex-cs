@@ -2449,9 +2449,19 @@ internal class String : RegexBase
             return null;
         }
 
+        int expanding = Array.FindAll(Characters, c => new Character(c, caseFlags: CaseFlags).Folded.Length > 1).Length;
+        if (expanding == 0)
+        {
+            return null;
+        }
+
+        // With one expanding character, reading it as its folding here would repeat the packed run
+        // that comes first, so it is read as the character alone: CHARACTER_IGN, without the full
+        // flag that makes a Character add its folding. With two or more, each may be either, and
+        // the mixtures are only here.
+        int atomFlags = expanding == 1 ? CaseFlags & ~RegexFlags.FullCase : CaseFlags;
         List<RegexBase> items = [];
         List<int> others = [];
-        bool expands = false;
 
         foreach (int c in Characters)
         {
@@ -2465,19 +2475,13 @@ internal class String : RegexBase
                     Array.TrueForAll(character.Folded, f => new Character(f, caseFlags: CaseFlags).Folded.Length == 1),
                     "A full case folding expands again."
                 );
-                expands = true;
                 FlushOthers();
-                items.Add(character);
+                items.Add(new Character(c, caseFlags: atomFlags));
             }
             else
             {
                 others.Add(c);
             }
-        }
-
-        if (!expands)
-        {
-            return null;
         }
 
         FlushOthers();

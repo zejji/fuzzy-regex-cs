@@ -48,12 +48,25 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// count, so the offsets need no walk.
 /// </para>
 /// <para>
+/// <b>One exception: a lone character no ASCII character equals.</b> A fuzzy full-folded run holding
+/// <c>ß</c> or a ligature reads it one character at a time on a second path (ledger entry 49), where
+/// the <c>ß</c> is a <c>CHARACTER_IGN</c> node of its own. No ASCII character equals it ignoring
+/// case, so an ASCII subject never holds it untouched and the piece search never finds a piece
+/// holding it - which is also true of the match, so the argument above still holds on the pieces
+/// that are left. The node must be one character from the Basic Multilingual Plane, so that one
+/// literal value is still one code unit, and <see cref="Matcher.SameCharIgn"/> must pair it with
+/// none of the 128 ASCII characters: KELVIN SIGN, which the engine pairs with <c>k</c>, is refused.
+/// A string node keeps the ASCII rule, because its values are compared a folded character at a time.
+/// </para>
+/// <para>
 /// sync-divergence: upstream's <c>basic_match</c> (<c>upstream/src/_regex.c:11767-11814</c>) runs
 /// no prefilter at all under a fuzzy section / this type screens the start positions of a fuzzy
 /// literal before each attempt / a fuzzy phrase search over short records otherwise tries every
 /// position of every record. Re-aligning: nothing to follow unless upstream adds a fuzzy prefilter
 /// of its own, or changes what a fuzzy section can match - an error that damages two characters at
-/// once would break the one-edit-one-piece argument above.
+/// once would break the one-edit-one-piece argument above. Ledger entry 49's reading is not one:
+/// substituting the whole <c>ß</c> damages one character on the path that reads it as one, and
+/// each path is a literal of its own.
 /// </para>
 /// </remarks>
 internal sealed class FuzzyLiteralFilter
@@ -95,7 +108,17 @@ internal sealed class FuzzyLiteralFilter
         MaxErrors = maxErrors;
         _comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         Reverse = reverse;
+        _asciiPiece = [.. pieces.Select(static piece => Ascii.IsValid(piece))];
     }
+
+    /// <summary>
+    /// Per piece, whether it is ASCII. One that is not holds a lone character no ASCII character
+    /// equals (see the class remarks), so it is never in the ASCII stretch the search accepts, and
+    /// is not searched for: an absent piece is searched to the end of the slice, and on every call
+    /// of a <c>Matches</c> walk that cost the whole rest of the subject each time - ten times the
+    /// search's cost on a 200,000-character subject (measured 2026-09-28).
+    /// </summary>
+    private readonly bool[] _asciiPiece;
 
     /// <summary>The <c>k + 1</c> pieces, in the literal's order.</summary>
     internal string[] Pieces { get; }
@@ -150,7 +173,7 @@ internal sealed class FuzzyLiteralFilter
         var offsets = new List<int>();
         foreach (List<uint> values in walk.Literals)
         {
-            if (values.Count / pieceCount < MinPieceLength || values.Any(static c => c > 0x7F))
+            if (values.Count / pieceCount < MinPieceLength)
             {
                 return null;
             }
@@ -159,8 +182,21 @@ internal sealed class FuzzyLiteralFilter
             for (int j = 0; j < pieceCount; j++)
             {
                 int offset = j * text.Length / pieceCount;
+                string piece = text[offset..((j + 1) * text.Length / pieceCount)];
+
+                // One search per distinct piece. Two paths through a branch can share a piece, and
+                // ledger entry 49's one-character reading of a run repeats the run's own literal
+                // once per expanding character. Keeping the larger offset moves the start bound
+                // earlier, which can only make the engine try more positions.
+                int seen = pieces.IndexOf(piece);
+                if (seen >= 0)
+                {
+                    offsets[seen] = Math.Max(offsets[seen], offset);
+                    continue;
+                }
+
                 offsets.Add(offset);
-                pieces.Add(text[offset..((j + 1) * text.Length / pieceCount)]);
+                pieces.Add(piece);
             }
         }
 
@@ -246,7 +282,7 @@ internal sealed class FuzzyLiteralFilter
                         return false;
                 }
 
-                if (Reverse is bool direction && direction != nodeIsReverse)
+                if ((Reverse is bool direction && direction != nodeIsReverse) || !TheSearchSeesAsTheEngineDoes(node))
                 {
                     return false;
                 }
@@ -263,6 +299,44 @@ internal sealed class FuzzyLiteralFilter
             }
 
             Literals.Add(values);
+            return true;
+        }
+
+        /// <summary>
+        /// Whether an ordinal search over ASCII text answers for this node as the engine does: every
+        /// value is ASCII, or the node is one character from the Basic Multilingual Plane that no
+        /// ASCII character equals, so neither the engine nor the search finds it there. See the
+        /// class remarks.
+        /// </summary>
+        /// <param name="node">A string or character node on the path.</param>
+        /// <returns>Whether the node can be part of a literal.</returns>
+        private static bool TheSearchSeesAsTheEngineDoes(Node node)
+        {
+            bool character =
+                node.Op is Opcode.Character or Opcode.CharacterIgn or Opcode.CharacterRev or Opcode.CharacterIgnRev;
+            bool ignoreCase = node.Op is Opcode.CharacterIgn or Opcode.CharacterIgnRev;
+
+            foreach (uint c in node.Values)
+            {
+                if (c <= 0x7F)
+                {
+                    continue;
+                }
+
+                if (!character || c > 0xFFFF)
+                {
+                    return false;
+                }
+
+                for (uint ascii = 0; ignoreCase && ascii <= 0x7F; ascii++)
+                {
+                    if (Matcher.SameCharIgn(node.Encoding, c, ascii))
+                    {
+                        return false;
+                    }
+                }
+            }
+
             return true;
         }
     }
@@ -327,7 +401,10 @@ internal sealed class FuzzyLiteralFilter
             string piece = Pieces[j];
             if (found[j] < textPos)
             {
-                int at = textPos < sliceEnd ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison) : -1;
+                int at =
+                    textPos < sliceEnd && _asciiPiece[j]
+                        ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison)
+                        : -1;
                 found[j] = at < 0 ? Absent : textPos + at;
             }
 
