@@ -294,13 +294,22 @@ public sealed class FuzzyExactDeletionTests
         // text is a match, and 'a', which matched, never inserted. This row witnessed that while
         // a section's minimums were checked before its trailing insertions, as upstream checks
         // them ([], [0], [1] upstream). Since ledger entry 51 the deletion of 'a' at 0 followed
-        // by a trailing insertion of the same 'a' comes first, as in the reference matcher, and
-        // two grids of 3,000 and 6,000 alternation rows found no row that needs the exception
-        // any more (2026-09-28, with it switched off); it is kept because it only keeps a choice.
+        // by a trailing insertion of the same 'a' comes first, as in the reference matcher.
         Match m = new FuzzyRegex("(?:(?:a|b)){1<=i<=1,1<=d<=1}").MatchAtStart("a");
         ShouldMatch(m, 0, 1, new FuzzyCounts(0, 1, 1));
         m.FuzzyChanges.Insertions.Should().Equal(0);
         m.FuzzyChanges.Deletions.Should().Equal(0);
+
+        // The witness since then: a capture tells the two orders apart. Deleting 'a' at 0 and
+        // inserting it after leaves group 1 empty at 0, so the backreference cannot match the
+        // second 'a'; only 'b' inserting the first 'a' and being deleted at 1 leaves group 1 on
+        // it. Upstream: (0, 2), group 1 (0, 1), fuzzy_changes ([], [0], [1]) (regex 2026.9.10,
+        // 2026-09-28). Without the exception this is None. Found by the D9 blind review.
+        Match witness = new FuzzyRegex(@"(?:(a|b)){1<=i<=1,1<=d<=1}\1$").MatchAtStart("aa");
+        ShouldMatch(witness, 0, 2, new FuzzyCounts(0, 1, 1));
+        (witness.Groups[1].Index, witness.Groups[1].Length).Should().Be((0, 1));
+        witness.FuzzyChanges.Insertions.Should().Equal(0);
+        witness.FuzzyChanges.Deletions.Should().Equal(1);
 
         var regex = new FuzzyRegex("(?:a|b|[bc]|bc|c){e<=1}");
         List<Node> items =
