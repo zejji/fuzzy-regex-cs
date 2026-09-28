@@ -24,6 +24,7 @@ skips them. Run them with:
 | D10 | A group call inside a failed lookaround leaves a capture behind. It is the same root cause as the leak that forces C1's lookaround exclusion | `(a)(?:(?!.(?1))\|.)+?b` over 'aaab': group 1 [0,1][2,1] vs [0,1] | main |
 | D13 | Timing tests depend on machine speed (TIMEOUT_SHAPES, demo checks, AOT smoke, FailedCallMemoTests) | FailedCallMemoTests went red under load on 2026-09-28 | none |
 | D14 | Performance: FuzzyLiteralFilter searches an absent ASCII piece to the end of the subject on every Matches step, so the search is quadratic | found by D6's builder | none |
+| D17 | An empty iteration that flips a tested group between two spans at one position counts as progress for ever: upstream's rule has no cycle check (found by D12's survey). Needs a per-run record of group states, like the fuzzy repeat memo | `^(?:(?=(?P=g)b)(?=(?P<g>ab))\|(?=(?P<g>a)))*$` over 'ab': 1 GB stack exhausted vs None (upstream: MemoryError) | `OpenDefectTests` on `maint/d12-empty-iteration` |
 
 ## In progress
 
@@ -34,7 +35,7 @@ skips them. Run them with:
 | D3 | A same-position group call is refused when a capture read by a conditional or backreference has changed | `(?(a)(?(b)x\|(?<b>)(?R))\|(?<a>)(?R))` over 'x': None vs (0,1) | design reviewed; the build waits for D1 (it needs C1) | `maint/call-guard` 28a057e, `docs/plan/2026-09-28-capture-dependent-recursion-design.md`; red test on main |
 | D8 | A fuzzy insertion is never tried before a failing lookaround (S3-F2) | `(?:b(?=c)){i<=1}` over 'bxc': None vs (0,2) with 1 insertion | build started | `maint/d8-insert-before-lookaround` |
 | D11 | Phantom partial matches at a boundary (F2; includes S3-F1 and oracle cluster A). The biggest item; design first. Owner rulings: Q1 = B, Q2 = B | see the 2026-09-26 handover | design started | `design/d11-partial-boundary` |
-| D12 | Exact matching: does a capture change count as progress in an empty iteration? Upstream says yes; re, PCRE2 and Perl say no. To be surveyed, then decided | `^(?:(?(1)c\| survey and decision started | `maint/d12-empty-iteration` |
+| D12 | Exact matching: does a capture change count as progress in an empty iteration? Upstream says yes; re, PCRE2 and Perl say no | `^(?:(?(1)c\|z)\|())*$` over 'c': (0,1), as upstream | decided: keep upstream's rule (its termination check loses no match, and it keeps `X*` a superset of `X{2,}`); the port already follows it, now pinned; blind review running, then merge | `maint/d12-empty-iteration`; decision in `docs/plan/2026-09-26-empty-iteration-survey.md` |
 | D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fix started | `maint/d15-d16-tooling` |
 | D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fix started | `maint/d15-d16-tooling` |
 
