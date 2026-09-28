@@ -5723,6 +5723,11 @@ internal static class Matcher
     /// literal's frame it never leaves the whole substitution out
     /// (<see cref="WholeSubstitutionRepeatsAFoldedInsertion"/> reads the pattern's next value, which
     /// a backreference does not have): that prune only saves work, so no answer depends on it.
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of nine,
+    /// <c>Count</c> over 40,000 characters): over ASCII text <c>(?fi)(\w{4}) (?:\1){e&lt;=1}</c>
+    /// takes 45.2 against 44.6 ms and the exact <c>(?fi)(\w{3})\w* \1</c> 26.7 against 27.0 ms,
+    /// inside each side's spread; where every sixth character expands the fuzzy one takes 39.6
+    /// against 33.2 ms (+19%), the new candidates being searched, as for ledger entry 52's literal.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The backreference.</param>
