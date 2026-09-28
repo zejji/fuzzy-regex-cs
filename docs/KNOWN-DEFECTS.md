@@ -56,8 +56,8 @@ such test is a mistake: reopen it.
 | F4 | Oracle row 20260927:3732. Upstream's IGNORECASE first-set precheck refuses a cased letter with no case partner (ledger 35 H; the port is right, pinned) | main 2357e67 |
 | F5 | Full-fold fuzzy: editing an expanding pattern character (ß) inside a run cost two edits (ledger 49, was D6) | main 58e57e5 |
 | F6 | Exact matching: an empty iteration that changes a tested group's span counts as progress. Kept upstream's rule; the port already followed it, now pinned by a 23-shape survey and 27 tests (was D12) | main 7d39d99 |
-| F7 | Test tooling: 20 `tools/controls.json` entries had lost their code site; `run-controls.py` crashed on a cp1252 console and no longer parsed the oracle summary (was D15) | main (this merge) |
-| F8 | Test harness: `_generate_matrix` drew `(?b)`/`(?e)` with weighted-cost constraints (was D16) | main (this merge) |
+| F7 | Test tooling: 20 `tools/controls.json` entries had lost their code site; `run-controls.py` crashed on a cp1252 console and no longer parsed the oracle summary (was D15) | main 017f578 |
+| F8 | Test harness: `_generate_matrix` drew `(?b)`/`(?e)` with weighted-cost constraints (was D16) | main 017f578 |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
