@@ -277,11 +277,10 @@
     "anchorNth": 1,
     "before": "SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos])",
     "after": "SameCharIgn(node.Encoding, state.CharAt(stringPos), folded[foldedPos])",
-    "generator": "case-folding",
-    "count": 600,
-    "seeds": [
-      7,
-      20260901
+    "signal": "suite",
+    "expectedFailures": [
+      "Full_case_folding_matches_where_upstream_does((?fi)(ffi)\\1, ﬃﬃ, 0, 2)",
+      "Full_case_folding_matches_where_upstream_does((?fi)(ss)\\1, ßß, 0, 2)"
     ]
   },
   {
