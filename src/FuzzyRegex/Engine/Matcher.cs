@@ -7043,6 +7043,8 @@ internal static class Matcher
         // The main matching loop.
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
@@ -10263,6 +10265,8 @@ internal static class Matcher
 
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 

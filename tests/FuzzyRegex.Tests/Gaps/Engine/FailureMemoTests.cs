@@ -22,12 +22,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </remarks>
 public sealed class FailureMemoTests
 {
-    /// <summary>
-    /// Long enough to rule out any doubt about the direction of a failure, short enough that the
-    /// pre-memo engine is a red test in seconds rather than a stalled suite.
-    /// </summary>
-    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
-
     [Test]
     [Arguments("(?:a|a)+c")]
     [Arguments("(a|aa)+c")]
@@ -38,12 +32,24 @@ public sealed class FailureMemoTests
         // Forty 'a's then "bc": the 'c' is there so the required-string screen cannot answer before
         // the engine runs. Every way of splitting the run reaches the 'b' and fails. With the memo,
         // the body fails once per position, so the attempt costs time linear in the run.
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
+        //
+        // Counted in engine steps rather than timed, because a busy machine is not a slow engine
+        // (D13). The four patterns took 1,230 to 15,507 steps for all three calls (Debug,
+        // 2026-09-28); with the memo off the first call alone hits the bound, since every split of
+        // forty 'a's is about 2^40 steps. The step bound also stops that runaway at once.
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = new string('a', 40) + "bc";
 
-        regex.IsMatch(subject).Should().BeFalse();
-        regex.MatchAtStart(subject).Success.Should().BeFalse();
-        regex.FullMatch(subject).Success.Should().BeFalse();
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                regex.IsMatch(subject).Should().BeFalse();
+                regex.MatchAtStart(subject).Success.Should().BeFalse();
+                regex.FullMatch(subject).Success.Should().BeFalse();
+            },
+            200_000,
+            "with the memo, the body fails once per position"
+        );
     }
 
     [Test]

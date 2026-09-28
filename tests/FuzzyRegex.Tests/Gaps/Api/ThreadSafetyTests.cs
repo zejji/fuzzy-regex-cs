@@ -267,6 +267,38 @@ public sealed class ThreadSafetyTests
     }
 
     [Test]
+    public void Only_the_debug_work_counters_are_thread_static()
+    {
+        // The scans in this file leave thread-static fields out, because a field each thread has
+        // its own copy of is not shared. That exclusion must not become a way round them, so the
+        // set is pinned: the Debug-only counters of WorkCounter (D13), which a Release build
+        // never writes.
+        IReadOnlyList<string> threadStatic =
+        [
+            .. _library
+                .GetTypes()
+                .SelectMany(static type =>
+                    type.GetFields(
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly
+                    )
+                )
+                .Where(IsThreadStatic)
+                .Select(static field => $"{field.DeclaringType!.Name}.{field.Name}")
+                .OrderBy(static name => name, StringComparer.Ordinal),
+        ];
+
+        threadStatic
+            .Should()
+            .Equal(
+                "WorkCounter.<CharacterLimit>k__BackingField",
+                "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<StatesInitialised>k__BackingField",
+                "WorkCounter.<StepLimit>k__BackingField",
+                "WorkCounter.<Steps>k__BackingField"
+            );
+    }
+
+    [Test]
     public void The_compilers_own_static_caches_are_single_reference_publications()
     {
         // Compiler-generated closure types hold a static cache field per lambda, and those are not
@@ -612,7 +644,17 @@ public sealed class ThreadSafetyTests
                 type.GetFields(
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly
                 )
-            );
+            )
+            .Where(static field => !IsThreadStatic(field));
+
+    /// <summary>
+    /// Whether each thread has its own copy of the field, so that it is not shared state at all.
+    /// <see cref="Only_the_debug_work_counters_are_thread_static"/> bounds which fields may be.
+    /// </summary>
+    /// <param name="field">The field.</param>
+    /// <returns>Whether it carries <see cref="ThreadStaticAttribute"/>.</returns>
+    private static bool IsThreadStatic(FieldInfo field) =>
+        field.IsDefined(typeof(ThreadStaticAttribute), inherit: false);
 
     /// <summary>
     /// Whether a static field's type is one that is safe to reach from several threads: immutable

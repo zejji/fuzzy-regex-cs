@@ -202,20 +202,23 @@ public sealed class FuzzyLiteralPrefilterTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
-    [SkipUnderStryker]
     public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
     {
         // 6,165 ms without the filter on Release, 1.7 ms before ledger entry 49 (the blind review
-        // of 251afa0). The budget is loose enough for a Debug build under load.
-        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}");
+        // of 251afa0). Counted in engine steps rather than timed, because a busy machine is not a
+        // slow engine (D13): the filter refuses every position, so the matching loop takes no
+        // steps at all (Debug, 2026-09-28), and without it every position is a fuzzy attempt.
+        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}", FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int count = -1;
 
-        int count = regex.Matches(subject).Count;
+        EngineWork.ShouldTakeAtMostSteps(
+            () => count = regex.Matches(subject).Count,
+            100_000,
+            "the filter, not the matcher, rules out the positions"
+        );
 
-        clock.Stop();
         count.Should().Be(0);
-        clock.ElapsedMilliseconds.Should().BeLessThan(500);
     }
 
     [Test]

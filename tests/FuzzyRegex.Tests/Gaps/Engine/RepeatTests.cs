@@ -281,15 +281,22 @@ public sealed class RepeatTests
         // n^2 + n^2/2 in each direction, which is the shape this test exists to refuse.
         //
         // The subject is four times upstream's test_bug_418626#3, so a quadratic scan costs sixteen
-        // times what it costs there and a linear one four times. The engine's own timeout is what
-        // enforces the ceiling, so a regression fails in twenty seconds instead of hanging the suite
-        // for an hour.
+        // times what it costs there and a linear one four times. What is bounded is the walk itself,
+        // counted one character at a time, rather than the time it takes: until 2026-09-28 this was
+        // a twenty-second match timeout, and a busy machine is not a slow engine (D13). The match
+        // walks 400,000 characters (Debug, 2026-09-28), five for every three of the subject; a
+        // quadratic walk is about n^2, and the bound stops it there. The timeout is left for Release.
         string subject = string.Concat(Enumerable.Repeat("abc", 80000)) + "de";
-        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        Match? m = null;
 
-        Match m = pattern.MatchAtStart(subject);
+        EngineWork.ShouldWalkAtMostCharacters(
+            () => m = pattern.MatchAtStart(subject),
+            4L * subject.Length,
+            "a linear scan walks each character a few times"
+        );
 
-        (m.Index + m.Length).Should().Be(240001);
+        (m!.Index + m.Length).Should().Be(240001);
     }
 
     [Test]
@@ -304,11 +311,18 @@ public sealed class RepeatTests
         string subject = string.Concat(Enumerable.Repeat("x\U0001F600y", 60000)) + "cd";
         subject.Should().HaveLength(240002, "180,002 characters, of which 60,000 take two code units");
 
-        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
+        // Counted as in the test above: 8,730,005 characters walked (Debug, 2026-09-28), which is
+        // the index's stride of 32 at most per conversion, against 3n^2 without it.
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        Match? m = null;
 
-        Match m = pattern.MatchAtStart(subject);
+        EngineWork.ShouldWalkAtMostCharacters(
+            () => m = pattern.MatchAtStart(subject),
+            200L * subject.Length,
+            "the index bounds each conversion's walk"
+        );
 
-        (m.Index + m.Length).Should().Be(240002);
+        (m!.Index + m.Length).Should().Be(240002);
     }
 
     /// <summary>
