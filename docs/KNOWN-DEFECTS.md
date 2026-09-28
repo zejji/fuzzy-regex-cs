@@ -32,6 +32,7 @@ such test is a mistake: reopen it.
 | D18 | Partial matching checks each undetermined decision at the text's edge on its own, so contradictory assertions at one position give a phantom partial (D11's limit 1; SHORTCUT in D11) | `a\b\B` over 'a' search: P(1,1) vs None | none yet (after D11) |
 | D19 | Partial matching presumes the rest of the pattern can match once a character is taken past the edge (D11's limit 2; upstream issue 367). Decidable only without backreferences and without calls or recursion (regular-language emptiness, possibly exponential); calls make it context-free, and with lookarounds emptiness is undecidable. Research the split | `(?:a\B)+` fullmatch 'a': partial vs None | none yet |
 | D20 | Test tooling: `record-oracle.py` writes by default to the same `TestResults/oracle/wave.jsonl` that `run-oracle.ps1` consumes (record-oracle.py:63, run-oracle.ps1:295), so an ad hoc recording in the same worktree can replace a running oracle's wave. Likely cause of the D15 builder's one-off 2,000-row fuzzy-only RED report. Fix: a per-run wave file, and the report names the wave's seed and generators | D15 builder, 2026-09-28 | none |
+| D21 | Test tooling: controls S22-D and S42-2G never fire. Their mutation changes no oracle row (0 diverge, as at baseline; DECISIONS.md:190, S42-bestmatch.md:368), so they guard nothing. Give each a signal that fires (a suite signal or a targeted wave), or show the mutation is unreachable and delete it | D15/D16 blind review, 2026-09-28 | none |
 
 ## In progress
 
@@ -42,8 +43,6 @@ such test is a mistake: reopen it.
 | D3 | A same-position group call is refused when a capture read by a conditional or backreference has changed | `(?(a)(?(b)x\|(?<b>)(?R))\|(?<a>)(?R))` over 'x': None vs (0,1) | design reviewed; the build waits for D1 (it needs C1) | `maint/call-guard` 28a057e, `docs/plan/2026-09-28-capture-dependent-recursion-design.md`; red test on main |
 | D8 | A fuzzy insertion is never tried before a failing lookaround (S3-F2) | `(?:b(?=c)){i<=1}` over 'bxc': None vs (0,2) with 1 insertion | fixed (upstream wrong, ledger 50, pinned); blind review clean; merges right after D1. Failing fuzzy lookarounds search more (417 vs 259 ms at 4.8k chars), because more candidates are now valid | `maint/d8-insert-before-lookaround` 9fed032 (on D1's branch). At merge, delete its OpenDefectTests row |
 | D11 | Phantom partial matches at a boundary (F2; includes S3-F1 and oracle cluster A). The biggest item; design first. Owner rulings: Q1 = B, Q2 = B | see the 2026-09-26 handover | design review round 1: 2 soundness defects (verbs as commit points; retried atomic path loses its mark) plus rule 10-12 gaps; revision running | `design/d11-partial-boundary` 775450a |
-| D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fixed on branch (117/117 controls resolve, 20 retargeted and fire); blind review next | `maint/d15-d16-tooling` 1c509db |
-| D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fixed on branch (26/3000 rows change, all b/e strips); blind review next; check why row 3732 went green | `maint/d15-d16-tooling` 0cb732e |
 | D9 | A section's minimum error count is met in the wrong order (F-D; upstream's END_FUZZY) | `(?:a){1<=e<=2}b` over 'aab': expected an insertion | build started | `maint/d9-minimum-errors` (on D8's branch) |
 | D13 | Timing tests depend on machine speed (TIMEOUT_SHAPES, demo checks, AOT smoke, FailedCallMemoTests) | FailedCallMemoTests went red under load on 2026-09-28 | build started | `maint/d13-timing-tests` |
 
@@ -57,6 +56,8 @@ such test is a mistake: reopen it.
 | F4 | Oracle row 20260927:3732. Upstream's IGNORECASE first-set precheck refuses a cased letter with no case partner (ledger 35 H; the port is right, pinned) | main 2357e67 |
 | F5 | Full-fold fuzzy: editing an expanding pattern character (ß) inside a run cost two edits (ledger 49, was D6) | main 58e57e5 |
 | F6 | Exact matching: an empty iteration that changes a tested group's span counts as progress. Kept upstream's rule; the port already followed it, now pinned by a 23-shape survey and 27 tests (was D12) | main 7d39d99 |
+| F7 | Test tooling: 20 `tools/controls.json` entries had lost their code site; `run-controls.py` crashed on a cp1252 console and no longer parsed the oracle summary (was D15) | main (this merge) |
+| F8 | Test harness: `_generate_matrix` drew `(?b)`/`(?e)` with weighted-cost constraints (was D16) | main (this merge) |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
