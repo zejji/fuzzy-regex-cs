@@ -177,13 +177,45 @@ public sealed class FuzzyLiteralPrefilterTests
     [Property("Upstream", "none - gap test")]
     public void A_fuzzy_run_holding_a_sharp_s_keeps_its_filter()
     {
-        // Ledger entry 49 gives the run a second path that reads the 'ß' as one CHARACTER_IGN node,
-        // which no ASCII character equals. That path is a literal of its own, 'straße lane'; before
-        // the lone-character rule it switched the filter off and this search ran ten times slower.
+        // Ledger entry 49 gives the run a second arm that reads the 'ß' as one character. Both arms
+        // are the one literal 'strasse lane', cut only between pattern characters, so never inside
+        // the 'ss' that is the 'ß'.
         FuzzyLiteralFilter? filter = Build("(?fi)(?:straße lane){e<=1}").FuzzyLiteralFilter;
 
         filter.Should().NotBeNull();
-        filter.Pieces.Should().Contain("stra\u00df");
+        filter.Pieces.Should().Equal("strass", "e lane");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_run_of_many_expanding_characters_is_one_literal_cut_between_them()
+    {
+        // Enumerating each 'ß's choice of itself or its folding gave 2^8 + 1 literals, more pieces
+        // than MaxPieces, and the filter went off from four on (the blind review of 251afa0). Eight
+        // characters, k = 2: three pieces of 2, 3 and 3 characters, never half an 'ss'.
+        FuzzyLiteralFilter? filter = Build("(?fi)(?:ßßßßßßßß){e<=2}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter.Pieces.Should().Equal("ssss", "ssssss");
+        filter.Offsets.Should().Equal(0, 10);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [SkipUnderStryker]
+    public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
+    {
+        // 6,165 ms without the filter on Release, 1.7 ms before ledger entry 49 (the blind review
+        // of 251afa0). The budget is loose enough for a Debug build under load.
+        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}");
+        string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        int count = regex.Matches(subject).Count;
+
+        clock.Stop();
+        count.Should().Be(0);
+        clock.ElapsedMilliseconds.Should().BeLessThan(500);
     }
 
     [Test]

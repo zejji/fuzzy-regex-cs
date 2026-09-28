@@ -1,5 +1,6 @@
 using System.Text;
 using Fuzzy.Text.RegularExpressions.Parsing;
+using Fuzzy.Text.RegularExpressions.Unicode;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
 
@@ -157,7 +158,7 @@ internal sealed class FuzzyLiteralFilter
         }
 
         var walk = new LiteralWalk();
-        if (!walk.Collect(fuzzy.Next1.Node, []) || walk.Reverse is not bool isReverse)
+        if (!walk.Collect(fuzzy.Next1.Node, new LiteralPath()) || walk.Reverse is not bool isReverse)
         {
             return null;
         }
@@ -171,23 +172,32 @@ internal sealed class FuzzyLiteralFilter
 
         var pieces = new List<string>();
         var offsets = new List<int>();
-        foreach (List<uint> values in walk.Literals)
+        foreach (LiteralPath literal in walk.Literals)
         {
-            if (values.Count / pieceCount < MinPieceLength)
+            // Cut at unit boundaries only: every value is a unit of its own except inside an
+            // expanding character's folding, which a piece must hold whole (see ReadRun). With every
+            // value a unit this is the plain j * n / (k + 1) cut.
+            List<int> units = [.. Enumerable.Range(0, literal.Values.Count).Where(i => literal.UnitStarts[i])];
+            if (units.Count < pieceCount)
             {
                 return null;
             }
 
-            string text = string.Concat(values.Select(static c => (char)c));
+            string text = string.Concat(literal.Values.Select(static c => (char)c));
             for (int j = 0; j < pieceCount; j++)
             {
-                int offset = j * text.Length / pieceCount;
-                string piece = text[offset..((j + 1) * text.Length / pieceCount)];
+                int offset = units[j * units.Count / pieceCount];
+                int end = j + 1 < pieceCount ? units[(j + 1) * units.Count / pieceCount] : text.Length;
+                if (end - offset < MinPieceLength)
+                {
+                    return null;
+                }
 
-                // One search per distinct piece. Two paths through a branch can share a piece, and
-                // ledger entry 49's one-character reading of a run repeats the run's own literal
-                // once per expanding character. Keeping the larger offset moves the start bound
-                // earlier, which can only make the engine try more positions.
+                string piece = text[offset..end];
+
+                // One search per distinct piece: two paths through a branch can share one. Keeping
+                // the larger offset moves the start bound earlier, which can only make the engine
+                // try more positions.
                 int seen = pieces.IndexOf(piece);
                 if (seen >= 0)
                 {
@@ -214,7 +224,7 @@ internal sealed class FuzzyLiteralFilter
         private int _branches;
 
         /// <summary>The literals found so far, each as the characters it reads, in reading order.</summary>
-        internal List<List<uint>> Literals { get; } = [];
+        internal List<LiteralPath> Literals { get; } = [];
 
         /// <summary>Whether any string node ignores case.</summary>
         internal bool IgnoreCase { get; private set; }
@@ -230,18 +240,38 @@ internal sealed class FuzzyLiteralFilter
         /// <param name="node">Where this path continues.</param>
         /// <param name="values">The characters this path has read so far; the walk owns it.</param>
         /// <returns>Whether the body is literals and nothing else.</returns>
-        internal bool Collect(Node? node, List<uint> values)
+        internal bool Collect(Node? node, LiteralPath values)
         {
             // Full case folding splits one literal into several nodes: '(?i)strasse' is STRING_FLD
             // 'st', STRING_IGN 'ra', STRING_FLD 'ss', STRING_IGN 'e', so that 'ß' and U+FB06 can
             // match. Over ASCII text every one of them compares a character at a time, so the chain
             // is one literal. If any node ignores case every piece is searched ignoring case, which
             // can only find more.
-            for (; node is not null && node.Op != Opcode.EndFuzzy; node = node.Next1.Node)
+            while (node is not null && node.Op != Opcode.EndFuzzy)
             {
                 bool nodeIsReverse;
                 switch (node.Op)
                 {
+                    case Opcode.Branch when node.Next2.Node is not null && ReadRun(node) is { } run:
+                    {
+                        // Ledger entry 49's run and its one-character reading are one literal: the
+                        // packed folding, cut only between characters. Enumerating the reading's
+                        // choices instead gave 2^n + 1 literals, and at four expanding characters
+                        // more pieces than MaxPieces, which switched the filter off.
+                        if ((Reverse is bool runDirection && runDirection != run.Reverse) || !run.Seen)
+                        {
+                            return false;
+                        }
+
+                        IgnoreCase = true;
+                        Reverse = run.Reverse;
+                        values.AddUnits(run.Units, run.Reverse);
+
+                        // The walk goes on where the reading rejoins the packed node.
+                        node = run.Packed.Next1.Node;
+                        continue;
+                    }
+
                     case Opcode.Branch when node.Next2.Node is not null:
                         // Each branch adds a path, so a walk that ends with MaxPieces literals or fewer
                         // passes fewer than MaxPieces of them. Refusing at that count bounds the
@@ -252,8 +282,9 @@ internal sealed class FuzzyLiteralFilter
                         }
 
                         // Both arms continue to the same END_FUZZY; each gets its own copy.
-                        return Collect(node.Next1.Node, [.. values]) && Collect(node.Next2.Node, values);
+                        return Collect(node.Next1.Node, values.Copy()) && Collect(node.Next2.Node, values);
                     case Opcode.Branch:
+                        node = node.Next1.Node;
                         continue;
                     // One character is a CHARACTER node, not a STRING: the 'e' that '(?r)(?:stone
                     // fine|oak strasse)' moves out as a common suffix. A negated one is a class, and
@@ -290,7 +321,8 @@ internal sealed class FuzzyLiteralFilter
                 // A reverse chain is walked from the literal's end, though each node holds its own
                 // characters in reading order, so a reverse node goes in front of the ones before it.
                 Reverse = nodeIsReverse;
-                values.InsertRange(nodeIsReverse ? 0 : values.Count, node.Values);
+                values.AddUnits([.. node.Values.Select(static v => new[] { v })], nodeIsReverse);
+                node = node.Next1.Node;
             }
 
             if (node?.Next1.Node is not { Op: Opcode.Success } || Literals.Count >= MaxPieces)
@@ -300,6 +332,120 @@ internal sealed class FuzzyLiteralFilter
 
             Literals.Add(values);
             return true;
+        }
+
+        /// <summary>
+        /// Recognises ledger entry 49's compile of a fuzzy full-folded run - a branch whose first
+        /// arm is the packed <c>STRING_FLD</c> and whose second reads the same run one character at
+        /// a time - and returns the run as units, one per pattern character, each holding that
+        /// character's folding. Anything else returns <see langword="null"/> and is walked as an
+        /// ordinary branch.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Why one literal cut between characters is sound for both arms.</b> Take the packed
+        /// folding, and cut it into <c>k + 1</c> pieces only where one pattern character ends and
+        /// the next begins. On the packed arm an edit changes one folded letter, which lies in one
+        /// piece; that arm is one literal and any cut serves it. On the reading arm each expanding
+        /// character is either the character alone or its folding: an edit to the character alone
+        /// changes one unit, an edit inside its folding changes one letter of one unit, and a unit
+        /// lies in one piece because no cut splits it. An insertion damages at most one piece on
+        /// either arm. So any match with at most <c>k</c> edits leaves one piece untouched.
+        /// </para>
+        /// <para>
+        /// That piece is found by the search. The filter only answers over ASCII text, where no
+        /// subject character's folding spans two units, and where the character alone cannot match
+        /// untouched: <see cref="TheSearchSeesAsTheEngineDoes"/> requires that no ASCII character
+        /// equals it. So every expanding character in the untouched piece was matched through its
+        /// folding, and the text there is the piece's own folded text. The start bound holds too:
+        /// a piece's folded offset is at least the number of pattern characters in front of it on
+        /// any reading, each of which reads at most one subject character.
+        /// </para>
+        /// <para>
+        /// The recognition is checked, not assumed: the units joined must equal the packed node's
+        /// values exactly, and each character's own branch must be the character against its folding.
+        /// </para>
+        /// </remarks>
+        /// <param name="branch">A branch node with two arms.</param>
+        /// <returns>The run, or <see langword="null"/>.</returns>
+        private static Run? ReadRun(Node branch)
+        {
+            if (branch.Next1.Node is not { Op: Opcode.StringFld or Opcode.StringFldRev } packed)
+            {
+                return null;
+            }
+
+            bool reverse = packed.Op == Opcode.StringFldRev;
+            Node? after = packed.Next1.Node;
+            var units = new List<uint[]>();
+            bool seen = TheSearchSeesAsTheEngineDoes(packed);
+            Node? cur = branch.Next2.Node;
+            Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+
+            // Each step reads at least one unit, and there are no more units than packed values.
+            int steps = 0;
+            while (cur != after)
+            {
+                if (cur is null || ++steps > 2 * packed.Values.Count + 2)
+                {
+                    return null;
+                }
+
+                List<uint[]> read = [];
+                switch (cur.Op)
+                {
+                    case Opcode.String or Opcode.StringIgn or Opcode.StringFld when !reverse:
+                    case Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev when reverse:
+                        read.AddRange(cur.Values.Select(static v => new[] { v }));
+                        seen &= TheSearchSeesAsTheEngineDoes(cur);
+                        cur = cur.Next1.Node;
+                        break;
+                    case Opcode.Character or Opcode.CharacterIgn when !reverse && cur.Match && cur.Step != 0:
+                    case Opcode.CharacterRev or Opcode.CharacterIgnRev when reverse && cur.Match && cur.Step != 0:
+                        read.Add(folded[..Encodings.FullCaseFold(cur.Encoding, cur.Values[0], folded)].ToArray());
+                        seen &= TheSearchSeesAsTheEngineDoes(cur);
+                        cur = cur.Next1.Node;
+                        break;
+                    case Opcode.Branch when cur.Next2.Node is not null:
+                    {
+                        // One character's choice of itself or its folding (Character.CompileCore).
+                        (Node? one, Node? fold) = cur.Next1.Node is { Op: Opcode.StringFld or Opcode.StringFldRev }
+                            ? (cur.Next2.Node, cur.Next1.Node)
+                            : (cur.Next1.Node, cur.Next2.Node);
+                        if (
+                            one is not { Op: Opcode.CharacterIgn or Opcode.CharacterIgnRev, Match: true }
+                            || fold is not { Op: Opcode.StringFld or Opcode.StringFldRev }
+                            || one.Next1.Node != fold.Next1.Node
+                            || !folded[..Encodings.FullCaseFold(one.Encoding, one.Values[0], folded)]
+                                .SequenceEqual(fold.Values.ToArray())
+                        )
+                        {
+                            return null;
+                        }
+
+                        read.Add([.. fold.Values]);
+                        seen &= TheSearchSeesAsTheEngineDoes(one) && TheSearchSeesAsTheEngineDoes(fold);
+                        cur = one.Next1.Node;
+                        break;
+                    }
+
+                    case Opcode.Branch:
+                        cur = cur.Next1.Node;
+                        break;
+                    default:
+                        return null;
+                }
+
+                // A reverse chain is walked from the run's end, so each node's units go in front.
+                units.InsertRange(reverse ? 0 : units.Count, read);
+            }
+
+            if (!units.SelectMany(static u => u).SequenceEqual(packed.Values))
+            {
+                return null;
+            }
+
+            return new Run(packed, units, reverse, seen);
         }
 
         /// <summary>
@@ -338,6 +484,47 @@ internal sealed class FuzzyLiteralFilter
             }
 
             return true;
+        }
+    }
+
+    /// <summary>A recognised ledger-49 run: see <c>LiteralWalk.ReadRun</c>.</summary>
+    /// <param name="Packed">The packed <c>STRING_FLD</c> node, whose successor the walk goes on from.</param>
+    /// <param name="Units">One folding per pattern character, in reading order.</param>
+    /// <param name="Reverse">Whether the run is the reverse kind.</param>
+    /// <param name="Seen">Whether every node of both arms passes <c>TheSearchSeesAsTheEngineDoes</c>.</param>
+    private sealed record Run(Node Packed, List<uint[]> Units, bool Reverse, bool Seen);
+
+    /// <summary>
+    /// One literal: its values in reading order, and for each value whether a piece may start
+    /// there. Only the first value of an expanding character's folding may start one.
+    /// </summary>
+    private sealed class LiteralPath
+    {
+        /// <summary>The values, in reading order.</summary>
+        internal List<uint> Values { get; } = [];
+
+        /// <summary>Per value, whether a cut may fall in front of it.</summary>
+        internal List<bool> UnitStarts { get; } = [];
+
+        /// <summary>A copy, for the other arm of a branch.</summary>
+        /// <returns>The copy.</returns>
+        internal LiteralPath Copy()
+        {
+            var copy = new LiteralPath();
+            copy.Values.AddRange(Values);
+            copy.UnitStarts.AddRange(UnitStarts);
+            return copy;
+        }
+
+        /// <summary>Adds units at the end, or at the front for a reverse chain.</summary>
+        /// <param name="units">The units, in reading order.</param>
+        /// <param name="front">Whether they go in front of what is already here.</param>
+        internal void AddUnits(List<uint[]> units, bool front)
+        {
+            List<uint> values = [.. units.SelectMany(static u => u)];
+            List<bool> starts = [.. units.SelectMany(static u => u.Select(static (_, i) => i == 0))];
+            Values.InsertRange(front ? 0 : Values.Count, values);
+            UnitStarts.InsertRange(front ? 0 : UnitStarts.Count, starts);
         }
     }
 
