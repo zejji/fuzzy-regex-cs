@@ -3042,13 +3042,13 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
-    private static (long Key, int Reach) PopOpenCall(MatchState state)
+    private static (long Key, int Reach, CallCaptures? Captures) PopOpenCall(MatchState state)
     {
-        (long key, int reach, _) = state.OpenCalls[^1];
+        (long key, int reach, CallCaptures? captures, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
-        bool removed = state.ActiveCalls.Remove((key, reach));
+        bool removed = state.ActiveCalls.Remove((key, reach, captures));
         Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
-        return (key, reach);
+        return (key, reach, captures);
     }
 
     /// <summary>
@@ -6711,6 +6711,10 @@ internal static class Matcher
         // calls skips tracking it. See PatternObject.HasGroupCalls.
         bool tracksReach = pattern.HasGroupCalls;
 
+        // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
+        // part of what makes a call a repeat, so the call guard keys on them too.
+        bool keysOnCaptures = tracksReach && pattern.GroupInfoList.Exists(static info => info.Referenced);
+
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
@@ -8476,7 +8480,9 @@ internal static class Matcher
                         "the text reached is measured and fits in the text"
                     );
 
-                    if (!state.ActiveCalls.Add((groupCallKey, groupCallReach)))
+                    CallCaptures? groupCallCaptures = keysOnCaptures ? CallCaptures.Take(state.Groups) : null;
+
+                    if (!state.ActiveCalls.Add((groupCallKey, groupCallReach, groupCallCaptures)))
                     {
                         goto backtrack;
                     }
@@ -8495,7 +8501,7 @@ internal static class Matcher
                         state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
                         "the text reached never shrinks, so an inner call's reach is at least its caller's"
                     );
-                    state.OpenCalls.Add((groupCallKey, groupCallReach, state.Sstack.Count));
+                    state.OpenCalls.Add((groupCallKey, groupCallReach, groupCallCaptures, state.Sstack.Count));
 
                     /* sstack: caller_groups caller_repeats capture_change return_node
                      *
@@ -8581,7 +8587,8 @@ internal static class Matcher
                         // The call is closed, so it is no longer one this position may not re-enter.
                         // It is the innermost open one - calls nest - and its key goes on the
                         // backtracking stack so the arm below can re-open it.
-                        (long groupReturnCallKey, int groupReturnCallReach) = PopOpenCall(state);
+                        (long groupReturnCallKey, int groupReturnCallReach, CallCaptures? groupReturnCaptures) =
+                            PopOpenCall(state);
 
                         // For the callee.
                         PushGroups(state, state.Bstack);
@@ -8589,6 +8596,13 @@ internal static class Matcher
                         state.Bstack.PushSize(state.CaptureChange);
                         state.Bstack.PushSize(groupReturnCallKey);
                         state.Bstack.PushSize(groupReturnCallReach);
+                        if (groupReturnCaptures is not null)
+                        {
+                            foreach (long value in groupReturnCaptures.Spans)
+                            {
+                                state.Bstack.PushSize(value);
+                            }
+                        }
                         state.Bstack.PushNode(groupReturnNode);
                         state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
 
@@ -10796,8 +10810,23 @@ internal static class Matcher
 
                     if (groupReturnBackNode is not null)
                     {
-                        // Backtracking into the call re-opens it, so its key and reach come back
-                        // off the backtracking stack.
+                        // Backtracking into the call re-opens it, so its key, reach and captures
+                        // come back off the backtracking stack.
+                        CallCaptures? groupReturnBackCaptures = null;
+                        if (keysOnCaptures)
+                        {
+                            long[] spans = new long[state.Groups.Length * 2];
+                            for (int i = spans.Length - 1; i >= 0; i--)
+                            {
+                                if (!state.Bstack.PopSize(out spans[i]))
+                                {
+                                    return MatchStatus.Illegal;
+                                }
+                            }
+
+                            groupReturnBackCaptures = new CallCaptures(spans);
+                        }
+
                         if (
                             !state.Bstack.PopSize(out long groupReturnBackReach)
                             || !state.Bstack.PopSize(out long groupReturnBackKey)
@@ -10815,13 +10844,17 @@ internal static class Matcher
                         state.Sstack.PushNode(groupReturnBackNode);
 
                         // The frame is back, so the call is open again and ends where it now ends.
-                        bool reopened = state.ActiveCalls.Add((groupReturnBackKey, (int)groupReturnBackReach));
+                        bool reopened = state.ActiveCalls.Add(
+                            (groupReturnBackKey, (int)groupReturnBackReach, groupReturnBackCaptures)
+                        );
                         Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
                         Debug.Assert(
                             state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
                             "a re-opened call is still inside the calls that were open when it returned"
                         );
-                        state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count));
+                        state.OpenCalls.Add(
+                            (groupReturnBackKey, (int)groupReturnBackReach, groupReturnBackCaptures, state.Sstack.Count)
+                        );
 
                         /* sstack: caller_groups caller_repeats capture_change return_node
                          *

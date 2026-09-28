@@ -2476,22 +2476,24 @@ through when the attempt has looked further into the text since the outer call o
 call's first try failed further on, and the inner call is a genuinely different path. With nothing
 new reached it is failed as before.
 
-**That is still too strict: a new capture can make the inner call different (open, 2026-09-28).**
+**That was still too strict: a new capture can make the inner call different (fixed 2026-09-28).**
 A blind review found `(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))` over `'x'`: upstream answers (0, 1),
 the port None, PCRE2 "nested recursion at the same subject position". Two calls of the whole
 pattern are open at 0 and nothing new is reached, but the group set between them changes which
 branch the conditional takes, so the inner call is not a repeat and the path is finite. The same
 holds for backreferences: `(?:\1x|\2()(?R)|()(?R))` and its named form, (0, 1) upstream, None here.
-Red and `[Explicit]` as
-`OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`.
+Pinned as `GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`,
+all three rows (0, 1) for search and fullmatch.
 
-The planned fix makes the key `(call, position, reach, captures read)`: the current spans of the
-groups a conditional or backreference reads (`GroupInfo.Referenced`), taken only when the pattern
-has such groups, saved on the backtracking stack at `GROUP_RETURN` so a re-opened call keeps its
-own. It still terminates: each such group's span is one of at most `(TextLength + 1)^2 + 1` values,
-so the entries per position stay finite. A capture-change COUNTER would be cheaper but does not
-terminate in principle - a group that alternates between two spans counts up for ever - so it is
-not the fix.
+The fix makes the key `(call, position, reach, captures)`, where the captures
+(`MatchState.CallCaptures`) are every group's current span. They are taken only when the pattern
+has a call AND a group some conditional or backreference reads (`GroupInfo.Referenced`), so other
+patterns pay nothing, and all groups rather than only the read ones, which is simpler and only
+lets more calls through. They go on the backtracking stack at `GROUP_RETURN` so a re-opened call
+keeps its own. It still terminates: each group's span is one of at most `(TextLength + 1)^2 + 1`
+values, so the entries per position stay finite. A capture-change COUNTER would be cheaper but
+does not terminate in principle - a group that alternates between two spans counts up for ever -
+so it is not the fix.
 
 In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
 touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.

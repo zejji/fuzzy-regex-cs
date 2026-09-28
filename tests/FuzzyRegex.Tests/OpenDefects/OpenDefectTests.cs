@@ -101,26 +101,4 @@ public sealed class OpenDefectTests
         m.Success.Should().BeTrue();
         m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1));
     }
-
-    // Blind review of the refined call guard, 2026-09-28 (ledger entry 14, "The guard refined").
-    // Each pattern needs two calls of itself open at 0 at once. The second reaches no new text, but
-    // a group set between the two calls changes what it does: a conditional or backreference reads
-    // that group, so the inner call is not a repeat of the outer one and the path is finite.
-    // Upstream 2026.9.10 answers (0, 1) for every row, search and fullmatch alike (measured
-    // 2026-09-28); PCRE2 10.47 raises "nested recursion at the same subject position" on the first.
-    // The port answers None, because the guard's key holds no capture state.
-    [Test]
-    [Arguments(@"(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))")]
-    [Arguments(@"(?:\1x|\2()(?R)|()(?R))")]
-    [Arguments(@"(?:(?P=b)x|(?P=a)(?<b>)(?R)|(?<a>)(?R))")]
-    public void A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through(string pattern)
-    {
-        var regex = new FuzzyRegex(pattern);
-
-        Match search = regex.Match("x");
-        Match full = regex.FullMatch("x");
-
-        (search.Success, search.Index, search.Length).Should().Be((true, 0, 1));
-        (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
-    }
 }

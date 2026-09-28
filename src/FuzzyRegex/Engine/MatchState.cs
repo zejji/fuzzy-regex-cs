@@ -39,6 +39,56 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
+/// NOT UPSTREAM'S: the current span of every group when a group call was made, the part of the
+/// call guard's key that a conditional or backreference can read. See
+/// <see cref="MatchState.ActiveCalls"/>. Compared by value.
+/// </summary>
+/// <param name="spans">Start then end of each group, -1 for both when the group is unset.</param>
+internal sealed class CallCaptures(long[] spans) : IEquatable<CallCaptures>
+{
+    /// <summary>Start then end of each group, -1 for both when the group is unset.</summary>
+    internal long[] Spans { get; } = spans;
+
+    /// <summary>Takes the groups' current spans.</summary>
+    /// <param name="groups">The match state's groups.</param>
+    /// <returns>The snapshot.</returns>
+    internal static CallCaptures Take(GroupData[] groups)
+    {
+        long[] spans = new long[groups.Length * 2];
+        for (int i = 0; i < groups.Length; i++)
+        {
+            GroupData group = groups[i];
+            bool set = group.Current >= 0;
+            spans[2 * i] = set ? group.Captures[group.Current].Start : -1;
+            spans[(2 * i) + 1] = set ? group.Captures[group.Current].End : -1;
+        }
+
+        return new CallCaptures(spans);
+    }
+
+    /// <inheritdoc/>
+    public bool Equals(CallCaptures? other) => other is not null && Spans.AsSpan().SequenceEqual(other.Spans);
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => Equals(obj as CallCaptures);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (long value in Spans)
+        {
+            hash.Add(value);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <inheritdoc/>
+    public override string ToString() => string.Join(",", Spans);
+}
+
+/// <summary>
 /// Everything one capture group has captured during this match. Port of <c>RE_GroupData</c>
 /// (<c>upstream/src/_regex.c</c> lines 329-334).
 /// </summary>
@@ -243,12 +293,12 @@ internal sealed class MatchState : IDisposable
     /// <para>
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
-    /// attempt has reached no text since that call opened, is failed. Usually such a call can only
-    /// repeat the open call's work one level deeper, but NOT always: a conditional or
-    /// backreference that reads a group set between the two calls can make the inner call do
-    /// something different, and then the path is finite and this guard wrongly fails it
-    /// (<c>OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
-    /// PCRE2 refuses the same shapes, upstream answers them). If the attempt HAS reached
+    /// attempt has reached no text since that call opened AND, where a conditional or backreference
+    /// can read a group, with every group's span as it was then, can only repeat the open call's
+    /// work one level deeper, so that path recurses for ever and is failed. The captures matter
+    /// because a group set between the two calls can change what a conditional or backreference
+    /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
+    /// PCRE2 refuses those shapes, upstream answers them). If the attempt HAS reached
     /// further, the inner call is let through: that is left recursion, <c>G -&gt; '' | G 'a'</c>,
     /// where the outer call's first try failed further on and the inner call is how 'aa' gets
     /// matched. The rule is PCRE2's (<c>OP_RECURSE</c> in <c>pcre2_match.c</c> 10.47, lines
@@ -258,8 +308,10 @@ internal sealed class MatchState : IDisposable
     /// </para>
     /// <para>
     /// Why it terminates: the width only grows during an attempt and never passes the text length,
-    /// and the set holds each entry once, so at most <c>TextLength + 1</c> calls of one group can be
-    /// open at one position.
+    /// each group's span is one of at most <c>(TextLength + 1)^2 + 1</c> values, and the set holds
+    /// each entry once, so finitely many calls of one group can be open at one position. The
+    /// captures are left out (<see cref="CallCaptures"/> is null) when nothing reads them, which
+    /// keeps the old bound of <c>TextLength + 1</c>.
     /// </para>
     /// <para>
     /// A set rather than a counter, because an entry is only ever added when it is absent - that is
@@ -268,7 +320,7 @@ internal sealed class MatchState : IDisposable
     /// thousand deep.
     /// </para>
     /// </remarks>
-    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+    internal readonly HashSet<(long Key, int Reach, CallCaptures? Captures)> ActiveCalls = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
@@ -312,7 +364,7 @@ internal sealed class MatchState : IDisposable
     /// abandoned.
     /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, int SstackDepth)> OpenCalls = [];
+    internal readonly List<(long Key, int Reach, CallCaptures? Captures, int SstackDepth)> OpenCalls = [];
 
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
