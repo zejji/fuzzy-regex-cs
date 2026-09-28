@@ -2737,7 +2737,10 @@ internal static class ExpectedDivergences
 
     /// <summary>
     /// The rows of <c>scoped-encoding-and-case-insensitive-property-rules</c>, recorded 2026-09-25 on
-    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each.
+    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each. The last three are
+    /// door H, recorded 2026-09-28 by <c>python tools/record-oracle.py --rows
+    /// tools/probes/ignorecase-property-precheck-rows.jsonl</c>: oracle row 20260927:3732 and its two
+    /// minimised forms, where the first-set precheck is the set.
     /// </summary>
     private const string _scopedEncodingPropertyRulesRows = """
         {"generator": "rows", "pattern": "(?a:(?s:\\w))", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
@@ -2746,6 +2749,9 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?i)x?\\p{Lt}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?i)\\p{Upper=No}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?i)(?a:[[:upper:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "interactions", "pattern": "(?r)(?P<g1>\\p{ASCII}{2})(\\p{Ll}+?)??", "flags": 10, "namedLists": {}, "subject": "\n\r\ud835\udd18\ud83d\ude00", "operation": "sub", "template": "\ud83d\ude00\\1]", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ud83d\ude00\n\r]\ud835\udd18\ud83d\ude00", "count": 1}}
+        {"generator": "rows", "pattern": "(?i)\\p{Ll}?a{2}", "flags": 0, "namedLists": {}, "subject": "\u2102aa", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ri)a{2}\\p{Ll}?", "flags": 0, "namedLists": {}, "subject": "aa\u2102", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         """;
 
     /// <summary>This port's judged answer to each row of <see cref="_scopedEncodingPropertyRulesRows"/>.</summary>
@@ -2757,6 +2763,9 @@ internal static class ExpectedDivergences
         "match 0:(0,1)[(0,1)] last=-1/-",
         "no match",
         "no match",
+        "sub 1 '\\ud83d\\ude00\\u000a\\u000d]\\ud83d\\ude00'",
+        "match 0:(0,3)[(0,3)] last=-1/-",
+        "match 0:(0,3)[(0,3)] last=-1/-",
     ];
 
     /// <summary><see cref="_scopedEncodingPropertyRulesRows"/> by its question, mapped to this port's judged answer.</summary>
@@ -4357,12 +4366,20 @@ internal static class ExpectedDivergences
                 + "forms match; Perl 5.42 and .NET 10's Regex give the bare and the set form the "
                 + "cased-letter answer, which this port now gives everywhere. (D) `(?i)\\p{Upper=No}` "
                 + "answers as `\\p{Upper}` because the collapse ignores the value (:2981); Perl gives "
-                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10.\n"
+                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10. (H) The same set "
+                + "rule reaches a pattern that wrote no set: when the first item can match nothing, "
+                + "_check_firstset (_regex_core.py:380) compiles a case-insensitive SET_UNION precheck "
+                + "of every possible first item, and its property member refuses a capital with no "
+                + "case partner (matches_member_ign, _regex.c:3085-3107), so `(?i)\\p{Ll}?a{2}` over "
+                + "U+2102 then 'aa' is (1, 3) and oracle row 20260927:3732 keeps U+1D518; with no precheck "
+                + "compiled upstream answers (0, 3) and this port's sub. Measured 2026-09-28.\n"
                 + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the generators rarely draw scoped "
                 + "encodings or `=No` values, and the rows keep the recheck asking upstream.",
             PinnedBy: "ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it, "
-                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does "
-                + "and .A_no_value_of_a_cased_property_is_its_complement",
+                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does, "
+                + ".A_no_value_of_a_cased_property_is_its_complement, "
+                + ".A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner "
+                + "and .Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches",
             Example: _scopedEncodingPropertyRulesRows,
             Applies: static (row, ours) =>
                 _scopedEncodingPropertyRules.TryGetValue(Question(row), out string? judged)

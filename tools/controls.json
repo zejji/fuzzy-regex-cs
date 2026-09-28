@@ -1835,5 +1835,41 @@
       "Compiles_to_upstreams_bytecode(#614 '(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)' flags=0x0)",
       "In_a_branch_reset_a_group_never_takes_a_number_another_group_will_use"
     ]
+  },
+  {
+    "id": "R3732-A",
+    "name": "set-property-member-by-case-closure",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, uint ch, ReadOnlySpan<uint> cases)",
+    "anchorNth": 1,
+    "before": "            case Opcode.Property:\n                return HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], ch);\n",
+    "after": "            case Opcode.Property:\n                foreach (uint variant in cases)\n                {\n                    if (MatchesProperty(encoding, member, variant))\n                    {\n                        return true;\n                    }\n                }\n\n                return false;\n",
+    "signal": "suite",
+    "expectedFailures": [
+      "A_case_insensitive_cased_property_answers_the_same_bare_and_in_a_set",
+      "A_case_insensitive_set_matches_each_member_first_then_combines_them",
+      "A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner((?i)\\p{Ll}?aa, \u2102aa, 0, 3)",
+      "A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner((?i)\\p{Ll}?a{2}, \u2102aa, 0, 3)",
+      "A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner((?i)\\p{Ll}?a{2}, \ud835\udd18aa, 0, 4)",
+      "A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner((?ri)a{2}\\p{Ll}?, aa\u2102, 0, 3)",
+      "A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner((?ri)a{2}\\p{Ll}?, aa\ud835\udd18, 0, 4)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?ai)[\\p{Lt}x], a)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?ai)x?\\p{Lt}, a)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?i)[[:upper:]x], \u0138)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?i)[\\p{Lt}x], a)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?i)[\\p{Lu}x], \u0138)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?i)\\p{Lt}|z, a)",
+      "A_cased_property_in_a_set_answers_as_the_bare_property_does((?i)\\p{Lu}|z, \u0138)",
+      "A_no_value_of_a_cased_property_is_its_complement((?i)[\\p{Upper=No}x], a, False)",
+      "A_set_holding_an_ascii_property_reaches_no_partner_whatever_its_member_count",
+      "Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[[\\p{Greek}]x], \u0345, False)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[[\\p{Lu}]x], \u0345, False)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[\\p{Greek}x], \u00b5, False)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[\\p{Lu}x], \u0345, False)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[\\w--\\p{Lu}], \u0138, False)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[\\w--\\p{Lu}], \u0345, True)",
+      "Set_members_match_case_insensitively_before_the_set_combines_them((?i)[x[\\w--\\p{Lu}]], \u0345, True)"
+    ]
   }
 ]

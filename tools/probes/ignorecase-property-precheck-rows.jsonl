@@ -1,0 +1,3 @@
+{"generator":"interactions","pattern":"(?r)(?P<g1>\\p{ASCII}{2})(\\p{Ll}+?)??","flags":10,"namedLists":{},"subject":"\n\r𝔘😀","operation":"sub","template":"😀\\1]","count":0}
+{"generator":"rows","pattern":"(?i)\\p{Ll}?a{2}","flags":0,"namedLists":{},"subject":"ℂaa","operation":"search"}
+{"generator":"rows","pattern":"(?ri)a{2}\\p{Ll}?","flags":0,"namedLists":{},"subject":"aaℂ","operation":"search"}

@@ -4206,11 +4206,86 @@ The oracle's dotless-i control also regressed with this fix: its property gate O
 already flagged UNICODE, upstream raised, and every such row lost its control. Fixed in
 `tools/record-oracle.py`.
 
-**Proposed fix upstream:** the same changes, A to G.
+**H. The first-set precheck is a set the pattern never wrote (2026-09-28).** Oracle row
+20260927:3732 (`interactions`), `(?r)(?P<g1>\p{ASCII}{2})(\p{Ll}+?)??` with flags 10 (IGNORECASE |
+MULTILINE) as a `sub` over '\n\r' U+1D518 U+1F600 with template U+1F600 `\1]`, came in as a
+possible reversed-sub surrogate bug. It is C, reached through the compiler. IGNORECASE is in play
+through the flags, not the pattern text; without it upstream and this port agree, because U+1D518
+MATHEMATICAL FRAKTUR CAPITAL U is Lu. Neither `(?r)`, `sub` nor the surrogate pair matters:
+
+```python
+>>> regex.search(r'(?i)\p{Ll}', '\u2102').span()          # bare: any cased letter
+(0, 1)
+>>> regex.search(r'(?i)\p{Ll}?a{2}', '\u2102aa').span()   # 'Aaa' gives (0, 3)
+(1, 3)
+>>> regex.search(r'(?ri)a{2}\p{Ll}?', 'aa\u2102').span()  # (?ri)a{2}\p{Ll}, not optional: (0, 3)
+(0, 2)
+```
+
+When the first item the matcher meets can match nothing, `_check_firstset`
+(`upstream/regex/_regex_core.py:380-409`) gathers every item that could start the match into one
+`SET_UNION` with the pattern's case flags, and `_main.py:646` puts it in front of the code as a
+precheck. `(?ri)a{2}\p{Ll}?` compiles to `67 3 [12 1 97] [37 1 1966093] 20 ...`:
+SET_UNION_IGN_REV over 'a' and PROPERTY Ll. A property member of a case-insensitive set is answered
+by `matches_member_ign` (`upstream/src/_regex.c:3085-3107`), which asks the plain property of each
+case variant (`:3103-3105`). U+2102 and U+1D518 have no case variant and are not Ll, so the
+precheck refuses the one position the match needs, although the matcher's own
+`matches_PROPERTY_IGN` (`:2958-2966`) would have accepted it. Letters with a partner are
+unaffected ('A' has 'a'). `tools/probes/ignorecase-property-precheck.py` isolates it and ablates
+it: with `_compile_firstset` returning no precheck and nothing else changed, upstream answers
+(0, 3) on both minimised rows and gives this port's `sub` on row 3732.
+
+The survey (same probe, and `tools/probes/ignorecase-property-precheck.cs`, 2026-09-28): is a
+case-insensitive `\p{Ll}`, bare and then in `[\p{Ll}x]`, true of U+2102, U+1D518, 'A', 'a'?
+
+| Engine | Bare | Set |
+|---|---|---|
+| upstream regex 2026.9.10 | 1 1 1 1 | 0 0 1 1 |
+| PCRE2 10.47 (pip `pcre2` 0.7.1), CASELESS | 1 1 1 1 | 1 1 1 1 |
+| Perl 5.42.3 `/i` | 1 1 1 1 | 1 1 1 1 |
+| .NET 10.0.12 `Regex`, IgnoreCase | 1 - 1 1 | 1 - 1 1 |
+| node 24.16 `/iu` | 0 0 1 1 | 0 0 1 1 |
+| Python `re` | `\p` is "bad escape" | |
+
+(.NET cannot ask U+1D518: its classes read one UTF-16 unit.) Every engine but upstream gives the
+bare and the set form one answer. PCRE2, Perl and .NET take the cased-letter rule this port applies
+everywhere since C; JavaScript takes case closure for both. Upstream's README says nothing about a
+precheck, and its changelog treats a first set that changes an answer as a bug (Hg issues 139 and
+216). The pattern here wrote a bare property, whose meaning upstream fixes as "any cased letter", so
+upstream is wrong on its own terms whichever rule is right.
+
+**This port.** Nothing to fix: C's `Matcher.MatchesMemberIgn` answers a property member with
+`HasPropertyIgn`, the bare rule, so the precheck the port compiles (the same bytes as upstream's,
+under version 0) accepts the letter. Under version 1, this port's default, IGNORECASE brings
+FULLCASE and `_check_firstset` builds no precheck at all, so the door is shut there on both sides.
+
+**The claim, stated so that a blind reviewer can falsify it.** Upstream's answer to row 3732 keeps
+U+1D518 only because the compiled first-set precheck, a case-insensitive set holding `\p{Ll}`,
+refuses U+1D518 at the one position where the match `\n\r` + U+1D518 starts, and it refuses it
+because `matches_member_ign` asks plain `\p{Ll}` of U+1D518's case variants, of which it has none.
+It is falsified if any of these holds:
+
+1. With `regex._main._compile_firstset` replaced by `lambda info, fs: []` (no precheck, nothing
+   else changed), upstream still keeps U+1D518 in the row's `sub`, or still answers (1, 3) and
+   (0, 2) on the two minimised rows. **Run:** it answers the port's `sub`, (0, 3) and (0, 3).
+2. The refusal does not follow the missing case partner: `(?i)\p{Ll}?a{2}` is (0, 3) upstream
+   over U+2102 'aa', or (1, 3) over 'Aaa', or the written set `(?i)[\p{Ll}x]` accepts U+2102.
+   **Run:** (1, 3), (0, 3) and no match, as the claim says.
+3. This port with control `R3732-A` applied (`python tools/run-controls.py --ids R3732-A`: the
+   property arm of `MatchesMemberIgn` put back to upstream's per-variant `has_property`, nothing
+   else changed) does NOT give upstream's answers. **Run, 2026-09-28:** FIRED, 24 tests red and
+   exactly the expected ones: the 18 existing tests of entries 34 and 35, the five precheck rows and the row-3732 test.
+
+**Proposed fix upstream:** the same changes, A to G. H needs no change of its own: with C's
+fix to `matches_member_ign` the precheck answers as the bare property does. The draft report for
+C and H is `entry-35-case-insensitive-property-in-a-set.md`. Ledger number 49 was not taken.
 
 **Tests.** `Gaps/Engine/ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it`,
-`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does` and
-`.A_no_value_of_a_cased_property_is_its_complement`; the oracle pin is
+`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does`,
+`.A_no_value_of_a_cased_property_is_its_complement`, and for H
+`.A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner` and
+`.Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches`, with control
+`R3732-A` in `tools/controls.json`; the oracle pin is
 `scoped-encoding-and-case-insensitive-property-rules`.
 
 ---
