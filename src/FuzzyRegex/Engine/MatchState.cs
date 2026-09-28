@@ -511,13 +511,16 @@ internal sealed class MatchState : IDisposable
     internal long CaptureChange;
 
     /// <summary>
-    /// NOT UPSTREAM (ledger entry 44's addendum): how many times this attempt has crossed a
-    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>. Only ever compared with an earlier reading, to tell whether a
-    /// pass or an iteration crossed one (<c>Matcher.OptionalPassAdmitted</c>,
-    /// <c>Matcher.CrossedAVerb</c>); it only grows, so a reading taken where the pass began is the
-    /// whole of what it needs.
+    /// NOT UPSTREAM (ledger entry 44's addendum): for each <c>(*PRUNE)</c> or <c>(*SKIP)</c> this
+    /// attempt has crossed, in order, the depth of <see cref="Pstack"/> when it was crossed: the
+    /// pruning mark it cuts to, or for one in an unfinished atomic group or positive lookaround the
+    /// group it will unwind past (ledger entry 47). A pass or iteration records how many there were
+    /// when it began; <c>Matcher.VerbCutPast</c> reads the ones crossed since.
     /// </summary>
-    internal int VerbsCrossed;
+    internal readonly List<int> VerbMarks = [];
+
+    /// <summary>How many verbs this attempt has crossed: the length of <see cref="VerbMarks"/>.</summary>
+    internal int VerbsCrossed => VerbMarks.Count;
 
     /// <summary>
     /// NOT UPSTREAM (ledger 33): what a fuzzy edit adds to <see cref="CaptureChange"/>, where
@@ -935,7 +938,7 @@ internal sealed class MatchState : IDisposable
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
         CallMemoKey.Clear();
-        VerbsCrossed = 0;
+        VerbMarks.Clear();
         CallMemoHits = 0;
         SearchAnchor = 0;
         MatchPos = 0;
@@ -1658,7 +1661,7 @@ internal sealed class MatchState : IDisposable
 /// <param name="Changes">How many fuzzy changes had been made when it began.</param>
 /// <param name="CaptureChange">The state's capture change counter when it began.</param>
 /// <param name="Verbs">
-/// <see cref="MatchState.VerbsCrossed"/> when it began, so its end can tell whether it crossed one.
+/// <see cref="MatchState.VerbsCrossed"/> when it began, so its end can tell which verbs it crossed.
 /// </param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange, int Verbs);

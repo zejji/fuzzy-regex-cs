@@ -498,4 +498,28 @@ public sealed class FuzzyNeededEmptyIterationTests
     {
         ShouldMatch(new FuzzyRegex(pattern).FullMatch(subject), 0, subject.Length, new FuzzyCounts(0, 0, 0));
     }
+
+    // A verb that cuts nothing past the pass leaves the rule in force: one inside an atomic group or
+    // lookaround that the pass opened and closed is confined to it, and the exit is still there.
+    // Upstream charges the deletion on every row; the verb-free spelling of each has none here
+    // (blind review of 41a281a). The last row is the control, where the verb does cut past the
+    // pass and the pass stands.
+    [Test]
+    [Arguments("(?:(?>(*PRUNE))a|){d<=1}", "b", 0, 0, 0)]
+    [Arguments("(?:(?>(*PRUNE))(?:a){d<=1})*", "", 0, 0, 0)]
+    [Arguments("(?:(?>(*PRUNE)(?:a){d<=1})|)", "", 0, 0, 0)]
+    [Arguments("(?:(?=(*PRUNE))(?:a){d<=1}|)", "", 0, 0, 0)]
+    [Arguments("(?:(?>(*SKIP))a|){d<=1}", "", 0, 0, 0)]
+    [Arguments("(?:(*PRUNE)(?>a)|){d<=1}", "", 0, 0, 1)]
+    [Arguments("(?>(?:a(*PRUNE)|)){d<=1}", "", 0, 0, 1)]
+    public void Only_a_verb_that_cuts_past_the_pass_exempts_it(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int deletions
+    )
+    {
+        ShouldMatch(new FuzzyRegex(pattern).Match(subject), start, end - start, new FuzzyCounts(0, 0, deletions));
+    }
 }

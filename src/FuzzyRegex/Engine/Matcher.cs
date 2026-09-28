@@ -4835,7 +4835,7 @@ internal static class Matcher
         && pass.TextPos == state.TextPos
         && pass.Changes == state.FuzzyChanges.Count
         && MatchState.GroupChanges(pass.CaptureChange) == MatchState.GroupChanges(state.CaptureChange)
-        && pass.Verbs == state.VerbsCrossed
+        && !VerbCutPast(state, pass.Verbs)
         && !RaisesUnmetMinimum(state, _oneDeletion, counted: false);
 
     /// <summary>
@@ -4853,15 +4853,14 @@ internal static class Matcher
     /// <c>(?:a|){d&lt;=1}</c> over <c>''</c> then has no errors, as <c>(?:a?){d&lt;=1}</c> has.
     /// </para>
     /// <para>
-    /// A pass that crossed a <c>(*PRUNE)</c> or <c>(*SKIP)</c> stands, in plain order. The rule is this
+    /// A pass that crossed a <c>(*PRUNE)</c> or <c>(*SKIP)</c> that cuts past it (<see cref="VerbCutPast"/>)
+    /// stands, in plain order. The rule is this
     /// port's own pruning, so it must never do more than an ordinary failure would, and a verb cuts
     /// the backtracking stack when it is crossed (the empty exit's choice goes with it) or unwinds
     /// past it when backtracking reaches it (ledger entry 47): failing the pass would then end the
     /// attempt, and <c>(?:b(*SKIP)|){d&lt;=1}</c> over <c>''</c> answered None where upstream has
     /// (0, 0) with one deletion. Deciding before the verb is crossed would need to know that nothing
-    /// after it in the pass consumes text, which only the pass's end knows. A verb confined to a
-    /// negative lookaround inside the pass cuts nothing past it, and the pass stands there too,
-    /// with upstream's answer: a missed prune, never a lost match.
+    /// after it in the pass consumes text, which only the pass's end knows.
     /// </para>
     /// <para>
     /// Off under <see cref="PatternObject.UpstreamEmptyIterations"/>, the oracle's ablation, which
@@ -4880,7 +4879,7 @@ internal static class Matcher
             || changes.Count == pass.Changes
             || state.Pattern.UpstreamEmptyIterations
             || MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(pass.CaptureChange)
-            || state.VerbsCrossed != pass.Verbs
+            || VerbCutPast(state, pass.Verbs)
         )
         {
             return true;
@@ -4913,7 +4912,8 @@ internal static class Matcher
 
     /// <summary>
     /// NOT UPSTREAM (ledger entry 44's addendum): whether the iteration now ending crossed a
-    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>. Then an empty iteration the needed rule would fail stands,
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> that cuts past its start (<see cref="VerbCutPast"/>). Then an
+    /// empty iteration the needed rule would fail stands,
     /// but the repeat takes no further iteration from it and the memo does not record it.
     /// </summary>
     /// <remarks>
@@ -4929,7 +4929,44 @@ internal static class Matcher
     /// <param name="rpData">The repeat, whose iteration start <see cref="IterationStart"/> recorded.</param>
     /// <returns><see langword="true"/> if it did.</returns>
     private static bool CrossedAVerb(MatchState state, RepeatData rpData) =>
-        (int)(rpData.ChangesAtStart >> 32) != state.VerbsCrossed;
+        VerbCutPast(state, (int)(rpData.ChangesAtStart >> 32));
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether a verb crossed since the pass or iteration
+    /// now ending began cuts past its start, so that failing it would lose the exit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The structure of a pass is balanced, so every atomic group, lookaround and conditional it
+    /// opened it has closed, and <see cref="MatchState.Pstack"/> is as deep as when it began. A verb
+    /// crossed with the pruning stack no deeper than that cuts to a mark set before the pass: the
+    /// attempt's own, or an enclosing group's, which for an unfinished atomic group or positive
+    /// lookaround the verb unwinds past when backtracking reaches it (ledger entry 47). Either way
+    /// the exit's choice is gone. A verb crossed deeper cut to a group the pass opened, and that
+    /// group has finished and taken the verb's effect with it, as in <c>(?:(?&gt;(*PRUNE))a|)</c>, so
+    /// the rule applies as it would without the verb (blind review of 41a281a).
+    /// </para>
+    /// <para>
+    /// A scan, but only of the verbs this pass crossed, and only where the rule would fail it.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="verbsAtStart"><see cref="MatchState.VerbsCrossed"/> when the pass began.</param>
+    /// <returns><see langword="true"/> if one does.</returns>
+    private static bool VerbCutPast(MatchState state, int verbsAtStart)
+    {
+        List<int> marks = state.VerbMarks;
+        int depth = state.Pstack.Count;
+        for (int i = verbsAtStart; i < marks.Count; i++)
+        {
+            if (marks[i] <= depth)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Whether <paramref name="edits"/>, counted by kind, raise a count that an open fuzzy section
@@ -7840,6 +7877,9 @@ internal static class Matcher
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
 
+        // NOT UPSTREAM (ledger entry 44's addendum): no pass of this attempt has crossed a verb.
+        state.VerbMarks.Clear();
+
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
@@ -10005,8 +10045,8 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbsCrossed.
-                    ++state.VerbsCrossed;
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+                    state.VerbMarks.Add(state.Pstack.Count);
 
                     // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
                     // positive lookaround the verb acts when backtracking reaches it, and then
@@ -10734,8 +10774,8 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbsCrossed.
-                    ++state.VerbsCrossed;
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+                    state.VerbMarks.Add(state.Pstack.Count);
 
                     // Prune the backtracking back to an appropriate backtracking point - unless the
                     // verb is in an unfinished atomic group or positive lookaround, where it prunes

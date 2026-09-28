@@ -316,6 +316,9 @@ public sealed class MatchStateCacheTests
             case List<long> numbers:
                 numbers.Add(7);
                 break;
+            case List<int> numbers:
+                numbers.Add(7);
+                break;
             case null when field.FieldType == typeof(HashSet<long[]>):
                 field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
                 break;

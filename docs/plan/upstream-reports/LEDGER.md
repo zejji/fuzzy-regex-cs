@@ -4652,8 +4652,10 @@ pruning, so it must never do more than an ordinary failure would. A `(*PRUNE)` o
 the backtracking stack when it is crossed, and the choice of the empty exit, or of leaving the
 repeat, goes with it: failing the pass then ended the attempt, and `(?:b(*SKIP)|){d<=1}` and
 `(?:(?:b(*SKIP))?){d<=1}` over `''` answered None where upstream has (0, 0) with one deletion. A
-pass that crossed a verb (`MatchState.VerbsCrossed`) now stands in plain order, which is
-upstream's answer; an empty iteration that crossed one stands but is not followed by another, so
+pass whose verb cut past its start now stands in plain order, which is upstream's answer; a verb
+confined to an atomic group or lookaround the pass opened and closed cuts nothing past it, and the
+rule applies (`Matcher.VerbCutPast`, second review). An empty iteration whose verb cut past it
+stands but is not followed by another, so
 the loop still ends where upstream's goes on to MemoryError. `(?:(?:(*PRUNE)a){1<=d<=1})+` over
 `'c'`, None until then, is (0, 0) with two deletions. Deciding before the verb is crossed would need
 to know that nothing after it in the pass consumes text, which only the pass's end knows.
