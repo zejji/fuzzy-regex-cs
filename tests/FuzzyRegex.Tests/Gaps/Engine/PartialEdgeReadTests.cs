@@ -1,0 +1,211 @@
+using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
+
+namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
+
+/// <summary>
+/// D11 M1, build chunk 2: the word, line and string tests at the edge of a partial call's second
+/// pass (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1, and the witnesses of
+/// section 7). A test there is decided when every non-empty continuation of the text gives it the
+/// same answer, and undetermined otherwise, when it passes and leaves a touch mark.
+/// </summary>
+/// <remarks>
+/// A partial asks whether a longer text could make the call a match (<c>upstream/README.rst:270</c>).
+/// Each expected answer below is the brute-force judge's, <c>tools/probes/d11-brute-judge.py</c>
+/// (upstream <c>regex</c> 2026.9.10 without partial, over every continuation of one to four
+/// characters), measured 2026-09-28 for the design's rows and 2026-09-29 for the rest. Upstream's own
+/// partial answers are given where they differ. S57d's escalation is still in place until build
+/// chunk 9, so a row it answers (B3, B6 and the fullmatch rows) is not a witness here.
+/// </remarks>
+public sealed class PartialEdgeReadTests
+{
+    /// <summary>
+    /// A test the held text already decides needs no continuation, so no partial comes of it (rows
+    /// B1, B2 and B7). With M1 removed, S57d escalates each of them to a partial.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM on nothing: upstream answers None to every row.
+    [Test]
+    // `\m` after a word character: no continuation starts a word there.
+    [Arguments("match", @"a\m", "a")]
+    // `\M` after a non-word character: no continuation ends a word there.
+    [Arguments("match", @" \M", " ")]
+    // Under `(?a)` the astral letter is not a word character, so `\M` after it is decided false.
+    [Arguments("match", "(?fai)^\U0001D518\\M", "\U0001D518")]
+    // Reversed, `\m` before a non-word character.
+    [Arguments("match", @"(?r)\m ", " ")]
+    public void A_word_test_the_held_text_decides_reports_no_partial(string operation, string pattern, string text)
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The seed-7 row of the 2026-09-21 oracle wave, which S57d pinned as a partial: its <c>\m</c>
+    /// comes after an astral uppercase letter at the end of the text, so no continuation starts a
+    /// word there. Upstream and the judge answer None, and so does the port since D11.
+    /// </summary>
+    [Test]
+    public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
+    {
+        new FuzzyRegex(
+            @"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$",
+            FuzzyRegexOptions.IgnoreCase
+                | FuzzyRegexOptions.Multiline
+                | FuzzyRegexOptions.FullCase
+                | FuzzyRegexOptions.Version0
+        )
+            .Match("\U00010400\U0001D518", partial: true)
+            .Success.Should()
+            .BeFalse();
+    }
+
+    /// <summary>
+    /// Tests that every continuation fails where the first pass, reading the text as ending, passed
+    /// them: <c>\Z</c> at the end (decision 3), <c>$</c> at a final newline, and a reversed
+    /// <c>\A</c> at the start (rows E1, E3, R1, N2, N3). With M1 removed each is a partial.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM on E1 and R1, deliberately: upstream answers a partial to both.
+    [Test]
+    [Arguments("match", @"a\Zb", "a")]
+    [Arguments("match", "a$\n\\b", "a\n")]
+    [Arguments("match", @"(?r)(?<=b)\Aa", "a")]
+    [Arguments("match", @"(?r)(?<=b)^a", "a")]
+    [Arguments("match", @"(?>a\Z|a|)(?<!a)a", "a")]
+    [Arguments("match", @"(?:a\Z(?<=b)|a(*PRUNE)(?<=b)|a)", "a")]
+    public void A_test_every_continuation_fails_is_false_at_the_edge(string operation, string pattern, string text)
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A decided-false test at the edge sends the path the other way, and the other way can be a
+    /// match that needs the continuation (row D4: 'a' + 'a', where <c>\Z</c> fails, the atomic group
+    /// takes its empty branch and <c>(?&lt;!a)a</c> matches). Upstream answers None.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately.
+    [Test]
+    public void A_decided_false_test_lets_the_path_take_its_other_branch()
+    {
+        Match m = Partial("match", @"(?>a\Z|)(?<!a)a", "a");
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 1));
+    }
+
+    /// <summary>
+    /// A test some continuations pass and others fail passes, and the path goes on to a partial
+    /// (rows P1, P2, P3 and A5, the zero-width attempts; E2 and the line tests). With the
+    /// undetermined answer read as the held text's, the zero-width rows are None; with it read as
+    /// decided false, the line rows are None too.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM on the zero-width rows but the reversed search, where upstream agrees.
+    [Test]
+    [Arguments("search", @"\b", "", 0, 0)]
+    [Arguments("match", @"\b", "", 0, 0)]
+    [Arguments("search", @"(?r)\b$", "", 0, 0)]
+    [Arguments("match", @"(?r)\b$", "", 0, 0)]
+    [Arguments("match", @"(?r)[a\d]\M", "", 0, 0)]
+    // The text to come may be a newline (row E2): 'a' + '\n' holds `$` and then matches `\n`. Read
+    // as decided false, `$` would refuse it.
+    [Arguments("match", "a$\n", "a", 0, 1)]
+    [Arguments("match", "(?m)a$\n", "a", 0, 1)]
+    // Under `(?w)` a final CR is a line separator's start that a lone LF to come keeps final, so
+    // `$` before it is undetermined, not false: 'a\r' + '\n' is a complete match.
+    [Arguments("match", "(?w)a$\r\n", "a\r", 0, 2)]
+    // Under `(?w)` a line starts after a CR unless the text to come begins with LF.
+    [Arguments("match", "(?wm)a\r^b", "a\r", 0, 2)]
+    public void A_test_the_continuation_decides_passes_and_the_path_reports_a_partial(
+        string operation,
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match m = Partial(operation, pattern, text);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+    }
+
+    /// <summary>
+    /// Where the held text decides a line test, the continuation changes nothing. Without
+    /// <c>(?w)</c> only LF ends a line, so <c>^</c> after a CR is false whatever follows.
+    /// </summary>
+    [Test]
+    public void A_line_test_the_held_text_decides_stays_decided()
+    {
+        Partial("match", "(?m)a\r^b", "a\r").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The first pass and a call without partial read the edge as before: the complete match wins,
+    /// and the answers are upstream's.
+    /// </summary>
+    [Test]
+    public void The_first_pass_reads_the_edge_as_the_end_of_the_text()
+    {
+        Match complete = Partial("match", @"a\Z", "a");
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 1));
+        new FuzzyRegex(@"(?r)\Aa").MatchAtStart("a", partial: true).PartialMatch.Should().BeFalse();
+        new FuzzyRegex(@"(?m)a$").MatchAtStart("a", partial: true).PartialMatch.Should().BeFalse();
+        new FuzzyRegex(@"a\m").MatchAtStart("a").Success.Should().BeFalse();
+        new FuzzyRegex(@"a\B").MatchAtStart("a").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The port grid's counters (VERIFICATION rule 11): an undetermined read pushes one touch mark,
+    /// and a decided read that differs from the first pass is counted. Debug builds only.
+    /// </summary>
+    [Test]
+    public void The_second_pass_counts_its_edge_reads_in_a_debug_build()
+    {
+        using MatchState undetermined = RunPartial(@"aa\B", "aa");
+        using MatchState decided = RunPartial(@"a\Zb", "a");
+
+#if DEBUG
+        const long one = 1;
+#else
+        const long one = 0;
+#endif
+        (
+            undetermined.PartialEventCount(PartialEvent.UndeterminedRead),
+            undetermined.PartialEventCount(PartialEvent.TouchPushed),
+            decided.PartialEventCount(PartialEvent.DecidedReadDiffering),
+            decided.PartialEventCount(PartialEvent.TouchPushed)
+        )
+            .Should()
+            .Be((one, one, one, 0L));
+    }
+
+    private static MatchState RunPartial(string pattern, string text)
+    {
+        var regex = new FuzzyRegex(pattern);
+        MatchState state = MatchState.Create(
+            regex.PatternObject,
+            text.AsMemory(),
+            0,
+            text.Length,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: false);
+        return state;
+    }
+
+    private static Match Partial(string operation, string pattern, string text)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        return operation switch
+        {
+            "match" => regex.MatchAtStart(text, partial: true),
+            "fullmatch" => regex.FullMatch(text, partial: true),
+            _ => regex.Match(text, partial: true),
+        };
+    }
+}

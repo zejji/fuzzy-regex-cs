@@ -139,6 +139,14 @@ internal static class MatchStatus
     /// <summary>Upstream <c>RE_ERROR_PARTIAL</c>.</summary>
     internal const int Partial = -13;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: a zero-width test at the edge of a partial call's second pass that
+    /// some continuations of the text pass and others fail. Only <c>Matcher.TryMatchZeroWidth</c>
+    /// returns it, and each of its callers says what it means there
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    internal const int Undetermined = 2;
+
     /// <summary>Upstream <c>bool_as_status</c> (<c>upstream/src/_regex.c</c> line 2225).</summary>
     /// <param name="matched">Whether the thing matched.</param>
     /// <returns><see cref="Success"/> or <see cref="Failure"/>.</returns>
@@ -2265,9 +2273,137 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchBoundary(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            if (AtContinuationEdge(state, textPos))
+            {
+                return WordTestAtEdge(state, node, textPos);
+            }
+
+            NoteBoundaryAtTruncationPoint(state, textPos);
+        }
 
         return MatchStatus.From(AtBoundary(state, node.Encoding, textPos) == node.Match);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: whether a zero-width test at <paramref name="textPos"/> reads the
+    /// text to come in a partial call's second pass. Forward that is a position at or past
+    /// <see cref="MatchState.TextEnd"/>; reversed, at or before <see cref="MatchState.TextStart"/>,
+    /// because the predicates read the whole string to the left of the slice (ledger entry 24)
+    /// where a consuming item runs out at the slice start.
+    /// </summary>
+    /// <remarks>Only called with <see cref="MatchState.PartialSide"/> set.</remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position the test asks about.</param>
+    /// <returns><see langword="true"/> if one side of the position is the text to come.</returns>
+    private static bool AtContinuationEdge(MatchState state, int textPos) =>
+        state.PartialSide == MatchState.PartialRight ? textPos >= state.TextEnd : textPos <= state.TextStart;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: <c>\b</c>, <c>\B</c>, <c>\m</c> or <c>\M</c> at the edge of a partial
+    /// call's second pass (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    /// <remarks>
+    /// The side beyond the edge is the first character of the text to come, and that is a word
+    /// character for some continuations and not for others. The test is therefore worked out for
+    /// both, which is the whole of the enumeration for these four: when the two answers agree the
+    /// test is decided, and the first pass, which reads the edge as a non-word side, answered the
+    /// same (A4). <c>\m</c> after a word character and <c>\M</c> after a non-word character are
+    /// decided false. When the answers differ the test is undetermined (A3 holds by construction),
+    /// and S57d still notes it until build chunk 9 deletes the escalation.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The edge.</param>
+    /// <returns><see cref="MatchStatus.Success"/>, <see cref="MatchStatus.Failure"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int WordTestAtEdge(MatchState state, Node node, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+        bool known = forward ? WordLeft(state, node.Encoding, textPos) : WordRight(state, node.Encoding, textPos);
+        bool ifWord = forward ? WordTest(node, known, true) : WordTest(node, true, known);
+        bool ifNotWord = forward ? WordTest(node, known, false) : WordTest(node, false, known);
+
+        if (ifWord == ifNotWord)
+        {
+            Debug.Assert(
+                ifNotWord
+                    == WordTest(
+                        node,
+                        WordLeft(state, node.Encoding, textPos),
+                        WordRight(state, node.Encoding, textPos)
+                    ),
+                "D11 A4: a decided word test answers what the first pass answered"
+            );
+
+            return MatchStatus.From(ifWord);
+        }
+
+        NoteBoundaryAtTruncationPoint(state, textPos);
+
+        return UndeterminedRead(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: <see cref="AtBoundary"/>, <see cref="AtWordStart"/> and
+    /// <see cref="AtWordEnd"/> over the two sides' word classes rather than over the text, so that
+    /// <see cref="WordTestAtEdge"/> can ask them about a side the text does not hold.
+    /// </summary>
+    /// <param name="node">A <c>Boundary</c>, <c>StartOfWord</c> or <c>EndOfWord</c> node.</param>
+    /// <param name="wordLeft">Whether a word character lies to the left.</param>
+    /// <param name="wordRight">Whether a word character lies to the right.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool WordTest(Node node, bool wordLeft, bool wordRight) =>
+        node.Op switch
+        {
+            Opcode.Boundary => node.Match ? wordLeft != wordRight : wordLeft == wordRight,
+            Opcode.StartOfWord => !wordLeft && wordRight,
+            _ => wordLeft && !wordRight,
+        };
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: the answer of a test at the edge that some continuations pass and
+    /// others fail, counted for the port grid.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int UndeterminedRead(MatchState state)
+    {
+        state.NotePartialEvent(PartialEvent.UndeterminedRead);
+
+        return MatchStatus.Undetermined;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: records that the path has read the text to come, as a one-byte
+    /// <see cref="Opcode.WTouch"/> entry and a touch mark at its position (design section 4.2).
+    /// Backtracking onto the entry drops the mark.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void PushTouchMark(MatchState state)
+    {
+        int position = state.Bstack.Count;
+        state.Bstack.PushUInt8((byte)Opcode.WTouch);
+
+        /* bstack: WTOUCH */
+
+        state.AddWMark(position, WMarkKind.Touch);
+        state.NotePartialEvent(PartialEvent.TouchPushed);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: the answer of a test at the edge that every non-empty continuation
+    /// fails where the first pass, reading the text as ending there, passed it: <c>\Z</c> and
+    /// <c>$</c> at the end or at a final newline, and a reversed <c>\A</c> at the start. No mark is
+    /// needed, because the answer holds whatever the continuation is.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Failure"/>.</returns>
+    private static int DecidedFalseAtEdge(MatchState state)
+    {
+        state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+
+        return MatchStatus.Failure;
     }
 
     /// <summary>
@@ -2341,7 +2477,15 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchEndOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            if (AtContinuationEdge(state, textPos))
+            {
+                return WordTestAtEdge(state, node, textPos);
+            }
+
+            NoteBoundaryAtTruncationPoint(state, textPos);
+        }
 
         return MatchStatus.From(AtWordEnd(state, node.Encoding, textPos));
     }
@@ -2354,7 +2498,15 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchStartOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            if (AtContinuationEdge(state, textPos))
+            {
+                return WordTestAtEdge(state, node, textPos);
+            }
+
+            NoteBoundaryAtTruncationPoint(state, textPos);
+        }
 
         return MatchStatus.From(AtWordStart(state, node.Encoding, textPos));
     }
@@ -2402,38 +2554,117 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || state.CharAt(textPos) == '\n');
+    internal static int TryMatchEndOfLine(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            // D11 M1: the text to come may start with a newline or may not.
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.From(state.CharAt(textPos) == '\n');
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE_U</c> (line 7115).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined at the end forward, where the text to come may start with a line
+    /// separator or may not, and reversed at the start before a newline, which the text to come
+    /// may put inside a CR/LF.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfLineU(MatchState state, Node node, int textPos) =>
-        MatchStatus.From(AtLineEnd(state, node.Encoding, textPos));
+    internal static int TryMatchEndOfLineU(MatchState state, Node node, int textPos)
+    {
+        if (
+            state.PartialSide != MatchState.PartialNone
+            && (
+                state.PartialSide == MatchState.PartialRight
+                    ? textPos >= state.TextEnd
+                    : textPos <= state.TextStart && textPos < state.TextEnd && state.CharAt(textPos) == 0x0A
+            )
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtLineEnd(state, node.Encoding, textPos));
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING</c> (line 7121).</summary>
+    /// <remarks>
+    /// D11 M1, decision 3: false at the end in a partial call's second pass, which asks only about
+    /// non-empty continuations, and after any of them the end of the text is not the end of the
+    /// string.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfString(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd);
+    internal static int TryMatchEndOfString(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING_LINE</c> (line 7127).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined at the end forward (the text to come may be a newline), and decided
+    /// false at a final newline, which any text to come stops being final.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfStringLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || textPos == state.FinalNewline);
+    internal static int TryMatchEndOfStringLine(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        if (textPos == state.FinalNewline)
+        {
+            return state.PartialSide == MatchState.PartialRight ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING_LINE_U</c> (line 7134).</summary>
+    /// <remarks>
+    /// D11 M1: as <see cref="TryMatchEndOfStringLine"/>, with one more undetermined case. A final
+    /// CR stays the start of the final line separator when the text to come is a lone LF, so there
+    /// the test is undetermined rather than decided false.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfStringLineU(MatchState state, Node node, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || textPos == FinalLineSep(state, node.Encoding));
+    internal static int TryMatchEndOfStringLineU(MatchState state, Node node, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        if (textPos == FinalLineSep(state, node.Encoding))
+        {
+            if (state.PartialSide != MatchState.PartialRight)
+            {
+                return MatchStatus.Success;
+            }
+
+            return state.CharAt(textPos) == 0x0D && state.NextPos(textPos) >= state.TextEnd
+                ? UndeterminedRead(state)
+                : DecidedFalseAtEdge(state);
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>
     /// <see cref="MatchState.FinalLineSep"/> under an encoding that may not be the pattern's (S91).
@@ -2458,23 +2689,62 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos <= state.TextStart || state.CharBefore(textPos) == '\n');
+    internal static int TryMatchStartOfLine(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            // D11 M1: reversed, the text to come may end with a newline or may not.
+            return state.PartialSide == MatchState.PartialLeft ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.From(state.CharBefore(textPos) == '\n');
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_LINE_U</c> (line 7365).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined reversed at the start, where the text to come may end with a line
+    /// separator or may not, and forward at the end after a CR, which a text to come starting with
+    /// LF turns into the inside of a CR/LF.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfLineU(MatchState state, Node node, int textPos) =>
-        MatchStatus.From(AtLineStart(state, node.Encoding, textPos));
+    internal static int TryMatchStartOfLineU(MatchState state, Node node, int textPos)
+    {
+        if (
+            state.PartialSide != MatchState.PartialNone
+            && (
+                state.PartialSide == MatchState.PartialLeft
+                    ? textPos <= state.TextStart
+                    : textPos >= state.TextEnd && textPos > state.TextStart && state.CharBefore(textPos) == 0x0D
+            )
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtLineStart(state, node.Encoding, textPos));
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_STRING</c> (line 7371).</summary>
+    /// <remarks>
+    /// D11 M1: reversed, false at the start in a partial call's second pass, by decision 3's
+    /// reasoning: with text to come on the left, the start of the text is not the start of the
+    /// string.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfString(MatchState state, int textPos) =>
-        MatchStatus.From(textPos <= state.TextStart);
+    internal static int TryMatchStartOfString(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>
     /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
@@ -2482,6 +2752,13 @@ internal static class Matcher
     /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
     /// same question about a position the matcher is not standing on.
     /// </summary>
+    /// <remarks>
+    /// In a partial call's second pass the word, line and string tests may also answer
+    /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
+    /// the matcher's own arm pushes the touch mark, and the prefilter and
+    /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
+    /// <c>(?w)</c> and grapheme tests keep answering against the held text until build chunk 10.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
     /// <param name="textPos">The position to ask about.</param>
@@ -2550,9 +2827,11 @@ internal static class Matcher
 
         foreach (Node guard in guards)
         {
+            // D11 M1: an undetermined answer holds for some continuations and fails for others, so
+            // it counts as either, which permits the insertion wherever some continuation would.
             if (
-                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success
-                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure
+                TryMatchZeroWidth(state, guard, state.SearchAnchor) != MatchStatus.Failure
+                && TryMatchZeroWidth(state, guard, onePastAnchor) != MatchStatus.Success
             )
             {
                 return true;
@@ -3110,8 +3389,33 @@ internal static class Matcher
     {
         if (state.Pstack.TopSize(out long bstackCount))
         {
-            state.SetBstackCount((int)bstackCount);
+            CutBstack(state, (int)bstackCount);
         }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a cut or a verb truncating the backtracking stack, which discards the
+    /// w-marks of the entries it discards before <see cref="MatchState.SetBstackCount"/> checks A7.
+    /// </summary>
+    /// <remarks>
+    /// A verb's unwinding drops the marks above its target by design (section 4.2). For the cuts
+    /// (atomic groups and possessive repeats, lookarounds, conditions' tests, a <c>(*PRUNE)</c>
+    /// that runs forward) the drop is interim. SHORTCUT: until the cut rule of build chunks 4 to 6,
+    /// every cut is taken as it was before D11, and a touch mark above it goes with the entries it
+    /// discards. Ceiling: a cut after a read of the text to come can discard an alternative that
+    /// some continuation needs (design rows D1-D3, V1-V3), which S57d's escalation still answers
+    /// until chunk 9. Upgrade: the cut rule blocks such a cut instead of taking it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="count">The new count.</param>
+    private static void CutBstack(MatchState state, int count)
+    {
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom(count);
+        }
+
+        state.SetBstackCount(count);
     }
 
     /// <summary>
@@ -3260,7 +3564,7 @@ internal static class Matcher
 
             if (!IsTransparentToVerbs(op, look))
             {
-                state.SetBstackCount((int)mark);
+                CutBstack(state, (int)mark);
                 toAttempt = op == Opcode.Failure;
                 if (toAttempt && crossedALookaround)
                 {
@@ -6627,7 +6931,8 @@ internal static class Matcher
 
         while (true)
         {
-            if (TryMatchZeroWidth(state, test, pos) == MatchStatus.Success)
+            // D11 M1: a start whose test is undetermined is one some continuation completes.
+            if (TryMatchZeroWidth(state, test, pos) != MatchStatus.Failure)
             {
                 return pos;
             }
@@ -7518,7 +7823,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.SetBstackCount((int)atomicBstackCount);
+                    CutBstack(state, (int)atomicBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
@@ -7586,7 +7891,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.SetBstackCount((int)endCondBstackCount);
+                    CutBstack(state, (int)endCondBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
                     {
@@ -8275,7 +8580,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.SetBstackCount((int)endLookBstackCount);
+                    CutBstack(state, (int)endLookBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
                     {
@@ -8495,6 +8800,13 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        node = node.Next1.Node!;
+                    }
+                    else if (status == MatchStatus.Undetermined)
+                    {
+                        // D11 M1: some continuations pass the test, so the path goes on and leaves a
+                        // touch mark. The continuations that fail it are ordinary backtracking.
+                        PushTouchMark(state);
                         node = node.Next1.Node!;
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
@@ -10546,6 +10858,23 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // NOT UPSTREAM'S, D11 M3's core (design section 4.3). The two passes run the
+                    // same code from the same start, so a path reaches here in the second pass only
+                    // through a test that read the text to come (M1): the match needs a
+                    // continuation, which makes it a partial. A full match would need the
+                    // continuation to be empty, which the first pass has already judged, so under
+                    // fullmatch it backtracks. M1 cannot land without this; the rest of M3 (the
+                    // prefilter's no-start partial, asserts A1 and A2) is build chunk 3.
+                    if (state.PartialSide != MatchState.PartialNone)
+                    {
+                        if (state.MatchAll)
+                        {
+                            goto backtrack;
+                        }
+
+                        return MatchStatus.Partial;
+                    }
+
                     if (state.MatchAll)
                     {
                         // We want to match all of the slice.
@@ -11965,6 +12294,14 @@ internal static class Matcher
                     state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
                     break;
                 }
+                case Opcode.WTouch: // NOT UPSTREAM'S, D11: backtracking has passed a touch mark.
+                    // The popped entry was at the stack's new count, which is the mark's position.
+                    Debug.Assert(
+                        state.WMarks.Count > 0 && state.WMarks[^1] == new WMark(state.Bstack.Count, WMarkKind.Touch),
+                        "D11: a touch entry carries its own mark, the newest"
+                    );
+                    state.DropWMarksFrom(state.Bstack.Count);
+                    break;
                 case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
                 {
                     /* bstack: text_pos node */

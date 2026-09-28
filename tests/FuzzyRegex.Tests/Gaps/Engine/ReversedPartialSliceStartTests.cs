@@ -144,13 +144,16 @@ public sealed class ReversedPartialSliceStartTests
     [Test]
     public void An_empty_slice_is_an_empty_slice_wherever_it_sits()
     {
-        // The same pattern at every empty slice of "xyz". At (0, 0) the answer is genuinely no
-        // match and not a partial, because \b needs a word character on one side and there is none:
-        // position 0 is the subject start and the slice end truncates everything after it. That
-        // cell is what proves the fix did not simply make every reversed call partial.
+        // The same pattern at every empty slice of "xyz". D11 changed the (0, 0) cell and the empty
+        // subject from None to a partial (design decision 1): reversed, the text to come goes on
+        // the left of position 0, and 'ab' there makes 'ab' + '' a match whose \b sits between 'b'
+        // and the end. The brute-force judge (tools/probes/d11-brute-judge.py, 2026-09-29) answers
+        // P(0, 0) with witness 'ab'. Before D11 the \b was read against the held text, which has no
+        // word character on either side of 0.
 
-        // UPSTREAM: regex.compile(r'(?r)ab(.*?)\b').match('xyz', 0, 0, partial=True) -> None
-        Answer(@"(?r)ab(.*?)\b", "xyz", 0, 0).Should().Be("None");
+        // UPSTREAM: regex.compile(r'(?r)ab(.*?)\b').match('xyz', 0, 0, partial=True) -> None.
+        // DIVERGES FROM UPSTREAM, deliberately.
+        Answer(@"(?r)ab(.*?)\b", "xyz", 0, 0).Should().Be("(0, 0) partial=True");
 
         // UPSTREAM: the same call at 1, 2 and 3 -> (1, 1), (2, 2) and (3, 3) partial. Upstream's
         // own Rule B path, and the port's Rule A answer of None was the defect.
@@ -158,8 +161,8 @@ public sealed class ReversedPartialSliceStartTests
         Answer(@"(?r)ab(.*?)\b", "xyz", 2, 2).Should().Be("(2, 2) partial=True");
         Answer(@"(?r)ab(.*?)\b", "xyz", 3, 3).Should().Be("(3, 3) partial=True");
 
-        // UPSTREAM: the empty subject -> None, for the same reason as (0, 0) above.
-        Answer(@"(?r)ab(.*?)\b", "", 0, 0).Should().Be("None");
+        // UPSTREAM: the empty subject -> None. DIVERGES, for the same reason as (0, 0) above.
+        Answer(@"(?r)ab(.*?)\b", "", 0, 0).Should().Be("(0, 0) partial=True");
     }
 
     [Test]

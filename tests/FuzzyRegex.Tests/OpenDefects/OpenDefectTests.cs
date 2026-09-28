@@ -171,8 +171,8 @@ public sealed class OpenDefectTests
     // followed by 'a' keeps 'a:a' one word under UAX #29 WB6, WB4 and WB12). L1 and A2 start where
     // the lookahead or the `\m` still can hold; A5, P1, P2 and P3 are zero-width attempts that a
     // word character after the truncation point completes (P1 and P2 invert
-    // PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_finds_no_partial_here
-    // and P3 inverts A_boundary_that_consumed_nothing_reports_no_partial, see the design's open
+    // PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_reports_the_partial_a_word_character_completes
+    // and P3 inverts A_boundary_that_consumed_nothing_reports_the_partial_a_word_character_completes, see the design's open
     // questions). S3 is the search convention the slow path already follows, (1, 1) for `\ma` over
     // 'b', reached through the prefilter. Upstream, measured 2026-09-28: W1 None, W2 (3, 3), W3 None,
     // W5 None, L1 (1, 1), A2 (2, 2), A5 None, P1 (0, 0), P2 None, P3 None, S3 (1, 1).

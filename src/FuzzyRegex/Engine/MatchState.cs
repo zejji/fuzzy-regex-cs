@@ -241,8 +241,8 @@ internal sealed class MatchState : IDisposable
     /// <remarks>
     /// Empty outside the second pass (A6), and at the start of every attempt (A5). The list is made
     /// with the state and has no storage until the first mark, so a call without partial allocates
-    /// nothing for it; a reused state keeps the storage, as the stacks keep theirs. Every change of
-    /// <see cref="Bstack"/>'s count other than a pop goes through <see cref="SetBstackCount"/>, which
+    /// nothing for it; a reused state keeps the storage, as the stacks keep theirs. Every truncation
+    /// of <see cref="Bstack"/> other than a pop goes through <see cref="SetBstackCount"/>, which
     /// asserts that no mark is left above the new count (A7).
     /// </remarks>
     internal readonly List<WMark> WMarks = [];

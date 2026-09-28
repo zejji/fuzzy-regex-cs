@@ -413,13 +413,21 @@ public sealed class InheritedIssueTests
         // Without asking for a partial there is still no match, which both engines already get right.
         pattern.FullMatch("True").Success.Should().BeFalse();
 
-        // AND THE ROWS THE REVERTED FIX BROKE. Upstream answers the same on both, and this port
-        // agreed before S50, agreed again after the revert, and still agrees now. A partial found
-        // the ORDINARY way keeps its own span and its own capture groups; the hitend flag is set
-        // here too, and is never read, because the match did not fail.
+        // AND THE ROWS THE REVERTED FIX BROKE. Upstream answered the same spans and groups on both,
+        // and this port agreed before S50, again after the revert, and under S57d.
+        //
+        // D11 MOVED THE GROUPS, and the mechanism is not S50's. S50 returned PARTIAL from the
+        // predicate, which cut the match off wherever the boundary was first asked. D11's second
+        // pass passes a boundary that the text to come could satisfy and lets the path run on to
+        // the end of the pattern (design sections 4.1 and 4.3), so the answer is the first path in
+        // the pattern's own order that some longer text completes: the lazy repeat's first try.
+        // '..' + 'a' matches with group 1 (0, 1), and '....' + 'a' with group 1 (0, 2), as a
+        // complete match would report them. Upstream decides `\b` against the held text, backtracks,
+        // and reports the path on which `\1` runs out: (0, 2) and (0, 3). Both are prefixes of real
+        // completions; the span agrees. DIVERGES FROM UPSTREAM on the groups, deliberately.
         var lazyBackreference = new FuzzyRegex(@"(\.+?)\1\b");
 
-        foreach ((string subject, int groupLength) in new[] { ("..", 2), ("....", 3) })
+        foreach ((string subject, int groupLength) in new[] { ("..", 1), ("....", 2) })
         {
             Match m = lazyBackreference.Match(subject, 0, subject.Length, partial: true);
 

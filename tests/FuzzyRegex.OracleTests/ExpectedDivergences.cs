@@ -3276,7 +3276,8 @@ internal static class ExpectedDivergences
                 + "tools/probes/upstream-partial-anchor-reachability.py "
                 + "tools/probes/s57b-extra-wave-partial-search-rows.jsonl`.",
             PinnedBy: "PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_"
-                + "subject_finds_no_partial_here and .A_skip_alternation_partial_starts_at_the_"
+                + "subject_reports_the_partial_a_word_character_completes and .A_skip_alternation_"
+                + "partial_starts_at_the_"
                 + "leftmost_position_that_matches",
             // The first arm's own row, then the second arm's judged rows VERBATIM rather than
             // retyped. They were a copy of `_searchStartElsewhereRows` until S43 added a fifth row
@@ -7018,8 +7019,9 @@ internal static class ExpectedDivergences
                 + "reversed limb was written for. Each is a permanent test.",
             PinnedBy: "PartialMatchingTests.A_boundary_decided_at_the_end_of_the_text_reports_a_"
                 + "partial_upstream_denies, .A_boundary_partial_is_what_the_oracle_waves_found, "
-                + ".A_boundary_partial_reports_no_groups, .A_boundary_that_consumed_nothing_reports_"
-                + "no_partial and InheritedIssueTests.A_partial_fullmatch_reports_a_prefix_whose_"
+                + ".A_boundary_partial_reports_the_groups_of_its_path, .A_boundary_that_consumed_"
+                + "nothing_reports_the_partial_a_word_character_completes and InheritedIssueTests."
+                + "A_partial_fullmatch_reports_a_prefix_whose_"
                 + "completion_matches",
             Example: """
             {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "𐐀𝔘", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}

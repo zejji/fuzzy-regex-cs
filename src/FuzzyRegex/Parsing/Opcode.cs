@@ -24,6 +24,7 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// graph - <c>END_GROUP</c>, <c>END_FUZZY</c>, <c>GREEDY_REPEAT_ONE</c> and the rest. They are here,
 /// in the same enum, because upstream keeps one numbering across both files and the engine's
 /// <c>switch</c> is keyed on it; a second enum would only add a cast at every node it builds.
+/// Value 98, <see cref="WTouch"/>, is this port's own and only ever a backtracking-stack entry.
 /// </para>
 /// </remarks>
 internal enum Opcode : uint
@@ -321,4 +322,12 @@ internal enum Opcode : uint
 
     /// <summary>Engine-only. Upstream <c>RE_OP_TAIL_START</c>.</summary>
     TailStart = 97,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry of a touch mark, pushed where a
+    /// partial call's second pass passes a test that reads the text to come
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). It never appears on a
+    /// node or in a code list, and its backtracking arm only drops the mark.
+    /// </summary>
+    WTouch = 98,
 }
