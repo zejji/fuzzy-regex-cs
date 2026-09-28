@@ -3052,6 +3052,27 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// The indexes into <see cref="MatchState.Groups"/> of the groups a conditional or
+    /// backreference reads (<see cref="GroupInfo.Referenced"/>): the only ones the call guard keys
+    /// on. See <see cref="CallCaptures"/>.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The indexes, in group order.</returns>
+    private static int[] GroupsSomethingReads(PatternObject pattern)
+    {
+        var read = new List<int>();
+        for (int i = 0; i < pattern.GroupInfoList.Count; i++)
+        {
+            if (pattern.GroupInfoList[i].Referenced)
+            {
+                read.Add(i);
+            }
+        }
+
+        return [.. read];
+    }
+
+    /// <summary>
     /// Widens the text this attempt has reached to take in <paramref name="textPos"/>. See
     /// <see cref="MatchState.ReachedLow"/>.
     /// </summary>
@@ -6714,6 +6735,7 @@ internal static class Matcher
         // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
         // part of what makes a call a repeat, so the call guard keys on them too.
         bool keysOnCaptures = tracksReach && pattern.GroupInfoList.Exists(static info => info.Referenced);
+        int[] readGroups = keysOnCaptures ? GroupsSomethingReads(pattern) : [];
 
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
@@ -8480,7 +8502,9 @@ internal static class Matcher
                         "the text reached is measured and fits in the text"
                     );
 
-                    CallCaptures? groupCallCaptures = keysOnCaptures ? CallCaptures.Take(state.Groups) : null;
+                    CallCaptures? groupCallCaptures = keysOnCaptures
+                        ? CallCaptures.Take(state.Groups, readGroups)
+                        : null;
 
                     if (!state.ActiveCalls.Add((groupCallKey, groupCallReach, groupCallCaptures)))
                     {
@@ -10815,7 +10839,7 @@ internal static class Matcher
                         CallCaptures? groupReturnBackCaptures = null;
                         if (keysOnCaptures)
                         {
-                            long[] spans = new long[state.Groups.Length * 2];
+                            long[] spans = new long[readGroups.Length * 2];
                             for (int i = spans.Length - 1; i >= 0; i--)
                             {
                                 if (!state.Bstack.PopSize(out spans[i]))

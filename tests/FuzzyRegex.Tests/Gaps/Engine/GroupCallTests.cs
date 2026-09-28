@@ -680,6 +680,27 @@ public sealed class GroupCallTests
         (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
     }
 
+    // Blind review of the capture-keyed guard, 2026-09-28. Only \1 is read, but a key holding every
+    // group's span let the recursion open one call per order of setting the k empty groups, about
+    // k! paths: over 5 s for k = 9 and 0.6-3.3 s for k = 8, where the guard without captures took
+    // 0 ms. Upstream raises MemoryError in 0.8 s. By the grammar, G -> ()_i G | \1 x matches 'x'
+    // (set group 1 empty, then \1x) and nothing that holds any other letter. The budget is a tenth
+    // of a second, so a return to the blowup fails with a timeout.
+    [Test]
+    [Arguments(9)]
+    [Arguments(8)]
+    public void A_group_nothing_reads_is_left_out_of_the_call_guard_key(int k)
+    {
+        string pattern = "(?:" + string.Join("|", Enumerable.Repeat("()", k)) + @")(?R)|\1x";
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(100));
+
+        Match full = regex.FullMatch("x");
+        (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
+        regex.FullMatch("ax").Success.Should().BeFalse();
+        regex.Match("y").Success.Should().BeFalse();
+        regex.Match("abc").Success.Should().BeFalse();
+    }
+
     [Test]
     public void A_nested_call_that_reaches_no_further_is_still_refused()
     {

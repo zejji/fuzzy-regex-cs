@@ -2486,12 +2486,19 @@ Pinned as `GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture
 all three rows (0, 1) for search and fullmatch.
 
 The fix makes the key `(call, position, reach, captures)`, where the captures
-(`MatchState.CallCaptures`) are every group's current span. They are taken only when the pattern
-has a call AND a group some conditional or backreference reads (`GroupInfo.Referenced`), so other
-patterns pay nothing, and all groups rather than only the read ones, which is simpler and only
-lets more calls through. They go on the backtracking stack at `GROUP_RETURN` so a re-opened call
-keeps its own. It still terminates: each group's span is one of at most `(TextLength + 1)^2 + 1`
-values, so the entries per position stay finite. A capture-change COUNTER would be cheaper but
+(`MatchState.CallCaptures`) are the current spans of the groups some conditional or backreference
+reads (`GroupInfo.Referenced`), and only those. They are taken only when the pattern has a call and
+such a group, so other patterns pay nothing. They go on the backtracking stack at `GROUP_RETURN` so
+a re-opened call keeps its own. It still terminates: with n the text length and r the groups read,
+each read span is one of at most `(n + 1)^2 + 1` values, so at most
+`(n + 1) * ((n + 1)^2 + 1)^r` calls of one group are open at one position.
+
+Keying on EVERY group, the first cut, was a regression the second blind review found:
+`(?:()|()|()|()|()|()|()|()|())(?R)|\1x` let the recursion open a call for each order of setting
+the empty groups, about k! paths - over 5 s at k = 9, 0.6-3.3 s at k = 8, against 0 ms without
+captures in the key (upstream: MemoryError in 0.8 s). Only `\1` is read, so only its span belongs
+in the key, and the rows now answer inside a 100 ms budget
+(`GroupCallTests.A_group_nothing_reads_is_left_out_of_the_call_guard_key`). A capture-change COUNTER would be cheaper but
 does not terminate in principle - a group that alternates between two spans counts up for ever -
 so it is not the fix.
 

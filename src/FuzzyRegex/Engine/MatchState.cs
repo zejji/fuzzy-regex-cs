@@ -39,25 +39,31 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
-/// NOT UPSTREAM'S: the current span of every group when a group call was made, the part of the
-/// call guard's key that a conditional or backreference can read. See
-/// <see cref="MatchState.ActiveCalls"/>. Compared by value.
+/// NOT UPSTREAM'S: the current span of each group a conditional or backreference reads, when a
+/// group call was made - the part of the call guard's key that can change what the call does.
+/// See <see cref="MatchState.ActiveCalls"/>. Compared by value.
 /// </summary>
-/// <param name="spans">Start then end of each group, -1 for both when the group is unset.</param>
+/// <remarks>
+/// SHORTCUT: one small array per call, and only in a pattern that has both a group call and a
+/// group some conditional or backreference reads. Packing one or two spans into the key tuple
+/// would remove it for the common case, if a benchmark ever shows it matters.
+/// </remarks>
+/// <param name="spans">Start then end of each read group, -1 for both when the group is unset.</param>
 internal sealed class CallCaptures(long[] spans) : IEquatable<CallCaptures>
 {
     /// <summary>Start then end of each group, -1 for both when the group is unset.</summary>
     internal long[] Spans { get; } = spans;
 
-    /// <summary>Takes the groups' current spans.</summary>
+    /// <summary>Takes the current spans of the groups that are read.</summary>
     /// <param name="groups">The match state's groups.</param>
+    /// <param name="readGroups">Indexes into <paramref name="groups"/> of the groups that are read.</param>
     /// <returns>The snapshot.</returns>
-    internal static CallCaptures Take(GroupData[] groups)
+    internal static CallCaptures Take(GroupData[] groups, int[] readGroups)
     {
-        long[] spans = new long[groups.Length * 2];
-        for (int i = 0; i < groups.Length; i++)
+        long[] spans = new long[readGroups.Length * 2];
+        for (int i = 0; i < readGroups.Length; i++)
         {
-            GroupData group = groups[i];
+            GroupData group = groups[readGroups[i]];
             bool set = group.Current >= 0;
             spans[2 * i] = set ? group.Captures[group.Current].Start : -1;
             spans[(2 * i) + 1] = set ? group.Captures[group.Current].End : -1;
@@ -293,8 +299,8 @@ internal sealed class MatchState : IDisposable
     /// <para>
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
-    /// attempt has reached no text since that call opened AND, where a conditional or backreference
-    /// can read a group, with every group's span as it was then, can only repeat the open call's
+    /// attempt has reached no text since that call opened AND with every group a conditional or
+    /// backreference reads holding the span it held then, can only repeat the open call's
     /// work one level deeper, so that path recurses for ever and is failed. The captures matter
     /// because a group set between the two calls can change what a conditional or backreference
     /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
@@ -308,10 +314,12 @@ internal sealed class MatchState : IDisposable
     /// </para>
     /// <para>
     /// Why it terminates: the width only grows during an attempt and never passes the text length,
-    /// each group's span is one of at most <c>(TextLength + 1)^2 + 1</c> values, and the set holds
-    /// each entry once, so finitely many calls of one group can be open at one position. The
-    /// captures are left out (<see cref="CallCaptures"/> is null) when nothing reads them, which
-    /// keeps the old bound of <c>TextLength + 1</c>.
+    /// each read group's span is one of at most <c>(n + 1)^2 + 1</c> values (n the text length), and
+    /// the set holds each entry once, so at most <c>(n + 1) * ((n + 1)^2 + 1)^r</c> calls of one group
+    /// can be open at one position, r the number of groups read. Groups nothing reads are left out
+    /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
+    /// for every order of setting the empty groups, about k! paths. When no group is read at all
+    /// (<see cref="CallCaptures"/> is null) the bound is <c>n + 1</c>.
     /// </para>
     /// <para>
     /// A set rather than a counter, because an entry is only ever added when it is absent - that is
