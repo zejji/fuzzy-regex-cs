@@ -262,13 +262,35 @@
     Record these explicit rows (JSONL) instead of generating any - the minimisation path.
 
 .PARAMETER SkipRecord
-    Re-run the consumer against the wave already on disk, without recording a new one.
+    Re-run the consumer against the wave already on disk, without recording a new one. Reads
+    -WavePath if given, otherwise TestResults/oracle/wave.jsonl - the fixed name a normal
+    (recording) run no longer writes to, so point this at a specific file: the archived
+    TestResults/oracle/wave-<seed>.jsonl from an earlier run, for instance.
+
+.PARAMETER WavePath
+    Where to record to (or, with -SkipRecord, where to read from) instead of the default. A normal
+    recording run's default is a per-run file under TestResults/oracle/ - named with this
+    process's PID and, when recording from a seed, the seed too - so that two overlapping runs in
+    the same worktree, or an ad hoc `record-oracle.py` run, cannot replace each other's wave while
+    the consumer is reading it (D20, docs/KNOWN-DEFECTS.md). Deleted after a GREEN run; a RED run
+    keeps it, alongside the unconditional TestResults/oracle/wave-<seed>.jsonl archive copy below.
 
 .PARAMETER Screen
     Auto (the default) screens, under MemorySanitizer, every row whose verdict rests on upstream's
     answer - fault, diverge and expected - whenever Docker is available, and re-runs the consumer if
     the screen annotated any. Never skips it. See tools/screen-undefined.py for why, and for the
     upstream-commit gate that stops the run when the known-defect registry is stale.
+
+.NOTES
+    The report, like the wave (see -WavePath), is per-run by default: TestResults/oracle/report-
+    <pid>-<seed>.txt, read and written through FUZZYREGEX_ORACLE_REPORT_PATH. Two overlapping runs
+    used to share TestResults/oracle/report.txt, so whichever consumer finished last silently
+    overwrote the other's evidence before its own report-<seed>.txt archive copy was taken - found
+    by running two seeds over the same wall-clock window in one worktree and diffing their archived
+    reports (D20, docs/KNOWN-DEFECTS.md). The fixed report.txt name is still refreshed at the end of
+    every seed, for tools/sweep-seeds.ps1's and a human's `Get-Content -Wait` - both read it only
+    after a single run-oracle.ps1 invocation has finished, never mid-run, so the fixed name racing
+    between two *separate* run-oracle.ps1 processes is not the failure this fixes.
 
 .EXAMPLE
     tools/run-oracle.ps1
@@ -285,6 +307,7 @@ param(
     [string]$Rows,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
     [switch]$SkipRecord,
+    [string]$WavePath,
     [ValidateSet('Auto', 'Never')][string]$Screen = 'Auto'
 )
 
@@ -292,8 +315,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$wavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
-$reportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
+$legacyWavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
+# The fixed name: refreshed at the end of every seed below for tools/sweep-seeds.ps1 and a human
+# tailing it, never read from mid-run any more - see the -Screen .NOTES above (D20).
+$legacyReportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
 
 # A run of explicit rows, and a re-run of the wave already on disk, are both a single wave by
 # construction: neither has a seed to vary, and -1 stands for "this run has no seed". Everything
@@ -326,9 +351,35 @@ foreach ($seed in $runs) {
         Write-Host "===== seed $seed =====" -ForegroundColor Cyan
     }
 
+    # Per-run by default (D20, docs/KNOWN-DEFECTS.md): two overlapping run-oracle.ps1 invocations
+    # in the same worktree, or an ad hoc `record-oracle.py` run, must not be able to replace the
+    # wave THIS run is mid-comparison against. -WavePath overrides it explicitly. -SkipRecord with
+    # no -WavePath falls back to the legacy fixed name, since nothing records there by default any
+    # more and this path has to name a wave that already exists.
+    $ownsWavePath = -not $WavePath
+    $runWavePath =
+        if ($WavePath) { $WavePath }
+        elseif ($SkipRecord) { $legacyWavePath }
+        elseif ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/wave-$PID-$seed.jsonl" }
+        else { Join-Path $repoRoot "TestResults/oracle/wave-$PID.jsonl" }
+
+    # Read by tests/FuzzyRegex.OracleTests/OracleWave.cs's WavePath property; the consumer below
+    # compares against this run's own file even while another run's consumer reads its own.
+    $env:FUZZYREGEX_ORACLE_WAVE_PATH = $runWavePath
+
+    # Same reasoning, for the report: a fixed report.txt used to mean two overlapping runs' consumers
+    # could overwrite each other's verdict before either archived it (D20, docs/KNOWN-DEFECTS.md).
+    # ScreenCandidatesPath is derived FROM ReportPath in OracleWave.cs, so setting this alone also
+    # makes the MSan screen's candidate list per-run - see screen-undefined.py's --candidates below.
+    $reportPath =
+        if ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/report-$PID-$seed.txt" }
+        else { Join-Path $repoRoot "TestResults/oracle/report-$PID.txt" }
+    $candidatesPath = Join-Path (Split-Path -Parent $reportPath) ((Split-Path -LeafBase $reportPath) + '.screen-candidates.txt')
+    $env:FUZZYREGEX_ORACLE_REPORT_PATH = $reportPath
+
     if (-not $SkipRecord) {
         Write-Host 'Recording a wave from upstream...' -ForegroundColor Cyan
-        $recorderArgs = @((Join-Path $PSScriptRoot 'record-oracle.py'), '--output', $wavePath)
+        $recorderArgs = @((Join-Path $PSScriptRoot 'record-oracle.py'), '--output', $runWavePath)
         if ($Rows) {
             $recorderArgs += @('--rows', $Rows)
         }
@@ -350,8 +401,8 @@ foreach ($seed in $runs) {
         }
     }
 
-    if (-not (Test-Path -LiteralPath $wavePath)) {
-        Write-Host "Oracle: RED - there is no wave at $wavePath." -ForegroundColor Red
+    if (-not (Test-Path -LiteralPath $runWavePath)) {
+        Write-Host "Oracle: RED - there is no wave at $runWavePath." -ForegroundColor Red
         exit 1
     }
 
@@ -383,20 +434,22 @@ foreach ($seed in $runs) {
     }
     # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
     # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
-    # again only if it did, so a wave with nothing to screen costs nothing extra.
-    $candidates = Join-Path $repoRoot 'TestResults/oracle/screen-candidates.txt'
+    # again only if it did, so a wave with nothing to screen costs nothing extra. Per-run, the same as
+    # $reportPath it is named from - a fixed candidates file let one run's row NUMBERS be screened
+    # against another run's wave, since a bare integer means nothing without knowing which wave it
+    # indexes (D20, docs/KNOWN-DEFECTS.md).
     $screenFailed = $false
-    if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidates) -and (Get-Item -LiteralPath $candidates).Length -gt 0) {
+    if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidatesPath) -and (Get-Item -LiteralPath $candidatesPath).Length -gt 0) {
         Write-Host ''
         Write-Host 'Screening the unsettled rows under MemorySanitizer...' -ForegroundColor Cyan
-        $before = (Get-FileHash -LiteralPath $wavePath).Hash
-        python (Join-Path $PSScriptRoot 'screen-undefined.py') --wave $wavePath --if-available
+        $before = (Get-FileHash -LiteralPath $runWavePath).Hash
+        python (Join-Path $PSScriptRoot 'screen-undefined.py') --wave $runWavePath --candidates $candidatesPath --if-available
         if ($LASTEXITCODE -ne 0) {
             # Most often the upstream-commit gate: its message above says what to run.
             Write-Host "Oracle: RED - the MSan screen failed (exit $LASTEXITCODE); see its message above." -ForegroundColor Red
             $screenFailed = $true
         }
-        elseif ((Get-FileHash -LiteralPath $wavePath).Hash -ne $before) {
+        elseif ((Get-FileHash -LiteralPath $runWavePath).Hash -ne $before) {
             Write-Host ''
             Write-Host 'The screen annotated rows; running the consumer again...' -ForegroundColor Cyan
             if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
@@ -420,8 +473,8 @@ foreach ($seed in $runs) {
         $failed += $seed
     }
 
-    # The next seed overwrites both files, so this run's evidence is kept under its own seed or it
-    # is gone by the time the summary prints.
+    # report-<seed>.txt is the archive of THIS run's own report (now a per-run file - see the -Screen
+    # .NOTES above), so this copy is race-free even while another seed's run-oracle.ps1 is mid-run.
     #
     # S57: this copy is UNCONDITIONAL, and it used to happen only on a red seed. That made
     # report-<seed>.txt mean "the last time this seed was red" rather than "what this seed did",
@@ -432,12 +485,37 @@ foreach ($seed in $runs) {
     # keeps the evidence (a green report is a record too, and a truthful one) while making a
     # DIVERGE line in report-<seed>.txt mean this run.
     if ($seed -ge 0) {
-        Copy-Item -LiteralPath $wavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
+        Copy-Item -LiteralPath $runWavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
         if (Test-Path -LiteralPath $reportPath) {
             Copy-Item -LiteralPath $reportPath -Destination (Join-Path $repoRoot "TestResults/oracle/report-$seed.txt") -Force
         }
     }
+
+    # The fixed name, refreshed last so tools/sweep-seeds.ps1 and a human tailing report.txt still see
+    # this seed's report the moment this invocation finishes - see the -Screen .NOTES above (D20).
+    if (Test-Path -LiteralPath $reportPath) {
+        Copy-Item -LiteralPath $reportPath -Destination $legacyReportPath -Force
+    }
+
+    # D20: a per-run wave and report this invocation both named and wrote are scratch once the run is
+    # GREEN - their content lives on in wave-<seed>.jsonl/report-<seed>.txt above (when seeded) or
+    # nowhere else (when not, e.g. -Rows), and either way a repeat invocation must not litter
+    # TestResults/oracle/ with one pair of files per run forever. Left in place on RED, for the same
+    # reason $runWavePath is.
+    if ($ownsWavePath -and -not $SkipRecord -and ($failed -notcontains $seed) -and (Test-Path -LiteralPath $runWavePath)) {
+        Remove-Item -LiteralPath $runWavePath -Force
+    }
+    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $reportPath)) {
+        Remove-Item -LiteralPath $reportPath -Force
+    }
+    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $candidatesPath)) {
+        Remove-Item -LiteralPath $candidatesPath -Force
+    }
 }
+
+Remove-Item Env:FUZZYREGEX_ORACLE_REPORT_PATH -ErrorAction SilentlyContinue
+
+Remove-Item Env:FUZZYREGEX_ORACLE_WAVE_PATH -ErrorAction SilentlyContinue
 
 Write-Host ''
 if ($failed.Count -eq 0) {

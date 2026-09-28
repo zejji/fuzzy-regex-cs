@@ -60,7 +60,13 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = REPO_ROOT / "TestResults" / "oracle" / "wave.jsonl"
+
+# .scratch/, not TestResults/oracle/wave.jsonl: that path is what tools/run-oracle.ps1 has a
+# running oracle read while it compares (via FUZZYREGEX_ORACLE_WAVE_PATH), and a bare, ad hoc
+# invocation of this recorder used to write straight into it - replacing a running oracle's wave
+# out from under its own consumer (D20, docs/KNOWN-DEFECTS.md). Point an ad hoc recording at a
+# specific file with --output when it needs to feed a consumer.
+DEFAULT_OUTPUT = REPO_ROOT / ".scratch" / "oracle" / "wave.jsonl"
 
 # Upstream never published the pinned release to PyPI, so a dev machine's `pip install regex`
 # gives the previous one. The changelog delta between them is the single line "Support Python
