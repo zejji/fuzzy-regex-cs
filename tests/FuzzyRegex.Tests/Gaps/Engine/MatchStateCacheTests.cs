@@ -119,6 +119,8 @@ public sealed class MatchStateCacheTests
     [Test]
     [Arguments("(?:(a)b)+(?:bc){e<=1}", "ababx")]
     [Arguments(@"(?r)(?:(\w)x)+(?1)", "x\U0001F600axbx")]
+    // A fuzzy literal, whose filter keeps what it learns about the subject on the state (D14).
+    [Arguments("(?:amber lantern works){e<=2}", "amber lantxrn works")]
     public void A_reused_state_forgets_every_field_its_last_call_set(string pattern, string subject)
     {
         // The wave above dirties what real matches dirty, which is not every field: a match that
@@ -227,10 +229,21 @@ public sealed class MatchStateCacheTests
             // MatchState.SectionEdits is null exactly when the pattern is not fuzzy, and it is
             // readonly, so no call can set it. For a fuzzy pattern it is an array, which the long[]
             // rule below scribbles, and this test's fuzzy case then checks a reused state clears it.
+            // MatchState.FilterMemory is the same: null exactly when the pattern has no fuzzy-literal
+            // filter, and readonly.
             if (
-                string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
-                && field.GetValue(state) is null
+                (
+                    string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                ) && field.GetValue(state) is null
             )
+            {
+                continue;
+            }
+
+            // An empty array holds nothing to carry over: the groups and repeats of a pattern with
+            // none, such as the fuzzy literal, which may have no group and keep its filter.
+            if (field.GetValue(state) is Array { Length: 0 })
             {
                 continue;
             }
@@ -305,6 +318,15 @@ public sealed class MatchStateCacheTests
                 break;
             case ByteStack stack:
                 stack.Push(7);
+                break;
+            case FuzzyLiteralFilter.ScanMemory memory:
+                Array.Fill(memory.From, 7);
+                Array.Fill(memory.Found, 7);
+                Array.Fill(memory.AbsentBelow, 7);
+                memory.SliceEnd = 7;
+                memory.SliceStart = 7;
+                memory.WitnessEnd = 7;
+                _ = memory.IsAscii("scribbled", 3, 5);
                 break;
             case HashSet<(long Key, int Reach)> set:
                 set.Add((7, 7));
@@ -400,6 +422,14 @@ public sealed class MatchStateCacheTests
                 break;
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
+                break;
+            case FuzzyLiteralFilter.ScanMemory memory:
+                RenderItems($"{path}.From", memory.From, lines);
+                RenderItems($"{path}.Found", memory.Found, lines);
+                RenderItems($"{path}.AbsentBelow", memory.AbsentBelow, lines);
+                lines.Add(
+                    $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd})"
+                );
                 break;
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
