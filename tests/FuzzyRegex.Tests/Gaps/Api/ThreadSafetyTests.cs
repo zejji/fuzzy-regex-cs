@@ -726,6 +726,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // Ledger entry 44's addendum: counted by NodeCompiler.BuildBranch, and reset by
+            // CompileToNodes in a pattern with no fuzzy section.
+            "PatternObject.OptionalPassCount",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
@@ -784,6 +787,9 @@ public sealed class ThreadSafetyTests
             "Node.FuzzyRunLength",
             // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
+            // Ledger entry 44's addendum: written by NodeCompiler.BuildBranch while the graph is
+            // built, and cleared by CompileToNodes in a pattern with no fuzzy section.
+            "Node.OptionalPassEnd",
             "Node.Match",
             "Node.Op",
             "Node.Status",

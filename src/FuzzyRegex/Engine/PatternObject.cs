@@ -436,6 +436,20 @@ internal sealed class PatternObject
     internal bool IsFuzzy;
 
     /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the code offsets of the <c>BRANCH</c> words that
+    /// <c>Branch.OptionalBranchWord</c> marks (<see cref="CompiledPattern.OptionalBranches"/>). Read
+    /// by <c>NodeCompiler.BuildBranch</c>.
+    /// </summary>
+    internal HashSet<int> OptionalBranches { get; private init; } = [];
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): how many alternations have an
+    /// <c>END_OPTIONAL_PASS</c>, and so a slot in <see cref="MatchState.OptionalPasses"/>. Counted
+    /// by <c>NodeCompiler.BuildBranch</c>.
+    /// </summary>
+    internal int OptionalPassCount;
+
+    /// <summary>
     /// The zero-width position assertions the pattern must pass before it can match anything, or
     /// <see langword="null"/> where it has none. <b>This port's own field: upstream has no
     /// equivalent.</b>
@@ -659,6 +673,7 @@ internal sealed class PatternObject
             ReqOffset = compiled.ReqOffset,
             RequiredChars = reqChars,
             ReqFlags = compiled.ReqFlags,
+            OptionalBranches = [.. compiled.OptionalBranches],
         };
 
         // Compile the regular expression code to nodes.

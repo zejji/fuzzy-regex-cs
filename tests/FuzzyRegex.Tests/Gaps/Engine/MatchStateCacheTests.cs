@@ -119,6 +119,7 @@ public sealed class MatchStateCacheTests
     [Test]
     [Arguments("(?:(a)b)+(?:bc){e<=1}", "ababx")]
     [Arguments(@"(?r)(?:(\w)x)+(?1)", "x\U0001F600axbx")]
+    [Arguments("(?:(a|)b)+(?:bc){e<=1}", "ababx")]
     public void A_reused_state_forgets_every_field_its_last_call_set(string pattern, string subject)
     {
         // The wave above dirties what real matches dirty, which is not every field: a match that
@@ -219,7 +220,12 @@ public sealed class MatchStateCacheTests
                 .Concat(fields.Where(static field => field.FieldType != typeof(CharacterIndex)))
         )
         {
-            if (string.Equals(field.Name, nameof(MatchState.Pattern), StringComparison.Ordinal))
+            // A pattern with no alternation that has an empty alternative after another has no
+            // optional-pass slots to scribble; the third row of the test that calls this has one.
+            if (
+                string.Equals(field.Name, nameof(MatchState.Pattern), StringComparison.Ordinal)
+                || field.GetValue(state) is OptionalPassStart[] { Length: 0 }
+            )
             {
                 continue;
             }
@@ -280,6 +286,9 @@ public sealed class MatchStateCacheTests
                     group.Current = 0;
                 }
 
+                break;
+            case OptionalPassStart[] passes:
+                Array.Fill(passes, new OptionalPassStart(7, 7, 7));
                 break;
             case RepeatData[] repeats:
                 foreach (RepeatData repeat in repeats)

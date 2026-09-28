@@ -4608,6 +4608,53 @@ Pinned by `Gaps/Engine/FuzzyNeededEmptyIterationTests.cs` (rule off: nine of ten
 `FuzzyEmptyIterationTests.cs`, re-pinned to the reference's answers. `ledger-reproductions.jsonl`
 re-checks upstream's answer to the first row.
 
+**Addendum (2026-09-28): an alternative written empty is the exit of an optional.** The rule above
+covered repeats only, so one optional written two ways gave two answers: `(?:a?){d<=1}` over `''`
+had no deletion here and `(?:a|){d<=1}` one, and over a 200,000-character text
+`(?:x(?:a|b|)y){e<=1}` found 62,683 matches where `(?:x(?:a|b)?y){e<=1}` found 62,233. Upstream
+gives both spellings the same answer, one deletion, which is the charge this entry removed. The
+owner chose option A of `docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md`: a pass
+through an alternative that has an alternative written empty after it is judged as an empty
+iteration is. If it consumed no text and spent errors, it stands only when its errors raise an unmet
+minimum of an open section or it changed a group a backreference or conditional tests; otherwise it
+fails, and the empty alternative matches with none.
+
+```
+search(r'(?:a|){d<=1}', '')              -> (0, 0) (0, 0, 1)     here (0, 0) (0, 0, 0)
+search(r'(?:a|b|){d<=1}', 'b')           -> (0, 0) (0, 0, 1)     here (0, 1) (0, 0, 0)
+search(r'(?:cat(?:s|)){e<=1}', 'cat')    -> (0, 3) (0, 0, 1)     here (0, 3) (0, 0, 0)
+search(r'(?:a|){1<=d<=1}', '')           -> (0, 0) (0, 0, 1)     here the same: the minimum needs it
+search(r'(?:cats|cat){e<=1}', 'cat')     -> (0, 3) (0, 0, 1)     here the same
+search(r'(?:a(?:b){d<=1}|a)', 'a')       -> (0, 1) (0, 0, 1)     here the same
+```
+
+A choice between alternatives that are not empty stays first-match, so the README's example keeps
+its deletion (`upstream/README.rst:609`, `test_regex.py:2784`). So does an empty alternative the
+compiler makes by factoring: `(?:a(?:b){d<=1}|a)` compiles to the same bytecode as
+`(?:a(?:(?:b){d<=1}|))` in both engines, and the last two rows keep one deletion where the written
+form has none. Factoring never runs inside a fuzzy section (a section's subpattern is not
+optimised), which is why `(?:cats|cat){e<=1}` stays two alternatives.
+
+This port: `Branch.OptionalBranchWord` marks the alternation while the parser's tree still says
+which empty alternatives were written. The bytecode stays upstream's, and the mark travels beside
+it (`CompiledPattern.OptionalBranches`). `NodeCompiler.BuildBranch` ends each alternative before the
+empty one with an `END_OPTIONAL_PASS` node. Taking the alternative's 2-way branch records where
+the pass began in a slot the alternation owns (`MatchState.OptionalPasses`, saved with the repeats
+across a group call), `Matcher.OptionalPassAdmitted` applies the rule at the pass's end, and
+`DeletionEmptiesAnOptionalPass` leaves out a deletion of the alternative's last item that would
+only make such a pass. `UpstreamEmptyIterations` turns it off with the repeat's rule.
+
+Evidence, 2026-09-28, on a Debug build so the assertions ran: the ruling's sweep of `X?` against
+`(?:X|)` spellings, 40,320 pairs, 0 differ (600 before); a second grid of 38,880 pairs that adds
+backreferences, conditionals, `(?r)`, lookahead, atomic groups, recursion and sections inside the
+alternatives, 0 differ (1,204 before); 3,072 rows of factored alternations, none changed, where
+their written twins changed on 570; 7,776 rows with verbs and 9,680 with recursion inside the
+alternatives, none differing from the `X?` spelling. Pinned by `FuzzyNeededEmptyIterationTests`: the
+rule off turns 24 tests red, and each of its conditions, each condition of the deletion prune, the
+factoring mark, the first-set offset and the slot's save across a call has a row that goes red
+without it. The two deletion prunes change no answer (they skip only what the pass's end would
+fail) and are there for speed.
+
 ---
 
 ## 45. `(*SKIP)` acts when it runs, not when backtracking reaches it, so a later `(*PRUNE)` cannot undo it - FIXED HERE (2026-09-26)

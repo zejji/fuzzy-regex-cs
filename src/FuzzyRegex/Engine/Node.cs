@@ -140,6 +140,15 @@ internal sealed class Node
     /// </summary>
     internal bool HasEarlierDeletionTwin;
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): on the 2-way branch of an alternative that has an
+    /// alternative written empty after it, the <c>END_OPTIONAL_PASS</c> node that ends its pass;
+    /// otherwise null. Taking the branch records where the pass began in the node's slot, and
+    /// that node reads it back (<c>Matcher.OptionalPassAdmitted</c>). Set by
+    /// <c>NodeCompiler.BuildBranch</c>.
+    /// </summary>
+    internal Node? OptionalPassEnd;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

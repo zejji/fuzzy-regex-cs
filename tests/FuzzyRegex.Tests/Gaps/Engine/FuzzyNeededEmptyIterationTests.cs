@@ -243,4 +243,197 @@ public sealed class FuzzyNeededEmptyIterationTests
         ShouldMatch(twoSubstitutions.Match("bb"), 0, 0, new FuzzyCounts(2, 0, 0));
         watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and these rows pin OUR answer: an alternative written empty
+    // is the exit of an optional, the same as the zero iterations of X?, so the needed rule covers
+    // (?:X|) as it covers X? (ledger entry 44's addendum; option A of
+    // docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md). A pass through an earlier
+    // alternative that consumed no text and spent errors nothing needs fails, and the empty
+    // alternative then matches with none. Upstream answers one error more on every row, and so did
+    // this port until 2026-09-28; the X? spelling of each row already gave this answer.
+    [Test]
+    [Arguments("(?:a|){d<=1}", "", 0, 0)]
+    [Arguments("(?:a|){e<=1}", "", 0, 0)]
+    [Arguments("(?:(?:a|)b){d<=1}", "b", 0, 1)]
+    [Arguments("(?:(?:a|)b){e<=1}", "b", 0, 1)]
+    [Arguments("(?:x(?:a|){d<=1})", "x", 0, 1)]
+    [Arguments("(?:a|){d<=1}b", "b", 0, 1)]
+    [Arguments("(?:a||c){d<=1}", "", 0, 0)]
+    [Arguments("(?:a|){d<=1}(?:b|){d<=1}", "", 0, 0)]
+    [Arguments("(?:(?:a|)(?:a|)){d<=2}", "", 0, 0)]
+    [Arguments("(?:aa*|){d<=1}", "", 0, 0)]
+    [Arguments("(?:ab|){d<=2}", "", 0, 0)]
+    [Arguments("(?:a(?:a|)|){d<=1}", "", 0, 0)]
+    [Arguments("(?:cat(?:s|)){e<=1}", "cat", 0, 3)]
+    [Arguments("(?:a(?:b|)){d<=1}", "a", 0, 1)]
+    [Arguments("(?r)(?:(?:b|)a){d<=1}", "a", 0, 1)]
+    [Arguments("(?:a|b|){d<=1}", "b", 0, 1)]
+    [Arguments("(?e)(?:a|b|){d<=1}", "b", 0, 1)]
+    [Arguments("(?:(?:a){d<=1}|)", "", 0, 0)]
+    [Arguments("(?:a(?:(?:b){d<=1}|))", "a", 0, 1)]
+    [Arguments("p?q(?:a|){d<=1}", "q", 0, 1)]
+    public void An_empty_alternative_is_an_exit_that_spends_no_errors(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        ShouldMatch(new FuzzyRegex(pattern).Match(subject), start, end - start, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex(pattern).FullMatch(subject), 0, subject.Length, new FuzzyCounts(0, 0, 0));
+    }
+
+    // The same rule, on rows where only the search changes: fullmatch over 'k' is None in every
+    // spelling, and in (?:a|b|) it already skipped the deleting pass, which cannot reach the end.
+    [Test]
+    public void An_empty_alternative_is_an_exit_for_a_search_that_stops_early()
+    {
+        // search('(?:[0-9]|){d<=1}', 'k')   (0, 0) (0, 0, 1)
+        ShouldMatch(new FuzzyRegex("(?:[0-9]|){d<=1}").Match("k"), 0, 0, new FuzzyCounts(0, 0, 0));
+        new FuzzyRegex("(?:[0-9]|){d<=1}").FullMatch("k").Success.Should().BeFalse();
+    }
+
+    // The group stays unset, as in (?:(?:(a))?){d<=1}: the pass that set it by deleting a failed.
+    [Test]
+    public void A_group_in_the_failed_pass_stays_unset()
+    {
+        // search('(?:(a)|){d<=1}', '')   (0, 0) (0, 0, 1), group 1 (0, 0)
+        Match m = new FuzzyRegex("(?:(a)|){d<=1}").Match("");
+        ShouldMatch(m, 0, 0, new FuzzyCounts(0, 0, 0));
+        m.Groups[1].Success.Should().BeFalse();
+    }
+
+    // AGREES WITH UPSTREAM 2026.9.10 where upstream spends the errors too: something needs them. A
+    // section minimum takes the one deletion it needs, not two; a conditional that tests the group
+    // the deleting pass set keeps that pass.
+    [Test]
+    public void An_empty_alternative_leaves_the_errors_something_needs()
+    {
+        // search('(?:a|){1<=d<=1}', '')                (0, 0) (0, 0, 1), the same
+        // search('(?:(?:a|)(?:a|)){1<=e<=2}', '')      (0, 0) (0, 0, 2)
+        // search('(?:(a)|){d<=1}(?(1)x|y)', 'x')       (0, 1) (0, 0, 1), group 1 (0, 0), the same
+        ShouldMatch(new FuzzyRegex("(?:a|){1<=d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:a?){1<=d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:(?:a|)(?:a|)){1<=e<=2}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        Match m = new FuzzyRegex("(?:(a)|){d<=1}(?(1)x|y)").Match("x");
+        ShouldMatch(m, 0, 1, new FuzzyCounts(0, 0, 1));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 0));
+    }
+
+    // AGREES WITH UPSTREAM 2026.9.10: a choice between alternatives that are not empty stays
+    // first-match. The README's own example keeps its deletion (upstream/README.rst:609,
+    // upstream/regex/tests/test_regex.py:2784), and so does an empty alternative the compiler makes
+    // when it factors a common prefix or suffix out of the alternatives (Branch.SplitCommonPrefix).
+    // That happens only outside a fuzzy section, since nothing inside one is optimised (Fuzzy has
+    // no Optimise), so it matters only where a section inside the alternatives spends the errors:
+    // (?:a(?:b){d<=1}|a) compiles to the same bytecode as (?:a(?:(?:b){d<=1}|)), upstream's and
+    // this port's, but it is a choice between two alternatives that are not empty.
+    [Test]
+    [Arguments("(?:cats|cat){e<=1}", "cat", 0, 3)]
+    [Arguments("(?:ab|a){d<=1}", "a", 0, 1)]
+    [Arguments("(?:ab|a){e<=1}", "a", 0, 1)]
+    [Arguments("(?r)(?:ba|a){d<=1}", "a", 0, 1)]
+    [Arguments("(?:ab|ac|a){d<=1}", "a", 0, 1)]
+    [Arguments("(?:x|(?:ab|a)){d<=1}", "a", 0, 0)]
+    [Arguments("(?:a(?:b){d<=1}|a)", "a", 0, 1)]
+    [Arguments("(?r)(?:(?:b){d<=1}a|a)", "a", 0, 1)]
+    public void A_choice_between_non_empty_alternatives_stays_first_match(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        ShouldMatch(new FuzzyRegex(pattern).Match(subject), start, end - start, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex(pattern).FullMatch(subject), 0, subject.Length, new FuzzyCounts(0, 0, 1));
+    }
+
+    // AGREES WITH UPSTREAM 2026.9.10: outside the rule. A nullable alternative or a lookaround is
+    // not an empty alternative; a substitution or insertion consumes text; BESTMATCH and ENHANCEMATCH
+    // already find the error-free answer; exact matching is untouched.
+    [Test]
+    public void Rows_outside_the_rule_keep_their_answer()
+    {
+        ShouldMatch(new FuzzyRegex("(?:a|b){d<=1}").Match("b"), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:c|a?){d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:a|(?=x)){d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:(?=x)|a){d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 1));
+        ShouldMatch(new FuzzyRegex("(?:a|){e<=1}").Match("b"), 0, 1, new FuzzyCounts(1, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?:a|){s<=1}").Match("x"), 0, 1, new FuzzyCounts(1, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?:a|){s<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?:a|){i<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?e)(?:cats|cat){e<=1}").Match("cat"), 0, 3, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?b)(?:a|){d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?b)(?:a|b|){d<=1}").Match("b"), 0, 1, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?:a|)").Match(""), 0, 0, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("(?:|a){d<=1}").Match(""), 0, 0, new FuzzyCounts(0, 0, 0));
+    }
+
+    // A pass that consumed text, or spent no errors, stands. The first row deletes b after matching
+    // a, as upstream does. In the second a* matches empty with no errors and the group it sets is
+    // kept; upstream spends a deletion there, which entry 44 already removed from a*.
+    [Test]
+    public void A_pass_that_consumed_text_or_spent_no_errors_stands()
+    {
+        // search('(?:ab|){d<=1}', 'a')      (0, 1) (0, 0, 1), the same
+        // search('(?:(a*)|){d<=1}', '')     (0, 0) (0, 0, 1), group 1 (0, 0)
+        ShouldMatch(new FuzzyRegex("(?:ab|){d<=1}").Match("a"), 0, 1, new FuzzyCounts(0, 0, 1));
+        Match m = new FuzzyRegex("(?:(a*)|){d<=1}").Match("");
+        ShouldMatch(m, 0, 0, new FuzzyCounts(0, 0, 0));
+        (m.Groups[1].Success, m.Groups[1].Index, m.Groups[1].Length).Should().Be((true, 0, 0));
+    }
+
+    // The deletion of an item that matched exactly and ends the alternative is left out only when the
+    // pass it leaves would fail at its end anyway. Each row needs that deletion (ledger entry 42,
+    // which upstream lacks, so upstream answers differently on all four): after the a matched
+    // exactly, what follows the alternation fails, and deleting the a instead leaves a pass that
+    // stands because of something the early exit must also see. In the first row an unmet section
+    // minimum needs the deletion; in the second a tested group changed in the pass; in the third
+    // the section minimum was unmet when the pass began, though the pass's deletion of the b has
+    // met it since; in the fourth the pass consumed the a before deleting the [bc]. The items are
+    // sets where a character would be packed into a string, which has its own deletion arm and no
+    // early exit.
+    [Test]
+    public void The_exact_deletion_is_left_out_only_where_the_pass_would_fail()
+    {
+        // search('(?:a|){1<=d<=1}', 'a')             (1, 1) (0, 0, 1)
+        // search('(?:()a|){d<=1}(?(1)a|z)', 'a')     None
+        // search('(?:b[ac]|){1<=d<=2}[ac]', 'a')     None
+        // search('(?:a[bc]|){d<=1}b', 'ab')          (1, 2) (0, 0, 0)
+        ShouldMatch(new FuzzyRegex("(?:a|){1<=d<=1}").Match("a"), 0, 0, new FuzzyCounts(0, 0, 1));
+        Match m = new FuzzyRegex("(?:()a|){d<=1}(?(1)a|z)").Match("a");
+        ShouldMatch(m, 0, 1, new FuzzyCounts(0, 0, 1));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 0));
+        ShouldMatch(new FuzzyRegex("(?:b[ac]|){1<=d<=2}[ac]").Match("a"), 0, 1, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?:a[bc]|){d<=1}b").Match("ab"), 0, 2, new FuzzyCounts(0, 0, 1));
+    }
+
+    // A group call inside the pass re-enters the same alternation, and the inner pass must not
+    // leave its start where the outer pass's end reads it. Here the outer pass deletes the c and
+    // calls group 1, whose inner pass matches b? empty with no errors. The outer pass then ends
+    // where it began with a deletion nothing needs, so it fails, as in the ? spelling, and the
+    // empty alternative matches. Read from the inner pass's start, it looked error-free and stood.
+    [Test]
+    public void A_call_inside_the_pass_does_not_move_where_the_pass_began()
+    {
+        // search('(?:(c(?1)|b?|)){d<=1}', '')      (0, 0) (0, 0, 1), group 1 ['', '']
+        // search('(?:((?:c(?1)|b?)?)){d<=1}', '')  the same
+        foreach (string pattern in new[] { "(?:(c(?1)|b?|)){d<=1}", "(?:((?:c(?1)|b?)?)){d<=1}" })
+        {
+            Match m = new FuzzyRegex(pattern).Match("");
+            ShouldMatch(m, 0, 0, new FuzzyCounts(0, 0, 0));
+            m.Groups[1].Captures.Should().ContainSingle(pattern);
+        }
+    }
+
+    // In a repeat, one path passes through the alternation once per iteration, and backtracking out
+    // of a later iteration's pass must give the slot back to the earlier pass it re-enters. Read
+    // from the later pass's start, the earlier pass's end saw fewer fuzzy changes than when that
+    // pass began, which a Debug build asserts against.
+    [Test]
+    public void Backtracking_out_of_a_later_iteration_gives_back_where_the_earlier_pass_began()
+    {
+        // search('(?:(?:(?:a?b|)x)*y){e<=1}', 'bbx')   (0, 1) (1, 0, 0), the same
+        ShouldMatch(new FuzzyRegex("(?:(?:(?:a?b|)x)*y){e<=1}").Match("bbx"), 0, 1, new FuzzyCounts(1, 0, 0));
+    }
 }

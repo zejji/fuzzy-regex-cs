@@ -225,6 +225,14 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal readonly RepeatData[] Repeats;
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): one slot per alternation with an alternative
+    /// written empty after one that is not, indexed by the value its <c>END_OPTIONAL_PASS</c> nodes
+    /// carry: where the pass through the alternative now being matched began. Written by
+    /// <c>Matcher.OpenOptionalPass</c>, read by <c>Matcher.OptionalPassAdmitted</c>.
+    /// </summary>
+    internal readonly OptionalPassStart[] OptionalPasses;
+
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
     internal readonly ByteStack Sstack;
 
@@ -756,6 +764,8 @@ internal sealed class MatchState : IDisposable
         {
             Repeats[r] = new RepeatData();
         }
+
+        OptionalPasses = new OptionalPassStart[pattern.OptionalPassCount];
     }
 
     /// <summary>
@@ -906,6 +916,9 @@ internal sealed class MatchState : IDisposable
             repeat.ChangesAtStart = 0;
             repeat.ClearMemo();
         }
+
+        // Every pass writes its slot before its end reads it, so this is for reuse alone.
+        Array.Clear(OptionalPasses);
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
@@ -1626,3 +1639,13 @@ internal sealed class MatchState : IDisposable
         return value > length ? length : value;
     }
 }
+
+/// <summary>
+/// NOT UPSTREAM (ledger entry 44's addendum): where a pass through an alternative with an alternative
+/// written empty after it began (<see cref="MatchState.OptionalPasses"/>).
+/// </summary>
+/// <param name="TextPos">The text position the pass began at.</param>
+/// <param name="Changes">How many fuzzy changes had been made when it began.</param>
+/// <param name="CaptureChange">The state's capture change counter when it began.</param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange);

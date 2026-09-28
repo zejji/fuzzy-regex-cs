@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -171,6 +172,24 @@ internal static class NodeCompiler
 
         pattern.MinWidth = args.MinWidth;
         pattern.IsFuzzy = args.IsFuzzy;
+
+        // NOT UPSTREAM (ledger entry 44's addendum): without a fuzzy section no pass spends an
+        // error, so an END_OPTIONAL_PASS could only admit it. Each becomes a 1-way branch, which
+        // the optimiser skips (Optimiser.SkipOneWayBranches), and exact matching runs the graph
+        // upstream builds.
+        if (!args.IsFuzzy)
+        {
+            pattern.OptionalPassCount = 0;
+            foreach (Node node in pattern.NodeList)
+            {
+                if (node.Op == Opcode.EndOptionalPass)
+                {
+                    node.Op = Opcode.Branch;
+                }
+
+                node.OptionalPassEnd = null;
+            }
+        }
         pattern.DoSearchStart = true;
         pattern.StartNode = args.Start;
         pattern.VisibleCaptureCount = args.VisibleCaptureCount;
@@ -743,6 +762,9 @@ internal static class NodeCompiler
             return _illegal;
         }
 
+        // NOT UPSTREAM (ledger entry 44's addendum): see Branch.OptionalBranchWord.
+        bool optional = args.Pattern.OptionalBranches.Contains(args.Code);
+
         // Create nodes for the start and end of the branch sequence.
         Node branchNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
         Node joinNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
@@ -758,6 +780,10 @@ internal static class NodeCompiler
         // NOT UPSTREAM (finding F-A): the first alternative that is one fuzzy one-character item;
         // see Node.HasEarlierDeletionTwin.
         Node? firstItem = null;
+
+        // NOT UPSTREAM: each alternative's 2-way branch and last node, joined up once it is known
+        // which alternatives have an empty one after them.
+        List<(Node Branch, Node End, bool Empty)> alternatives = [];
 
         // A branch in the regular expression is compiled into a series of 2-way branches.
         do
@@ -799,7 +825,7 @@ internal static class NodeCompiler
 
             // Append the sequence.
             AddNode(branchNode, subargs.Start);
-            AddNode(subargs.End!, joinNode);
+            alternatives.Add((branchNode, subargs.End!, ReferenceEquals(subargs.Start, subargs.End)));
 
             // Create a start node for the next sequence and append it.
             Node nextBranchNode = CreateNode(subargs.Pattern, Opcode.Branch, 0, 0, 0);
@@ -812,6 +838,31 @@ internal static class NodeCompiler
         if (subargs.Op != Opcode.End)
         {
             return _illegal;
+        }
+
+        // An alternative with an empty one after it ends its pass with END_OPTIONAL_PASS, which its
+        // 2-way branch opens (Node.OptionalPassEnd). The compiler marks only an alternation with
+        // such a pair; see Branch.CompileCore.
+        int lastEmpty = optional ? alternatives.FindLastIndex(static a => a.Empty) : -1;
+        Debug.Assert(!optional || lastEmpty > 0, "an optional branch has an empty alternative after one that is not");
+        uint slot = optional ? (uint)args.Pattern.OptionalPassCount++ : 0;
+        for (int i = 0; i < alternatives.Count; i++)
+        {
+            (Node alternativeBranch, Node end, bool empty) = alternatives[i];
+            if (i < lastEmpty && !empty)
+            {
+                // Every alternative of one alternation shares its slot: only one is being matched.
+                // The second value says whether a pass's start must be restored on backtracking;
+                // see Matcher.OpenOptionalPass.
+                Node passEnd = CreateNode(args.Pattern, Opcode.EndOptionalPass, 0, 0, 2);
+                passEnd.Values[0] = slot;
+                passEnd.Values[1] = args.RepeatDepth > 0 ? 1u : 0u;
+                alternativeBranch.OptionalPassEnd = passEnd;
+                AddNode(end, passEnd);
+                end = passEnd;
+            }
+
+            AddNode(end, joinNode);
         }
 
         args.Code = subargs.Code;

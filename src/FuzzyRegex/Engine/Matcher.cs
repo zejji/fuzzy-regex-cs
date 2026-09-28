@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -3004,6 +3005,10 @@ internal static class Matcher
         {
             PushRepeatData(stack, repeat, state.IsFuzzy);
         }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the optional passes' slots, which a call
+        // must not see changed when it returns; see OpenOptionalPass.
+        stack.PushBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan()));
     }
 
     /// <summary>Upstream <c>pop_repeats</c> (line 2744).</summary>
@@ -3012,6 +3017,11 @@ internal static class Matcher
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeats(MatchState state, ByteStack stack)
     {
+        if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
+        {
+            return false;
+        }
+
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
             if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy))
@@ -4579,6 +4589,12 @@ internal static class Matcher
                     return MatchStatus.Failure;
                 }
 
+                // NOT UPSTREAM (ledger entry 44's addendum): see DeletionEmptiesAnOptionalPass.
+                if (!isString && DeletionEmptiesAnOptionalPass(state, data.NewNode!))
+                {
+                    return MatchStatus.Failure;
+                }
+
                 AdvanceItem(state, ref data, isString, step);
 
                 return MatchStatus.Success;
@@ -4725,6 +4741,139 @@ internal static class Matcher
         Span<long> edits = stackalloc long[FuzzyValue.Count];
         List<FuzzyChange> changes = state.FuzzyChanges;
         for (int i = (int)rpData.ChangesAtStart; i < changes.Count; i++)
+        {
+            edits[changes[i].Type]++;
+        }
+
+        return RaisesUnmetMinimum(state, edits, counted: true);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the 2-way branch of an alternative with an
+    /// alternative written empty after it has been taken. Records where the pass begins in the
+    /// alternation's slot (<see cref="MatchState.OptionalPasses"/>), for its <c>END_OPTIONAL_PASS</c>
+    /// (<see cref="OptionalPassAdmitted"/>), and pushes the slot's previous value so backtracking
+    /// puts it back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A slot per alternation, as a repeat has its <see cref="RepeatData"/>, so the pass's end reads
+    /// its start with no stack traffic. The start it reads is this pass's because nothing between
+    /// the branch and the pass's end can open another pass of the same alternation except a group
+    /// call, and a call saves every slot with the repeats (<see cref="PushRepeats"/>) and its return
+    /// restores them. Backtracking undoes the branch's entry before it tries the next alternative, or
+    /// before it re-enters anything that ran before the branch, so a slot always holds the start of
+    /// the innermost pass of its alternation still on the path.
+    /// </para>
+    /// <para>
+    /// The entry takes the place of the branch's own (<c>text_pos node BRANCH</c>): backtracking to
+    /// it restores the slot and then tries the next alternative, as <c>BRANCH</c>'s arm does. The
+    /// restore is needed only where one activation of the pattern or of a called group can pass
+    /// through the alternation more than once, which takes a repeat around it (the pass end's
+    /// second value, set by <c>NodeCompiler.BuildBranch</c>). A group call saves and restores every
+    /// slot in both directions, at the call and at the return and in both of their backtrack arms,
+    /// so each activation has its own. Elsewhere the branch pushes its own entry, and a stale slot
+    /// is never read: once backtracking has left a pass, the path reaches that pass's end again
+    /// only through its branch, which writes the slot anew.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="branch">The 2-way branch.</param>
+    /// <param name="passEnd">The pass's <c>END_OPTIONAL_PASS</c> node, whose value is the slot.</param>
+    private static void OpenOptionalPass(MatchState state, Node branch, Node passEnd)
+    {
+        uint slot = passEnd.Values[0];
+        if (passEnd.Values[1] != 0)
+        {
+            state.Bstack.PushBlock(
+                MemoryMarshal.AsBytes(new ReadOnlySpan<OptionalPassStart>(in state.OptionalPasses[slot]))
+            );
+            state.Bstack.PushCode(slot);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.EndOptionalPass);
+
+            /* bstack: previous_start slot text_pos node END_OPTIONAL_PASS */
+        }
+        else
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+            /* bstack: text_pos node BRANCH */
+        }
+
+        state.OptionalPasses[slot] = new OptionalPassStart(
+            state.TextPos,
+            state.FuzzyChanges.Count,
+            state.CaptureChange
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether deleting <paramref name="node"/> here,
+    /// the last item of an alternative with an alternative written empty after it, leaves a pass
+    /// that <see cref="OptionalPassAdmitted"/> fails at <c>END_OPTIONAL_PASS</c>, the item's next
+    /// node. Then the deletion holds nothing and is not tried.
+    /// </summary>
+    /// <remarks>
+    /// It is that check with the pass's edits known to be this one deletion: the pass began here,
+    /// with no edit and no change to a tested group since, so the deletion is its only edit, it
+    /// consumes nothing and it changes no group. Asked where an item that matched offers its
+    /// deletion (<see cref="PushExactItemDeletion"/>) and where an item that failed tries one
+    /// (<see cref="NextFuzzyMatchItem"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The one-character item about to be deleted.</param>
+    /// <returns><see langword="true"/> if the deletion can be left out.</returns>
+    private static bool DeletionEmptiesAnOptionalPass(MatchState state, Node node) =>
+        node.Next1.Node is { Op: Opcode.EndOptionalPass } passEnd
+        && !state.Pattern.UpstreamEmptyIterations
+        && state.OptionalPasses[passEnd.Values[0]] is var pass
+        && pass.TextPos == state.TextPos
+        && pass.Changes == state.FuzzyChanges.Count
+        && MatchState.GroupChanges(pass.CaptureChange) == MatchState.GroupChanges(state.CaptureChange)
+        && !RaisesUnmetMinimum(state, _oneDeletion, counted: false);
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether a pass through an alternative with an
+    /// alternative written empty after it may stand. Otherwise it fails.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An empty alternative after X is the exit of an optional, the same as the zero iterations of
+    /// <c>X?</c>, so a pass that consumed no text and spent errors is dominated by it: the empty
+    /// alternative reaches the same position with the same groups and fewer errors, and it is always
+    /// tried later. So the pass stands only if something needs its errors, by the rule
+    /// <see cref="EmptyIterationAdmitted"/> applies to a repeat: they raise an open section's unmet
+    /// minimum, or the pass changed the span of a group a backreference or conditional tests.
+    /// <c>(?:a|){d&lt;=1}</c> over <c>''</c> then has no errors, as <c>(?:a?){d&lt;=1}</c> has.
+    /// </para>
+    /// <para>
+    /// Off under <see cref="PatternObject.UpstreamEmptyIterations"/>, the oracle's ablation, which
+    /// puts back upstream's answer for the repeat and the alternation alike.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pass">Where the pass began.</param>
+    /// <returns><see langword="true"/> if the pass stands.</returns>
+    private static bool OptionalPassAdmitted(MatchState state, OptionalPassStart pass)
+    {
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        Debug.Assert(changes.Count >= pass.Changes, "fuzzy changes only grow along a path");
+        if (
+            state.TextPos != pass.TextPos
+            || changes.Count == pass.Changes
+            || state.Pattern.UpstreamEmptyIterations
+            || MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(pass.CaptureChange)
+        )
+        {
+            return true;
+        }
+
+        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        for (int i = pass.Changes; i < changes.Count; i++)
         {
             edits[changes[i].Type]++;
         }
@@ -5177,6 +5326,13 @@ internal static class Matcher
             && repeat.Count + 1 > end.Values[1]
             && !RaisesUnmetMinimum(state, _oneDeletion, counted: false)
         )
+        {
+            return;
+        }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the same for an item that ends an alternative
+        // with an empty alternative after it.
+        if (DeletionEmptiesAnOptionalPass(state, node))
         {
             return;
         }
@@ -8145,11 +8301,21 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushNode(node.Next2.Node!);
-                        state.Bstack.PushUInt8((byte)Opcode.Branch);
+                        // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
+                        // one after it opens a pass, whose entry does the branch's job too; see
+                        // OpenOptionalPass.
+                        if (node.OptionalPassEnd is { } passEnd)
+                        {
+                            OpenOptionalPass(state, node, passEnd);
+                        }
+                        else
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.Branch);
 
-                        /* bstack: text_pos node BRANCH */
+                            /* bstack: text_pos node BRANCH */
+                        }
 
                         node = nextPosition.Node;
                         state.TextPos = nextPosition.TextPos;
@@ -9526,6 +9692,16 @@ internal static class Matcher
 
                     node = node.Next1.Node!;
                     break;
+                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
+                {
+                    if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+                    {
+                        goto backtrack;
+                    }
+
+                    node = node.Next1.Node!;
+                    break;
+                }
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -11856,6 +12032,29 @@ internal static class Matcher
 
                     state.MatchPos = (int)keepMatchPos;
                     break;
+                }
+                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
+                {
+                    /* bstack: previous_start slot text_pos node */
+
+                    // Leaving the pass through its 2-way branch: the slot gets its previous value,
+                    // and the branch tries its next alternative, as BRANCH's arm below does.
+                    if (
+                        !state.Bstack.PopNode(pattern, out Node? nextAlternative)
+                        || !state.Bstack.PopSize(out long branchTextPos)
+                        || !state.Bstack.PopCode(out uint slot)
+                        || slot >= state.OptionalPasses.Length
+                        || !state.Bstack.PopBlock(
+                            MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
+                        )
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    node = nextAlternative!;
+                    state.TextPos = (int)branchTextPos;
+                    goto advance;
                 }
                 case Opcode.BodyEnd:
                 {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 
 namespace Fuzzy.Text.RegularExpressions.Parsing;
@@ -1264,6 +1265,37 @@ internal class Branch : RegexBase
     /// <summary>The alternatives. Upstream <c>branches</c>.</summary>
     internal List<RegexBase> Branches { get; private protected set; }
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether this alternation is what is left of one
+    /// whose common prefix or suffix <see cref="Optimise"/> moved out, so that an empty alternative
+    /// in it is one the compiler made rather than one the pattern wrote.
+    /// </summary>
+    /// <remarks>
+    /// <c>(?:a(?:b){d&lt;=1}|a)</c> is compiled as <c>a</c> followed by an alternation of
+    /// <c>(?:b){d&lt;=1}</c> and an empty alternative (<see cref="SplitCommonPrefix"/>), the same
+    /// bytecode as <c>(?:a(?:(?:b){d&lt;=1}|))</c>. It is still a choice between two alternatives
+    /// that are not empty, which stays first-match (<c>upstream/README.rst</c>:609), so its empty
+    /// alternative must not become an optional's exit (<see cref="CompileCore"/>); otherwise the
+    /// answer would depend on whether the factoring ran. Factoring never runs inside a fuzzy section,
+    /// since <see cref="Fuzzy"/> does not optimise its subpattern, so <c>(?:cats|cat){e&lt;=1}</c>
+    /// stays two alternatives in upstream's bytecode and here.
+    /// </remarks>
+    internal bool EmptyAlternativeIsFactored { get; private init; }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the <c>BRANCH</c> word of an alternation with an
+    /// alternative written empty after one that is not, such as <c>(?:a|)</c> or <c>(?:a|b|)</c>.
+    /// The empty alternative is the exit of an optional, as the zero iterations of <c>a?</c> are.
+    /// </summary>
+    /// <remarks>
+    /// It is upstream's word, so the bytecode stays upstream's (the compile-parity corpus pins it);
+    /// the mark is which instance it is. <c>PatternCompiler.Compile</c> finds this instance in the
+    /// code before flattening it and records its offset (<see cref="CompiledPattern.OptionalBranches"/>),
+    /// and <c>NodeCompiler.BuildBranch</c> closes each alternative before the empty one with an
+    /// <c>END_OPTIONAL_PASS</c> node. Nothing writes to a code word once it is emitted.
+    /// </remarks>
+    internal static readonly uint[] OptionalBranchWord = [(uint)Opcode.Branch];
+
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
@@ -1283,6 +1315,7 @@ internal class Branch : RegexBase
 
         // Flatten branches within branches.
         List<RegexBase> branches = FlattenBranches(info, reverse, Branches);
+        bool hasEmptyAlternative = branches.Exists(static b => b is Sequence { Items.Count: 0 });
 
         // Move any common prefix or suffix out of the branches.
         List<RegexBase> prefix;
@@ -1301,10 +1334,23 @@ internal class Branch : RegexBase
         // Try to reduce adjacent single-character branches to sets.
         branches = ReduceToSet(info, reverse, branches);
 
+        // An empty alternative stops the factoring, since it has no prefix or suffix to share, so
+        // the alternatives factored here were all written non-empty and any empty one left is the
+        // compiler's. A nested alternation is flattened only if nothing was factored out of it.
+        Debug.Assert(
+            (prefix.Count == 0 && suffix.Count == 0) || !hasEmptyAlternative,
+            "a written empty alternative was factored"
+        );
         List<RegexBase> sequence;
         if (branches.Count > 1)
         {
-            sequence = [new Branch(branches)];
+            sequence =
+            [
+                new Branch(branches)
+                {
+                    EmptyAlternativeIsFactored = EmptyAlternativeIsFactored || prefix.Count > 0 || suffix.Count > 0,
+                },
+            ];
 
             if (prefix.Count == 0 || suffix.Count == 0)
             {
@@ -1423,13 +1469,29 @@ internal class Branch : RegexBase
         [
             [(uint)Opcode.Branch],
         ];
+
+        // NOT UPSTREAM (ledger entry 44's addendum): an alternative written empty after one that is
+        // not is the exit of an optional; see OptionalBranchWord. Marked whether or not this
+        // alternation is inside a section, since a section inside an alternative spends errors too:
+        // (?:(?:a){d<=1}|) is (?:(?:a){d<=1})? spelt as an alternation. The node compiler drops the
+        // mark from a pattern that has no fuzzy section (NodeCompiler.CompileToNodes).
+        bool seenNonEmpty = false;
+        bool emptyExit = false;
         foreach (RegexBase b in Branches)
         {
-            code.AddRange(b.Compile(reverse, fuzzy));
+            List<uint[]> alternative = b.Compile(reverse, fuzzy);
+            emptyExit |= seenNonEmpty && alternative.Count == 0;
+            seenNonEmpty |= alternative.Count > 0;
+            code.AddRange(alternative);
             code.Add([(uint)Opcode.Next]);
         }
 
         code[^1] = [(uint)Opcode.End];
+
+        if (emptyExit && !EmptyAlternativeIsFactored)
+        {
+            code[0] = OptionalBranchWord;
+        }
 
         return code;
     }
@@ -1444,6 +1506,9 @@ internal class Branch : RegexBase
             RegexBase b = branch.Optimise(info, reverse);
             if (b is Branch nested)
             {
+                // Optimise returns a bare alternation only when it factored nothing out of it; one
+                // it factored comes back inside a sequence, after or before what it moved out.
+                Debug.Assert(!nested.EmptyAlternativeIsFactored, "a factored alternation was flattened");
                 newBranches.AddRange(nested.Branches);
             }
             else

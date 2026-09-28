@@ -219,6 +219,11 @@ internal sealed class FuzzyLiteralFilter
                         return Collect(node.Next1.Node, [.. values]) && Collect(node.Next2.Node, values);
                     case Opcode.Branch:
                         continue;
+
+                    // NOT UPSTREAM (ledger entry 44's addendum): a check that reads no text and can
+                    // only fail a path, so the path's literal is unchanged.
+                    case Opcode.EndOptionalPass:
+                        continue;
                     // One character is a CHARACTER node, not a STRING: the 'e' that '(?r)(?:stone
                     // fine|oak strasse)' moves out as a common suffix. A negated one is a class, and
                     // a zero-width one is a check that reads nothing.

@@ -3084,16 +3084,20 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The four rows of <c>fuzzy-empty-iteration-needed-rule</c>, recorded by
-    /// <c>python tools/record-oracle.py --rows</c> on 2026-09-26: two deletions nothing needs, a
+    /// The six rows of <c>fuzzy-empty-iteration-needed-rule</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows</c>: on 2026-09-26, two deletions nothing needs, a
     /// needless deletion in an exact list, a match a section minimum allows at an earlier start, and
-    /// a bounded repeat that takes three deleting iterations where one is needed.
+    /// a bounded repeat that takes three deleting iterations where one is needed; on 2026-09-28, two
+    /// passes through an alternative with an empty alternative after it that delete what the empty
+    /// alternative skips for free (ledger entry 44's addendum).
     /// </summary>
     private const string _neededEmptyIterationRows = """
         {"generator": "rows", "pattern": "(?:[0-9]+){d<=2}", "flags": 0, "namedLists": {}, "subject": "42kg", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 0], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": []}}]}
         {"generator": "rows", "pattern": "(?:(?:[0-9]+,){d<=1})+end", "flags": 0, "namedLists": {}, "subject": "12,end", "operation": "search", "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}]}
         {"generator": "rows", "pattern": "(?:[0-9]+){1<=d<=2}", "flags": 0, "namedLists": {}, "subject": "42", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}]}
         {"generator": "rows", "pattern": "(?:(?:x){d<=1}){1,3}y", "flags": 0, "namedLists": {}, "subject": "y", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1, 2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1, 2]}}]}
+        {"generator": "rows", "pattern": "(?:a|){d<=1}", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
+        {"generator": "rows", "pattern": "(?:(?:a|b|)c){d<=1}", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
         """;
 
     /// <summary>
@@ -3235,12 +3239,19 @@ internal static class ExpectedDivergences
                 + "minimum, its edits raise an unmet minimum of an open section, or it changed "
                 + "a group a backreference or conditional tests; an error-free empty iteration keeps "
                 + "upstream's rule; a repeat memo drops paths that reach a state an earlier path through "
-                + "the same run of the repeat reached. Answers move to fewer errors, to an earlier start "
+                + "the same run of the repeat reached. THE ADDENDUM (2026-09-28): an alternative written "
+                + "empty is the exit of an optional, as the zero iterations of `X?` are, so a pass through "
+                + "an earlier alternative that consumed no text and spent errors stands by the same rule; "
+                + "`(?:a|){d<=1}` over '' has no errors, as `(?:a?){d<=1}` has, where upstream has one "
+                + "deletion for both. An empty alternative the compiler makes by factoring `(?:ab|a)` is not "
+                + "one, so a choice between non-empty alternatives stays first-match "
+                + "(docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md). Answers move to fewer errors, to an earlier start "
                 + "a section minimum allows, from MemoryError to an answer, and on entry 33's own case to "
                 + "one more deletion, where a pass at the end of the text changes a tested group.\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithUpstreamEmptyIterations`, which sets "
-                + "`PatternObject.UpstreamEmptyIterations` and also takes entry 42 away, reproduces "
+                + "`PatternObject.UpstreamEmptyIterations`, which turns off the repeat's rule and the "
+                + "alternation's alike, and also takes entry 42 away, reproduces "
                 + "upstream's recorded answer exactly, AND this port's live answer is the one being "
                 + "judged. A row entry 42 alone explains was claimed by the entry above first. The "
                 + "control is `A_row_the_needed_rule_does_not_explain_is_not_accounted_for`.",
