@@ -10676,17 +10676,13 @@ internal static class Matcher
                     // merged - and it refuses only insertions the budget has already said are
                     // unaffordable, so it cannot lose a match that fits.
                     //
-                    // ponytail: NO TEST PINS THIS ONE, and it is kept anyway. Deleting it changes
-                    // nothing measurable - the 5854-test suite stays green, all three default-wave
-                    // seeds stay green, S42's blind review swept 1,425 weighted-cost '(?b)' rows
-                    // across two seeds and found no row it affects, and four hand-built
-                    // group-call-plus-trailing-insertion patterns behave identically with and
-                    // without it. What it defends is a HANG rather than a wrong answer: on
-                    // re-entering one section the merged live counts can outrun the per-entry bound
-                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on.
-                    // A hang costs an unattended slice where one comparison on a backtrack arm costs
-                    // nothing, so the asymmetry decides it. Upgrade path: if a case is ever
-                    // constructed, it becomes a test here and this note goes.
+                    // Pinned by Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion (D21,
+                    // tools/controls.json S42-2G): without this term, a self-recursive group call
+                    // that re-enters this section can outrun the per-entry bound
+                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
+                    // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
+                    // rather than asserting a value.
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
                         && TotalErrors(state.FuzzyCounts)
