@@ -213,8 +213,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
-    /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/> and
-    /// <see cref="RunWithoutTheLookaroundInsertion"/> and by
+    /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
+    /// <see cref="RunWithoutTheLookaroundInsertion"/> and <see cref="RunWithTheUpstreamMinimumOrder"/> and by
     /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
@@ -696,6 +696,37 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a section's minimum checked before its trailing
+    /// insertions, as upstream checks it (ledger entry 51 switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream fails a section that reaches its end below its minimum without trying the trailing
+    /// insertion that could meet it, so <c>(?:a){1&lt;=e&lt;=2}b</c> finds nothing in 'aab' at 0.
+    /// Setting <c>PatternObject.CheckMinimumBeforeTrailingInsertions</c> restores that order, which
+    /// is the whole of the fix. Ledger entry 50's lookaround insertion is switched off too, so that
+    /// a row both fixes move is claimed here rather than by neither. The
+    /// <c>fuzzy-minimum-met-by-a-trailing-insertion</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamMinimumOrder(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = true;
+                compiled.PatternObject.SkipLookaroundInsertion = true;
+            }
         );
     }
 

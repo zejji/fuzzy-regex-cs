@@ -608,6 +608,19 @@ internal sealed class PatternObject
     internal bool SkipLookaroundInsertion;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
+    /// below its minimum error count fails at once, without trying the trailing insertions that
+    /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one
+    /// call, to show that the ledger entry 51 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's forward <c>END_FUZZY</c> checks the minimums (<c>upstream/src/_regex.c</c>:12461)
+    /// before it pushes the frame that offers trailing insertions (:12500-12511), so
+    /// <c>(?:a){1&lt;=e&lt;=2}b</c> finds nothing in 'aab'. See <c>Matcher.InsertionsCanMeetMinimum</c>.
+    /// </remarks>
+    internal bool CheckMinimumBeforeTrailingInsertions;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a repeat's end reads progress as
     /// upstream does, counting any fuzzy edit, even one since undone, and stopping at the end of the
     /// slice, instead of the "needed" rule and the repeat memo. The oracle sets it on a pattern it

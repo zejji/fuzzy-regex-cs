@@ -1535,6 +1535,29 @@ Negative lookarounds and lookbehinds work the same way. A lookaround can still b
 substituted nor deleted, since it matches no character. There is no option to restore the upstream
 answer. Ledger entry 50.
 
+### A fuzzy section's minimum error count can be met by a text character inserted after its last item
+
+A constraint such as `{1<=e<=2}` asks for at least one error. When the section's text matches
+exactly, upstream fails it at the section's end without trying the one error still open to it: a
+text character inserted after the last item. It finds that insertion after a string of two or more
+characters, but not after a single character or a class. Here the minimum is checked after the
+trailing insertions, so both find it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The second 'a' is the inserted character that meets the minimum.
+Match m = FuzzyRegex.MatchAtStart("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 3, 1) - upstream: no match
+
+// A search now finds that match at 0, before upstream's deletion at 2.
+Match s = FuzzyRegex.Match("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
+```
+
+A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
+neither. There is no option to restore the upstream answer. Ledger entry 51.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

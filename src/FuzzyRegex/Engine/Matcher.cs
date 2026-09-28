@@ -4377,6 +4377,40 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether counts that fail <see cref="FuzzyWithinConstraints"/> at the end of their section
+    /// fail it only for want of insertions: an insertion or error minimum is unmet, and the section
+    /// would be legal with just enough more insertions to meet it.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 51, known defect D9). Counts only rise along a path, and a trailing
+    /// insertion raises the insertion and error counts and nothing else, so no run of them can meet
+    /// an unmet substitution or deletion minimum, or bring back a maximum already passed. Adding the
+    /// fewest insertions that would meet the minimums and asking the constraints again answers both:
+    /// with more than that, every count limited above is only higher.
+    /// </remarks>
+    /// <param name="fuzzyCounts">The section's counts.</param>
+    /// <param name="fuzzyNode">The section.</param>
+    /// <param name="maxErrors">Upstream's <c>max_errors</c>.</param>
+    /// <returns><see langword="true"/> if trailing insertions can make the section legal.</returns>
+    private static bool InsertionsCanMeetMinimum(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode, long maxErrors)
+    {
+        List<uint> values = fuzzyNode.Values;
+        long needed = Math.Max(
+            values[FuzzyValue.MinIns] - fuzzyCounts[FuzzyValue.Ins],
+            values[FuzzyValue.MinErr] - TotalErrors(fuzzyCounts)
+        );
+        if (needed <= 0)
+        {
+            return false;
+        }
+
+        Span<long> raised = stackalloc long[FuzzyValue.Count];
+        fuzzyCounts.CopyTo(raised);
+        raised[FuzzyValue.Ins] += needed;
+        return FuzzyWithinConstraints(raised, fuzzyNode, maxErrors);
+    }
+
+    /// <summary>
     /// Whether a reversed match has run out of the text it is allowed to match, which is the
     /// question every left-hand partial match turns on. <b>This is the one place the left edge is
     /// decided</b>; every site that reports a partial on the left asks it here.
@@ -8566,9 +8600,26 @@ internal static class Matcher
                     // Are the inner constraints OK? This is the one place a 'min' is consulted: an
                     // item asks whether one more error fits, and only the end of the section can ask
                     // whether the section as a whole is legal.
+                    //
+                    // NOT UPSTREAM (ledger entry 51, known defect D9): a section below an insertion
+                    // or error minimum is not failed yet. Upstream fails it here (':12461-12462'),
+                    // before pushing the frame that offers trailing insertions (':12500-12511'), so
+                    // the one error that could still meet the minimum is never tried:
+                    // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
+                    // section were legal, pushes that frame, and then backtracks into it; the
+                    // backtrack arm asks the constraints again after each insertion.
+                    bool minimumAwaitsInsertions = false;
                     if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
                     {
-                        goto backtrack;
+                        if (
+                            pattern.CheckMinimumBeforeTrailingInsertions
+                            || !InsertionsCanMeetMinimum(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors)
+                        )
+                        {
+                            goto backtrack;
+                        }
+
+                        minimumAwaitsInsertions = true;
                     }
 
                     // MERGING, not restoring: the section's own changes are part of the answer this
@@ -8682,6 +8733,12 @@ internal static class Matcher
                      * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
                      * end_fuzzy_node END_FUZZY
                      */
+
+                    // Ledger entry 51: zero trailing insertions do not meet the minimum, so try one.
+                    if (minimumAwaitsInsertions)
+                    {
+                        goto backtrack;
+                    }
 
                     node = node.Next1.Node!;
                     break;
@@ -12044,6 +12101,23 @@ internal static class Matcher
                             // above. The section that used these errors is the inner one just
                             // popped, which is the node the trailing insertion was tried against.
                             state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
+
+                            // NOT UPSTREAM (ledger entry 51): the forward arm let a section below
+                            // its minimum through to here, so the constraints are asked again. Until
+                            // they hold, the frame just pushed is backtracked into for one more
+                            // insertion. The limits were checked above, so only a minimum can fail.
+                            if (
+                                pattern.HasFuzzyMinimum
+                                && !FuzzyWithinConstraints(innerCounts, innerNode, state.MaxErrors)
+                            )
+                            {
+                                Debug.Assert(
+                                    !pattern.CheckMinimumBeforeTrailingInsertions
+                                        && InsertionsCanMeetMinimum(innerCounts, innerNode, state.MaxErrors),
+                                    "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
+                                );
+                                goto backtrack;
+                            }
 
                             node = node.Next1.Node!;
                             goto advance;

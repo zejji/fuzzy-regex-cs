@@ -729,6 +729,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 50 added SkipLookaroundInsertion, likewise set only by
             // OracleComparer.RunWithoutTheLookaroundInsertion.
             "PatternObject.SkipLookaroundInsertion",
+            // Ledger entry 51 added CheckMinimumBeforeTrailingInsertions, likewise set only by
+            // OracleComparer.RunWithTheUpstreamMinimumOrder.
+            "PatternObject.CheckMinimumBeforeTrailingInsertions",
             // Ledger entry 44's addendum: counted by NodeCompiler.BuildBranch, and reset by
             // CompileToNodes in a pattern with no fuzzy section.
             "PatternObject.OptionalPassCount",

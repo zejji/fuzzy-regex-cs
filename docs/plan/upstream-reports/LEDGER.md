@@ -4908,3 +4908,60 @@ kinds at each seed, and all but 3 of the moved rows are upstream's answer once t
 rule 10 and entry 42's deletion (one is the string case above, two are entry 44's needed rule). The default oracle waves at seeds 7, 4242
 and 20260927 draw about 27 fuzzy lookaround rows each and move none. The oracle entry
 `fuzzy-insertion-before-a-failing-lookaround` keys on `PatternObject.SkipLookaroundInsertion`.
+
+## 51. A section below its minimum error count never tries the insertion that would meet it - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D9, finding F-D of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-51-minimum-trailing-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+match(r'(?:a){1<=e<=2}b', 'aab')             -> None                   expected (0, 3), one insertion
+match(r'(?:a){1<=e<=1}c', 'axc')             -> None                   expected (0, 3), one insertion
+fullmatch(r'(?:a){1<=e<=2}', 'aa')           -> None                   expected (0, 2), one insertion
+match(r'(?:(?:a){1<=e<=1}b){e<=1}', 'aab')   -> None                   expected (0, 3), one insertion
+search(r'(?:a){1<=e<=2}b', 'aab')            -> (2, 3), one deletion   expected (0, 3), one insertion
+match(r'(?:ab){1<=e<=2}c', 'abxc')           -> (0, 4), one insertion  (the control: a string's retry)
+match(r'(?:a){1<=e<=2}b', 'cab')             -> (0, 3), (1, 1, 0)      (the control: minimum met first)
+```
+
+**Why upstream is wrong.** A minimum error count says the match must hold at least that many
+errors (`upstream/README.rst:538-566`), and an insertion is a text character the pattern does not
+account for, which may stand after a section's last item as well as between two of them: upstream
+itself offers insertions there when backtracking into `END_FUZZY` (`_regex.c:15512-15563`). But the
+frame that offers them is pushed by the forward `END_FUZZY` only after it has checked the minimums
+(`fuzzy_within_constraints` at `:12461-12462`, the push at `:12500-12511`), so a section that reaches
+its end below its minimum backtracks at once and the one error that could still meet it is never
+tried. Upstream is not consistent about it: a multi-character string pushes its own insertion retry
+before the section ends (`fuzzy_insert`, `:14764-14768`), so `(?:ab){1<=e<=2}c` over 'abxc' is
+(0, 4) with one insertion, while `(?:a){1<=e<=1}c` over 'axc', the same situation with a
+one-character item, is None. The last control shows the order is the defect, not the insertion:
+once a substitution has met the minimum, the trailing insertion is found. None of the engines the
+port's correctness survey uses (PCRE2, Python `re`, .NET, Perl, JavaScript) has fuzzy matching, so
+the question is settled from the definition and upstream's own string rule.
+
+**Proposed fix upstream:** in the forward `END_FUZZY`, when `fuzzy_within_constraints` fails only
+because an insertion or error minimum is unmet, and the section would pass with enough more
+insertions, carry on to push the frame and then `goto backtrack`, so the backtrack case tries one
+trailing insertion; in that case, after each insertion, check the constraints again and backtrack
+into the frame just pushed while they still fail. A substitution or deletion minimum cannot be met
+by insertions, and neither can a maximum already passed, so those still fail at once.
+
+**This port.** The forward and backtrack `END_FUZZY` arms of `src/FuzzyRegex/Engine/Matcher.cs`, with
+`Matcher.InsertionsCanMeetMinimum` deciding which sections wait. A pattern with no minimum pays
+nothing: the forward arm's new work runs only where the constraint check already failed, and the
+backtrack arm's re-check is behind `PatternObject.HasFuzzyMinimum`. Pinned by
+`Gaps/Engine/FuzzyMinimumErrorTests` (e and i minimums, two insertions, a group reference, nested
+sections, a full match, the earlier search start, a reversed section, `(?b)` and `(?e)`, and s, d,
+fuzzy-test and budget controls). `tools/probes/fuzzy-reference-matcher.py` already checked minimums
+after the trailing insertions (its rule 6) and gains a switch for upstream's order;
+`tools/probes/fuzzy-minimum-grid.py` compares the port with it on a Debug build, reversing the
+pattern and subject for `(?r)` rows and checking the fewest errors over every path for `(?b)` and
+`(?e)` rows: 6,000 rows at seeds 51 and 7, 0 disagreements. The rule moves 4 to 41 rows of each
+construct (e, i, d, s, mixed, nested, `(?r)`, `(?b)`, `(?e)`) at each seed; a d or s section on its
+own moves none (every moved d or s row at seed 51 also holds an e, i or mixed section). All but 8 of the moved flag-free rows are upstream's answer once the
+reference drops rules 6, 3 and 10, and upstream already gives the reference's answer on those 8, each
+through a string's own insertion retry. The oracle entry `fuzzy-minimum-met-by-a-trailing-insertion`
+keys on `PatternObject.CheckMinimumBeforeTrailingInsertions`.

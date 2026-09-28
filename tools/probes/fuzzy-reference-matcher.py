@@ -56,6 +56,9 @@ of mrab-regex 2026.9.10):
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
    _regex.c:9709-9745). Here minimums are checked after the trailing
    insertions of rule 4, so a trailing insertion can meet a minimum.
+   Upstream checks them first (_regex.c:12461-12462, before the frame that
+   offers trailing insertions is pushed at :12500-12511), so a section that
+   ends below its minimum never tries one (ledger entry 51, known defect D9).
 7. Constraint defaults: if any of i, s, d has its own limit, the unnamed
    types are not permitted (README.rst:565, "{i<=2,d<=2,e<=3} ... but no
    substitutions"); a cost equation permits only the types it names
@@ -123,6 +126,9 @@ EMPTY_DELETION_ITERATIONS = "perl"
 # Rule 10 switch: False gives upstream's behaviour (a failing lookaround is
 # never passed by an insertion).
 LOOKAROUND_INSERTION = True
+# Rule 6 switch: False gives upstream's order (a section below its minimum at
+# its end fails before any trailing insertion is tried).
+MINIMUM_AFTER_TRAILING_INSERTIONS = True
 # "unrestricted" only: the most empty iterations in a row at one position, for
 # patterns whose budget does not bound them (a fuzzy section inside the
 # repeat body restarts its counts each iteration). None = no cap.
@@ -719,6 +725,7 @@ def fuzzy(node, st, ctx, k):
 
 def end_fuzzy(st, ctx, k):
     """Rule 4: 0, 1, 2 ... trailing insertions; rule 6: then check the limits."""
+    first = True
     while True:
         if within(st.counts, st.limits):
             (counts, limits), outer = st.outer[-1], st.outer[:-1]
@@ -728,6 +735,9 @@ def end_fuzzy(st, ctx, k):
             else:  # nested: the inner errors also count against the outer section
                 counts = tuple(a + b for a, b in zip(counts, st.counts))
             yield from k(replace(st, totals=totals, counts=counts, limits=limits, outer=outer))
+        elif first and not MINIMUM_AFTER_TRAILING_INSERTIONS:
+            return
+        first = False
         if st.pos >= len(ctx.text) or not permitted(st, 1):
             return
         st = add_error(st, 1, st.pos + 1)  # a trailing insertion

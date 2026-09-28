@@ -291,12 +291,16 @@ public sealed class FuzzyExactDeletionTests
         watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
 
         // Only where the branch began: after 'b' inserts the 'a', its deletion at the end of the
-        // text is the one match, since the section's minimums are checked before any trailing
-        // insertion, and 'a', which matched, never inserted. Upstream and main give the same.
+        // text is a match, and 'a', which matched, never inserted. This row witnessed that while
+        // a section's minimums were checked before its trailing insertions, as upstream checks
+        // them ([], [0], [1] upstream). Since ledger entry 51 the deletion of 'a' at 0 followed
+        // by a trailing insertion of the same 'a' comes first, as in the reference matcher, and
+        // two grids of 3,000 and 6,000 alternation rows found no row that needs the exception
+        // any more (2026-09-28, with it switched off); it is kept because it only keeps a choice.
         Match m = new FuzzyRegex("(?:(?:a|b)){1<=i<=1,1<=d<=1}").MatchAtStart("a");
         ShouldMatch(m, 0, 1, new FuzzyCounts(0, 1, 1));
         m.FuzzyChanges.Insertions.Should().Equal(0);
-        m.FuzzyChanges.Deletions.Should().Equal(1);
+        m.FuzzyChanges.Deletions.Should().Equal(0);
 
         var regex = new FuzzyRegex("(?:a|b|[bc]|bc|c){e<=1}");
         List<Node> items =
