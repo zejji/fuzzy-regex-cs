@@ -75,11 +75,13 @@ WAVES = REPO / ".scratch" / "control-waves"
 LIVE_WAVE = REPO / "TestResults" / "oracle" / "wave.jsonl"
 REPORT = REPO / "TestResults" / "oracle" / "report.txt"
 # `expected` is optional so a report written before S33 added the accounted-for list still parses.
+# The columns between `expected` and `diverge` (timeout, resource, undefined, fault) are skipped:
+# they were added after this pattern was written and made every summary fail to parse.
 # Counted and printed rather than folded into `diverge`: a mutation whose damage happens to look like
 # an entry in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs lands here instead of there, and a
 # control whose expected count moved is as much a finding as one whose diverge count did.
 SUMMARY = re.compile(
-    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
+    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?(?:[a-z]+ \d+\s+)*?diverge (\d+)\s+of (\d+) rows"
 )
 CONSUME_TIMEOUT = 240
 # A suite control's signal is named test failures, not a diverge column: S50's control C reverts a
