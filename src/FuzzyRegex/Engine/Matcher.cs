@@ -3110,7 +3110,7 @@ internal static class Matcher
     {
         if (state.Pstack.TopSize(out long bstackCount))
         {
-            state.Bstack.Count = (int)bstackCount;
+            state.SetBstackCount((int)bstackCount);
         }
     }
 
@@ -3166,9 +3166,11 @@ internal static class Matcher
     /// Each of the four sites that push a mark (<c>start_match</c>, <c>ATOMIC</c>,
     /// <c>CONDITIONAL</c>, <c>LOOKAROUND</c>) pushes its opcode byte immediately before it, so the
     /// byte under the mark names the construct. A lookaround's entry holds the structure-stack depth
-    /// just below that byte, and the parked node there says whether it is negative. The reads move
-    /// <see cref="ByteStack.Count"/> down and put it back; nothing above a mark is overwritten, so
-    /// the bytes are still there to read.
+    /// just below that byte, and the parked node there says whether it is negative. Upstream's way
+    /// of reading is to move <see cref="ByteStack.Count"/> down and put it back; this port reads in
+    /// place (<see cref="ByteStack.ReadBlockBelow"/>), because every change to the count goes
+    /// through <see cref="MatchState.SetBstackCount"/> (D11, A7) and a read is not a truncation.
+    /// The Sstack read keeps upstream's way.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="mark">The backtracking-stack size the mark holds.</param>
@@ -3186,15 +3188,12 @@ internal static class Matcher
             return false;
         }
 
-        state.Bstack.Count = mark;
-        bool read = state.Bstack.PopUInt8(out byte code);
+        bool read = state.Bstack.ReadUInt8Below(mark, out byte code);
         long sstackCount = 0;
         if (read && (Opcode)code == Opcode.Lookaround)
         {
-            read = state.Bstack.PopSize(out sstackCount);
+            read = state.Bstack.ReadSizeBelow(mark - 1, out sstackCount);
         }
-
-        state.Bstack.Count = bstackCount;
 
         if (!read)
         {
@@ -3261,7 +3260,7 @@ internal static class Matcher
 
             if (!IsTransparentToVerbs(op, look))
             {
-                state.Bstack.Count = (int)mark;
+                state.SetBstackCount((int)mark);
                 toAttempt = op == Opcode.Failure;
                 if (toAttempt && crossedALookaround)
                 {
@@ -6823,6 +6822,7 @@ internal static class Matcher
             return MatchStatus.Cancelled;
         }
 
+        Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
@@ -7216,7 +7216,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)atomicBstackCount;
+                    state.SetBstackCount((int)atomicBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
@@ -7284,7 +7284,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)endCondBstackCount;
+                    state.SetBstackCount((int)endCondBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
                     {
@@ -7973,7 +7973,7 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)endLookBstackCount;
+                    state.SetBstackCount((int)endLookBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
                     {
@@ -11085,9 +11085,10 @@ internal static class Matcher
                     // Reset the guards.
                     state.ResetGuards();
 
-                    // Reset the stacks.
+                    // Reset the stacks. Backtracking has popped every entry of the attempt, and each
+                    // w-mark goes with its entry, so none is left for the next attempt (D11, A5).
                     state.Sstack.Reset();
-                    state.Bstack.Reset();
+                    state.SetBstackCount(0);
                     state.Pstack.Reset();
                     goto start_match;
                 case Opcode.Fuzzy: // Fuzzy matching (:15752).

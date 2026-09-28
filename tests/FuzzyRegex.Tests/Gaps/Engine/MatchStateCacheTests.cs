@@ -231,10 +231,12 @@ public sealed class MatchStateCacheTests
             // rule below scribbles, and this test's fuzzy case then checks a reused state clears it.
             // MatchState.FilterMemory is the same: null exactly when the pattern has no fuzzy-literal
             // filter, and readonly.
+            // MatchState.PartialEventCounts is null exactly in a Release build (D11).
             if (
                 (
                     string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.PartialEventCounts), StringComparison.Ordinal)
                 ) && field.GetValue(state) is null
             )
             {
@@ -336,6 +338,9 @@ public sealed class MatchStateCacheTests
                 break;
             case List<(long Key, int Reach, int SstackDepth)> calls:
                 calls.Add((7, 7, 7));
+                break;
+            case List<WMark> marks:
+                marks.Add(new WMark(7, WMarkKind.Touch));
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);

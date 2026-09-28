@@ -235,6 +235,34 @@ internal sealed class MatchState : IDisposable
     internal readonly ByteStack Pstack;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: the w-marks of a partial call's second pass, sorted by position, each
+    /// live while its entry is on <see cref="Bstack"/> (design section 4.2).
+    /// </summary>
+    /// <remarks>
+    /// Empty outside the second pass (A6), and at the start of every attempt (A5). The list is made
+    /// with the state and has no storage until the first mark, so a call without partial allocates
+    /// nothing for it; a reused state keeps the storage, as the stacks keep theirs. Every change of
+    /// <see cref="Bstack"/>'s count other than a pop goes through <see cref="SetBstackCount"/>, which
+    /// asserts that no mark is left above the new count (A7).
+    /// </remarks>
+    internal readonly List<WMark> WMarks = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: how many times each <see cref="PartialEvent"/> happened in this call,
+    /// which the port grid reads per row to show every mechanism fired (VERIFICATION rule 11).
+    /// </summary>
+    /// <remarks>
+    /// Null outside Debug builds. It is on the state rather than in a static because the library
+    /// holds no writable static (<c>ThreadSafetyTests</c>). <see cref="Init"/> zeroes it for each
+    /// call.
+    /// </remarks>
+#if DEBUG
+    internal readonly long[]? PartialEventCounts = new long[Enum.GetValues<PartialEvent>().Length];
+#else
+    internal readonly long[]? PartialEventCounts;
+#endif
+
+    /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
     /// call was made.
@@ -842,9 +870,14 @@ internal sealed class MatchState : IDisposable
             ?? MemoryMarshal.Cast<char, ushort>(text.Span).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
         _characterIndex = null;
 
-        // What a new state holds by default, and a reused one must be given back.
+        // What a new state holds by default, and a reused one must be given back. A call that
+        // succeeded leaves its stack, and so its marks, where they were (D11).
+        WMarks.Clear();
+#if DEBUG
+        Array.Clear(PartialEventCounts!);
+#endif
         Sstack.Reset();
-        Bstack.Reset();
+        SetBstackCount(0);
         Pstack.Reset();
         ClearGroups();
         foreach (RepeatData repeat in Repeats)
@@ -1024,6 +1057,7 @@ internal sealed class MatchState : IDisposable
         // ArrayPool<byte>.Shared after every call made a warm call allocate whenever another thread
         // had taken them from the pool's shared stacks in between: 280 B at a time in the parallel
         // native-AOT run, and deterministically in AllocationTests (2026-09-25).
+        WMarks.Clear();
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
@@ -1151,13 +1185,95 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: sets <see cref="Bstack"/>'s count, which is how every truncation of the
+    /// backtracking stack is made (upstream assigns <c>bstack.count</c> directly).
+    /// </summary>
+    /// <remarks>
+    /// The one check is A7: no live w-mark lies at or above the new count, so the caller must have
+    /// dropped the marks it discards. The design's one exception, an unblocked construct's own-frame
+    /// cut taint, which moves to the entry its cut pushes, arrives with its only caller, the cut rule
+    /// (build chunk 4). The check is Debug only, so a Release build pays nothing here.
+    /// </remarks>
+    /// <param name="count">The new count, at most the current one.</param>
+    internal void SetBstackCount(int count)
+    {
+        Debug.Assert(count <= Bstack.Count, "a truncation never grows the backtracking stack");
+        Debug.Assert(NoWMarkAtOrAbove(count), "D11 A7: a truncation discards no live w-mark");
+        Bstack.Count = count;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: counts one second-pass event. Compiled away outside Debug builds.</summary>
+    /// <param name="partialEvent">The event.</param>
+    [Conditional("DEBUG")]
+    internal void NotePartialEvent(PartialEvent partialEvent) => PartialEventCounts![(int)partialEvent]++;
+
+    /// <summary>NOT UPSTREAM'S, D11: how many times an event has happened in this call.</summary>
+    /// <param name="partialEvent">The event.</param>
+    /// <returns>The count; always 0 outside Debug builds.</returns>
+    internal long PartialEventCount(PartialEvent partialEvent) => PartialEventCounts?[(int)partialEvent] ?? 0;
+
+    /// <summary>NOT UPSTREAM'S, D11: records a w-mark (design section 4.2).</summary>
+    /// <param name="position">The index of the backtracking-stack entry the mark belongs to.</param>
+    /// <param name="kind">What the mark records.</param>
+    internal void AddWMark(int position, WMarkKind kind)
+    {
+        Debug.Assert(PartialSide != PartialNone, "D11 A6: only a partial call's second pass marks");
+
+        // Marks are nearly always made at the top of the stack; a verb taint goes to its scope's
+        // frame, lower down, and sits after any mark already at that position.
+        int index = WMarks.Count;
+        while (index > 0 && WMarks[index - 1].Position > position)
+        {
+            index--;
+        }
+
+        WMarks.Insert(index, new WMark(position, kind));
+        Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: drops every w-mark at or above a position.</summary>
+    /// <param name="position">The lowest position dropped.</param>
+    internal void DropWMarksFrom(int position)
+    {
+        int keep = WMarks.Count;
+        while (keep > 0 && WMarks[keep - 1].Position >= position)
+        {
+            keep--;
+        }
+
+        WMarks.RemoveRange(keep, WMarks.Count - keep);
+        Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
+    }
+
+    /// <summary>A7's test: whether every live w-mark lies below <paramref name="count"/>.</summary>
+    /// <param name="count">A backtracking-stack count.</param>
+    /// <returns><see langword="true"/> if no mark would be left above that count.</returns>
+    internal bool NoWMarkAtOrAbove(int count) => WMarks.Count == 0 || WMarks[^1].Position < count;
+
+    /// <summary>A8's test: the w-marks are sorted by position and each lies below the stack's count.</summary>
+    /// <returns><see langword="true"/> if they are.</returns>
+    internal bool WMarksAreInOrder()
+    {
+        for (int i = 0; i < WMarks.Count; i++)
+        {
+            if (WMarks[i].Position < 0 || (i > 0 && WMarks[i - 1].Position > WMarks[i].Position))
+            {
+                return false;
+            }
+        }
+
+        return NoWMarkAtOrAbove(Bstack.Count);
+    }
+
+    /// <summary>
     /// Upstream <c>init_match</c> (<c>upstream/src/_regex.c</c> line 3404).
     /// </summary>
     internal void InitMatch()
     {
-        // Reset the stacks.
+        // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
+        WMarks.Clear();
         Sstack.Reset();
-        Bstack.Reset();
+        SetBstackCount(0);
         Pstack.Reset();
 
         SearchAnchor = TextPos;
