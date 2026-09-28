@@ -1778,11 +1778,24 @@ internal class Branch : RegexBase
 
     /// <summary>Upstream <c>Branch._reduce_to_set</c> (lines 2417-2443).</summary>
     /// <remarks>
-    /// NOT UPSTREAM (ledger entry 44's addendum): carries <see cref="_covered"/> through, and a set
-    /// made from merged members is never covered. That cannot change an answer: only an optimised
-    /// alternation is merged, a fuzzy section's subpattern is never optimised (<see cref="Fuzzy"/>
-    /// has no <c>Optimise</c>), so a merged character is outside every section, matches exactly and
-    /// spends no error, and a pass through it is never one the rule would fail.
+    /// <para>
+    /// NOT UPSTREAM (ledger entry 44's addendum): carries <see cref="_covered"/> through. Members
+    /// merge as upstream merges them, so the bytecode stays upstream's, and a set, or the single
+    /// character the flush rebuilds, is covered only if every member was.
+    /// </para>
+    /// <para>
+    /// The flag is needed although only an optimised alternation is merged and a section's
+    /// subpattern is never optimised: a group call from inside a section runs the optimised code
+    /// with the section's budget, so a merged character can be deleted there.
+    /// <c>(?:a|)z|(?:(?R)x){d&lt;=1}</c> over <c>'zx'</c> reaches <c>(?:a|)</c> through <c>(?R)</c>;
+    /// with the flag dropped it took one deletion where <c>(?:a?)z|(?:(?R)x){d&lt;=1}</c> takes none.
+    /// </para>
+    /// <para>
+    /// Taking every member's flag loses nothing: covered alternatives are followed by an empty one in
+    /// their own alternation, so a covered member can only follow an uncovered one in a set, as
+    /// <c>b</c> follows <c>a</c> in <c>(?:a|(?:b|))</c>, and deleting <c>b</c> there reaches the state
+    /// deleting <c>a</c> reached first, with the same errors.
+    /// </para>
     /// </remarks>
     private static (List<RegexBase> Branches, List<bool> Covered) ReduceToSet(
         Info info,
@@ -1795,16 +1808,18 @@ internal class Branch : RegexBase
         List<RegexBase> newBranches = [];
         List<bool> newCovered = [];
         HashSet<RegexBase> items = [];
+        bool itemsCovered = true;
         int caseFlags = RegexFlags.NoCase;
 
         void Flush()
         {
             if (items.Count > 0)
             {
-                newCovered.Add(false);
+                newCovered.Add(itemsCovered);
             }
 
             FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+            itemsCovered = true;
         }
 
         for (int i = 0; i < branches.Count; i++)
@@ -1822,6 +1837,7 @@ internal class Branch : RegexBase
                 }
 
                 items.Add(b.WithFlags(caseFlags: RegexFlags.NoCase));
+                itemsCovered &= covered[i];
             }
             else
             {
