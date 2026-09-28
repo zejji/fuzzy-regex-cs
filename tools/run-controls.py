@@ -56,6 +56,15 @@ import time
 from xml.etree import ElementTree
 from pathlib import Path
 
+# A default Windows console is cp1252, and both a control's own name (free text in controls.json)
+# and a mutated build's log tail (dotnet/csharpier output, read with errors="replace" so it never
+# raises) can carry characters outside that codepage. Without this, print() raises
+# UnicodeEncodeError partway through a run and the mutation marker is left applied - "reconfigure"
+# needs Python 3.7+, which this repo's tooling already requires.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 # Tracked rather than left in .scratch/, which slice sessions clear. S18's controls were lost
 # that way and are permanently unreproducible; tools/launch-slice.ps1 and tools/heartbeat.sh
 # were promoted for the same reason on 2026-09-01. The waves and the consumer log this
