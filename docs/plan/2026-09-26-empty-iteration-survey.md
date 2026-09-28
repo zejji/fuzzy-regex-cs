@@ -477,7 +477,7 @@ deletion is the honest cost of a first-match rule.
 ## How "needed" compares with upstream, `(?e)`, `(?b)` and TRE
 
 `needed_sweeps.py counts` compares the full match (span and counts) on the 9,000-case grid
-(`needed_counts.tsv` has every row). Upstream calls have a 2-second limit.
+(regenerate `needed_counts.tsv` with it for every row; it is not committed). Upstream calls have a 2-second limit.
 
 | upstream mode | same result | "needed" fewer errors | "needed" more errors | same total, other span or types | only "needed" matches | only upstream matches | upstream MemoryError or timeout |
 |---|---|---|---|---|---|---|---|
@@ -813,9 +813,11 @@ change. The port differs from Perl, PCRE2, .NET and `re` on these patterns and s
 
 Pinned by `tests/FuzzyRegex.Tests/Gaps/Engine/EmptyIterationGroupProgressTests.cs` (the k and b
 rows, the `*`-superset law and the controls). Witness: with the group half removed from the greedy
-check (`bool changed = state.TextPos != rpData.Start;` at `:7606`) 19 of its 27 cases fail; with it
+check (`bool changed = state.TextPos != rpData.Start;` at `:7606`) 17 of its 27 cases fail; with it
 removed from the lazy check (`:7817`) 4 fail (the `*?` rows and the law test); the controls pass
-under both.
+under both. Four rows pass under both mutants, so they pin the answer but would not catch a
+position-only engine: the `+` row, the `+?` row, the `(?:(?(1)c|z)|(()))*` row and the
+`^(?:|(?=(c)))+$` row (blind review, 2026-09-28).
 
 **What the rule still lacks: termination when a group cycles (D17).** Upstream's rule counts any
 span change, so a pass that flips a tested group between two spans at one position is progress
@@ -834,7 +836,7 @@ memo and should be designed with it.
 - `python tools/probes/empty-iteration-survey/run_all.py`: the exact battery on every engine, and
   the fuzzy battery on `regex` and TRE (TRE, glibc and Ruby in WSL Ubuntu 24.04).
 - `python tools/probes/empty-iteration-survey/needed_sweeps.py [s1 s2 s3 s4 s5 s4cap rand modes counts tre]`:
-  the sweeps, the rule comparison, the count comparison (also written to `needed_counts.tsv`) and
+  the sweeps, the rule comparison, the count comparison (also written to `needed_counts.tsv`, not committed) and
   the TRE comparison (`tre_batch.c`, built in WSL).
 - `python tools/probes/empty-iteration-survey/capture_progress.py`: the D12 table. Set `PORT_PROBE` to the
   path of `port-probe.cs` (`git show 8dda4d9:tools/probes/port-probe.cs`) to add the port's column.
