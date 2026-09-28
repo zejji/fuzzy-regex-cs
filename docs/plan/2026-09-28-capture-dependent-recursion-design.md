@@ -376,3 +376,200 @@ All probes were in `.scratch`, and have been deleted.
   is already full when the calls happen.
 - **PCRE2:** `pcre2.compile(p, jit=False)` for the interpreter, `jit=True` for JIT. **Perl:**
   `perl -e` with `qr//` and `eval`, reading `$-[0]` and `$+[0]`.
+
+## Addendum 1 (2026-09-28, design round 2): the memo's ancestor term
+
+The blind review of 314c9c0 found the design sound with changes. Three findings:
+
+1. No hole in the capture key in 10,000 rows. The `CaptureChange` point (section 4d) is still
+   unproven.
+2. (d) plus the memo is still factorial in the number of groups set at one position.
+   `(?:()|()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7\8x` search over `aay` takes 1 ms on main,
+   8.9 to 15 s under (d) and 6.7 s under (d) plus the memo. The conditional form
+   `(?(1)|z)...(?(8)|z)x` takes 11.6 s at k = 8. The cause is the memo key's list of open ancestor
+   calls at the same position. Each ancestor has a different read state, and together they record
+   the order in which the groups were set.
+3. The C1 dependency and the reach bit are confirmed. The reach-bit witness is
+   `(?(DEFINE)(?<H>(?&G)|.*z|(?&G)|a)(?<G>(?&H)b))(?&H)`, fullmatch over `ab`.
+
+This addendum replaces the memo key of section 4a with one that is exact, meaning it holds
+everything the called group's run depends on and nothing else, and it is not factorial.
+
+### A1. The new key
+
+For a call C of target g at position p, made when the text reached so far is the interval
+[Low, High] of width W and the (d) read state is s:
+
+    K(C) = ( g, p, s, Low, High, A )
+    A    = the SET of (target, position, read state) of every open call O such that
+           - O is at or after p in the matching direction (C1's rule; calls inside a lookbehind stay excluded),
+           - O's recorded reach equals W, and
+           - O's set mask equals s's set mask (the same read groups set, whatever their texts).
+
+In production this sits beside C1's other fields: section counts, enclosing sections and the
+search anchor, per fuzzy-a2's `FailedCallKey` (`Matcher.cs:3103-3155` there). It replaces two of
+them. C1's `MemoGroups` spans become the (d) state, and C1's ordered list of open calls
+(`Matcher.cs:3145-3152` there) becomes A. Round 1's per-ancestor reach bit is gone, because it is
+now implied: an ancestor either passes the reach filter or cannot matter.
+
+### A2. Why the key is exact
+
+The failed-call memo is sound if two calls with the same key would run the same way until they
+run out of choices. So each thing the run reads must either be in the key or be shown not to
+matter. C1's table in `2026-09-27-recursion-failure-memo-design.md` section 2a covers everything
+except the guard. The guard reads three things.
+
+**(i) The guard reads the open calls only as a set.** The one read is `ActiveCalls.Add`, a
+membership test (b3b988f `Matcher.cs:8509`). Nothing in C's run reads the order of `OpenCalls`.
+
+- `PopOpenCall` removes the innermost entry. Until C returns, that entry is C or one of its
+  descendants.
+- `CloseCallsAbove` drops only entries above a saved-stack depth restored inside C's run. That
+  depth is at least C's own, so no ancestor is dropped.
+
+C returning ends the run the memo records, because a call that returned is never recorded
+(section 4a). So order cannot matter, and a set is enough. That alone does not remove the
+blow-up, because the ancestors' read states still differ. That is what (ii) deals with.
+
+**(ii) An ancestor with a smaller set mask can never be matched.** Lemma: during an open call's
+run, the set of read groups that are set never shrinks below what it was at the call.
+
+- Going forward, a group is only ever set.
+- Every group restore in the matcher puts back a snapshot:
+  - `PopGroups` at a nested call's return (`Matcher.cs:2889`), which restores the caller's
+    groups as they were when the nested call was made;
+  - the backtracking arms (`Matcher.cs:11013`);
+  - `RestoreGroups` for lookarounds (`Matcher.cs:11787`).
+  Each of those snapshots was taken inside the same open run, or at its entry.
+- `ClearGroups` runs only at the start of an attempt (`MatchState.cs:901`, `1218`) and after the
+  search fails (`Matcher.cs:11130`, `12942`). Neither can happen inside an open call.
+
+Apply the lemma twice.
+
+- Every call I made inside C's run has mask(I) ⊇ mask(s).
+- C is inside the run of every open ancestor O, whether O is still in its first run or was
+  re-opened by backtracking into it. So mask(O) ⊆ mask(s).
+
+The guard can refuse I against O only if the two read states are equal. Then mask(O) = mask(I),
+and with mask(O) ⊆ mask(s) ⊆ mask(I), that forces mask(O) = mask(s). So an ancestor with a
+smaller mask can never cause a refusal inside C, and leaving it out of the key changes nothing.
+
+This is where the factorial goes. In the k-group rows, each ancestor at p has one group fewer set
+than the call after it. Every ancestor fails the filter, A is empty, and the key is (g, p, s,
+reach): one entry per subset of groups, not per order.
+
+**(iii) An ancestor with a smaller reach can never be matched.** The guard refuses I against O
+only if the reach at I equals the reach O recorded. The reach only grows during an attempt, so the
+reach at I is at least W, and O's reach is at most W. If O's reach is below W, it can never equal
+the reach at I, so O never causes a refusal. If it equals W, O refuses I exactly when nothing new
+has been reached between C and I. That depends on the interval [Low, High], not only on its width,
+so the interval is in the key.
+
+This also settles the reach-bit finding without the monotonicity argument of section 4a. That
+argument was incomplete. Refusing a branch earlier also changes how far the reach grows before
+later calls are opened. So "more refusals keep a failure a failure" does not follow. With the
+interval in the key, the argument is determinism, not monotonicity: the same key gives the same
+run.
+
+**(iv) The call itself.** The target, the position and s are in the key, and (d)'s argument for
+s is section 4d. Its one open point, `CaptureChange`, is unchanged by this addendum.
+
+### A3. Bound
+
+Forward matching moves back only inside a lookbehind, which C1 excludes. So an open ancestor at or
+after p is at exactly p. For groups read only by conditionals, an equal mask means an equal state,
+so A holds at most one entry per call target. It cannot hold C's own (g, s) at reach W, because the
+guard would then have refused C itself. The memo therefore holds at most
+
+    targets x (n + 1) x S x (n + 1)^2 x 2^(targets - 1)
+
+entries, where S is the number of distinct (d) states: 2 per conditional-only group, and the
+number of distinct texts plus 1 per backreferenced group. That is polynomial in the text length
+for a fixed pattern. It is exponential in the number of read groups through S, and that part is
+inherent to exact semantics. The k-group rows reach 2^k observable states, and each has to be
+explored once, unless an exit-summary memo (C2) proves some of them equivalent. Measured, it
+grows like k x 2^k, not k!.
+
+### A4. Measurements
+
+Prototype on b3b988f, one build with the key chosen by an environment switch:
+
+- `off`: (d), no memo.
+- `chain`: round 1's key, ordered ancestors with a reach bit.
+- `nobit`: `chain` without the bit.
+- `new`: section A1.
+
+The reference is b3b988f's exact-span key with no memo, which is the most conservative guard.
+Release, one run per cell, laptop under other load; the first row of each run includes JIT. "t/o"
+is a timeout at 20 s. Times in ms.
+
+| Row, search over `aay` unless marked | main | (d) off | chain | nobit | **new** | upstream |
+|---|---|---|---|---|---|---|
+| backreference form, k = 6 | 146 (JIT) | 486, 456 k calls | 632 | 1,150 | **108 (JIT), 2,957 calls** | MemoryError |
+| conditional form, k = 6 | 4 | 88 | 286 | 470 | **10** | MemoryError |
+| backreference form, k = 7 | 0 | 899, 4.6 M calls | 4,796 | 5,029 | **20, 6,760 calls** | MemoryError |
+| conditional form, k = 7 | 0 | 796 | 3,187 | 3,439 | **14** | MemoryError |
+| backreference form, k = 8 | 1 | 16,666, 51 M calls | t/o | t/o | **35, 15,239 calls** | MemoryError |
+| conditional form, k = 8 | 1 | 12,190 | t/o | t/o | **32** | MemoryError |
+| reach-bit witness, fullmatch `ab` | (0,2) | (0,2) | (0,2) | **None, wrong** | **(0,2)** | MemoryError |
+| conditional form, k = 8, over `a^12 y` | not run | not run | not run | not run | 357, 210 k calls | not run |
+| conditional form, k = 10, `aay` | not run | not run | not run | not run | 65, 75 k calls | not run |
+| conditional form, k = 12, `aay` | not run | not run | not run | not run | 358, 357 k calls | not run |
+
+Every k-group row answers None in every column that finishes, which matches the grammar (the
+subject has no x). On the earlier rows, `new` keeps d+c1's answers and costs:
+
+- one read group, n = 24: 144 calls;
+- three read groups, n = 12: 149 calls;
+- the lookaround residual `(?:(?=(a*))|a)(?R)|\1x` at n = 20: 22 ms, 7,308 calls;
+- the value witness: `(0,3)`;
+- the three red rows: `(0,1)`.
+
+Without the memo, (d) makes 456 k, 4.6 M and 51 M calls at k = 6, 7 and 8, about 10 times more
+per extra group, which is at least as fast as k! grows. The memo keyed on the ordered chain was
+slower still, because each order is a new key, so it paid the cost of building keys without
+getting hits.
+
+**Soundness grids.** Four new generated grids of 9,000 rows each (1,500 patterns, 3 subjects,
+search and fullmatch), with a 0.5 s timeout per row:
+
+- `g2`: flag setters with conditional and backreference readers;
+- `g4`: captures of the read group inside repeats;
+- `gk`: 2 to 4 empty groups set in any order before a same-position recursion, with mixed readers;
+- `gm`: mutual recursion through `DEFINE` with `.*z` branches, the reach-witness family.
+
+| Grid | new vs reference | nobit vs reference | main vs reference | timeouts (reference / new) |
+|---|---|---|---|---|
+| g2 | 0 | 0 | 11 | 0 / 0 |
+| g4 | 0 | 0 | 28 | 23 / 8 |
+| gk | 0 | 0 | 958 | 0 / 0 |
+| gm | 0 | **7** | 0 | 0 / 0 |
+
+So `gm` catches the unsound reach handling, and the new key passes it. On `gk`, main differs on
+958 rows. I re-ran 12 of them, drawn at random, on upstream: all 12 raise MemoryError. In each,
+the reference's answer is one the grammar derives, for example `(?:()|()|()|()|a)(?R)|\3\4x`
+over `aax`: reference `(0,3)`, main None.
+
+### A5. Plan changes
+
+Section 7 changes in three places.
+
+- **Step 1 (this branch, (d)).** Add red timing tests for the k-group rows at k = 6, 7 and 8, in
+  both the backreference form `(?:()|...|()|a)(?R)|\1...\kx` and the conditional form
+  `(?:()|...|()|a)(?R)|(?(1)|z)...(?(k)|z)x`, search over `aay`, each expecting None. With (d)
+  alone these take 0.1 to 17 s, so the k = 8 rows (12 to 17 s) are red at any reasonable budget.
+  They turn green only with the memo in step 3. So they go in as explicit open-defect tests in
+  step 1 and move into the ratchet in step 3. Budget: 1 s each, not 100 ms. The ratchet runs in
+  Debug, 3 to 10 times slower than these Release numbers, and `new` takes 32 to 35 ms at k = 8 in
+  Release. Also add the reach-bit witness (expect `(0,2)`) and one `gk` row, for example
+  `(?:()|()|()|()|a)(?R)|\3\4x` over `aax` (expect `(0,3)`). Both need the memo, so they are
+  step-3 tests too.
+- **Step 3 (the memo).** Build the failed-call key as in A1: the (d) state, the entry reach
+  interval, and the filtered set of ancestors, sorted before hashing. Do not use a bit per
+  ancestor. Grid-test against the no-memo guard with the four generators above; the `gm` grid is
+  the one that catches reach errors.
+- **Unchanged.** Rejecting (b) and (c), the merge gate (no (d) on main before the memo), and the
+  separate reach-saturation defect (section 6b).
+
+The prototype and grids were rebuilt in `.scratch` for this round and deleted afterwards. The
+generators and the key switch are as described above and in section 8.
