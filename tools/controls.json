@@ -277,11 +277,18 @@
     "anchorNth": 1,
     "before": "SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos])",
     "after": "SameCharIgn(node.Encoding, state.CharAt(stringPos), folded[foldedPos])",
-    "generator": "case-folding",
-    "count": 600,
-    "seeds": [
-      7,
-      20260901
+    "signal": "suite",
+    "expectedFailures": [
+      "A_backreference_folds_both_sides_before_fuzzing",
+      "A_backreference_under_full_case_folding_matches_a_different_length_form",
+      "A_case_insensitive_set_test_inside_a_folding_constrains_nothing",
+      "A_retried_deletion_steps_past_the_deleted_group_character",
+      "An_error_inside_a_case_folding_asks_the_folded_character",
+      "Full_case_folding_matches_where_upstream_does((?fi)(ffi)\\1, ﬃﬃ, 0, 2)",
+      "Full_case_folding_matches_where_upstream_does((?fi)(ss)\\1, ßß, 0, 2)",
+      "Fuzzy_backreference_to_a_literal_ss_group_folds_a_subject_sharp_s_within_the_constraint((?fiu)(ss)\\1{e<=1:[a-z]}, ßst, True)",
+      "Fuzzy_backreference_to_a_literal_ss_group_folds_a_subject_sharp_s_within_the_constraint((?fiu)(ss)\\1{e<=1:[a-z]}, ßts, True)",
+      "The_folded_test_asks_the_character_at_the_fold_position_not_the_first_one"
     ]
   },
   {
@@ -1574,11 +1581,9 @@
     "anchorNth": 1,
     "before": "                        && TotalErrors(state.FuzzyCounts)\n                            + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)\n                            < state.MaxErrors\n                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]\n                            <= state.MaxCost\n",
     "after": "                        && TotalErrors(state.FuzzyCounts)\n                            + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)\n                            < state.MaxErrors\n                        && innerNode!.Values[FuzzyValue.InsCost] <= state.MaxCost\n",
-    "generator": "fuzzy",
-    "count": 2000,
-    "seeds": [
-      7,
-      31
+    "signal": "suite",
+    "expectedFailures": [
+      "Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion"
     ]
   },
   {

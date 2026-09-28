@@ -1199,4 +1199,25 @@ public sealed class FuzzyBestMatchTests
 
         parts.Should().Equal("", "\r\n", "\U0001d518\U0001d518\rAa");
     }
+
+    // S42-2G, tools/controls.json: the whole-match cost bound on END_FUZZY's trailing-insertion
+    // retry ('Matcher.cs', the third test beside the 'ponytail:' note). Found by a blind review's
+    // 686-candidate sweep of the '(?1)$' self-recursive-call family (2026-09-28); this is the
+    // smallest of the 56 that fired. Dropping the bound's 'TotalCost(state.FuzzyCounts, innerNode)'
+    // term (leaving only the trailing insertion's own cost) lets the retry re-enter the section on
+    // every walk-0 step without ever spending down the budget, and the match times out rather than
+    // answering wrong - so this test is the control's whole signal; the ratchet's normal answer
+    // never sees a wrong value to assert against. Upstream, regex 2026.9.10, checked 2026-09-28:
+    // search('(?b)((?:a){1s+2i<=2})(?1)$', 'bab') -> (1, 3) counts=(1, 0, 0).
+    [Test]
+    public void Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion()
+    {
+        Match m = new FuzzyRegex("(?b)((?:a){1s+2i<=2})(?1)$", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match(
+            "bab"
+        );
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
 }

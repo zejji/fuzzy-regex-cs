@@ -15,7 +15,9 @@ silent on the row, MSan and Valgrind both name it).
 What it screens
 ---------------
 Only the rows whose verdict depends on upstream's answer: the consumer's `fault`, `diverge` and
-`expected` rows, whose numbers it writes to TestResults/oracle/screen-candidates.txt. An AGREEING
+`expected` rows, whose numbers it writes next to the report (`<report>.screen-candidates.txt` -
+`TestResults/oracle/report.screen-candidates.txt` by default, per-run under `run-oracle.ps1`, D20).
+An AGREEING
 row is not screened: the port has no uninitialised memory, so it can only agree with a garbage
 answer by coincidence. Screening every row is what was measured and rejected - 5 to 12 times the
 recording time, and 15.2 GB where the plain build needs 1.4 GB on the same generator
@@ -63,7 +65,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = REPO_ROOT / "tools" / "msan" / "known-undefined.json"
-CANDIDATES = REPO_ROOT / "TestResults" / "oracle" / "screen-candidates.txt"
+# Matches OracleWave.cs's ScreenCandidatesPath default (named from ReportPath's own filename, so a
+# per-run --report-path there implies a per-run candidates file here too - D20, docs/KNOWN-DEFECTS.md).
+CANDIDATES = REPO_ROOT / "TestResults" / "oracle" / "report.screen-candidates.txt"
 IMAGE = "fuzzyregex-msan:cpython-3.14.7"
 
 # The worker's row tag, written to its stderr before each row when ORACLE_TAG_ROWS is set - see
