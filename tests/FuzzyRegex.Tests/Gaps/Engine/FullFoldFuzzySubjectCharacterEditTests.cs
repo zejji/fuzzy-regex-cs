@@ -118,6 +118,23 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
         m.Success.Should().BeFalse();
     }
 
+    // The whole-character edits are tried before older alternatives upstream would reach first,
+    // so the first answer can hold a different mix of the same number of edits (Matcher.FoldWholeSub).
+    // Upstream: (0, 3, 0), (0, 1, 1) and (0, 2, 1), with the same spans.
+    [Test]
+    [Arguments("(?fi)(?:ss){e<=3}", "jßsß", 0, 4, 1, 2, 0)]
+    [Arguments("(?rfi)(?:fi){e<=2}", "ǰf", 0, 2, 2, 0, 0)]
+    [Arguments("(?fi)(?:fi){e<=3}", "ißß", 0, 3, 2, 1, 0)]
+    public void The_first_answer_can_hold_a_different_mix_of_the_same_number_of_edits(
+        string pattern,
+        string text,
+        int index,
+        int length,
+        int substitutions,
+        int insertions,
+        int deletions
+    ) => ShouldMatch(pattern, text, "fullmatch", index, length, new FuzzyCounts(substitutions, insertions, deletions));
+
     // Controls, where upstream is already right: deletions alone cannot absorb a subject character,
     // and a pattern ß replaced by a subject ǰ is ledger entry 49's character reading.
     [Test]

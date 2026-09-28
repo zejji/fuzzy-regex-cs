@@ -40,8 +40,9 @@ own, the edit is one character and the match is found.
 A possible fix: at the start of a subject character's folding, when the folding is longer than one
 character, also offer a substitution and an insertion of the whole subject character, after the
 existing three kinds. Offer them too when the first folded character matched, so that matching
-half of the character does not rule out editing all of it. Every match the current edits find
-first stays the same.
+half of the character does not rule out editing all of it. No match the current edits find is
+lost, although the first answer's mix of edits can change: `(?fi)(?:ss){e<=3}` fullmatched over
+'jßsß' then reports one substitution and two insertions instead of three insertions.
 
 None of PCRE2, Python `re`, .NET, JavaScript or Perl has fuzzy matching, so there is no second
 answer to compare with.
