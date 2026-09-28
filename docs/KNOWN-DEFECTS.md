@@ -33,7 +33,7 @@ skips them. Run them with:
 | D1 | Fuzzy exact-deletion retry and failed-call memo (ledgers 42 and 44, C1), plus ruling A: an explicit empty alternative is an optional exit | see ledgers 42 and 44 | reviews clean; waiting on a quiet benchmark, then merge | `maint/fuzzy-exact-deletion-tidy` 54c6687; ruling in `docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md` |
 | D2 | A fuzzy repeat of a section that only spends errors iterates until the stack runs out (queue items 4 and 5) | `(?:(?:a){d<=1})+?` fullmatch 'aaaaba': 1 GB stack exhausted vs None | fixed by D1's needed rule; merges with D1 | pinned on D1's branch. Delete the two matching OpenDefectTests when D1 merges |
 | D3 | A same-position group call is refused when a capture read by a conditional or backreference has changed | `(?(a)(?(b)x\|(?<b>)(?R))\|(?<a>)(?R))` over 'x': None vs (0,1) | design reviewed; the build waits for D1 (it needs C1) | `maint/call-guard` 28a057e, `docs/plan/2026-09-28-capture-dependent-recursion-design.md`; red test on main |
-| D8 | A fuzzy insertion is never tried before a failing lookaround (S3-F2) | `(?:b(?=c)){i<=1}` over 'bxc': None vs (0,2) with 1 insertion | build started | `maint/d8-insert-before-lookaround` |
+| D8 | A fuzzy insertion is never tried before a failing lookaround (S3-F2) | `(?:b(?=c)){i<=1}` over 'bxc': None vs (0,2) with 1 insertion | fixed (upstream wrong, ledger 50, pinned); blind review next, merges after D1 | `maint/d8-insert-before-lookaround` 9fed032 (on D1's branch). At merge, delete its OpenDefectTests row |
 | D11 | Phantom partial matches at a boundary (F2; includes S3-F1 and oracle cluster A). The biggest item; design first. Owner rulings: Q1 = B, Q2 = B | see the 2026-09-26 handover | design started | `design/d11-partial-boundary` |
 | D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fix started | `maint/d15-d16-tooling` |
 | D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fix started | `maint/d15-d16-tooling` |
@@ -47,7 +47,7 @@ skips them. Run them with:
 | F3 | BESTMATCH fullmatch lost a candidate with trailing insertions. Upstream's END_FUZZY guard counts the errors twice (ledger 12; the port is right, pinned) | main 5e0a2cd |
 | F4 | Oracle row 20260927:3732. Upstream's IGNORECASE first-set precheck refuses a cased letter with no case partner (ledger 35 H; the port is right, pinned) | main 2357e67 |
 | F5 | Full-fold fuzzy: editing an expanding pattern character (ß) inside a run cost two edits (ledger 49, was D6) | main 58e57e5 |
-| F6 | Exact matching: an empty iteration that changes a tested group's span counts as progress. Kept upstream's rule; the port already followed it, now pinned by a 23-shape survey and 27 tests (was D12) | main (this merge) |
+| F6 | Exact matching: an empty iteration that changes a tested group's span counts as progress. Kept upstream's rule; the port already followed it, now pinned by a 23-shape survey and 27 tests (was D12) | main 7d39d99 |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
