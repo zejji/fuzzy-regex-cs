@@ -33,6 +33,7 @@ such test is a mistake: reopen it.
 | D17 | An empty iteration that flips a tested group between two spans at one position counts as progress for ever: upstream's rule has no cycle check (found by D12's survey). Needs a per-run record of group states, like the fuzzy repeat memo | `^(?:(?=(?P=g)b)(?=(?P<g>ab))\|(?=(?P<g>a)))*$` over 'ab': 1 GB stack exhausted vs None (upstream: MemoryError) | main |
 | D18 | Partial matching checks each undetermined decision at the text's edge on its own, so contradictory assertions at one position give a phantom partial (D11's limit 1; SHORTCUT in D11) | `a\b\B` over 'a' search: P(1,1) vs None | none yet (after D11) |
 | D19 | Partial matching presumes the rest of the pattern can match once a character is taken past the edge (D11's limit 2; upstream issue 367). Decidable without backreferences (regular-language emptiness); research the backreference case | `(?:a\B)+` fullmatch 'a': partial vs None | none yet |
+| D20 | Test tooling: `record-oracle.py` writes by default to the same `TestResults/oracle/wave.jsonl` that `run-oracle.ps1` consumes (record-oracle.py:63, run-oracle.ps1:295), so an ad hoc recording in the same worktree can replace a running oracle's wave. Likely cause of the D15 builder's one-off 2,000-row fuzzy-only RED report. Fix: a per-run wave file, and the report names the wave's seed and generators | D15 builder, 2026-09-28 | none |
 
 ## In progress
 
