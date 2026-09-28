@@ -5071,6 +5071,14 @@ internal static class Matcher
     /// Whether the attempt stands at the start of a subject character's folding that is longer than
     /// one character, where D7's whole-character edits apply. See <see cref="FoldWholeSub"/>.
     /// </summary>
+    /// <remarks>
+    /// The start test is what keeps a whole-character edit from charging one edit for the rest of a
+    /// part-matched folding (<c>FullFoldFuzzySubjectCharacterEditTests</c>, 'ﬃi' and 'αᾷ'). The
+    /// length test only saves repeating upstream's own edits: for a one-character folding a
+    /// whole-character substitution or insertion lands where <see cref="FuzzyValue.Sub"/> and
+    /// <see cref="FuzzyValue.Ins"/> already land (<c>newPos = foldedPos + step</c>), so no answer
+    /// depends on it.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="data">The attempt.</param>
     /// <returns>Whether a whole-character edit may be tried.</returns>
@@ -5208,8 +5216,14 @@ internal static class Matcher
 
                 return CheckFuzzyPartial(state, newPos);
             case FoldWholeSub:
-                // NOT UPSTREAM (D7): could the whole subject character have been substituted?
-                if (data.ValuesRanOut || !AtStartOfAnExpandingFolding(state, in data))
+                // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
+                // loop tries this kind only at the start of an expanding folding.
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                // The values run out at the start of a folding only in the leftovers loop under
+                // PatternObject.ChargeUntouchedFoldings, the oracle's upstream rule
+                // (FoldingIsPartUsed); there is no pattern character left to substitute.
+                if (data.ValuesRanOut)
                 {
                     return MatchStatus.Failure;
                 }
@@ -5225,7 +5239,9 @@ internal static class Matcher
                 return MatchStatus.Success;
             case FoldWholeIns:
                 // NOT UPSTREAM (D7): could the whole subject character have been inserted?
-                if (!data.PermitInsertion || !AtStartOfAnExpandingFolding(state, in data))
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                if (!data.PermitInsertion)
                 {
                     return MatchStatus.Failure;
                 }
@@ -5402,7 +5418,11 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FoldEditKinds; data.FuzzyType++)
+        // D7's two kinds only apply at the start of an expanding folding, which no kind that fails
+        // moves, so every other attempt stops after upstream's three.
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (data.FuzzyType = 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -5514,7 +5534,9 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FoldEditKinds; data.FuzzyType++)
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
