@@ -6964,6 +6964,45 @@ internal static class ExpectedDivergences
                 && theirs.Groups.Skip(1).All(static group => !group.Success)
                 && HasABoundaryEscape(row.Pattern)
         ),
+        new(
+            Id: "fuzzy-search-anchor-backtracked",
+            Reason: "THIS PORT ANSWERS A `\\G` INSIDE A FUZZY SECTION where upstream raises "
+                + "`RuntimeError: invalid RE code`. Ledger entry 48; fixed on 2026-09-27 under the "
+                + "owner's no-known-bugs rule, and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a failed SEARCH_ANCHOR in a fuzzy section takes an insertion "
+                + "and pushes a retry frame like every other zero-width item "
+                + "(upstream/src/_regex.c:14431), but the backtrack switch's zero-width list "
+                + "(:15330-15344) omits SEARCH_ANCHOR, so popping that frame reaches the default arm "
+                + "and raises. `(?:\\Gb){i<=1}` over 'ab', whose insertion is never backtracked over, "
+                + "is answered by both engines.\n"
+                + "WHAT `\\G` MEANS is not in question: PCRE2 10.47, .NET 10.0.12 and upstream's exact "
+                + "matcher agree it holds only at the search start, honours pos, and holds at the end "
+                + "under right-to-left (tools/probes/search-anchor-survey, 2026-09-27).\n"
+                + "FOUND BY the interaction-matrix wave, 7 rows over seeds 7, 4242 and 20260927; the "
+                + "example rows are hand-minimised and recorded by `record-oracle.py --rows` on "
+                + "2026-09-28.\n"
+                + "THE PREDICATE: upstream's recorded answer is exactly that error, raised while "
+                + "matching; the pattern holds a live `\\G` and a fuzzy constraint; and this port "
+                + "ANSWERED - a match, no match, or a scan result, never an error of its own, a "
+                + "timeout or an unported seam. Upstream raises this message for nothing else the "
+                + "saved waves hold. The control is "
+                + "`A_row_the_search_anchor_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyMatchingTests: the seven search-anchor cases, from "
+                + ".A_search_anchor_inside_a_called_group_in_a_fuzzy_section_is_answered to "
+                + ".A_failed_search_anchor_in_a_fuzzy_section_is_backtracked_over_under_a_best_match_flag",
+            Example: """
+            {"generator": "rows", "pattern": "(?:a\\G){i<=1}", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            {"generator": "rows", "pattern": "(?b)(?:.??(?1)){e<=1}(?:x|(\\Gab))", "flags": 0, "namedLists": {}, "subject": "zab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            {"generator": "rows", "pattern": "(?r)(?:\\Gab|ab\\G){i<=1}", "flags": 0, "namedLists": {}, "subject": "xab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            """,
+            Applies: static (row, ours) =>
+                row.Expected
+                    is ErrorOutcome { Exception: "RuntimeError", Message: "invalid RE code", WhileMatching: true }
+                && ours is MatchOutcome or NoMatchOutcome or MatchesOutcome or SubOutcome or SplitOutcome
+                && HasASearchAnchorEscape(row.Pattern)
+                && row.Pattern.Contains('{', StringComparison.Ordinal)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -7905,6 +7944,26 @@ internal static class ExpectedDivergences
         for (int i = pattern.IndexOf('\\'); i >= 0 && i + 1 < pattern.Length; i = pattern.IndexOf('\\', i + 2))
         {
             if (pattern[i + 1] is 'b' or 'B' or 'm' or 'M' or 'X')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the pattern holds a live <c>\G</c>, for <c>fuzzy-search-anchor-backtracked</c>. The scan
+    /// steps over an escaped backslash, as <see cref="HasABoundaryEscape"/> does, so <c>\\G</c> does
+    /// not count.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> if it contains <c>\G</c>.</returns>
+    private static bool HasASearchAnchorEscape(string pattern)
+    {
+        for (int i = pattern.IndexOf('\\'); i >= 0 && i + 1 < pattern.Length; i = pattern.IndexOf('\\', i + 2))
+        {
+            if (pattern[i + 1] == 'G')
             {
                 return true;
             }
