@@ -15,7 +15,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class IterationTests
 {
     [Test]
-    public void A_scan_over_a_long_subject_initialises_one_match_state_whatever_its_length()
+    public void A_scan_over_a_long_subject_does_work_linear_in_its_length()
     {
         // The complexity guard for the whole iteration surface. Since the 2026-09-01 quadratic fix
         // a MatchState costs one vectorised pass over the subject to build, so a scan that builds
@@ -27,17 +27,32 @@ public sealed class IterationTests
         // engine (D13). Measured 2026-09-01 in Release: a scan that builds a state per match cost
         // 10.8x for a doubling of the subject, and a linear one 2.2x. Now, in Debug: the three
         // scans initialise three states between them at 1,000 matches and at 2,000 (2026-09-28).
-        // In a Release build there is no counter, so what is left is the answers.
+        //
+        // The states are one way to be quadratic, not the only one, so the loop steps and the
+        // characters walked are bounded as well: 18,000 and 18,003 over this 6,000-character
+        // subject, three per character. Any pass over the subject per match is millions. In a
+        // Release build there is no counter, so what is left is the answers.
         const int matches = 2_000;
         string subject = string.Concat(Enumerable.Repeat("ab ", matches));
         var pattern = new FuzzyRegex(@"\w+", FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        long states = EngineWork.StatesInitialisedBy(() =>
-        {
-            pattern.Count(subject).Should().Be(matches);
-            pattern.Matches(subject).Count.Should().Be(matches);
-            pattern.Split(subject).Should().HaveCount(matches + 1);
-        });
+        long states = 0;
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+                EngineWork.ShouldWalkAtMostCharacters(
+                    () =>
+                        states = EngineWork.StatesInitialisedBy(() =>
+                        {
+                            pattern.Count(subject).Should().Be(matches);
+                            pattern.Matches(subject).Count.Should().Be(matches);
+                            pattern.Split(subject).Should().HaveCount(matches + 1);
+                        }),
+                    6L * subject.Length,
+                    "a scan walks each character a few times, not once per match"
+                ),
+            6L * subject.Length,
+            "a scan's matching loops run a few steps per character, not a pass per match"
+        );
 
         if (WorkCounter.Enabled)
         {

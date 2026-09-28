@@ -324,8 +324,13 @@ public sealed class TimeoutAndCancellationTests
         // start time, so without a clock restart per step the caller's own work between two
         // matches would time the walk out. The built-in Regex times each match of a lazy walk
         // (tools/probes/bcl-lazy-walk-timeout.cs), and DIVERGENCES keeps this port there.
+        //
+        // Half a second, not 50 ms, since 2026-09-28: beside a CPU burner the 50 ms version failed
+        // one run in twenty, because a step that takes microseconds can still wait longer than
+        // 50 ms for the processor (D13). Each spin is one and a half budgets, so the four spins
+        // are still three budgets of caller time more than a walk charged for them could survive.
         FuzzyRegex pattern = new(@"\w+");
-        TimeSpan budget = TimeSpan.FromMilliseconds(50);
+        TimeSpan budget = TimeSpan.FromMilliseconds(500);
         IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
             ? pattern.EnumerateMatches("a b c d", timeout: budget)
             : pattern.EnumerateSplits("a b c d", timeout: budget);
@@ -337,7 +342,7 @@ public sealed class TimeoutAndCancellationTests
             {
                 steps++;
                 long started = Stopwatch.GetTimestamp();
-                while (Stopwatch.GetElapsedTime(started) < budget * 3)
+                while (Stopwatch.GetElapsedTime(started) < budget * 1.5)
                 {
                     Thread.SpinWait(1_000);
                 }

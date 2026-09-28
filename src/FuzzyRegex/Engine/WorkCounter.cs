@@ -58,7 +58,7 @@ internal static class WorkCounter
     }
 
     /// <summary>
-    /// The value of <see cref="Steps"/> at which <see cref="Step"/> throws
+    /// The value of <see cref="Steps"/> at or past which <see cref="Step"/> throws
     /// <see cref="StepLimitReachedException"/>, or 0 for no limit. A test sets it so that a runaway
     /// stops at a step count rather than at a wall-clock timeout.
     /// </summary>
@@ -70,14 +70,16 @@ internal static class WorkCounter
     [Conditional("DEBUG")]
     internal static void Step()
     {
-        if (++Steps == StepLimit)
+        // At or past, not only at: a caller that swallows the exception (the demo's interop
+        // boundary catches everything) must be stopped again at its very next step.
+        if (++Steps >= StepLimit && StepLimit != 0)
         {
             throw new StepLimitReachedException();
         }
     }
 
     /// <summary>
-    /// The value of <see cref="CharactersWalked"/> at which <see cref="CharacterWalked"/> throws
+    /// The value of <see cref="CharactersWalked"/> at or past which <see cref="CharacterWalked"/> throws
     /// <see cref="StepLimitReachedException"/>, or 0 for no limit.
     /// </summary>
     [field: ThreadStatic]
@@ -88,7 +90,9 @@ internal static class WorkCounter
     [Conditional("DEBUG")]
     internal static void CharacterWalked()
     {
-        if (++CharactersWalked == CharacterLimit)
+        // At or past, not only at: a caller that swallows the exception (the demo's interop
+        // boundary catches everything) must be stopped again at its very next step.
+        if (++CharactersWalked >= CharacterLimit && CharacterLimit != 0)
         {
             throw new StepLimitReachedException();
         }

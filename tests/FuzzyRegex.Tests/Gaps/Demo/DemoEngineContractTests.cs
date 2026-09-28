@@ -305,6 +305,9 @@ public sealed class DemoEngineContractTests
     /// This is the fast common-case exit; <c>worker.terminate()</c> is the real safety net, and the
     /// harness proves that half in a browser.
     /// </summary>
+    /// <summary>A budget no runaway fits in on any machine; see the runaway test.</summary>
+    private static readonly TimeSpan _oneMillisecond = TimeSpan.FromMilliseconds(1);
+
     [Test]
     public void A_runaway_pattern_comes_back_as_a_timeout_error_not_as_an_exception()
     {
@@ -316,13 +319,15 @@ public sealed class DemoEngineContractTests
         //
         // The message alone is not the contract - returning is. Asserting only on the text is how
         // the suite stayed green while Run could take forever (S70 review). So the call is bounded
-        // in engine steps, which a busy machine cannot break (D13), where until 2026-09-28 it was
-        // bounded at ten seconds. Thirty 'a's are about 2^30 steps: the two-second budget stops
-        // the walk well inside the bound, and a walk that ignored the budget is stopped at it.
+        // in engine steps, where until 2026-09-28 it was bounded at ten seconds (D13). The budget
+        // is a millisecond rather than the shipped two seconds, so that neither bound depends on
+        // the machine: thirty 'a's are about 2^30 steps, which no machine takes in a millisecond,
+        // and a millisecond of steps is a few thousand here, so a machine would have to be
+        // thousands of times faster to reach the bound. A walk that ignored the budget stops at it.
         string answer = "";
         EngineWork.ShouldTakeAtMostSteps(
-            () => answer = Run(@"(a|a)*\1\b\B", "", new string('a', 30)),
-            200_000_000,
+            () => answer = DemoEngine.Run(@"(a|a)*\1\b\B", "", new string('a', 30), "", "", "", _oneMillisecond),
+            20_000_000,
             "the budget stops a runaway"
         );
 
@@ -360,6 +365,27 @@ public sealed class DemoEngineContractTests
 
         finished.Should().BeFalse("the deadline had passed before the first match was found");
         matches.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The other half of <see cref="The_whole_walk_shares_one_time_budget_rather_than_one_per_match"/>:
+    /// that a search really hands the walk a deadline. Each of the thousand matches costs 2.3 ms in
+    /// Release and 14.5 ms in Debug (2026-09-28), so every one fits in a 200 ms budget of its own
+    /// and the thousand together do not.
+    /// </summary>
+    /// <remarks>
+    /// Robust to the machine in both directions. Slower, a single match may exceed the budget,
+    /// which is a timeout too. Faster, the thousand still overrun one budget unless each match
+    /// took under a fifth of a millisecond, about eleven times faster than Release here.
+    /// </remarks>
+    [Test]
+    public void A_search_hands_the_walk_one_deadline_for_every_match()
+    {
+        string subject = string.Concat(Enumerable.Repeat(new string('a', 12) + "cb", DemoEngine.MaxMatches));
+
+        string answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "", "", "", TimeSpan.FromMilliseconds(200));
+
+        Error(answer).Should().Contain("timed out");
     }
 
     /// <summary>
@@ -853,12 +879,12 @@ public sealed class DemoEngineContractTests
         // The optional '\1' keeps the search exponential; see the runaway test above. Twenty-two
         // 'a's a chunk rather than eighteen since 2026-09-26: with the '\1', the eighteen-'a'
         // subject's whole replacement pass took 1.1 s in Release, inside the two-second budget.
-        // Bounded in engine steps, as the runaway test is, where until 2026-09-28 it was bounded
-        // at six seconds (D13).
+        // Bounded in engine steps with a one-millisecond budget, for the reasons the runaway test
+        // gives, where until 2026-09-28 it was bounded at six seconds (D13).
         string answer = "";
         EngineWork.ShouldTakeAtMostSteps(
-            () => answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", ""),
-            200_000_000,
+            () => answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "", _oneMillisecond),
+            20_000_000,
             "the budget stops a runaway replacement"
         );
 
