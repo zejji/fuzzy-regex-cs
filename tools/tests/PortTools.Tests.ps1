@@ -102,6 +102,10 @@ Describe 'Test-Ratchet' {
 
         $other = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'needs:lookbehind - not implemented' }
         (Test-Ratchet -Results @($other) -BaselinePassing @($id)).IsGreen | Should -BeFalse
+
+        # A reason that only starts the same way is some other skip.
+        $prefix = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'Debug-only work counter: something else' }
+        (Test-Ratchet -Results @($prefix) -BaselinePassing @($id)).IsGreen | Should -BeFalse
     }
 
     It 'stays red on a missing test unless removals are explicitly accepted' {

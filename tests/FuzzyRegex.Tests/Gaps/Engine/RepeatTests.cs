@@ -289,15 +289,15 @@ public sealed class RepeatTests
         // quadratic walk is about n^2, and the bound stops it there. The timeout is left for Release.
         string subject = string.Concat(Enumerable.Repeat("abc", 80000)) + "de";
         var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
-        Match? m = null;
-
         EngineWork.ShouldWalkAtMostCharacters(
-            () => m = pattern.MatchAtStart(subject),
+            () =>
+            {
+                Match m = pattern.MatchAtStart(subject);
+                (m.Index + m.Length).Should().Be(240001);
+            },
             4L * subject.Length,
             "a linear scan walks each character a few times"
         );
-
-        (m!.Index + m.Length).Should().Be(240001);
     }
 
     [Test]
@@ -316,15 +316,15 @@ public sealed class RepeatTests
         // Counted as in the test above: 8,730,005 characters walked (Debug, 2026-09-28), which is
         // the index's stride of 32 at most per conversion, against 3n^2 without it.
         var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
-        Match? m = null;
-
         EngineWork.ShouldWalkAtMostCharacters(
-            () => m = pattern.MatchAtStart(subject),
+            () =>
+            {
+                Match m = pattern.MatchAtStart(subject);
+                (m.Index + m.Length).Should().Be(240002);
+            },
             200L * subject.Length,
             "the index bounds each conversion's walk"
         );
-
-        (m!.Index + m.Length).Should().Be(240002);
     }
 
     /// <summary>

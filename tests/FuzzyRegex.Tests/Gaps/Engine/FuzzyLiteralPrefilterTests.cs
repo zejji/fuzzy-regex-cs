@@ -211,15 +211,11 @@ public sealed class FuzzyLiteralPrefilterTests
         // steps at all (Debug, 2026-09-28), and without it every position is a fuzzy attempt.
         var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}", FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
-        int count = -1;
-
         EngineWork.ShouldTakeAtMostSteps(
-            () => count = regex.Matches(subject).Count,
+            () => regex.Matches(subject).Count.Should().Be(0),
             100_000,
             "the filter, not the matcher, rules out the positions"
         );
-
-        count.Should().Be(0);
     }
 
     [Test]
@@ -511,12 +507,11 @@ public sealed class FuzzyLiteralPrefilterTests
         // the rest of the subject on every step, about n^2 / 27.
         string subject = string.Concat(Enumerable.Repeat(unit, 100_000 / unit.Length));
         var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
-        int count = 0;
-
-        long searched = EngineWork.CharactersSearchedBy(() => count = regex.Matches(subject).Count);
-
-        count.Should().Be(subject.Length / unit.Length);
-        searched.Should().BeLessThanOrEqualTo(20L * subject.Length, "each stretch is searched once per scan");
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
     }
 
     [Test]
@@ -536,12 +531,11 @@ public sealed class FuzzyLiteralPrefilterTests
             FuzzyRegexOptions.None,
             EngineWork.HangGuard
         );
-        int count = 0;
-
-        long searched = EngineWork.CharactersSearchedBy(() => count = regex.Matches(subject).Count);
-
-        count.Should().Be(subject.Length / unit.Length);
-        searched.Should().BeLessThanOrEqualTo(20L * subject.Length, "each stretch is searched once per scan");
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
     }
 
     [Test]

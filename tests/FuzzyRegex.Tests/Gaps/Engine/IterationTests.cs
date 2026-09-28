@@ -36,25 +36,26 @@ public sealed class IterationTests
         string subject = string.Concat(Enumerable.Repeat("ab ", matches));
         var pattern = new FuzzyRegex(@"\w+", FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        long states = 0;
         EngineWork.ShouldTakeAtMostSteps(
             () =>
                 EngineWork.ShouldWalkAtMostCharacters(
                     () =>
-                        states = EngineWork.StatesInitialisedBy(() =>
-                        {
-                            pattern.Count(subject).Should().Be(matches);
-                            pattern.Matches(subject).Count.Should().Be(matches);
-                            pattern.Split(subject).Should().HaveCount(matches + 1);
-                        }),
+                        EngineWork.ShouldInitialiseStates(
+                            () =>
+                            {
+                                pattern.Count(subject).Should().Be(matches);
+                                pattern.Matches(subject).Count.Should().Be(matches);
+                                pattern.Split(subject).Should().HaveCount(matches + 1);
+                            },
+                            3,
+                            "one state for each of the three scans, not one for each match"
+                        ),
                     6L * subject.Length,
                     "a scan walks each character a few times, not once per match"
                 ),
             6L * subject.Length,
             "a scan's matching loops run a few steps per character, not a pass per match"
         );
-
-        states.Should().Be(3, "one state for each of the three scans, not one for each match");
     }
 
     [Test]

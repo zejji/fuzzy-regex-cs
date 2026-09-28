@@ -158,20 +158,17 @@ public sealed class LazyEnumerationTests
         // And the lazy call's cost is counted in engine steps rather than timed, because a busy
         // machine is not a slow engine (D13): 36 steps for the two matches (Debug, 2026-09-28),
         // where the cliff is about 2^26.
-        List<int> first = [];
         EngineWork.ShouldTakeAtMostSteps(
             () =>
-                first = [
-                    .. pattern
-                        .EnumerateMatches(_twoMatchesThenACliff, timeout: budget)
-                        .Take(2)
-                        .Select(static m => m.Index),
-                ],
+                pattern
+                    .EnumerateMatches(_twoMatchesThenACliff, timeout: budget)
+                    .Take(2)
+                    .Select(static m => m.Index)
+                    .Should()
+                    .Equal(0, 2),
             10_000,
             "two matches at the front of the subject are not the cliff"
         );
-
-        first.Should().Equal(0, 2);
     }
 
     [Test]

@@ -166,6 +166,9 @@ function Get-SliceFailureReason {
     return $null
 }
 
+# EngineWork.DebugOnly in tests/FuzzyRegex.Tests/EngineWork.cs, character for character.
+$script:DebugOnlySkipReason = 'Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here'
+
 function Test-DebugOnlySkip {
     <#
     .SYNOPSIS
@@ -173,8 +176,8 @@ function Test-DebugOnlySkip {
 
     .DESCRIPTION
         The WorkCounter bounds (D13) exist in a Debug build only, and in Release those tests skip
-        themselves rather than pass for nothing. The reason's opening words are the constant
-        EngineWork.DebugOnly in tests/FuzzyRegex.Tests/EngineWork.cs. CI runs the same tests in
+        themselves rather than pass for nothing. Only the exact reason EngineWork.DebugOnly
+        (tests/FuzzyRegex.Tests/EngineWork.cs) is accepted. CI runs the same tests in
         Debug by category, so the Release ratchet does not count the skip as a regression.
     #>
     param([Parameter(Mandatory)][object]$Result)
@@ -182,7 +185,7 @@ function Test-DebugOnlySkip {
     $reason = $Result.PSObject.Properties['SkipReason']
     if ($Result.Outcome -ne 'Skipped' -or $null -eq $reason) { return $false }
 
-    "$($reason.Value)".StartsWith('Debug-only work counter:', [System.StringComparison]::Ordinal)
+    [string]::Equals("$($reason.Value)", $script:DebugOnlySkipReason, [System.StringComparison]::Ordinal)
 }
 
 function Test-Ratchet {

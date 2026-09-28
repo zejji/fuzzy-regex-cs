@@ -325,14 +325,14 @@ public sealed class DemoEngineContractTests
         // the machine: thirty 'a's are about 2^30 steps, which no machine takes in a millisecond,
         // and a millisecond of steps is a few thousand here, so a machine would have to be
         // thousands of times faster to reach the bound. A walk that ignored the budget stops at it.
-        string answer = "";
         EngineWork.ShouldTakeAtMostSteps(
-            () => answer = DemoEngine.Run(@"(a|a)*\1\b\B", "", new string('a', 30), "", "", "", _oneMillisecond),
+            static () =>
+                Error(DemoEngine.Run(@"(a|a)*\1\b\B", "", new string('a', 30), "", "", "", _oneMillisecond))
+                    .Should()
+                    .Contain("timed out"),
             20_000_000,
             "the budget stops a runaway"
         );
-
-        Error(answer).Should().Contain("timed out");
     }
 
     /// <summary>
@@ -883,14 +883,14 @@ public sealed class DemoEngineContractTests
         // subject's whole replacement pass took 1.1 s in Release, inside the two-second budget.
         // Bounded in engine steps with a one-millisecond budget, for the reasons the runaway test
         // gives, where until 2026-09-28 it was bounded at six seconds (D13).
-        string answer = "";
         EngineWork.ShouldTakeAtMostSteps(
-            () => answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "", _oneMillisecond),
+            () =>
+                Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "", _oneMillisecond))
+                    .Should()
+                    .Contain("timed out"),
             20_000_000,
             "the budget stops a runaway replacement"
         );
-
-        Error(answer).Should().Contain("timed out");
     }
 
     /// <summary>
