@@ -31,7 +31,7 @@ such test is a mistake: reopen it.
 | D13 | Timing tests depend on machine speed (TIMEOUT_SHAPES, demo checks, AOT smoke, FailedCallMemoTests) | FailedCallMemoTests went red under load on 2026-09-28 | none |
 | D14 | Performance: FuzzyLiteralFilter searches an absent ASCII piece to the end of the subject on every Matches step, so the search is quadratic | found by D6's builder | none |
 | D17 | An empty iteration that flips a tested group between two spans at one position counts as progress for ever: upstream's rule has no cycle check (found by D12's survey). Needs a per-run record of group states, like the fuzzy repeat memo | `^(?:(?=(?P=g)b)(?=(?P<g>ab))\|(?=(?P<g>a)))*$` over 'ab': 1 GB stack exhausted vs None (upstream: MemoryError) | main |
-| D18 | Partial matching checks each undetermined decision at the text's edge on its own, so contradictory assertions at one position give a phantom partial (D11's limit 1; SHORTCUT in D11) | `a\B` over 'a' search: P(1,1) vs None | none yet (after D11) |
+| D18 | Partial matching checks each undetermined decision at the text's edge on its own, so contradictory assertions at one position give a phantom partial (D11's limit 1; SHORTCUT in D11) | `a\b\B` over 'a' search: P(1,1) vs None | none yet (after D11) |
 | D19 | Partial matching presumes the rest of the pattern can match once a character is taken past the edge (D11's limit 2; upstream issue 367). Decidable without backreferences (regular-language emptiness); research the backreference case | `(?:a\B)+` fullmatch 'a': partial vs None | none yet |
 
 ## In progress
