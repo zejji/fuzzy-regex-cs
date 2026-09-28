@@ -9,7 +9,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// <remarks>
 /// <para>
 /// On its own, <c>(?fi)ß</c> compiles to a choice between the character and its folding
-/// (<c>Character._compile</c>, <c>upstream/regex/_regex_core.py:2628-2631</c>), so one substitution
+/// (<c>Character._compile</c>, <c>upstream/regex/_regex_core.py:2629-2632</c>), so one substitution
 /// can replace the whole <c>ß</c>: <c>(?fi)(?:ß){s&lt;=1}</c> over <c>a</c> is (0, 1) upstream.
 /// Next to another literal, <c>Sequence.pack_characters</c> packs both into one <c>STRING_FLD</c>
 /// item holding only the folding, <c>ssx</c>, whose edits are one folded letter each. Replacing the

@@ -2409,8 +2409,11 @@ internal class String : RegexBase
             code[3 + i] = (uint)FoldedCharacters[i];
         }
 
-        // NOT UPSTREAM: see CharacterReading.
-        if (fuzzy && !Required && !UpstreamFoldingOnly && CharacterReading() is { } characters)
+        // NOT UPSTREAM: see CharacterReading. A fuzzy run is never the required string, which the
+        // Branch below would hide from the engine: Fuzzy inherits RegexBase.GetRequiredString, which
+        // offers none, so nothing inside a fuzzy section is ever marked.
+        System.Diagnostics.Debug.Assert(!fuzzy || !Required, "A fuzzy run was marked as the required string.");
+        if (fuzzy && !UpstreamFoldingOnly && CharacterReading() is { } characters)
         {
             return new Branch([new PrecompiledCode(code), characters]).Compile(reverse, fuzzy);
         }
@@ -2425,7 +2428,7 @@ internal class String : RegexBase
     /// <remarks>
     /// <para>
     /// On its own an expanding character compiles to a choice between itself and its folding
-    /// (<see cref="Character"/>, upstream <c>_regex_core.py:2628-2631</c>), so a fuzzy section can
+    /// (<see cref="Character"/>, upstream <c>_regex_core.py:2629-2632</c>), so a fuzzy section can
     /// replace the whole <c>ß</c> with one substitution. Packed into a run, it survives only as its
     /// folding, whose edits are one folded letter each: <c>(?fi)(?:ßx){s&lt;=1}</c> over <c>ax</c>
     /// needs a substitution and a deletion for the <c>ß</c> and finds nothing, although
@@ -2439,6 +2442,12 @@ internal class String : RegexBase
     /// letter and the expanding character next to it: <c>(?fi)sß</c> matches <c>ßs</c>. Every
     /// exact match of this reading is an exact match of the packed run, so it only adds fuzzy
     /// matches. An exact section, and a run with nothing that expands, compile as upstream's.
+    /// </para>
+    /// <para>
+    /// It costs the fuzzy full-folded paths that hold an expanding character 10-30% (a search of
+    /// 200,000 characters, medians of 11 against 5e0a2cd, 2026-09-28), which is the new search
+    /// space itself; with one expanding character the reading holds it bare, since its folding is
+    /// the packed run. Every other path compiles as before and pays nothing.
     /// </para>
     /// </remarks>
     /// <returns>The reading, or <see langword="null"/> when the run needs none.</returns>

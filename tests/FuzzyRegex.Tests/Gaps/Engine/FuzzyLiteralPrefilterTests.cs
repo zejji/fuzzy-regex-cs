@@ -225,6 +225,7 @@ public sealed class FuzzyLiteralPrefilterTests
     [Test]
     [Property("Upstream", "none - gap test")]
     [Arguments("(?:café au lait){e<=1}")] // a literal that is not ASCII
+    [Arguments("(?i)(?:oak strass😀){e<=1}")] // a lone character outside the BMP is two code units
     [Arguments("(?:abcdef){e<=3}")] // pieces too short to be worth searching for
     [Arguments("(?:abcdefghijkl){i}")] // no bound on the errors at all
     [Arguments("(?:abcdefghijkl){2i+0d<=4}")] // a free deletion leaves the budget unbounded

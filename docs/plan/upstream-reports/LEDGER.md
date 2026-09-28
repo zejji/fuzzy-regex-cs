@@ -4759,3 +4759,57 @@ insertion only moves away from the anchor - so a fuzzy `\G` means what an exact 
 `src/FuzzyRegex/Engine/Matcher.cs`. Pinned by the seven `\G` cases in
 `Gaps/Engine/FuzzyMatchingTests`; the oracle entry `fuzzy-search-anchor-backtracked` classifies
 rows where upstream raises this error and this port answers.
+
+## 49. A fuzzy run that holds `ß` or a ligature cannot edit it as one character, although a lone one can - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found as open-defect queue item 17
+(`(?fi)(?:ß){s<=1}` over 'a' matches, `(?fi)(?:ßx){s<=1}` over 'ax' does not). Draft report:
+`entry-49-full-fold-run-expanding-character.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?fi)(?:ß){s<=1}', 'a')      -> (0, 1), one substitution     (the control)
+search(r'(?fi)(?:ß){s<=1}x', 'ax')    -> (0, 2), one substitution     (the control)
+search(r'(?fi)(?:ßx){s<=1}', 'ax')    -> None                         expected (0, 2), one substitution
+search(r'(?fi)(?:ßx){d<=1}', 'x')     -> None                         expected (0, 1), one deletion
+search(r'(?fi)(?:ßx){s<=1}', 'sx')    -> None                         expected (0, 2), one substitution
+search(r'(?fi)(?:ﬁx){s<=1}', 'ax')    -> None                         expected (0, 2), one substitution
+search(r'(?bfi)(?:ßx){e<=2}', 'ax')   -> (0, 2), counts (1, 0, 1)     expected counts (1, 0, 0)
+search(r'(?fi)(?:ßßx){s<=1}', 'ssax') -> None                         expected (0, 4), one substitution
+```
+
+**Why upstream is wrong.** On its own, a character that expands under full case folding compiles
+to a choice between the character and its folding: `Character._compile` builds
+`Branch([CHARACTER ß, String('ss')])` (`upstream/regex/_regex_core.py:2629-2632`). A fuzzy section
+can therefore replace the whole `ß` with one substitution. Next to another literal,
+`Sequence.pack_characters` (`:3525`) packs both into one `String`, which compiles to `STRING_FLD`
+holding only the folded characters `ssx` (`:4017-4025`, `:4041-4048`). Each fuzzy edit there is one
+folded letter, so replacing the `ß` needs a substitution and a deletion. A fuzzy section that covers
+more of the pattern allows every error placement a narrower one does, so `(?:ßx){s<=1}` cannot match
+less than `(?:ß){s<=1}x`; upstream's answer depends on whether the `ß` happened to be packed.
+Upstream's own chunking shows the same split: `(?fi)(?:xß){s<=1}` over 'xa' matches, because
+`_fix_full_casefold`'s drifted offsets leave that `ß` as a lone character.
+
+No second engine is fuzzy. PCRE2 10.47, Python `re`, .NET 10 and JavaScript do not fold `ß` to `ss`
+at all; Perl 5.42.3 does, and agrees that `ß`, `ßx` and `sß` match `ss`, `ssx` and `ßs` exactly
+(measured 2026-09-28). The expected values rest on the argument above.
+
+**Proposed fix upstream:** in a fuzzy section, compile a full-folded `String` holding an expanding
+character as `Branch([String, Sequence of its characters])`, the lone character's own choice
+extended to the run.
+
+**This port.** `String.CharacterReading` (`src/FuzzyRegex/Parsing/Nodes.cs`) adds that
+character-by-character reading as a second alternative when the run is fuzzy; the packed run stays
+first, so every exact match and every match upstream already finds through the folding is
+unchanged. The fuzzy literal prefilter accepts the reading's lone `CHARACTER_IGN ß`
+(`FuzzyLiteralFilter.TheSearchSeesAsTheEngineDoes`). Pinned by
+`Gaps/Engine/FullFoldFuzzyCharacterEditTests`; the oracle entry
+`full-fold-run-edits-an-expanding-character-whole` classifies rows by switching the reading off
+(`Info.UpstreamFoldedRuns`).
+
+**Not covered, and open:** the subject-side twin. `(?fi)(?:ssx){s<=1}` over 'ǰsx' is None in both
+engines, although `(?fi)(?:s){s<=1}sx` matches it: a `STRING_FLD` substitution consumes one folded
+character of the subject, and U+01F0 folds to two. That is a matcher change, recorded as the
+explicit red test `OpenDefectTests.A_substituted_expanding_subject_character_costs_one_edit_in_a_folded_run`.

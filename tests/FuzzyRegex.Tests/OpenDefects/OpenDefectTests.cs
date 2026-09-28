@@ -35,6 +35,25 @@ public sealed class OpenDefectTests
         new FuzzyRegex("(?:(?:b?)*){d<=1}").FullMatch("a").Success.Should().BeFalse();
     }
 
+    // Found 2026-09-28 beside ledger entry 49, the subject-side twin of that fix. U+01F0 folds to
+    // two characters, j and U+030C, and a STRING_FLD substitution consumes one folded character of
+    // the subject, so replacing the first pattern letter with it costs two edits. The same
+    // substitution in a section that covers only that letter is one: `(?fi)(?:s){s<=1}sx` over
+    // 'ǰsx' and `(?fi)s(?:s){s<=1}x` over 'sǰx' are (0, 3) with counts (1, 0, 0) in both engines,
+    // and a wider section cannot match less. Upstream: None for both rows below (regex 2026.9.10,
+    // 2026-09-28).
+    [Test]
+    [Arguments("ǰsx")]
+    [Arguments("sǰx")]
+    public void A_substituted_expanding_subject_character_costs_one_edit_in_a_folded_run(string text)
+    {
+        Match m = new FuzzyRegex("(?fi)(?:ssx){s<=1}").Match(text);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
     // Queue item 7 (S3-F2). One inserted 'x' after the 'b' puts the lookahead in front of the 'c',
     // so the first match is (0, 2) with one insertion. Upstream: None (it never tries an insertion
     // before a failing lookaround).

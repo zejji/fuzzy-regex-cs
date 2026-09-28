@@ -7053,7 +7053,7 @@ internal static class ExpectedDivergences
                 + "fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as a deliberate "
                 + "divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM DEFECT: a lone `(?fi)ß` compiles to a choice between the character and "
-                + "its folding `ss` (`_regex_core.py:2628-2631`), so `(?fi)(?:ß){s<=1}` over 'a' is "
+                + "its folding `ss` (`_regex_core.py:2629-2632`), so `(?fi)(?:ß){s<=1}` over 'a' is "
                 + "(0, 1) with one substitution. `Sequence.pack_characters` packs `ßx` into one "
                 + "STRING_FLD item holding only the folding `ssx`, whose edits are one folded letter "
                 + "each, so `(?fi)(?:ßx){s<=1}` over 'ax' needs a substitution and a deletion and "
