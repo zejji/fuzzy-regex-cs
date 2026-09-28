@@ -4886,5 +4886,57 @@ unchanged. The fuzzy literal prefilter accepts the reading's lone `CHARACTER_IGN
 
 **Not covered, and open:** the subject-side twin. `(?fi)(?:ssx){s<=1}` over 'ǰsx' is None in both
 engines, although `(?fi)(?:s){s<=1}sx` matches it: a `STRING_FLD` substitution consumes one folded
-character of the subject, and U+01F0 folds to two. That is a matcher change, recorded as the
-explicit red test `OpenDefectTests.A_substituted_expanding_subject_character_costs_one_edit_in_a_folded_run`.
+character of the subject, and U+01F0 folds to two. That is a matcher change, fixed as ledger entry 52.
+
+## 52. A fuzzy full-folded run cannot edit a subject character that expands under folding as one character - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found beside ledger entry 49 as its subject-side twin
+(known defect D7). Draft report: `entry-52-full-fold-run-expanding-subject-character.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?fi)(?:s){s<=1}sx', 'ǰsx')     -> (0, 3), one substitution     (the control)
+search(r'(?fi)(?:ssx){s<=1}', 'asx')     -> (0, 3), one substitution     (the control)
+search(r'(?fi)(?:ssx){s<=1}', 'ǰsx')     -> None                         expected (0, 3), one substitution
+search(r'(?fi)(?:ssx){s<=1}', 'sǰx')     -> None                         expected (0, 3), one substitution
+search(r'(?rfi)(?:ssx){s<=1}', 'ǰsx')    -> None                         expected (0, 3), one substitution
+fullmatch(r'(?fi)(?:fst){i<=1}', 'fßst') -> None                         expected (0, 4), one insertion
+fullmatch(r'(?fi)(?:fst){s<=1}', 'fßt')  -> None                         expected (0, 3), one substitution
+```
+
+**Why upstream is wrong.** A fuzzy edit applies to one subject character. `STRING_FLD` compares the
+pattern with each subject character's full case folding, and `next_fuzzy_match_string_fld`
+(`upstream/src/_regex.c:10580-10633`) moves one folded character per edit. U+01F0 folds to j and
+U+030C, so replacing a pattern letter with it inside a run costs two edits. Where the section covers
+only that letter, the letter is its own item and the substitution is one edit, as it is for any
+character that does not expand ('asx'). A fuzzy section that covers more of the pattern allows every
+error placement the narrower one does, so it cannot match less. This is ledger entry 49 seen from the
+subject: there a pattern `ß` could not be edited whole, here a subject one cannot.
+
+Upstream's folded-character edits are kept, as entry 49 kept them on the pattern side, so no match
+upstream finds is lost. No other engine is fuzzy, so the expected values rest on the argument
+above. İ is the one class upstream already answers, by another route: its
+default tables fold İ to a lone i (the Turkic rows this port leaves out, `docs/DIVERGENCES.md`).
+
+**Proposed fix upstream:** at the start of a subject character's folding, when it is longer than one
+character, also try a substitution and an insertion of the whole character, after the three existing
+kinds; and leave a backtrack point when the first folded character matched, so that matching half of
+the character does not rule out editing all of it.
+
+**This port.** `Matcher.FoldWholeSub` and `FoldWholeIns` are two extra error kinds in the
+`STRING_FLD` frame, tried after upstream's three, only at the start of a folding longer than one
+character; `Matcher.OfferWholeFoldedCharEdit` leaves the backtrack point after an exact comparison
+there. Each is counted and recorded as a substitution or an insertion. The fuzzy literal prefilter
+needs no change: a whole-character edit damages one piece at most, and a differential over 55,080
+filtered searches, 10,320 of them answered differently by the new edits, found no answer the filter
+changes. Pinned by `Gaps/Engine/FullFoldFuzzySubjectCharacterEditTests` and
+`FuzzyLiteralPrefilterTests.An_expanding_subject_character_edited_whole_is_found_through_the_filter`;
+the oracle entry `full-fold-run-edits-an-expanding-subject-character-whole` classifies rows by
+switching the edits off (`PatternObject.SkipWholeFoldedCharEdits`).
+
+**Not covered, and open:** `REF_GROUP_FLD`, a full-folded backreference, edits its subject the same
+way (`next_fuzzy_match_group_fld`, `upstream/src/_regex.c:10824`) and was not changed here:
+`fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')` is None in both engines, while 'ssxas' is (0, 5) with
+one substitution (measured 2026-09-28).

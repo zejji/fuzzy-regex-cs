@@ -722,6 +722,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
+            // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
+            "PatternObject.SkipWholeFoldedCharEdits",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

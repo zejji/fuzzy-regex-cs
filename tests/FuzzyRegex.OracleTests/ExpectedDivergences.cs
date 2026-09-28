@@ -3097,9 +3097,11 @@ internal static class ExpectedDivergences
     /// <summary>
     /// The rows of <c>full-fold-run-edits-an-expanding-character-whole</c>. Rows 1 to 5 are
     /// hand-minimised, recorded by <c>python tools/record-oracle.py --rows
-    /// tools/probes/fi-sharp-s/rows.jsonl</c> on 2026-09-28. Rows 6 to 10 are seed 7 row 6587, seed
-    /// 4242 rows 6047, 6106 and 6392, and seed 20260922 row 6080, which
+    /// tools/probes/fi-sharp-s/rows.jsonl</c> on 2026-09-28. Rows 6 to 9 are seed 7 row 6587, seed
+    /// 4242 rows 6047 and 6106, and seed 20260922 row 6080, which
     /// <c>full-fold-fuzzy-deletion</c> held until then and which the entry's second arm now claims.
+    /// Seed 4242 row 6392 was here too until ledger entry 52's whole-character edits changed what
+    /// this entry's ablations answer; it is in <see cref="_subjectFoldRows"/>.
     /// </summary>
     private const string _fullFoldRunRows = """
         {"generator": "rows", "pattern": "(?fi)(?:\u00dfx){s<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -3110,8 +3112,26 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?fi)(?r)\\B(?:ﬀo[ab]){d<=1}", "flags": 0, "namedLists": {}, "subject": "xßFOA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?straße){d<=2}", "flags": 0, "namedLists": {}, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": []}}
         {"generator": "rows", "pattern": "(?fi)(?:ﬀo(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "namedLists": {}, "subject": "FaFOBAaQb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?fi)\\b(?:ﬀo(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "ßFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ßFOz", "count": 0}}
         {"generator": "rows", "pattern": "(?fi)(?:ﬆx😀𝟮){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": " 0t😀𝟮", "operation": "split", "count": 1, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" 0t😀𝟮"]}}
+        """;
+
+    /// <summary>
+    /// The rows of <c>full-fold-run-edits-an-expanding-subject-character-whole</c>. Rows 1 to 7 are
+    /// recorded by <c>python tools/record-oracle.py --rows tools/probes/d7-subject-fold/rows.jsonl</c>
+    /// on 2026-09-28: four hand-minimised, then seed 7 rows 6112 and 7477 and seed 4242 row 6392 of
+    /// that day's waves. Row 8 is <c>full-fold-leftover-take-back</c>'s fifth row, which this port
+    /// answers as it did before; with the whole-character edits left on, S85's ablation stopped
+    /// reproducing upstream's answer, so the entry's third arm claims it.
+    /// </summary>
+    private const string _subjectFoldRows = """
+        {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "s\u01f0x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:fst){i<=1}", "flags": 0, "namedLists": {}, "subject": "f\u00dfst", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?fi)(?:\ufb00o\\p{L}){e<=2,s<=1}", "flags": 0, "namedLists": {}, "subject": "a\ufb06fO\ufb06", "operation": "split", "count": 2, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a\ufb06fO\ufb06"]}}
+        {"generator": "rows", "pattern": "(?e)(?fi)(?r)(?:(?:\\1)\ufb00oab){e<=3}(ff)", "flags": 0, "namedLists": {}, "subject": "\ufb00fxf\u00dfOaBbff", "operation": "subf", "template": "<>", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb00fxf\u00dfOaBbff", "count": 0}}
+        {"generator": "rows", "pattern": "(?fi)\\b(?:\ufb00o(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "\u00dfFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u00dfFOz", "count": 0}}
+        {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
         """;
 
     /// <summary>
@@ -3127,9 +3147,10 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
+    /// Seven of the eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s85-leftover-take-back-rows.jsonl</c> on
-    /// 2026-09-23.
+    /// 2026-09-23. The fifth, <c>(?fi)(?:xfff){i&lt;=1,d&lt;=2}</c> over 'ﬀﬃfi', moved to
+    /// <see cref="_subjectFoldRows"/> on 2026-09-28.
     /// </summary>
     /// <remarks>
     /// The staleness alarm only; the entry is keyed on an ablation. No wave row at the three
@@ -3143,7 +3164,6 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?rfi)(?:sss){d<=1}", "flags": 0, "namedLists": {}, "subject": "ßß", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
         {"generator": "rows", "pattern": "(?fi)(?:ff){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬃ", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}]}
         {"generator": "rows", "pattern": "(?fi)(?:fffx){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃ", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
         {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){d<=1}(s)", "flags": 0, "namedLists": {}, "subject": "ßs", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "fSﬄ", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
@@ -7102,6 +7122,41 @@ internal static class ExpectedDivergences
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamFoldedRuns(row))
                 || TheFoldedRunsAndTheEarlierFoldFixesExplainIt(row, ours)
         ),
+        new(
+            Id: "full-fold-run-edits-an-expanding-subject-character-whole",
+            Reason: "A SUBJECT CHARACTER THAT EXPANDS UNDER FULL CASE FOLDING CAN BE EDITED AS ONE "
+                + "CHARACTER INSIDE A FUZZY RUN HERE, AS IT CAN IN BOTH ENGINES WHERE THE SECTION COVERS "
+                + "ONLY THE PATTERN LETTER IT REPLACES. Ledger entry 52, the subject-side twin of ledger "
+                + "entry 49; fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a fuzzy STRING_FLD item compares the pattern with the subject "
+                + "character's folding and edits that folding one folded character at a time "
+                + "(`next_fuzzy_match_string_fld`, `_regex.c:10580-10633`). U+01F0 folds to j and "
+                + "U+030C, so replacing a pattern letter with it inside a run costs two edits: "
+                + "`(?fi)(?:ssx){s<=1}` over 'ǰsx' finds nothing, although `(?fi)(?:s){s<=1}sx` over the "
+                + "same text is (0, 3) with one substitution. A fuzzy section that covers more of the "
+                + "pattern allows every error placement the narrower one does, so it cannot match less. "
+                + "This port keeps upstream's folded-character edits and tries a substitution and an "
+                + "insertion of the whole subject character after them, at the start of its folding "
+                + "(`Matcher.FoldWholeSub`), so every answer upstream's edits reach first is unchanged.\n"
+                + "NO OTHER ENGINE IS FUZZY; the expected values rest on the argument above.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamSubjectFoldEdits`, which sets "
+                + "`PatternObject.SkipWholeFoldedCharEdits`, reproduces upstream's recorded answer "
+                + "exactly, AND this port's live answer is the one being judged. A second arm switches "
+                + "off ledger entry 49's character reading as well, and a third the four earlier "
+                + "full-fold fixes too, for rows those entries held until the whole-character edits "
+                + "changed what their ablations answer. Each of those arms also demands that the same "
+                + "ablation with the edits left on does NOT give upstream's answer, so it claims only "
+                + "rows the edits are part of. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FullFoldFuzzySubjectCharacterEditTests",
+            Example: _subjectFoldRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSubjectFoldEdits(row))
+                || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: false)
+                || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: true)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -7545,6 +7600,29 @@ internal static class ExpectedDivergences
             row,
             ours,
             OracleComparer.RunWithoutTheFoldFixes(row, withTheUpstreamFoldedRuns: true)
+        );
+
+    /// <summary>
+    /// Whether ledger entry 52's whole-character edits, switched off with ledger entry 49's
+    /// character reading and, if asked, the four earlier full-fold fixes, are the whole of the
+    /// difference between the two engines on a row, and the edits are part of it.
+    /// </summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="withoutTheEarlierFoldFixes">Whether to switch off S83, S84, S85 and the retried fold steps too.</param>
+    /// <returns><see langword="true"/> if the fixes together explain the divergence.</returns>
+    private static bool TheFoldReadingsTogetherExplainIt(
+        OracleRow row,
+        IOracleOutcome ours,
+        bool withoutTheEarlierFoldFixes
+    ) =>
+        OracleComparer.RunWithoutTheFoldReadings(row, withTheSubjectFoldEdits: true, withoutTheEarlierFoldFixes)
+            is { } editsOn
+        && OracleComparer.Compare(row, editsOn) != OracleVerdict.Agree
+        && OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithoutTheFoldReadings(row, withTheSubjectFoldEdits: false, withoutTheEarlierFoldFixes)
         );
 
     /// <summary>

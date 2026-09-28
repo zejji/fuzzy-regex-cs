@@ -417,6 +417,13 @@ internal sealed class PatternObject
     internal bool SkipLeftoverTakeBack;
 
     /// <summary>
+    /// Oracle-only: a fuzzy <c>STRING_FLD</c> item edits a subject character that expands under full
+    /// case folding one folded character at a time, as upstream does, and never whole (D7). Set only
+    /// by <c>OracleComparer</c>'s ablation; never by the library. See <c>Matcher.FoldWholeSub</c>.
+    /// </summary>
+    internal bool SkipWholeFoldedCharEdits;
+
+    /// <summary>
     /// Oracle-only: a <c>(*SKIP)</c> moves the slice the moment it runs, as upstream's
     /// <c>RE_OP_SKIP</c> does (<c>:14551-14555</c>), instead of when backtracking reaches it (ledger
     /// entry 45). Set only by <c>OracleComparer</c>'s ablation; never by the library.
