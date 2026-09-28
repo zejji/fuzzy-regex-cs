@@ -78,8 +78,12 @@ WAVES = REPO / ".scratch" / "control-waves"
 # time used to race this one on exactly the file it is mid-comparison against. consume() below
 # passes FUZZYREGEX_ORACLE_WAVE_PATH/REPORT_PATH so the consumer actually reads and writes here
 # instead of falling back to that shared default.
-LIVE_WAVE = REPO / "TestResults" / "oracle" / f"wave-{os.getpid()}.jsonl"
-REPORT = REPO / "TestResults" / "oracle" / f"report-{os.getpid()}.txt"
+# `-run-` rather than a bare PID: tools/run-oracle.ps1 archives its permanent evidence as
+# wave-<seed>.jsonl/report-<seed>.txt, no PID, and a PID that happens to equal an already-archived
+# seed used to overwrite that archive - then consume()'s own cleanup deleted it as scratch (D20/D21
+# repair round 2). A distinct infix keeps the two namespaces disjoint.
+LIVE_WAVE = REPO / "TestResults" / "oracle" / f"wave-run-{os.getpid()}.jsonl"
+REPORT = REPO / "TestResults" / "oracle" / f"report-run-{os.getpid()}.txt"
 # `expected` is optional so a report written before S33 added the accounted-for list still parses.
 # The columns between `expected` and `diverge` (timeout, resource, undefined, fault) are skipped:
 # they were added after this pattern was written and made every summary fail to parse.
@@ -239,40 +243,53 @@ def consume(wave: Path) -> tuple[str, str]:
     # run's answer - which is how an unformatted mutation gets recorded as a control that fired.
     REPORT.unlink(missing_ok=True)
 
-    # Bounded, because a mutation can make a row backtrack catastrophically rather than answer
-    # wrongly: S17-B ran for six minutes on a 1200-row wave that the honest engine answers in one
-    # second. An unbounded wait there looks exactly like a slow build.
-    # Redirected to a file rather than captured through a pipe. `dotnet test` spawns MSBuild nodes
-    # and a test host that inherit the handles, so on a timeout `subprocess.run` kills the direct
-    # child and then blocks for ever draining a pipe those grandchildren still hold open - which is
-    # how a 240-second bound sat there for six minutes without firing (measured 2026-09-01).
-    log = REPO / ".scratch" / "control-consume.log"
-    with open(log, "w", encoding="utf-8") as handle:
-        # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
-        # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
-        # later build can replace it (two such orphans on 2026-09-13, killed by hand).
-        env = os.environ | {
-            "FUZZYREGEX_ORACLE_WAVE_PATH": str(LIVE_WAVE),
-            "FUZZYREGEX_ORACLE_REPORT_PATH": str(REPORT),
-        }
-        proc = subprocess.Popen(
-            ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
-             "--configuration", "Debug"],
-            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT, env=env,
-            **({} if sys.platform == "win32" else {"start_new_session": True}),
-        )
-        try:
-            proc.wait(timeout=CONSUME_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            kill_tree(proc)
-            return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s (process tree killed)"
+    # The consumer also writes these two beside REPORT, named from REPORT's own filename
+    # (OracleWave.cs's ExpectedExamplesPath/ScreenCandidatesPath). Never read back here, so once
+    # this call returns they are pure debris; deleted in the finally below on every exit path,
+    # not only when the run goes GREEN (D20/D21 repair round 2).
+    candidates = REPORT.with_name(REPORT.stem + ".screen-candidates.txt")
+    examples = REPORT.with_name(REPORT.stem + ".expected-examples.jsonl")
 
-    if not REPORT.exists():
-        tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
-        return "NO REPORT", tail
+    try:
+        # Bounded, because a mutation can make a row backtrack catastrophically rather than answer
+        # wrongly: S17-B ran for six minutes on a 1200-row wave that the honest engine answers in one
+        # second. An unbounded wait there looks exactly like a slow build.
+        # Redirected to a file rather than captured through a pipe. `dotnet test` spawns MSBuild nodes
+        # and a test host that inherit the handles, so on a timeout `subprocess.run` kills the direct
+        # child and then blocks for ever draining a pipe those grandchildren still hold open - which is
+        # how a 240-second bound sat there for six minutes without firing (measured 2026-09-01).
+        log = REPO / ".scratch" / "control-consume.log"
+        with open(log, "w", encoding="utf-8") as handle:
+            # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
+            # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
+            # later build can replace it (two such orphans on 2026-09-13, killed by hand).
+            env = os.environ | {
+                "FUZZYREGEX_ORACLE_WAVE_PATH": str(LIVE_WAVE),
+                "FUZZYREGEX_ORACLE_REPORT_PATH": str(REPORT),
+            }
+            proc = subprocess.Popen(
+                ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
+                 "--configuration", "Debug"],
+                cwd=REPO, stdout=handle, stderr=subprocess.STDOUT, env=env,
+                **({} if sys.platform == "win32" else {"start_new_session": True}),
+            )
+            try:
+                proc.wait(timeout=CONSUME_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                kill_tree(proc)
+                return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s (process tree killed)"
 
-    first = REPORT.read_text(encoding="utf-8").splitlines()[0]
-    return first, ""
+        if not REPORT.exists():
+            tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
+            return "NO REPORT", tail
+
+        first = REPORT.read_text(encoding="utf-8").splitlines()[0]
+        return first, ""
+    finally:
+        LIVE_WAVE.unlink(missing_ok=True)
+        REPORT.unlink(missing_ok=True)
+        candidates.unlink(missing_ok=True)
+        examples.unlink(missing_ok=True)
 
 
 def main() -> int:

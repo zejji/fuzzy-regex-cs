@@ -282,7 +282,7 @@
     upstream-commit gate that stops the run when the known-defect registry is stale.
 
 .NOTES
-    The report, like the wave (see -WavePath), is per-run by default: TestResults/oracle/report-
+    The report, like the wave (see -WavePath), is per-run by default: TestResults/oracle/report-run-
     <pid>-<seed>.txt, read and written through FUZZYREGEX_ORACLE_REPORT_PATH. Two overlapping runs
     used to share TestResults/oracle/report.txt, so whichever consumer finished last silently
     overwrote the other's evidence before its own report-<seed>.txt archive copy was taken - found
@@ -363,12 +363,15 @@ foreach ($seed in $runs) {
     # wave THIS run is mid-comparison against. -WavePath overrides it explicitly. -SkipRecord with
     # no -WavePath falls back to the legacy fixed name, since nothing records there by default any
     # more and this path has to name a wave that already exists.
+    # `-run-` rather than a bare PID: the archives below this loop are named wave-<seed>.jsonl, no
+    # PID, and a PID that happens to equal an already-archived seed used to overwrite that archive -
+    # then the GREEN cleanup deleted it as scratch (D20/D21 repair round 2).
     $ownsWavePath = -not $WavePath
     $runWavePath =
         if ($WavePath) { $WavePath }
         elseif ($SkipRecord) { $legacyWavePath }
-        elseif ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/wave-$PID-$seed.jsonl" }
-        else { Join-Path $repoRoot "TestResults/oracle/wave-$PID.jsonl" }
+        elseif ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/wave-run-$PID-$seed.jsonl" }
+        else { Join-Path $repoRoot "TestResults/oracle/wave-run-$PID.jsonl" }
 
     # Read by tests/FuzzyRegex.OracleTests/OracleWave.cs's WavePath property; the consumer below
     # compares against this run's own file even while another run's consumer reads its own.
@@ -379,8 +382,8 @@ foreach ($seed in $runs) {
     # ScreenCandidatesPath is derived FROM ReportPath in OracleWave.cs, so setting this alone also
     # makes the MSan screen's candidate list per-run - see screen-undefined.py's --candidates below.
     $reportPath =
-        if ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/report-$PID-$seed.txt" }
-        else { Join-Path $repoRoot "TestResults/oracle/report-$PID.txt" }
+        if ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/report-run-$PID-$seed.txt" }
+        else { Join-Path $repoRoot "TestResults/oracle/report-run-$PID.txt" }
     $candidatesPath = Join-Path (Split-Path -Parent $reportPath) ((Split-Path -LeafBase $reportPath) + '.screen-candidates.txt')
     $env:FUZZYREGEX_ORACLE_REPORT_PATH = $reportPath
 

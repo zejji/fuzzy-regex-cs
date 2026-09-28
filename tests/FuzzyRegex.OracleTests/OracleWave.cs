@@ -41,10 +41,11 @@ internal static class OracleWave
     /// <summary>Where the recorder writes the wave and where this consumer reads it.</summary>
     /// <remarks>
     /// <c>FUZZYREGEX_ORACLE_WAVE_PATH</c> overrides the fixed default when set. <c>tools/run-oracle.ps1</c>
-    /// sets it to a per-run file (<c>TestResults/oracle/wave-&lt;pid&gt;-&lt;seed&gt;.jsonl</c>) so that a
-    /// second recording in the same worktree - an ad hoc <c>tools/record-oracle.py</c> run, or an
+    /// sets it to a per-run file (<c>TestResults/oracle/wave-run-&lt;pid&gt;-&lt;seed&gt;.jsonl</c>) so that
+    /// a second recording in the same worktree - an ad hoc <c>tools/record-oracle.py</c> run, or an
     /// overlapping <c>run-oracle.ps1</c> - cannot replace the wave this run is mid-comparison against
-    /// (D20, docs/KNOWN-DEFECTS.md).
+    /// (D20, docs/KNOWN-DEFECTS.md). The <c>-run-</c> infix keeps this scratch name out of the
+    /// <c>wave-&lt;seed&gt;.jsonl</c> archive namespace (D20/D21 repair round 2).
     /// </remarks>
     public static string WavePath { get; } =
         Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_WAVE_PATH") is { Length: > 0 } overridden
