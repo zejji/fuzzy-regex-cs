@@ -13,6 +13,12 @@ skips them. Run them with:
 
     dotnet run --project tests/FuzzyRegex.Tests -- --treenode-filter "/*/*/OpenDefectTests/*"
 
+A defect moves to Completed only when a test in the ratchet pins the fix. The fix branch moves
+the defect's red test out of `OpenDefectTests` into the normal suite. It adds a regression test
+for every repro and sibling case it touches, and proves each one fails without the fix. A pinned
+divergence is also pinned by its ExpectedDivergences entry and control. A Completed row with no
+such test is a mistake: reopen it.
+
 ## To do
 
 | # | Defect | Repro (port vs expected) | Red test |
