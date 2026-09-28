@@ -35,19 +35,6 @@ public sealed class OpenDefectTests
         new FuzzyRegex("(?:(?:b?)*){d<=1}").FullMatch("a").Success.Should().BeFalse();
     }
 
-    // Queue item 6 (checklist item 17). Upstream lets the fully folded 'ß' item be substituted by
-    // one character: `(?fi)(?:ß){s<=1}` over 'a' is (0, 1) with counts (1, 0, 0). The same
-    // substitution followed by an exact 'x' must then match 'ax'. Upstream: None.
-    [Test]
-    public void A_substituted_fully_folded_sharp_s_can_be_followed_by_more_pattern()
-    {
-        Match m = new FuzzyRegex("(?fi)(?:ßx){s<=1}").Match("ax");
-
-        m.Success.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-    }
-
     // Queue item 7 (S3-F2). One inserted 'x' after the 'b' puts the lookahead in front of the 'c',
     // so the first match is (0, 2) with one insertion. Upstream: None (it never tries an insertion
     // before a failing lookaround).

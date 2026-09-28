@@ -2336,6 +2336,12 @@ internal class String : RegexBase
     /// </summary>
     internal bool Required { get; set; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
+    /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamFoldingOnly { get; init; }
+
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
         [new Character(Characters[reverse ? Characters.Length - 1 : 0], caseFlags: CaseFlags)];
@@ -2403,7 +2409,91 @@ internal class String : RegexBase
             code[3 + i] = (uint)FoldedCharacters[i];
         }
 
+        // NOT UPSTREAM: see CharacterReading.
+        if (fuzzy && !Required && !UpstreamFoldingOnly && CharacterReading() is { } characters)
+        {
+            return new Branch([new PrecompiledCode(code), characters]).Compile(reverse, fuzzy);
+        }
+
         return [code];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 49): the same run read one pattern character at a time, for a
+    /// fuzzy full-case-folded run holding a character that expands on folding, such as <c>ß</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On its own an expanding character compiles to a choice between itself and its folding
+    /// (<see cref="Character"/>, upstream <c>_regex_core.py:2628-2631</c>), so a fuzzy section can
+    /// replace the whole <c>ß</c> with one substitution. Packed into a run, it survives only as its
+    /// folding, whose edits are one folded letter each: <c>(?fi)(?:ßx){s&lt;=1}</c> over <c>ax</c>
+    /// needs a substitution and a deletion for the <c>ß</c> and finds nothing, although
+    /// <c>(?fi)(?:ß){s&lt;=1}x</c> matches it. A wider fuzzy section can never match less.
+    /// </para>
+    /// <para>
+    /// So a fuzzy run gets this reading as a second alternative: each expanding character as a
+    /// <see cref="Character"/>, and each stretch of the others as a run of its own, so a subject
+    /// <c>ß</c> can still answer for two written letters. The packed run stays first and is emitted
+    /// exactly as before, because only it lets one subject character's folding span a written
+    /// letter and the expanding character next to it: <c>(?fi)sß</c> matches <c>ßs</c>. Every
+    /// exact match of this reading is an exact match of the packed run, so it only adds fuzzy
+    /// matches. An exact section, and a run with nothing that expands, compile as upstream's.
+    /// </para>
+    /// </remarks>
+    /// <returns>The reading, or <see langword="null"/> when the run needs none.</returns>
+    private Sequence? CharacterReading()
+    {
+        if ((CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase || Characters.Length < 2)
+        {
+            return null;
+        }
+
+        List<RegexBase> items = [];
+        List<int> others = [];
+        bool expands = false;
+
+        foreach (int c in Characters)
+        {
+            var character = new Character(c, caseFlags: CaseFlags);
+
+            if (character.Folded.Length > 1)
+            {
+                // Its Character compiles its folding as a String, which must not expand again or
+                // that String would take a reading of its own. Full folding is idempotent.
+                System.Diagnostics.Debug.Assert(
+                    Array.TrueForAll(character.Folded, f => new Character(f, caseFlags: CaseFlags).Folded.Length == 1),
+                    "A full case folding expands again."
+                );
+                expands = true;
+                FlushOthers();
+                items.Add(character);
+            }
+            else
+            {
+                others.Add(c);
+            }
+        }
+
+        if (!expands)
+        {
+            return null;
+        }
+
+        FlushOthers();
+
+        return new Sequence(items);
+
+        void FlushOthers()
+        {
+            if (others.Count > 0)
+            {
+                items.Add(
+                    others.Count == 1 ? new Character(others[0], caseFlags: CaseFlags) : new String(others, CaseFlags)
+                );
+                others.Clear();
+            }
+        }
     }
 }
 
@@ -2774,7 +2864,7 @@ internal sealed class Sequence : RegexBase
                 items.Add(
                     chars.Length == 1
                         ? new Character(chars[0], caseFlags: literal.CaseFlags)
-                        : new String(chars, literal.CaseFlags)
+                        : new String(chars, literal.CaseFlags) { UpstreamFoldingOnly = info.UpstreamFoldedRuns }
                 );
             }
         }

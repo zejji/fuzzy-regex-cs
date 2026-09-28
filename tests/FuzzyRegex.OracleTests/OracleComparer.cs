@@ -222,13 +222,19 @@ internal static class OracleComparer
     /// on the compile, because what ledger entry 43 changed is the code <c>\X</c> compiles to. Used
     /// by <see cref="RunWithTheUpstreamReverseGrapheme"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// Compile every fuzzy full-case-folded run to its folding alone, as upstream does (ledger entry
+    /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
+    /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
         TimeSpan timeout,
         bool lazy = false,
         Action<FuzzyRegex>? ablate = null,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -262,7 +268,8 @@ internal static class OracleComparer
                 // the public constructor a trailing int of its own and this row's version became a
                 // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion,
-                upstreamReverseGrapheme: upstreamReverseGrapheme
+                upstreamReverseGrapheme: upstreamReverseGrapheme,
+                upstreamFoldedRuns: upstreamFoldedRuns
             );
         }
         catch (NotImplementedException)
@@ -686,6 +693,61 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             upstreamReverseGrapheme: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with every fuzzy full-case-folded run compiled to its
+    /// folding alone, as upstream compiles it.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 49 gives such a run a second, character-by-character reading, so an expanding
+    /// character such as <c>ß</c> can be edited as one character, as it can on its own.
+    /// <c>upstreamFoldedRuns</c> drops that reading at compile time. The
+    /// <c>full-fold-run-edits-an-expanding-character-whole</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's compile, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamFoldedRuns(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            upstreamFoldedRuns: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the four earlier full-fold fixes switched off
+    /// together - S83's untouched foldings, S84's group leftovers, S85's leftover take-back and
+    /// the retried fold steps - and, if asked, ledger entry 49's character reading too.
+    /// </summary>
+    /// <remarks>
+    /// For the second arm of <c>full-fold-run-edits-an-expanding-character-whole</c>: rows those
+    /// fixes explained until the reading, left on, changed what their ablations answer.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withTheUpstreamFoldedRuns">Whether to drop the character reading as well.</param>
+    /// <returns>What this port answers so ablated, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheFoldFixes(OracleRow row, bool withTheUpstreamFoldedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.ChargeUntouchedFoldings = true;
+                compiled.PatternObject.SkipGroupFoldLeftovers = true;
+                compiled.PatternObject.SkipLeftoverTakeBack = true;
+                compiled.PatternObject.SkipRetriedFoldSteps = true;
+            },
+            upstreamFoldedRuns: withTheUpstreamFoldedRuns
         );
     }
 
