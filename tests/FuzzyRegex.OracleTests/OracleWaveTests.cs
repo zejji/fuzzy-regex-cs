@@ -580,9 +580,10 @@ public sealed class OracleWaveTests
     [Arguments("full-fold-leftover-take-back")]
     [Arguments("full-fold-fix-behind-an-innermost-count")]
     [Arguments("full-fold-run-edits-an-expanding-character-whole")]
+    [Arguments("full-fold-run-edits-an-expanding-subject-character-whole")]
     public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for(string id)
     {
-        // The control for the six full-fold entries (S83, S84, S85, S90, ledger 49), built the same way as the anchor
+        // The control for the seven full-fold entries (S83, S84, S85, S90, ledgers 49 and 52), built the same way as the anchor
         // pin's above: upstream's own answer is what this port gave before the fix, so accepting it
         // would classify a revert of the fix as the fix; and no match stands in for an unrelated
         // defect. Most of these rows' upstream answer IS no match, so for them the two cases

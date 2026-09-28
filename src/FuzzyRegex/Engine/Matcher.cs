@@ -5016,6 +5016,250 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (D7): a substitution of one whole subject character that expands under full case
+    /// folding, such as U+01F0, for one pattern character. A <c>STRING_FLD</c> error kind after
+    /// upstream's three; it is counted and recorded as <see cref="FuzzyValue.Sub"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>STRING_FLD</c> edits move through the subject character's folding one folded
+    /// character at a time (<c>upstream/src/_regex.c</c>:10580-10633), so replacing a pattern
+    /// letter with U+01F0, which folds to j and U+030C, costs two edits inside a run, although the
+    /// same substitution costs one where the run is split around it: <c>(?fi)(?:ssx){s&lt;=1}</c>
+    /// over 'ǰsx' finds nothing upstream while <c>(?fi)(?:s){s&lt;=1}sx</c> gives (0, 3). This
+    /// kind, and <see cref="FoldWholeIns"/>, edit the subject character whole. They are tried only
+    /// at the start of its folding, only when the folding is longer than one character (for one
+    /// character the folded-character edit is the same edit), and after upstream's three kinds in
+    /// the same frame. No match upstream finds is lost, but the mix of edits in the first answer
+    /// can change: the frame <see cref="OfferWholeFoldedCharEdit"/> leaves, and these kinds in any
+    /// frame, are tried before the alternatives of older frames, so <c>(?fi)(?:ss){e&lt;=3}</c>
+    /// fullmatched over 'jßsß' is (0, 4) with counts (1, 2, 0) here and (0, 3, 0) upstream. Keeping
+    /// upstream's first answer would mean running each failing attempt again with these kinds on
+    /// once upstream's alternatives were spent, about the cost of the attempt twice over (measured
+    /// below). The subject-side twin of ledger entry 49; see <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// <para>
+    /// The cost is measured, not argued, on a Release build (2026-09-28, medians of three
+    /// interleaved runs of 15, <c>Matches</c> over 160,000 characters). Over text where every sixth
+    /// character expands (ß, ﬁ, ǰ, ŉ, ﬆ), <c>(?fi)(?:strasse lane){e&lt;=1}</c> takes 50.5 ms
+    /// against 43.7 ms before (+16%), <c>{e&lt;=2}</c> 170.9 against 137.8 ms (+24%) and
+    /// <c>{s&lt;=1}</c> 25.4 against 21.6 ms (+17%): the extra time is the new, valid candidates
+    /// being searched. With these edits switched off the same searches take 45.5, 141.3 and
+    /// 21.4 ms, so running an attempt twice would cost about 96, 312 and 47 ms. Over ASCII text,
+    /// where no folding is longer than one character, the two fuzzy searches take 4.47 against
+    /// 4.27 ms and 30.7 against 28.8 ms, the same spread as an exact search this change does not
+    /// touch (8.66 against 8.34 ms). Denser text costs more: where 8 of every 11 characters
+    /// expand, <c>{e&lt;=2}</c> is 35% slower and <c>{s&lt;=1}</c> 19% (the blind review's
+    /// measurement, 2026-09-28).
+    /// </para>
+    /// </remarks>
+    internal const int FoldWholeSub = FuzzyValue.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): an insertion of one whole subject character that expands under full case
+    /// folding; counted and recorded as <see cref="FuzzyValue.Ins"/>. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    internal const int FoldWholeIns = FuzzyValue.Count + 1;
+
+    /// <summary>How many error kinds a <c>STRING_FLD</c> frame tries: upstream's three and D7's two.</summary>
+    internal const int FoldEditKinds = FuzzyValue.Count + 2;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): the error kind a <c>STRING_FLD</c> frame holds when the comparison at the
+    /// start of an expanding subject character's folding SUCCEEDED, so that backtracking into it
+    /// still tries the whole-character edits. No error was charged for it.
+    /// </summary>
+    /// <remarks>
+    /// Matching f against the first folded character of U+FB01 uses only half of that subject
+    /// character, and the rest must then be paid for one folded character at a time, so
+    /// <c>(?fi)(?:fst){s&lt;=1}</c> over 'ﬁst' could only charge the i as an insertion; with
+    /// insertions not allowed it failed, although substituting the ﬁ for the f is one edit.
+    /// </remarks>
+    internal const int FoldExactTaken = FoldEditKinds;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): <see cref="FoldExactTaken"/> for a frame whose whole-character
+    /// substitution is left out, because it would repeat an insertion upstream's own edits have
+    /// already tried. See <see cref="WholeSubstitutionRepeatsAFoldedInsertion"/>.
+    /// </summary>
+    internal const int FoldExactTakenInsOnly = FoldEditKinds + 1;
+
+    /// <summary>The error type a <c>STRING_FLD</c> error kind is counted and recorded as.</summary>
+    /// <param name="kind">An error kind, below <see cref="FoldEditKinds"/>.</param>
+    /// <returns>A <see cref="FuzzyValue"/> error type.</returns>
+    private static int FoldCountedAs(int kind) =>
+        kind switch
+        {
+            FoldWholeSub => FuzzyValue.Sub,
+            FoldWholeIns => FuzzyValue.Ins,
+            _ => kind,
+        };
+
+    /// <summary>
+    /// Whether the attempt stands at the start of a subject character's folding that is longer than
+    /// one character, where D7's whole-character edits apply. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    /// <remarks>
+    /// The start test is what keeps a whole-character edit from charging one edit for the rest of a
+    /// part-matched folding (<c>FullFoldFuzzySubjectCharacterEditTests</c>, 'ﬃi' and 'αᾷ'). The
+    /// length test only saves repeating upstream's own edits: for a one-character folding a
+    /// whole-character substitution or insertion lands where <see cref="FuzzyValue.Sub"/> and
+    /// <see cref="FuzzyValue.Ins"/> already land (<c>newPos = foldedPos + step</c>), so no answer
+    /// depends on it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole-character edit may be tried.</returns>
+    private static bool AtStartOfAnExpandingFolding(MatchState state, in FuzzyData data) =>
+        data.FoldedLen > 1
+        && (data.Step > 0 ? data.NewFoldedPos == 0 : data.NewFoldedPos == data.FoldedLen)
+        && !state.Pattern.SkipWholeFoldedCharEdits;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): leaves a <c>STRING_FLD</c> frame behind an exact comparison at the start of
+    /// an expanding subject character's folding, so that backtracking tries editing that character
+    /// whole. See <see cref="FoldExactTaken"/>.
+    /// </summary>
+    /// <remarks>
+    /// The frame has the layout <see cref="FuzzyMatchStringFld"/> pushes, with no change recorded or
+    /// counted, so <see cref="RetryFuzzyMatchStringFld"/> reads it like any other. Only a fuzzy
+    /// item reaches this, and only at a subject character whose folding is longer than one
+    /// character, so any other match pays one comparison per character.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedPos">Where in the folding the comparison is: its start.</param>
+    /// <param name="foldedLen">The length of the folding, more than one.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
+    /// <param name="folded">The subject character's folding.</param>
+    private static void OfferWholeFoldedCharEdit(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        int foldChangesStart,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        Debug.Assert(
+            foldedLen > 1 && foldedPos == (step > 0 ? 0 : foldedLen),
+            "only at the start of an expanding folding"
+        );
+
+        if (state.Pattern.SkipWholeFoldedCharEdits)
+        {
+            return;
+        }
+
+        // Backtracking restores the counts, so what is permitted now is what the retry will find:
+        // with neither kind permitted (deletions only, or the budget spent) the frame yields nothing.
+        bool sub = ThisErrorPermitted(state, FuzzyValue.Sub);
+        bool ins = ThisErrorPermitted(state, FuzzyValue.Ins);
+
+        if (!sub && !ins)
+        {
+            return;
+        }
+
+        byte kind =
+            sub && !(ins && WholeSubstitutionRepeatsAFoldedInsertion(state, node, step, stringPos, foldedLen, folded))
+                ? (byte)FoldExactTaken
+                : (byte)FoldExactTakenInsOnly;
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(kind);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// Whether substituting the whole subject character, after its first folded character matched,
+    /// would only repeat a state upstream's own edits have already tried and failed from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Take a two-character folding x1 x2 whose x1 matched the pattern character exactly, and a next
+    /// pattern character that x2 does not match. The comparison then fails at x2, and upstream's
+    /// edits there include inserting x2 (<see cref="NextFuzzyMatchStringFld"/>): the counts are the
+    /// ones this frame sees, so the insertion is permitted exactly when <paramref name="state"/>
+    /// permits one now, and <see cref="PermitInsertionInFold"/> allows it part way through a
+    /// folding. It ends the folding, one pattern character on, with one more insertion. The whole
+    /// substitution ends at the same subject and pattern positions with one more substitution.
+    /// That frame sits above this one, so by the time this one is retried every path from that
+    /// state has failed.
+    /// </para>
+    /// <para>
+    /// The two states differ only in which count holds the edit, so they reach the same answers
+    /// when nothing tells a substitution from an insertion: the section's minimums for both are
+    /// zero, neither kind's maximum is below the error maximum, both cost the same, and the section
+    /// is the pattern's only one (an enclosing section checks the sum against its own limits,
+    /// <c>END_FUZZY</c>). <c>BESTMATCH</c>, <c>ENHANCEMATCH</c> and <c>POSIX</c> keep looking after
+    /// a match, so they are left out too. The constraint's test sees the same subject character
+    /// either way.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedLen">The length of the folding.</param>
+    /// <param name="folded">The folding.</param>
+    /// <returns>Whether the whole substitution can be left out.</returns>
+    private static bool WholeSubstitutionRepeatsAFoldedInsertion(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedLen,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        if (foldedLen != 2)
+        {
+            return false;
+        }
+
+        int next = step > 0 ? stringPos + 1 : stringPos - 2;
+
+        if (next < 0 || next >= node.Values.Count)
+        {
+            return false;
+        }
+
+        if (SameCharIgn(node.Encoding, node.Values[next], step > 0 ? folded[1] : folded[0]))
+        {
+            return false;
+        }
+
+        PatternObject pattern = state.Pattern;
+
+        if (
+            pattern.FuzzyCount != 1
+            || (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) != 0
+        )
+        {
+            return false;
+        }
+
+        List<uint> values = state.FuzzyNode!.Values;
+
+        return values[FuzzyValue.MinSub] == 0
+            && values[FuzzyValue.MinIns] == 0
+            && values[FuzzyValue.MaxSub] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.MaxIns] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.CostBase + FuzzyValue.Sub] == values[FuzzyValue.CostBase + FuzzyValue.Ins];
+    }
+
+    /// <summary>
     /// Upstream <c>next_fuzzy_match_string_fld</c> (line 10580): one kind of error against a string
     /// whose subject side is being full-case-folded.
     /// </summary>
@@ -5031,7 +5275,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int NextFuzzyMatchStringFld(MatchState state, ref FuzzyData data)
     {
-        if (!ThisErrorPermitted(state, data.FuzzyType))
+        if (!ThisErrorPermitted(state, FoldCountedAs(data.FuzzyType)))
         {
             return MatchStatus.Failure;
         }
@@ -5094,6 +5338,45 @@ internal static class Matcher
                 }
 
                 return CheckFuzzyPartial(state, newPos);
+            case FoldWholeSub:
+                // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
+                // loop tries this kind only at the start of an expanding folding.
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                // The values run out at the start of a folding only in the leftovers loop under
+                // PatternObject.ChargeUntouchedFoldings, the oracle's upstream rule
+                // (FoldingIsPartUsed); there is no pattern character left to substitute.
+                if (data.ValuesRanOut)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+                data.NewStringPos += data.Step;
+
+                return MatchStatus.Success;
+            case FoldWholeIns:
+                // NOT UPSTREAM (D7): could the whole subject character have been inserted?
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                if (!data.PermitInsertion)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+
+                return MatchStatus.Success;
             default:
                 return MatchStatus.Failure;
         }
@@ -5258,7 +5541,11 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        // D7's two kinds only apply at the start of an expanding folding, which no kind that fails
+        // moves, so every other attempt stops after upstream's three.
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (data.FuzzyType = 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -5291,9 +5578,9 @@ internal static class Matcher
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
@@ -5325,8 +5612,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type */
 
         if (
@@ -5349,8 +5634,23 @@ internal static class Matcher
 
         int currFoldedPos = (int)poppedFoldedPos;
 
+        // NOT UPSTREAM (D7): a frame left by OfferWholeFoldedCharEdit charged nothing, and goes on
+        // to the whole-character kinds.
+        bool exactTaken = poppedType is FoldExactTaken or FoldExactTakenInsOnly;
+
+        if (!exactTaken)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FoldCountedAs(poppedType)];
+        }
+
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
+        data.FuzzyType = poppedType switch
+        {
+            FoldExactTaken => FoldWholeSub - 1,
+            FoldExactTakenInsOnly => FoldWholeIns - 1,
+            _ => poppedType,
+        };
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewStringPos = stringPos;
@@ -5358,13 +5658,13 @@ internal static class Matcher
         data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
-        --fuzzyCounts[data.FuzzyType];
-
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -5394,11 +5694,11 @@ internal static class Matcher
         state.Bstack.PushUInt8((byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
@@ -9747,6 +10047,21 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == 0 && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        1,
+                                        stringPos,
+                                        0,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
                                 ++stringPos;
                                 ++foldedPos;
 
@@ -10115,6 +10430,21 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == foldedLen && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        -1,
+                                        stringPos,
+                                        foldedLen,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
                                 --stringPos;
                                 --foldedPos;
 

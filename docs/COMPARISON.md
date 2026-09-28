@@ -1504,6 +1504,21 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){s<=1}").Match("ax").Length); // 
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){d<=1}").Match("x").Length);  // 1 - upstream: no match
 ```
 
+### A fuzzy run can edit an expanding subject character as one character
+
+The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a
+combining caron, and upstream edits a folding one folded character at a time, so replacing a letter
+of a run with `ǰ` costs two edits, although it costs one where the fuzzy section covers only that
+letter. This port also lets the run substitute or insert the whole subject character.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:s){s<=1}sx").Match("ǰsx").Length);  // 3 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ssx){s<=1}").Match("ǰsx").Length);  // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:fst){i<=1}").FullMatch("fßst").Length); // 4 - upstream: no match
+```
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

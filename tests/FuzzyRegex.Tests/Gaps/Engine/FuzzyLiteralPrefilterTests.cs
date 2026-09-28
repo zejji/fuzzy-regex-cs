@@ -241,6 +241,37 @@ public sealed class FuzzyLiteralPrefilterTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
+    // Ledger entry 52; the expected values are this port's, argued there. Upstream: None for all
+    // three, regex 2026.9.10, 2026-09-28. A subject character edited whole is one character, so it
+    // damages one piece at most, as any other edit does; the subject is not ASCII, so the filter
+    // stops at it. A differential over 55,080 such searches, 10,320 of them answered differently by
+    // the whole-character edits, found no answer the filter changes (2026-09-28).
+    // The whole ǰ substituted for an s.
+    [Arguments("(?fi)(?:strasse lane){e<=1}", "straǰse lane", "(0,12) 1,0,0")]
+    // The whole ǰ inserted.
+    [Arguments("(?fi)(?:strasse lane){i<=1}", "strasǰse lane", "(0,13) 0,1,0")]
+    // A match after an ASCII stretch the filter searched.
+    [Arguments("(?fi)(?:strasse lane){s<=1}", "xx sﬁrasse lane", "(3,15) 1,0,0")]
+    public void An_expanding_subject_character_edited_whole_is_found_through_the_filter(
+        string pattern,
+        string subject,
+        string expected
+    )
+    {
+        // The pattern that answers is the one whose filter was checked.
+        var regex = new FuzzyRegex(pattern);
+        regex.PatternObject.FuzzyLiteralFilter.Should().NotBeNull();
+
+        Match m = regex.Match(subject);
+
+        m.Success.Should().BeTrue();
+        $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts.Substitutions},{m.FuzzyCounts.Insertions},{m.FuzzyCounts.Deletions}"
+            .Should()
+            .Be(expected);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
     public void A_lone_character_an_ascii_letter_equals_ignoring_case_switches_the_filter_off()
     {
         // Full case folding cuts 'oak strassK' after its 'ss', so KELVIN SIGN is a CHARACTER_IGN node
