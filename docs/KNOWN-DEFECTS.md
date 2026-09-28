@@ -26,9 +26,7 @@ such test is a mistake: reopen it.
 | D4 | The call guard blocks finite left recursion again when the attempt has already reached the whole text (see D3's design doc, section 6b) | `.*z\|(?:\|(?R)a)` fullmatch 'aa': None vs (0,2) | none yet |
 | D5 | A conditional on a capture set inside a lookahead, with recursion, gives the wrong start (found in D3's design grids) | `.*z\|\1b\|(?(1)(?=(?<g>aa))\|(?=(?<g>a)))(?R)` search 'aab': (1,3) vs (0,3) | none yet |
 | D7 | Full-fold fuzzy, subject side: an expanding subject character inside a run can't be edited as one character (the twin of D6; needs a STRING_FLD matcher change) | `(?fi)(?:ssx){s<=1}` over 'ǰsx': None in both engines | main |
-| D9 | A section's minimum error count is met in the wrong order (F-D; upstream's END_FUZZY) | `(?:a){1<=e<=2}b` over 'aab': expected an insertion | main (3 rows) |
 | D10 | A group call inside a failed lookaround leaves a capture behind. It is the same root cause as the leak that forces C1's lookaround exclusion | `(a)(?:(?!.(?1))\|.)+?b` over 'aaab': group 1 [0,1][2,1] vs [0,1] | main |
-| D13 | Timing tests depend on machine speed (TIMEOUT_SHAPES, demo checks, AOT smoke, FailedCallMemoTests) | FailedCallMemoTests went red under load on 2026-09-28 | none |
 | D14 | Performance: FuzzyLiteralFilter searches an absent ASCII piece to the end of the subject on every Matches step, so the search is quadratic | found by D6's builder | none |
 | D17 | An empty iteration that flips a tested group between two spans at one position counts as progress for ever: upstream's rule has no cycle check (found by D12's survey). Needs a per-run record of group states, like the fuzzy repeat memo | `^(?:(?=(?P=g)b)(?=(?P<g>ab))\|(?=(?P<g>a)))*$` over 'ab': 1 GB stack exhausted vs None (upstream: MemoryError) | main |
 | D18 | Partial matching checks each undetermined decision at the text's edge on its own, so contradictory assertions at one position give a phantom partial (D11's limit 1; SHORTCUT in D11) | `a\b\B` over 'a' search: P(1,1) vs None | none yet (after D11) |
@@ -46,6 +44,8 @@ such test is a mistake: reopen it.
 | D11 | Phantom partial matches at a boundary (F2; includes S3-F1 and oracle cluster A). The biggest item; design first. Owner rulings: Q1 = B, Q2 = B | see the 2026-09-26 handover | design review round 1: 2 soundness defects (verbs as commit points; retried atomic path loses its mark) plus rule 10-12 gaps; revision running | `design/d11-partial-boundary` 775450a |
 | D15 | Test tooling: 21 `tools/controls.json` entries no longer find their code site, and `run-controls.py` crashes on a cp1252 console | found by R3732's builder | fixed on branch (117/117 controls resolve, 20 retargeted and fire); blind review next | `maint/d15-d16-tooling` 1c509db |
 | D16 | Test harness: `_generate_matrix` (`tools/record-oracle.py` ~6762) draws `(?b)`/`(?e)` with weighted-cost constraints, which the other generators avoid | matrix row 7:2677 | fixed on branch (26/3000 rows change, all b/e strips); blind review next; check why row 3732 went green | `maint/d15-d16-tooling` 0cb732e |
+| D9 | A section's minimum error count is met in the wrong order (F-D; upstream's END_FUZZY) | `(?:a){1<=e<=2}b` over 'aab': expected an insertion | build started | `maint/d9-minimum-errors` (on D8's branch) |
+| D13 | Timing tests depend on machine speed (TIMEOUT_SHAPES, demo checks, AOT smoke, FailedCallMemoTests) | FailedCallMemoTests went red under load on 2026-09-28 | build started | `maint/d13-timing-tests` |
 
 ## Completed
 
