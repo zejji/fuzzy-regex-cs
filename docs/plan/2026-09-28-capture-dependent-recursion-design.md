@@ -21,8 +21,8 @@ been deleted; section 8 says how to rebuild them.
   backreference reads only the captured *text*. The empty groups that `()` sets at positions 3 and
   7 are different spans but the same state as far as any reader can tell. Keying on what is
   actually read (option d, new) takes every review shape back to main's speed.
-- **(d) fixes every known capture-dependent wrong answer.** It matches upstream on the three red rows and on a new
-  witness where main gives a wrong span rather than None:
+- **(d) fixes every known capture-dependent wrong answer.** It matches upstream on the three red
+  rows and on a new witness where main gives a wrong span rather than None:
   `.*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)` over `aab` gives `(0,3)` upstream and in (d), but
   `(1,3)` on main. That witness also rules out keying on set-or-unset alone.
 - **(d) leaves one exponential class, and a failure memo closes it.** If a backreferenced group is
