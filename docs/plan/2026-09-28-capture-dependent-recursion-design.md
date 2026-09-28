@@ -10,8 +10,6 @@ read them as orders of magnitude. The first row of each run includes JIT (about 
 prototypes were built in `.scratch` copies (`git archive` of `src`), never in this tree, and have
 been deleted; section 8 says how to rebuild them.
 
-**WIP: the upstream columns of the grids (section 6) are still running.**
-
 ## Summary
 
 - **The blow-up is in breadth, not depth.** On `(?:()|a)(?R)|(?(1)x)` over `a...ay`, b3b988f nests
@@ -23,7 +21,7 @@ been deleted; section 8 says how to rebuild them.
   backreference reads only the captured *text*. The empty groups that `()` sets at positions 3 and
   7 are different spans but the same state as far as any reader can tell. Keying on what is
   actually read (option d, new) takes every review shape back to main's speed.
-- **(d) fixes every known wrong answer.** It matches upstream on the three red rows and on a new
+- **(d) fixes every known capture-dependent wrong answer.** It matches upstream on the three red rows and on a new
   witness where main gives a wrong span rather than None:
   `.*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)` over `aab` gives `(0,3)` upstream and in (d), but
   `(1,3)` on main. That witness also rules out keying on set-or-unset alone.
@@ -34,6 +32,11 @@ been deleted; section 8 says how to rebuild them.
 - **(c), accepting None, has no support.** No engine surveyed returns None on the red rows.
   Upstream and PCRE2's JIT answer `(0,1)`. PCRE2's interpreter and Perl raise an error instead.
   Main returns None on those rows, and a wrong span on the new witness.
+- **New, separate defect: the reach can be full before the first call.** `.*z|(?:|(?R)a)`
+  fullmatch over `aa` gives `(0,2)` upstream and None on main. The `.*z` branch reads the whole
+  text first, so no later call can show growth, and the finite left recursion is refused again.
+  PCRE2 fails this row with an error. No key change fixes it, because it is in the reach component
+  (section 6b). It needs its own red tests and design step.
 - **Recommendation: (d) now, plus the failed-call memo extended with the guard's state (a) once C1
   is on main.** Key each open call on what is read: a set-or-unset bit for a group that only
   conditionals read, and the captured text for a group that a backreference reads. Build (d) first,
@@ -265,7 +268,46 @@ because it keys on the exact spans.
 
 Timeouts in grid 4: r2 30, (d) 15, c1 8, d+c1 4, main 0.
 
-**Upstream on grids 2 and 3: pending.**
+**Upstream.** Upstream ran in-process with a 0.5 s timeout. On grid 2 it answered 4,486 rows and
+on grid 3 5,551; it timed out or ran out of memory on the rest. Every variant, main included,
+agrees with upstream on every row it answered. So the rows where main or bmask differ from r2 are
+all rows upstream cannot answer in 0.5 s. I re-ran the 40 such rows across grids 2 to 4, one
+subprocess each with a 30 s limit. Upstream raised MemoryError or timed out on 39 of them. It
+answered the other one:
+
+- `(?:(?(g)|(?<g>)))*|(?(g)b|a)(?R)(?:(?<g>)(?P=g))+|(?:(?<g>)(?P=g))+(?:(?<g>))*(?R)`, fullmatch
+  over `ab`: upstream gives `(0,2)`, as do r2, bmask and (d). Main gives None.
+
+On the 39 rows upstream cannot settle, the answer has to come from the rule. The (d) key is at
+least as fine as main's, so (d) refuses only calls that main also refuses: it keeps every path
+main keeps, and some that main wrongly cuts. What (d) still cuts wrongly comes from the reach rule
+(section 6b), not from the key, and main has that gap too.
+
+Upstream on grid 4 answered 2,598 of 12,000 rows. Main differs from it on 2 rows. r2, bmask, (d),
+c1 and d+c1 each differ on 1, the same row, which main also gets wrong. The other main row is the
+`(0,2)` row above. The shared row is a separate defect, below.
+
+### 6b. A second defect, independent of captures: the reach can be full before the call
+
+The row every variant gets wrong, minimised:
+`(?:a|(?<g>))*?(?P=g)|(?<g>)a(?R)|(?R)(?P=g)x`, fullmatch over `ax`. Upstream gives `(0,2)`, and
+every port variant, main included, gives None. Its captures are a distraction. The same thing
+happens with none:
+
+| `.*z|(?:|(?R)a)`, fullmatch | upstream | PCRE2 interpreter and JIT | main |
+|---|---|---|---|
+| `aa` | (0,2) | error: nested recursion at the same subject position | **None** |
+| `a` | (0,1) | not measured | (0,1) |
+| without the `.*z|` branch, `aa` | (0,2) | (0,2) | (0,2) |
+
+The reach is measured over the whole attempt (`MatchState.cs:333-350`). The `.*z` branch fails
+only after reading to the end of the text, so the reach is already full before the first call is
+made. After that, no inner call can show growth, and the finite left recursion that 94ba2d5 was
+built to let through is refused again. PCRE2's `last_used_ptr` rule has the same gap, but fails the
+match with an error instead of cutting the path. This is in the guard's reach component, which
+none of the options in section 4 touch. It needs its own design step. One lead: measure the
+text reached since each open call was made, not since the attempt began. Whether that still
+terminates has to be argued before anything is built.
 
 ## 7. Recommendation and build plan
 
@@ -282,9 +324,9 @@ Why (d) rather than a bound or a memo alone:
 
 Order, each step test-first:
 
-1. **This branch: (d).** Red first, on b3b988f: the value witness, with upstream's `(0,3)`
-   (b3b988f passes it, main fails it); timing tests at 100 ms for the one-, two- and three-group
-   `a^n y` shapes and for `(?:()|a)(?R)|\1x` (all red on b3b988f); the three red rows and the k = 8
+1. **This branch: (d).** Red first, on b3b988f: the value witness, with upstream's `(0,3)`, and
+   the grid row with upstream's `(0,2)` (section 6; b3b988f passes both, main fails both).
+   Timing tests at 100 ms for the one-, two- and three-group `a^n y` shapes and for `(?:()|a)(?R)|\1x` (all red on b3b988f); the three red rows and the k = 8
    and 9 test kept. Then split `Referenced` into conditional-read and backreference-read, and
    change `CallCaptures` to bits and texts. Run the oracle and a matrix wave, then a blind review.
    The lookaround-captured residual stays red as an explicit open-defect timing test.
@@ -300,6 +342,9 @@ Order, each step test-first:
    it cannot, the residual waits for the capture-list leak fix (queue item 9).
 4. **Ledger 14:** replace "captures" in the key description with "what the callee reads". Record
    the survey table, and that PCRE2's interpreter and Perl refuse these shapes with an error.
+5. **Separately, now:** add `.*z|(?:|(?R)a)` fullmatch `aa` (upstream `(0,2)`) and the section 6b
+   grid row to OpenDefectTests as red rows. Give the reach gap its own design step. It is
+   independent of (d), and neither blocks the other.
 
 `MatchTimeout` stays the backstop throughout. A timeout never gives a wrong answer, and it is the
 same policy C1's residuals already follow.
