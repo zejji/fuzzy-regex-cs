@@ -7,7 +7,10 @@ behind ledger entry 44 (`2026-09-26-empty-iteration-survey.md`) is not repeated 
 
 ## Summary
 
-**Ruling: option A.** A written empty alternative is the exit of an optional, the same as the zero
+**Superseded by the addendum at the end of this note: the final ruling is option B.** Sections 1 to
+7 are kept as the record of the first ruling. Their measurements still stand.
+
+**First ruling: option A.** A written empty alternative is the exit of an optional, the same as the zero
 iterations of `X?`. So ledger 44's "needed" rule covers it: a pass through a non-empty alternative
 that consumed no text and spent errors fails unless something needs those errors (a section
 minimum or a tested group), and the empty alternative then matches with none. After the fix,
@@ -19,7 +22,7 @@ Why:
 
 - **The identity is universal.** `X?` and `(?:X|)` give the same answer (1,200 cases) in Python
   `re`, PCRE2, Perl, .NET, upstream's exact mode and the port's exact mode. They also agree in
-  upstream's fuzzy modes, plain, `(?e)` and `(?b)` (26,880 pairs). F-A is the only engine measured
+  upstream's fuzzy modes, plain, `(?e)` and `(?b)` (40,320 pairs). F-A is the only engine measured
   that breaks it: 600 pairs, 28 of them with a different span.
 - **Option B would move the break, not remove it.** Narrowing ledger 44 so that `a?` gives upstream's
   one deletion would break the equally basic identities `X{0,2}` = `(?:XX?)?` and `X*` = `(?:XX*)?`.
@@ -63,7 +66,7 @@ ways, each pair against its alternation spelling:
 Each pair went into four contexts (alone, followed by `b`, `x…b`, and doubled), under eight
 constraints (`d<=1`, `d<=2`, `e<=1`, `e<=2`, `s<=1`, `i<=1`, `1<=e<=2`, `2i+2d+1s<=2`) and three
 modes (plain, `(?e)`, `(?b)`). Every combination ran over ten subjects with search and fullmatch:
-80,640 rows, 26,880 pairs per engine.
+80,640 rows, 40,320 pairs per engine (13,440 per mode).
 
 | engine | pairs that differ |
 |---|---|
@@ -152,14 +155,14 @@ means `X?`, `X??`, `X{0,n}`, `X*`, or an alternative written empty.
 
 | engine | how run | `a?` against `(a\|)`, and the other pairs | answer |
 |---|---|---|---|
-| `regex` 2026.9.10, plain | Python | 26,880 pairs, 0 differ | 1 deletion for both greedy forms over `''` (first found) |
+| `regex` 2026.9.10, plain | Python | 40,320 pairs, 0 differ | 1 deletion for both greedy forms over `''` (first found) |
 | `regex`, ENHANCEMATCH `(?e)` | Python | 0 differ | 0 for both |
 | `regex`, BESTMATCH `(?b)` | Python | 0 differ | 0 for both |
 | TRE 0.8.0 (`libtre5` 0.8.0-7) | `tre_regaexec` from C in WSL (probe below) | 105 pairs under `d`, `e` and `s` budgets: equal cost in every pair; 3 ties differ in edit kind | 0 for `a?`, `(a\|)`, `a??`, `(\|a)`, `(a\|b)?` and `(a\|b\|)` over `''` and `b`: minimum cost |
 | tre-agrep 0.8.0 (the agrep interface) | WSL CLI, `-D1 -I9 -S9 -E1` | `a?b` and `(a\|)b` over `b` both match | same as TRE |
 | ugrep 7.8.5 `-Z` | `winget install Genivia.ugrep` | rejects an empty alternative (`x(a\|)`: "error at position 8"). With the empty alternative written `b{0}`, `x(a\|b{0})` and `xa?` give cost 0 over `x`, `xy` and `xb` under `-Z-1`, `-Z1` and `-Z~1` | 0 for both |
 | fuzzysearch 0.8.1 | `pip install fuzzysearch` | literal patterns only; `a?` is two literal characters | not applicable |
-| F-A | port probe | 600 of 26,880 differ | 0 for `a?`, 1 for `(?:a\|)` |
+| F-A | port probe | 600 of 40,320 differ | 0 for `a?`, 1 for `(?:a\|)` |
 
 TRE documents a minimum-cost search. Its README (the `libtre-dev` copy in WSL; upstream
 <https://github.com/laurikari/tre>) says: "TRE can also be used to search for matches with the
@@ -329,7 +332,7 @@ search    (?:a|)                          ''    (0,0) (0,0,0)            # exact
 **Equivalence property test.** Regenerate the sweep from section 1: seven bodies, the greedy, lazy
 and middle pairs, four contexts, eight constraints, three modes, ten subjects, search and
 fullmatch. Assert that the two spellings of every pair give the same span, counts and group 1.
-Expect 0 of 26,880 to differ, where F-A today has 600. Hold this pair invariant rather than
+Expect 0 of 40,320 to differ, where F-A today has 600. Hold this pair invariant rather than
 upstream's answers: for `(?e)` and `(?b)` the builder's measured value is whatever the `?` spelling
 gives.
 
@@ -368,3 +371,168 @@ The probes are in the worktree's `.scratch/ovea/` and are not committed:
   repo's analysers reject the script): the exact-matching battery;
 - `tre_ovea.c`: built with `gcc tre_ovea.c -ltre` in WSL;
 - `perf/`, `perfm/`: the timings.
+
+## Addendum (2026-09-28): the ruling reversed to option B
+
+**The challenge.** The orchestrator measured upstream's plain mode: `(?:a?){d<=1}` and
+`(?:a|){d<=1}` over `''`, and `(?:cats|cat){e<=1}` and `(?:cat(?:s|)){e<=1}` over `cat`, all give 1
+deletion. Under `(?e)` and `(?b)`, all four give 0. Upstream's plain mode is therefore pure
+backtracking order. Rewriting a pattern into an equivalent form that keeps the order of its choices
+does not change the fuzzy answer. Option A would give 0, 0, 1 and 0 for these four patterns, which
+moves the inconsistency to `cats|cat` against `cat(?:s|)` without removing it. Ledger 44 is what
+first broke equivalent spellings in plain mode. The challenge is right. Section 4 compared only
+options that keep the "needed" rule. The option that keeps backtracking order has none of those
+breaks.
+
+### A mode that keeps backtracking order
+
+I added a mode to a scratch copy of `tools/probes/fuzzy-reference-matcher.py`
+(`.scratch/ovea/refmatch_order.py`, mode `order`). It is the matcher's `unrestricted` mode, which
+follows upstream's order and lets an empty deleting iteration go round again while the budget
+allows, with one change. An iteration that matched no text and spent errors fails if an earlier
+iteration of the same run of the repeat already reached the same state. The state is the text
+position, the count clipped to the repeat's bounds, the error counts of every open section, and the
+tested groups (`empty_state_key`). The path that reached that state first has the same future and
+was fully explored first, so failing the later one cannot lose a match or change which match is
+found first. It only stops a cycle.
+
+Measured on 2026-09-28, over the 13,440 plain-mode pairs of the section 1 sweep:
+
+| engine | pairs that differ |
+|---|---|
+| mode `order` | **0** |
+| upstream | 0 |
+| F-A (ledger 44) | 587 |
+
+Mode `order` still differs from upstream on 1,240 individual rows, and every such difference is
+the same for both spellings. The samples all come from ledger 42 (the exact-item deletion, for
+example `(?:(?:a)?){1<=e<=2}` over `a` gives (0,0) here and (1,1) upstream), which is outside this
+question.
+
+A correction to sections 1 to 3: the sweep has 40,320 pairs, 13,440 per mode, not 26,880. The
+text above has been corrected.
+
+### Upstream breaks equivalent spellings in exactly one place
+
+Upstream itself breaks equivalent spellings in one place: its end-of-text exception. An empty
+deleting iteration is refused once the repeat stands at the end of the text (survey, "Problem 1").
+The same pattern then gives a different answer from its own unrolled form:
+
+| pattern | subject | upstream | its unrolled form, upstream | mode `order`, both forms |
+|---|---|---|---|---|
+| `(?:b{0,3}){d<=2}` | `bb` | (0,2) (0,0,0) | `(?:(?:b(?:b(?:b)?)?)?){d<=2}`: (0,2) (0,0,1) | (0,0,1) |
+| `(?:[0-9]{1,3}){d<=2}` | `42` | (0,2) (0,0,0) | `(?:[0-9](?:[0-9](?:[0-9])?)?){d<=2}`: (0,0,1) | (0,0,1) |
+| `(?:[0-9]+){1<=d<=2}` | `42` | **(1,2)** (0,0,1) | `(?:[0-9](?:[0-9](?:[0-9](?:[0-9])?)?)?){1<=d<=2}`: (0,2) (0,0,2) | (0,2) (0,0,2) |
+
+The last row is a real bug by upstream's own rules. A match starting at 0 exists in upstream's own
+order, and upstream reports one starting at 1.
+
+### What ledger 44 fixed that upstream got wrong, and what survives
+
+| upstream defect | rows (upstream / F-A / B) | survives under B? |
+|---|---|---|
+| **Does not terminate.** The budget restarts in every iteration, or undone edits count as progress. | `search (?:(?:x){d<=1})+y` over `y`: MemoryError / (0,1) (0,0,1) / (0,1) (0,0,1). `search (?:(?:[0-9]+,){d<=3})+end` over `end`: MemoryError / (0,3) (0,0,2) / **(0,3) (0,0,3)**. `fullmatch (?:(?:b?)*){d<=1}` over `a`: MemoryError (main: a 1 GB backtracking-stack exception) / None / None. | **Yes.** The cycle stop settles what upstream leaves infinite. |
+| **The end-of-text exception.** It breaks unrolled forms, loses the leftmost match, and makes the count depend on the next character. | The three rows above. `(?:[0-9]+){d<=2}` gives 0 deletions over `42` and 2 over `42kg`. | **Removed, but in the direction of order.** The deletions are charged at the end of the text too, so `42` and `42kg` both give (0,2) (0,0,2). |
+| **The repeat memo** (drops a path whose state an earlier path of the same run already reached). | Performance only; it never changes an answer (survey, "Performance"). | **Yes,** as pure pruning, provided it stays exact against the new rule. |
+| **"Needed": an error-spending empty iteration fails unless a minimum or a tested group needs it.** | `(?:[0-9]+){d<=2}` over `42kg`, `(?:a?){d<=1}` over `''`, `(?:cats?){e<=1}` over `cat` | **No.** It is a cost preference, not a fix for anything undefined, and it is the source of the 587 broken pairs. The fewest-error answer is what `(?e)` and `(?b)` exist for (`upstream/README.rst:590`), and they already give 0 on all of these rows. |
+
+### Option C: minimum cost in plain mode
+
+Option C is not justified:
+
+- The README defines plain mode as first match (`README.rst:590` and `:607-615`), and
+  `test_regex.py:2784` and `:3380` pin `(?:cats|cat){e<=1}` at (0,0,1).
+- The owner rejected minimum cost for the default mode on 2026-09-26.
+- It is expensive: upstream's `(?b)` times out on ledger 33's case.
+- Users who want the fewest errors already have it, spelt `(?e)` or `(?b)`.
+
+### Final ruling: B
+
+**Plain mode is backtracking order, with a cycle stop.** Concretely:
+
+- An empty iteration without errors keeps upstream's rule.
+- An empty iteration that spent errors is admitted exactly as upstream admits it (every fuzzy edit
+  counts as progress), with no end-of-text exception.
+- The iteration fails only if an earlier iteration of the same run of the repeat already reached
+  the same state (`empty_state_key`).
+- An empty alternative is not special: `(?:X|)` and `X?` both follow order.
+
+The needed rule, its two sites (`Matcher.cs:5170-5181`, the check in the deletion path, and
+`:8404`, the check at the repeat's end) and `RaisesUnmetMinimum` for empty iterations are removed.
+The minimum-count and tested-group admissions become unnecessary, because order admits every
+error-spending iteration that does not cycle.
+
+**Divergences from upstream that remain, and why.**
+
+- The MemoryError rows now answer.
+- The end-of-text rows follow order: `(?:[0-9]+){d<=2}` over `42` gives (0,0,2), not (0,0,0), and
+  `(?:[0-9]+){1<=d<=2}` over `42` gives (0,2), not (1,2).
+- Entry 33's `(?:(?(1)c|z)|()(?:x){d<=1})*$` over `c` stays at 2 deletions (upstream gives 1, F-A
+  2). Mode `order` gives 2, because the end-of-text exception is gone.
+- All of these are upstream breaking its own order rule, so each is a port-right divergence under
+  the owner's no-known-bugs rule.
+- The cost is that plain mode charges deletions at the end of the text that upstream skips. That
+  follows from the documented first-match definition, and `(?e)` and `(?b)` give 0 there.
+
+**Performance.** B removes work. It drops the needed rule's two checks, and the cycle stop is the
+existing memo's lookup applied only to iterations that are empty and spent errors: one comparison
+of the text position against the iteration's start, and then a hash only on that rare path. Gate:
+
+- `(?:x(?:a)?y){e<=1}` returns to main's speed (52.3 ms, against 58.7 ms on F-A; section 5);
+- the benchmark suite shows no regression.
+
+### Tests for B
+
+**Red tests.** Each row fails on F-A today and passes after the change. The expected values come
+from mode `order` on 2026-09-28, which equals upstream wherever upstream terminates, apart from the
+end-of-text rows:
+
+```
+search    (?:a?){d<=1}                    ''       (0,0) (0,0,1)   # F-A (0,0,0); search and fullmatch
+search    (?:a?){e<=1}                    ''       (0,0) (0,0,1)   # F-A (0,0,0)
+search    (?:a?b){d<=1}                   'b'      (0,1) (0,0,1)   # F-A (0,0,0)
+search    (?:(?:a|b)?){d<=1}              'b'      (0,0) (0,0,1)   # F-A (0,1) (0,0,0)
+search    (?e)(?:(?:a|b)?){d<=1}          'b'      (0,0) (0,0,0)   # F-A (0,1); upstream's answer
+fullmatch (?:cats?){e<=1}                 'cat'    (0,3) (0,0,1)   # F-A (0,0,0)
+search    (?:a?){d<=1}(?:b?){d<=1}        ''       (0,0) (0,0,2)   # F-A (0,0,0)
+search    (?:[0-9]+){d<=2}                '42kg'   (0,2) (0,0,2)   # F-A (0,0,0); = upstream
+search    (?:b*){d<=2}                    'bba'    (0,2) (0,0,2)   # F-A (0,0,0); = upstream
+search    (?:(?:[0-9]+,){d<=1})+end       '12,end' (0,6) (0,0,1)   # F-A (0,0,0); = upstream
+search    (?:[0-9]+){d<=2}                '42'     (0,2) (0,0,2)   # F-A and upstream (0,0,0): end-of-text exception dropped
+search    (?:b{0,3}){d<=2}                'bb'     (0,2) (0,0,1)   # F-A and upstream (0,0,0); = the unrolled form
+search    (?:[0-9]+){1<=d<=2}             '42'     (0,2) (0,0,2)   # F-A (0,2) (0,0,1); upstream (1,2) (0,0,1)
+search    (?:(?:[0-9]+,){d<=3})+end       'end'    (0,3) (0,0,3)   # F-A (0,0,2); upstream MemoryError
+```
+
+**Witness rows** (unchanged on F-A):
+
+- `(?:a|){d<=1}` over `''`: (0,0) (0,0,1)
+- `(?:a??){d<=1}` and `(?:|a){d<=1}` over `''`: (0,0,0)
+- `(?:cats|cat){e<=1}` and `(?:cat(?:s|)){e<=1}` over `cat`: (0,0,1)
+- `(?:(?:x){d<=1})+y` over `y`: (0,1) (0,0,1)
+- `fullmatch (?:(?:b?)*){d<=1}` over `a`: None
+- `(?:(?(1)c|z)|()(?:x){d<=1})*$` over `c`: (0,1) (0,0,2)
+- every `(?b)` row of section 1
+
+**Equivalence property.** On all 40,320 pairs of section 1's sweep, the two spellings agree on
+span, counts and group 1: 0 differences, as upstream has.
+
+**Pinned property.** The port's plain-mode answers equal mode `order` of the reference matcher on
+the ledger 44 sweeps (`tools/probes/empty-iteration-survey/needed_sweeps.py`). The needed-rule tests
+in `Gaps/Engine/FuzzyNeededEmptyIterationTests.cs` are rewritten to these values.
+
+**Paperwork.**
+
+- Ledger 44 (`docs/DIVERGENCES.md:78`) is amended to "cycle stop, and no end-of-text exception".
+- The oracle entry `fuzzy-empty-iteration-needed-rule` (`ExpectedDivergences.cs:3222`) narrows to
+  the MemoryError and end-of-text rows.
+- The rule change is a phase-plan amendment, so the spec and ROADMAP move together.
+
+**Still unsettled after the reversal.**
+
+- Whether to keep upstream's end-of-text exception for parity. It would leave the three unrolling
+  breaks and the (1,2) leftmost bug, so I recommend against it. It is the one choice here that
+  trades consistency for parity, and it is the owner's call.
+- Mode `order` exists only in the scratch copy. The builder should add it to
+  `tools/probes/fuzzy-reference-matcher.py` together with the ledger 44 sweeps, and check that it
+  loses no match that mode `unrestricted` finds on the finite-budget grids.
