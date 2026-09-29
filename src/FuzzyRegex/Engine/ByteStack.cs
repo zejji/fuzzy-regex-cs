@@ -276,6 +276,24 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         return ReadBlockBelow(top, MemoryMarshal.AsBytes(new Span<long>(ref item)));
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: overwrites the size just below <paramref name="top"/>, the
+    /// one <see cref="ReadSizeBelow"/> reads.
+    /// </summary>
+    /// <param name="top">The depth to write below.</param>
+    /// <param name="item">The value.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool WriteSizeBelow(int top, long item)
+    {
+        if (top < sizeof(long) || top > Count)
+        {
+            return false;
+        }
+
+        MemoryMarshal.Write(_storage.AsSpan(top - sizeof(long), sizeof(long)), in item);
+        return true;
+    }
+
     /// <summary>Upstream <c>push_uint8</c> (line 2440).</summary>
     /// <param name="item">The value to push.</param>
     internal void PushUInt8(byte item) => Push(item);

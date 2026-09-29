@@ -4074,10 +4074,11 @@ internal static class Matcher
             state.AddWMark(frameEnd - 1, WMarkKind.CutTaint);
         }
 
+        state.Bstack.PushSize(CallBase(state));
         state.Bstack.PushSize(frameEnd);
         state.Bstack.PushUInt8((byte)Opcode.Reopen);
 
-        /* bstack: pstack_mark REOPEN */
+        /* bstack: call_base pstack_mark REOPEN */
 
         state.NotePartialEvent(PartialEvent.CutBlockedAtomic);
     }
@@ -4350,10 +4351,11 @@ internal static class Matcher
         _ = state.Sstack.MoveTopTo(state.Bstack, moved);
         state.Bstack.PushSize(moved);
         state.Bstack.PushSize(state.SectionFrame);
+        state.Bstack.PushSize(CallBase(state));
         state.Bstack.PushSize(mark);
         state.Bstack.PushUInt8((byte)Opcode.Reopen);
 
-        /* bstack: sstack_bytes length section_frame pstack_mark REOPEN */
+        /* bstack: sstack_bytes length section_frame call_base pstack_mark REOPEN */
 
         Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
         CloseFramesAbove(state);
@@ -4373,6 +4375,55 @@ internal static class Matcher
         node = node.Next1.Node!;
         state.NotePartialEvent(blockedEvent);
         return LookaroundEnd.Continue;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2, repair 1: the saved-stack depth where the innermost open
+    /// call's frame ends, or 0 with no call open. Everything a blocked frame recorded as an absolute
+    /// saved-stack depth lies above it.
+    /// </summary>
+    /// <remarks>
+    /// Backtracking into a <c>GROUP_RETURN</c> pushes the call's frame again from the caller's state
+    /// as it is then, and the caller's repeat guard lists persist across backtracking, so the frame
+    /// can come back longer than it went (upstream's <c>push_repeats</c>, as ported in the
+    /// <c>GROUP_RETURN</c> arm). A frame that is still open across the return, which only a blocked
+    /// end makes, then records a depth that is short by the difference. Everything above the call's
+    /// frame moves by the same amount, so a depth measured from this point does not move: the
+    /// <c>REOPEN</c> arm rebases by the change in it (<see cref="RebaseTheReopenedFrame"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The depth.</returns>
+    private static int CallBase(MatchState state) => state.OpenCalls.Count > 0 ? state.OpenCalls[^1].SstackDepth : 0;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2, repair 1: moves a reopened frame's saved-stack depth by the
+    /// distance the innermost open call's frame end moved since its blocked end
+    /// (<see cref="CallBase"/>). Row `(?(DEFINE)(?&lt;c&gt;(?=a\b)))(?&amp;c)*b` over 'a': the call's
+    /// frame ends at 64 when the lookahead parks at 72, and at 96 after the return is backtracked
+    /// into, because the repeat's guard list has grown.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The frame's pruning mark.</param>
+    /// <param name="callBase">The call base the blocked end recorded.</param>
+    /// <returns>The distance, 0 when nothing moved; or <see langword="null"/> if the stacks are not as the marks promise.</returns>
+    private static int? RebaseTheReopenedFrame(MatchState state, int frameEnd, long callBase)
+    {
+        int delta = CallBase(state) - (int)callBase;
+        if (delta == 0)
+        {
+            return 0;
+        }
+
+        if (
+            !state.Bstack.ReadSizeBelow(frameEnd - 1, out long saved)
+            || !state.Bstack.WriteSizeBelow(frameEnd - 1, saved + delta)
+        )
+        {
+            return null;
+        }
+
+        state.NotePartialEvent(PartialEvent.ReopenRebased);
+        return delta;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
@@ -15661,7 +15712,16 @@ internal static class Matcher
                 {
                     /* bstack: pstack_mark */
 
-                    if (!state.Bstack.PopSize(out long reopenedFrameEnd))
+                    if (
+                        !state.Bstack.PopSize(out long reopenedFrameEnd)
+                        || !state.Bstack.PopSize(out long reopenedCallBase)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // Repair 1: the frame's saved-stack depth follows the call frame below it.
+                    if (RebaseTheReopenedFrame(state, (int)reopenedFrameEnd, reopenedCallBase) is not { } reopenedDelta)
                     {
                         return MatchStatus.Illegal;
                     }
@@ -15705,7 +15765,10 @@ internal static class Matcher
                             state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
                             "D11 amendment 2, assert 4: the body's bytes are back"
                         );
-                        state.SectionFrame = (int)reopenedSection;
+                        state.SectionFrame =
+                            reopenedSection > reopenedCallBase
+                                ? (int)reopenedSection + reopenedDelta
+                                : (int)reopenedSection;
                         state.SliceStart = state.TextStart;
                         state.SliceEnd = state.TextEnd;
                         state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);

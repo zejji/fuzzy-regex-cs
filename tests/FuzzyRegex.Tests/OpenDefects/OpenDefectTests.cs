@@ -245,6 +245,16 @@ public sealed class OpenDefectTests
         }
     }
 
+    // D11 amendment 2's review, left to build chunk 8 with the rows above: a fuzzy section around a
+    // condition whose test is blocked. No continuation of 'aa' completes the match ('aa' + 'b' fails
+    // at the (*PRUNE), tools/probes/d11-brute-judge.py, 2026-09-29; upstream None); the port
+    // answers P(0, 2). The review counted 8 such rows and gave this one.
+    [Test]
+    public void A_fuzzy_section_around_a_blocked_condition_decides_as_the_judge_does()
+    {
+        Partial("match", @"(?:(?(?=a$|a)|b)){e<=1}a(*PRUNE)b", "aa").Success.Should().BeFalse();
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

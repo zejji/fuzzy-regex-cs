@@ -92,6 +92,9 @@ internal enum PartialEvent
     /// <summary>Amendment 2: a <c>REOPEN</c> put the moved bytes back on the saved stack.</summary>
     ReopenRestoredSstack,
 
+    /// <summary>Amendment 2, repair 1: a <c>REOPEN</c> moved its frame's depth after its call's frame moved.</summary>
+    ReopenRebased,
+
     /// <summary>M2: a negative lookaround or negative test passed undetermined.</summary>
     NegativeUndetermined,
 

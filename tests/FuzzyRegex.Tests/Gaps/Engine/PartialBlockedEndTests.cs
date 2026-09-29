@@ -18,7 +18,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// sound phantoms: C3's search (the attempt from inside the text to come), C4 and X1 (S57d's
 /// escalation, until build chunk 9), F1 (P(0, 2) for match and search, where the judge's search
 /// starts at 1), and R4's group 1 (unset: the judge's completion sets it only from the text still
-/// to come). The controls (C5-C7, C9, N2, R1-R4) passed
+/// to come). N2 threw too. The controls (C5-C7, C9, R1-R4) passed
 /// before the fix and guard the paths that did not misread. Group 1 is "unset" when it matched
 /// nothing, "n/a" when the row does not check it, and otherwise its last capture (a called group's
 /// captures are what the judge reports, <c>spans(1)</c>).
@@ -103,6 +103,64 @@ public sealed class PartialBlockedEndTests
                 (int.Parse(span[0], CultureInfo.InvariantCulture), int.Parse(span[1], CultureInfo.InvariantCulture)),
                 id
             );
+    }
+
+    /// <summary>
+    /// Repair 1: a blocked end inside a called group under a repeat. The continuation returns from
+    /// the call, and backtracking into the return pushes the call's frame again with the caller's
+    /// repeat guards as they are then, longer than it went (0 to 64 on the call, 0 to 96 on the
+    /// re-push, in the first row), so every saved-stack depth above it moves. REOPEN now rebases its
+    /// frame's depth by the distance the innermost call's frame end moved. The first three rows are
+    /// the review's (before: P(0, 11) on a one-character text, a NullReferenceException, an
+    /// InvalidOperationException); the rest are one per call kind and repeat from
+    /// <c>tools/probes/d11-called-repeat-grid.py</c>, each an exception before, and each the judge's
+    /// answer. The first row's P(0, 1) is S57d's escalation, as the unrepeated
+    /// <c>(?(DEFINE)(?&lt;c&gt;(?=a\b)))(?&amp;c)b</c> answers, until build chunk 9; the judge answers None.
+    /// </summary>
+    // Upstream answers None to every match row and P(|t|, |t|) to every search row.
+    [Test]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*b", "a", 0, 1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?(?=a$)|b)))(?&c)*b", "a", -1, -1)]
+    [Arguments("match", @"(?:((?=(?:a|ab)$)a)|x(?1))+(?>a|ab)\n", "xab", -1, -1)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*b", "a", 1, 1)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*?b", "a", 1, 1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)+b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?(?=a$)|b)))(?&c)+?b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$)))(?&c){1,3}b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$)))(?&c){2,}b", "a", -1, -1)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=a\b))(?<d>x?(?&c)))(?&d)*b", "a", 1, 1)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=a\b))(?<d>x?(?&c)))(?&d)*?b", "a", 1, 1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$))(?<d>x?(?&c)))(?&d)+b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$))(?<d>x?(?&c)))(?&d)+?b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$))(?<d>x?(?&c)))(?&d){1,3}b", "a", -1, -1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a$))(?<d>x?(?&c)))(?&d){2,}b", "a", -1, -1)]
+    [Arguments("search", @"(?:((?=a\b))|x(?1))*b", "xa", 2, 2)]
+    [Arguments("search", @"(?:((?=a\b))|x(?1))*?b", "xa", 2, 2)]
+    [Arguments("match", @"(?:((?=a$))|x(?1))+b", "xa", -1, -1)]
+    [Arguments("match", @"(?:((?=a$))|x(?1))+?b", "xa", -1, -1)]
+    [Arguments("match", @"(?:((?=a$))|x(?1)){1,3}b", "xa", -1, -1)]
+    [Arguments("match", @"(?:((?=a$))|x(?1)){2,}b", "xa", -1, -1)]
+    public void A_blocked_end_in_a_called_group_under_a_repeat_follows_the_call_frame(
+        string operation,
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "search", StringComparison.Ordinal)
+            ? regex.Match(text, partial: true)
+            : regex.MatchAtStart(text, partial: true);
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        }
     }
 
     /// <summary>
