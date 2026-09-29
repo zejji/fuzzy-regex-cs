@@ -40,130 +40,30 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
-/// NOT UPSTREAM'S: what each group a conditional or backreference reads showed when a group call
-/// was made - the part of the call guard's key that can change what the call does. See
-/// <see cref="MatchState.ActiveCalls"/>. Compared by value.
+/// NOT UPSTREAM'S: what of a group that a conditional or backreference reads the call guard
+/// compares, to tell whether a call would repeat an open one (<see cref="MatchState.ActiveCalls"/>).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each read group gives one value, and it holds exactly what a reader can see (the
-/// capture-dependent recursion design, <c>docs/plan/2026-09-28-capture-dependent-recursion-design.md</c>
-/// section 4d). A conditional reads only whether its group is set, so a group only conditionals
-/// read gives <see cref="SetGroup"/> or <see cref="UnsetGroup"/>. A backreference compares the
-/// group's text with the text ahead, so a group a backreference reads
-/// (<see cref="GroupInfo.TextRead"/>) gives the id of its text (<see cref="CaptureTextIds"/>): two
-/// captures with equal text behave the same for every backreference, wherever they sit. Keying on
-/// the spans instead walked a new call chain for every position at which an empty group had been
-/// set, 2^n of them on <c>(?:()|a)(?R)|(?(1)x)</c> over <c>a...ay</c>. Exact text is finer than a
-/// case-insensitive or fuzzy comparison needs, so it can keep apart two states that could have
-/// been merged, but never merges two that differ.
+/// The guard compares exactly what a reader can see (the capture-dependent recursion design,
+/// <c>docs/plan/2026-09-28-capture-dependent-recursion-design.md</c> section 4d). A conditional
+/// reads only whether its group is set. A backreference compares the group's text with the text
+/// ahead, so two captures with equal text behave the same for every backreference, wherever they
+/// sit. Comparing the spans instead walked a new call chain for every position at which an empty
+/// group had been set, 2^n of them on <c>(?:()|a)(?R)|(?(1)x)</c> over <c>a...ay</c>. Exact text is
+/// finer than a case-insensitive or fuzzy comparison needs, so it can keep apart two states that
+/// could have been merged, but never merges two that differ.
 /// </para>
 /// <para>
 /// One more thing reads a group's span: the capture-change counter, which a capture bumps only
-/// when the new span differs from the current one, and which a repeat's empty-iteration test and an
-/// optional pass read. So a group captured inside a repeat body, and every read group of a fuzzy
-/// pattern, is keyed on its span (<see cref="CallRead.Span"/>).
+/// when the new span differs from the current one, and which a repeat's empty-iteration test and
+/// an optional pass read. So a group captured inside a repeat body, and every read group of a
+/// fuzzy pattern, is compared by span (<see cref="Span"/>).
 /// <c>(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?&lt;g&gt;)|a)*)))|(?&lt;g&gt;)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))</c>
 /// fullmatch over <c>aax</c> gave group 1 two captures more than upstream's <c>[0,0][1,0]</c> when
-/// that group was keyed on its text (the design grid, 2026-09-29).
-/// </para>
-/// <para>
-/// SHORTCUT: one small array per call, and only in a pattern that has both a group call and a
-/// group some conditional or backreference reads. Packing one or two values into the key tuple
-/// would remove it for the common case, if a benchmark ever shows it matters.
+/// that group was compared by text (the design grid, 2026-09-29).
 /// </para>
 /// </remarks>
-/// <param name="values">One value per read group, in group order.</param>
-internal sealed class CallCaptures(long[] values) : IEquatable<CallCaptures>
-{
-    /// <summary>The value of a read group that is unset.</summary>
-    internal const long UnsetGroup = -1;
-
-    /// <summary>The value of a group only conditionals read, when it is set.</summary>
-    internal const long SetGroup = 0;
-
-    /// <summary>One value per read group: <see cref="UnsetGroup"/>, <see cref="SetGroup"/> or a text id.</summary>
-    internal long[] Values { get; } = values;
-
-    /// <summary>Takes what the read groups show now.</summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="readGroups">
-    /// Indexes into <see cref="MatchState.Groups"/> of the groups that are read, each with what the
-    /// key holds of it.
-    /// </param>
-    /// <returns>The snapshot.</returns>
-    internal static CallCaptures Take(MatchState state, (int Index, CallRead Read)[] readGroups)
-    {
-        long[] values = new long[readGroups.Length];
-        for (int i = 0; i < readGroups.Length; i++)
-        {
-            (int index, CallRead read) = readGroups[i];
-            GroupData group = state.Groups[index];
-            if (group.Current < 0)
-            {
-                values[i] = UnsetGroup;
-                continue;
-            }
-
-            GroupSpan span = group.Captures[group.Current];
-            values[i] = read switch
-            {
-                CallRead.SetOrUnset => SetGroup,
-                CallRead.Text => state.CaptureTexts.IdOf(span.Start, span.End - span.Start),
-                // Negative and never -1, so it is neither UnsetGroup nor an id: the start is an int.
-                _ => long.MinValue | ((long)(uint)span.Start << 32) | (uint)span.End,
-            };
-        }
-
-        return new CallCaptures(values);
-    }
-
-    /// <summary>
-    /// Whether the same read groups are set here as in <paramref name="other"/>, whatever their
-    /// texts: the filter on the failed-call memo's ancestors (<c>Matcher.FailedCallKey</c>).
-    /// </summary>
-    /// <param name="other">A snapshot taken for the same pattern.</param>
-    /// <returns><see langword="true"/> if the set groups are the same.</returns>
-    internal bool SetsTheSameGroups(CallCaptures other)
-    {
-        Debug.Assert(other.Values.Length == Values.Length, "both snapshots read the same groups");
-        for (int i = 0; i < Values.Length; i++)
-        {
-            bool unset = Values[i] == UnsetGroup;
-            if (unset != (other.Values[i] == UnsetGroup))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <inheritdoc/>
-    public bool Equals(CallCaptures? other) => other is not null && Values.AsSpan().SequenceEqual(other.Values);
-
-    /// <inheritdoc/>
-    public override bool Equals(object? obj) => Equals(obj as CallCaptures);
-
-    /// <inheritdoc/>
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        foreach (long value in Values)
-        {
-            hash.Add(value);
-        }
-
-        return hash.ToHashCode();
-    }
-
-    /// <inheritdoc/>
-    public override string ToString() => string.Join(",", Values);
-}
-
-/// <summary>
-/// NOT UPSTREAM'S: what the call guard keys a read group on. See <see cref="CallCaptures"/>.
-/// </summary>
 internal enum CallRead : byte
 {
     /// <summary>Only whether it is set: only conditionals read it.</summary>
@@ -178,16 +78,15 @@ internal enum CallRead : byte
 
 /// <summary>
 /// NOT UPSTREAM'S: numbers the distinct texts that groups a backreference reads have captured, so
-/// the call guard and the failed-call memo can key a group on its text with one number
-/// (<see cref="CallCaptures"/>). Two spans get the same id exactly when their texts are equal,
-/// compared ordinally.
+/// the failed-call memo can key a group on its text with one number (<c>Matcher.ReadValue</c>).
+/// Two spans get the same id exactly when their texts are equal, compared ordinally.
 /// </summary>
 /// <remarks>
-/// The ids hold for one subject: <see cref="MatchState.Init"/> calls <see cref="Reset"/>, and every
-/// key that holds an id (the open calls, the backtracking stack and the failed-call memo) is
-/// cleared there too. SHORTCUT: the table only grows while one subject is matched. It gains an
-/// entry only for a new text a group call has seen, so it is no larger than the calls made; a cap
-/// with a fallback to keying on spans would bound it, if a workload ever shows it matters.
+/// The ids hold for one subject: <see cref="MatchState.Init"/> calls <see cref="Reset"/>, and the
+/// failed-call memo, the one set of keys that holds an id, is emptied there too. SHORTCUT: the table
+/// only grows while one subject is matched. It gains an entry only for a new text seen while the
+/// memo builds keys, so it is no larger than the calls made; a cap with a fallback to keying on
+/// spans would bound it, if a workload ever shows it matters.
 /// </remarks>
 internal sealed class CaptureTextIds : IEqualityComparer<(int Start, int Length)>
 {
@@ -214,10 +113,7 @@ internal sealed class CaptureTextIds : IEqualityComparer<(int Start, int Length)
     /// <summary>The id of the text at <paramref name="start"/>, numbering it if it is new.</summary>
     /// <param name="start">Where the text starts in the subject.</param>
     /// <param name="length">Its length.</param>
-    /// <returns>
-    /// The id, at least 1, so it is never <see cref="CallCaptures.SetGroup"/> or
-    /// <see cref="CallCaptures.UnsetGroup"/>.
-    /// </returns>
+    /// <returns>The id, at least 1, so it is never the value of an unset group (-1) or of a set group only conditionals read (0).</returns>
     internal long IdOf(int start, int length)
     {
         ref long id = ref CollectionsMarshal.GetValueRefOrAddDefault(_ids, (start, length), out bool exists);
@@ -364,8 +260,8 @@ internal sealed class MatchState : IDisposable
     internal ReadOnlyMemory<char> Text;
 
     /// <summary>
-    /// NOT UPSTREAM'S: the ids of the texts the call guard has keyed a backreferenced group on. See
-    /// <see cref="CallCaptures"/>.
+    /// NOT UPSTREAM'S: the ids of the texts the failed-call memo has keyed a backreferenced group on.
+    /// See <see cref="CaptureTextIds"/>.
     /// </summary>
     internal readonly CaptureTextIds CaptureTexts = new();
 
@@ -451,14 +347,15 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
-    /// call was made.
+    /// call was made. In a pattern where a conditional or backreference reads a group, two open
+    /// calls can share an entry, so <see cref="ActiveCallCounts"/> is used in its place.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
     /// attempt has reached no text since that call opened AND with every group a conditional or
-    /// backreference reads showing what it showed then (<see cref="CallCaptures"/>: set or not for a
+    /// backreference reads showing what it showed then (<see cref="CallRead"/>: set or not for a
     /// conditional, the text for a backreference), can only repeat the open call's work one level
     /// deeper, so that path recurses for ever and is failed. The captures matter
     /// because a group set between the two calls can change what a conditional or backreference
@@ -479,16 +376,26 @@ internal sealed class MatchState : IDisposable
     /// number of groups read. Groups nothing reads are left out
     /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
     /// for every order of setting the empty groups, about k! paths. When no group is read at all
-    /// (<see cref="CallCaptures"/> is null) the bound is <c>n + 1</c>.
+    /// the bound is <c>n + 1</c>.
     /// </para>
     /// <para>
-    /// A set rather than a counter, because an entry is only ever added when it is absent - that is
-    /// what the guard tests. <see cref="OpenCalls"/> is the same information as a stack, and is what
-    /// keeps the two in step; this is only here so the test itself costs O(1) on a recursion ten
-    /// thousand deep.
+    /// A set rather than a counter where no group is read, because an entry is only ever added when
+    /// it is absent - that is what the guard tests. Where groups are read, a count per key
+    /// (<see cref="ActiveCallCounts"/>), so a call whose key and reach no open call shares is let
+    /// through without looking at any capture; only when one does are the open calls with that key
+    /// and reach compared with the read groups now (<see cref="OpenCallSpans"/>). Either way the test
+    /// costs O(1) on a recursion ten thousand deep. <see cref="OpenCalls"/> is the same information
+    /// as a stack, and is what keeps them in step.
     /// </para>
     /// </remarks>
-    internal readonly HashSet<(long Key, int Reach, CallCaptures? Captures)> ActiveCalls = [];
+    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: <see cref="ActiveCalls"/> for a pattern with a group a conditional or
+    /// backreference reads: how many calls are open for each key and reach. Only keys with an open
+    /// call are present.
+    /// </summary>
+    internal readonly Dictionary<(long Key, int Reach), int> ActiveCallCounts = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
@@ -540,8 +447,15 @@ internal sealed class MatchState : IDisposable
     /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
     /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, CallCaptures? Captures, int SstackDepth, long[]? MemoKey)> OpenCalls =
-    [];
+    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: for each entry of <see cref="OpenCalls"/>, in the same order, the packed span
+    /// (<c>Matcher.PackedSpan</c>, -1 when unset) that each group of
+    /// <see cref="PatternObject.CallReadGroups"/> held when the call was made. The guard compares
+    /// them (<see cref="CallRead"/>) and the failed-call memo keys them; empty when no group is read.
+    /// </summary>
+    internal readonly List<long> OpenCallSpans = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
@@ -1212,7 +1126,9 @@ internal sealed class MatchState : IDisposable
         Array.Clear(OptionalPasses);
 
         ActiveCalls.Clear();
+        ActiveCallCounts.Clear();
         OpenCalls.Clear();
+        OpenCallSpans.Clear();
         FailedCalls = null;
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;

@@ -327,8 +327,11 @@ public sealed class MatchStateCacheTests
                 memory.WitnessEnd = 7;
                 _ = memory.IsAscii("scribbled", 3, 5);
                 break;
-            case HashSet<(long Key, int Reach, CallCaptures? Captures)> set:
-                set.Add((7, 7, null));
+            case HashSet<(long Key, int Reach)> set:
+                set.Add((7, 7));
+                break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                counts.Add((7, 7), 7);
                 break;
             case CaptureTextIds ids:
                 ids.Reset("scribbled".AsMemory());
@@ -337,8 +340,8 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int Reach, CallCaptures? Captures, int SstackDepth, long[]? MemoKey)> calls:
-                calls.Add((7, 7, null, 7, null));
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
+                calls.Add((7, 7, 7, null));
                 break;
             case List<long> numbers:
                 numbers.Add(7);
@@ -443,8 +446,11 @@ public sealed class MatchStateCacheTests
                     $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd})"
                 );
                 break;
-            case HashSet<(long Key, int Reach, CallCaptures? Captures)> set:
-                RenderItems(path, set.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
+            case HashSet<(long Key, int Reach)> set:
+                RenderItems(path, set.Order(), lines);
+                break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                RenderItems(path, counts.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
                 break;
             case CaptureTextIds ids:
                 lines.Add($"{path}=({ids.Count},{(ReadOnlyMemory<char>)Private(ids, "_text")})");

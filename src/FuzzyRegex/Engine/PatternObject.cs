@@ -21,7 +21,7 @@ internal sealed class GroupInfo
     /// <summary>
     /// NOT UPSTREAM'S: a backreference reads this group's text, as opposed to only a conditional
     /// reading whether it is set. The call guard keys such a group on its text and any other
-    /// <see cref="Referenced"/> group on one bit (<c>CallCaptures</c>).
+    /// <see cref="Referenced"/> group on one bit (<c>CallRead</c>).
     /// </summary>
     internal bool TextRead;
 
@@ -384,13 +384,13 @@ internal sealed class PatternObject
     internal int[] MemoGroups = [];
 
     /// <summary>
-    /// NOT UPSTREAM'S: the groups the call guard keys a call on (<c>CallCaptures</c>), as indexes into
+    /// NOT UPSTREAM'S: the groups the call guard keys a call on (<c>CallRead</c>), as indexes into
     /// <c>MatchState.Groups</c>, each with what the key holds of it; empty when the
     /// pattern has no group call. Set when the pattern is compiled.
     /// </summary>
     internal (int Index, CallRead Read)[] CallReadGroups = [];
 
-    /// <summary>What the call guard keys a read group on; see <c>CallCaptures</c>.</summary>
+    /// <summary>What the call guard keys a read group on; see <c>CallRead</c>.</summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="info">The group, which a conditional or backreference reads.</param>
     /// <returns>Its span where the capture-change counter can see the span, else its text or one bit.</returns>
