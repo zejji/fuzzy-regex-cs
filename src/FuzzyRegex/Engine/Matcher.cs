@@ -11177,6 +11177,25 @@ internal static class Matcher
 
                         if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    -1,
+                                    foldChangesStart
+                                );
+                            }
+
                             // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
                             if (
                                 (
@@ -11197,21 +11216,6 @@ internal static class Matcher
                                     gfoldedLen,
                                     foldChangesStart,
                                     search
-                                );
-                            }
-
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactGroupFldDeletion(
-                                    state,
-                                    node,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    -1,
-                                    foldChangesStart
                                 );
                             }
 
@@ -11405,6 +11409,25 @@ internal static class Matcher
 
                         if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    1,
+                                    foldChangesStart
+                                );
+                            }
+
                             // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
                             if (
                                 ((foldedLen > 1 && foldedPos == 0) || (gfoldedLen > 1 && gfoldedPos == 0))
@@ -11422,21 +11445,6 @@ internal static class Matcher
                                     gfoldedLen,
                                     foldChangesStart,
                                     search
-                                );
-                            }
-
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactGroupFldDeletion(
-                                    state,
-                                    node,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    1,
-                                    foldChangesStart
                                 );
                             }
 

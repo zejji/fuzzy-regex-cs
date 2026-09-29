@@ -100,6 +100,25 @@ public sealed class FuzzyExactDeletionTests
         );
     }
 
+    // A backreference to an expanding case-folded group character answers as its literal does
+    // (D24): the whole-character deletion is retried before the exact-deletion retry deletes the
+    // character's folded letters one at a time, which spends one deletion more. The exact
+    // deletion's frame sits beneath D22/D24's at REF_GROUP_FLD's exact comparisons. Rows from the
+    // merge review of 73ce238e, which answered each with one deletion more; the answers here are
+    // main's (7cecdb35) and the literals'.
+    [Test]
+    [Arguments("(?i)(ẞ).?(?:\\1){d<=2}s", "xẞ-ſẞf", 1, 3, 0)]
+    [Arguments("(?V0)(?fi)(ss|ﬆI).?(?:\\1){d<=2}\\b", "ß-ssxẞſ", 0, 2, 0)]
+    [Arguments("(?i)(ßst)(?:\\1){e<=3}\\b", "ißﬆ-ssstS", 1, 3, 1)]
+    [Arguments("(?i)(st)(?:\\1){d<=2}s", "x-sſtxﬆſ", 6, 2, 0)]
+    public void A_folded_backreference_deletes_an_expanding_character_whole_first(
+        string pattern,
+        string subject,
+        int index,
+        int length,
+        int substitutions
+    ) => ShouldMatch(new FuzzyRegex(pattern).Match(subject), index, length, new FuzzyCounts(substitutions, 0, 1));
+
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     [Test]
     public void Every_item_after_the_exact_one_may_be_deleted_too()
