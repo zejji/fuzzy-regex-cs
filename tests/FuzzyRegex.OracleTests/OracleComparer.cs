@@ -805,6 +805,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             upstreamFoldedRuns: true
         );
@@ -830,6 +831,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SkipWholeFoldedCharEdits = true
         );
@@ -860,6 +862,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: compiled =>
             {
@@ -896,6 +899,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: static compiled =>
             {
