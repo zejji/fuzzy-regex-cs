@@ -67,7 +67,7 @@ such test is a mistake: reopen it.
 | F20 | A section's minimum error count was met in the wrong order (F-D; upstream's END_FUZZY is wrong, ledger 51, pinned). It unblocked D7's minimum-check witness `(?fi)(?:st){1<=s<=1,i<=1,e<=1}` over 'ßt' (was D9) | main bdf87df6 |
 | F21 | An empty iteration that flipped a tested group between spans at one position counted as progress for ever. Now a per-run record of repeat states (position, capped count, error counts clipped at the pattern's largest limit, tested-group spans) ends the loop; cleared at the end of each call. Removes a doubling-per-character slowdown on main (was D17) | main eb5124ad |
 | F22 | A fuzzy repeat whose empty iterations only spent edits looped until the stack ran out; already fixed by F-A's needed rule (F18), pinned in EmptyIterationCycleTests (was D30) | main eb5124ad |
-| F23 | A fuzzy repeat around empty-able group-setting iterations ran without bound (both engines); already fixed by F-A's needed rule (Matcher.EmptyIterationAdmitted). Pinned by 28 cases in FuzzyNeededEmptyIterationTests over a 5,144-row variant grid (was D27) | main (D27/D30 tests merge) |
+| F23 | A fuzzy repeat around empty-able group-setting iterations ran without bound (both engines); already fixed by F-A's needed rule (Matcher.EmptyIterationAdmitted). Pinned by 28 cases in FuzzyNeededEmptyIterationTests over a 5,144-row variant grid (was D27) | main 0922b568 |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
