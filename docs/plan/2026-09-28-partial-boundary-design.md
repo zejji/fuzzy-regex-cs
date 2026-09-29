@@ -937,3 +937,122 @@ ratchet green. S57d's escalation stays until chunk 9, so the guard rows stay gre
 | 9 | the per-attempt fork budget, the lookaround memo, RC5, deleting HitEnd and S57d, the pin moves of section 5 | X1, S4, Z1, Z2; A11-A13; every guard row green without S57d |
 | 10 | exact `(?w)` and grapheme M1 through property cores | W1-W6 |
 | 11 | the port grid (8.1), the oracle at three seeds and the wave generators, the benchmarks (section 9) | the gate of 8.1; oracle green; no path over 10% slower |
+
+## 12. Amendments
+
+### Amendment 1 (2026-09-29): X2, why the second pass is exponential, and the fix
+
+Chunk 7 left X2 (`(?:(?(?=.*z)a|a))*b` over 'a' * n + 'c') right but exponential in the second
+pass. This amendment gives the cause, the options and the fix, measured on a copy of 62c3fe16
+(Release, `.scratch/d11-x2/`, two environment switches, the rest of the engine unchanged).
+
+**The cause has two halves, and each alone changes nothing.**
+
+1. *The failure memo is off in the second pass.* `MatchState.KeepsFailureMemo`
+   (`MatchState.cs:1846`) answers false whenever `PartialSide != PartialNone`, so
+   `END_GREEDY_REPEAT` and `END_LAZY_REPEAT` (`Matcher.cs:10811`, `:11011`) mark every position
+   where the body matched as unprotected, upstream's rule, and the failure found there later is
+   never recorded. The pattern's half does not turn the memo off for X2:
+   `Optimiser.KeepFailureMemosSound` (`Optimiser.cs:601`) clears it for a condition on a group
+   (`GroupExists`), not for a lookaround condition, and X2's repeat qualifies
+   (`NodeCompiler.cs:1634`: top level, not in a submatch, no maximum, minimum 0). Chunk 7's note
+   that a conditional switches the memo off is corrected here.
+2. *The condition's restore wipes the outer repeat's guards.* `CONDITIONAL` saves every repeat's
+   guard lists (`PushRepeats`, `Matcher.cs:3606`, called at `:10384`), and its backtrack arms put
+   them back (`CONDITIONAL` `:14344`, `END_CONDITIONAL` `:14396`, and the negative test's success
+   `:10510`). The save exists for guards recorded *inside* the test (the remark at `:3598-3602`),
+   but it also throws away what the outer repeat learned *after* the test ended. With both branches
+   taken, the timeline at one position p is: the yes-branch runs, and the whole rest of the match
+   above it fails, recording guards for the outer repeat at p + 1, p + 2 and so on; backtracking
+   pops `END_CONDITIONAL`, whose restore deletes those guards; the no-branch then explores the same
+   rest again from nothing. Two full explorations per position is 2^n.
+
+Measured, match, 'a' * n + 'c' (truth None at every n):
+
+| switches | n = 18 | n = 20 | n = 100 | n = 1000 |
+|---|---|---|---|---|
+| neither (62c3fe16) | 280 ms | 1,185 ms | timeout (30 s) | timeout |
+| memo in the second pass only | 361 ms | - | timeout | timeout |
+| guards kept across the restore only | 328 ms | - | timeout | timeout |
+| both | 0.09 ms | 0.11 ms | 0.87 ms | 17.5 ms |
+
+With both, the second pass is at the pattern's own order on a completed text: the same call without
+partial over 'a' * n + 'zcb' takes 11.0 ms at n = 1000 and 83.6 ms at n = 3000, against 17.5 ms and
+125 ms (quadratic, because each lookahead scans to the end, as section 9 says). As a search, X2
+takes 1,443 ms at n = 1000 against 961 ms for the completed text; the lookaround memo of chunk 9 is
+what brings a search down further.
+
+**Is the partial exclusion still needed? No.** It came from the memo design
+(`2026-09-26-backtrack-memoisation-design.md`, condition 8, "a partial result is neither success nor
+failure") and was kept without a witness (`RepeatInfo.FailureMemo`'s remarks, `PatternObject.cs:76`,
+list the four witnessed conditions; partial is not one). The memo needs one fact: entering the body
+of repeat R at position p has the same outcome whatever path arrived there. What a second-pass path
+carries beyond the position after chunks 1-7, and why none of it breaks that:
+
+- *W-marks.* A mark blocks only constructs older than itself. The continuation of a memo repeat
+  holds no cut by a construct older than R: R is not inside an atomic group, possessive repeat,
+  lookaround or test (the compiler's half), and the pattern has no `(*PRUNE)` or `(*SKIP)` (the
+  pattern's half). Marks newer than R are made inside the subtree. This is section 4.6, step 6,
+  which already argues from "a guard is recorded when R's entry is popped", the memo's rule.
+- *`AttemptTouchedTheTextToCome`* decides only what `Success` does (`Matcher.cs:13913`). A touched
+  success returns a partial, or under `fullmatch` backtracks, the same for every arrival. An
+  untouched second-pass success would be a first-pass success (A1), and the memo's patterns are not
+  fuzzy, so A1's exception does not arise.
+- *Run-outs.* Outside a body a run-out ends the attempt, so no guard is recorded over it. Inside a
+  body it goes on as if the body matched, a function of the position; and a memo repeat is never
+  inside a body.
+- *Unknown captures* matter only to backreferences and group conditions, which switch the memo off.
+- *The dedup records and the fork counter* (chunk 9) belong to newer frames or end the attempt with
+  a partial; the lookaround memo (chunk 9) replays a function of the body's start state.
+
+A differential grid backs this up: 42,240 partial rows (`(?:X)QY` for 16 bodies X, among them X2's
+condition, alternations, lookarounds, atomic groups, `\b` and `\B`; five quantifiers Q; 11 tails Y;
+eight subjects over {a, b, c} of length up to 5; match, search and fullmatch) give identical answers
+with both switches on and off, 5,260 of them partials.
+
+**Is keeping the guards across the restore sound?** Yes, for memo repeats. A guard at p for such a
+repeat says the body entered at p fails for every arrival (above). It was recorded after the test
+had ended, so it does not come from the question the test asked, which is all the restore protects.
+The rest of the saved state (count, start, capture change) is still restored.
+
+**The restore is exponential without partial too.** `(?:(?(?=a)a|a)|a)*b` over 'a' * n + 'cb' (the
+'b' defeats the required-string screen): the port takes 1,910 ms at n = 22 and 8,388 ms at n = 24;
+with the guards kept, 0.07 ms. Upstream 2026.9.10 takes 1,378 ms at n = 22 (measured 2026-09-29).
+So the kept guards apply to every call, not only the second pass. A lookaround does not save the
+repeats, and `(?:(?=a)a|a)*b` and `(?:(?>a)|a)*b` are already linear; the other callers of
+`PushRepeats` (group call, group condition) are in patterns with no memo.
+
+**Plain partial `(?:a|a)*b` is exponential in the port as well**, with no condition: over
+'a' * n + 'c', 234 ms at n = 20 and 880 ms at n = 22 (second pass only; the first pass has the
+memo), and upstream 97.5 ms and 396 ms. The memo half alone fixes it: 0.32 ms at n = 22 and 122 ms
+at n = 100,000. This goes beyond upstream, which has no memo.
+
+**The options.**
+
+| option | soundness | cost on X2 | partial-off cost | verdict |
+|---|---|---|---|---|
+| A. The memo in the second pass, and memo repeats' guards kept across a condition's restore | the arguments above; 0 differences in 42,240 rows | 0.11 ms at n = 20, 17.5 ms at n = 1000 | nothing added: one test leaves `KeepsFailureMemo`, and `CONDITIONAL` saves and restores fewer bytes, since the memo repeats' lists are skipped | **recommended** |
+| B. A per-attempt visited set of (node, position, relevant state) | needs its own argument for every node kind, and the relevant state (marks, touch, dedup, counts) is what A shows the memo repeats never read | a hash insert per node visit in the second pass, and memory of nodes times positions; polynomial, but slower than A wherever A applies | none if second-pass only | not needed now; the upgrade path if a pattern outside the memo's conditions proves exponential |
+| C. Bound the second pass: the fork budget (M4) alone | sound (a partial is never a refusal) | X2 counts a fork per condition, so it stops at 256 (\|t\| + 1) forks and answers P(0, \|t\|), a phantom where the truth is None | none | a backstop only; it does not bound plain `(?:a\|a)*b`, which forks nowhere |
+| D. Either half of A alone (chunk 7 tried keeping the guards) | sound | still exponential (table above) | - | rejected |
+
+**Recommendation: A.** It is two small changes, each sound on its own, and together they fix X2,
+plain partial repeats and a non-partial exponential that upstream shares.
+
+- *Guards kept across a condition's restore:* its own defect row, since it is not a partial
+  problem, fixed on main test-first and merged into D11. Witness: `(?:(?(?=a)a|a)|a)*b` over
+  'a' * 40 + 'cb' within a step bound (`EngineWork.ShouldTakeAtMostSteps`, as in
+  `FailureMemoTests`), red on main. The build measures a condition-heavy benchmark against main.
+- *The memo in the second pass:* D11 chunk 9, with the fork budget, because the budget would
+  otherwise turn X2 into a phantom and the two are measured together. X2 moves from chunk 7's
+  "done when" to chunk 9's. Witnesses: X2 over 'a' * 40 + 'c' within a step bound, and the four
+  `FailureMemoTests` patterns with `partial: true`, each red with the `PartialSide` test put back.
+  Rule 11 needs a Debug count of guards consulted in second passes, non-zero on the grid.
+
+**Left open.** A repeat outside the memo's conditions (a backreference, a group condition, a verb or
+fuzzy matching anywhere in the pattern) keeps upstream's guards, so an X2-shaped body there stays
+exponential in the second pass, and the fork budget answers it with a C5 phantom; option B is the
+upgrade path. Found on the way, and not caused by this: `(x)?(?(?=.*z)a|a)b(?(1)y)` and
+`(x)?(?(?=.*z)a|a)b\1` over 'ac', match, answer P(0, 2) in the port and in upstream, where the judge
+says None; without the backreference or group condition they answer None. It needs triage, likely
+with chunk 8's unknown captures.
