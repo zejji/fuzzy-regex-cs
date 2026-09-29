@@ -721,18 +721,19 @@ internal static class OracleComparer
     }
 
     /// <summary>
-    /// Puts a row's question to this port with the second pass of a partial call reading the word,
-    /// line and string tests against the held text, as it did before D11 M1 and as upstream does.
+    /// Puts a row's question to this port with the second pass of a partial call as it was before
+    /// D11 and as upstream's is: the word, line and string tests read against the held text, and a
+    /// search with no start left answering failure.
     /// </summary>
     /// <remarks>
     /// D11 M1 decides such a test at the edge for the text to come: false where every continuation
     /// fails it (<c>\Z</c>, <c>\m</c> after a word character), passed with a touch mark where some
-    /// continuation passes it (<c>\b</c>). Setting <c>PatternObject.EdgeReadsTheHeldText</c> puts
-    /// the held-text reading back. The <c>partial-edge-read</c> entry keys on this.
+    /// continuation passes it (<c>\b</c>). Setting <c>PatternObject.SecondPassAsBeforeD11</c> puts
+    /// both back. The <c>partial-edge-read</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers without M1, on the row's own deadline.</returns>
-    internal static IOracleOutcome? RunWithTheEdgeReadAgainstTheHeldText(OracleRow row)
+    internal static IOracleOutcome? RunWithTheSecondPassAsBeforeD11(OracleRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -740,7 +741,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.EdgeReadsTheHeldText = true
+            ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true
         );
     }
 

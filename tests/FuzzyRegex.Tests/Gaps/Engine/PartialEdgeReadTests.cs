@@ -39,23 +39,33 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
-    /// The seed-7 row of the 2026-09-21 oracle wave, which S57d pinned as a partial: its <c>\m</c>
-    /// comes after an astral uppercase letter at the end of the text, so no continuation starts a
-    /// word there. Upstream and the judge answer None, and so does the port since D11.
+    /// The seed-7 row of the 2026-09-21 oracle wave, which S57d pinned as a partial at (0, 4): its
+    /// <c>\m</c> comes after an astral uppercase letter at the end of the text, so no continuation
+    /// starts a word there, and the attempt at 0 fails.
     /// </summary>
+    /// <remarks>
+    /// Searched, the answer is the edge partial (4, 4), the search convention of design section 1,
+    /// rule 3: with <c>(?m)</c> a match could begin after a newline in the text to come. No text
+    /// completes this pattern (<c>\m$</c> holds nowhere), so the judge answers None: the design's
+    /// accepted phantom class C1, which upstream shares on most rows (upstream answers None here).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the search door, as the design's class C1.
     [Test]
     public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
     {
-        new FuzzyRegex(
+        var regex = new FuzzyRegex(
             @"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$",
             FuzzyRegexOptions.IgnoreCase
                 | FuzzyRegexOptions.Multiline
                 | FuzzyRegexOptions.FullCase
                 | FuzzyRegexOptions.Version0
-        )
-            .Match("\U00010400\U0001D518", partial: true)
-            .Success.Should()
-            .BeFalse();
+        );
+
+        regex.MatchAtStart("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
+
+        Match searched = regex.Match("\U00010400\U0001D518", partial: true);
+
+        (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, 4, 0));
     }
 
     /// <summary>
@@ -125,6 +135,35 @@ public sealed class PartialEdgeReadTests
 
         m.PartialMatch.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((start, end));
+    }
+
+    /// <summary>
+    /// A search whose only completion starts inside the text to come reports the partial at the
+    /// end of the text, the convention of design section 1, rule 3, whichever path the search
+    /// takes: the prefilter's or the slow one (D11 M3, the prefilter's no-start partial).
+    /// </summary>
+    /// <remarks>
+    /// Found by review of build chunk 2 (2026-09-29) as a regression against S57d: once <c>\Z</c>
+    /// at the edge is decided false, no path reaches S57d's note, and the prefilter answered
+    /// failure where the slow path answers the edge partial. The brute-force judge answers P(0, 0)
+    /// for the first two and P(1, 1) for the last (design row S3).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the third row: upstream answers (1, 1) too; on the first two it
+    // answers None.
+    [Test]
+    [Arguments(@"(?a)\Z(\W?\M)(^ +?\m)?", "", 0)]
+    [Arguments(@"(?u)\Z(?:(?:\Bax|aa\b)|(\M))", "", 0)]
+    [Arguments("(?i)\\mİ", "b", 1)]
+    public void A_search_whose_only_completion_starts_in_the_text_to_come_reports_the_edge(
+        string pattern,
+        string text,
+        int edge
+    )
+    {
+        Match m = Partial("search", pattern, text);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((edge, 0));
     }
 
     /// <summary>
@@ -227,15 +266,18 @@ public sealed class PartialEdgeReadTests
 
         (m5367.PartialMatch, m5367.Index, m5367.Length).Should().Be((true, 0, 0));
 
-        // Rows 6399 and 6589: upstream's partials, which no continuation completes.
+        // Row 6399: upstream's partial, which no continuation completes.
         new FuzzyRegex(@"(?fi)(?r)\m(?:(?:b+?\A){e<=3}){e<=2}", FuzzyRegexOptions.Version0)
             .FullMatch("BB", partial: true)
             .Success.Should()
             .BeFalse();
-        new FuzzyRegex(@"(?b)\B(?:\Z[a-f]\p{L}\Wa+){e<=2}", FuzzyRegexOptions.Version0)
-            .Match("bb.aa", partial: true)
-            .Success.Should()
-            .BeFalse();
+        // Row 6589 is searched, so it gets the edge partial of the search convention (class C1).
+        Match m6589 = new FuzzyRegex(@"(?b)\B(?:\Z[a-f]\p{L}\Wa+){e<=2}", FuzzyRegexOptions.Version0).Match(
+            "bb.aa",
+            partial: true
+        );
+
+        (m6589.PartialMatch, m6589.Index, m6589.Length).Should().Be((true, 5, 0));
     }
 
     private static MatchState RunPartial(string pattern, string text)

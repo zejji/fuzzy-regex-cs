@@ -2745,7 +2745,7 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.EdgeReadsTheHeldText"/>):
+    /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.SecondPassAsBeforeD11"/>):
     /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
     /// the held text, with S57d noting a word or grapheme test at the truncation point.
     /// </summary>
@@ -2798,7 +2798,7 @@ internal static class Matcher
     /// <param name="textPos">The position to ask about.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
-        state.PartialSide != MatchState.PartialNone && state.Pattern.EdgeReadsTheHeldText
+        state.PartialSide != MatchState.PartialNone && state.Pattern.SecondPassAsBeforeD11
             ? ZeroWidthAgainstTheHeldText(state, node, textPos)
             : node.Op switch
             {
@@ -7585,6 +7585,26 @@ internal static class Matcher
                     // Upstream also forwards RE_ERROR_PARTIAL here (:11828-11830). This port's
                     // prefilter has no partial arms to forward - see SearchStart - so what reaches
                     // this line is a failure or a cancellation.
+                    //
+                    // NOT UPSTREAM'S, D11 M3 (design section 4.3, row S3), brought forward from
+                    // build chunk 3 by chunk 2's review: in a partial call's second pass a search
+                    // with no start left answers what the slow path below answers when it steps
+                    // past the slice, the partial at the edge, because a match could still begin
+                    // in the text to come. Without it `\Z` at the edge, decided false by M1, left
+                    // `(?u)\Z(?:(?:\Bax|aa\b)|(\M))` searched over '' with no answer at all.
+                    if (
+                        status == MatchStatus.Failure
+                        && state.PartialSide != MatchState.PartialNone
+                        && !state.Pattern.SecondPassAsBeforeD11
+                    )
+                    {
+                        state.MatchPos = state.Reverse ? state.SliceStart : state.SliceEnd;
+                        state.TextPos = state.MatchPos;
+                        state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
+
+                        return MatchStatus.Partial;
+                    }
+
                     return status;
                 }
 
@@ -11727,15 +11747,20 @@ internal static class Matcher
                     // Can we advance?
                     state.TextPos = state.MatchPos;
 
-                    if (state.Reverse)
+                    if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
-                        if (state.TextPos <= state.SliceStart)
+                        // NOT UPSTREAM'S, D11 M3 (design section 1, rule 3), brought forward from
+                        // build chunk 3 by chunk 2's review: in a partial call's second pass a search
+                        // with no start left may still find a match that begins in the text to
+                        // come, which is the partial at the edge, as the prefilter answers.
+                        if (state.PartialSide != MatchState.PartialNone && !state.Pattern.SecondPassAsBeforeD11)
                         {
-                            return MatchStatus.Failure;
+                            state.MatchPos = state.TextPos;
+                            state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
+
+                            return MatchStatus.Partial;
                         }
-                    }
-                    else if (state.TextPos >= state.SliceEnd)
-                    {
+
                         return MatchStatus.Failure;
                     }
 

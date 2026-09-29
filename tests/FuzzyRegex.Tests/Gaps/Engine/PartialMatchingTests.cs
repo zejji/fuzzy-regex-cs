@@ -366,16 +366,23 @@ public sealed class PartialMatchingTests
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
         );
 
-        narrowed.Match(" \r", partial: true).Success.Should().BeFalse("upstream answers (0, 2) partial");
+        // D11 (2026-09-29) moved this row from None to (2, 2): a search with no start left in the
+        // held text reports the partial at the edge, because ' \r' + '\n ' matches at 3 (the
+        // brute-force judge, tools/probes/d11-brute-judge.py, answers P(2, 2) with witness '\n ').
+        // Upstream answers (0, 2), the span its own match denies.
+        Match narrowedMatch = narrowed.Match(" \r", partial: true);
 
-        // The greedy twin, which is the control: both engines answer nothing.
-        new FuzzyRegex(
+        narrowedMatch.PartialMatch.Should().BeTrue("upstream answers (0, 2) partial");
+        (narrowedMatch.Index, narrowedMatch.Length).Should().Be((2, 0));
+
+        // The greedy twin, which is the control: upstream answers nothing, and this port the same
+        // edge partial, so the lazy repeat is what upstream's (0, 2) is about.
+        Match greedy = new FuzzyRegex(
             @"^([^a-f]?)([\ ])$",
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
-        )
-            .Match(" \r", partial: true)
-            .Success.Should()
-            .BeFalse();
+        ).Match(" \r", partial: true);
+
+        (greedy.PartialMatch, greedy.Index, greedy.Length).Should().Be((true, 2, 0));
     }
 
     // DIVERGES FROM UPSTREAM on the match door, deliberately, and this test pins OUR answer.

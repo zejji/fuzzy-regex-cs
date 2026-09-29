@@ -483,6 +483,32 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
+    /// The row of <c>partial-edge-read</c> keyed on its judged answer rather than on the ablation.
+    /// </summary>
+    /// <remarks>
+    /// Seed 7 row 4867, <c>^(\p{Lu}+?)(?(?&lt;=\p{Nd})[A-Z])\m$</c> under MULTILINE searched over two
+    /// astral uppercase letters. S57d answered (0, 4); D11 decides <c>\m</c> false at the end, and
+    /// the search, with no start left, answers the partial at the edge (4, 4). No text completes
+    /// the pattern (<c>\m$</c> holds nowhere; tools/probes/d11-brute-judge.py answers None), so the
+    /// answer is the design's accepted phantom class C1 and upstream's None is the truth. The
+    /// ablation keeps S57d, which answers (0, 4), so it cannot account for the row.
+    /// <para>
+    /// The 37 rows the no-start arm moved on seed 7 were each judged on 2026-09-29 by
+    /// tools/probes/d11-brute-judge.py, the sliced ones by hand: 2 are completions upstream refuses
+    /// and 35 are phantoms of class C1 (see the entry's Reason).
+    /// </para>
+    /// </remarks>
+    private const string _edgeReadJudgedRows = """
+        {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary><see cref="_edgeReadJudgedRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _edgeReadJudged = OracleWave
+        .ParseRows(_edgeReadJudgedRows)
+        .Select(static row => (Key: Question(row), Ours: "match 0:(4,0)[(4,0)] 1:unset last=-1/- partial"))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
     /// The row of <c>fuzzy-counts-of-a-partial-are-the-innermost-sections</c>, recorded by
     /// <c>python tools/record-oracle.py --rows</c> on 2026-09-14.
     /// </summary>
@@ -1159,9 +1185,17 @@ internal static class ExpectedDivergences
     /// zero-width partial its <c>search</c> did, so this is upstream's SLOW path and not the
     /// prefilter, and the row belongs here rather than there.
     /// </para>
+    /// <para>
+    /// D11 (2026-09-29) re-recorded row 34508 on the MATCH door. Searched, it now agrees with
+    /// upstream's (5, 5), because a search with no start left answers the partial at the edge (a
+    /// match of <c>^İ\K\b</c> can begin after a newline in the text to come). Anchored at the slice,
+    /// the question is still the Turkic fold data alone: upstream answers (5, 5) and this port None,
+    /// which is what <c>CaseFoldingTests</c> pins through <c>MatchAtStart</c>. Re-recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-09-29.
+    /// </para>
     /// </remarks>
     private const string _turkicPatternSideRows = """
-        {"generator": "partial-sliced", "pattern": "^İ\\K\\b", "flags": 16650, "namedLists": {}, "subject": "sﬁﬀıİ", "operation": "search", "partial": true, "pos": 5, "endpos": 5, "codepointSlice": [5, 5], "oracle": "prefilter-free", "codepointSpan": [5, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial-sliced", "pattern": "^\u0130\\K\\b", "flags": 16650, "namedLists": {}, "subject": "s\ufb01\ufb00\u0131\u0130", "operation": "match", "partial": true, "pos": 5, "endpos": 5, "codepointSlice": [5, 5], "oracle": "prefilter-free", "codepointSpan": [5, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -2162,11 +2196,22 @@ internal static class ExpectedDivergences
     [
         "no match",
         "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial",
-        "no match",
+        // Row 3 was "no match" until D11 (2026-09-29): a search with no start left in the held text
+        // now answers the partial at the edge, and ' \r' + '\n ' does match at 3 under MULTILINE
+        // (tools/probes/d11-brute-judge.py: P(2, 2), witness '\n '). So the old answer was a miss
+        // and this is the truth; upstream's (0, 2) is still the span its own match denies.
+        "match 0:(2,0)[(2,0)] 1:unset 2:unset last=-1/- partial",
         // Seeds of the 2026-09-24 scheduled sweep, recorded on Linux and identical on Windows, judged
         // 2026-09-25 against upstream's own greedy twin, no match: seed 500905607 row 34832; the minimal form of D4.
-        "no match",
-        "no match",
+        // Row 4 moved with D11 as row 3 did: '𐐨𐐨\n' on the left of the slice's '\r' matches
+        // (upstream 2026.9.10 without partial: `(?rm)𐐨𐐨[abz]??$` searched over '𐐨𐐨\n\r' is (0, 2)),
+        // so the partial at the slice's edge is the truth and "no match" was a miss.
+        "match 0:(2,0)[(2,0)] last=-1/- partial",
+        // Row 5, `(?r)aab??$` over 'c', moved with D11 from "no match" to the partial at the edge,
+        // the search convention of the D11 design's section 1, rule 3. No text on the left completes
+        // it (`$` must sit after 'c'), so this is the design's accepted phantom class C1; upstream's
+        // (0, 1) is a phantom too, and a different one.
+        "match 0:(0,0)[(0,0)] last=-1/- partial",
         // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 102 row 1750 and seed 103
         // row 2314, both ledger entry 2's second door. Upstream's greedy twin of each,
         // `(?r)[a][[:digit:]]*$` and `(\p{Ll}*)a\1\b`, answers the partial this port answers, (0, 0)
@@ -7011,12 +7056,26 @@ internal static class ExpectedDivergences
                 + "`[\\ ]+` then consumes a space there, and row 5310, a `\\b` at the edge of the "
                 + "empty slice at 3 followed by a skin-tone modifier, which is no word character "
                 + "(judge None on both; upstream None).\n"
-                + "KEYED ON AN ABLATION: a row belongs here only when "
-                + "`OracleComparer.RunWithTheEdgeReadAgainstTheHeldText`, which sets "
-                + "`PatternObject.EdgeReadsTheHeldText` so the second pass reads the held text as "
-                + "before D11, reproduces upstream's recorded answer exactly, AND this port's live "
-                + "answer is the one being judged. A partial row this port gets wrong for any other "
-                + "reason still diverges with the held-text reading and is reported.",
+                + "THE NO-START ARM, added by chunk 2's repair round (design section 1, rule 3): a "
+                + "search whose second pass has no start left answers the partial at the edge, "
+                + "because a match could begin in the text to come, where upstream answers failure. "
+                + "It moved 37 more seed 7 rows, each judged by tools/probes/d11-brute-judge.py on "
+                + "2026-09-29 (the sliced ones by hand). Two are real completions upstream refuses, "
+                + "for example row 5161, `^\\K(\\p{L})*?\\w*` under MULTILINE over the empty slice "
+                + "after 'a', which '\\n' to come completes. The other 35 are the design's accepted "
+                + "phantom class C1, the edge partial of a pattern no text completes: nearly all are "
+                + "reversed searches whose backreference runs before its group is set, which "
+                + "upstream's own matcher never matches either (`(?r)(\\w+)\\1` searched over 'aa\\n' "
+                + "is None).\n"
+                + "KEYED ON AN ABLATION: a row belongs here when "
+                + "`OracleComparer.RunWithTheSecondPassAsBeforeD11`, which sets "
+                + "`PatternObject.SecondPassAsBeforeD11` so the second pass runs as before D11 "
+                + "(held-text reads, no no-start partial), reproduces upstream's recorded answer "
+                + "exactly, AND this port's live answer is the one being judged. A partial row this "
+                + "port gets wrong for any other reason still diverges with the ablation and is "
+                + "reported. ONE ROW IS KEYED ON ITS JUDGED ANSWER instead: seed 7 row 4867, where the "
+                + "ablation still carries S57d's escalation and so cannot give upstream's None (see "
+                + "_edgeReadJudgedRows).",
             PinnedBy: "PartialEdgeReadTests.The_rows_the_seed_7_wave_found",
             Example: """
             {"generator": "partial", "pattern": "\\b(?:[^\\p{L}]{0}(*PRUNE)\\D|[^a])[^a]+\\B", "flags": 16394, "namedLists": {}, "subject": "", "operation": "match", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -7025,10 +7084,17 @@ internal static class ExpectedDivergences
             {"generator": "partial-sliced", "pattern": "\\b([A]*){1}\\1", "flags": 256, "namedLists": {}, "subject": "\r\n", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 0, "codepointSlice": [0, 0], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "fuzzy-anchored", "pattern": "(?fi)(?r)\\m(?:(?:b+?\\A){e<=3}){e<=2}", "flags": 0, "namedLists": {}, "subject": "BB", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 1], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 1], "deletions": []}}]}
             {"generator": "fuzzy-anchored", "pattern": "(?b)\\B(?:\\Z[a-f]\\p{L}\\Wa+){e<=2}", "flags": 0, "namedLists": {}, "subject": "bb.aa", "operation": "search", "partial": true, "codepointSpan": [4, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}], "searchOnlyPartial": false, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}}
+            {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """,
             Applies: static (row, ours) =>
                 row.Partial
-                && OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheEdgeReadAgainstTheHeldText(row))
+                && (
+                    OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheSecondPassAsBeforeD11(row))
+                    || (
+                        _edgeReadJudged.TryGetValue(Question(row), out string? judgedEdge)
+                        && string.Equals(ours.Describe(), judgedEdge, StringComparison.Ordinal)
+                    )
+                )
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",

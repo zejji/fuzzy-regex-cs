@@ -484,12 +484,13 @@ internal sealed class PatternObject
     internal bool UpstreamDefaultBoundary;
 
     /// <summary>
-    /// NOT UPSTREAM, and never set by this library: whether a partial call's second pass reads the
-    /// word, line and string tests against the held text, as upstream does, instead of deciding
-    /// them for the text to come (D11 M1). The oracle sets it on a pattern it compiled for one
-    /// call, to show that M1 is the whole of a divergence. See <c>Matcher.TryMatchZeroWidth</c>.
+    /// NOT UPSTREAM, and never set by this library: whether a partial call's second pass runs as it
+    /// did before D11, as upstream's does: the word, line and string tests read against the held
+    /// text (M1 off), and a search with no start left answers failure rather than the partial at
+    /// the edge. The oracle sets it on a pattern it compiled for one call, to show that D11 is the
+    /// whole of a divergence. See <c>Matcher.TryMatchZeroWidth</c> and the two no-start arms.
     /// </summary>
-    internal bool EdgeReadsTheHeldText;
+    internal bool SecondPassAsBeforeD11;
 
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
