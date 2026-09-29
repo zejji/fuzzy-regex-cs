@@ -245,6 +245,20 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
             .BeFalse();
     }
 
+    // The same rule when the whole insertion is reached by backtracking into an earlier edit's
+    // frame, where upstream's retry spells its own insertion rule differently
+    // (Matcher.RetryFuzzyMatchGroupFld): the search moves on to the exact match instead.
+    // Upstream: (1, 3) and (1, 4) with no errors, as for the literal twin (?fi)(?=.*?(js))(?:js){i<=1}.
+    [Test]
+    [Arguments(@"(?fi)(?=.*?(js))(?:\1){i<=1}", "ǰjs", 1, 2)]
+    [Arguments(@"(?fi)(?=.*?(sst))(?:\1){i<=1}", "ßsst", 1, 3)]
+    public void A_retried_backreference_edit_makes_no_whole_character_insertion_at_the_search_anchor(
+        string pattern,
+        string text,
+        int index,
+        int length
+    ) => ShouldMatch(pattern, text, "search", index, length, new FuzzyCounts(0, 0, 0));
+
     // Controls for the backreference edits, each None in both engines: the constraint's test sees
     // the whole subject character, which is not in [a-z]; an edit does not start part way through
     // ﬃ; and deletions alone cannot absorb a subject character.
