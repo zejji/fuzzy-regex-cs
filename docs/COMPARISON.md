@@ -1646,6 +1646,25 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:ß){s<=1}").FullMatch("ßxa").Le
 Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:\1){s<=1}").FullMatch("ßxa").Length); // 3 - upstream: no match
 ```
 
+### A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away
+
+A group call such as `(?1)` adds to the called group's capture list, as the group itself does.
+Upstream saves and restores the capture lists around a lookaround only when its body holds a
+capture group, so when the body only calls one, the call's capture outlives a negative lookaround
+whose body matched, or a positive one the match backtracked past. Here a call counts as a group, so
+the lists are restored, as they are for a group written directly.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("aaab", "(a)(?:(?!.(?1))|.)+?b");
+Console.WriteLine(m.Groups[1].Captures.Count);   // 1 - upstream: 2
+Console.WriteLine(m.Groups[1].Index);   // 0 - upstream: 0
+```
+
+Spans, group values and fuzzy counts are unchanged; only capture lists differ. There is no option
+to restore the upstream answer. Ledger entry 54.
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

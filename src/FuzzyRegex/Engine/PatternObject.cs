@@ -434,11 +434,15 @@ internal sealed class PatternObject
     /// of those constructs whose body holds a call, a fuzzy section or a <c>\K</c> turns the memo
     /// off (<see cref="WritesInDiscardingConstruct"/>, <see cref="KeepInSubmatch"/>). That also
     /// covers a call inside a lookbehind, which runs the other way and so can meet open calls the
-    /// key does not hold. A capture group in there does not: the stray entry appears only when a
-    /// call writes the capture. Upstream 2026.9.10 and the port both give group 1 no capture for
-    /// <c>(?:(?=(a))ax|a)b</c> over <c>ab</c>, and <c>(a)(?:(?!.(a))|.)+?b</c> over <c>aaab</c> gives
-    /// only [0,1] in both, where <c>(a)(?:(?!.(?1))|.)+?b</c> gives [0,1][2,1]. Keeping the memo on
-    /// there is what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
+    /// key does not hold. A capture group in there does not: the stray entry appeared only when a
+    /// call wrote the capture, because a lookaround saved the captures only for a body holding a
+    /// capture group, so <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> gave group 1 [0,1][2,1] where
+    /// <c>(a)(?:(?!.(a))|.)+?b</c> gives [0,1] (upstream 2026.9.10 still does). D10 made a call count
+    /// as a group (<c>NodeCompiler.BuildGroupCall</c>), and the capture-list witness above now
+    /// answers the same with the memo forced on. A call in there still turns the memo off: the group
+    /// it calls may hold a fuzzy section, which leaves the error total as above, and in a lookbehind
+    /// it meets open calls the key does not hold. Keeping the memo on for a capture group there is
+    /// what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
     /// </para>
     /// <para>
     /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a
@@ -733,6 +737,21 @@ internal sealed class PatternObject
     /// nothing in <c>bxc</c>. See <c>Matcher.InsertBeforeAFailedLookaround</c>.
     /// </remarks>
     internal bool SkipLookaroundInsertion;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never read by this library: the lookarounds that save and restore the
+    /// captures only because their body calls a group (D10), or <see langword="null"/> when there
+    /// are none. Written by <c>NodeCompiler.BuildLookaround</c>. The oracle clears their
+    /// <see cref="NodeStatus.HasGroups"/> flag on a pattern it compiled for one call, to show that
+    /// the D10 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream saves the captures around a lookaround only when its body holds a capture group
+    /// (<c>upstream/src/_regex.c</c>:13772), so a call's capture outlives a body that is thrown away:
+    /// <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> leaves group 1 with [0,1][2,1]. See
+    /// <c>NodeCompiler.BuildGroupCall</c>.
+    /// </remarks>
+    internal List<Node>? LookaroundsSavingOnlyForCalls;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end

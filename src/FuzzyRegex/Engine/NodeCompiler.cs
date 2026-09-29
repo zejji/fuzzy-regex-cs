@@ -1229,6 +1229,13 @@ internal static class NodeCompiler
         node.Status |= NodeStatus.HasGroups;
         node.Status |= NodeStatus.HasRepeats;
 
+        // NOT UPSTREAM (D10): a call writes the called group's captures, so it counts as a group for
+        // the enclosing sequence. Upstream sets only the call node's own flag, but the flag is read
+        // only on a LOOKAROUND node (:13772), so a lookaround whose body only calls a group never
+        // saves the captures and keeps the call's capture after a negative body succeeded or a
+        // positive one was backtracked past.
+        args.HasGroups = true;
+
         args.Code += 2;
 
         // Record that we used a call_ref.
@@ -1383,6 +1390,7 @@ internal static class NodeCompiler
         subargs.WithinSubmatch = true;
         subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
+        long groupEndsBefore = args.Pattern.GroupEndIndex;
         int status = BuildSequence(ref subargs);
         if (status != _success)
         {
@@ -1407,6 +1415,15 @@ internal static class NodeCompiler
         if (subargs.HasGroups)
         {
             lookaroundNode.Status |= NodeStatus.HasGroups;
+        }
+
+        // NOT UPSTREAM (D10), for the oracle alone: upstream's flag means the body built a capture
+        // group (build_GROUP is the only place that sets has_groups, :24811), and every group built
+        // bumps GroupEndIndex, so a flag with no group built came from a call.
+        Debug.Assert(subargs.HasGroups || args.Pattern.GroupEndIndex == groupEndsBefore);
+        if (subargs.HasGroups && args.Pattern.GroupEndIndex == groupEndsBefore)
+        {
+            (args.Pattern.LookaroundsSavingOnlyForCalls ??= []).Add(lookaroundNode);
         }
 
         if (subargs.HasRepeats)

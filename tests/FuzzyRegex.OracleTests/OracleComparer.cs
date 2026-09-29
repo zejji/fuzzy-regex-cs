@@ -1,3 +1,5 @@
+using Fuzzy.Text.RegularExpressions.Engine;
+
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
 
 /// <summary>Runs one recorded row through this port and diffs the answer against upstream's.</summary>
@@ -214,7 +216,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
-    /// <see cref="RunWithoutTheLookaroundInsertion"/> and <see cref="RunWithTheUpstreamMinimumOrder"/> and by
+    /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
+    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/> and by
     /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
@@ -732,6 +735,39 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a group call inside a lookaround no longer counted as
+    /// a group, as upstream counts it (the D10 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream saves the captures around a lookaround only when its body holds a capture group, so
+    /// a call's capture outlives a body that is thrown away: <c>(a)(?:(?!.(?1))|.)+?b</c> over
+    /// 'aaab' leaves group 1 with [0,1][2,1]. Clearing the saved-captures flag of every lookaround in
+    /// <c>PatternObject.LookaroundsSavingOnlyForCalls</c> restores that, which is the whole of the
+    /// fix. The <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamLookaroundCallCaptures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled =>
+            {
+                foreach (Node lookaround in compiled.PatternObject.LookaroundsSavingOnlyForCalls ?? [])
+                {
+                    lookaround.Status &= ~NodeStatus.HasGroups;
+                }
+            },
             keepMinimumOrderFix: true
         );
     }

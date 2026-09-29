@@ -121,4 +121,72 @@ public sealed class LookaroundTests
 
         (m.Index, m.Length).Should().Be((1, 1));
     }
+
+    // D10. A group call writes the called group's capture list, so a call inside a lookaround writes
+    // it just as a capture group there does. LOOKAROUND saves and restores the captures only when
+    // its body holds a group, and a call did not count as one, so a lookaround whose body only
+    // calls a group left the call's capture behind on every path that threw the body away: a
+    // negative lookaround that failed, and a positive one the match backtracked past. Upstream
+    // 2026.9.10 has the same flaw, measured 2026-09-29 (.scratch survey, draft report entry 54):
+    // regex.search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1) == [(0, 1), (2, 3)], where the same
+    // pattern with a capture group in place of the call, r'(?P<x>a)(?:(?!.(?P<x>a))|.)+?b', gives
+    // [(0, 1)]. PCRE2 and Perl keep no capture lists and restore a called group on return, so they
+    // cannot show the entry, but every engine discards what a failed assertion captured.
+
+    private static (int Start, int End)[] Captures(Match m, int group) =>
+        [.. m.Groups[group].Captures.Select(static c => (c.Index, c.Index + c.Length))];
+
+    [Test]
+    [Arguments(@"(a)(?:(?!.(?1))|.)+?b", "negative lookahead")]
+    [Arguments(@"(a)(?:(?=.(?1))x|.)+?b", "positive lookahead backtracked past")]
+    [Arguments(@"(a)(?:(?<!(?1)).|.)+?b", "negative lookbehind")]
+    [Arguments(@"(a)(?:(?<=(?1))x|.)+?b", "positive lookbehind backtracked past")]
+    [Arguments(@"(?<n>a)(?:(?!.(?&n))|.)+?b", "call by name")]
+    [Arguments(@"(a)(?:(?!.(?:(?1)){e<=1})|.)+?b", "fuzzy call inside the lookahead")]
+    public void A_group_call_inside_a_lookaround_whose_body_is_thrown_away_leaves_no_capture(
+        string pattern,
+        string shape
+    )
+    {
+        // Upstream gives group 1 [(0, 1), (2, 3)] for the lookaheads and [(0, 1), (0, 1), (1, 2)]
+        // for the lookbehinds; each entry after the first came from a body that was thrown away.
+        Match m = new FuzzyRegex(pattern).Match("aaab");
+
+        (m.Index, m.Length).Should().Be((0, 4), shape);
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 1), shape);
+        Captures(m, 1).Should().Equal([(0, 1)], shape);
+    }
+
+    [Test]
+    public void A_group_call_inside_a_failed_lookaround_leaves_no_capture_in_a_fuzzy_or_partial_match()
+    {
+        // Upstream: regex.search(r'(?:(a)(?:(?!.(?1))|.)+?b){e<=1}', 'aaab') spans (0, 3) with one
+        // substitution where this port inserts (ledger 50, pinned), and group 1's list [(0, 1),
+        // (2, 3)] in both engines before D10; regex.search(r'(a)(?:(?!.(?1))|.)+?bc', 'aaab',
+        // partial=True) is the partial (0, 4) with the same list.
+        Match fuzzy = new FuzzyRegex(@"(?:(a)(?:(?!.(?1))|.)+?b){e<=1}").Match("aaab");
+        Match partial = new FuzzyRegex(@"(a)(?:(?!.(?1))|.)+?bc").Match("aaab", 0, 4, true);
+
+        fuzzy.Success.Should().BeTrue();
+        Captures(fuzzy, 1).Should().Equal((0, 1));
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((0, 4));
+        Captures(partial, 1).Should().Equal((0, 1));
+    }
+
+    [Test]
+    public void A_group_call_inside_a_lookaround_that_holds_keeps_its_capture()
+    {
+        // The control. Upstream: regex.search(r'(a)(?=(?1))', 'aa').spans(1) == [(0, 1), (1, 2)],
+        // and regex.search(r'(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b', 'aaab') gives group 1 [(0, 1),
+        // (1, 2)] from the call outside the lookaround. A call's capture stays wherever the path
+        // that made it survives.
+        Match kept = new FuzzyRegex("(a)(?=(?1))").Match("aa");
+        Match nested = new FuzzyRegex(@"(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b").Match("aaab");
+
+        (kept.Index, kept.Length).Should().Be((0, 1));
+        Captures(kept, 1).Should().Equal((0, 1), (1, 2));
+        Captures(nested, 1).Should().Equal((0, 1), (1, 2));
+        Captures(nested, 2).Should().Equal((1, 2));
+    }
 }
