@@ -570,13 +570,24 @@ of section 8 (60,000 random, 60,000 shaped); a row counts once, in the first cla
 
 | class | rows | example (truth None, design partial) | shared by | register |
 |---|---|---|---|---|
-| **C1** search convention: a match that could begin inside `w` is reported at `(\|t\|, \|t\|)` even when the pattern can never match | 4,377 | search `(*FAIL)` over '' | upstream, the port | section 1, rule 3 |
+| **C1** search convention: a match that could begin inside `w` is reported at `(\|t\|, \|t\|)` even when the pattern can never match | 4,377 (model, before the round-2 rule) | search `(?rm)(*FAIL)\M` over 'b' | the port only; upstream and PCRE2 answer None (corrected in build chunk 2, repair round 2) | section 1, rule 3 |
 | **C2** limit 2: once a path consumes a character of `w`, the rest of the pattern (or of the body) is presumed to match | 8,731 | search `\n*+\n` over 'b'; B4, Z3, A3 | upstream, PCRE2, the port | D19 |
 | **C3** limit 1: reads of `w` are independent, so two that no single `w` satisfies together still pass | 63 | match `\b$` over ''; J1, J2 | PCRE2, the port | D18 |
 | **C4** this design: a blocked construct keeps every outcome, including the alternatives made after the read that blocked it | 589 | match `\m(*PRUNE)((?!^\w))` over ''; N4-N6, T8 | PCRE2 on N4-N6, the port | D18 |
 | **C5** the fork budget fired | 0 | X1 | upstream on X1 | D18 |
 
-1. **C1** is the convention the port and upstream already share; PCRE2 answers None there.
+1. **C1** is this port's alone. The earlier text said upstream shares it; it does not. Search
+   `(*FAIL)` over '' and `(?r)a(?!)` over 'b' are None upstream (regex 2026.9.10, measured
+   2026-09-29), and PCRE2 answers None as well. A pattern no text can match must never report a
+   partial, which follows from the definition in section 1. So the rule was narrowed in build
+   chunk 2's repair round 2 (owner's delegate, 2026-09-29): a search with no start left answers the
+   edge partial only when its attempt at the edge read a test about the text to come
+   (`MatchState.ReadTheTextToCome`); a run-out answers the partial itself. Search `(*FAIL)` over ''
+   is now None. **What remains of C1** is patterns that do read the edge and still can never
+   match, for example `(?rm)(*FAIL)\M` over 'b', whose `\M` reads the edge before the verb fails:
+   62 of 3,000 random rows (model generator, seed 29, 2026-09-29), down from 123 before the rule.
+   The flag cannot tell them apart without deciding whether any text completes the pattern, which
+   is D19's question (decision 4).
 2. **C2** is issue 367's limit. Decision 4 (section 10) keeps it out of D11's scope.
 3. **C3 and C4 are one SHORTCUT, registered as D18.** Both err towards a phantom, never a refusal.
    C3's ceiling is contradictory reads at the one edge position; its upgrade is a per-path class mask

@@ -366,23 +366,23 @@ public sealed class PartialMatchingTests
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
         );
 
-        // D11 (2026-09-29) moved this row from None to (2, 2): a search with no start left in the
-        // held text reports the partial at the edge, because ' \r' + '\n ' matches at 3 (the
-        // brute-force judge, tools/probes/d11-brute-judge.py, answers P(2, 2) with witness '\n ').
-        // Upstream answers (0, 2), the span its own match denies.
-        Match narrowedMatch = narrowed.Match(" \r", partial: true);
+        // A KNOWN MISS, kept as 11ccae7 answered it. ' \r' + '\n ' matches at 3, so the truth is the
+        // partial (2, 2) (tools/probes/d11-brute-judge.py, witness '\n '). Only a start inside the
+        // text to come completes it, and the attempt at the edge reads nothing past it (`^` after
+        // a CR is decided by the held text), so chunk 2's rule for a search with no start left
+        // refuses it: that edge partial fires only when the edge attempt read the text to come,
+        // which is what keeps `(*FAIL)` from reporting one (repair round 2). Upstream answers
+        // (0, 2), the span its own match denies.
+        narrowed.Match(" \r", partial: true).Success.Should().BeFalse("upstream answers (0, 2) partial");
 
-        narrowedMatch.PartialMatch.Should().BeTrue("upstream answers (0, 2) partial");
-        (narrowedMatch.Index, narrowedMatch.Length).Should().Be((2, 0));
-
-        // The greedy twin, which is the control: upstream answers nothing, and this port the same
-        // edge partial, so the lazy repeat is what upstream's (0, 2) is about.
-        Match greedy = new FuzzyRegex(
+        // The greedy twin, which is the control: both engines answer nothing.
+        new FuzzyRegex(
             @"^([^a-f]?)([\ ])$",
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
-        ).Match(" \r", partial: true);
-
-        (greedy.PartialMatch, greedy.Index, greedy.Length).Should().Be((true, 2, 0));
+        )
+            .Match(" \r", partial: true)
+            .Success.Should()
+            .BeFalse();
     }
 
     // DIVERGES FROM UPSTREAM on the match door, deliberately, and this test pins OUR answer.

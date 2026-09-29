@@ -248,6 +248,30 @@ internal sealed class MatchState : IDisposable
     internal readonly List<WMark> WMarks = [];
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the current attempt of a partial call's second pass has asked a
+    /// test at the edge, where one side is the text to come: every read M1 answers there, decided
+    /// or undetermined. It is close to the per-attempt flag of the design's assert A1 (section
+    /// 4.5), which chunk 3 adds, and wider: A1 counts only decided reads that differ from the first
+    /// pass, and this also counts a decided read that agrees with it.
+    /// Cleared at the start of each attempt, and read where a search runs out of starts: the
+    /// partial at the edge needs the last attempt, the one at the edge, to have read the text to
+    /// come, so that a pattern no text matches, `(*FAIL)` for one, reports nothing (chunk 2 repair
+    /// round 2). A run-out needs no flag, because it answers the partial itself.
+    /// </summary>
+    /// <remarks>
+    /// A touch mark cannot say this after the attempt: it is dropped on backtracking, and a decided
+    /// read leaves none. A decided read counts, because a match may begin in the text to come even
+    /// where the edge decides against one there: <c>(?i)\mİ</c> over 'b' (design row S3) matches in
+    /// 'b' + ' İ', and <c>\Z</c> at the edge is false only because some text follows, in which
+    /// <c>(?u)\Z(?:(?:\Bax|aa\b)|(\M))</c> then matches ('' + 'x'). SHORTCUT: the flag says only
+    /// that the pattern looks past the edge, not that some text there completes it, so a pattern
+    /// that reads the edge and can never match still reports the edge partial (phantom class C1,
+    /// for example <c>(?rm)(*FAIL)\M</c> searched over 'b'). Ceiling: those phantoms. Upgrade:
+    /// deciding whether any text completes the pattern, which is known defect D19's research.
+    /// </remarks>
+    internal bool ReadTheTextToCome;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: how many times each <see cref="PartialEvent"/> happened in this call,
     /// which the port grid reads per row to show every mechanism fired (VERIFICATION rule 11).
     /// </summary>
@@ -875,6 +899,7 @@ internal sealed class MatchState : IDisposable
         // What a new state holds by default, and a reused one must be given back. A call that
         // succeeded leaves its stack, and so its marks, where they were (D11).
         WMarks.Clear();
+        ReadTheTextToCome = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
 #endif
@@ -1060,6 +1085,7 @@ internal sealed class MatchState : IDisposable
         // had taken them from the pool's shared stacks in between: 280 B at a time in the parallel
         // native-AOT run, and deterministically in AllocationTests (2026-09-25).
         WMarks.Clear();
+        ReadTheTextToCome = false;
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
@@ -1278,6 +1304,7 @@ internal sealed class MatchState : IDisposable
     {
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
+        ReadTheTextToCome = false;
         Sstack.Reset();
         SetBstackCount(0);
         Pstack.Reset();

@@ -2354,6 +2354,10 @@ internal static class Matcher
                 "D11 A4: a decided word test answers what the first pass answered"
             );
 
+            // Decided, but still a read at the edge, so a search out of starts may answer the edge
+            // partial: `(?i)\mİ` over 'b' (design row S3) matches in 'b' + ' İ'.
+            state.ReadTheTextToCome = true;
+
             return MatchStatus.From(ifWord);
         }
 
@@ -2387,6 +2391,7 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Undetermined"/>.</returns>
     private static int UndeterminedRead(MatchState state)
     {
+        state.ReadTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.UndeterminedRead);
 
         return MatchStatus.Undetermined;
@@ -2419,6 +2424,7 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Failure"/>.</returns>
     private static int DecidedFalseAtEdge(MatchState state)
     {
+        state.ReadTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
 
         return MatchStatus.Failure;
@@ -7464,6 +7470,7 @@ internal static class Matcher
         }
 
         Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
+        state.ReadTheTextToCome = false;
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
@@ -7591,10 +7598,14 @@ internal static class Matcher
                     // with no start left answers what the slow path below answers when it steps
                     // past the slice, the partial at the edge, because a match could still begin
                     // in the text to come. Without it `\Z` at the edge, decided false by M1, left
-                    // `(?u)\Z(?:(?:\Bax|aa\b)|(\M))` searched over '' with no answer at all.
+                    // `(?u)\Z(?:(?:\Bax|aa\b)|(\M))` searched over '' with no answer at all. It
+                    // fires only when the attempt read the text to come (MatchState.
+                    // ReadTheTextToCome), so a pattern no text matches, `(*FAIL)` for one, answers
+                    // nothing (repair round 2).
                     if (
                         status == MatchStatus.Failure
                         && state.PartialSide != MatchState.PartialNone
+                        && state.ReadTheTextToCome
                         && !state.Pattern.SecondPassAsBeforeD11
                     )
                     {
@@ -11752,8 +11763,13 @@ internal static class Matcher
                         // NOT UPSTREAM'S, D11 M3 (design section 1, rule 3), brought forward from
                         // build chunk 3 by chunk 2's review: in a partial call's second pass a search
                         // with no start left may still find a match that begins in the text to
-                        // come, which is the partial at the edge, as the prefilter answers.
-                        if (state.PartialSide != MatchState.PartialNone && !state.Pattern.SecondPassAsBeforeD11)
+                        // come, which is the partial at the edge, as the prefilter answers. Only
+                        // when the attempt at the edge read the text to come, as there.
+                        if (
+                            state.PartialSide != MatchState.PartialNone
+                            && state.ReadTheTextToCome
+                            && !state.Pattern.SecondPassAsBeforeD11
+                        )
                         {
                             state.MatchPos = state.TextPos;
                             state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);

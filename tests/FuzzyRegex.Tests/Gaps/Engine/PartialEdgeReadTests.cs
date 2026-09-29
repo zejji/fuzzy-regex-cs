@@ -44,12 +44,10 @@ public sealed class PartialEdgeReadTests
     /// starts a word there, and the attempt at 0 fails.
     /// </summary>
     /// <remarks>
-    /// Searched, the answer is the edge partial (4, 4), the search convention of design section 1,
-    /// rule 3: with <c>(?m)</c> a match could begin after a newline in the text to come. No text
-    /// completes this pattern (<c>\m$</c> holds nowhere), so the judge answers None: the design's
-    /// accepted phantom class C1, which upstream shares on most rows (upstream answers None here).
+    /// Searched it is None too. No text completes the pattern (<c>\m$</c> holds nowhere; the judge
+    /// answers None), and the attempt at the edge reads no test about the text to come, so the
+    /// search's edge partial does not fire (repair round 2 of chunk 2).
     /// </remarks>
-    // DIVERGES FROM UPSTREAM on the search door, as the design's class C1.
     [Test]
     public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
     {
@@ -63,9 +61,7 @@ public sealed class PartialEdgeReadTests
 
         regex.MatchAtStart("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
 
-        Match searched = regex.Match("\U00010400\U0001D518", partial: true);
-
-        (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, 4, 0));
+        regex.Match("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
     }
 
     /// <summary>
@@ -164,6 +160,27 @@ public sealed class PartialEdgeReadTests
 
         m.PartialMatch.Should().BeTrue();
         (m.Index, m.Length).Should().Be((edge, 0));
+    }
+
+    /// <summary>
+    /// A pattern that no text can match reports no partial on any door, however its search ends.
+    /// </summary>
+    /// <remarks>
+    /// Chunk 2's repair round 2 (2026-09-29, the owner's delegate): the edge partial of a search
+    /// with no start left fires only when the attempt at the edge read the text to come. At 50abbe7
+    /// it fired on every exhausted search, and both searches below answered P(0, 0). Upstream
+    /// 2026.9.10 answers None on every door, as the definition requires.
+    /// </remarks>
+    [Test]
+    [Arguments("search", "(*FAIL)", "")]
+    [Arguments("match", "(*FAIL)", "")]
+    [Arguments("fullmatch", "(*FAIL)", "")]
+    [Arguments("search", "(?r)a(?!)", "b")]
+    [Arguments("match", "(?r)a(?!)", "b")]
+    [Arguments("fullmatch", "(?r)a(?!)", "b")]
+    public void A_pattern_no_text_can_match_reports_no_partial(string operation, string pattern, string text)
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
     }
 
     /// <summary>
