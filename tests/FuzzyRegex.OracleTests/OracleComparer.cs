@@ -520,8 +520,16 @@ internal static class OracleComparer
     /// <c>full-fold-backreference-leftovers</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
+    /// <param name="withoutTheSubjectFoldEdits">
+    /// Also set <c>PatternObject.SkipWholeFoldedCharEdits</c>: known defect D22 lets the
+    /// backreference substitute a subject ß whole for a group s, which gives some of the same
+    /// matches the leftovers loop gives.
+    /// </param>
     /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
-    internal static IOracleOutcome? RunWithoutTheGroupFoldLeftovers(OracleRow row)
+    internal static IOracleOutcome? RunWithoutTheGroupFoldLeftovers(
+        OracleRow row,
+        bool withoutTheSubjectFoldEdits = false
+    )
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -529,7 +537,11 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.SkipGroupFoldLeftovers = true
+            ablate: compiled =>
+            {
+                compiled.PatternObject.SkipGroupFoldLeftovers = true;
+                compiled.PatternObject.SkipWholeFoldedCharEdits = withoutTheSubjectFoldEdits;
+            }
         );
     }
 
@@ -602,11 +614,13 @@ internal static class OracleComparer
     /// <param name="row">The row to run.</param>
     /// <param name="withoutTheRetriedFoldSteps">Also set <c>PatternObject.SkipRetriedFoldSteps</c>.</param>
     /// <param name="withoutTheGroupFoldLeftovers">Also set <c>PatternObject.SkipGroupFoldLeftovers</c>.</param>
+    /// <param name="withoutTheSubjectFoldEdits">Also set <c>PatternObject.SkipWholeFoldedCharEdits</c>.</param>
     /// <returns>What this port answers with upstream's rules, on the row's own deadline.</returns>
     internal static IOracleOutcome? RunWithTheDoubledInsertionGuard(
         OracleRow row,
         bool withoutTheRetriedFoldSteps,
-        bool withoutTheGroupFoldLeftovers
+        bool withoutTheGroupFoldLeftovers,
+        bool withoutTheSubjectFoldEdits = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -620,6 +634,7 @@ internal static class OracleComparer
                 compiled.PatternObject.DoubleCountTrailingInsertions = true;
                 compiled.PatternObject.SkipRetriedFoldSteps = withoutTheRetriedFoldSteps;
                 compiled.PatternObject.SkipGroupFoldLeftovers = withoutTheGroupFoldLeftovers;
+                compiled.PatternObject.SkipWholeFoldedCharEdits = withoutTheSubjectFoldEdits;
             }
         );
     }

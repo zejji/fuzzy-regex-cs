@@ -44,5 +44,48 @@ half of the character does not rule out editing all of it. No match the current 
 lost, although the first answer's mix of edits can change: `(?fi)(?:ss){e<=3}` fullmatched over
 'jßsß' then reports one substitution and two insertions instead of three insertions.
 
+A fuzzy full-folded backreference has the same problem, in `next_fuzzy_match_group_fld` (lines
+10824-10877). It is edited fuzzily in general, but not across such a character:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxas')
+<regex.Match object; span=(0, 5), match='ssxas', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')
+>>> regex.fullmatch(r'(?fi)(fst)x(?:\1){s<=1}', 'fstxfßt')
+>>>
+```
+
+The same two edits fix it there. A whole substitution should replace a whole character of the
+group, so it applies only at the start of one and uses up all of its folding: then ǰ for a captured
+'ß' is one edit, and ǰ after the first s of that 'ß' has matched is not offered.
+
+The backreference folds the captured text as it goes, and edits that folding one folded character
+at a time too, so a captured 'ß' costs two edits to replace or delete, where the literal it stands
+for costs one:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ß)x(?:ß){s<=1}', 'ßxa')
+<regex.Match object; span=(0, 3), match='ßxa', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ß)x(?:ß){d<=1}', 'ßx')
+<regex.Match object; span=(0, 2), match='ßx', fuzzy_counts=(0, 0, 1)>
+>>> regex.fullmatch(r'(?fi)(ß)x(?:\1){s<=1}', 'ßxa')
+>>> regex.fullmatch(r'(?fi)(ß)x(?:\1){d<=1}', 'ßx')
+>>>
+```
+
+The group-side fix mirrors the subject-side one: at the start of a group character whose folding
+is longer than one character, also offer the whole substitution (one whole group character for one
+whole subject character) and a deletion of the whole group character, and offer them too when the
+first folded character matched, so that `(?fi)(ß)x(?:\1){s<=1}` matches 'ßxs'. Try them before
+the folded edits, as the lone literal does (it compiles to the character first and its folding
+second), or a looser budget still charges the captured 'ß' twice:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ß)-(?:ß){e<=2}', 'ß-a')
+<regex.Match object; span=(0, 3), match='ß-a', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ß)-(?:\1){e<=2}', 'ß-a')
+<regex.Match object; span=(0, 3), match='ß-a', fuzzy_counts=(1, 0, 1)>
+```
+
 None of PCRE2, Python `re`, .NET, JavaScript or Perl has fuzzy matching, so there is no second
 answer to compare with.
