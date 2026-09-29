@@ -559,3 +559,35 @@ answer becomes None.
 
 x01 and f01 also change from main, but ledger 45 already changes them. Every one of the 118 rows
 follows the section 3 table.
+
+## Addendum 2026-09-29: quantifiers that can exit empty (D31)
+
+D31 was reported as a bug: `(?m)(?> |(?>(*SKIP)\ba|ab)\w(?:\Z|.))*+(?>\B|(?>aa\m|(*SKIP)a)(?:a*?|\X)(?: ?+|a$))?`
+matched against '\n' is None in the port and (0,0) upstream. It is this survey's model at work, not
+a defect. The shrunk repro is `((?>(*SKIP)\$))?`: backtracking onto the verb inside the unfinished
+atomic group ends the attempt, and the `?` around the group does not catch it. With
+`PatternObject.VerbsAreConfinedToTheInnermostGroup` set, the port gives upstream's (0,0) on every row
+below, so the oracle's `verb-unwinds-through-unfinished-groups` entry covers them.
+
+Search answers. PCRE2 10.47 via pip `pcre2` 0.7.1, the same with the JIT and with the interpreter
+plus NO_START_OPTIMIZE; upstream is regex 2026.9.10; Perl is 5.42.3.
+
+| Row | Pattern | Subject | PCRE2 | Perl | Upstream | Port |
+|-----|---------|---------|-------|------|----------|------|
+| q1 | `(?>(*SKIP)a)?` | 'b' | None | (0,0) | (0,0) | None |
+| q2 | `(?>(*PRUNE)a)?` | 'b' | None | (0,0) | (0,0) | None |
+| q3 | `(?>(*SKIP)a)*` | 'ab' | None | (0,1) | (0,1) | None |
+| q4 | `(?>(*SKIP)a)*+` | 'ab' | None | None | (0,1) | None |
+| q5 | `(?>(*PRUNE)a)*` | 'ab' | None | (0,1) | (0,1) | None |
+| q6 | `(?>(?>(*SKIP)a))?` | 'b' | None | (0,0) | (0,0) | None |
+| q7 | `((?>(*SKIP)\$))?` | 'b' | None | (0,0) | (0,0) | None |
+| q8 | `(?>(*SKIP)a)?` | 'ab' | (0,1) | (0,1) | (0,1) | (0,1) |
+| q9 | `(?:(*SKIP)a)?` | 'b' | None | (0,0) | None | None |
+| q10 | D31's row without `\m` (PCRE2 has none) | '\n' | None | None | (0,0) | None |
+
+Perl is not consistent with itself here: `(?>(*PRUNE)a)?` over 'b' is (0,0), while
+`(?>(*PRUNE)a)*+` over the same text is None. It also gives (0,0) on q9, where no atomic group is
+involved and upstream agrees with PCRE2, against perlre's own rule that backtracking onto (*SKIP)
+fails the match at the current start. So Perl's `?` does not carry a verb's failure outward. PCRE2
+follows its documentation on every row, so the rows are pinned to PCRE2 in `VerbScopeTests`, as the
+rest of this survey is.
