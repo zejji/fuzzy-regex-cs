@@ -7075,17 +7075,21 @@ internal static class ExpectedDivergences
                 + "(upstream without partial, every continuation of one to four characters). PORT "
                 + "RIGHT, upstream refusing a real completion (ledger 21's false negative): row 4841, "
                 + "`\\b(?:[^\\p{L}]{0}(*PRUNE)\\D|[^a])[^a]+\\B` over '' (witness 'B\\n'), and row 5367, "
-                + "`\\b([A]*){1}\\1` fullmatch over the empty slice of '\\r\\n' (witness 'AA'). PORT "
-                + "RIGHT, upstream answering a partial no text completes (decision 3): row 6399, "
-                + "`(?fi)(?r)\\m(?:(?:b+?\\A){e<=3}){e<=2}` fullmatch over 'BB' (judge None). Row "
-                + "6589, `(?b)\\B(?:\\Z[a-f]\\p{L}\\Wa+){e<=2}` over 'bb.aa', was port right until the "
-                + "attempt from inside the text to come; it is now a phantom of limit C2 (below). "
-                + "PHANTOMS OF THE DESIGN'S LIMIT C2, known defect D19 (once a path consumes a "
+                + "`\\b([A]*){1}\\1` fullmatch over the empty slice of '\\r\\n' (witness 'AA'). Rows "
+                + "6399 and 6589, which chunk 2 moved, are upstream's answers again since RC5 "
+                + "(below). PHANTOMS OF THE DESIGN'S LIMIT C2, known defect D19 (once a path consumes a "
                 + "character of the text to come, the rest is presumed to match): row 5098, a "
                 + "reversed search whose `\\M` at the left edge reads a word character and whose "
                 + "`[\\ ]+` then consumes a space there, and row 5310, a `\\b` at the edge of the "
                 + "empty slice at 3 followed by a skin-tone modifier, which is no word character "
                 + "(judge None on both; upstream None).\n"
+                + "RC5, A FUZZY INSERTION AT THE EDGE RUNS OUT OF TEXT (design section 4.5, brought "
+                + "forward to build chunk 3): the insertion arm checks the position after the "
+                + "insertion, as the substitution arm does, where upstream checks the one before it "
+                + "(_regex.c:10156) and fails. Its phantoms are limit C2, the rest presumed after "
+                + "the inserted character: seed 7 row 7283 (`fuzzy-overhang`), fullmatch "
+                + "`(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}` over 'tXt', whose `^` "
+                + "no text satisfies (judge None; upstream and 11ccae7 None).\n"
                 + "THE ATTEMPT FROM INSIDE THE TEXT TO COME (design section 1, rule 3; chunk 2's "
                 + "post-repair design step): a search whose second pass finds nothing makes one more "
                 + "attempt, from a start inside the text to come with both of its sides unknown, and "
@@ -7100,7 +7104,8 @@ internal static class ExpectedDivergences
                 + "KEYED ON AN ABLATION: a row belongs here only when "
                 + "`OracleComparer.RunWithTheSecondPassAsBeforeD11`, which sets "
                 + "`PatternObject.SecondPassAsBeforeD11` so the second pass runs as before D11 "
-                + "(held-text reads, no attempt from inside the text to come), reproduces "
+                + "(held-text reads, no attempt from inside the text to come, upstream's insertion "
+                + "check), reproduces "
                 + "upstream's recorded answer "
                 + "exactly, AND this port's live answer is the one being judged. A partial row this "
                 + "port gets wrong for any other reason still diverges with the ablation and is "
@@ -7113,9 +7118,8 @@ internal static class ExpectedDivergences
             {"generator": "partial", "pattern": "(?r)^(?P<g1>\\p{Nd}*)*(?P<g2>[\\ ]+)(?:(?(2)(?<=(?P>g2))[^\\d]))*?\\M", "flags": 16650, "namedLists": {}, "subject": "     ", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial-sliced", "pattern": "\\b(?P<g1>[\ud83c\udffb]{2,}?)\\1", "flags": 16642, "namedLists": {}, "subject": "\ud83c\udffb\r\n", "operation": "fullmatch", "partial": true, "pos": 3, "endpos": 3, "codepointSlice": [2, 2], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial-sliced", "pattern": "\\b([A]*){1}\\1", "flags": 256, "namedLists": {}, "subject": "\r\n", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 0, "codepointSlice": [0, 0], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-            {"generator": "fuzzy-anchored", "pattern": "(?fi)(?r)\\m(?:(?:b+?\\A){e<=3}){e<=2}", "flags": 0, "namedLists": {}, "subject": "BB", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 1], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 1], "deletions": []}}]}
-            {"generator": "fuzzy-anchored", "pattern": "(?b)\\B(?:\\Z[a-f]\\p{L}\\Wa+){e<=2}", "flags": 0, "namedLists": {}, "subject": "bb.aa", "operation": "search", "partial": true, "codepointSpan": [4, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}], "searchOnlyPartial": false, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}}
             {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "fuzzy-overhang", "pattern": "(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}", "flags": 0, "namedLists": {}, "subject": "tXt", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """,
             Applies: static (row, ours) =>
                 row.Partial

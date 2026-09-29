@@ -4879,8 +4879,12 @@ internal static class Matcher
                 // as the substitution arm below passes. Upstream passes the position before it
                 // (:10156), which is never past the edge, so an insertion that needs the character
                 // after the text failed instead of running out. S57d's note hid that until M1
-                // decided the tests at the edge: `(?:a\m){i<=1}` over 'a' ('a' + ' ' matches).
-                if (CheckFuzzyPartial(state, newPos) == MatchStatus.Partial)
+                // decided the tests at the edge: `(?:a\m){i<=1}` over 'a' ('a' + ' ' matches). The
+                // oracle's pre-D11 ablation keeps upstream's argument.
+                if (
+                    CheckFuzzyPartial(state, state.Pattern.SecondPassAsBeforeD11 ? data.NewTextPos : newPos)
+                    == MatchStatus.Partial
+                )
                 {
                     state.NotePartialEvent(PartialEvent.InsertionRunOut);
 
