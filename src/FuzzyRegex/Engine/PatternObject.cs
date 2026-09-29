@@ -25,6 +25,13 @@ internal sealed class GroupInfo
     /// </summary>
     internal bool TextRead;
 
+    /// <summary>
+    /// NOT UPSTREAM'S: the group is captured inside a repeat body, where a repeat's empty-iteration
+    /// test reads whether the capture changed its span, so the call guard keys it on its span
+    /// (<c>CallRead.Span</c>).
+    /// </summary>
+    internal bool CapturedInRepeat;
+
     /// <summary>Upstream <c>has_name</c>: the group is named.</summary>
     internal bool HasName;
 }
@@ -378,10 +385,24 @@ internal sealed class PatternObject
 
     /// <summary>
     /// NOT UPSTREAM'S: the groups the call guard keys a call on (<c>CallCaptures</c>), as indexes into
-    /// <c>MatchState.Groups</c>, each with whether a backreference reads its text; empty when the
+    /// <c>MatchState.Groups</c>, each with what the key holds of it; empty when the
     /// pattern has no group call. Set when the pattern is compiled.
     /// </summary>
-    internal (int Index, bool TextRead)[] CallReadGroups = [];
+    internal (int Index, CallRead Read)[] CallReadGroups = [];
+
+    /// <summary>What the call guard keys a read group on; see <c>CallCaptures</c>.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="info">The group, which a conditional or backreference reads.</param>
+    /// <returns>Its span where the capture-change counter can see the span, else its text or one bit.</returns>
+    private static CallRead CallReadOf(PatternObject pattern, GroupInfo info)
+    {
+        if (pattern.IsFuzzy || info.CapturedInRepeat)
+        {
+            return CallRead.Span;
+        }
+
+        return info.TextRead ? CallRead.Text : CallRead.SetOrUnset;
+    }
 
     /// <summary>
     /// NOT UPSTREAM (the failed-call memo): whether <c>GROUP_CALL</c> may fail a call at once
@@ -400,10 +421,14 @@ internal sealed class PatternObject
     /// same to the whole-match error total, which <c>END_FUZZY</c> restores only from the entry the
     /// construct threw away: <c>(?e)((?=(?:a){e&lt;=1}))(((?&gt;a)){1}()?(.?(?1)|(?0))){d&lt;=1}((?0)(a))?</c>
     /// over <c>xa</c> answered (0, 1) with two errors with the memo and (1, 1) with one without. So one
-    /// of those constructs whose body holds a capture group, a call, a fuzzy section or a
-    /// <c>\K</c> turns the memo off (<see cref="WritesInDiscardingConstruct"/>,
-    /// <see cref="KeepInSubmatch"/>). That also covers a call inside a lookbehind, which runs the
-    /// other way and so can meet open calls the key does not hold.
+    /// of those constructs whose body holds a call, a fuzzy section or a <c>\K</c> turns the memo
+    /// off (<see cref="WritesInDiscardingConstruct"/>, <see cref="KeepInSubmatch"/>). That also
+    /// covers a call inside a lookbehind, which runs the other way and so can meet open calls the
+    /// key does not hold. A capture group in there does not: the stray entry appears only when a
+    /// call writes the capture. Upstream 2026.9.10 and the port both give group 1 no capture for
+    /// <c>(?:(?=(a))ax|a)b</c> over <c>ab</c>, and <c>(a)(?:(?!.(a))|.)+?b</c> over <c>aaab</c> gives
+    /// only [0,1] in both, where <c>(a)(?:(?!.(?1))|.)+?b</c> gives [0,1][2,1]. Keeping the memo on
+    /// there is what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
     /// </para>
     /// <para>
     /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a
@@ -423,7 +448,7 @@ internal sealed class PatternObject
     internal int GroupCallSites;
 
     /// <summary>
-    /// NOT UPSTREAM (the failed-call memo): whether a capture group, a group call or a fuzzy section
+    /// NOT UPSTREAM (the failed-call memo): whether a group call or a fuzzy section
     /// sits inside an atomic group, a possessive repeat, a lookaround or a conditional's lookaround
     /// test. Written by <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
     /// </summary>
@@ -924,7 +949,7 @@ internal sealed class PatternObject
         self.MemoGroups = [.. tested];
         if (self.HasGroupCalls)
         {
-            self.CallReadGroups = [.. tested.Select(g => (g - 1, self.GroupInfoList[g - 1].TextRead))];
+            self.CallReadGroups = [.. tested.Select(g => (g - 1, CallReadOf(self, self.GroupInfoList[g - 1])))];
         }
 
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the

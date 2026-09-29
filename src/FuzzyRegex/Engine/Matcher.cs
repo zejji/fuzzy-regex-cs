@@ -8768,7 +8768,7 @@ internal static class Matcher
 
         // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
         // part of what makes a call a repeat, so the call guard keys on them too.
-        (int Index, bool TextRead)[] readGroups = pattern.CallReadGroups;
+        (int Index, CallRead Read)[] readGroups = pattern.CallReadGroups;
         bool keysOnCaptures = readGroups.Length > 0;
 
         // Look beyond any initial group node.

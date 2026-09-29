@@ -2547,6 +2547,28 @@ in the key, and the rows now answer inside a 100 ms budget
 does not terminate in principle - a group that alternates between two spans counts up for ever -
 so it is not the fix.
 
+**The key is what the callee reads, not the spans (2026-09-29, D3).** Keying on spans walked a new
+call chain for every position at which an empty group had been set: `(?:()|a)(?R)|(?(1)x)` over
+`a...ay` made 2^n calls. A conditional reads only whether its group is set, and a backreference only
+the text it holds, so the key now holds a set bit for a group only conditionals read and an id of
+the text for a group a backreference reads (`CallCaptures`, `CaptureTextIds`,
+`docs/plan/2026-09-28-capture-dependent-recursion-design.md` section 4d). Engine survey (section 3):
+on the three rows above upstream and PCRE2's JIT answer (0, 1); PCRE2's interpreter and Perl 5.42
+refuse every same-position recursion with an error ("nested recursion at the same subject
+position", "Infinite recursion"); no engine answers None. The same key fixed D5,
+`.*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)` over `aab`: (0, 3) as upstream, where the capture-free
+key answered (1, 3). The failed-call memo keys the same read state, the reach interval, and the
+open calls the guard could refuse against as a set, filtered by reach and by which read groups are
+set (the design's addendum 1); keying the ordered chain made every order of setting k empty groups
+its own key. A capture group inside a lookaround no longer turns the memo off, since only a call
+there leaks a capture-list entry; that keeps `(?:(?=(a*))|a)(?R)|\1x`, where group 1 has a new text
+at every position, polynomial. Pinned in `GroupCallTests.A_call_guard_keyed_on_what_is_read_stays_polynomial`.
+
+Still open: D4. When the attempt has reached the whole text before the first call, as in
+`.*z|(?:|(?R)a)` fullmatch `aa`, no later call can show growth and the finite left recursion is
+refused again (upstream (0, 2), the port None; `OpenDefectTests`). PCRE2's `last_used_ptr` rule
+has the same gap but raises an error. It needs a change to the reach rule, not the key.
+
 In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
 touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.
 `Matcher.NoteReached` widens it at every group call and wherever a path fails; `start_match` resets

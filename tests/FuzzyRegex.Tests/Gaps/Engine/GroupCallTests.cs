@@ -730,6 +730,24 @@ public sealed class GroupCallTests
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
     }
 
+    // Found by the design grid of captures inside repeats (2026-09-29). Group g is captured empty
+    // inside a repeat, and a repeat counts an empty iteration as progress only when a capture
+    // changed a span, so two calls that see g with the same empty text at different spans can run
+    // differently. Keyed on its text, the guard refused a call that upstream makes, and group 1
+    // gained two captures more than upstream 2026.9.10's [0, 0][1, 0] (30 s run, 2026-09-29).
+    [Test]
+    public void A_group_captured_inside_a_repeat_is_keyed_on_its_span()
+    {
+        Match m = new FuzzyRegex(
+            @"(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?<g>)|a)*)))|(?<g>)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("aax");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+        m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 0), (1, 0));
+    }
+
     // The design's shapes where keying on the captured spans walks a new call chain for every order
     // or position at which the read groups were set (sections 2 and A4). What a reader sees is
     // only whether a conditional's group is set and what text a backreference's group holds, so

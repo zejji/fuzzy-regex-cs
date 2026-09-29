@@ -59,6 +59,15 @@ internal readonly record struct FuzzyChange(byte Type, int Pos);
 /// been merged, but never merges two that differ.
 /// </para>
 /// <para>
+/// One more thing reads a group's span: the capture-change counter, which a capture bumps only
+/// when the new span differs from the current one, and which a repeat's empty-iteration test and an
+/// optional pass read. So a group captured inside a repeat body, and every read group of a fuzzy
+/// pattern, is keyed on its span (<see cref="CallRead.Span"/>).
+/// <c>(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?&lt;g&gt;)|a)*)))|(?&lt;g&gt;)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))</c>
+/// fullmatch over <c>aax</c> gave group 1 two captures more than upstream's <c>[0,0][1,0]</c> when
+/// that group was keyed on its text (the design grid, 2026-09-29).
+/// </para>
+/// <para>
 /// SHORTCUT: one small array per call, and only in a pattern that has both a group call and a
 /// group some conditional or backreference reads. Packing one or two values into the key tuple
 /// would remove it for the common case, if a benchmark ever shows it matters.
@@ -79,30 +88,31 @@ internal sealed class CallCaptures(long[] values) : IEquatable<CallCaptures>
     /// <summary>Takes what the read groups show now.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="readGroups">
-    /// Indexes into <see cref="MatchState.Groups"/> of the groups that are read, each with whether a
-    /// backreference reads its text.
+    /// Indexes into <see cref="MatchState.Groups"/> of the groups that are read, each with what the
+    /// key holds of it.
     /// </param>
     /// <returns>The snapshot.</returns>
-    internal static CallCaptures Take(MatchState state, (int Index, bool TextRead)[] readGroups)
+    internal static CallCaptures Take(MatchState state, (int Index, CallRead Read)[] readGroups)
     {
         long[] values = new long[readGroups.Length];
         for (int i = 0; i < readGroups.Length; i++)
         {
-            (int index, bool textRead) = readGroups[i];
+            (int index, CallRead read) = readGroups[i];
             GroupData group = state.Groups[index];
             if (group.Current < 0)
             {
                 values[i] = UnsetGroup;
+                continue;
             }
-            else if (!textRead)
+
+            GroupSpan span = group.Captures[group.Current];
+            values[i] = read switch
             {
-                values[i] = SetGroup;
-            }
-            else
-            {
-                GroupSpan span = group.Captures[group.Current];
-                values[i] = state.CaptureTexts.IdOf(span.Start, span.End - span.Start);
-            }
+                CallRead.SetOrUnset => SetGroup,
+                CallRead.Text => state.CaptureTexts.IdOf(span.Start, span.End - span.Start),
+                // Negative and never -1, so it is neither UnsetGroup nor an id: the start is an int.
+                _ => long.MinValue | ((long)(uint)span.Start << 32) | (uint)span.End,
+            };
         }
 
         return new CallCaptures(values);
@@ -149,6 +159,21 @@ internal sealed class CallCaptures(long[] values) : IEquatable<CallCaptures>
 
     /// <inheritdoc/>
     public override string ToString() => string.Join(",", Values);
+}
+
+/// <summary>
+/// NOT UPSTREAM'S: what the call guard keys a read group on. See <see cref="CallCaptures"/>.
+/// </summary>
+internal enum CallRead : byte
+{
+    /// <summary>Only whether it is set: only conditionals read it.</summary>
+    SetOrUnset,
+
+    /// <summary>Its text: a backreference reads it.</summary>
+    Text,
+
+    /// <summary>Its span: it is captured inside a repeat body, or the pattern is fuzzy.</summary>
+    Span,
 }
 
 /// <summary>

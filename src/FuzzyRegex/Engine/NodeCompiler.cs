@@ -79,7 +79,7 @@ internal struct CompileArgs
     /// <summary>
     /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
     /// lookaround test: a construct that throws away its body's undo entries when the body
-    /// succeeds. <b>Not upstream</b>; a capture group, a group call or a fuzzy section in here turns
+    /// succeeds. <b>Not upstream</b>; a group call or a fuzzy section in here turns
     /// off the failed-call memo (<see cref="PatternObject.WritesInDiscardingConstruct"/>).
     /// </summary>
     internal bool WithinDiscardingConstruct;
@@ -1150,6 +1150,14 @@ internal static class NodeCompiler
 
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
+
+        // NOT UPSTREAM: see GroupInfo.CapturedInRepeat. Both numbers, since a conditional or
+        // backreference may name either.
+        if (args.RepeatDepth > 0)
+        {
+            args.Pattern.GroupInfoAt((int)privateGroup).CapturedInRepeat = true;
+            args.Pattern.GroupInfoAt((int)publicGroup).CapturedInRepeat = true;
+        }
 
         // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
         // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.

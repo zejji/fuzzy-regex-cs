@@ -867,6 +867,7 @@ public sealed class ThreadSafetyTests
             "GroupInfo.Node",
             "GroupInfo.Referenced",
             "GroupInfo.TextRead",
+            "GroupInfo.CapturedInRepeat",
             "CallRefInfo.Defined",
             "CallRefInfo.Node",
             "CallRefInfo.Used",
