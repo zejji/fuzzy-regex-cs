@@ -367,4 +367,13 @@ internal enum Opcode : uint
     /// never appears on a node or in a code list.
     /// </summary>
     UndeterminedFuzzyRetry = 102,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a negative condition test leaves
+    /// when a partial call's second pass exhausts its body after a blocked success, holding the
+    /// no-branch's node and the text position (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>,
+    /// section 4.2). The yes-branch runs first; backtracking onto the entry runs the no-branch, which
+    /// the continuations where that success held need. It never appears on a node or in a code list.
+    /// </summary>
+    NoBranch = 103,
 }

@@ -71,8 +71,9 @@ internal sealed class Node
     internal Node? TrueNode;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11: for a lookaround, the node that ends its body, where a partial call's
-    /// second pass goes when the body runs out of text (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// NOT UPSTREAM'S, D11: for a lookaround or a condition's test, the node that ends its body, where
+    /// a partial call's second pass goes when the body runs out of text
+    /// (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </summary>
     internal Node? LookaroundEnd;
 

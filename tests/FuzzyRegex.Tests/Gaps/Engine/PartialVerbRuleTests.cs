@@ -168,19 +168,30 @@ public sealed class PartialVerbRuleTests
     }
 
     /// <summary>
-    /// A verb whose scope is a condition's test acts as before, whatever its path read, until build
-    /// chunk 7 gives conditions the cut rule. Skipped, it would leave the test's other branch, which
-    /// succeeds on the held text, to decide the condition for every continuation, and the branch
-    /// that 'a' + '\n' needs would be lost (review of chunk 5, round 1). The judge, upstream and the
-    /// port before chunk 5 all answer these.
+    /// A verb whose scope is a condition's test and whose path read the text to come does nothing,
+    /// and the test, blocked, takes both branches (build chunk 7, row T6). The first five rows are
+    /// chunk 5's review's (round 1): there the test's other branch succeeds on the held text, and
+    /// deciding the condition from it for every continuation would lose the branch 'a' + '\n' needs.
+    /// In the last three the verb acted before chunk 7 and chose the no-branch, which fails on 'a';
+    /// 'a' + '\n' fails the <c>(?!$)</c>, so the test's <c>a</c> branch holds, and the yes-branch
+    /// matches. The judge answers all eight; upstream the first five, and None to the last three.
     /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately, on the last three rows.
     [Test]
     [Arguments("match", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "a", 0)]
     [Arguments("match", @"(?(?=a$(*SKIP)(?<=b)|a)x|a\n)", "a", 0)]
     [Arguments("match", @"(?(?!a$(*PRUNE)(?<=b)|a)a\n|x)", "a", 0)]
     [Arguments("fullmatch", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "a", 0)]
     [Arguments("search", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "ba", 1)]
-    public void A_verb_in_a_condition_s_test_is_not_skipped(string operation, string pattern, string text, int start)
+    [Arguments("match", @"(?(?=a(?!$)(*PRUNE)(?<=b)|a)a\n|b)", "a", 0)]
+    [Arguments("match", @"(?(?=a(?!$)(*SKIP)(?<=b)|a)a\n|b)", "a", 0)]
+    [Arguments("match", @"(?(?!a(?!$)(*PRUNE)(?<=b)|a)b|a\n)", "a", 0)]
+    public void A_skipped_verb_in_a_condition_s_test_leaves_both_branches(
+        string operation,
+        string pattern,
+        string text,
+        int start
+    )
     {
         Match m = Run(operation, pattern, text);
 

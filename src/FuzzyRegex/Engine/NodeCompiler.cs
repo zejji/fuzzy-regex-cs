@@ -1041,6 +1041,7 @@ internal static class NodeCompiler
         // test node -> test -> end test node
         AddNode(testNode, subargs.Start!);
         AddNode(subargs.End!, endTestNode);
+        testNode.LookaroundEnd = endTestNode;
 
         // Compile the true branch.
         subargs = args;

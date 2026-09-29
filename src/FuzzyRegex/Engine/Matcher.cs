@@ -4028,12 +4028,8 @@ internal static class Matcher
     /// group, possessive repeat or <c>\X</c> reaches here only unblocked, with no mark above its
     /// frame (build chunk 4, <see cref="BlockAtomicCut"/>), and so does a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> (build chunk 5, <see cref="SkipABlockedVerb"/>), and a lookaround's end (build
-    /// chunk 6, <see cref="EndALookaroundInTheSecondPass"/>). For a condition's test the drop is
-    /// interim. SHORTCUT: until the cut rule of build chunk 7, that cut is taken as it was before
-    /// D11, and a touch mark above one goes with the entries it discards. Ceiling: such a cut after a
-    /// read of the text to come can discard an alternative that some continuation needs (rows
-    /// T4-T6), which S57d's escalation still answers until chunk 9. Upgrade: the cut rule blocks such
-    /// a cut instead of taking it.
+    /// chunk 6, <see cref="EndALookaroundInTheSecondPass"/>), and so does a condition's test (build
+    /// chunk 7, the same method).
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="count">The new count.</param>
@@ -4143,7 +4139,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if it holds.</returns>
     private static bool ReopenedFrameIsTheBlockedOne(MatchState state, int frameEnd) =>
         state.Bstack.ReadUInt8Below(frameEnd, out byte frameOp)
-        && frameOp is (byte)Opcode.Atomic or (byte)Opcode.Lookaround
+        && frameOp is (byte)Opcode.Atomic or (byte)Opcode.Lookaround or (byte)Opcode.Conditional
         && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
 
     /// <summary>
@@ -4175,15 +4171,11 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the verb was blocked and must do nothing.</returns>
     private static bool SkipABlockedVerb(MatchState state)
     {
-        // SHORTCUT: a verb whose scope is a condition's test acts as it did before D11, whatever its
-        // path read, until build chunk 7 gives conditions the cut rule. Skipped, it would leave the
-        // test's other branches to decide the condition for every continuation, which loses the
-        // branch a continuation needs: `(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)` over 'a' is P(0, 1), and
-        // None with the verb skipped (review of chunk 5, round 1). Ceiling: a verb in a test after a
-        // read of the text to come still discards the test's other paths (row T6), which S57d's
-        // escalation answers until chunk 9. Upgrade: skip it, and let the blocked test take both
-        // branches.
-        if (!FindTheVerbTarget(state, out long targetMark, out Opcode targetOp) || targetOp == Opcode.Conditional)
+        // A verb whose scope is a condition's test is skipped as any other is: its verb taint then
+        // blocks the test's end, so the test takes both branches rather than letting its other
+        // branches decide it for every continuation (build chunk 7; row T6, and
+        // `(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)` over 'a' from the review of chunk 5, round 1).
+        if (!FindTheVerbTarget(state, out long targetMark))
         {
             return false;
         }
@@ -4212,14 +4204,13 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="targetMark">Receives the scope's pruning mark.</param>
-    /// <param name="targetOp">Receives the opcode of the construct that pushed it.</param>
     /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
-    private static bool FindTheVerbTarget(MatchState state, out long targetMark, out Opcode targetOp)
+    private static bool FindTheVerbTarget(MatchState state, out long targetMark)
     {
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
             targetMark = state.Pstack.SizeAt(offset);
-            if (!ReadPruningMark(state, (int)targetMark, out targetOp, out LookaroundStateData look))
+            if (!ReadPruningMark(state, (int)targetMark, out Opcode targetOp, out LookaroundStateData look))
             {
                 break;
             }
@@ -4231,7 +4222,6 @@ internal static class Matcher
         }
 
         targetMark = 0;
-        targetOp = Opcode.Failure;
         return false;
     }
 
@@ -4287,7 +4277,7 @@ internal static class Matcher
         if (
             !state.Pstack.TopSize(out long mark)
             || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
-            || op != Opcode.Lookaround
+            || op is not (Opcode.Lookaround or Opcode.Conditional)
         )
         {
             return LookaroundEnd.Cut;
@@ -4295,6 +4285,8 @@ internal static class Matcher
 
         int frame = (int)mark - 1;
         bool blocked = state.WMarks[^1].Position > frame || HasWMarkAt(state, frame, WMarkKind.VerbTaint);
+        PartialEvent blockedEvent =
+            op == Opcode.Conditional ? PartialEvent.CutBlockedCondition : PartialEvent.CutBlockedLookaround;
 
         if (!look.Node.Match)
         {
@@ -4304,7 +4296,7 @@ internal static class Matcher
             }
 
             TaintTheFrame(state, frame);
-            state.NotePartialEvent(PartialEvent.CutBlockedLookaround);
+            state.NotePartialEvent(blockedEvent);
             return LookaroundEnd.Backtrack;
         }
 
@@ -4343,7 +4335,7 @@ internal static class Matcher
         state.SliceStart = look.SliceStart;
         state.SliceEnd = look.SliceEnd;
         node = node.Next1.Node!;
-        state.NotePartialEvent(PartialEvent.CutBlockedLookaround);
+        state.NotePartialEvent(blockedEvent);
         return LookaroundEnd.Continue;
     }
 
@@ -4371,11 +4363,15 @@ internal static class Matcher
     /// verb taint too, since one may lie after the edge (row Q3).
     /// </para>
     /// <para>
+    /// A condition's test is a lookaround here (build chunk 7): a run-out inside it goes on at the
+    /// test's end, whose blocked end then takes both branches (rows L4 and L5).
+    /// </para>
+    /// <para>
     /// SHORTCUT: the captures the body would make after the edge are unknown, which build chunk 8
-    /// models. Until then a pattern that reads captures while it matches, one with group calls, and
-    /// a run-out inside a condition's test answer the run-out partial, as before D11; so does the
-    /// oracle's pre-D11 ablation. Ceiling: those answer a partial at the attempt's start whatever
-    /// follows. Upgrade: chunk 8's unknown captures, and chunk 7's conditions.
+    /// models. Until then a pattern that reads captures while it matches, and one with group calls,
+    /// answer the run-out partial, as before D11; so does the oracle's pre-D11 ablation. Ceiling:
+    /// those answer a partial at the attempt's start whatever follows. Upgrade: chunk 8's unknown
+    /// captures.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -4411,7 +4407,7 @@ internal static class Matcher
                 return null;
             }
 
-            if (op == Opcode.Lookaround)
+            if (op is Opcode.Lookaround or Opcode.Conditional)
             {
                 break;
             }
@@ -4525,7 +4521,7 @@ internal static class Matcher
 
         bool read = state.Bstack.ReadUInt8Below(mark, out byte code);
         long sstackCount = 0;
-        if (read && (Opcode)code == Opcode.Lookaround)
+        if (read && (Opcode)code is Opcode.Lookaround or Opcode.Conditional)
         {
             read = state.Bstack.ReadSizeBelow(mark - 1, out sstackCount);
         }
@@ -4536,9 +4532,9 @@ internal static class Matcher
         }
 
         op = (Opcode)code;
-        if (op != Opcode.Lookaround)
+        if (op is not (Opcode.Lookaround or Opcode.Conditional))
         {
-            return op is Opcode.Failure or Opcode.Atomic or Opcode.Conditional;
+            return op is Opcode.Failure or Opcode.Atomic;
         }
 
         int sstackTop = state.Sstack.Count;
@@ -10416,6 +10412,24 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the cut rule, in a partial call's second pass. A blocked positive test
+                    // goes on in the yes-branch with its body's entries kept; a blocked negative one
+                    // goes back into its body.
+                    LookaroundEnd condEnd = LookaroundEnd.Cut;
+                    if (state.WMarks.Count != 0)
+                    {
+                        condEnd = EndALookaroundInTheSecondPass(state, ref node);
+                        if (condEnd == LookaroundEnd.Continue)
+                        {
+                            break;
+                        }
+
+                        if (condEnd == LookaroundEnd.Backtrack)
+                        {
+                            goto backtrack;
+                        }
+                    }
+
                     // The condition matched. It is atomic, like a lookaround, so everything it pushed
                     // while matching goes: the condition is asked once and never re-asked.
                     if (!state.Pstack.PopSize(out long endCondBstackCount))
@@ -10425,12 +10439,16 @@ internal static class Matcher
 
                     CutBstack(state, (int)endCondBstackCount);
 
-                    // The frame goes, and any mark at it. None is made there until build chunk 7,
-                    // because no verb in a test is skipped before then (the SHORTCUT in
-                    // SkipABlockedVerb); the drop keeps A7 when chunk 7 makes one.
+                    // D11 M2: the frame goes, and its marks and dedup records with it. A positive
+                    // test's own cut taint moves to the end entry below, as a lookaround's does.
                     if (state.WMarks.Count != 0)
                     {
                         state.DropWMarksFrom((int)endCondBstackCount - 1);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom((int)endCondBstackCount - 1);
                     }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
@@ -10465,6 +10483,11 @@ internal static class Matcher
                         // It's a positive lookaround that's succeeded, so the condition holds. The
                         // saved block stays on the stack for the backtrack case to undo.
                         state.Bstack.PushUInt8((byte)Opcode.EndConditional);
+
+                        if (condEnd == LookaroundEnd.CutTainted)
+                        {
+                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                        }
 
                         /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
 
@@ -14266,10 +14289,19 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // D11: the frame's marks go with it (the SHORTCUT at END_CONDITIONAL's forward arm).
+                    // D11 M2: the frame's marks and dedup records go with it. A cut taint means a
+                    // success of the test was blocked, so the branch the test's failure picks is
+                    // taken only for some continuations.
+                    bool condWasBlocked = false;
                     if (state.WMarks.Count != 0)
                     {
+                        condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
                         state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
                     }
 
                     // The condition failed to match. As with LOOKAROUND, the condition's own bstack
@@ -14321,11 +14353,36 @@ internal static class Matcher
                     // branch. Neither is a failure of the conditional itself, so this goes forward
                     // rather than on backtracking.
                     node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;
+
+                    // D11 M2: after a blocked success the branch holds only for some continuations.
+                    // A positive test has already taken its yes-branch for the others; a negative one
+                    // takes its no-branch for them when backtracking reaches the NO_BRANCH entry.
+                    if (condWasBlocked)
+                    {
+                        if (!condNode.Match)
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(condNode.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                            /* bstack: text_pos node NO_BRANCH */
+                        }
+
+                        PushTouchMark(state);
+                        state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                    }
+
                     goto advance;
                 }
                 case Opcode.EndConditional: // End of a conditional subpattern (:15460).
                 {
                     /* bstack: captures repeats capture_change */
+
+                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
 
                     if (!state.Bstack.PopSize(out long endCondCaptureChange))
                     {
@@ -15524,6 +15581,25 @@ internal static class Matcher
                     );
                     state.DropWMarksFrom(state.Bstack.Count);
                     break;
+                case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
+                {
+                    /* bstack: text_pos node */
+
+                    if (
+                        !state.Bstack.PopNode(pattern, out Node? noBranchNode)
+                        || !state.Bstack.PopSize(out long noBranchPos)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The continuations in which a success of the test's body held: the condition
+                    // does not hold there, so the no-branch runs from where the condition stood.
+                    state.TextPos = (int)noBranchPos;
+                    node = noBranchNode!;
+                    PushTouchMark(state);
+                    goto advance;
+                }
                 case Opcode.Reopen: // NOT UPSTREAM'S, D11 M2: back into a group whose cut was blocked.
                 {
                     /* bstack: pstack_mark */
@@ -15539,12 +15615,12 @@ internal static class Matcher
                     );
 
                     // The group is open again, as it was before its end, so that the body's other
-                    // paths end at the group's end once more. A lookaround's body matches over the
-                    // whole text, as its forward arm set it up to.
+                    // paths end at the group's end once more. A lookaround's body, and a condition's
+                    // test, match over the whole text, as their forward arms set them up to.
                     state.Pstack.PushSize(reopenedFrameEnd);
                     if (
                         state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
-                        && reopenedOp == (byte)Opcode.Lookaround
+                        && reopenedOp is (byte)Opcode.Lookaround or (byte)Opcode.Conditional
                     )
                     {
                         state.SliceStart = state.TextStart;
