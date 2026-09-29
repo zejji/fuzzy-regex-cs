@@ -138,6 +138,23 @@ public sealed class FailureMemoTests
     }
 
     [Test]
+    public void A_conditional_keeps_upstreams_save_for_a_repeat_without_the_memo()
+    {
+        // The witness that D35 must stay confined to failure-memo repeats. The group-exists
+        // conditional at the end switches the memo off, so the repeat's guards are upstream's,
+        // which hold for the path that recorded them and not for every path. Kept across the
+        // inner conditional's restore, a guard recorded on a path that failed at the end blocks
+        // the later path that goes round the repeat again, and group 2 ends with one capture
+        // instead of two. Upstream: regex.match(r'(a)?(?:(?(?=(a))a*|b)|a)*(?(1)c|b)', 'abab')
+        // spans (0, 4), group 2 captures (0, 1) and (2, 3), regex 2026.9.10, 2026-09-29.
+        Match m = FuzzyRegex.MatchAtStart("abab", "(a)?(?:(?(?=(a))a*|b)|a)*(?(1)c|b)");
+
+        (m.Index, m.Length).Should().Be((0, 4));
+        m.Groups[1].Success.Should().BeFalse();
+        m.Groups[2].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1), (2, 1));
+    }
+
+    [Test]
     public void A_group_exists_conditional_anywhere_keeps_the_memo_off()
     {
         // Two paths reach position 1: one took the 'a' through group 1, one did not. With group 1
