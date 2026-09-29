@@ -486,9 +486,11 @@ internal sealed class PatternObject
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a partial call's second pass runs as it
     /// did before D11, as upstream's does: the word, line and string tests read against the held
-    /// text (M1 off), and a search with no start left answers failure rather than the partial at
-    /// the edge. The oracle sets it on a pattern it compiled for one call, to show that D11 is the
-    /// whole of a divergence. See <c>Matcher.TryMatchZeroWidth</c> and the two no-start arms.
+    /// text (M1 off), and no attempt from inside the text to come, so that a search the second
+    /// pass finds nothing for answers failure. The oracle sets it on a pattern it compiled for one
+    /// call, to show that D11 is the
+    /// whole of a divergence. See <c>Matcher.TryMatchZeroWidth</c> and
+    /// <c>Matcher.MatchFromInsideTheTextToCome</c>.
     /// </summary>
     internal bool SecondPassAsBeforeD11;
 

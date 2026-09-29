@@ -1061,7 +1061,7 @@ internal static class Matcher
         // slice (2, 3), which splits the pair.
         isPartial = reverse
             ? count < maxCount && pos == state.SliceStart && RanOutOnTheLeft(state, pos)
-            : pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
+            : pos == state.TextEnd && count < maxCount && state.RunsOutRight;
 
         return count;
     }
@@ -2141,7 +2141,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(textPos < state.SliceEnd && MatchesAny(state.CharAt(textPos)));
@@ -2155,7 +2155,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(textPos < state.SliceEnd);
@@ -2170,7 +2170,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(node.Encoding, state.CharAt(textPos)));
@@ -2354,10 +2354,6 @@ internal static class Matcher
                 "D11 A4: a decided word test answers what the first pass answered"
             );
 
-            // Decided, but still a read at the edge, so a search out of starts may answer the edge
-            // partial: `(?i)\mİ` over 'b' (design row S3) matches in 'b' + ' İ'.
-            state.ReadTheTextToCome = true;
-
             return MatchStatus.From(ifWord);
         }
 
@@ -2391,7 +2387,6 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Undetermined"/>.</returns>
     private static int UndeterminedRead(MatchState state)
     {
-        state.ReadTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.UndeterminedRead);
 
         return MatchStatus.Undetermined;
@@ -2424,7 +2419,6 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Failure"/>.</returns>
     private static int DecidedFalseAtEdge(MatchState state)
     {
-        state.ReadTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
 
         return MatchStatus.Failure;
@@ -2751,6 +2745,47 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// The two readings of a zero-width test that leave the usual second pass: from a start inside
+    /// the text to come (<see cref="MatchState.InsideW"/>), and the oracle's pre-D11 ablation.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int ZeroWidthOffTheUsualPath(MatchState state, Node node, int textPos) =>
+        state.InsideW ? ZeroWidthInsideTheTextToCome(state, node) : ZeroWidthAgainstTheHeldText(state, node, textPos);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a zero-width test in the attempt that starts inside the text to come,
+    /// where both sides of the position are unknown (design section 1, rule 3).
+    /// </summary>
+    /// <remarks>
+    /// Only the start is ever asked, because anything consumed from it runs out. A test is false
+    /// where no position inside the text to come can pass it: <c>\A</c> and a plain <c>^</c>
+    /// forward, which need the start of the string, and <c>\Z</c> and a plain <c>$</c> reversed,
+    /// which need its end or a final newline, both of which lie in the held text on that side;
+    /// <c>\G</c> either way, which holds only where the search began. Every other test holds for
+    /// some continuation and fails for another, so it is undetermined, which passes and marks the
+    /// path as the edge's tests do.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <returns><see cref="MatchStatus.Failure"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int ZeroWidthInsideTheTextToCome(MatchState state, Node node)
+    {
+        bool neverInside = node.Op switch
+        {
+            Opcode.SearchAnchor => true,
+            Opcode.StartOfString => state.PartialSide == MatchState.PartialRight,
+            Opcode.EndOfString or Opcode.EndOfStringLine or Opcode.EndOfStringLineU => state.PartialSide
+                == MatchState.PartialLeft,
+            _ => false,
+        };
+
+        return neverInside ? MatchStatus.Failure : UndeterminedRead(state);
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.SecondPassAsBeforeD11"/>):
     /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
     /// the held text, with S57d noting a word or grapheme test at the truncation point.
@@ -2804,8 +2839,8 @@ internal static class Matcher
     /// <param name="textPos">The position to ask about.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
-        state.PartialSide != MatchState.PartialNone && state.Pattern.SecondPassAsBeforeD11
-            ? ZeroWidthAgainstTheHeldText(state, node, textPos)
+        state.PartialSide != MatchState.PartialNone && (state.InsideW || state.Pattern.SecondPassAsBeforeD11)
+            ? ZeroWidthOffTheUsualPath(state, node, textPos)
             : node.Op switch
             {
                 Opcode.Boundary => TryMatchBoundary(state, node, textPos),
@@ -2898,7 +2933,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(
@@ -4190,7 +4225,7 @@ internal static class Matcher
                 {
                     if (pos >= state.SliceEnd)
                     {
-                        return state.PartialSide == MatchState.PartialRight;
+                        return state.RunsOutRight;
                     }
 
                     if (!SameStringChar(test, state.CharAt(pos), test.Values[sPos]))
@@ -4227,7 +4262,7 @@ internal static class Matcher
                     {
                         if (pos >= state.SliceEnd)
                         {
-                            return state.PartialSide == MatchState.PartialRight;
+                            return state.RunsOutRight;
                         }
 
                         foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharAt(pos), folded);
@@ -4340,7 +4375,7 @@ internal static class Matcher
         {
             Opcode.Character or Opcode.CharacterIgn or Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos
                 >= state.TextEnd
-                && state.PartialSide == MatchState.PartialRight,
+                && state.RunsOutRight,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.StringRev
@@ -4650,7 +4685,7 @@ internal static class Matcher
     /// <param name="textPos">The position the match has reached.</param>
     /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
     private static bool RanOutOnTheLeft(MatchState state, int textPos) =>
-        state.PartialSide == MatchState.PartialLeft && textPos <= state.SliceStart;
+        state.RunsOutLeft && textPos <= state.SliceStart;
 
     /// <summary>
     /// The same edge as <see cref="RanOutOnTheLeft"/>, for a position that has already stepped PAST
@@ -4666,20 +4701,17 @@ internal static class Matcher
     /// <param name="textPos">The position the match has been moved to.</param>
     /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
     private static bool SteppedPastTheLeft(MatchState state, int textPos) =>
-        state.PartialSide == MatchState.PartialLeft && textPos < state.SliceStart;
+        state.RunsOutLeft && textPos < state.SliceStart;
 
     /// <summary>Upstream <c>check_fuzzy_partial</c> (line 9751).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position the error would have moved to.</param>
     /// <returns><see cref="MatchStatus.Partial"/> if the subject ran out, else failure.</returns>
     private static int CheckFuzzyPartial(MatchState state, int textPos) =>
-        state.PartialSide switch
-        {
-            // 'slice_start', not upstream's 'text_start': see 'SteppedPastTheLeft'.
-            MatchState.PartialLeft when SteppedPastTheLeft(state, textPos) => MatchStatus.Partial,
-            MatchState.PartialRight when textPos > state.TextEnd => MatchStatus.Partial,
-            _ => MatchStatus.Failure,
-        };
+        // 'slice_start', not upstream's 'text_start': see 'SteppedPastTheLeft'.
+        SteppedPastTheLeft(state, textPos) || (state.RunsOutRight && textPos > state.TextEnd)
+            ? MatchStatus.Partial
+            : MatchStatus.Failure;
 
     /// <summary>
     /// Upstream <c>save_fuzzy_changes</c> (line 9899): takes a copy of the errors the current match
@@ -7470,7 +7502,6 @@ internal static class Matcher
         }
 
         Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
-        state.ReadTheTextToCome = false;
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
@@ -7533,7 +7564,7 @@ internal static class Matcher
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
-        if (state.Pattern.ReqString is null || state.TextPos < state.ReqPos || state.ScreenSettles())
+        if (state.Pattern.ReqString is null || state.InsideW || state.TextPos < state.ReqPos || state.ScreenSettles())
         {
             foundPos = state.TextPos;
         }
@@ -7592,30 +7623,6 @@ internal static class Matcher
                     // Upstream also forwards RE_ERROR_PARTIAL here (:11828-11830). This port's
                     // prefilter has no partial arms to forward - see SearchStart - so what reaches
                     // this line is a failure or a cancellation.
-                    //
-                    // NOT UPSTREAM'S, D11 M3 (design section 4.3, row S3), brought forward from
-                    // build chunk 3 by chunk 2's review: in a partial call's second pass a search
-                    // with no start left answers what the slow path below answers when it steps
-                    // past the slice, the partial at the edge, because a match could still begin
-                    // in the text to come. Without it `\Z` at the edge, decided false by M1, left
-                    // `(?u)\Z(?:(?:\Bax|aa\b)|(\M))` searched over '' with no answer at all. It
-                    // fires only when the attempt read the text to come (MatchState.
-                    // ReadTheTextToCome), so a pattern no text matches, `(*FAIL)` for one, answers
-                    // nothing (repair round 2).
-                    if (
-                        status == MatchStatus.Failure
-                        && state.PartialSide != MatchState.PartialNone
-                        && state.ReadTheTextToCome
-                        && !state.Pattern.SecondPassAsBeforeD11
-                    )
-                    {
-                        state.MatchPos = state.Reverse ? state.SliceStart : state.SliceEnd;
-                        state.TextPos = state.MatchPos;
-                        state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
-
-                        return MatchStatus.Partial;
-                    }
-
                     return status;
                 }
 
@@ -7667,7 +7674,7 @@ internal static class Matcher
             {
                 if (state.TextPos > state.SliceEnd)
                 {
-                    return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+                    return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                 }
             }
 
@@ -8753,7 +8760,7 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgn: // Set symmetric difference, ignoring case.
                 case Opcode.SetUnion: // Set union.
                 case Opcode.SetUnionIgn: // Set union, ignoring case.
-                    if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                    if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                     {
                         return MatchStatus.Partial;
                     }
@@ -9634,7 +9641,7 @@ internal static class Matcher
                     // where the lockstep argument no longer holds.
                     while (stringPos < span.End)
                     {
-                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
                             return MatchStatus.Partial;
                         }
@@ -10049,7 +10056,7 @@ internal static class Matcher
                         // Case-fold at current position in text.
                         if (foldedPos >= foldedLen)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
                                 return MatchStatus.Partial;
                             }
@@ -10193,7 +10200,7 @@ internal static class Matcher
                     // Try comparing.
                     while (stringPos < span.End)
                     {
-                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
                             return MatchStatus.Partial;
                         }
@@ -10312,7 +10319,7 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos < length)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
                                 return MatchStatus.Partial;
                             }
@@ -10408,7 +10415,7 @@ internal static class Matcher
                         {
                             if (foldedPos >= foldedLen)
                             {
-                                if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                                if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                                 {
                                     return MatchStatus.Partial;
                                 }
@@ -10558,7 +10565,7 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos < length)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
                                 return MatchStatus.Partial;
                             }
@@ -10930,14 +10937,18 @@ internal static class Matcher
                     // through a test that read the text to come (M1): the match needs a
                     // continuation, which makes it a partial. A full match would need the
                     // continuation to be empty, which the first pass has already judged, so under
-                    // fullmatch it backtracks. M1 cannot land without this; the rest of M3 (the
-                    // prefilter's no-start partial, asserts A1 and A2) is build chunk 3.
+                    // fullmatch it backtracks. M1 cannot land without this; the rest of M3 (asserts
+                    // A1 and A2) is build chunk 3.
                     if (state.PartialSide != MatchState.PartialNone)
                     {
                         if (state.MatchAll)
                         {
+                            state.NotePartialEvent(PartialEvent.FullmatchBacktrack);
+
                             goto backtrack;
                         }
+
+                        state.NotePartialEvent(PartialEvent.SuccessTurnedPartial);
 
                         return MatchStatus.Partial;
                     }
@@ -11760,23 +11771,6 @@ internal static class Matcher
 
                     if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
-                        // NOT UPSTREAM'S, D11 M3 (design section 1, rule 3), brought forward from
-                        // build chunk 3 by chunk 2's review: in a partial call's second pass a search
-                        // with no start left may still find a match that begins in the text to
-                        // come, which is the partial at the edge, as the prefilter answers. Only
-                        // when the attempt at the edge read the text to come, as there.
-                        if (
-                            state.PartialSide != MatchState.PartialNone
-                            && state.ReadTheTextToCome
-                            && !state.Pattern.SecondPassAsBeforeD11
-                        )
-                        {
-                            state.MatchPos = state.TextPos;
-                            state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
-
-                            return MatchStatus.Partial;
-                        }
-
                         return MatchStatus.Failure;
                     }
 
@@ -13466,6 +13460,76 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: the one attempt of a partial search that starts inside the text to
+    /// come (design section 1, rule 3, "a match that could only begin inside w"; chunk 2's
+    /// post-repair design step, 2026-09-29).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A start at the edge sees the held text on one side, so it cannot say whether a start further
+    /// in could match: <c>\Z(?:\M)</c> over '' fails at 0, where <c>\Z</c> is false for every
+    /// non-empty continuation, but matches at 1 of '' + 'x'. This attempt stands for every such
+    /// start at once. The window is collapsed to the edge, so that consumption runs out on both
+    /// sides (<see cref="MatchState.RunsOutRight"/>, <see cref="MatchState.RunsOutLeft"/>), and
+    /// <see cref="MatchState.InsideW"/> answers each zero-width test for a position with unknown
+    /// text on both sides (<see cref="ZeroWidthInsideTheTextToCome"/>). A success there is M3's
+    /// partial; a run-out is the partial of limit C2, presuming the rest (known defect D19).
+    /// </para>
+    /// <para>
+    /// A pattern no text can match fails here as everywhere: search <c>(*FAIL)</c> over '' is None,
+    /// as upstream and PCRE2 answer. The groups are cleared, because what they would capture lies
+    /// in the text to come.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, after a failed second pass.</param>
+    /// <param name="edge">The truncation point: the slice end forward, the slice start reversed.</param>
+    /// <returns><see cref="MatchStatus.Partial"/> at the edge, or failure.</returns>
+    private static int MatchFromInsideTheTextToCome(MatchState state, int edge)
+    {
+        (int textStart, int textEnd, int initialStart, int initialEnd) = (
+            state.TextStart,
+            state.TextEnd,
+            state.InitialSliceStart,
+            state.InitialSliceEnd
+        );
+
+        state.TextStart = state.TextEnd = edge;
+        state.InitialSliceStart = state.InitialSliceEnd = edge;
+        state.SliceStart = state.SliceEnd = edge;
+        state.TextPos = edge;
+        state.InsideW = true;
+
+        int status;
+        try
+        {
+            status = DoMatch2(state, false);
+        }
+        finally
+        {
+            state.InsideW = false;
+            (state.TextStart, state.TextEnd, state.InitialSliceStart, state.InitialSliceEnd) = (
+                textStart,
+                textEnd,
+                initialStart,
+                initialEnd
+            );
+            state.SliceStart = initialStart;
+            state.SliceEnd = initialEnd;
+        }
+
+        Debug.Assert(status != MatchStatus.Success, "D11 M3: a success from inside the text to come is a partial");
+
+        if (status == MatchStatus.Partial)
+        {
+            state.ClearGroups();
+            state.MatchPos = edge;
+            state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
+        }
+
+        return status;
+    }
+
+    /// <summary>
     /// Upstream <c>do_match</c> (<c>upstream/src/_regex.c</c> line 18121), less the GIL handling.
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -13611,6 +13675,14 @@ internal static class Matcher
                 state.SliceStart = sliceStart;
                 state.SliceEnd = sliceEnd;
                 status = DoMatch2(state, search);
+
+                // NOT UPSTREAM'S, D11 (design section 1, rule 3): a search whose second pass found
+                // nothing may still find a match that begins inside the text to come, which is
+                // reported at the edge. One attempt from there decides it.
+                if (status == MatchStatus.Failure && search && !state.Pattern.SecondPassAsBeforeD11)
+                {
+                    status = MatchFromInsideTheTextToCome(state, state.Reverse ? sliceStart : sliceEnd);
+                }
 
                 // PCRE2's model, and the point of the whole of S57d: a boundary decided at the
                 // truncation point only reports a partial once EVERYTHING else has failed. A

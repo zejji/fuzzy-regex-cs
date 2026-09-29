@@ -44,10 +44,12 @@ public sealed class PartialEdgeReadTests
     /// starts a word there, and the attempt at 0 fails.
     /// </summary>
     /// <remarks>
-    /// Searched it is None too. No text completes the pattern (<c>\m$</c> holds nowhere; the judge
-    /// answers None), and the attempt at the edge reads no test about the text to come, so the
-    /// search's edge partial does not fire (repair round 2 of chunk 2).
+    /// Searched, it is the partial at the edge (4, 4), a PHANTOM OF LIMIT C2, known defect D19. No
+    /// text completes the pattern (<c>\m$</c> holds nowhere; the judge answers None), but the
+    /// search's second pass runs a <c>\p{Lu}+?</c> out of text, and after a run-out the rest is
+    /// presumed to match. The day D19 decides the rest, this row moves to None, on purpose.
     /// </remarks>
+    // DIVERGES FROM UPSTREAM on the search door, as limit C2 (D19).
     [Test]
     public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
     {
@@ -61,7 +63,9 @@ public sealed class PartialEdgeReadTests
 
         regex.MatchAtStart("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
 
-        regex.Match("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
+        Match searched = regex.Match("\U00010400\U0001D518", partial: true);
+
+        (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, 4, 0));
     }
 
     /// <summary>
@@ -136,7 +140,7 @@ public sealed class PartialEdgeReadTests
     /// <summary>
     /// A search whose only completion starts inside the text to come reports the partial at the
     /// end of the text, the convention of design section 1, rule 3, whichever path the search
-    /// takes: the prefilter's or the slow one (D11 M3, the prefilter's no-start partial).
+    /// takes: the attempt from inside the text to come (Matcher.MatchFromInsideTheTextToCome).
     /// </summary>
     /// <remarks>
     /// Found by review of build chunk 2 (2026-09-29) as a regression against S57d: once <c>\Z</c>
@@ -166,10 +170,12 @@ public sealed class PartialEdgeReadTests
     /// A pattern that no text can match reports no partial on any door, however its search ends.
     /// </summary>
     /// <remarks>
-    /// Chunk 2's repair round 2 (2026-09-29, the owner's delegate): the edge partial of a search
-    /// with no start left fires only when the attempt at the edge read the text to come. At 50abbe7
-    /// it fired on every exhausted search, and both searches below answered P(0, 0). Upstream
-    /// 2026.9.10 answers None on every door, as the definition requires.
+    /// Chunk 2's post-repair design step (2026-09-29, the owner's delegate). At 50abbe7 a search
+    /// with no start left answered the partial at the edge, and both searches below answered
+    /// P(0, 0). Now the edge partial comes only from an attempt that starts inside the text to
+    /// come, and a pattern no text can match fails there as everywhere. Upstream 2026.9.10 answers
+    /// None on every door, as the definition requires. Under <c>(?r)</c> the <c>(?!)</c> runs
+    /// first and fails, so <c>(?r)a(?!)</c> consumes nothing and is no C2 phantom either.
     /// </remarks>
     [Test]
     [Arguments("search", "(*FAIL)", "")]
@@ -240,11 +246,11 @@ public sealed class PartialEdgeReadTests
     /// as the wave generated them (ExpectedDivergences <c>partial-edge-read</c>, which judges each).
     /// </summary>
     /// <remarks>
-    /// Rows 4841 and 5367 are real completions upstream refuses; rows 6399 and 6589 are partials
-    /// upstream answers that no text completes, because <c>\A</c> and <c>\Z</c> at the edge are
-    /// false for every continuation. Rows 5098 and 5310 are phantoms of the design's limit C2 (known
-    /// defect D19), pinned so that the day D19 is fixed they move on purpose: the brute-force judge
-    /// answers None to both.
+    /// Rows 4841 and 5367 are real completions upstream refuses; row 6399 is a partial upstream
+    /// answers that no text completes, because <c>\A</c> at the edge is false for every
+    /// continuation. Rows 5098, 5310 and 6589 are phantoms of the design's limit C2 (known defect
+    /// D19), pinned so that the day D19 is fixed they move on purpose: the brute-force judge answers
+    /// None to all three.
     /// </remarks>
     // DIVERGES FROM UPSTREAM on every row, deliberately on four and as a registered limit on two.
     [Test]
@@ -288,7 +294,8 @@ public sealed class PartialEdgeReadTests
             .FullMatch("BB", partial: true)
             .Success.Should()
             .BeFalse();
-        // Row 6589 is searched, so it gets the edge partial of the search convention (class C1).
+        // Row 6589 searched: the attempt from inside the text to come passes `\B` and `\Z` as
+        // undetermined and its `[a-f]` runs out, a phantom of limit C2 (D19; the judge answers None).
         Match m6589 = new FuzzyRegex(@"(?b)\B(?:\Z[a-f]\p{L}\Wa+){e<=2}", FuzzyRegexOptions.Version0).Match(
             "bb.aa",
             partial: true

@@ -723,7 +723,7 @@ internal static class OracleComparer
     /// <summary>
     /// Puts a row's question to this port with the second pass of a partial call as it was before
     /// D11 and as upstream's is: the word, line and string tests read against the held text, and a
-    /// search with no start left answering failure.
+    /// search making no attempt from inside the text to come.
     /// </summary>
     /// <remarks>
     /// D11 M1 decides such a test at the edge for the text to come: false where every continuation

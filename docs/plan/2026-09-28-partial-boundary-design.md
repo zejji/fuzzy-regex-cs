@@ -23,8 +23,10 @@ A call with `partial=True` asks: **could a longer text make this a match?** (`up
    the text ending where it does, which the first pass has already judged.
 3. The answer is a partial at the leftmost start `s` from which some `w` gives a complete match of
    `t + w`, spanning `(s, |t|)`. Under `fullmatch` the match must end at the end of `t + w`. For a
-   search, a match that could only begin inside `w` is reported at `(|t|, |t|)`, the convention
-   upstream and the port already share (rows S1-S3); PCRE2 answers None there.
+   search, a match that could only begin inside `w` is reported at `(|t|, |t|)` (rows S1-S3);
+   PCRE2 answers None there. It is decided by one more attempt, whose start is inside `w` with both
+   of its sides unknown (section 4.3, "The search"), so a pattern no text can match is never
+   reported: search `(*FAIL)` over '' is None, as upstream answers.
 4. Q2 = B follows from (3) directly: the match found in `t + w` need not reach past `|t|`. It only
    has to depend on `w`. `(?w)a\B` over `'a:'` is a partial because `'a:a'` matches at (0, 1), and
    the span is (0, 2), as PCRE2 reports for `a(?=:a)` over `'a:'` (row C7).
@@ -393,8 +395,15 @@ it from `BasicMatch` unrefined, as run-out partials already are (:12336-12339; u
 `_regex.c:17644`, `:17933`); `FoundMatch` is never set in the second pass (M5, M6).
 
 **The search.** The prefilter calls the same `TryMatchZeroWidth`, so M1 makes it admit a start whose
-test is undetermined (A2). When no start is left, `DoMatch2` returns the slow path's `(|t|, |t|)`
-partial instead of failure (S3, :6949-6955 against :7004-7007), the convention of section 1, rule 3.
+test is undetermined (A2). When the second pass of a search finds nothing, one more attempt
+decides section 1's rule 3, "a match that could only begin inside `w`" (build chunk 2's post-repair
+design step, 2026-09-29; `Matcher.MatchFromInsideTheTextToCome`). Its start stands for every start
+inside `w`, so both of its sides are unknown: the window is collapsed to the edge, anything consumed
+runs out on either side, `\A` and a plain `^` are false forward (as `\Z` and a plain `$` are under
+`(?r)`, and `\G` either way), and every other test is undetermined. A success or a run-out is the
+partial `(|t|, |t|)`, with no groups. An attempt at the edge itself cannot decide this: `\Z` there
+is false for every non-empty `w`, so `(?u)\Z(?:(?:\Bax|aa\b)|(\M))` over '' fails at 0, yet matches
+at 1 of '' + 'x'. Upstream's slow path answers failure here, and so did this port's before D11.
 
 ### 4.4 M4. A fork budget
 
@@ -570,24 +579,24 @@ of section 8 (60,000 random, 60,000 shaped); a row counts once, in the first cla
 
 | class | rows | example (truth None, design partial) | shared by | register |
 |---|---|---|---|---|
-| **C1** search convention: a match that could begin inside `w` is reported at `(\|t\|, \|t\|)` even when the pattern can never match | 4,377 (model, before the round-2 rule) | search `(?rm)(*FAIL)\M` over 'b' | the port only; upstream and PCRE2 answer None (corrected in build chunk 2, repair round 2) | section 1, rule 3 |
+| **C1** search convention: a match that could begin inside `w` is reported at `(\|t\|, \|t\|)` even when the pattern can never match | 4,377 in the model; none since build chunk 2's attempt from inside `w` | search `(*FAIL)` over '' (the model's; the port now answers None) | nobody: upstream and PCRE2 answer None (corrected in build chunk 2) | section 1, rule 3 |
 | **C2** limit 2: once a path consumes a character of `w`, the rest of the pattern (or of the body) is presumed to match | 8,731 | search `\n*+\n` over 'b'; B4, Z3, A3 | upstream, PCRE2, the port | D19 |
 | **C3** limit 1: reads of `w` are independent, so two that no single `w` satisfies together still pass | 63 | match `\b$` over ''; J1, J2 | PCRE2, the port | D18 |
 | **C4** this design: a blocked construct keeps every outcome, including the alternatives made after the read that blocked it | 589 | match `\m(*PRUNE)((?!^\w))` over ''; N4-N6, T8 | PCRE2 on N4-N6, the port | D18 |
 | **C5** the fork budget fired | 0 | X1 | upstream on X1 | D18 |
 
-1. **C1** is this port's alone. The earlier text said upstream shares it; it does not. Search
-   `(*FAIL)` over '' and `(?r)a(?!)` over 'b' are None upstream (regex 2026.9.10, measured
-   2026-09-29), and PCRE2 answers None as well. A pattern no text can match must never report a
-   partial, which follows from the definition in section 1. So the rule was narrowed in build
-   chunk 2's repair round 2 (owner's delegate, 2026-09-29): a search with no start left answers the
-   edge partial only when its attempt at the edge read a test about the text to come
-   (`MatchState.ReadTheTextToCome`); a run-out answers the partial itself. Search `(*FAIL)` over ''
-   is now None. **What remains of C1** is patterns that do read the edge and still can never
-   match, for example `(?rm)(*FAIL)\M` over 'b', whose `\M` reads the edge before the verb fails:
-   62 of 3,000 random rows (model generator, seed 29, 2026-09-29), down from 123 before the rule.
-   The flag cannot tell them apart without deciding whether any text completes the pattern, which
-   is D19's question (decision 4).
+1. **C1** is gone, and the earlier text was wrong to say upstream shares it: search `(*FAIL)` over ''
+   and `(?r)a(?!)` over 'b' are None upstream (regex 2026.9.10, measured 2026-09-29) and in PCRE2,
+   and a pattern no text can match must never report a partial, which follows from section 1. Build
+   chunk 2 answered every exhausted search with the edge partial at first (50abbe7), then gated it
+   on a read at the edge (70418ff), which left 62 phantoms in 3,000 random rows and a real
+   completion refused. Its post-repair design step replaced both with the attempt from inside `w`
+   (section 4.3): a start there is judged like any other, so the only phantoms it can add are C2
+   (a run-out presumes the rest) and C3 (independent reads). Measured over the same 3,000 rows
+   (model generator, seed 29) against 11ccae7, every row where the answers differ judged by the
+   brute force: 0 new misses, 66 misses fixed, 72 new phantoms, 60 of them C2 (for example search
+   `(?<= )^(*PRUNE)` over 'a', whose lookbehind consumes the text to come) and 12 C3 (for example
+   match `\b$` over ''). The 4,377 rows the model counted under C1 predate this rule.
 2. **C2** is issue 367's limit. Decision 4 (section 10) keeps it out of D11's scope.
 3. **C3 and C4 are one SHORTCUT, registered as D18.** Both err towards a phantom, never a refusal.
    C3's ceiling is contradictory reads at the one edge position; its upgrade is a per-path class mask
