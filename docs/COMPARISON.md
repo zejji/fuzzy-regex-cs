@@ -151,8 +151,9 @@ Console.WriteLine((m.Index, m.Length));   // (6, 7)
 
 ### `{0<e<5}`: two-sided form, at least one error and fewer than five
 
-Reads as a range on the total error count, so an exact match is rejected as firmly as one with too
-many errors.
+Reads as a range on the total error count, so a match with no errors is rejected as firmly as one
+with too many. An exact occurrence can still match with one error, by leaving out its last letter;
+Python's `regex` answers None there, which this port treats as a bug (`docs/DIVERGENCES.md`).
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -161,7 +162,7 @@ Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection)
 Console.WriteLine((fuzzy.Index, fuzzy.Length));   // (0, 16)
 
 Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}");
-Console.WriteLine(exact.Success);   // False
+Console.WriteLine((exact.Index, exact.Length, exact.FuzzyCounts.Deletions));   // (0, 16, 1)
 ```
 
 ### `{e<=n:[set]}`: constrain which characters an edit may touch
@@ -1014,6 +1015,29 @@ Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
 Console.WriteLine((m.Index, m.Length));   // (0, 4)
 ```
 
+### A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay exponential, and `MatchTimeout` is their bound
+
+When a recursive call runs out of choices without ever returning, the engine remembers what the
+call could see when it started - its position, its error budget and a little more - and fails any
+later call that starts the same way at once. A fuzzy recursive pattern reaches the same call in
+many ways, because the callers spent their errors differently, so this turns searches that took
+minutes into ones that take milliseconds. Upstream raises `MemoryError` on the same patterns.
+
+It does not cover a call that returns and whose caller then fails, so some patterns of that shape
+still take time exponential in the length of the text. Give a pattern that mixes fuzzy sections
+with recursion a `matchTimeout`: a match that runs out of time throws
+`RegexMatchTimeoutException`, and never returns a wrong answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(
+    "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+    FuzzyRegexOptions.None,
+    TimeSpan.FromSeconds(2));
+Console.WriteLine(regex.Match("baxbax").Success);   // False, in milliseconds
+```
+
 ### In a branch reset, a group never takes a number another group in the same branch will use
 
 A branch-reset group `(?|...)` restarts the numbering at every `|`, so each branch hands out the
@@ -1281,26 +1305,35 @@ Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two s
 upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
 inner `{s<=1}` removed. There is no option to restore the upstream answer.
 
-### A greedy repeat with no maximum stops at a fuzzy iteration that only deleted
+### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
-A fuzzy group inside a repeat can match by deleting its whole body, without moving through the
-text. Upstream counts each such pass as progress and, with no maximum, goes round until it runs out
-of memory. Here the repeat stops at the first such pass once it has its minimum, which is what
-upstream already does when the pass happens at the end of the text.
+Inside a repeat, a fuzzy pattern can match nothing at all by leaving out every character of the
+body, at one deletion each. Upstream counts each such pass as progress, so a greedy repeat takes as
+many of them as its budget allows before a character it cannot match, except at the end of the
+text; and where a fuzzy group inside the repeat gets a fresh budget on every pass, it goes round
+until it runs out of memory. Here such a pass is taken only when something needs it: the repeat's
+minimum count, a minimum error count that its deletions raise, or a group that the pattern tests
+later. Everything else is unchanged, including a pass that matches nothing without an error.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-// Two passes delete the x, then the y matches.
-var loop = new FuzzyRegex("(?:(?:x){d<=1})+y");
-Match m = loop.Match("y");
-Console.WriteLine(m.FuzzyCounts.Deletions);   // 2 - upstream: MemoryError
+// The digits match exactly; nothing needs the two passes that leave out a digit.
+Match digits = FuzzyRegex.Match("42kg", "(?:[0-9]+){d<=2}");
+Console.WriteLine(digits.FuzzyCounts.Deletions);   // 0 - upstream: 2 (and 0 over "42")
+
+// "At least one deletion": one pass after 42 leaves out a digit.
+Match needed = FuzzyRegex.Match("42", "(?:[0-9]+){1<=d<=2}");
+Console.WriteLine((needed.Index, needed.Length, needed.FuzzyCounts.Deletions));   // (0, 2, 1) - upstream: (1, 1, 1)
+
+// The + needs one pass, which leaves out the x; then y matches.
+Match loop = FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y");
+Console.WriteLine(loop.FuzzyCounts.Deletions);   // 1 - upstream: MemoryError
 ```
 
-Upstream gives two deletions for `(?:(?:x){d<=1})+` over the empty string. A repeat with a maximum,
-such as `{1,3}`, keeps upstream's answer, and so does a repeat whose body holds a capture group,
-since a pass that sets a group can change what the next pass matches. There is no option to
-restore the upstream behaviour.
+The rule, the alternatives, what other engines do and the evidence are in
+`docs/plan/2026-09-26-empty-iteration-survey.md`. There is no option to restore the upstream
+behaviour. Ledger entries 33 and 44.
 
 ### A literal under a scoped `(?i:...)` is found in text that holds only its full case folding
 
@@ -1473,6 +1506,34 @@ Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); /
 
 A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
 Boost; PCRE2 alone makes the call fail instead.
+
+### A fuzzy item that matched exactly can still be deleted, and that choice comes before any earlier one
+
+A deletion leaves a pattern character out of the match. Upstream tries that only for a character
+that failed to match: when a fuzzy character matches and something after it then fails, leaving it
+out is never tried, so a match within the budget is missed. Here the choice is tried as soon as
+everything after the exact match has failed, before going back to any earlier choice, which is the
+order upstream's own README gives for `(?:cats|cat){e<=1}`.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Leaving out the fuzzy a is one deletion, within d<=1.
+Match m = FuzzyRegex.MatchAtStart("a", "(?:a){d<=1}a");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Deletions));   // (0, 1, 1) - upstream: no match
+
+// At 0 the match leaves out the b that matched; upstream skips it and answers (3, 3), the exact abb.
+Match first = FuzzyRegex.Match("abxabb", "(?:ab){d<=1}b");
+Console.WriteLine((first.Index, first.Length));   // (0, 2) - upstream: (3, 3)
+
+// The first branch, with its a left out, comes before the second branch.
+Match branch = FuzzyRegex.Match("ab", "(?:(?:a){d<=1}ab|a)");
+Console.WriteLine((branch.Index, branch.Length));   // (0, 2) - upstream: (0, 1)
+```
+
+Upstream finds such a match when the character happens to fail first: `(?:a|b){d<=1}a` matches
+`a`, because its `b` branch fails and tries the deletion. There is no option to restore the
+upstream answer. Ledger entry 42.
 
 ### A `\G` inside a fuzzy section is answered where upstream raises an error
 

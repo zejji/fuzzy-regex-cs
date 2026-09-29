@@ -55,8 +55,12 @@ public sealed class ComparisonSamples
         Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection){0<e<5}");
         (fuzzy.Index, fuzzy.Length).Should().Be((0, 16));
 
+        // Not an exact match: the one error can be the last letter left out, so an exact
+        // occurrence answers (0, 16) with one deletion. Upstream answers None here, which is
+        // finding F-A (docs/DIVERGENCES.md); it finds the same match over 'service detectio'.
         Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}");
-        exact.Success.Should().BeFalse();
+        (exact.Index, exact.Length).Should().Be((0, 16));
+        exact.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     /// <summary>"`{e&lt;=n:[set]}`: constrain which characters an edit may touch".</summary>
@@ -411,6 +415,22 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
+    /// "A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay
+    /// exponential, and `MatchTimeout` is their bound".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_recursive_pattern_whose_calls_fail_is_matched_in_milliseconds()
+    {
+        var regex = new FuzzyRegex(
+            "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        );
+
+        regex.Match("baxbax").Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// "In a branch reset, a group never takes a number another group in the same branch will use".
     /// </summary>
     [Test]
@@ -489,6 +509,38 @@ public sealed class ComparisonSamples
 
         backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
         new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
+    }
+
+    /// <summary>
+    /// "A fuzzy item that matched exactly can still be deleted, and that choice comes before any
+    /// earlier one".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_item_that_matched_exactly_can_still_be_deleted()
+    {
+        Match m = FuzzyRegex.MatchAtStart("a", "(?:a){d<=1}a");
+        (m.Index, m.Length, m.FuzzyCounts.Deletions).Should().Be((0, 1, 1));
+
+        Match first = FuzzyRegex.Match("abxabb", "(?:ab){d<=1}b");
+        (first.Index, first.Length).Should().Be((0, 2));
+
+        Match branch = FuzzyRegex.Match("ab", "(?:(?:a){d<=1}ab|a)");
+        (branch.Index, branch.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
+    /// "A fuzzy repeat takes an iteration that matches no text by deleting only when something
+    /// needs it".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_repeat_takes_an_empty_deleting_iteration_only_when_something_needs_it()
+    {
+        FuzzyRegex.Match("42kg", "(?:[0-9]+){d<=2}").FuzzyCounts.Deletions.Should().Be(0);
+
+        Match needed = FuzzyRegex.Match("42", "(?:[0-9]+){1<=d<=2}");
+        (needed.Index, needed.Length, needed.FuzzyCounts.Deletions).Should().Be((0, 2, 1));
+
+        FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y").FuzzyCounts.Deletions.Should().Be(1);
     }
 
     /// <summary>"A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start".</summary>

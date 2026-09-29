@@ -119,6 +119,7 @@ public sealed class MatchStateCacheTests
     [Test]
     [Arguments("(?:(a)b)+(?:bc){e<=1}", "ababx")]
     [Arguments(@"(?r)(?:(\w)x)+(?1)", "x\U0001F600axbx")]
+    [Arguments("(?:(a|)b)+(?:bc){e<=1}", "ababx")]
     // A fuzzy literal, whose filter keeps what it learns about the subject on the state (D14).
     [Arguments("(?:amber lantern works){e<=2}", "amber lantxrn works")]
     public void A_reused_state_forgets_every_field_its_last_call_set(string pattern, string subject)
@@ -226,16 +227,11 @@ public sealed class MatchStateCacheTests
                 continue;
             }
 
-            // MatchState.SectionEdits is null exactly when the pattern is not fuzzy, and it is
-            // readonly, so no call can set it. For a fuzzy pattern it is an array, which the long[]
-            // rule below scribbles, and this test's fuzzy case then checks a reused state clears it.
-            // MatchState.FilterMemory is the same: null exactly when the pattern has no fuzzy-literal
-            // filter, and readonly.
+            // MatchState.FilterMemory is null exactly when the pattern has no fuzzy-literal filter,
+            // and readonly, so no call can set it.
             if (
-                (
-                    string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
-                    || string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
-                ) && field.GetValue(state) is null
+                string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                && field.GetValue(state) is null
             )
             {
                 continue;
@@ -305,6 +301,9 @@ public sealed class MatchStateCacheTests
                 }
 
                 break;
+            case OptionalPassStart[] passes:
+                Array.Fill(passes, new OptionalPassStart(7, 7, 7, 7));
+                break;
             case RepeatData[] repeats:
                 foreach (RepeatData repeat in repeats)
                 {
@@ -334,8 +333,17 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int Reach, int SstackDepth)> calls:
-                calls.Add((7, 7, 7));
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
+                calls.Add((7, 7, 7, null));
+                break;
+            case List<long> numbers:
+                numbers.Add(7);
+                break;
+            case List<int> numbers:
+                numbers.Add(7);
+                break;
+            case null when field.FieldType == typeof(HashSet<long[]>):
+                field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);
@@ -433,6 +441,13 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case HashSet<long[]> keys:
+                RenderItems(
+                    path,
+                    keys.Select(static key => string.Join(" ", key)).Order(StringComparer.Ordinal),
+                    lines
+                );
                 break;
             case Array array and (long[] or GroupData[] or RepeatData[]):
                 int index = 0;

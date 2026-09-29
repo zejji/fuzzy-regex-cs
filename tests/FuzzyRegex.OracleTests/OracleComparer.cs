@@ -211,7 +211,8 @@ internal static class OracleComparer
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
-    /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>
+    /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
+    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/> and <see cref="RunWithTheUpstreamVerbScope"/> and by
     /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
@@ -221,6 +222,16 @@ internal static class OracleComparer
     /// Compile a backwards <c>\X</c> in upstream's order. Unlike <paramref name="ablate"/> this acts
     /// on the compile, because what ledger entry 43 changed is the code <c>\X</c> compiles to. Used
     /// by <see cref="RunWithTheUpstreamReverseGrapheme"/> and by nothing else.
+    /// </param>
+    /// <param name="withoutTheFuzzySearchFixes">
+    /// Switch ledger entries 42 and 44 off as well. Every named ablation helper passes
+    /// <see langword="true"/>; a caller that only wants to disturb the pattern, as the reuse test
+    /// does, leaves it off.
+    /// </param>
+    /// <param name="keepEmptyIterationRule">
+    /// Leave ledger entry 44's "needed" rule on in an ablated run, which otherwise switches it off
+    /// with entry 42 (see the comment where they are applied). Used by
+    /// <see cref="RunWithoutTheExactDeletion"/> and by nothing else.
     /// </param>
     /// <param name="upstreamFoldedRuns">
     /// Compile every fuzzy full-case-folded run to its folding alone, as upstream does (ledger entry
@@ -234,6 +245,8 @@ internal static class OracleComparer
         bool lazy = false,
         Action<FuzzyRegex>? ablate = null,
         bool upstreamReverseGrapheme = false,
+        bool withoutTheFuzzySearchFixes = false,
+        bool keepEmptyIterationRule = false,
         bool upstreamFoldedRuns = false
     )
     {
@@ -286,6 +299,19 @@ internal static class OracleComparer
             // message: when the answer turns out to be a crash in our own engine, the stack trace
             // in the report is the difference between a finding and a fishing trip.
             return ErrorOutcome.From(e);
+        }
+
+        // Every named ablation (each RunWith... and RunWithout... helper) also has ledger entries 42
+        // and 44 off: the exact-item
+        // deletion and the "needed" empty-iteration rule widen and reshape the fuzzy search on top of
+        // every other fix, so with them on, taking one of those fixes away need not bring back
+        // upstream's answer. Entry 42's own ablation keeps entry 44 on, so that its entry, which sits
+        // first, claims only the rows entry 42 alone explains. See ExpectedDivergences'
+        // `fuzzy-exact-item-offered-as-a-deletion` and `fuzzy-empty-iteration-needed-rule`.
+        if (withoutTheFuzzySearchFixes)
+        {
+            compiled.PatternObject.SkipExactDeletionRetry = true;
+            compiled.PatternObject.UpstreamEmptyIterations = !keepEmptyIterationRule;
         }
 
         ablate?.Invoke(compiled);
@@ -416,6 +442,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.AnchorGuards = null
         );
     }
@@ -445,6 +472,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.ChargeUntouchedFoldings = true
         );
     }
@@ -479,6 +507,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: compiled =>
             {
                 compiled.PatternObject.SkipGroupFoldLeftovers = true;
@@ -525,6 +554,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: compiled =>
             {
                 compiled.PatternObject.SkipRetriedFoldSteps = true;
@@ -571,6 +601,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: compiled =>
             {
                 compiled.PatternObject.DoubleCountTrailingInsertions = true;
@@ -603,7 +634,65 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipLeftoverTakeBack = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the ledger entry 42 exact-item deletion switched off.
+    /// </summary>
+    /// <remarks>
+    /// Upstream tries errors on a fuzzy item only when it fails to match, so an item that matched
+    /// exactly is never offered as a deletion and <c>(?:a){d&lt;=1}a</c> finds nothing in 'a'.
+    /// Setting <c>PatternObject.SkipExactDeletionRetry</c> stops every such offer, which is the
+    /// whole of the fix. The <c>fuzzy-exact-item-offered-as-a-deletion</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheExactDeletion(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled => compiled.PatternObject.SkipExactDeletionRetry = true,
+            keepEmptyIterationRule: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's empty-iteration rule in place of the
+    /// "needed" rule, and with the ledger entry 42 exact-item deletion off as well.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 44 admits a repeat iteration that consumed no text and spent fuzzy errors only
+    /// when something needs it, and drops paths that reach a state already reached. Setting
+    /// <c>PatternObject.UpstreamEmptyIterations</c> puts back upstream's rule, which counts any fuzzy
+    /// edit as progress and stops only at the end of the slice. Entry 42 is switched off too,
+    /// because it offers deletions upstream never makes, and a row that both fixes move then shows
+    /// upstream's answer only with both gone. The <c>fuzzy-empty-iteration-needed-rule</c> entry
+    /// keys on this, after entry 42's has claimed the rows entry 42 alone explains.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without either fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithUpstreamEmptyIterations(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.UpstreamEmptyIterations = true;
+                compiled.PatternObject.SkipExactDeletionRetry = true;
+            }
         );
     }
 
@@ -628,6 +717,7 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
+            withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
         );
     }
@@ -730,6 +820,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             upstreamFoldedRuns: true
         );
@@ -755,6 +846,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SkipWholeFoldedCharEdits = true
         );
@@ -785,6 +877,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: compiled =>
             {
@@ -821,6 +914,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
             lazy: false,
             ablate: static compiled =>
             {

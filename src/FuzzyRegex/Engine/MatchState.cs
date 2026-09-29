@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -225,6 +226,14 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal readonly RepeatData[] Repeats;
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): one slot per alternation with an alternative
+    /// written empty after one that is not, indexed by the value its <c>END_OPTIONAL_PASS</c> nodes
+    /// carry: where the pass through the alternative now being matched began. Written by
+    /// <c>Matcher.OpenOptionalPass</c>, read by <c>Matcher.OptionalPassAdmitted</c>.
+    /// </summary>
+    internal readonly OptionalPassStart[] OptionalPasses;
+
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
     internal readonly ByteStack Sstack;
 
@@ -273,7 +282,8 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
     /// match path fails and where a group call is made. Only the guard in
-    /// <see cref="ActiveCalls"/> reads them.
+    /// <see cref="ActiveCalls"/> reads them, and the failed-call memo keys them
+    /// (<c>Matcher.FailedCallKey</c>) because the guard does.
     /// </summary>
     /// <remarks>
     /// Both ends, so the measure works the same in a reversed pattern, where the text reached grows
@@ -304,15 +314,69 @@ internal sealed class MatchState : IDisposable
     /// saved stack and discards the orphan. The key would stay in the set for the rest of the
     /// attempt and refuse the next legitimate call of that group at that position - a match upstream
     /// finds, lost, and not a shape upstream blows up on. So every site that restores the saved
-    /// stack's count calls <c>Matcher.CloseCallsAbove</c>, which drops every entry whose frame that
+    /// stack's count calls <c>Matcher.CloseFramesAbove</c>, which drops every entry whose frame that
     /// restore has just discarded.
     /// </para>
     /// <para>
     /// <see cref="Matcher"/>'s <c>start_match</c> clears both, which covers a whole attempt being
     /// abandoned.
     /// </para>
+    /// <para>
+    /// <c>MemoKey</c> is the call's entry key for the failed-call memo (<see cref="FailedCalls"/>),
+    /// or <see langword="null"/> when the call is not to be recorded: the memo is off or not yet
+    /// switched on, the memo is full, or the call has returned at least once. <c>GROUP_CALL</c>'s
+    /// backtrack arm records a key it finds here; a call that returned is re-opened by
+    /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, int SstackDepth)> OpenCalls = [];
+    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
+    /// choices without ever returning, or <see langword="null"/> before the first is recorded. See
+    /// <c>Matcher.FailedCallKey</c> for what a key holds and why a call with a recorded key can be
+    /// failed at once.
+    /// </summary>
+    /// <remarks>
+    /// One set per pass: <see cref="InitMatch"/> empties it. A pass is one <c>basic_match</c>, with
+    /// one <see cref="SearchAnchor"/> and one search flag, and both are read by what a call can do
+    /// (<c>\G</c> and the rule against an insertion where a search began) but neither is in the
+    /// key. A set kept across the best-match walk's passes answered
+    /// <c>(?b)(?:.??(?1)|z)(?:q){e&lt;=1}(?(DEFINE)(\Ga))</c> over <c>zaq</c> with (0, 2) and a
+    /// substitution, where the right answer is (1, 3) with none.
+    /// </remarks>
+    internal HashSet<long[]>? FailedCalls;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): the calls made so far in this pass. The memo builds
+    /// keys only once this passes <see cref="CallMemoThreshold"/>.
+    /// </summary>
+    internal long CallsThisPass;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): how many calls a pass makes before the memo switches
+    /// on, set by <see cref="InitMatch"/>; <see cref="long.MaxValue"/> where it never does.
+    /// </summary>
+    /// <remarks>
+    /// The switch is lazy, as Perl's super-linear cache is: a pass that makes more calls than
+    /// (slice length + 1) x the pattern's call sites is doing more than one call per position
+    /// per site, which ordinary recursion does not. Below that the memo costs one counter per call.
+    /// A call made before the switch has no key and is never recorded, which is only lost pruning.
+    /// </remarks>
+    internal long CallMemoThreshold = long.MaxValue;
+
+    /// <summary>
+    /// Where <c>Matcher.FailedCallKey</c> builds a key, kept so a call that is failed at once
+    /// allocates nothing.
+    /// </summary>
+    internal readonly List<long> CallMemoKey = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (the failed-call memo): how many calls the memo has failed at once since the
+    /// state was last initialised. Nothing in the engine reads it; the memo's tests and grid do, to
+    /// tell a row the memo decided from one it never touched.
+    /// </summary>
+    internal long CallMemoHits;
 
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
@@ -483,6 +547,18 @@ internal sealed class MatchState : IDisposable
     internal long CaptureChange;
 
     /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): for each <c>(*PRUNE)</c> or <c>(*SKIP)</c> this
+    /// attempt has crossed, in order, the depth of <see cref="Pstack"/> when it was crossed: the
+    /// pruning mark it cuts to, or for one in an unfinished atomic group or positive lookaround the
+    /// group it will unwind past (ledger entry 47). A pass or iteration records how many there were
+    /// when it began; <c>Matcher.VerbCutPast</c> reads the ones crossed since.
+    /// </summary>
+    internal readonly List<int> VerbMarks = [];
+
+    /// <summary>How many verbs this attempt has crossed: the length of <see cref="VerbMarks"/>.</summary>
+    internal int VerbsCrossed => VerbMarks.Count;
+
+    /// <summary>
     /// NOT UPSTREAM (ledger 33): what a fuzzy edit adds to <see cref="CaptureChange"/>, where
     /// upstream adds 1. A referenced group's span change still adds 1, so the low 32 bits count
     /// group changes alone and come back with every save and restore upstream already makes -
@@ -498,11 +574,31 @@ internal sealed class MatchState : IDisposable
     internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
-    /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
-    /// node index. Counted up and never restored. Allocated only
-    /// for a fuzzy pattern.
+    /// NOT UPSTREAM (empty-iteration rule): where on <see cref="Sstack"/> the frame of the fuzzy
+    /// section now open ends, or -1 when no section entered in this attempt is open. Kept only for a
+    /// pattern with a minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), which is what
+    /// needs to know whether an enclosing section's minimum is met
+    /// (<c>Matcher.RaisesUnmetMinimum</c>, <c>Matcher.AllMinimumsMet</c>).
     /// </summary>
-    internal readonly long[]? SectionEdits;
+    /// <remarks>
+    /// FUZZY pushes the enclosing section's counts and node onto <see cref="Sstack"/>, and for such
+    /// a pattern this value beneath them, the frame of the section it was entered from. Each
+    /// section's link therefore lives in its own frame, restored with it on every path the engine
+    /// takes, and a recursive entry into a section gets a frame of its own. The value itself is set
+    /// by FUZZY, END_FUZZY and their backtrack arms, and cleared at the start of each attempt, where
+    /// upstream leaves <see cref="FuzzyNode"/> as a verb may have left it. A verb that drops
+    /// backtracking entries leaves the structure stack alone, but an enclosing atomic group,
+    /// lookaround or conditional then cuts the stack back past a section whose FUZZY entry is gone,
+    /// so each such cut also steps this value out to a frame still on the stack
+    /// (<c>Matcher.CloseFramesAbove</c>).
+    /// </remarks>
+    internal int SectionFrame = -1;
+
+    /// <summary>
+    /// The bytes a section frame spans for a pattern that keeps <see cref="SectionFrame"/>: the link,
+    /// three counts, the change count and the outer node.
+    /// </summary>
+    internal const int SectionFrameSize = 6 * sizeof(long);
 
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
@@ -738,22 +834,41 @@ internal sealed class MatchState : IDisposable
             Repeats[r] = new RepeatData();
         }
 
-        SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+        OptionalPasses = pattern.OptionalPassCount == 0 ? [] : new OptionalPassStart[pattern.OptionalPassCount];
         FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
     }
 
-    /// <summary>The edits <paramref name="section"/> has charged so far, or 0 outside any section.</summary>
-    /// <param name="section">A FUZZY node, or <see langword="null"/> outside any section.</param>
-    /// <returns>The count from <see cref="SectionEdits"/>.</returns>
-    internal long EditsChargedBy(Node? section) => section is null ? 0 : SectionEdits![section.Index];
-
-    /// <summary>Counts one fuzzy edit against the section currently open, for <see cref="EditsChargedBy"/>.</summary>
-    internal void CountSectionEdit()
+    /// <summary>
+    /// One step out along the chain of open fuzzy sections: the section the one whose frame ends at
+    /// <paramref name="frame"/> was entered from, and that section's counts at the time.
+    /// </summary>
+    /// <remarks>
+    /// Safe by construction: a link is followed only if it points below the frame it was read from,
+    /// so a walk ends after at most one step per frame on the stack, whatever the stack holds.
+    /// </remarks>
+    /// <param name="frame">The end of the current frame; on success, the end of the outer one's.</param>
+    /// <param name="outerCounts">Receives the enclosing section's counts at entry.</param>
+    /// <returns>The enclosing FUZZY node, or <see langword="null"/> when there is none.</returns>
+    internal Node? TryOuterSection(ref int frame, Span<long> outerCounts)
     {
-        if (FuzzyNode is not null)
+        if (frame < SectionFrameSize || frame > Sstack.Count)
         {
-            ++SectionEdits![FuzzyNode.Index];
+            return null;
         }
+
+        long link = Sstack.SizeAt(frame - SectionFrameSize);
+        if (link < 0 || link > frame - SectionFrameSize)
+        {
+            return null;
+        }
+
+        int counts = frame - (5 * sizeof(long));
+        outerCounts[FuzzyValue.Sub] = Sstack.SizeAt(counts + (FuzzyValue.Sub * sizeof(long)));
+        outerCounts[FuzzyValue.Ins] = Sstack.SizeAt(counts + (FuzzyValue.Ins * sizeof(long)));
+        outerCounts[FuzzyValue.Del] = Sstack.SizeAt(counts + (FuzzyValue.Del * sizeof(long)));
+        Node? outer = Sstack.NodeAt(Pattern, frame - sizeof(long));
+        frame = (int)link;
+        return outer;
     }
 
     /// <summary>
@@ -870,11 +985,21 @@ internal sealed class MatchState : IDisposable
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
-            repeat.SectionEdits = 0;
+            repeat.ChangesAtStart = 0;
+            repeat.ClearMemo();
         }
+
+        // Every pass writes its slot before its end reads it, so this is for reuse alone.
+        Array.Clear(OptionalPasses);
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
+        FailedCalls = null;
+        CallsThisPass = 0;
+        CallMemoThreshold = long.MaxValue;
+        CallMemoKey.Clear();
+        VerbMarks.Clear();
+        CallMemoHits = 0;
         ReachedLow = int.MaxValue;
         ReachedHigh = int.MinValue;
         SearchAnchor = 0;
@@ -894,10 +1019,7 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
-        if (SectionEdits is not null)
-        {
-            Array.Clear(SectionEdits);
-        }
+        SectionFrame = -1;
         ReqEnd = 0;
         LastIndex = 0;
         LastGroup = 0;
@@ -1048,6 +1170,9 @@ internal sealed class MatchState : IDisposable
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
+
+        // The failed-call memo belongs to one pass, so a state waiting in the cache holds none.
+        FailedCalls = null;
     }
 
     /// <summary>
@@ -1204,6 +1329,50 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;
+
+        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
+        // the memo never leaves the threshold or the set other than Reset leaves them, so it pays
+        // one test here. See FailedCalls and CallMemoThreshold.
+        CallsThisPass = 0;
+        if (Pattern.UseCallMemo)
+        {
+            InitCallMemo();
+        }
+    }
+
+    /// <summary>
+    /// The failed-call memo's part of <see cref="InitMatch"/>, for a pattern that can use it: empties
+    /// <see cref="FailedCalls"/> and sets <see cref="CallMemoThreshold"/> for the pass.
+    /// </summary>
+    /// <remarks>
+    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
+    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void InitCallMemo()
+    {
+        if (Pattern.SkipCallMemo || PartialSide != PartialNone)
+        {
+            CallMemoThreshold = long.MaxValue;
+        }
+        else
+        {
+            CallMemoThreshold = Pattern.EagerCallMemo ? 0 : ((long)SliceEnd - SliceStart + 1) * Pattern.GroupCallSites;
+        }
+
+        if (FailedCalls is not { Count: > 0 })
+        {
+            return;
+        }
+
+        if (FailedCalls.Count > 4096)
+        {
+            FailedCalls = null;
+        }
+        else
+        {
+            FailedCalls.Clear();
+        }
     }
 
     /// <summary>
@@ -1561,3 +1730,16 @@ internal sealed class MatchState : IDisposable
         return value > length ? length : value;
     }
 }
+
+/// <summary>
+/// NOT UPSTREAM (ledger entry 44's addendum): where a pass through an alternative with an alternative
+/// written empty after it began (<see cref="MatchState.OptionalPasses"/>).
+/// </summary>
+/// <param name="TextPos">The text position the pass began at.</param>
+/// <param name="Changes">How many fuzzy changes had been made when it began.</param>
+/// <param name="CaptureChange">The state's capture change counter when it began.</param>
+/// <param name="Verbs">
+/// <see cref="MatchState.VerbsCrossed"/> when it began, so its end can tell which verbs it crossed.
+/// </param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange, int Verbs);

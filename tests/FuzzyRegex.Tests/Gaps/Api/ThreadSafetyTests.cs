@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names fifty-six, and under the JIT this set is exactly those fifty-six. A floor of
+        // The allowlist names seventy-one, and under the JIT this set is exactly those seventy-one. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names fifty-six writable fields, so a near-empty answer means the "
+                "the allowlist names seventy-one writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -718,7 +718,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all forty-six, and it is the reason they are not readonly: the engine's
+            // ONE writer for all seventy-one, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -729,7 +729,7 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all forty-six
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-one
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
@@ -759,12 +759,19 @@ public sealed class ThreadSafetyTests
             // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
             // OracleComparer.RunWithTheUpstreamDefaultBoundary.
             "PatternObject.UpstreamDefaultBoundary",
+            // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
+            // likewise set only by the OracleComparer ablations.
+            "PatternObject.SkipExactDeletionRetry",
+            "PatternObject.UpstreamEmptyIterations",
             // Ledger entry 45 added SkipMovesTheSliceWhenItRuns, likewise set only by
             // OracleComparer.RunWithTheUpstreamSkipTiming.
             "PatternObject.SkipMovesTheSliceWhenItRuns",
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // Ledger entry 44's addendum: counted by NodeCompiler.BuildBranch, and reset by
+            // CompileToNodes in a pattern with no fuzzy section.
+            "PatternObject.OptionalPassCount",
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
@@ -781,6 +788,30 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
+            // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
+            "PatternObject.NarrowExactDeletions",
+            // Its repair round added ExactDeletionCeiling, written by Compile after the node loop,
+            // and moved two node fields onto the pattern as tables written by Compile once the
+            // nodes are numbered: FuzzyRunExits (SetFuzzyRunLengths) and OptionalPassEndOf, built
+            // from OptionalPassBranches, which NodeCompiler.BuildBranch fills and Compile empties.
+            "PatternObject.ExactDeletionCeiling",
+            "PatternObject.FuzzyRunExits",
+            "PatternObject.OptionalPassBranches",
+            "PatternObject.OptionalPassEndOf",
+            // The empty-iteration rule added these three, written by Compile after the node loop.
+            "PatternObject.HasFuzzyMinimum",
+            "PatternObject.MemoGroups",
+            "PatternObject.UseRepeatMemo",
+            // The failed-call memo added these three, written by Compile (GroupCallSites and
+            // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
+            // (WritesInDiscardingConstruct).
+            "PatternObject.WritesInDiscardingConstruct",
+            "PatternObject.GroupCallSites",
+            "PatternObject.UseCallMemo",
+            // And these two, never written by the library: FailedCallMemoTests and the memo grid
+            // set them on a pattern compiled for that one purpose.
+            "PatternObject.EagerCallMemo",
+            "PatternObject.SkipCallMemo",
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
@@ -807,6 +838,11 @@ public sealed class ThreadSafetyTests
             // Node and NextNode: the opcode graph. Nodes are emitted before their successors exist,
             // so the links are patched up afterwards - upstream's own two-pass shape.
             "Node.Index",
+            // Finding F-A: written by PatternObject.SetFuzzyRunLengths, which Compile calls once
+            // the nodes are numbered.
+            "Node.FuzzyRunLength",
+            // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
+            "Node.HasEarlierDeletionTwin",
             "Node.Match",
             "Node.Op",
             "Node.Status",

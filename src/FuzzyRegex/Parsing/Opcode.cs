@@ -25,6 +25,9 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// in the same enum, because upstream keeps one numbering across both files and the engine's
 /// <c>switch</c> is keyed on it; a second enum would only add a cast at every node it builds.
 /// </para>
+/// <para>
+/// <b>Value 98 is this port's own</b>, after upstream's last, so no upstream value moves.
+/// </para>
 /// </remarks>
 internal enum Opcode : uint
 {
@@ -321,4 +324,12 @@ internal enum Opcode : uint
 
     /// <summary>Engine-only. Upstream <c>RE_OP_TAIL_START</c>.</summary>
     TailStart = 97,
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum). Engine-only: the end of a pass through an
+    /// alternative that has an alternative written empty after it (<c>Branch.OptionalPassEndWord</c>).
+    /// The pass fails if it consumed no text and spent errors that nothing needs, by the rule a
+    /// repeat applies to an empty iteration (<c>Matcher.OptionalPassAdmitted</c>).
+    /// </summary>
+    EndOptionalPass = 98,
 }

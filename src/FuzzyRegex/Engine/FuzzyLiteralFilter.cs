@@ -279,7 +279,10 @@ internal sealed class FuzzyLiteralFilter
 
                         // Both arms continue to the same END_FUZZY; each gets its own copy.
                         return Collect(node.Next1.Node, values.Copy()) && Collect(node.Next2.Node, values);
+                    // NOT UPSTREAM (ledger entry 44's addendum): END_OPTIONAL_PASS is a check that
+                    // reads no text and can only fail a path, so the path's literal is unchanged.
                     case Opcode.Branch:
+                    case Opcode.EndOptionalPass:
                         node = node.Next1.Node;
                         continue;
                     // One character is a CHARACTER node, not a STRING: the 'e' that '(?r)(?:stone
