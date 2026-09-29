@@ -87,5 +87,15 @@ Existing memos considered:
 `Gaps/Engine/EmptyIterationCycleTests`: the repro, a three-state cycle, cycles seen by a
 backreference and by a conditional (in the body and in the tail), a nested repeat, lazy and `{3,}`
 forms, a fuzzy section around the loop and after it, `(?r)` forms with lookbehinds and lookaheads,
-the other alternatives still tried after a cycle, and witnesses for the count and run-id parts of
-the key.
+and the other alternatives still tried after a cycle. All 14 loop for ever without the check.
+
+Each part of the key has a witness, a test whose answer changes when that part is left out
+(checked by zeroing the part in a scratch build, 2026-09-29): the position, the count, the run and
+the open section's fuzzy counts. Every witness's expected answer is upstream's, since upstream
+ends on each of them.
+
+The error and cost totals have no witness. They change only when a fuzzy section closes, which
+also changes the enclosing section's counts, and they matter only to the ranking modes; three
+random searches over generated fuzzy and BESTMATCH patterns, about 20 minutes in all, found no
+answer that depends on them. They
+are kept because an extra part can only make the check cut less, never cut wrongly.

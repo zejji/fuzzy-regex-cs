@@ -102,4 +102,58 @@ public sealed class EmptyIterationCycleTests
             m.Groups["g"].Value.Should().Be("ab");
         }
     }
+
+    [Test]
+    public void A_state_is_keyed_by_the_position_it_was_reached_at()
+    {
+        // Witness for the position in the key. Pass 1 sets g to (0, 1) at position 0 and fails
+        // later; its sibling reads 'a' and sets g to (0, 0), and at position 1 the lookbehind sets g
+        // back to (0, 1). Only from there can the backreference read the second 'a'. Keyed without
+        // the position, that state looks like the one pass 1 reached, and the match is lost.
+        // Upstream: (0, 2), g = (1, 2).
+        Match m = new FuzzyRegex(
+            @"^(?:(?=(?P<g>a)a)|^(?P<g>)a|(?<=(?P<g>a))|(?<=a)(?P=g))*$",
+            FuzzyRegexOptions.None,
+            _timeout
+        ).Match("aa");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        (m.Groups["g"].Index, m.Groups["g"].Length).Should().Be((1, 1));
+    }
+
+    [Test]
+    public void A_state_is_keyed_by_the_errors_the_open_section_has_made()
+    {
+        // Witness for the fuzzy counts in the key. The inner repeat reaches the same position and
+        // spans with the section's one error spent and with it unspent. Keyed without the counts,
+        // the two look alike, the one reached second is taken as already tried, and the first match
+        // starts at 1 instead of 0. Upstream: (0, 3) with one insertion, g = (2, 3).
+        Match m = new FuzzyRegex(
+            @"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}",
+            FuzzyRegexOptions.None,
+            _timeout
+        ).Match("abb");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        (m.FuzzyCounts.Insertions, m.FuzzyCounts.Total).Should().Be((1, 1));
+        (m.Groups["g"].Index, m.Groups["g"].Length).Should().Be((2, 1));
+    }
+
+    [Test]
+    public void A_state_one_run_of_a_repeat_recorded_is_not_read_by_another()
+    {
+        // Witness for the run in the key. The inner repeat is entered once for each pass of the
+        // outer one, at the same position with the same g, but the outer count differs, and so does
+        // what can follow. Keyed without the run, the second entry reads the first entry's states as
+        // already tried and the match is lost. Upstream: (0, 3), g = 'a'.
+        Match m = new FuzzyRegex(@"^(?:(?:(?P=g)|(?=(?P<g>a)))*(?(g)b)){2}b$", FuzzyRegexOptions.None, _timeout).Match(
+            "abb"
+        );
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.Groups["g"].Value.Should().Be("a");
+    }
 }
