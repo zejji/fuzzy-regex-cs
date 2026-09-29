@@ -742,6 +742,10 @@ public sealed class ThreadSafetyTests
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",
+            // D17 added TestedGroups, written by Optimiser.CollectTestedGroups inside Compile.
+            "PatternObject.TestedGroups",
+            // And LargestFuzzyLimit, written by Optimiser.FindFuzzyLimit inside Compile.
+            "PatternObject.LargestFuzzyLimit",
             // S83 added ChargeUntouchedFoldings, which the library never writes. Only
             // OracleComparer.RunWithoutTheFoldFix sets it, on a pattern compiled for that one call.
             "PatternObject.ChargeUntouchedFoldings",

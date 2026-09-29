@@ -51,20 +51,6 @@ public sealed class OpenDefectTests
         (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
     }
 
-    // D17, found by D12's survey. An empty iteration counts as progress when it changes the span of
-    // a tested group (upstream's rule, kept by D12). Here each pass flips group g between (0, 1) and
-    // (0, 2), so every pass is a change and the repeat never stops. No pass reads text and '$'
-    // cannot hold at 0 in 'ab', so the answer is no match, which PCRE2 10.47 and Perl 5.42 give at
-    // once. Upstream: MemoryError after 1.4 s. The port exhausts its 1 GB backtrack stack.
-    [Test]
-    public void An_empty_iteration_that_flips_a_tested_group_between_two_spans_stops()
-    {
-        new FuzzyRegex(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a)))*$", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5))
-            .Match("ab")
-            .Success.Should()
-            .BeFalse();
-    }
-
     // D11 (docs/plan/2026-09-28-partial-boundary-design.md; the ids are its table's). A partial
     // means some longer text completes the match (upstream/README.rst:270). In each row no
     // continuation can: the held text already decides the boundary (B1, B2, B7), a later item

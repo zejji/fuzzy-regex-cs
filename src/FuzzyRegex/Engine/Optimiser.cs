@@ -50,6 +50,10 @@ internal static class Optimiser
         // position; see RepeatInfo.FailureMemo.
         KeepFailureMemosSound(pattern);
 
+        // NOT UPSTREAM (D17). List the groups an empty iteration's state is keyed by.
+        CollectTestedGroups(pattern);
+        FindFuzzyLimit(pattern);
+
         // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
         // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
         FindAnchorGuards(pattern);
@@ -624,6 +628,52 @@ internal static class Optimiser
         {
             info.FailureMemo = false;
         }
+    }
+
+    /// <summary>
+    /// Fills in <see cref="PatternObject.TestedGroups"/>: the groups whose spans the rest of a match
+    /// can read, which are the ones <c>START_GROUP</c> and <c>END_GROUP</c> bump the capture-change
+    /// counter for. <b>Not an upstream pass</b> (D17); see <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    private static void CollectTestedGroups(PatternObject pattern)
+    {
+        List<int> tested = [];
+        for (int group = 1; group <= pattern.TrueGroupCount; group++)
+        {
+            if (pattern.GroupInfoAt(group).Referenced)
+            {
+                tested.Add(group);
+            }
+        }
+
+        pattern.TestedGroups = [.. tested];
+    }
+
+    /// <summary>
+    /// Fills in <see cref="PatternObject.LargestFuzzyLimit"/> from every fuzzy section's limits.
+    /// <b>Not an upstream pass</b> (D17); see <c>Matcher.ErrorCountCap</c>.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    private static void FindFuzzyLimit(PatternObject pattern)
+    {
+        long largest = -1;
+        foreach (Node node in pattern.NodeList)
+        {
+            if (node.Op != Opcode.Fuzzy)
+            {
+                continue;
+            }
+
+            for (int i = FuzzyValue.MinBase; i <= FuzzyValue.MaxErr; i++)
+            {
+                largest = Matcher.LargerFiniteBound(largest, node.Values[i]);
+            }
+
+            largest = Matcher.LargerFiniteBound(largest, node.Values[FuzzyValue.MaxCost]);
+        }
+
+        pattern.LargestFuzzyLimit = largest;
     }
 
     /// <summary>Upstream <c>mark_named_groups</c> (line 23672).</summary>

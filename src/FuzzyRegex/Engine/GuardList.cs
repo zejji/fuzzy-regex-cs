@@ -395,6 +395,63 @@ internal sealed class RepeatData
             Memo.Clear();
         }
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): which run of this repeat is under way, one entry into it with its fixed
+    /// continuation, so that the states one run records are never read by another. Numbered from
+    /// <c>MatchState.NextRunId</c>, and only when the pattern tests a group. See
+    /// <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal long RunId;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D17): the state an empty iteration of a repeat led to, which is everything the rest
+/// of the match can depend on within one run of the repeat. See
+/// <c>Matcher.RevisitsEmptyIterationState</c>.
+/// </summary>
+/// <remarks>
+/// The values sit in an array because the number of tested groups is the pattern's. A lookup
+/// wraps the state's scratch array (<c>MatchState.EmptyIterationScratch</c>), so it allocates
+/// nothing; only a new state is stored, with a <see cref="Copy"/> of its values.
+/// </remarks>
+internal readonly struct EmptyIterationState : IEquatable<EmptyIterationState>
+{
+    private readonly long _runId;
+    private readonly long[] _values;
+    private readonly int _hash;
+
+    /// <summary>Wraps <paramref name="values"/> without copying them.</summary>
+    /// <param name="runId">The run of the repeat.</param>
+    /// <param name="values">The position, the count and the rest of the state, in a fixed order.</param>
+    internal EmptyIterationState(long runId, long[] values)
+    {
+        _runId = runId;
+        _values = values;
+
+        var hash = new HashCode();
+        hash.Add(runId);
+        foreach (long value in values)
+        {
+            hash.Add(value);
+        }
+
+        _hash = hash.ToHashCode();
+    }
+
+    /// <summary>The same state over its own copy of the values, for storing.</summary>
+    /// <returns>The copy.</returns>
+    internal EmptyIterationState Copy() => new(_runId, [.. _values]);
+
+    /// <inheritdoc/>
+    public bool Equals(EmptyIterationState other) =>
+        _hash == other._hash && _runId == other._runId && _values.AsSpan().SequenceEqual(other._values);
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is EmptyIterationState other && Equals(other);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => _hash;
 }
 
 /// <summary>

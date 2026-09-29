@@ -86,6 +86,21 @@ public class WorkloadBenchmarks
     /// <summary>Words with optional spaces between them, anchored at the end.</summary>
     private static readonly FuzzyRegex _wordsToEnd = new(@"(\w+\s?)+$");
 
+    /// <summary>
+    /// D17: a repeat whose body tests a group, failing, with no empty iteration, so the state
+    /// record is never consulted. The subject ends in <c>d</c>, which the pattern cannot pass.
+    /// </summary>
+    private static readonly FuzzyRegex _testedGroupRepeat = new(@"(a)(?:\1|b)*c");
+
+    /// <summary>
+    /// D17: an empty iteration that sets a tested group at every position, so every iteration of
+    /// the run is looked up in the state record and the failing search records one state each.
+    /// </summary>
+    private static readonly FuzzyRegex _emptyIterationRecord = new(@"^(?:(?=(a))|a)*\1?$");
+
+    /// <summary><c>a</c>, then two hundred <c>ab</c>s, then <c>d</c>.</summary>
+    private static readonly string _abRunThenD = "a" + string.Concat(Enumerable.Repeat("ab", 200)) + "d";
+
     /// <summary>Twenty <c>a</c>s and <c>bc</c>.</summary>
     private static readonly string _twentyAs = new string('a', 20) + "bc";
 
@@ -248,6 +263,16 @@ public class WorkloadBenchmarks
     /// <returns>Whether it matched, which it does not.</returns>
     [Benchmark]
     public bool PathologicalWordsToEnd() => _wordsToEnd.IsMatch(_wordsThenBang);
+
+    /// <summary><c>(a)(?:\1|b)*c</c> failing over <see cref="_abRunThenD"/>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool TestedGroupRepeat() => _testedGroupRepeat.IsMatch(_abRunThenD);
+
+    /// <summary><c>^(?:(?=(a))|a)*\1?$</c> failing over two hundred <c>a</c>s and <c>bc</c>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool EmptyIterationRecord() => _emptyIterationRecord.IsMatch(_twoHundredAs);
 
     /// <summary>Compiles a large pattern from source, which is parser and compiler work only.</summary>
     /// <returns>How many capture groups it has, so the result cannot be discarded.</returns>
