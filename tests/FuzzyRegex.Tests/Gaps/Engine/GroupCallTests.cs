@@ -658,6 +658,177 @@ public sealed class GroupCallTests
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 4));
     }
 
+    // Blind review of the refined call guard, 2026-09-28 (ledger entry 14, "The guard refined").
+    // Each pattern needs two calls of itself open at 0 at once. The second reaches no new text, but
+    // a group set between the two calls changes what it does: a conditional or backreference reads
+    // that group, so the inner call is not a repeat of the outer one and the path is finite.
+    // Upstream 2026.9.10 answers (0, 1) for every row, search and fullmatch alike (measured
+    // 2026-09-28); PCRE2 10.47 raises "nested recursion at the same subject position" on the first.
+    // The guard used to answer None; its key now holds the captures.
+    [Test]
+    [Arguments(@"(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))")]
+    [Arguments(@"(?:\1x|\2()(?R)|()(?R))")]
+    [Arguments(@"(?:(?P=b)x|(?P=a)(?<b>)(?R)|(?<a>)(?R))")]
+    public void A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through(string pattern)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget);
+
+        Match search = regex.Match("x");
+        Match full = regex.FullMatch("x");
+
+        (search.Success, search.Index, search.Length).Should().Be((true, 0, 1));
+        (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
+    }
+
+    // Blind review of the capture-keyed guard, 2026-09-28. Only \1 is read, but a key holding every
+    // group's span let the recursion open one call per order of setting the k empty groups, about
+    // k! paths: over 5 s for k = 9 and 0.6-3.3 s for k = 8, where the guard without captures took
+    // 0 ms. Upstream raises MemoryError in 0.8 s. By the grammar, G -> ()_i G | \1 x matches 'x'
+    // (set group 1 empty, then \1x) and nothing that holds any other letter. Bounded in engine
+    // steps, not wall time (D13): the four calls take about 1,500 steps at k = 8 and 1,700 at k = 9
+    // (Debug, 2026-09-29), and a key on every group runs past the bound.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(9)]
+    [Arguments(8)]
+    public void A_group_nothing_reads_is_left_out_of_the_call_guard_key(int k)
+    {
+        string pattern = "(?:" + string.Join("|", Enumerable.Repeat("()", k)) + @")(?R)|\1x";
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+                Match full = regex.FullMatch("x");
+                (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
+                regex.FullMatch("ax").Success.Should().BeFalse();
+                regex.Match("y").Success.Should().BeFalse();
+                regex.Match("abc").Success.Should().BeFalse();
+            },
+            20_000,
+            "only the group a backreference reads is in the key"
+        );
+    }
+
+    // Found by a grid of fuzzy recursive patterns (2026-09-29): in a fuzzy pattern the call guard
+    // compares every read group by its span, because an optional pass and the fuzzy repeat memo
+    // read the capture-change counter, which sees spans. Comparing group 1 by its text here
+    // refused a call that does not repeat the open one, and fullmatch answered None, although
+    // 'abb' matches with one substitution: the answer below is a path the matcher itself finds.
+    // Upstream 2026.9.10 raises MemoryError, so it gives no reference.
+    [Test]
+    public void A_group_read_in_a_fuzzy_pattern_is_compared_by_its_span()
+    {
+        Match m = new FuzzyRegex(
+            @"(?e)()(?:(?R)(?R)(?:(?=a\1)b|)(?:(?:b(?(1)a|b))*)?\1|b){s<=1}",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("abb");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    // D5, found in the capture-dependent recursion design's grids (2026-09-28, section 3). Upstream
+    // 2026.9.10 answers (0, 3). A call of the pattern at 0 made after g has captured a new text in
+    // the lookahead can do something different from the call at 0 already open, but the guard
+    // without captures refused it as a repeat, so the attempt at 0 failed and the answer was the
+    // attempt at 1, (1, 3).
+    [Test]
+    public void A_capture_taken_inside_a_lookahead_is_part_of_the_call_guard_key()
+    {
+        Match m = new FuzzyRegex(@".*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)", FuzzyRegexOptions.None, _budget).Match(
+            "aab"
+        );
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+    }
+
+    // The design's grid 2 row that upstream settles (section 6, 30 s run, 2026-09-28): (0, 2). The
+    // guard without captures answered None.
+    [Test]
+    public void A_group_set_empty_between_two_calls_lets_the_inner_call_through()
+    {
+        Match m = new FuzzyRegex(
+            @"(?:(?(g)|(?<g>)))*|(?(g)b|a)(?R)(?:(?<g>)(?P=g))+|(?:(?<g>)(?P=g))+(?:(?<g>))*(?R)",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("ab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
+
+    // Found by the design grid of captures inside repeats (2026-09-29). Group g is captured empty
+    // inside a repeat, and a repeat counts an empty iteration as progress only when a capture
+    // changed a span, so two calls that see g with the same empty text at different spans can run
+    // differently. Keyed on its text, the guard refused a call that upstream makes, and group 1
+    // gained two captures more than upstream 2026.9.10's [0, 0][1, 0] (30 s run, 2026-09-29).
+    [Test]
+    public void A_group_captured_inside_a_repeat_is_keyed_on_its_span()
+    {
+        Match m = new FuzzyRegex(
+            @"(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?<g>)|a)*)))|(?<g>)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("aax");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+        m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 0), (1, 0));
+    }
+
+    // The design's shapes where keying on the captured spans walks a new call chain for every order
+    // or position at which the read groups were set (sections 2 and A4). What a reader sees is
+    // only whether a conditional's group is set and what text a backreference's group holds, so
+    // the key holds only that, and the failed-call memo keys its ancestors as a set. By the
+    // grammar the k-group rows match nothing over 'aay' (no x), the lookahead row matches (0, 20)
+    // and the gk row (0, 3); upstream raises MemoryError on all of them. The reach witness is the
+    // row that fails when the memo's ancestors are not filtered by their reach. The \1x row with
+    // a lookahead gives group 1 a new text at every position, so only the memo keeps it
+    // polynomial, and it needs the memo on for a capture group inside a lookahead.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|(?(1)x)", "aaaaaaaaaaaaaaaaaaaay", false, 0, 20)]
+    [Arguments(@"(?:()|a)(?R)|(?(1)x)", "aaaaaaaaaaaaaaaaaaaaaaaay", false, 0, 24)]
+    [Arguments(@"(?:()|()|()|a)(?R)|(?(1)x)|(?(2)x)|(?(3)x)", "aaaaaaaaaaaay", false, 0, 12)]
+    [Arguments(@"(?:()|a)(?R)|\1x", "aaaaaaaaaaaaaaaaaaaay", false, -1, 0)]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|\1x", "aaaaaaaaaaaaaaaaaaaay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7\8x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|(?(1)|z)(?(2)|z)(?(3)|z)(?(4)|z)(?(5)|z)(?(6)|z)x", "aay", false, -1, 0)]
+    [Arguments(
+        @"(?:()|()|()|()|()|()|()|()|a)(?R)|(?(1)|z)(?(2)|z)(?(3)|z)(?(4)|z)(?(5)|z)(?(6)|z)(?(7)|z)(?(8)|z)x",
+        "aay",
+        false,
+        -1,
+        0
+    )]
+    [Arguments(@"(?:()|()|()|()|a)(?R)|\3\4x", "aax", false, 0, 3)]
+    [Arguments(@"(?:()|()|()|()|a)(?R)|\1\2\3\4x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|a)(?R)|\1\2\3\4\5x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:(?:())?|(?:())?|(?:())?|(?:())?|(?:())?|a)(?R)|\1\2\3\4\5x", "aay", false, -1, 0)]
+    [Arguments(@"(?(DEFINE)(?<H>(?&G)|.*z|(?&G)|a)(?<G>(?&H)b))(?&H)", "ab", true, 0, 2)]
+    public void A_call_guard_keyed_on_what_is_read_stays_polynomial(
+        string pattern,
+        string subject,
+        bool full,
+        int start,
+        int end
+    )
+    {
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+                Match m = full ? regex.FullMatch(subject) : regex.Match(subject);
+                (m.Success ? (m.Index, m.Index + m.Length) : (-1, 0)).Should().Be((start, end));
+            },
+            1_000_000,
+            "the guard and the memo key only what a conditional or backreference reads"
+        );
+    }
+
     [Test]
     [Category(EngineWork.Category)]
     public void A_nested_call_that_reaches_no_further_is_still_refused()

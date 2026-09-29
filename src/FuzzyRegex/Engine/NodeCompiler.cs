@@ -79,7 +79,7 @@ internal struct CompileArgs
     /// <summary>
     /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
     /// lookaround test: a construct that throws away its body's undo entries when the body
-    /// succeeds. <b>Not upstream</b>; a capture group, a group call or a fuzzy section in here turns
+    /// succeeds. <b>Not upstream</b>; a group call or a fuzzy section in here turns
     /// off the failed-call memo (<see cref="PatternObject.WritesInDiscardingConstruct"/>).
     /// </summary>
     internal bool WithinDiscardingConstruct;
@@ -1151,8 +1151,19 @@ internal static class NodeCompiler
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
-        // NOT UPSTREAM: see PatternObject.UseCallMemo.
-        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
+        // NOT UPSTREAM: see GroupInfo.CapturedInRepeat. Both numbers, since a conditional or
+        // backreference may name either.
+        if (args.RepeatDepth > 0)
+        {
+            args.Pattern.GroupInfoAt((int)privateGroup).CapturedInRepeat = true;
+            args.Pattern.GroupInfoAt((int)publicGroup).CapturedInRepeat = true;
+        }
+
+        // NOT UPSTREAM: see PatternObject.CapturesAgainstDirection.
+        args.Pattern.CapturesAgainstDirection |= forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+
+        // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
+        // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.
 
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
@@ -1484,6 +1495,9 @@ internal static class NodeCompiler
 
         // Record that we have a reference to a group.
         RecordRefGroup(args.Pattern, (int)group);
+
+        // NOT UPSTREAM: a backreference reads the group's text. See GroupInfo.TextRead.
+        args.Pattern.GroupInfoAt((int)group).TextRead = true;
 
         // Append the reference.
         AddNode(args.End!, node);

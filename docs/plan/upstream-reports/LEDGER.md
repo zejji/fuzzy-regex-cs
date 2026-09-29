@@ -2521,22 +2521,53 @@ through when the attempt has looked further into the text since the outer call o
 call's first try failed further on, and the inner call is a genuinely different path. With nothing
 new reached it is failed as before.
 
-**That is still too strict: a new capture can make the inner call different (open, 2026-09-28).**
+**That was still too strict: a new capture can make the inner call different (fixed 2026-09-28).**
 A blind review found `(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))` over `'x'`: upstream answers (0, 1),
 the port None, PCRE2 "nested recursion at the same subject position". Two calls of the whole
 pattern are open at 0 and nothing new is reached, but the group set between them changes which
 branch the conditional takes, so the inner call is not a repeat and the path is finite. The same
 holds for backreferences: `(?:\1x|\2()(?R)|()(?R))` and its named form, (0, 1) upstream, None here.
-Red and `[Explicit]` as
-`OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`.
+Pinned as `GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`,
+all three rows (0, 1) for search and fullmatch.
 
-The planned fix makes the key `(call, position, reach, captures read)`: the current spans of the
-groups a conditional or backreference reads (`GroupInfo.Referenced`), taken only when the pattern
-has such groups, saved on the backtracking stack at `GROUP_RETURN` so a re-opened call keeps its
-own. It still terminates: each such group's span is one of at most `(TextLength + 1)^2 + 1` values,
-so the entries per position stay finite. A capture-change COUNTER would be cheaper but does not
-terminate in principle - a group that alternates between two spans counts up for ever - so it is
-not the fix.
+The fix makes the key `(call, position, reach, captures)`, where the captures
+(`MatchState.CallCaptures`) are the current spans of the groups some conditional or backreference
+reads (`GroupInfo.Referenced`), and only those. They are taken only when the pattern has a call and
+such a group, so other patterns pay nothing. They go on the backtracking stack at `GROUP_RETURN` so
+a re-opened call keeps its own. It still terminates: with n the text length and r the groups read,
+each read span is one of at most `(n + 1)^2 + 1` values, so at most
+`(n + 1) * ((n + 1)^2 + 1)^r` calls of one group are open at one position.
+
+Keying on EVERY group, the first cut, was a regression the second blind review found:
+`(?:()|()|()|()|()|()|()|()|())(?R)|\1x` let the recursion open a call for each order of setting
+the empty groups, about k! paths - over 5 s at k = 9, 0.6-3.3 s at k = 8, against 0 ms without
+captures in the key (upstream: MemoryError in 0.8 s). Only `\1` is read, so only its span belongs
+in the key, and the rows now answer inside a 100 ms budget
+(`GroupCallTests.A_group_nothing_reads_is_left_out_of_the_call_guard_key`). A capture-change COUNTER would be cheaper but
+does not terminate in principle - a group that alternates between two spans counts up for ever -
+so it is not the fix.
+
+**The key is what the callee reads, not the spans (2026-09-29, D3).** Keying on spans walked a new
+call chain for every position at which an empty group had been set: `(?:()|a)(?R)|(?(1)x)` over
+`a...ay` made 2^n calls. A conditional reads only whether its group is set, and a backreference only
+the text it holds, so the key now holds a set bit for a group only conditionals read and an id of
+the text for a group a backreference reads (`CallCaptures`, `CaptureTextIds`,
+`docs/plan/2026-09-28-capture-dependent-recursion-design.md` section 4d). Engine survey (section 3):
+on the three rows above upstream and PCRE2's JIT answer (0, 1); PCRE2's interpreter and Perl 5.42
+refuse every same-position recursion with an error ("nested recursion at the same subject
+position", "Infinite recursion"); no engine answers None. The same key fixed D5,
+`.*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)` over `aab`: (0, 3) as upstream, where the capture-free
+key answered (1, 3). The failed-call memo keys the same read state, the reach interval, and the
+open calls the guard could refuse against as a set, filtered by reach and by which read groups are
+set (the design's addendum 1); keying the ordered chain made every order of setting k empty groups
+its own key. A capture group inside a lookaround no longer turns the memo off, since only a call
+there leaks a capture-list entry; that keeps `(?:(?=(a*))|a)(?R)|\1x`, where group 1 has a new text
+at every position, polynomial. Pinned in `GroupCallTests.A_call_guard_keyed_on_what_is_read_stays_polynomial`.
+
+Still open: D4. When the attempt has reached the whole text before the first call, as in
+`.*z|(?:|(?R)a)` fullmatch `aa`, no later call can show growth and the finite left recursion is
+refused again (upstream (0, 2), the port None; `OpenDefectTests`). PCRE2's `last_used_ptr` rule
+has the same gap but raises an error. It needs a change to the reach rule, not the key.
 
 In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
 touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.

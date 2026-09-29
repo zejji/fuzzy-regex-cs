@@ -154,6 +154,27 @@ public sealed class FailedCallMemoTests
     }
 
     [Test]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|\1x", "aaay")]
+    [Arguments(@"(?:(?=(a))ax|a)(?R)?b", "aab")]
+    [Arguments(@"(a)(?:(?!.(a))|.)+?(?1)?b", "aaab")]
+    public void A_capture_group_inside_a_lookaround_leaves_the_memo_on(string pattern, string subject)
+    {
+        // Only a call writing a capture inside a lookaround leaves a stray capture-list entry
+        // behind; a capture group there does not (upstream 2026.9.10 agrees: (?:(?=(a))ax|a)b over
+        // 'ab' leaves group 1 no capture). So the memo stays on, and answers as it does off.
+        FuzzyRegex on = WithMemo(pattern, eager: true);
+        FuzzyRegex off = WithMemo(pattern, eager: false);
+
+        on.PatternObject.UseCallMemo.Should().BeTrue();
+        Match onMatch = on.Match(subject);
+        Match offMatch = off.Match(subject);
+        (onMatch.Success, onMatch.Index, onMatch.Length)
+            .Should()
+            .Be((offMatch.Success, offMatch.Index, offMatch.Length));
+        CaptureLists(onMatch).Should().Equal(CaptureLists(offMatch));
+    }
+
+    [Test]
     public void A_fuzzy_section_inside_a_lookaround_keeps_the_memo_off()
     {
         // END_FUZZY sets the whole-match error total and restores it only from its backtracking

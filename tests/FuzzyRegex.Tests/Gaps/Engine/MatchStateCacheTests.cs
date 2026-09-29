@@ -405,6 +405,13 @@ public sealed class MatchStateCacheTests
             case HashSet<(long Key, int Reach)> set:
                 set.Add((7, 7));
                 break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                counts.Add((7, 7), 7);
+                break;
+            case CaptureTextIds ids:
+                ids.Reset("scribbled".AsMemory());
+                _ = ids.IdOf(1, 2);
+                break;
             case HashSet<EmptyIterationState> states:
                 states.Add(new EmptyIterationState(7, [7]));
                 break;
@@ -522,6 +529,12 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                RenderItems(path, counts.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
+                break;
+            case CaptureTextIds ids:
+                lines.Add($"{path}=({ids.Count},{(ReadOnlyMemory<char>)Private(ids, "_text")})");
                 break;
             case HashSet<EmptyIterationState> states:
                 // Allocated on first use and then kept, so an empty one is the same as none.

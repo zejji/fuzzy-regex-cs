@@ -812,6 +812,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
             "PatternObject.UseRepeatMemo",
+            // The capture-dependent call guard added one, written in Compile beside MemoGroups.
+            "PatternObject.CallReadGroups",
+            "PatternObject.CapturesAgainstDirection",
             // The failed-call memo added these three, written by Compile (GroupCallSites and
             // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
             // (WritesInDiscardingConstruct).
@@ -868,6 +871,8 @@ public sealed class ThreadSafetyTests
             "GroupInfo.HasName",
             "GroupInfo.Node",
             "GroupInfo.Referenced",
+            "GroupInfo.TextRead",
+            "GroupInfo.CapturedInRepeat",
             "CallRefInfo.Defined",
             "CallRefInfo.Node",
             "CallRefInfo.Used",
