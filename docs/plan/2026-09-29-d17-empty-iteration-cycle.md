@@ -110,6 +110,22 @@ Existing memos considered:
   `^(?:(?=(a))|a)*\1?$` over 2,000 characters allocates under 400 bytes per character (6.6 GB
   over 10,000 before the scratch key).
 
+Measured 2026-09-29, Release, main (171a1a7c, the same code as 7cecdb35) against this branch, run
+in turns on a busy machine, per call:
+
+| Workload | main | this branch |
+| --- | --- | --- |
+| `(a)(?:\1\|b)*c` failing over 402 characters (`TestedGroupRepeat`) | 51-68 ms, best 50.9 | 50-65 ms, best 49.9 |
+| `(\w+) \1` (control) | 39-55 µs, best 38.3 | 38-49 µs, best 37.5 |
+| `(\w+\s?)+$` (control) | 4.1-5.4 ms, best 4.0 | 3.9-4.9 ms, best 3.9 |
+| `^(?:(?=(a))\|a)*\1?$` over 16 `a`s and `bc` | 229 ms | 0.40 ms |
+| the same over 20 | 3.5-4.4 s | 0.58 ms |
+| the same over 200 (`EmptyIterationRecord`) | over 150 s, not finished | 35-39 ms |
+
+The first three are within the machine's noise. The last is the sibling rule at work: on main every
+path through the `(?=(a))` and `a` choices is explored, doubling the time with each character; here a
+state reached before on a failed path is not explored again. Both answer no match.
+
 ## Tests
 
 `Gaps/Engine/EmptyIterationCycleTests`: the repro, a three-state cycle, cycles seen by a
