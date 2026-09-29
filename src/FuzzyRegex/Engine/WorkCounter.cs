@@ -54,6 +54,14 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long CharactersSearched { get; private set; }
 
+    /// <summary>
+    /// Guard lists of a failure-memo repeat on this thread that a conditional's restore left in
+    /// place although they had been edited since its save (D35): each is a set of failure records
+    /// upstream's restore would have deleted. See <c>Matcher.PushRepeats</c>.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long GuardListsKept { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -110,6 +118,10 @@ internal static class WorkCounter
     /// <param name="length">The stretch's length.</param>
     [Conditional("DEBUG")]
     internal static void Searched(int length) => CharactersSearched += length;
+
+    /// <summary>Counts one guard list kept across a conditional's restore.</summary>
+    [Conditional("DEBUG")]
+    internal static void GuardListKept() => GuardListsKept++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

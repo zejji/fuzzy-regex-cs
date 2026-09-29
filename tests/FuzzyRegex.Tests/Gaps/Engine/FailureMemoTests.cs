@@ -54,6 +54,107 @@ public sealed class FailureMemoTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(?:(?(?=a)a|a)|a)*b")]
+    [Arguments("(?:(?(?<=a|^)a|a)|a)*?b")]
+    [Arguments("(?:(?(?=(a))a|a)|a)*b")]
+    [Arguments("(?:(?(?=a)(a)|a)|a)*b")]
+    public void A_conditional_does_not_forget_what_its_branches_learned(string pattern)
+    {
+        // D35. A conditional saves every repeat's guards before its test and used to put them all
+        // back when it was undone. So at each position the path through the conditional explored
+        // the rest of the run, the repeat recorded where its body failed, and backtracking out of
+        // the conditional wiped those records; the plain 'a' beside it then explored the same
+        // rest again. Two explorations per position is 2^n. The rows vary the kind of test and
+        // where the captures are. A negative test is not among them: when it holds, its arm runs
+        // after the restore, so nothing is lost. Upstream regex 2026.9.10 is exponential here too:
+        // regex.match(r'(?:(?(?=a)a|a)|a)*b', 'a' * 18 + 'cb') took 89 ms and doubles with every
+        // 'a' (measured 2026-09-29). The answers are upstream's: no match at the start, and a
+        // search finds the final 'b' alone. The four rows took 14,114 to 17,714 steps for all
+        // three calls (Debug, 2026-09-29); before the fix the first call alone hits the bound.
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new string('a', 40) + "cb";
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                regex.MatchAtStart(subject).Success.Should().BeFalse();
+                regex.FullMatch(subject).Success.Should().BeFalse();
+                Match m = regex.Match(subject);
+                (m.Index, m.Length).Should().Be((41, 1));
+            },
+            200_000,
+            "the guards a repeat records after a conditional's test survive the test being undone"
+        );
+    }
+
+    [Test]
+    [Arguments(@"(?:(?(?=a)(a)|a)|a)*b", "aaacaab", "search", false, 4, 7, false, "4,5;5,6")]
+    [Arguments(@"(?:(?(?=(a))a|a)|a)*b", "aaacaab", "search", false, 4, 7, false, "4,5;5,6")]
+    [Arguments(@"(?:(?(?=a)a|a)|a)*b", "aaa", "match", true, 0, 3, true, "")]
+    [Arguments(@"(?:(?(?=a)a|a)|a)*b", "aaacb", "search", true, 4, 5, false, "")]
+    [Arguments(@"(?:(?(?=a)(?(?<=a)a|b)|b)|a)*b", "aaacab", "search", false, 4, 6, false, "")]
+    [Arguments(@"(?:(?(?=a)ab|a)|a)*b", "aaab", "fullmatch", false, 0, 4, false, "")]
+    [Arguments(@"(?:(?(?=a)(a)|a)|b|a)+?$", "aaab", "search", false, 0, 4, false, "0,1;1,2;2,3")]
+    [Arguments(@"(?:(?(?=a*b)a|b)|a){2,}b", "aab", "match", false, 0, 3, false, "")]
+    [Arguments(@"(?:(?(?=a)a)|a)*\Kb", "aacab", "search", false, 4, 5, false, "")]
+    [Arguments(@"(a)?(?:(?(1)a|b)|a)*c", "aabac", "search", false, 0, 5, false, "")]
+    [Arguments(@"(a)?(?:(?(?=a)a|a)|a)*\1b", "aaacaab", "search", false, 4, 7, false, "4,5")]
+    [Arguments(@"(?:(?(?=a)a|a)|a)*(*PRUNE)b", "aaacaab", "search", false, 4, 7, false, "")]
+    public void A_conditional_that_keeps_the_guards_gives_upstreams_answer(
+        string pattern,
+        string subject,
+        string operation,
+        bool partial,
+        int start,
+        int end,
+        bool isPartial,
+        string group1
+    )
+    {
+        // D35's edge cases: captures set in an arm or in the test, a partial match, a nested
+        // conditional, a conditional with no else, a lazy repeat, a minimum, a \K after the
+        // repeat, and three controls where the memo is off (a group-exists conditional, a
+        // backreference, (*PRUNE)), which keep upstream's save. The first two fail at positions
+        // 0 to 3 with the kept guards in use, then match at 4, so they check that a kept guard
+        // changes no capture. Upstream: regex.<operation>(pattern, subject, partial=partial),
+        // regex 2026.9.10, 2026-09-29.
+        var regex = new FuzzyRegex(pattern);
+        Match m = operation switch
+        {
+            "match" => regex.MatchAtStart(subject, partial: partial),
+            "fullmatch" => regex.FullMatch(subject, partial: partial),
+            _ => regex.Match(subject, 0, subject.Length, partial),
+        };
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length, m.PartialMatch).Should().Be((start, end, isPartial));
+        if (m.Groups.Count > 1)
+        {
+            string.Join(';', m.Groups[1].Captures.Select(static c => $"{c.Index},{c.Index + c.Length}"))
+                .Should()
+                .Be(group1);
+        }
+    }
+
+    [Test]
+    public void A_conditional_keeps_upstreams_save_for_a_repeat_without_the_memo()
+    {
+        // The witness that D35 must stay confined to failure-memo repeats. The group-exists
+        // conditional at the end switches the memo off, so the repeat's guards are upstream's,
+        // which hold for the path that recorded them and not for every path. Kept across the
+        // inner conditional's restore, a guard recorded on a path that failed at the end blocks
+        // the later path that goes round the repeat again, and group 2 ends with one capture
+        // instead of two. Upstream: regex.match(r'(a)?(?:(?(?=(a))a*|b)|a)*(?(1)c|b)', 'abab')
+        // spans (0, 4), group 2 captures (0, 1) and (2, 3), regex 2026.9.10, 2026-09-29.
+        Match m = FuzzyRegex.MatchAtStart("abab", "(a)?(?:(?(?=(a))a*|b)|a)*(?(1)c|b)");
+
+        (m.Index, m.Length).Should().Be((0, 4));
+        m.Groups[1].Success.Should().BeFalse();
+        m.Groups[2].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1), (2, 1));
+    }
+
+    [Test]
     public void A_group_exists_conditional_anywhere_keeps_the_memo_off()
     {
         // Two paths reach position 1: one took the 'a' through group 1, one did not. With group 1

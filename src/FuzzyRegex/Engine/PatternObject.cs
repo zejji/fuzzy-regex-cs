@@ -84,7 +84,9 @@ internal sealed class RepeatInfo
     /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
     /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
     /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial match does not use it
-    /// either (<c>MatchState.KeepsFailureMemo</c>).
+    /// either (<c>MatchState.KeepsFailureMemo</c>). Where it does apply, a conditional's restore
+    /// leaves the repeat's guards in place rather than putting back the saved ones (D35,
+    /// <c>Matcher.PushRepeats</c>).
     /// </para>
     /// <para>
     /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
