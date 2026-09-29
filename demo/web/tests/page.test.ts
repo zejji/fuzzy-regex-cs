@@ -835,10 +835,10 @@ test('a marked run says where the error was spent, on a pointer and on a tap', a
 
     // The pointer leaving takes the note with it, the way the flag help behaves - after the grace
     // that lets a pointer travel to the note instead (WCAG 1.4.13, PEEK_GRACE_MS).
+    holdTheClock();
     await hover(2, 'mouseleave');
     expect(note.hidden).toBe(false);
-    await sleep(PEEK_GRACE_MS * 2);
-    await settle();
+    await advance(PEEK_GRACE_MS * 2);
     expect(note.hidden).toBe(true);
 
     // A tap leaves no pointer behind to hold the note open, so a press pins it (WCAG 1.4.13
@@ -1593,9 +1593,9 @@ test('each flag explains itself in the library own words, and Escape puts it awa
     await settle();
     expect(text.hidden).toBe(false);
     expect(button.getAttribute('aria-expanded')).toBe('true');
+    holdTheClock();
     button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
-    await sleep(PEEK_GRACE_MS * 2);
-    await settle();
+    await advance(PEEK_GRACE_MS * 2);
     expect(text.hidden).toBe(true);
 
     // A press pins it, because a tap leaves no pointer behind to hold it open, and content that
@@ -1635,9 +1635,9 @@ test('the keyboard opens a flag help and closes it again', async () => {
     await settle();
     expect(text.hidden).toBe(false);
 
+    holdTheClock();
     button.blur();
-    await sleep(PEEK_GRACE_MS * 2);
-    await settle();
+    await advance(PEEK_GRACE_MS * 2);
     expect(text.hidden).toBe(true);
 });
 

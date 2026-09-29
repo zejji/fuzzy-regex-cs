@@ -65,18 +65,29 @@ internal static class PatternCompiler
     /// <param name="upstreamReverseGrapheme">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamReverseGrapheme"/>.
     /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFoldedRuns"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
         int flags = 0,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
         int defaultVersion = DefaultVersion,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         try
         {
-            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion, upstreamReverseGrapheme);
+            return CompileUnderVersion(
+                pattern,
+                flags,
+                namedLists,
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns
+            );
         }
         catch (FuzzyRegexParseException unterminated)
             when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
@@ -160,7 +171,8 @@ internal static class PatternCompiler
         int flags,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
         int defaultVersion,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -185,6 +197,7 @@ internal static class PatternCompiler
                 {
                     GuessEncoding = guessEncoding,
                     UpstreamReverseGrapheme = upstreamReverseGrapheme,
+                    UpstreamFoldedRuns = upstreamFoldedRuns,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -312,13 +325,14 @@ internal static class PatternCompiler
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
         // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
-        List<int> optionalPassEnds = [];
+        // None in most patterns, so the list is made only for the first.
+        List<int>? optionalPassEnds = null;
         int offset = 0;
         foreach (uint[] word in code)
         {
             if (ReferenceEquals(word, Branch.OptionalPassEndWord))
             {
-                optionalPassEnds.Add(offset);
+                (optionalPassEnds ??= []).Add(offset);
             }
 
             offset += word.Length;
@@ -333,7 +347,10 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
-                optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                if (optionalPassEnds is not null)
+                {
+                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                }
             }
             catch (FirstSetErrorException)
             {
@@ -342,7 +359,7 @@ internal static class PatternCompiler
         }
 
         Debug.Assert(
-            optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            optionalPassEnds is null || optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
             "every recorded offset is a NEXT word"
         );
 
@@ -360,7 +377,7 @@ internal static class PatternCompiler
             info.GroupCount
         )
         {
-            OptionalPassEnds = optionalPassEnds,
+            OptionalPassEnds = optionalPassEnds ?? [],
         };
     }
 

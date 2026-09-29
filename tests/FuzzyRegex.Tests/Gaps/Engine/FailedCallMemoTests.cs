@@ -9,7 +9,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The speed tests are the two rows that made the memo necessary. Ledger entry 42's exact-deletion
+/// The speed tests are the two rows that made the memo necessary, bounded in engine steps. Ledger entry 42's exact-deletion
 /// retry multiplies the ways into each recursive call, and every call on both rows fails, so they
 /// took over a minute and 8 seconds. Upstream regex 2026.9.10 raises <c>MemoryError</c> on both,
 /// so it cannot grade them; "no match" is the answer the port gives with the retry off, and with
@@ -26,46 +26,57 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </remarks>
 public sealed class FailedCallMemoTests
 {
-    /// <summary>
-    /// Fifty times what the rows take on a first run, JIT included, and a small fraction of what
-    /// they took without the memo, so the test is stable and a regression is still red.
-    /// </summary>
-    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(2);
-
     private const string _rowA = "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}";
 
+    // The speed rows are bounded in engine steps, not seconds (D13): a busy machine is not a slow
+    // engine. Measured in Debug on 2026-09-29, after main's reach-keyed call guard was merged:
+    // 103,625, 86,426 and 3,253,750 steps with the memo, and past 50,000,000 on every row with it
+    // off (PatternObject.SkipCallMemo). Each bound is about ten times the count with the memo.
     [Test]
+    [Category(EngineWork.Category)]
     public void A_fuzzy_recursion_whose_calls_all_fail_is_searched_in_milliseconds()
     {
         // 69.5 s before the memo, 889,000 calls at four characters and only 2,390 different ones.
-        var regex = new FuzzyRegex(_rowA, FuzzyRegexOptions.None, _timeout);
+        var regex = new FuzzyRegex(_rowA, FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        regex.Match("baxbax").Success.Should().BeFalse();
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Match("baxbax").Success.Should().BeFalse(),
+            1_000_000,
+            "the memo fails each repeated failed call at once"
+        );
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_best_match_fuzzy_recursion_whose_calls_all_fail_is_fullmatched_in_milliseconds()
     {
         // 8.2 s before the memo.
         var regex = new FuzzyRegex(
             "(?b)(?:(?:.(?:(?:(?:b)+(?R)||)){1<=e<=2}(?:c)*?){2<=d<=3})",
             FuzzyRegexOptions.None,
-            _timeout
+            EngineWork.HangGuard
         );
 
-        regex.FullMatch("xxaxabxx").Success.Should().BeFalse();
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.FullMatch("xxaxabxx").Success.Should().BeFalse(),
+            1_000_000,
+            "the memo fails each repeated failed call at once"
+        );
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void The_failed_calls_grow_polynomially_with_the_subject()
     {
         // Without the memo each character multiplied row A's time by about 11, so 15 characters
         // would take years. With it, the number of different failed calls grows about as n^4.
-        var regex = new FuzzyRegex(_rowA, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5));
+        var regex = new FuzzyRegex(_rowA, FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        Action search = () => regex.Match("baxbaxbaxbaxbax");
-
-        search.Should().NotThrow();
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Match("baxbaxbaxbaxbax").Success.Should().BeFalse(),
+            30_000_000,
+            "the memo keeps the search polynomial in the subject"
+        );
     }
 
     [Test]
@@ -220,10 +231,27 @@ public sealed class FailedCallMemoTests
         (m.Index, m.Length).Should().Be((0, 2));
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void The_key_holds_the_text_reached(bool eager)
+    {
+        // match('(?1)|((?2)|aa|(?2)|a)((?1)c)', 'ac')   MemoryError
+        // The re-entry guard lets a nested call of a group at the same position through once the
+        // attempt has reached further than when the open call was made, so a call that failed
+        // before the text reached grew can succeed after it. Without the reached text and the open
+        // calls' reach in the key, the later call is failed and the match is (0, 1).
+        FuzzyRegex regex = WithMemo("(?1)|((?2)|aa|(?2)|a)((?1)c)", eager);
+
+        Match m = regex.Match("ac");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+    }
+
     /// <summary>A pattern compiled for one test, with the memo on from the first call, or off.</summary>
     private static FuzzyRegex WithMemo(string pattern, bool eager)
     {
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
         regex.PatternObject.EagerCallMemo = eager;
         regex.PatternObject.SkipCallMemo = !eager;
         return regex;

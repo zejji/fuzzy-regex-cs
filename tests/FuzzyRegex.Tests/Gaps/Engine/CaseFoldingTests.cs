@@ -505,31 +505,40 @@ public sealed class CaseFoldingTests
 
     /// <summary>
     /// A <c>\L&lt;name&gt;</c> word beginning with the dotted capital costs what a word beginning with
-    /// any other expanding fold costs, and not what a one-character fold costs.
+    /// any other letter costs: two substitutions, one for each letter.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Row 25482 of the seed-20260915 2000-row wave of commit <c>407c0cb</c>: the Turkic letter is in
-    /// neither the subject nor the pattern text but in a named list, which is the third place the
-    /// entry <c>turkic-default-folding</c>'s span test cannot look. The fuzzy section reaches the
-    /// two-codepoint fold one codepoint sooner, so the first match it finds ends at 2 having spent one
-    /// substitution; a word whose first letter folds to a single character ends at 3 having spent two.
-    /// Upstream answers the SECOND for U+0130 and the first for U+00DF, U+FB00 and U+01F0, which is
-    /// <c>0130; T; 0069</c> and nothing else - measured 2026-09-15 on regex 2026.9.10 by
-    /// <c>tools/probes/upstream-turkic-from-the-pattern-side.py</c>.
+    /// neither the subject nor the pattern text but in a named list. Upstream answers (3, 3) with two
+    /// substitutions for U+0130, <c>h</c> and <c>i</c>, and (2, 2) with one for U+00DF, U+FB00 and
+    /// U+01F0 - measured 2026-09-15 on regex 2026.9.10 by
+    /// <c>tools/probes/upstream-turkic-from-the-pattern-side.py</c>. Those three reach (2, 2) through
+    /// the list's second word, <c>ﬀ</c>, because upstream can edit their folding only one folded letter
+    /// at a time, so the first word would need three edits.
+    /// </para>
+    /// <para>
+    /// Before ledger entry 49 this port answered (2, 2) for U+0130 too, which is how this test
+    /// witnessed the Turkic fold data (<c>turkic-default-folding-from-the-pattern-side</c>). Since
+    /// then an expanding first letter can be substituted as one character, as on its own, so every
+    /// row takes the first word with two substitutions and U+0130 agrees with upstream here by a
+    /// different route. <see cref="A_leading_literal_that_folds_longer_than_itself_reports_no_partial_on_an_empty_slice"/>
+    /// still witnesses the fold data.
+    /// </para>
     /// </remarks>
     /// <param name="first">The list word's first letter.</param>
     /// <param name="end">Where the zero-width answer lands.</param>
     /// <param name="substitutions">What it cost to get there.</param>
     [Test]
-    // Folds longer than one character. upstream answers this for all but U+0130.
-    [Arguments("İ", 2, 1)]
-    [Arguments("ß", 2, 1)]
-    [Arguments("ﬀ", 2, 1)]
-    [Arguments("ǰ", 2, 1)]
+    // Folds longer than one character. Upstream answers (2, 1) for all but U+0130; ledger entry 49.
+    [Arguments("İ", 3, 2)]
+    [Arguments("ß", 3, 2)]
+    [Arguments("ﬀ", 3, 2)]
+    [Arguments("ǰ", 3, 2)]
     // Folds of exactly one character, which is what upstream makes U+0130.
     [Arguments("h", 3, 2)]
     [Arguments("i", 3, 2)]
-    public void A_named_list_word_starting_on_an_expanding_fold_costs_one_substitution_not_two(
+    public void A_named_list_word_starting_on_an_expanding_fold_costs_one_substitution_per_letter(
         string first,
         int end,
         int substitutions

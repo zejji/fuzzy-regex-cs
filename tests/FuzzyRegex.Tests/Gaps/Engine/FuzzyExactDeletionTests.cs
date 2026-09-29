@@ -56,6 +56,70 @@ public sealed class FuzzyExactDeletionTests
     }
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    // The witness for PatternObject.ExactDeletionCeiling, which refuses the deletion choice of a
+    // string character when more of the string is left than any section has deletions. Each row
+    // needs a choice with exactly the ceiling's count left: the whole string deleted, where the
+    // ceiling is the deletion limit, the cost limit over a deletion's cost, the larger of two
+    // sections' limits, and a reverse string's count. One fewer, or the least of the sections,
+    // loses the row. The last row is the control: the budget itself refuses a third of a cost.
+    [Test]
+    public void A_string_is_deleted_whole_when_the_budget_covers_exactly_its_length()
+    {
+        // fullmatch('(?:ab){d<=2}ab', 'ab')             None
+        // fullmatch('(?:ab){2d<=4}ab', 'ab')            None
+        // fullmatch('(?:x){s<=1}(?:ab){d<=2}ab', 'xab') None
+        // fullmatch('(?r)ab(?:ab){d<=2}', 'ab')         None
+        // fullmatch('(?:ab){2d<=3}ab', 'ab')            None
+        ShouldMatch(new FuzzyRegex("(?:ab){d<=2}ab").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?:ab){2d<=4}ab").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?:x){s<=1}(?:ab){d<=2}ab").FullMatch("xab"), 0, 3, new FuzzyCounts(0, 0, 2));
+        ShouldMatch(new FuzzyRegex("(?r)ab(?:ab){d<=2}").FullMatch("ab"), 0, 2, new FuzzyCounts(0, 0, 2));
+        new FuzzyRegex("(?:ab){2d<=3}ab").FullMatch("ab").Success.Should().BeFalse();
+    }
+
+    // AGREES WITH UPSTREAM 2026.9.10. A full-folded string's exact-deletion retry, once taken, is
+    // only taken back: at an expanding subject character the whole-character edits belong to the
+    // frame D7 leaves beneath it (Matcher._exactDeletionDone). Retried as an ordinary deletion it
+    // tried them again, 2,653 steps here where it now takes 1,418 (Debug, 2026-09-29).
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_taken_full_fold_deletion_retry_does_not_repeat_the_whole_character_edits()
+    {
+        // search('(?fi)fi(?:(?:ssaffiffii){e<=3}(?:ffis|fitstss)|)', 'ﬁßaﬀﬁﬃﬁﬁ')
+        //   (0, 1) (0, 0, 0)
+        var regex = new FuzzyRegex(
+            "(?fi)fi(?:(?:ssaffiffii){e<=3}(?:ffis|fitstss)|)",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => ShouldMatch(regex.Match("ﬁßaﬀﬁﬃﬁﬁ"), 0, 1, new FuzzyCounts(0, 0, 0)),
+            2_000,
+            "a taken deletion retry is only taken back"
+        );
+    }
+
+    // A backreference to an expanding case-folded group character answers as its literal does
+    // (D24): the whole-character deletion is retried before the exact-deletion retry deletes the
+    // character's folded letters one at a time, which spends one deletion more. The exact
+    // deletion's frame sits beneath D22/D24's at REF_GROUP_FLD's exact comparisons. Rows from the
+    // merge review of 73ce238e, which answered each with one deletion more; the answers here are
+    // main's (7cecdb35) and the literals'.
+    [Test]
+    [Arguments("(?i)(ẞ).?(?:\\1){d<=2}s", "xẞ-ſẞf", 1, 3, 0)]
+    [Arguments("(?V0)(?fi)(ss|ﬆI).?(?:\\1){d<=2}\\b", "ß-ssxẞſ", 0, 2, 0)]
+    [Arguments("(?i)(ßst)(?:\\1){e<=3}\\b", "ißﬆ-ssstS", 1, 3, 1)]
+    [Arguments("(?i)(st)(?:\\1){d<=2}s", "x-sſtxﬆſ", 6, 2, 0)]
+    public void A_folded_backreference_deletes_an_expanding_character_whole_first(
+        string pattern,
+        string subject,
+        int index,
+        int length,
+        int substitutions
+    ) => ShouldMatch(new FuzzyRegex(pattern).Match(subject), index, length, new FuzzyCounts(substitutions, 0, 1));
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     [Test]
     public void Every_item_after_the_exact_one_may_be_deleted_too()
     {
@@ -202,8 +266,9 @@ public sealed class FuzzyExactDeletionTests
 
         ab.FuzzyRunLength.Should().Be(4, "'ab', the set, and the 'e' the compiler writes before e*");
         set.FuzzyRunLength.Should().Be(2);
-        ab.FuzzyRunExit.Should().NotBeNull();
-        ab.FuzzyRunExit.Op.Should().Be(Opcode.GreedyRepeat);
+        Node? exit = regex.PatternObject.FuzzyRunExits![ab.Index];
+        exit.Should().NotBeNull();
+        exit.Op.Should().Be(Opcode.GreedyRepeat);
     }
 
     // The narrowing is off where its exchange argument fails: a test on which characters an error

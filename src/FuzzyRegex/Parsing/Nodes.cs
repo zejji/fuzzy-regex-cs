@@ -1350,7 +1350,7 @@ internal class Branch : RegexBase
         }
 
         // Flatten branches within branches.
-        (List<RegexBase> branches, List<bool> covered) = FlattenBranches(info, reverse, Branches, _writtenEmpty);
+        (List<RegexBase> branches, List<bool>? covered) = FlattenBranches(info, reverse, Branches, _writtenEmpty);
 
         // Move any common prefix or suffix out of the branches.
         List<RegexBase> prefix;
@@ -1370,7 +1370,7 @@ internal class Branch : RegexBase
         // covered alternative has one after it, so nothing factored here is covered and the empty
         // alternatives factoring leaves are no alternative's exit.
         Debug.Assert(
-            (prefix.Count == 0 && suffix.Count == 0) || !covered.Contains(true),
+            (prefix.Count == 0 && suffix.Count == 0) || covered is null || !covered.Contains(true),
             "an alternative with an empty one after it was factored"
         );
 
@@ -1380,7 +1380,10 @@ internal class Branch : RegexBase
         List<RegexBase> sequence;
         if (branches.Count > 1)
         {
-            sequence = [new Branch(branches) { _covered = covered.Contains(true) ? [.. covered] : null }];
+            sequence =
+            [
+                new Branch(branches) { _covered = covered is not null && covered.Contains(true) ? [.. covered] : null },
+            ];
 
             if (prefix.Count == 0 || suffix.Count == 0)
             {
@@ -1508,15 +1511,16 @@ internal class Branch : RegexBase
         // alternative that compiles to nothing has no pass to judge.
         // A section's subpattern is compiled without being optimised, so an alternation inside one
         // has only its own marks.
-        bool[] covered = _covered ?? OwnCovered(_writtenEmpty, Branches.Count);
+        bool[]? covered = _covered ?? OwnCovered(_writtenEmpty, Branches.Count);
         for (int i = 0; i < Branches.Count; i++)
         {
             List<uint[]> alternative = Branches[i].Compile(reverse, fuzzy);
             code.AddRange(alternative);
-            code.Add(covered[i] && alternative.Count > 0 ? OptionalPassEndWord : [(uint)Opcode.Next]);
+            bool passEnd = covered is not null && covered[i] && alternative.Count > 0;
+            code.Add(passEnd ? OptionalPassEndWord : [(uint)Opcode.Next]);
         }
 
-        Debug.Assert(!covered[^1], "an alternative with an empty one after it is not the last");
+        Debug.Assert(covered is null || !covered[^1], "an alternative with an empty one after it is not the last");
         code[^1] = [(uint)Opcode.End];
 
         return code;
@@ -1528,18 +1532,19 @@ internal class Branch : RegexBase
     /// </summary>
     /// <param name="writtenEmpty">The parser's flags, or null.</param>
     /// <param name="count">How many alternatives.</param>
-    /// <returns>One flag per alternative.</returns>
-    private static bool[] OwnCovered(bool[]? writtenEmpty, int count)
+    /// <returns>One flag per alternative, or <see langword="null"/> when none is covered.</returns>
+    private static bool[]? OwnCovered(bool[]? writtenEmpty, int count)
     {
-        // Which alternatives have one written empty after them, in this alternation.
-        bool[] own = new bool[count];
-        bool emptyAfter = false;
-        for (int i = count - 1; i >= 0; i--)
+        // An alternative is covered when one after it is written empty: every one before the last
+        // alternative written empty.
+        int lastEmpty = writtenEmpty is null ? -1 : Array.LastIndexOf(writtenEmpty, true);
+        if (lastEmpty <= 0)
         {
-            own[i] = emptyAfter;
-            emptyAfter |= writtenEmpty is not null && writtenEmpty[i];
+            return null;
         }
 
+        bool[] own = new bool[count];
+        Array.Fill(own, true, 0, lastEmpty);
         return own;
     }
 
@@ -1550,37 +1555,66 @@ internal class Branch : RegexBase
     /// covered by a later one written empty in its own alternation, and a nested alternation's
     /// alternatives also by whatever covered the nested alternation as a whole.
     /// </remarks>
-    private static (List<RegexBase> Branches, List<bool> Covered) FlattenBranches(
+    private static (List<RegexBase> Branches, List<bool>? Covered) FlattenBranches(
         Info info,
         bool reverse,
         List<RegexBase> branches,
         bool[]? writtenEmpty
     )
     {
-        bool[] own = OwnCovered(writtenEmpty, branches.Count);
+        bool[]? own = OwnCovered(writtenEmpty, branches.Count);
 
-        // Flatten the branches so that there aren't branches of branches.
+        // Flatten the branches so that there aren't branches of branches. The flags stay null until
+        // one is set, which most alternations never do.
         List<RegexBase> newBranches = [];
-        List<bool> covered = [];
+        List<bool>? covered = null;
         for (int i = 0; i < branches.Count; i++)
         {
+            bool ownCovered = own is not null && own[i];
             RegexBase b = branches[i].Optimise(info, reverse);
             if (b is Branch nested)
             {
-                newBranches.AddRange(nested.Branches);
                 for (int k = 0; k < nested.Branches.Count; k++)
                 {
-                    covered.Add(own[i] || (nested._covered is not null && nested._covered[k]));
+                    bool nestedCovered = nested._covered is not null && nested._covered[k];
+                    AddCovered(ref covered, newBranches.Count, ownCovered || nestedCovered);
+                    newBranches.Add(nested.Branches[k]);
                 }
             }
             else
             {
+                AddCovered(ref covered, newBranches.Count, ownCovered);
                 newBranches.Add(b);
-                covered.Add(own[i]);
             }
         }
 
         return (newBranches, covered);
+    }
+
+    /// <summary>
+    /// Appends the flag of the alternative at <paramref name="position"/> to a list of covered
+    /// flags that is <see langword="null"/> while every flag is false.
+    /// </summary>
+    /// <param name="covered">The flags so far, or <see langword="null"/> if all are false.</param>
+    /// <param name="position">How many flags come before this one.</param>
+    /// <param name="value">This alternative's flag.</param>
+    private static void AddCovered(ref List<bool>? covered, int position, bool value)
+    {
+        if (covered is null)
+        {
+            if (!value)
+            {
+                return;
+            }
+
+            covered = new List<bool>(position + 1);
+            for (int i = 0; i < position; i++)
+            {
+                covered.Add(false);
+            }
+        }
+
+        covered.Add(value);
     }
 
     /// <summary>Upstream <c>Branch._split_common_prefix</c> (lines 2250-2290).</summary>
@@ -1797,16 +1831,16 @@ internal class Branch : RegexBase
     /// deleting <c>a</c> reached first, with the same errors.
     /// </para>
     /// </remarks>
-    private static (List<RegexBase> Branches, List<bool> Covered) ReduceToSet(
+    private static (List<RegexBase> Branches, List<bool>? Covered) ReduceToSet(
         Info info,
         bool reverse,
         List<RegexBase> branches,
-        List<bool> covered
+        List<bool>? covered
     )
     {
-        // Can the branches be reduced to a set?
+        // Can the branches be reduced to a set? With no flag set there are none to carry.
         List<RegexBase> newBranches = [];
-        List<bool> newCovered = [];
+        List<bool>? newCovered = covered is null ? null : [];
         HashSet<RegexBase> items = [];
         bool itemsCovered = true;
         int caseFlags = RegexFlags.NoCase;
@@ -1815,7 +1849,7 @@ internal class Branch : RegexBase
         {
             if (items.Count > 0)
             {
-                newCovered.Add(itemsCovered);
+                newCovered?.Add(itemsCovered);
             }
 
             FlushSetMembers(info, reverse, items, caseFlags, newBranches);
@@ -1837,14 +1871,14 @@ internal class Branch : RegexBase
                 }
 
                 items.Add(b.WithFlags(caseFlags: RegexFlags.NoCase));
-                itemsCovered &= covered[i];
+                itemsCovered &= covered is not null && covered[i];
             }
             else
             {
                 Flush();
 
                 newBranches.Add(b);
-                newCovered.Add(covered[i]);
+                newCovered?.Add(covered![i]);
             }
         }
 
@@ -2506,6 +2540,12 @@ internal class String : RegexBase
     /// </summary>
     internal bool Required { get; set; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
+    /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamFoldingOnly { get; init; }
+
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
         [new Character(Characters[reverse ? Characters.Length - 1 : 0], caseFlags: CaseFlags)];
@@ -2573,7 +2613,104 @@ internal class String : RegexBase
             code[3 + i] = (uint)FoldedCharacters[i];
         }
 
+        // NOT UPSTREAM: see CharacterReading. A fuzzy run is never the required string, which the
+        // Branch below would hide from the engine: Fuzzy inherits RegexBase.GetRequiredString, which
+        // offers none, so nothing inside a fuzzy section is ever marked.
+        System.Diagnostics.Debug.Assert(!fuzzy || !Required, "A fuzzy run was marked as the required string.");
+        if (fuzzy && !UpstreamFoldingOnly && CharacterReading() is { } characters)
+        {
+            return new Branch([new PrecompiledCode(code), characters]).Compile(reverse, fuzzy);
+        }
+
         return [code];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 49): the same run read one pattern character at a time, for a
+    /// fuzzy full-case-folded run holding a character that expands on folding, such as <c>ß</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On its own an expanding character compiles to a choice between itself and its folding
+    /// (<see cref="Character"/>, upstream <c>_regex_core.py:2629-2632</c>), so a fuzzy section can
+    /// replace the whole <c>ß</c> with one substitution. Packed into a run, it survives only as its
+    /// folding, whose edits are one folded letter each: <c>(?fi)(?:ßx){s&lt;=1}</c> over <c>ax</c>
+    /// needs a substitution and a deletion for the <c>ß</c> and finds nothing, although
+    /// <c>(?fi)(?:ß){s&lt;=1}x</c> matches it. A wider fuzzy section can never match less.
+    /// </para>
+    /// <para>
+    /// So a fuzzy run gets this reading as a second alternative: each expanding character as a
+    /// <see cref="Character"/>, and each stretch of the others as a run of its own, so a subject
+    /// <c>ß</c> can still answer for two written letters. The packed run stays first and is emitted
+    /// exactly as before, because only it lets one subject character's folding span a written
+    /// letter and the expanding character next to it: <c>(?fi)sß</c> matches <c>ßs</c>. Every
+    /// exact match of this reading is an exact match of the packed run, so it only adds fuzzy
+    /// matches. An exact section, and a run with nothing that expands, compile as upstream's.
+    /// </para>
+    /// <para>
+    /// It costs the fuzzy full-folded paths that hold an expanding character 10-30% (a search of
+    /// 200,000 characters, medians of 11 against 5e0a2cd, 2026-09-28), which is the new search
+    /// space itself; with one expanding character the reading holds it bare, since its folding is
+    /// the packed run. Every other path compiles as before and pays nothing.
+    /// </para>
+    /// </remarks>
+    /// <returns>The reading, or <see langword="null"/> when the run needs none.</returns>
+    private Sequence? CharacterReading()
+    {
+        if ((CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase || Characters.Length < 2)
+        {
+            return null;
+        }
+
+        int expanding = Array.FindAll(Characters, c => new Character(c, caseFlags: CaseFlags).Folded.Length > 1).Length;
+        if (expanding == 0)
+        {
+            return null;
+        }
+
+        // With one expanding character, reading it as its folding here would repeat the packed run
+        // that comes first, so it is read as the character alone: CHARACTER_IGN, without the full
+        // flag that makes a Character add its folding. With two or more, each may be either, and
+        // the mixtures are only here.
+        int atomFlags = expanding == 1 ? CaseFlags & ~RegexFlags.FullCase : CaseFlags;
+        List<RegexBase> items = [];
+        List<int> others = [];
+
+        foreach (int c in Characters)
+        {
+            var character = new Character(c, caseFlags: CaseFlags);
+
+            if (character.Folded.Length > 1)
+            {
+                // Its Character compiles its folding as a String, which must not expand again or
+                // that String would take a reading of its own. Full folding is idempotent.
+                System.Diagnostics.Debug.Assert(
+                    Array.TrueForAll(character.Folded, f => new Character(f, caseFlags: CaseFlags).Folded.Length == 1),
+                    "A full case folding expands again."
+                );
+                FlushOthers();
+                items.Add(new Character(c, caseFlags: atomFlags));
+            }
+            else
+            {
+                others.Add(c);
+            }
+        }
+
+        FlushOthers();
+
+        return new Sequence(items);
+
+        void FlushOthers()
+        {
+            if (others.Count > 0)
+            {
+                items.Add(
+                    others.Count == 1 ? new Character(others[0], caseFlags: CaseFlags) : new String(others, CaseFlags)
+                );
+                others.Clear();
+            }
+        }
     }
 }
 
@@ -2944,7 +3081,7 @@ internal sealed class Sequence : RegexBase
                 items.Add(
                     chars.Length == 1
                         ? new Character(chars[0], caseFlags: literal.CaseFlags)
-                        : new String(chars, literal.CaseFlags)
+                        : new String(chars, literal.CaseFlags) { UpstreamFoldingOnly = info.UpstreamFoldedRuns }
                 );
             }
         }

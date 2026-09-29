@@ -60,7 +60,13 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = REPO_ROOT / "TestResults" / "oracle" / "wave.jsonl"
+
+# .scratch/, not TestResults/oracle/wave.jsonl: that path is what tools/run-oracle.ps1 has a
+# running oracle read while it compares (via FUZZYREGEX_ORACLE_WAVE_PATH), and a bare, ad hoc
+# invocation of this recorder used to write straight into it - replacing a running oracle's wave
+# out from under its own consumer (D20, docs/KNOWN-DEFECTS.md). Point an ad hoc recording at a
+# specific file with --output when it needs to feed a consumer.
+DEFAULT_OUTPUT = REPO_ROOT / ".scratch" / "oracle" / "wave.jsonl"
 
 # Upstream never published the pinned release to PyPI, so a dev machine's `pip install regex`
 # gives the previous one. The changelog delta between them is the single line "Support Python
@@ -1871,6 +1877,7 @@ GENERATORS = (
     "fuzzy-overhang",
     "fuzzy-literal",
     "fuzzy-alternation",
+    "matrix",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -6667,6 +6674,122 @@ def _generate_long(name: str, rng: random.Random, count: int):
         yield row
 
 
+# --------------------------------------------------------------------------------------------
+# The feature-interaction generator (2026-09-27)
+# --------------------------------------------------------------------------------------------
+
+# Each construct wraps an inner fragment. A row nests two or three of them, drawn uniformly, so
+# every pair of constructs meets in both nesting orders instead of only where some generator
+# happened to combine them. `tools/interaction-matrix.py --generator matrix` counts the rows per
+# pair and fails on a zero. Before this generator, 90 of 630 construct pairs had no row in any wave
+# (seeds 7, 4242, 20260927 at 1000 rows a generator); branch reset was never drawn at all and
+# `\G` met no lookaround, verb or fuzzy section.
+MATRIX_ATOMS = ("a", "b", ".", "[ab]", "ab", "a?", "")
+MATRIX_SUBJECT_ALPHABET = "aab"
+MAX_MATRIX_SUBJECT_LENGTH = 6
+MATRIX_FUZZY_CONSTRAINTS = (
+    "{e<=1}", "{e<=2}", "{i<=1}", "{d<=1}", "{s<=1}", "{i<=1,d<=1}", "{1<=e<=2}", "{2i+1d+1s<=2}", "{1<=e<=2,2i+1d+1s<=3}",
+)
+MATRIX_INLINE_FLAGS = ("b", "e", "r", "i", "fi", "w", "p", "V1")
+MATRIX_NAMED_LIST = ["a", "ab", "ba"]
+MATRIX_PARTIAL_PROBABILITY = 0.15
+MATRIX_SLICE_PROBABILITY = 0.15
+
+
+def _matrix_wrap(rng: random.Random, construct: str, inner: str, groups: list) -> str:
+    """``inner`` wrapped in ``construct``; ``groups`` holds the number of the last group opened."""
+    other = rng.choice(MATRIX_ATOMS[:5])
+    if construct == "fuzzy":
+        return f"(?:{inner}){rng.choice(MATRIX_FUZZY_CONSTRAINTS)}"
+    if construct == "capture":
+        groups[0] += 1
+        return f"({inner})"
+    if construct == "call":
+        groups[0] += 1
+        n = groups[0]
+        return rng.choice((f"({inner})(?{n})", f"(?:{inner}|{other}(?R))", f"({inner}(?{n})?)"))
+    if construct == "backref":
+        groups[0] += 1
+        return rf"({inner})\{groups[0]}"
+    if construct == "conditional":
+        groups[0] += 1
+        n = groups[0]
+        return f"(?:({other})|)(?({n}){inner}|{rng.choice(MATRIX_ATOMS[:5])})"
+    if construct == "branch-reset":
+        groups[0] += 1
+        return f"(?|({inner})|({other}))"
+    if construct in ("lookahead", "neg-lookahead", "lookbehind", "neg-lookbehind"):
+        opener = {"lookahead": "(?=", "neg-lookahead": "(?!", "lookbehind": "(?<=",
+                  "neg-lookbehind": "(?<!"}[construct]
+        body = f"{opener}{inner})"
+        return rng.choice((body + other, other + body, body))
+    if construct == "atomic":
+        return f"(?>{inner}){rng.choice(('', other))}"
+    if construct == "possessive":
+        return f"(?:{inner}){rng.choice(('*+', '++', '?+', '{0,2}+'))}"
+    if construct == "lazy":
+        return f"(?:{inner}){rng.choice(('*?', '+?', '??', '{1,2}?'))}"
+    if construct == "repeat":
+        return f"(?:{inner}){rng.choice(('*', '+', '?', '{0,2}'))}"
+    if construct == "verb":
+        verb = rng.choice(("(*PRUNE)", "(*SKIP)", "(*FAIL)"))
+        return rng.choice((f"(?:{inner}{verb}{other}|{other})", f"{inner}{verb}", f"(?:{verb}{inner}|{other})"))
+    if construct == "search-anchor":
+        return rng.choice((rf"\G{inner}", rf"{inner}\G", rf"(?:{other}|\G){inner}"))
+    if construct == "alternation":
+        return rng.choice((f"(?:{inner}|{other})", f"(?:{other}|{inner})"))
+    if construct == "anchor":
+        return rng.choice((rf"^{inner}", rf"{inner}$", rf"{inner}\Z", rf"\A{inner}"))
+    if construct == "word-boundary":
+        return rng.choice((rf"\b{inner}", rf"{inner}\b", rf"\B{inner}"))
+    if construct == "named-list":
+        return rng.choice((rf"(?:{inner}\L<w>)", rf"(?:\L<w>|{inner})"))
+    raise ValueError(construct)
+
+
+MATRIX_CONSTRUCTS = (
+    "fuzzy", "capture", "call", "backref", "conditional", "branch-reset", "lookahead", "neg-lookahead",
+    "lookbehind", "neg-lookbehind", "atomic", "possessive", "lazy", "repeat", "verb", "search-anchor",
+    "alternation", "anchor", "word-boundary", "named-list",
+)
+
+
+def _generate_matrix(rng: random.Random, count: int):
+    """Two or three constructs nested at random, under up to two inline flags. See MATRIX_ATOMS."""
+    for i in range(count):
+        groups = [0]
+        fragment = rng.choice(MATRIX_ATOMS)
+        chosen = rng.sample(MATRIX_CONSTRUCTS, rng.choice((2, 2, 3)))
+        for construct in chosen:
+            fragment = _matrix_wrap(rng, construct, fragment, groups)
+            if rng.random() < 0.3:
+                fragment = rng.choice(("", rng.choice(MATRIX_ATOMS[:5]))) + fragment + rng.choice(("", "b"))
+
+        flags = rng.sample(MATRIX_INLINE_FLAGS, rng.choice((0, 1, 1, 2)))
+        if "b" in flags and "e" in flags:
+            flags.remove("e")
+        if _has_weighted_cost(fragment):
+            flags = [f for f in flags if f not in ("b", "e")]
+        pattern = "".join(f"(?{f})" for f in flags) + fragment
+
+        length = rng.randrange(MAX_MATRIX_SUBJECT_LENGTH + 1)
+        subject = "".join(rng.choice(MATRIX_SUBJECT_ALPHABET) for _ in range(length))
+        row = {
+            "generator": "matrix",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {"w": list(MATRIX_NAMED_LIST)} if r"\L<w>" in pattern else {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+        if rng.random() < MATRIX_PARTIAL_PROBABILITY:
+            row["partial"] = True
+        if subject and rng.random() < MATRIX_SLICE_PROBABILITY:
+            row["pos"] = rng.randrange(len(subject) + 1)
+            row["endpos"] = rng.randrange(row["pos"], len(subject) + 1)
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -6683,6 +6806,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "timeout":
         yield from _generate_timeout(rng, count)
+        return
+
+    if name == "matrix":
+        yield from _generate_matrix(rng, count)
         return
 
     if name == "classes":

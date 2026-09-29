@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -3052,13 +3053,37 @@ internal static class Matcher
     /// so an empty list would be a bug in the bookkeeping rather than a state to handle.
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <returns>The closed call's key.</returns>
-    private static long PopOpenCall(MatchState state)
+    /// <returns>The closed call's key, and the text reached when it was made.</returns>
+    private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, _, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
-        state.ActiveCalls.Remove(key);
-        return key;
+        bool removed = state.ActiveCalls.Remove((key, reach));
+        Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
+        return (key, reach);
+    }
+
+    /// <summary>
+    /// Widens the text this attempt has reached to take in <paramref name="textPos"/>. See
+    /// <see cref="MatchState.ReachedLow"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">A position matching has just been at.</param>
+    private static void NoteReached(MatchState state, int textPos)
+    {
+        // The termination argument in MatchState.ActiveCalls counts on this: a width no greater
+        // than the text, because positions never leave it.
+        Debug.Assert(textPos >= 0 && textPos <= state.TextLength, "a text position lies within the text");
+
+        if (textPos < state.ReachedLow)
+        {
+            state.ReachedLow = textPos;
+        }
+
+        if (textPos > state.ReachedHigh)
+        {
+            state.ReachedHigh = textPos;
+        }
     }
 
     /// <summary>
@@ -3083,7 +3108,8 @@ internal static class Matcher
     /// minimum, counting the errors of the sections inside it, which is all
     /// <see cref="RaisesUnmetMinimum"/> and <see cref="AllMinimumsMet"/> read of it; and the open
     /// calls the called group can reach, those at or after the position (at or before it in a
-    /// reverse pattern), which the re-entry guard reads. A call inside a lookbehind could reach the
+    /// reverse pattern), with the text each had reached when it was made, and the text the attempt
+    /// has reached, all of which the re-entry guard reads. A call inside a lookbehind could reach the
     /// others, and <see cref="PatternObject.UseCallMemo"/> is off for it.
     /// </para>
     /// <para>
@@ -3152,12 +3178,19 @@ internal static class Matcher
             }
         }
 
-        foreach ((long openCall, _, _) in state.OpenCalls)
+        // The text the attempt has reached, and each reachable open call's reach, which the
+        // re-entry guard compares (MatchState.ActiveCalls): a nested call is let through only once
+        // the reach has grown past the open call's, and how far the called group's own positions
+        // grow it depends on where the reach already stands.
+        key.Add(state.ReachedLow);
+        key.Add(state.ReachedHigh);
+        foreach ((long openCall, int openReach, _, _) in state.OpenCalls)
         {
             int openPos = (int)(uint)openCall;
             if (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
             {
                 key.Add(openCall);
+                key.Add(openReach);
             }
         }
 
@@ -3170,6 +3203,159 @@ internal static class Matcher
     /// holds: correct, and slower only on a pass that fails that many different calls.
     /// </remarks>
     private const int _failedCallCap = 1 << 20;
+
+    /// <summary>
+    /// Builds the entry key of the group call about to be made (<see cref="FailedCallKey"/>) and
+    /// reports whether the failed-call memo holds it, counting a hit.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c>, whose every call pays to zero its frame: the lookup's locals
+    /// would otherwise live there.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="callIndex">The called group's index.</param>
+    /// <returns><see langword="true"/> if a call with this key has already failed in this pass.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool CallAlreadyFailed(MatchState state, int callIndex)
+    {
+        ReadOnlySpan<long> key = FailedCallKey(state, callIndex);
+        if (state.FailedCalls is { } failedCalls && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(key))
+        {
+            ++state.CallMemoHits;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The key <see cref="CallAlreadyFailed"/> has just built, copied for <see cref="MatchState.OpenCalls"/>,
+    /// or <see langword="null"/> when the memo is full.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The key to record if the call fails, or <see langword="null"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long[]? FailedCallKeyToRecord(MatchState state) =>
+        (state.FailedCalls?.Count ?? 0) < _failedCallCap ? [.. state.CallMemoKey] : null;
+
+    /// <summary>
+    /// A group call has run out of choices: records its entry key in the failed-call memo, if the
+    /// call was given one (<see cref="MatchState.OpenCalls"/>). Kept out of <c>BasicMatch</c> for
+    /// the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state, with the call still open.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecordFailedCall(MatchState state)
+    {
+        if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
+        {
+            state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
+            _ = state.FailedCalls.Add(failedCallKey);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the fuzzy part of a repeat end's progress test, the
+    /// "needed" rule and the repeat memo, which drop an iteration or say whether it counts as
+    /// progress. See <see cref="EmptyIterationAdmitted"/>.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat's data, for the iteration just ended.</param>
+    /// <param name="node">The repeat's end node.</param>
+    /// <param name="changed">Whether the iteration moved through the text or changed a capture.</param>
+    /// <returns>-1 to drop the iteration, otherwise 1 if it is progress and 0 if not.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int FuzzyIterationStands(MatchState state, RepeatData rpData, Node node, bool changed)
+    {
+        bool keyed = true;
+        if (state.TextPos == rpData.Start)
+        {
+            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
+            bool groupChanged =
+                MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(rpData.CaptureChange);
+            if (edited)
+            {
+                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                {
+                    changed = true;
+                }
+                else if (CrossedAVerb(state, rpData))
+                {
+                    // It stands, but no iteration follows it; see CrossedAVerb.
+                    changed = false;
+                    keyed = false;
+                }
+                else
+                {
+                    return -1;
+                }
+            }
+            else
+            {
+                // Error-free: upstream's rule, a tested group's change is progress.
+                changed = groupChanged;
+                keyed = false;
+            }
+        }
+
+        if (keyed && state.Pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+        {
+            return -1;
+        }
+
+        return changed ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Pops the link to the enclosing section's frame that <c>FUZZY</c> pushed for a pattern with a
+    /// minimum error count, into <see cref="MatchState.SectionFrame"/>. Kept out of
+    /// <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool PopSectionFrame(MatchState state)
+    {
+        if (!state.Sstack.PopSize(out long outerFrame))
+        {
+            return false;
+        }
+
+        state.SectionFrame = (int)outerFrame;
+        return true;
+    }
+
+    /// <summary>
+    /// <c>END_OPTIONAL_PASS</c>'s backtrack arm: pops the entry <see cref="OpenOptionalPass"/>
+    /// pushed, gives the slot its previous value and moves to where the branch's next alternative
+    /// begins. Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The next alternative, or <see langword="null"/> if the stack is malformed.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node? PopOptionalPass(MatchState state)
+    {
+        /* bstack: previous_start slot text_pos node */
+
+        if (
+            !state.Bstack.PopNode(state.Pattern, out Node? nextAlternative)
+            || !state.Bstack.PopSize(out long branchTextPos)
+            || !state.Bstack.PopCode(out uint slot)
+            || slot >= state.OptionalPasses.Length
+            || !state.Bstack.PopBlock(
+                MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
+            )
+        )
+        {
+            return null;
+        }
+
+        state.TextPos = (int)branchTextPos;
+        return nextAlternative;
+    }
 
     /// <summary>
     /// Closes every group call and every fuzzy section whose saved-stack frame has just been
@@ -4786,6 +4972,19 @@ internal static class Matcher
     private const byte _exactFuzzyType = byte.MaxValue;
 
     /// <summary>
+    /// The fuzzy type of a full-case-folded frame whose exact-deletion retry
+    /// (<see cref="_exactFuzzyType"/>) has been taken. Its retry takes the deletion back and fails.
+    /// </summary>
+    /// <remarks>
+    /// Pushed back as an ordinary deletion, the frame would go on, at an expanding subject
+    /// character, to the whole-character kinds: the edits <c>OfferWholeFoldedCharEdit</c>'s frame
+    /// beneath it tries anyway, without that frame's filter on a substitution that repeats a folded
+    /// insertion. Measured on <c>(?fi)fi(?:(?:ssaffiffii){e&lt;=3}(?:ffis|fitstss)|)</c>: 1.94 times
+    /// the engine steps, and 7% more over 8,000 random <c>(?fi)</c> rows (review, 2026-09-29).
+    /// </remarks>
+    private const byte _exactDeletionDone = byte.MaxValue - 1;
+
+    /// <summary>
     /// The "needed" rule: whether a repeat iteration that consumed no text and spent fuzzy edits may
     /// stand. Otherwise it fails.
     /// </summary>
@@ -4852,10 +5051,23 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="branch">The 2-way branch.</param>
-    /// <param name="passEnd">The pass's <c>END_OPTIONAL_PASS</c> node, whose value is the slot.</param>
-    private static void OpenOptionalPass(MatchState state, Node branch, Node passEnd)
+    /// <param name="branch">
+    /// The 2-way branch of a pattern with optional passes. One that opens none pushes the branch's
+    /// own entry: the table lookup is here rather than in <c>BasicMatch</c>, whose frame every call
+    /// zeroes.
+    /// </param>
+    private static void OpenOptionalPass(MatchState state, Node branch)
     {
+        if (state.Pattern.OptionalPassEndOf![branch.Index] is not { } passEnd)
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+            /* bstack: text_pos node BRANCH */
+            return;
+        }
+
         uint slot = passEnd.Values[0];
         if (passEnd.Values[1] != 0)
         {
@@ -5276,7 +5488,9 @@ internal static class Matcher
     /// </returns>
     private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next, Node? item = null)
     {
-        if (state.Pattern.SkipExactDeletionRetry)
+        // The common case, more of the item left than any section has deletions: see
+        // PatternObject.ExactDeletionCeiling.
+        if (remaining > state.Pattern.ExactDeletionCeiling || state.Pattern.SkipExactDeletionRetry)
         {
             return false;
         }
@@ -5312,7 +5526,7 @@ internal static class Matcher
         if (next is { FuzzyRunLength: > 0 })
         {
             count += next.FuzzyRunLength;
-            exit = next.FuzzyRunExit;
+            exit = state.Pattern.FuzzyRunExits![next.Index];
         }
         else
         {
@@ -5786,6 +6000,21 @@ internal static class Matcher
             return MatchStatus.Illegal;
         }
 
+        // The frame is fuzzy_match_item's, pushed with the item's own opcode (FuzzyMatchItem's
+        // PushUInt8(FuzzyFrameOp(node)), which tags a lookaround's frame FuzzyLookaround, ledger
+        // entry 50). A zero-width item pushed a step of 0 (the forward zero-width
+        // case's 'FuzzyMatchItem(state, search, ref node, 0)'), and with a step of 0 an insertion is
+        // the only error NextFuzzyMatchItem can take, so that is what the frame holds.
+        System.Diagnostics.Debug.Assert(
+            currNode is not null && FuzzyFrameOp(currNode) == op,
+            "a fuzzy item frame carries its own opcode"
+        );
+        System.Diagnostics.Debug.Assert(advance || step == 0, "a zero-width item's frame carries a step of 0");
+        System.Diagnostics.Debug.Assert(
+            advance || poppedType == FuzzyValue.Ins,
+            "the only error a zero-width item can take is an insertion"
+        );
+
         state.TextPos = (int)poppedTextPos;
 
         FuzzyData data = default;
@@ -6133,6 +6362,377 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (D7): a substitution of one whole subject character that expands under full case
+    /// folding, such as U+01F0, for one pattern character. A <c>STRING_FLD</c> error kind after
+    /// upstream's three, and since D22 a <c>REF_GROUP_FLD</c> one (where it replaces one whole group
+    /// character; see <see cref="NextFuzzyMatchGroupFld"/>); it is counted and recorded as
+    /// <see cref="FuzzyValue.Sub"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>STRING_FLD</c> edits move through the subject character's folding one folded
+    /// character at a time (<c>upstream/src/_regex.c</c>:10580-10633), so replacing a pattern
+    /// letter with U+01F0, which folds to j and U+030C, costs two edits inside a run, although the
+    /// same substitution costs one where the run is split around it: <c>(?fi)(?:ssx){s&lt;=1}</c>
+    /// over 'ǰsx' finds nothing upstream while <c>(?fi)(?:s){s&lt;=1}sx</c> gives (0, 3). This
+    /// kind, and <see cref="FoldWholeIns"/>, edit the subject character whole. They are tried only
+    /// at the start of its folding, only when the folding is longer than one character (for one
+    /// character the folded-character edit is the same edit), and after upstream's three kinds in
+    /// the same frame. No match upstream finds is lost, but the mix of edits in the first answer
+    /// can change: the frame <see cref="OfferWholeFoldedCharEdit"/> leaves, and these kinds in any
+    /// frame, are tried before the alternatives of older frames, so <c>(?fi)(?:ss){e&lt;=3}</c>
+    /// fullmatched over 'jßsß' is (0, 4) with counts (1, 2, 0) here and (0, 3, 0) upstream. Keeping
+    /// upstream's first answer would mean running each failing attempt again with these kinds on
+    /// once upstream's alternatives were spent, about the cost of the attempt twice over (measured
+    /// below). The subject-side twin of ledger entry 49; see <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// <para>
+    /// The cost is measured, not argued, on a Release build (2026-09-28, medians of three
+    /// interleaved runs of 15, <c>Matches</c> over 160,000 characters). Over text where every sixth
+    /// character expands (ß, ﬁ, ǰ, ŉ, ﬆ), <c>(?fi)(?:strasse lane){e&lt;=1}</c> takes 50.5 ms
+    /// against 43.7 ms before (+16%), <c>{e&lt;=2}</c> 170.9 against 137.8 ms (+24%) and
+    /// <c>{s&lt;=1}</c> 25.4 against 21.6 ms (+17%): the extra time is the new, valid candidates
+    /// being searched. With these edits switched off the same searches take 45.5, 141.3 and
+    /// 21.4 ms, so running an attempt twice would cost about 96, 312 and 47 ms. Over ASCII text,
+    /// where no folding is longer than one character, the two fuzzy searches take 4.47 against
+    /// 4.27 ms and 30.7 against 28.8 ms, the same spread as an exact search this change does not
+    /// touch (8.66 against 8.34 ms). Denser text costs more: where 8 of every 11 characters
+    /// expand, <c>{e&lt;=2}</c> is 35% slower and <c>{s&lt;=1}</c> 19% (the blind review's
+    /// measurement, 2026-09-28).
+    /// </para>
+    /// </remarks>
+    internal const int FoldWholeSub = FuzzyValue.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): an insertion of one whole subject character that expands under full case
+    /// folding; counted and recorded as <see cref="FuzzyValue.Ins"/>. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    internal const int FoldWholeIns = FuzzyValue.Count + 1;
+
+    /// <summary>How many error kinds a <c>STRING_FLD</c> frame tries: upstream's three and D7's two.</summary>
+    internal const int FoldEditKinds = FuzzyValue.Count + 2;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): a deletion of one whole group character that expands under full case
+    /// folding, such as a captured ß; a <c>REF_GROUP_FLD</c> kind only, counted and recorded as
+    /// <see cref="FuzzyValue.Del"/>. See <see cref="GroupFoldEditKinds"/>.
+    /// </summary>
+    internal const int FoldWholeDel = FoldEditKinds;
+
+    /// <summary>
+    /// How many error kinds a <c>REF_GROUP_FLD</c> frame tries: <see cref="FoldEditKinds"/> and
+    /// <see cref="FoldWholeDel"/>.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (D24). A backreference folds its group as it goes, and upstream edits that
+    /// folding one folded character at a time too (<c>next_fuzzy_match_group_fld</c>,
+    /// <c>upstream/src/_regex.c</c>:10824-10877), so a captured ß cost two edits to replace or
+    /// delete: <c>(?fi)(ß)x(?:\1){s&lt;=1}</c> fullmatched over 'ßxa' finds nothing upstream, while
+    /// the literal <c>(?fi)(ß)x(?:ß){s&lt;=1}</c> gives (0, 3) with one substitution. This is the
+    /// group-side twin of ledger entry 49, which lets a pattern ß be edited whole. At the start of
+    /// a group character whose folding is longer than one character, the frame also tries
+    /// <see cref="FoldWholeSub"/>, which replaces the whole group character with one whole subject
+    /// character, and this deletion, after upstream's three kinds and behind the same switch as
+    /// D22's subject-side kinds (<see cref="AtStartOfAnExpandingFolding"/>).
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of 15, <c>Count</c>
+    /// over 40,000 characters of ASCII words, against main at 894c495, D25 included): the V1
+    /// <c>(?i)(\w{4}) (?:\1){e&lt;=1}</c> takes 6.24 against 6.26 ms and <c>{s&lt;=1}</c> 4.38 against
+    /// 4.25 ms, the untouched simple-fold <c>(?V0i)</c> form 5.47 against 5.30 ms and the
+    /// case-sensitive one 5.30 against 5.30 ms: the same spread as a path this change does not
+    /// reach. Where every sixth character is ß the fuzzy search takes 6.46 against 6.18 ms (+4%)
+    /// and finds 303 matches where it found 269.
+    /// </remarks>
+    internal const int GroupFoldEditKinds = FoldEditKinds + 1;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): the error kind a <c>STRING_FLD</c> frame holds when the comparison at the
+    /// start of an expanding subject character's folding SUCCEEDED, so that backtracking into it
+    /// still tries the whole-character edits. No error was charged for it.
+    /// </summary>
+    /// <remarks>
+    /// Matching f against the first folded character of U+FB01 uses only half of that subject
+    /// character, and the rest must then be paid for one folded character at a time, so
+    /// <c>(?fi)(?:fst){s&lt;=1}</c> over 'ﬁst' could only charge the i as an insertion; with
+    /// insertions not allowed it failed, although substituting the ﬁ for the f is one edit.
+    /// </remarks>
+    internal const int FoldExactTaken = GroupFoldEditKinds;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): <see cref="FoldExactTaken"/> for a frame whose whole-character
+    /// substitution is left out, because it would repeat an insertion upstream's own edits have
+    /// already tried. See <see cref="WholeSubstitutionRepeatsAFoldedInsertion"/>.
+    /// </summary>
+    internal const int FoldExactTakenInsOnly = GroupFoldEditKinds + 1;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): the first of the codes a <c>REF_GROUP_FLD</c> frame uses at the start of
+    /// an expanding group character, where it tries the kinds in the order
+    /// <see cref="GroupCharFirstOrder"/> gives rather than upstream's.
+    /// </summary>
+    /// <remarks>
+    /// A backreference matches as the literal text it captured, and upstream compiles a lone
+    /// literal ß as the character first and its folding second (<c>Character._compile</c>,
+    /// <c>upstream/regex/_regex_core.py:2629-2632</c>), so its fuzzy edits take the whole ß before
+    /// any folded s: <c>(?fi)(ß)-(?:ß){e&lt;=2}</c> gives one deletion over 'ß-' and one
+    /// substitution over 'ß-a'. With upstream's order the backreference found two edits first for
+    /// the same spans. The codes run in sequence, so a retry moves on with <c>++</c> as for any
+    /// other frame; each stands for the kind <see cref="GroupCharFirstOrder"/> maps it to.
+    /// </remarks>
+    internal const int GroupCharFirst = FoldExactTakenInsOnly + 1;
+
+    /// <summary>One past the last <see cref="GroupCharFirst"/> code.</summary>
+    internal const int GroupCharFirstEnd = GroupCharFirst + 6;
+
+    /// <summary>
+    /// The kind a <see cref="GroupCharFirst"/> code stands for: the literal ß's own order (the whole
+    /// substitution, the insertion and the whole deletion), then upstream's folded substitution and
+    /// deletion, then D22's whole insertion of an expanding subject character. Any other kind is
+    /// itself.
+    /// </summary>
+    /// <param name="code">A <c>REF_GROUP_FLD</c> error kind or code.</param>
+    /// <returns>The error kind.</returns>
+    private static int GroupCharFirstOrder(int code) =>
+        (code - GroupCharFirst) switch
+        {
+            0 => FoldWholeSub,
+            1 => FuzzyValue.Ins,
+            2 => FoldWholeDel,
+            3 => FuzzyValue.Sub,
+            4 => FuzzyValue.Del,
+            5 => FoldWholeIns,
+            _ => code,
+        };
+
+    /// <summary>
+    /// The error type a <c>STRING_FLD</c> or <c>REF_GROUP_FLD</c> error kind is counted and
+    /// recorded as.
+    /// </summary>
+    /// <param name="code">
+    /// An error kind, below <see cref="GroupFoldEditKinds"/>, or a <see cref="GroupCharFirst"/> code.
+    /// </param>
+    /// <returns>A <see cref="FuzzyValue"/> error type.</returns>
+    private static int FoldCountedAs(int code) =>
+        GroupCharFirstOrder(code) switch
+        {
+            FoldWholeSub => FuzzyValue.Sub,
+            FoldWholeIns => FuzzyValue.Ins,
+            FoldWholeDel => FuzzyValue.Del,
+            int kind => kind,
+        };
+
+    /// <summary>
+    /// Whether the attempt stands at the start of a subject character's folding that is longer than
+    /// one character, where D7's whole-character edits apply. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    /// <remarks>
+    /// The start test is what keeps a whole-character edit from charging one edit for the rest of a
+    /// part-matched folding (<c>FullFoldFuzzySubjectCharacterEditTests</c>, 'ﬃi' and 'αᾷ'). The
+    /// length test only saves repeating upstream's own edits: for a one-character folding a
+    /// whole-character substitution or insertion lands where <see cref="FuzzyValue.Sub"/> and
+    /// <see cref="FuzzyValue.Ins"/> already land (<c>newPos = foldedPos + step</c>), so no answer
+    /// depends on it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole-character edit may be tried.</returns>
+    private static bool AtStartOfAnExpandingFolding(MatchState state, in FuzzyData data) =>
+        data.FoldedLen > 1
+        && (data.Step > 0 ? data.NewFoldedPos == 0 : data.NewFoldedPos == data.FoldedLen)
+        && !state.Pattern.SkipWholeFoldedCharEdits;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): whether a <c>REF_GROUP_FLD</c> attempt stands at the start of a group
+    /// character whose folding is longer than one character, where the whole-character edits of
+    /// that group character apply. The group-side <see cref="AtStartOfAnExpandingFolding"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole group character may be edited.</returns>
+    private static bool AtStartOfAnExpandingGroupCharacter(MatchState state, in FuzzyData data) =>
+        data.GfoldedLen > 1
+        && AtStartOfAGroupCharacter(data.Step, data.NewGfoldedPos, data.GfoldedLen)
+        && !state.Pattern.SkipWholeFoldedCharEdits;
+
+    /// <summary>
+    /// How many error kinds a <c>REF_GROUP_FLD</c> attempt tries: all of
+    /// <see cref="GroupFoldEditKinds"/> where either side stands at the start of an expanding
+    /// character (D22 and D24), and otherwise upstream's three.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>The kind to stop before.</returns>
+    private static int GroupFoldKinds(MatchState state, in FuzzyData data) =>
+        AtStartOfAnExpandingFolding(state, in data) || AtStartOfAnExpandingGroupCharacter(state, in data)
+            ? GroupFoldEditKinds
+            : FuzzyValue.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): leaves a <c>STRING_FLD</c> frame behind an exact comparison at the start of
+    /// an expanding subject character's folding, so that backtracking tries editing that character
+    /// whole. See <see cref="FoldExactTaken"/>.
+    /// </summary>
+    /// <remarks>
+    /// The frame has the layout <see cref="FuzzyMatchStringFld"/> pushes, with no change recorded or
+    /// counted, so <see cref="RetryFuzzyMatchStringFld"/> reads it like any other. Only a fuzzy
+    /// item reaches this, and only at a subject character whose folding is longer than one
+    /// character, so any other match pays one comparison per character.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedPos">Where in the folding the comparison is: its start.</param>
+    /// <param name="foldedLen">The length of the folding, more than one.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
+    /// <param name="folded">The subject character's folding.</param>
+    private static void OfferWholeFoldedCharEdit(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        int foldChangesStart,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        Debug.Assert(
+            foldedLen > 1 && foldedPos == (step > 0 ? 0 : foldedLen),
+            "only at the start of an expanding folding"
+        );
+
+        if (state.Pattern.SkipWholeFoldedCharEdits)
+        {
+            return;
+        }
+
+        // Backtracking restores the counts, so what is permitted now is what the retry will find:
+        // with neither kind permitted (deletions only, or the budget spent) the frame yields nothing.
+        bool sub = ThisErrorPermitted(state, FuzzyValue.Sub);
+        bool ins = ThisErrorPermitted(state, FuzzyValue.Ins);
+
+        if (!sub && !ins)
+        {
+            return;
+        }
+
+        byte kind =
+            sub && !(ins && WholeSubstitutionRepeatsAFoldedInsertion(state, node, step, stringPos, foldedLen, folded))
+                ? (byte)FoldExactTaken
+                : (byte)FoldExactTakenInsOnly;
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(kind);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// Whether substituting the whole subject character, after its first folded character matched,
+    /// would only repeat a state upstream's own edits have already tried and failed from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Take a two-character folding x1 x2 whose x1 matched the pattern character exactly, and a next
+    /// pattern character that x2 does not match. The comparison then fails at x2, and upstream's
+    /// edits there include inserting x2 (<see cref="NextFuzzyMatchStringFld"/>): the counts are the
+    /// ones this frame sees, so the insertion is permitted exactly when <paramref name="state"/>
+    /// permits one now, and <see cref="PermitInsertionInFold"/> allows it part way through a
+    /// folding. It ends the folding, one pattern character on, with one more insertion. The whole
+    /// substitution ends at the same subject and pattern positions with one more substitution.
+    /// That frame sits above this one, so by the time this one is retried every path from that
+    /// state has failed.
+    /// </para>
+    /// <para>
+    /// The two states differ only in which count holds the edit, so they reach the same answers
+    /// when nothing tells a substitution from an insertion: the section's minimums for both are
+    /// zero, neither kind's maximum is below the error maximum, both cost the same, and the section
+    /// is the pattern's only one (an enclosing section checks the sum against its own limits,
+    /// <c>END_FUZZY</c>). <c>BESTMATCH</c>, <c>ENHANCEMATCH</c> and <c>POSIX</c> keep looking after
+    /// a match, so they are left out too. The constraint's test sees the same subject character
+    /// either way.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedLen">The length of the folding.</param>
+    /// <param name="folded">The folding.</param>
+    /// <returns>Whether the whole substitution can be left out.</returns>
+    private static bool WholeSubstitutionRepeatsAFoldedInsertion(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedLen,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        if (foldedLen != 2)
+        {
+            return false;
+        }
+
+        int next = step > 0 ? stringPos + 1 : stringPos - 2;
+
+        if (next < 0 || next >= node.Values.Count)
+        {
+            return false;
+        }
+
+        if (SameCharIgn(node.Encoding, node.Values[next], step > 0 ? folded[1] : folded[0]))
+        {
+            return false;
+        }
+
+        PatternObject pattern = state.Pattern;
+
+        if (
+            pattern.FuzzyCount != 1
+            || (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) != 0
+        )
+        {
+            return false;
+        }
+
+        List<uint> values = state.FuzzyNode!.Values;
+
+        return values[FuzzyValue.MinSub] == 0
+            && values[FuzzyValue.MinIns] == 0
+            && values[FuzzyValue.MaxSub] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.MaxIns] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.CostBase + FuzzyValue.Sub] == values[FuzzyValue.CostBase + FuzzyValue.Ins];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D7, D22): the whole-character insertion shared by <c>STRING_FLD</c> and
+    /// <c>REF_GROUP_FLD</c>: could the whole subject character at the start of its folding have been
+    /// inserted? Neither side's pattern or group position moves.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt; its folded position moves past the whole folding.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int WholeFoldedCharInsertion(MatchState state, ref FuzzyData data)
+    {
+        Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+        if (!data.PermitInsertion || !FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+        {
+            return MatchStatus.Failure;
+        }
+
+        data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
     /// Upstream <c>next_fuzzy_match_string_fld</c> (line 10580): one kind of error against a string
     /// whose subject side is being full-case-folded.
     /// </summary>
@@ -6148,7 +6748,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int NextFuzzyMatchStringFld(MatchState state, ref FuzzyData data)
     {
-        if (!ThisErrorPermitted(state, data.FuzzyType))
+        if (!ThisErrorPermitted(state, FoldCountedAs(data.FuzzyType)))
         {
             return MatchStatus.Failure;
         }
@@ -6211,6 +6811,31 @@ internal static class Matcher
                 }
 
                 return CheckFuzzyPartial(state, newPos);
+            case FoldWholeSub:
+                // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
+                // loop tries this kind only at the start of an expanding folding.
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                // The values run out at the start of a folding only in the leftovers loop under
+                // PatternObject.ChargeUntouchedFoldings, the oracle's upstream rule
+                // (FoldingIsPartUsed); there is no pattern character left to substitute.
+                if (data.ValuesRanOut)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+                data.NewStringPos += data.Step;
+
+                return MatchStatus.Success;
+            case FoldWholeIns:
+                // NOT UPSTREAM (D7): could the whole subject character have been inserted?
+                return WholeFoldedCharInsertion(state, ref data);
             default:
                 return MatchStatus.Failure;
         }
@@ -6219,7 +6844,7 @@ internal static class Matcher
     /// <summary>
     /// Upstream's "an insertion inside a folding is free" rule, spelled out four times
     /// (<c>upstream/src/_regex.c</c> lines 10659-10665, 10761-10767, 10905-10911 and, in a different
-    /// shape, 11019).
+    /// shape, 11019, which this port does not keep; see <see cref="RetryFuzzyMatchGroupFld"/>).
     /// </summary>
     /// <remarks>
     /// Once the comparison is part way through a subject character's folding, the search anchor has
@@ -6375,7 +7000,11 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        // D7's two kinds only apply at the start of an expanding folding, which no kind that fails
+        // moves, so every other attempt stops after upstream's three.
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (data.FuzzyType = 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -6408,9 +7037,9 @@ internal static class Matcher
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
@@ -6463,7 +7092,35 @@ internal static class Matcher
 
         int currFoldedPos = (int)poppedFoldedPos;
 
+        // NOT UPSTREAM (D7): a frame left by OfferWholeFoldedCharEdit charged nothing, and goes on
+        // to the whole-character kinds. Nor did one left by PushExactStringFldDeletion (finding
+        // F-A), which tries a deletion alone: the whole-character kinds at that comparison belong to
+        // OfferWholeFoldedCharEdit's frame, pushed beneath it.
+        bool exactDeletion = poppedType == _exactFuzzyType;
+        bool exactTaken = exactDeletion || poppedType is FoldExactTaken or FoldExactTakenInsOnly;
+
+        // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
+        if (poppedType == _exactDeletionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
+        if (!exactTaken)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FoldCountedAs(poppedType)];
+        }
+
         FuzzyData data = default;
+        data.FuzzyType = poppedType switch
+        {
+            FoldExactTaken => FoldWholeSub - 1,
+            FoldExactTakenInsOnly => FoldWholeIns - 1,
+            _exactFuzzyType => FuzzyValue.Del - 1,
+            _ => poppedType,
+        };
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewStringPos = stringPos;
@@ -6471,22 +7128,13 @@ internal static class Matcher
         data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
-        if (poppedType == _exactFuzzyType)
-        {
-            data.FuzzyType = FuzzyValue.Del - 1;
-        }
-        else
-        {
-            state.UnrecordFuzzy();
-            data.FuzzyType = poppedType;
-            --fuzzyCounts[data.FuzzyType];
-        }
-
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        int kinds = !exactDeletion && AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -6513,14 +7161,14 @@ internal static class Matcher
         state.Bstack.PushSize(currFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
@@ -6530,6 +7178,124 @@ internal static class Matcher
 
         return MatchStatus.Success;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D22, D24): <see cref="OfferWholeFoldedCharEdit"/> for a full-folded
+    /// backreference, leaving a <c>REF_GROUP_FLD</c> frame behind an exact comparison at the start of
+    /// an expanding subject character's folding or, since D24, of an expanding group character's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matching the group's s against the first folded s of a subject ß uses only half of the ß
+    /// (D22), and matching the first folded s of a group ß against a subject s uses only half of
+    /// the group's ß (D24): <c>(?fi)(ß)x(?:\1){s&lt;=1}</c> over 'ßxs' could then only delete the
+    /// rest, although substituting the s for the ß is one edit.
+    /// </para>
+    /// <para>
+    /// The frame has the layout <see cref="FuzzyMatchGroupFld"/> pushes, with no change recorded or
+    /// counted, so <see cref="RetryFuzzyMatchGroupFld"/> reads it like any other. Unlike the
+    /// literal's frame it never leaves the whole substitution out
+    /// (<see cref="WholeSubstitutionRepeatsAFoldedInsertion"/> reads the pattern's next value, which
+    /// a backreference does not have): that prune only saves work, so no answer depends on it.
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of nine,
+    /// <c>Count</c> over 40,000 characters): over ASCII text <c>(?fi)(\w{4}) (?:\1){e&lt;=1}</c>
+    /// takes 45.2 against 44.6 ms and the exact <c>(?fi)(\w{3})\w* \1</c> 26.7 against 27.0 ms,
+    /// inside each side's spread; where every sixth character expands the fuzzy one takes 39.6
+    /// against 33.2 ms (+19%), the new candidates being searched, as for ledger entry 52's literal.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The backreference.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="foldedPos">Where in the subject folding the comparison is.</param>
+    /// <param name="foldedLen">The length of the subject folding.</param>
+    /// <param name="groupPos">The position in the referenced capture.</param>
+    /// <param name="gfoldedPos">Where in the group character's folding the comparison is.</param>
+    /// <param name="gfoldedLen">The length of the group character's folding.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    private static void OfferWholeFoldedGroupCharEdit(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int foldedPos,
+        int foldedLen,
+        int groupPos,
+        int gfoldedPos,
+        int gfoldedLen,
+        int foldChangesStart,
+        bool search
+    )
+    {
+        Debug.Assert(
+            (foldedLen > 1 && foldedPos == (step > 0 ? 0 : foldedLen))
+                || (gfoldedLen > 1 && gfoldedPos == (step > 0 ? 0 : gfoldedLen)),
+            "only at the start of an expanding character"
+        );
+
+        if (state.Pattern.SkipWholeFoldedCharEdits)
+        {
+            return;
+        }
+
+        // Leave no frame that cannot succeed. The retry asks the same questions of the same state:
+        // backtracking restores the counts and text_pos, and the frame holds these positions, so
+        // what is refused here would be refused there, and the frame would only cost a push and a pop.
+        FuzzyData at = default;
+        at.Step = step;
+        at.NewFoldedPos = foldedPos;
+        at.FoldedLen = foldedLen;
+        at.NewGfoldedPos = gfoldedPos;
+        at.GfoldedLen = gfoldedLen;
+
+        bool sub =
+            ThisErrorPermitted(state, FuzzyValue.Sub)
+            && AtStartOfAGroupCharacter(step, gfoldedPos, gfoldedLen)
+            && AtStartOfASubjectCharacter(in at);
+        bool ins =
+            ThisErrorPermitted(state, FuzzyValue.Ins)
+            && AtStartOfAnExpandingFolding(state, in at)
+            && PermitInsertionInFold(state, in at, search, state.TextPos == state.SearchAnchor);
+        bool del = ThisErrorPermitted(state, FuzzyValue.Del) && AtStartOfAnExpandingGroupCharacter(state, in at);
+
+        if (!sub && !ins && !del)
+        {
+            return;
+        }
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(gfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(groupPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)FoldExactTaken);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D22): whether the group side of a <c>REF_GROUP_FLD</c> comparison stands at the
+    /// start of a group character, where a whole substitution may replace that character.
+    /// </summary>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="gfoldedPos">Where in the group character's folding the comparison is.</param>
+    /// <param name="gfoldedLen">The length of that folding, 0 once the group has run out.</param>
+    /// <returns>Whether a whole substitution may be tried.</returns>
+    private static bool AtStartOfAGroupCharacter(sbyte step, int gfoldedPos, int gfoldedLen) =>
+        gfoldedLen > 0 && gfoldedPos == (step > 0 ? 0 : gfoldedLen);
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): whether the subject side of a <c>REF_GROUP_FLD</c> attempt stands at the
+    /// start of a subject character, where a whole substitution may replace that character. The
+    /// folding is empty at the end of the slice, where no character is left to substitute.
+    /// </summary>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole substitution may take the subject character.</returns>
+    private static bool AtStartOfASubjectCharacter(in FuzzyData data) =>
+        data.FoldedLen > 0 && data.NewFoldedPos == (data.Step > 0 ? 0 : data.FoldedLen);
 
     /// <summary>
     /// Upstream <c>fuzzy_ext_match_group_fld</c> (line 10033): the <c>{...:test}</c> constraint
@@ -6642,7 +7408,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int NextFuzzyMatchGroupFld(MatchState state, ref FuzzyData data)
     {
-        if (!ThisErrorPermitted(state, data.FuzzyType))
+        if (!ThisErrorPermitted(state, FoldCountedAs(data.FuzzyType)))
         {
             return MatchStatus.Failure;
         }
@@ -6651,7 +7417,7 @@ internal static class Matcher
 
         int newPos;
 
-        switch (data.FuzzyType)
+        switch (GroupCharFirstOrder(data.FuzzyType))
         {
             case FuzzyValue.Del:
                 // Could a character at text_pos have been deleted?
@@ -6710,6 +7476,55 @@ internal static class Matcher
                 }
 
                 return CheckFuzzyPartial(state, newPos);
+            case FoldWholeSub:
+                // NOT UPSTREAM (D22, D24): could the whole subject character have been substituted
+                // for one whole group character? The loop tries this kind only where one side
+                // stands at the start of an expanding character, and both must stand at the start
+                // of one: the edit takes all of each folding, one character for one character. Part
+                // way through a group ß it would charge one edit for the rest of the ß and a whole
+                // subject character, part way through a subject ﬀ one edit for a whole group
+                // character and half of the ﬀ, and in the leftovers loop no group character is left.
+                Debug.Assert(
+                    GroupFoldKinds(state, in data) == GroupFoldEditKinds,
+                    "tried only at an expanding character's start"
+                );
+
+                if (
+                    !AtStartOfAGroupCharacter(data.Step, data.NewGfoldedPos, data.GfoldedLen)
+                    || !AtStartOfASubjectCharacter(in data)
+                )
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+                data.NewGfoldedPos = data.Step > 0 ? data.GfoldedLen : 0;
+
+                return MatchStatus.Success;
+            case FoldWholeIns:
+                // NOT UPSTREAM (D22): could the whole subject character have been inserted? Only
+                // where it expands: a frame opened for an expanding group character (D24) can
+                // stand anywhere in the subject's folding.
+                return AtStartOfAnExpandingFolding(state, in data)
+                    ? WholeFoldedCharInsertion(state, ref data)
+                    : MatchStatus.Failure;
+            case FoldWholeDel:
+                // NOT UPSTREAM (D24): could the whole group character have been deleted? Only at
+                // the start of an expanding one; the subject side does not move, as for upstream's
+                // deletion, so it can stand anywhere in its folding.
+                if (!AtStartOfAnExpandingGroupCharacter(state, in data))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewGfoldedPos = data.Step > 0 ? data.GfoldedLen : 0;
+
+                return MatchStatus.Success;
             default:
                 return MatchStatus.Failure;
         }
@@ -6765,7 +7580,12 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        // D22: D7's two kinds, on the same terms as in FuzzyMatchStringFld; D24: and the group's,
+        // whole edits first at an expanding group character.
+        bool groupCharFirst = AtStartOfAnExpandingGroupCharacter(state, in data);
+        int kinds = groupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
+
+        for (data.FuzzyType = groupCharFirst ? GroupCharFirst : 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchGroupFld(state, ref data);
 
@@ -6802,9 +7622,9 @@ internal static class Matcher
          * fuzzy_type op
          */
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
@@ -6865,7 +7685,37 @@ internal static class Matcher
         int gfoldedLen = (int)poppedGfoldedLen;
         int newGfoldedPos = (int)poppedGfoldedPos;
 
+        // NOT UPSTREAM (D22): a frame left by OfferWholeFoldedGroupCharEdit charged nothing, and goes
+        // on to the whole-character kinds. Upstream unrecords before popping; nothing in between
+        // reads the record, so doing it here is the same. Nor did a frame left by
+        // PushExactGroupFldDeletion (finding F-A), which tries a deletion alone: the whole-character
+        // kinds at that comparison belong to OfferWholeFoldedGroupCharEdit's frame, pushed beneath it.
+        bool exactDeletion = poppedType == _exactFuzzyType;
+
+        // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
+        if (poppedType == _exactDeletionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
+        if (poppedType != FoldExactTaken && !exactDeletion)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FoldCountedAs(poppedType)];
+        }
+
         FuzzyData data = default;
+        if (exactDeletion)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            data.FuzzyType = poppedType == FoldExactTaken ? FoldWholeSub - 1 : poppedType;
+        }
+
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewFoldedPos = newFoldedPos;
@@ -6874,31 +7724,30 @@ internal static class Matcher
         data.FoldChangesStart = foldChangesStart;
         data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
-        if (poppedType == _exactFuzzyType)
-        {
-            data.FuzzyType = FuzzyValue.Del - 1;
-        }
-        else
-        {
-            state.UnrecordFuzzy();
-            data.FuzzyType = poppedType;
-            --fuzzyCounts[data.FuzzyType];
-        }
-
-        // Permit insertion except initially when searching. Upstream spells the folding half of the
-        // rule differently here from the three places PermitInsertionInFold covers (:11019): one
-        // '||' chain, and with no step test, so a reverse retry asks 'folded_pos != folded_len'
-        // where the first attempt would have asked 'folded_pos != 0'. Ported as written.
-        // ...plus the issue 563 and 564 fix, NOT UPSTREAM, exactly as at the other seven sites.
-        data.PermitInsertion =
-            !search
-            || state.TextPos != state.SearchAnchor
-            || AnchorIsPinned(state, data.Step)
-            || data.NewFoldedPos != data.FoldedLen;
+        // Permit insertion except initially when searching.
+        // NOT UPSTREAM (D25): with the first attempt's rule. Upstream spells it here as one '||'
+        // chain ending 'new_folded_pos != folded_len' (:11019), which a forward retry meets at the
+        // start of every folding, where the first attempt asks 'folded_pos != 0'. Upstream never
+        // shows the difference, because its re-entry drops a retried insertion that finishes a
+        // folding (ledger entry 30). With S84's re-entry steps it opened a search with one:
+        // '(?i)(?=.*?(xtj))(?:\1){e<=1}' over 'axtj' retried the substitution at 0 as an
+        // insertion and gave (0, 4), where upstream and the literal give (1, 4). Reversed, the two
+        // rules are the same test. D22's whole insertion shares the rule.
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        int kinds;
+        if (exactDeletion)
+        {
+            kinds = FuzzyValue.Count;
+        }
+        else
+        {
+            kinds = poppedType >= GroupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
+        }
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchGroupFld(state, ref data);
 
@@ -6927,19 +7776,20 @@ internal static class Matcher
         state.Bstack.PushSize(newFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type op
          */
 
-        ++fuzzyCounts[data.FuzzyType];
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
+        state.RetriedAWholeFoldEdit = GroupCharFirstOrder(data.FuzzyType) >= FoldWholeSub;
         node = newNode!;
         groupPos = newGroupPos;
         foldedPos = data.NewFoldedPos;
@@ -7846,6 +8696,10 @@ internal static class Matcher
         PatternObject pattern = state.Pattern;
         Node startNode = pattern.StartNode!;
 
+        // NOT UPSTREAM'S: only the call guard reads the text reached, so a pattern without group
+        // calls skips tracking it. See PatternObject.HasGroupCalls.
+        bool tracksReach = pattern.HasGroupCalls;
+
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
@@ -7930,12 +8784,10 @@ internal static class Matcher
 
         // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
         // withheld from a partial match, which can be a prefix of the literal holding no whole
-        // piece. Its per-piece cache lives for this call, across every attempt. See FuzzyLiteralFilter.
+        // piece. What it learns lives on the state, across every attempt of every call of the scan
+        // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
-        Span<int> fuzzyFilterFound = stackalloc int[FuzzyLiteralFilter.MaxPieces];
-        fuzzyFilterFound.Fill(FuzzyLiteralFilter.Unknown);
-        int fuzzyFilterAsciiEnd = state.TextPos;
 
         Node node;
         int status;
@@ -8005,6 +8857,8 @@ internal static class Matcher
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
+        state.ReachedLow = int.MaxValue;
+        state.ReachedHigh = int.MinValue;
 
         // NOT UPSTREAM (ledger entry 44's addendum): no pass of this attempt has crossed a verb.
         state.VerbMarks.Clear();
@@ -8032,7 +8886,7 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos))
+                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos, state.FilterMemory!))
                 {
                     return MatchStatus.Failure;
                 }
@@ -8041,13 +8895,7 @@ internal static class Matcher
             }
             else
             {
-                int next = fuzzyFilter.NextStart(
-                    state.Text.Span,
-                    foundPos,
-                    state.SliceEnd,
-                    fuzzyFilterFound,
-                    ref fuzzyFilterAsciiEnd
-                );
+                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!);
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
@@ -8168,6 +9016,8 @@ internal static class Matcher
         // The main matching loop.
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
@@ -8523,9 +9373,9 @@ internal static class Matcher
                         // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
                         // one after it opens a pass, whose entry does the branch's job too; see
                         // OpenOptionalPass.
-                        if (node.OptionalPassEnd is { } passEnd)
+                        if (pattern.OptionalPassEndOf is not null)
                         {
-                            OpenOptionalPass(state, node, passEnd);
+                            OpenOptionalPass(state, node);
                         }
                         else
                         {
@@ -8676,14 +9526,9 @@ internal static class Matcher
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
                     long closedFrame = state.SectionFrame;
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
                     {
-                        if (!state.Sstack.PopSize(out long outerFrame))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.SectionFrame = (int)outerFrame;
+                        return MatchStatus.Illegal;
                     }
 
                     /* sstack: - */
@@ -8811,44 +9656,14 @@ internal static class Matcher
                     // iteration whose state this run of the repeat has already reached.
                     if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
-                        bool keyed = true;
-                        if (state.TextPos == rpData.Start)
-                        {
-                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
-                            bool groupChanged =
-                                MatchState.GroupChanges(state.CaptureChange)
-                                != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edited)
-                            {
-                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
-                                {
-                                    changed = true;
-                                }
-                                else if (CrossedAVerb(state, rpData))
-                                {
-                                    // It stands, but no iteration follows it; see CrossedAVerb.
-                                    changed = false;
-                                    keyed = false;
-                                }
-                                else
-                                {
-                                    --rpData.Count;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                // Error-free: upstream's rule, a tested group's change is progress.
-                                changed = groupChanged;
-                                keyed = false;
-                            }
-                        }
-
-                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
                         {
                             --rpData.Count;
                             goto backtrack;
                         }
+
+                        changed = stands > 0;
                     }
                     else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
                     {
@@ -9033,44 +9848,14 @@ internal static class Matcher
                     // iteration whose state this run of the repeat has already reached.
                     if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
-                        bool keyed = true;
-                        if (state.TextPos == rpData.Start)
-                        {
-                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
-                            bool groupChanged =
-                                MatchState.GroupChanges(state.CaptureChange)
-                                != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edited)
-                            {
-                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
-                                {
-                                    changed = true;
-                                }
-                                else if (CrossedAVerb(state, rpData))
-                                {
-                                    // It stands, but no iteration follows it; see CrossedAVerb.
-                                    changed = false;
-                                    keyed = false;
-                                }
-                                else
-                                {
-                                    --rpData.Count;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                // Error-free: upstream's rule, a tested group's change is progress.
-                                changed = groupChanged;
-                                keyed = false;
-                            }
-                        }
-
-                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
                         {
                             --rpData.Count;
                             goto backtrack;
                         }
+
+                        changed = stands > 0;
                     }
                     else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
                     {
@@ -9774,30 +10559,28 @@ internal static class Matcher
                     Node groupCallReturnNode = node.Next1.Node!;
 
                     // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
-                    // already open. See MatchState.ActiveCalls and ledger entry 14 - the path is
-                    // infinite, and failing it leaves every other path alone.
+                    // already open, when the attempt has reached no further since that call was made.
+                    // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
+                    // and failing it leaves every other path alone.
                     long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
+                    NoteReached(state, state.TextPos);
+                    int groupCallReach = state.ReachedWidth;
+                    Debug.Assert(
+                        groupCallReach >= 0 && groupCallReach <= state.TextLength,
+                        "the text reached is measured and fits in the text"
+                    );
 
                     // NOT UPSTREAM'S: a call with the same entry key as one that ran out of choices
                     // without returning fails the same way, so it fails now. Nothing has been pushed
                     // yet, so backtracking resumes where the call's own backtrack arm would have left
                     // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
-                    ReadOnlySpan<long> groupCallMemoKey = default;
                     bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
-                    if (groupCallKeyed)
+                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
                     {
-                        groupCallMemoKey = FailedCallKey(state, groupCallIndex);
-                        if (
-                            state.FailedCalls is { } failedCalls
-                            && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(groupCallMemoKey)
-                        )
-                        {
-                            ++state.CallMemoHits;
-                            goto backtrack;
-                        }
+                        goto backtrack;
                     }
 
-                    if (!state.ActiveCalls.Add(groupCallKey))
+                    if (!state.ActiveCalls.Add((groupCallKey, groupCallReach)))
                     {
                         goto backtrack;
                     }
@@ -9812,13 +10595,16 @@ internal static class Matcher
                     // The call is open, and the frame it belongs to ends here. See
                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
                     // open calls it has just thrown away.
+                    Debug.Assert(
+                        state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
+                        "the text reached never shrinks, so an inner call's reach is at least its caller's"
+                    );
                     state.OpenCalls.Add(
                         (
                             groupCallKey,
+                            groupCallReach,
                             state.Sstack.Count,
-                            groupCallKeyed && (state.FailedCalls?.Count ?? 0) < _failedCallCap
-                                ? groupCallMemoKey.ToArray()
-                                : null
+                            groupCallKeyed ? FailedCallKeyToRecord(state) : null
                         )
                     );
 
@@ -9906,13 +10692,14 @@ internal static class Matcher
                         // The call is closed, so it is no longer one this position may not re-enter.
                         // It is the innermost open one - calls nest - and its key goes on the
                         // backtracking stack so the arm below can re-open it.
-                        long groupReturnCallKey = PopOpenCall(state);
+                        (long groupReturnCallKey, int groupReturnCallReach) = PopOpenCall(state);
 
                         // For the callee.
                         PushGroups(state, state.Bstack);
                         PushRepeats(state, state.Bstack);
                         state.Bstack.PushSize(state.CaptureChange);
                         state.Bstack.PushSize(groupReturnCallKey);
+                        state.Bstack.PushSize(groupReturnCallReach);
                         state.Bstack.PushNode(groupReturnNode);
                         state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
 
@@ -9944,7 +10731,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
                      *         GROUP_RETURN
                      *
                      * else:
@@ -10497,8 +11284,14 @@ internal static class Matcher
                     else
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
+                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+                        // bounded by the slice, as in the loop below. Upstream folds the character
+                        // before text_pos unguarded; no retried kind of its own succeeds at the start
+                        // of the slice, but D24's whole deletion of a group character does.
+                        foldedLen =
+                            state.TextPos > state.SliceStart
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
+                                : 0;
 
                         // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
                         // STRING_FLD_REV takes the subject's step here (:14907).
@@ -10507,7 +11300,7 @@ internal static class Matcher
                                 ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
                                 : 0;
 
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos <= 0 && foldedLen > 0)
                             {
@@ -10553,6 +11346,10 @@ internal static class Matcher
 
                         if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
                             if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
                                 PushExactGroupFldDeletion(
@@ -10565,6 +11362,29 @@ internal static class Matcher
                                     gfoldedLen,
                                     -1,
                                     foldChangesStart
+                                );
+                            }
+
+                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                            if (
+                                (
+                                    (foldedLen > 1 && foldedPos == foldedLen)
+                                    || (gfoldedLen > 1 && gfoldedPos == gfoldedLen)
+                                )
+                                && (node.Status & NodeStatus.Fuzzy) != 0
+                            )
+                            {
+                                OfferWholeFoldedGroupCharEdit(
+                                    state,
+                                    node,
+                                    -1,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    foldChangesStart,
+                                    search
                                 );
                             }
 
@@ -10692,8 +11512,14 @@ internal static class Matcher
                     else
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
+                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+                        // bounded by the slice, as in the loop below. Upstream folds the character at
+                        // text_pos unguarded; no retried kind of its own succeeds at the end of the
+                        // slice, but D24's whole deletion of a group character does.
+                        foldedLen =
+                            state.TextPos < state.SliceEnd
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
+                                : 0;
 
                         // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
                         // used up, where upstream reads the character after it.
@@ -10706,7 +11532,7 @@ internal static class Matcher
                         // follow a fuzzy call in its body, so a retried edit that finishes a folding
                         // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
                         // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos >= foldedLen && foldedLen > 0)
                             {
@@ -10752,6 +11578,10 @@ internal static class Matcher
 
                         if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
                             if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
                                 PushExactGroupFldDeletion(
@@ -10764,6 +11594,26 @@ internal static class Matcher
                                     gfoldedLen,
                                     1,
                                     foldChangesStart
+                                );
+                            }
+
+                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                            if (
+                                ((foldedLen > 1 && foldedPos == 0) || (gfoldedLen > 1 && gfoldedPos == 0))
+                                && (node.Status & NodeStatus.Fuzzy) != 0
+                            )
+                            {
+                                OfferWholeFoldedGroupCharEdit(
+                                    state,
+                                    node,
+                                    1,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    foldChangesStart,
+                                    search
                                 );
                             }
 
@@ -11026,7 +11876,10 @@ internal static class Matcher
                                 && SameChar(state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
                                 {
                                     PushExactStringDeletion(state, node, stringPos, 1);
                                 }
@@ -11135,6 +11988,21 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == 0 && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        1,
+                                        stringPos,
+                                        0,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
                                 if ((node.Status & NodeStatus.Fuzzy) != 0)
                                 {
                                     PushExactStringFldDeletion(
@@ -11275,7 +12143,10 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
                                 {
                                     PushExactStringDeletion(state, node, stringPos, 1);
                                 }
@@ -11347,7 +12218,7 @@ internal static class Matcher
                                 && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
                                 {
                                     PushExactStringDeletion(state, node, stringPos, -1);
                                 }
@@ -11422,7 +12293,7 @@ internal static class Matcher
                                 )
                             )
                             {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
                                 {
                                     PushExactStringDeletion(state, node, stringPos, -1);
                                 }
@@ -11531,6 +12402,21 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == foldedLen && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        -1,
+                                        stringPos,
+                                        foldedLen,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
                                 if ((node.Status & NodeStatus.Fuzzy) != 0)
                                 {
                                     PushExactStringFldDeletion(
@@ -11677,8 +12563,17 @@ internal static class Matcher
         }
 
         backtrack:
+        // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
+        // MatchState.ReachedLow. Only a pattern with group calls reads it.
+        if (tracksReach)
+        {
+            NoteReached(state, state.TextPos);
+        }
+
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
@@ -11747,6 +12642,9 @@ internal static class Matcher
                 // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
                 // puts a step of 0 back into next_fuzzy_match_item.
                 case Opcode.FuzzyLookaround: // NOT UPSTREAM (ledger entry 50).
+                // NOT UPSTREAM: SEARCH_ANCHOR is here too, ledger entry 48. Upstream's forward case
+                // (:14431) fuzzes a failed \G exactly like the others, but its list here omits it, so
+                // backtracking over that insertion raises "invalid RE code".
                 case Opcode.Boundary:
                 case Opcode.DefaultBoundary:
                 case Opcode.DefaultEndOfWord:
@@ -11758,6 +12656,7 @@ internal static class Matcher
                 case Opcode.EndOfStringLineU:
                 case Opcode.EndOfWord:
                 case Opcode.GraphemeBoundary:
+                case Opcode.SearchAnchor:
                 case Opcode.StartOfLine:
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:
@@ -12089,17 +12988,13 @@ internal static class Matcher
                     // merged - and it refuses only insertions the budget has already said are
                     // unaffordable, so it cannot lose a match that fits.
                     //
-                    // ponytail: NO TEST PINS THIS ONE, and it is kept anyway. Deleting it changes
-                    // nothing measurable - the 5854-test suite stays green, all three default-wave
-                    // seeds stay green, S42's blind review swept 1,425 weighted-cost '(?b)' rows
-                    // across two seeds and found no row it affects, and four hand-built
-                    // group-call-plus-trailing-insertion patterns behave identically with and
-                    // without it. What it defends is a HANG rather than a wrong answer: on
-                    // re-entering one section the merged live counts can outrun the per-entry bound
-                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on.
-                    // A hang costs an unattended slice where one comparison on a backtrack arm costs
-                    // nothing, so the asymmetry decides it. Upgrade path: if a case is ever
-                    // constructed, it becomes a test here and this note goes.
+                    // Pinned by Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion (D21,
+                    // tools/controls.json S42-2G): without this term, a self-recursive group call
+                    // that re-enters this section can outrun the per-entry bound
+                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
+                    // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
+                    // rather than asserting a value.
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
                         && TotalErrors(state.FuzzyCounts)
@@ -12216,11 +13111,7 @@ internal static class Matcher
                     // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
                     // returned, a later call with the same entry key fails the same way. See
                     // FailedCallKey and MatchState.OpenCalls.
-                    if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
-                    {
-                        state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
-                        _ = state.FailedCalls.Add(failedCallKey);
-                    }
+                    RecordFailedCall(state);
 
                     // The call is no longer open: backtracking past it means it never happened.
                     PopOpenCall(state);
@@ -12247,7 +13138,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
                      *
                      * else:
                      *
@@ -12263,9 +13154,12 @@ internal static class Matcher
 
                     if (groupReturnBackNode is not null)
                     {
-                        // Backtracking into the call re-opens it, so its key comes back off the
-                        // backtracking stack.
-                        if (!state.Bstack.PopSize(out long groupReturnBackKey))
+                        // Backtracking into the call re-opens it, so its key and reach come back
+                        // off the backtracking stack.
+                        if (
+                            !state.Bstack.PopSize(out long groupReturnBackReach)
+                            || !state.Bstack.PopSize(out long groupReturnBackKey)
+                        )
                         {
                             return MatchStatus.Illegal;
                         }
@@ -12279,9 +13173,14 @@ internal static class Matcher
                         state.Sstack.PushNode(groupReturnBackNode);
 
                         // The frame is back, so the call is open again and ends where it now ends.
+                        bool reopened = state.ActiveCalls.Add((groupReturnBackKey, (int)groupReturnBackReach));
+                        Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
+                        Debug.Assert(
+                            state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
+                            "a re-opened call is still inside the calls that were open when it returned"
+                        );
                         // It has returned, so it is not one the failed-call memo may record.
-                        state.ActiveCalls.Add(groupReturnBackKey);
-                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count, null));
+                        state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
 
                         /* sstack: caller_groups caller_repeats capture_change return_node
                          *
@@ -12338,21 +13237,12 @@ internal static class Matcher
 
                     // Leaving the pass through its 2-way branch: the slot gets its previous value,
                     // and the branch tries its next alternative, as BRANCH's arm below does.
-                    if (
-                        !state.Bstack.PopNode(pattern, out Node? nextAlternative)
-                        || !state.Bstack.PopSize(out long branchTextPos)
-                        || !state.Bstack.PopCode(out uint slot)
-                        || slot >= state.OptionalPasses.Length
-                        || !state.Bstack.PopBlock(
-                            MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
-                        )
-                    )
+                    if (PopOptionalPass(state) is not { } nextAlternative)
                     {
                         return MatchStatus.Illegal;
                     }
 
-                    node = nextAlternative!;
-                    state.TextPos = (int)branchTextPos;
+                    node = nextAlternative;
                     goto advance;
                 }
                 case Opcode.BodyEnd:
@@ -12585,14 +13475,9 @@ internal static class Matcher
                     state.FuzzyNode = outerFuzzyNode;
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
                     {
-                        if (!state.Sstack.PopSize(out long outerFrame))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.SectionFrame = (int)outerFrame;
+                        return MatchStatus.Illegal;
                     }
 
                     break;

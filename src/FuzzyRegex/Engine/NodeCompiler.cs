@@ -180,14 +180,13 @@ internal static class NodeCompiler
         if (!args.IsFuzzy)
         {
             pattern.OptionalPassCount = 0;
+            pattern.OptionalPassBranches = null;
             foreach (Node node in pattern.NodeList)
             {
                 if (node.Op == Opcode.EndOptionalPass)
                 {
                     node.Op = Opcode.Branch;
                 }
-
-                node.OptionalPassEnd = null;
             }
         }
         pattern.DoSearchStart = true;
@@ -778,9 +777,10 @@ internal static class NodeCompiler
         // see Node.HasEarlierDeletionTwin.
         Node? firstItem = null;
 
-        // NOT UPSTREAM: each alternative's 2-way branch and last node, joined up once it is known
-        // which alternatives have an empty one after them.
-        List<(Node Branch, Node End, bool Covered)> alternatives = [];
+        // NOT UPSTREAM: the 2-way branch and last node of each alternative with an empty one after
+        // it, joined up once the alternation's slot is known; null until there is one. Every other
+        // alternative is joined as upstream joins it, straight away.
+        List<(Node Branch, Node End)>? covered = null;
 
         // A branch in the regular expression is compiled into a series of 2-way branches.
         do
@@ -825,12 +825,18 @@ internal static class NodeCompiler
             // NOT UPSTREAM (ledger entry 44's addendum): the word that ends the alternative says
             // whether an alternative written empty after it is its exit; see
             // Branch.OptionalPassEndWord.
-            bool covered = args.Pattern.OptionalPassEnds.Contains(subargs.Code);
-            Debug.Assert(
-                !covered || !ReferenceEquals(subargs.Start, subargs.End),
-                "an alternative with a pass to judge has nodes"
-            );
-            alternatives.Add((branchNode, subargs.End!, covered));
+            if (args.Pattern.OptionalPassEnds?.Contains(subargs.Code) == true)
+            {
+                Debug.Assert(
+                    !ReferenceEquals(subargs.Start, subargs.End),
+                    "an alternative with a pass to judge has nodes"
+                );
+                (covered ??= []).Add((branchNode, subargs.End!));
+            }
+            else
+            {
+                AddNode(subargs.End!, joinNode);
+            }
 
             // Create a start node for the next sequence and append it.
             Node nextBranchNode = CreateNode(subargs.Pattern, Opcode.Branch, 0, 0, 0);
@@ -846,26 +852,22 @@ internal static class NodeCompiler
         }
 
         // An alternative whose exit is an empty one after it ends its pass with END_OPTIONAL_PASS,
-        // which its 2-way branch opens (Node.OptionalPassEnd); see Branch.CompileCore.
-        bool optional = alternatives.Exists(static a => a.Covered);
-        uint slot = optional ? (uint)args.Pattern.OptionalPassCount++ : 0;
-        for (int i = 0; i < alternatives.Count; i++)
+        // which its 2-way branch opens (PatternObject.OptionalPassEndOf); see Branch.CompileCore.
+        if (covered is not null)
         {
-            (Node alternativeBranch, Node end, bool covered) = alternatives[i];
-            if (covered)
+            // Every alternative of one alternation shares its slot: only one is being matched.
+            uint slot = (uint)args.Pattern.OptionalPassCount++;
+            foreach ((Node alternativeBranch, Node end) in covered)
             {
-                // Every alternative of one alternation shares its slot: only one is being matched.
                 // The second value says whether a pass's start must be restored on backtracking;
                 // see Matcher.OpenOptionalPass.
                 Node passEnd = CreateNode(args.Pattern, Opcode.EndOptionalPass, 0, 0, 2);
                 passEnd.Values[0] = slot;
                 passEnd.Values[1] = args.RepeatDepth > 0 ? 1u : 0u;
-                alternativeBranch.OptionalPassEnd = passEnd;
+                (args.Pattern.OptionalPassBranches ??= []).Add((alternativeBranch, passEnd));
                 AddNode(end, passEnd);
-                end = passEnd;
+                AddNode(passEnd, joinNode);
             }
-
-            AddNode(end, joinNode);
         }
 
         args.Code = subargs.Code;
@@ -1209,6 +1211,7 @@ internal static class NodeCompiler
 
         // Create the node.
         Node node = CreateNode(args.Pattern, Opcode.GroupCall, 0, 0, 1);
+        args.Pattern.HasGroupCalls = true;
 
         node.Values[0] = callRef;
 

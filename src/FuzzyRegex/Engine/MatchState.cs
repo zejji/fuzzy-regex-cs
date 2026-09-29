@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
@@ -243,25 +244,60 @@ internal sealed class MatchState : IDisposable
     internal readonly ByteStack Pstack;
 
     /// <summary>
-    /// NOT UPSTREAM'S: the group calls that are open right now, one key per call, as
-    /// <c>(call index &lt;&lt; 32) | text position</c>.
+    /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
+    /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
+    /// call was made.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Ledger entry 14's guard, and PCRE2's: a call that re-enters a group at a text position where
-    /// a call of that same group is already open cannot consume anything before it arrives back
-    /// where it started, so that path recurses for ever. PCRE2 answers the whole match with
-    /// <c>PCRE2_ERROR_RECURSELOOP</c>, "nested recursion at the same subject position"; upstream has
-    /// no guard at all and allocates until <c>MemoryError</c>.
+    /// Ledger entry 14: the guard against a recursion that can never finish. A call that
+    /// re-enters a group at the text position where a call of that group is already open, when the
+    /// attempt has reached no text since that call opened, is failed. Usually such a call can only
+    /// repeat the open call's work one level deeper, but NOT always: a conditional or
+    /// backreference that reads a group set between the two calls can make the inner call do
+    /// something different, and then the path is finite and this guard wrongly fails it
+    /// (<c>OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
+    /// PCRE2 refuses the same shapes, upstream answers them). If the attempt HAS reached
+    /// further, the inner call is let through: that is left recursion, <c>G -&gt; '' | G 'a'</c>,
+    /// where the outer call's first try failed further on and the inner call is how 'aa' gets
+    /// matched. The rule is PCRE2's (<c>OP_RECURSE</c> in <c>pcre2_match.c</c> 10.47, lines
+    /// 5686-5709: same group, same subject pointer and the same <c>last_used_ptr</c>). PCRE2 then
+    /// fails the whole match with <c>PCRE2_ERROR_RECURSELOOP</c>; this port fails only the path.
+    /// Upstream has no guard at all and allocates until <c>MemoryError</c>.
     /// </para>
     /// <para>
-    /// A set rather than a counter, because a key is only ever added when it is absent - that is
+    /// Why it terminates: the width only grows during an attempt and never passes the text length,
+    /// and the set holds each entry once, so at most <c>TextLength + 1</c> calls of one group can be
+    /// open at one position.
+    /// </para>
+    /// <para>
+    /// A set rather than a counter, because an entry is only ever added when it is absent - that is
     /// what the guard tests. <see cref="OpenCalls"/> is the same information as a stack, and is what
     /// keeps the two in step; this is only here so the test itself costs O(1) on a recursion ten
     /// thousand deep.
     /// </para>
     /// </remarks>
-    internal readonly HashSet<long> ActiveCalls = [];
+    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
+    /// match path fails and where a group call is made. Only the guard in
+    /// <see cref="ActiveCalls"/> reads them, and the failed-call memo keys them
+    /// (<c>Matcher.FailedCallKey</c>) because the guard does.
+    /// </summary>
+    /// <remarks>
+    /// Both ends, so the measure works the same in a reversed pattern, where the text reached grows
+    /// to the left. <see cref="ReachedLow"/> starts above <see cref="ReachedHigh"/>, meaning nothing
+    /// reached yet; the first group call of the attempt records its own position before it reads
+    /// the width.
+    /// </remarks>
+    internal int ReachedLow = int.MaxValue;
+
+    /// <inheritdoc cref="ReachedLow"/>
+    internal int ReachedHigh = int.MinValue;
+
+    /// <summary>How much text this attempt has reached; see <see cref="ReachedLow"/>.</summary>
+    internal int ReachedWidth => ReachedHigh - ReachedLow;
 
     /// <summary>
     /// NOT UPSTREAM'S: the same open calls as <see cref="ActiveCalls"/>, innermost last, each with
@@ -293,7 +329,7 @@ internal sealed class MatchState : IDisposable
     /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
     /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
@@ -571,6 +607,13 @@ internal sealed class MatchState : IDisposable
     internal int ReqEnd;
 
     /// <summary>
+    /// NOT UPSTREAM (D14): what the pattern's <see cref="FuzzyLiteralFilter"/> has learned about
+    /// this scan's subject, kept across the scan's steps; <see langword="null"/> when the pattern
+    /// has no filter.
+    /// </summary>
+    internal readonly FuzzyLiteralFilter.ScanMemory? FilterMemory;
+
+    /// <summary>
     /// NOT UPSTREAM: the slice start <see cref="RequiredStringScreen"/> last scanned, part of its
     /// cache key.
     /// </summary>
@@ -693,6 +736,20 @@ internal sealed class MatchState : IDisposable
     internal Node? FuzzyNode;
 
     /// <summary>
+    /// NOT UPSTREAM (D22): whether the last retried <c>REF_GROUP_FLD</c> edit was one of ledger
+    /// entry 52's whole-character kinds, which the arm must step past even when
+    /// <see cref="PatternObject.SkipRetriedFoldSteps"/> restores upstream's re-entry.
+    /// </summary>
+    /// <remarks>
+    /// That switch reproduces upstream's re-entry for upstream's own edits, which compare the used-up
+    /// character again. A whole-character edit always uses up the subject character and upstream has
+    /// none, so skipping its step would only undo it, and the oracle's
+    /// <c>full-fold-backreference-retry</c> entry would claim the rows the edit explains. Set on
+    /// every successful retry, which is the one way into the arm's re-entry.
+    /// </remarks>
+    internal bool RetriedAWholeFoldEdit;
+
+    /// <summary>
     /// Upstream <c>fuzzy_changes</c> (<c>RE_FuzzyChangesList</c>, <c>:397</c>): every error used so
     /// far, in the order it was used.
     /// </summary>
@@ -777,7 +834,8 @@ internal sealed class MatchState : IDisposable
             Repeats[r] = new RepeatData();
         }
 
-        OptionalPasses = new OptionalPassStart[pattern.OptionalPassCount];
+        OptionalPasses = pattern.OptionalPassCount == 0 ? [] : new OptionalPassStart[pattern.OptionalPassCount];
+        FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
     }
 
     /// <summary>
@@ -901,6 +959,8 @@ internal sealed class MatchState : IDisposable
         bool? oneUnitPerCharacter
     )
     {
+        WorkCounter.StateInitialised();
+
         PatternObject pattern = Pattern;
 
         Text = text;
@@ -940,6 +1000,8 @@ internal sealed class MatchState : IDisposable
         CallMemoKey.Clear();
         VerbMarks.Clear();
         CallMemoHits = 0;
+        ReachedLow = int.MaxValue;
+        ReachedHigh = int.MinValue;
         SearchAnchor = 0;
         MatchPos = 0;
         BestMatchPos = 0;
@@ -966,6 +1028,7 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         Array.Clear(FuzzyCounts);
         FuzzyNode = null;
+        RetriedAWholeFoldEdit = false;
         FuzzyChanges.Clear();
 
         VisibleCaptures = visibleCaptures;
@@ -978,6 +1041,7 @@ internal sealed class MatchState : IDisposable
         ScreenFoundFarthest = false;
         ScreenClearedLow = 1;
         ScreenClearedHigh = 0;
+        FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
 
         // Adjust boundaries.
@@ -1149,6 +1213,8 @@ internal sealed class MatchState : IDisposable
     /// <returns>The next position.</returns>
     internal int NextPos(int pos)
     {
+        WorkCounter.CharacterWalked();
+
         ReadOnlySpan<char> text = Text.Span;
         return
             pos + 1 < TextEnd
@@ -1201,6 +1267,8 @@ internal sealed class MatchState : IDisposable
     /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
     internal int PrevPos(int pos)
     {
+        WorkCounter.CharacterWalked();
+
         ReadOnlySpan<char> text = Text.Span;
         return
             pos >= 2
@@ -1252,6 +1320,7 @@ internal sealed class MatchState : IDisposable
         {
             Array.Clear(FuzzyCounts);
             FuzzyNode = null;
+            RetriedAWholeFoldEdit = false;
             FuzzyChanges.Clear();
         }
 
@@ -1261,11 +1330,28 @@ internal sealed class MatchState : IDisposable
         CaptureChange = 0;
         Iterations = 0;
 
-        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. See FailedCalls and
-        // CallMemoThreshold.
-        ClearFailedCalls();
+        // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
+        // the memo never leaves the threshold or the set other than Reset leaves them, so it pays
+        // one test here. See FailedCalls and CallMemoThreshold.
         CallsThisPass = 0;
-        if (!Pattern.UseCallMemo || Pattern.SkipCallMemo || PartialSide != PartialNone)
+        if (Pattern.UseCallMemo)
+        {
+            InitCallMemo();
+        }
+    }
+
+    /// <summary>
+    /// The failed-call memo's part of <see cref="InitMatch"/>, for a pattern that can use it: empties
+    /// <see cref="FailedCalls"/> and sets <see cref="CallMemoThreshold"/> for the pass.
+    /// </summary>
+    /// <remarks>
+    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
+    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void InitCallMemo()
+    {
+        if (Pattern.SkipCallMemo || PartialSide != PartialNone)
         {
             CallMemoThreshold = long.MaxValue;
         }
@@ -1273,15 +1359,7 @@ internal sealed class MatchState : IDisposable
         {
             CallMemoThreshold = Pattern.EagerCallMemo ? 0 : ((long)SliceEnd - SliceStart + 1) * Pattern.GroupCallSites;
         }
-    }
 
-    /// <summary>Empties <see cref="FailedCalls"/>, dropping a large one rather than clearing it.</summary>
-    /// <remarks>
-    /// Clear costs the table's capacity, so a set that grew large once would tax every later pass;
-    /// a fresh one is allocated on demand instead. The same rule as <c>RepeatData.ClearMemo</c>.
-    /// </remarks>
-    private void ClearFailedCalls()
-    {
         if (FailedCalls is not { Count: > 0 })
         {
             return;

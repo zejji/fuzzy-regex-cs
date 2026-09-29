@@ -56,6 +56,15 @@ import time
 from xml.etree import ElementTree
 from pathlib import Path
 
+# A default Windows console is cp1252, and both a control's own name (free text in controls.json)
+# and a mutated build's log tail (dotnet/csharpier output, read with errors="replace" so it never
+# raises) can carry characters outside that codepage. Without this, print() raises
+# UnicodeEncodeError partway through a run and the mutation marker is left applied - "reconfigure"
+# needs Python 3.7+, which this repo's tooling already requires.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 # Tracked rather than left in .scratch/, which slice sessions clear. S18's controls were lost
 # that way and are permanently unreproducible; tools/launch-slice.ps1 and tools/heartbeat.sh
 # were promoted for the same reason on 2026-09-01. The waves and the consumer log this
@@ -63,14 +72,26 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CONTROLS = Path(__file__).resolve().parent / "controls.json"
 WAVES = REPO / ".scratch" / "control-waves"
-LIVE_WAVE = REPO / "TestResults" / "oracle" / "wave.jsonl"
-REPORT = REPO / "TestResults" / "oracle" / "report.txt"
+# Per-process, not the fixed wave.jsonl/report.txt this used to be (D20/D21 repair round 1): this
+# runner is itself sequential, but the fixed names are also OracleWave.cs's own un-overridden
+# default, so a run-oracle.ps1 sweep or another run-controls.py in the same worktree at the same
+# time used to race this one on exactly the file it is mid-comparison against. consume() below
+# passes FUZZYREGEX_ORACLE_WAVE_PATH/REPORT_PATH so the consumer actually reads and writes here
+# instead of falling back to that shared default.
+# `-run-` rather than a bare PID: tools/run-oracle.ps1 archives its permanent evidence as
+# wave-<seed>.jsonl/report-<seed>.txt, no PID, and a PID that happens to equal an already-archived
+# seed used to overwrite that archive - then consume()'s own cleanup deleted it as scratch (D20/D21
+# repair round 2). A distinct infix keeps the two namespaces disjoint.
+LIVE_WAVE = REPO / "TestResults" / "oracle" / f"wave-run-{os.getpid()}.jsonl"
+REPORT = REPO / "TestResults" / "oracle" / f"report-run-{os.getpid()}.txt"
 # `expected` is optional so a report written before S33 added the accounted-for list still parses.
+# The columns between `expected` and `diverge` (timeout, resource, undefined, fault) are skipped:
+# they were added after this pattern was written and made every summary fail to parse.
 # Counted and printed rather than folded into `diverge`: a mutation whose damage happens to look like
 # an entry in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs lands here instead of there, and a
 # control whose expected count moved is as much a finding as one whose diverge count did.
 SUMMARY = re.compile(
-    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
+    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?(?:[a-z]+ \d+\s+)*?diverge (\d+)\s+of (\d+) rows"
 )
 CONSUME_TIMEOUT = 240
 # A suite control's signal is named test failures, not a diverge column: S50's control C reverts a
@@ -222,36 +243,53 @@ def consume(wave: Path) -> tuple[str, str]:
     # run's answer - which is how an unformatted mutation gets recorded as a control that fired.
     REPORT.unlink(missing_ok=True)
 
-    # Bounded, because a mutation can make a row backtrack catastrophically rather than answer
-    # wrongly: S17-B ran for six minutes on a 1200-row wave that the honest engine answers in one
-    # second. An unbounded wait there looks exactly like a slow build.
-    # Redirected to a file rather than captured through a pipe. `dotnet test` spawns MSBuild nodes
-    # and a test host that inherit the handles, so on a timeout `subprocess.run` kills the direct
-    # child and then blocks for ever draining a pipe those grandchildren still hold open - which is
-    # how a 240-second bound sat there for six minutes without firing (measured 2026-09-01).
-    log = REPO / ".scratch" / "control-consume.log"
-    with open(log, "w", encoding="utf-8") as handle:
-        # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
-        # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
-        # later build can replace it (two such orphans on 2026-09-13, killed by hand).
-        proc = subprocess.Popen(
-            ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
-             "--configuration", "Debug"],
-            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
-            **({} if sys.platform == "win32" else {"start_new_session": True}),
-        )
-        try:
-            proc.wait(timeout=CONSUME_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            kill_tree(proc)
-            return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s (process tree killed)"
+    # The consumer also writes these two beside REPORT, named from REPORT's own filename
+    # (OracleWave.cs's ExpectedExamplesPath/ScreenCandidatesPath). Never read back here, so once
+    # this call returns they are pure debris; deleted in the finally below on every exit path,
+    # not only when the run goes GREEN (D20/D21 repair round 2).
+    candidates = REPORT.with_name(REPORT.stem + ".screen-candidates.txt")
+    examples = REPORT.with_name(REPORT.stem + ".expected-examples.jsonl")
 
-    if not REPORT.exists():
-        tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
-        return "NO REPORT", tail
+    try:
+        # Bounded, because a mutation can make a row backtrack catastrophically rather than answer
+        # wrongly: S17-B ran for six minutes on a 1200-row wave that the honest engine answers in one
+        # second. An unbounded wait there looks exactly like a slow build.
+        # Redirected to a file rather than captured through a pipe. `dotnet test` spawns MSBuild nodes
+        # and a test host that inherit the handles, so on a timeout `subprocess.run` kills the direct
+        # child and then blocks for ever draining a pipe those grandchildren still hold open - which is
+        # how a 240-second bound sat there for six minutes without firing (measured 2026-09-01).
+        log = REPO / ".scratch" / "control-consume.log"
+        with open(log, "w", encoding="utf-8") as handle:
+            # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
+            # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
+            # later build can replace it (two such orphans on 2026-09-13, killed by hand).
+            env = os.environ | {
+                "FUZZYREGEX_ORACLE_WAVE_PATH": str(LIVE_WAVE),
+                "FUZZYREGEX_ORACLE_REPORT_PATH": str(REPORT),
+            }
+            proc = subprocess.Popen(
+                ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
+                 "--configuration", "Debug"],
+                cwd=REPO, stdout=handle, stderr=subprocess.STDOUT, env=env,
+                **({} if sys.platform == "win32" else {"start_new_session": True}),
+            )
+            try:
+                proc.wait(timeout=CONSUME_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                kill_tree(proc)
+                return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s (process tree killed)"
 
-    first = REPORT.read_text(encoding="utf-8").splitlines()[0]
-    return first, ""
+        if not REPORT.exists():
+            tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
+            return "NO REPORT", tail
+
+        first = REPORT.read_text(encoding="utf-8").splitlines()[0]
+        return first, ""
+    finally:
+        LIVE_WAVE.unlink(missing_ok=True)
+        REPORT.unlink(missing_ok=True)
+        candidates.unlink(missing_ok=True)
+        examples.unlink(missing_ok=True)
 
 
 def main() -> int:
