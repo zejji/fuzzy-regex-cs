@@ -26,6 +26,9 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// <c>switch</c> is keyed on it; a second enum would only add a cast at every node it builds.
 /// Value 98, <see cref="WTouch"/>, is this port's own and only ever a backtracking-stack entry.
 /// </para>
+/// <para>
+/// <b>Value 98 is this port's own</b>, after upstream's last, so no upstream value moves.
+/// </para>
 /// </remarks>
 internal enum Opcode : uint
 {
@@ -324,10 +327,26 @@ internal enum Opcode : uint
     TailStart = 97,
 
     /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum). Engine-only: the end of a pass through an
+    /// alternative that has an alternative written empty after it (<c>Branch.OptionalPassEndWord</c>).
+    /// The pass fails if it consumed no text and spent errors that nothing needs, by the rule a
+    /// repeat applies to an empty iteration (<c>Matcher.OptionalPassAdmitted</c>).
+    /// </summary>
+    EndOptionalPass = 98,
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 50). Engine-only, and never a node: the backtrack tag of an
+    /// insertion made in front of a lookaround that failed in a fuzzy section. The lookaround's own
+    /// opcode already tags its frame, so the insertion needs a tag of its own
+    /// (<c>Matcher.FuzzyFrameOp</c>).
+    /// </summary>
+    FuzzyLookaround = 99,
+
+    /// <summary>
     /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry of a touch mark, pushed where a
     /// partial call's second pass passes a test that reads the text to come
     /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). It never appears on a
     /// node or in a code list, and its backtracking arm only drops the mark.
     /// </summary>
-    WTouch = 98,
+    WTouch = 100,
 }

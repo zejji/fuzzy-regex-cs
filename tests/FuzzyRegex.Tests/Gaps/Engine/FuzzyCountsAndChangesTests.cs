@@ -567,14 +567,16 @@ public sealed class FuzzyCountsAndChangesTests
             FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline
         ).Match(subject, partial: true);
 
-        // D11 moved the counts from (2, 0, 0) with substitutions at 2 and 5 to one substitution at
-        // 2: the second pass takes the first path whose `\B` at the end some continuation passes,
-        // where before D11 that `\B` failed and a later path that ran out of text answered. Upstream
-        // 2026.9.10 counts (1, 0, 0) too, and lists its stale substitution at codepoint 0.
+        // Moved by the empty-iteration rule (2026-09-26), which no longer counts undone edits as a
+        // repeat's progress: the partial now starts at 0, where it was (2, 4) with (2, 0, 0) and
+        // substitutions at 2 and 5. The point of the row, that the changes agree with the counts,
+        // holds either way. D11 alone had moved it to (2, 4) with one substitution at 2; with both,
+        // entry 44's answer stands (measured on the merge, 2026-09-29).
         astral.PartialMatch.Should().BeTrue();
-        (astral.Index, astral.Length).Should().Be((2, 4));
-        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        astral.FuzzyChanges.Substitutions.Should().Equal(2);
+        (astral.Index, astral.Length).Should().Be((0, 6));
+        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        astral.FuzzyChanges.Substitutions.Should().Equal(0);
+        astral.FuzzyChanges.Insertions.Should().Equal(2);
         AssertChangesAgreeWithCounts(astral);
     }
 

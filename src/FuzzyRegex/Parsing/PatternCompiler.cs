@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -322,6 +324,20 @@ internal static class PatternCompiler
         // Flatten the code into a list of ints.
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
+        // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
+        // None in most patterns, so the list is made only for the first.
+        List<int>? optionalPassEnds = null;
+        int offset = 0;
+        foreach (uint[] word in code)
+        {
+            if (ReferenceEquals(word, Branch.OptionalPassEndWord))
+            {
+                (optionalPassEnds ??= []).Add(offset);
+            }
+
+            offset += word.Length;
+        }
+
         if (!parsed.HasSimpleStart())
         {
             // Get the first set, if possible.
@@ -331,12 +347,21 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
+                if (optionalPassEnds is not null)
+                {
+                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                }
             }
             catch (FirstSetErrorException)
             {
                 // No usable first set; the engine simply scans from every position.
             }
         }
+
+        Debug.Assert(
+            optionalPassEnds is null || optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            "every recorded offset is a NEXT word"
+        );
 
         // NOT PORTED: index_group, which CompiledPattern derives from GroupIndex on demand.
 
@@ -350,7 +375,10 @@ internal static class PatternCompiler
             reqChars,
             reqFlags,
             info.GroupCount
-        );
+        )
+        {
+            OptionalPassEnds = optionalPassEnds ?? [],
+        };
     }
 
     /// <summary>

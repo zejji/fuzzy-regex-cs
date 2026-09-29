@@ -140,15 +140,20 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
     // its checks removed (measured 2026-09-28): the first when the section's limits are not both
     // at least the error maximum and the ENHANCEMATCH check is gone too (None), the second with
     // the maximum check alone ((1, 4) found first), the third with the equal-cost check alone
-    // (None), and the fourth with the only-section check alone (None). The minimum check has no
-    // witness yet: `(?fi)(?:st){1<=s,e<=1}` fullmatched over 'ßt' finds nothing with or without
-    // it, which is known defect D9's order of meeting a minimum. Upstream: None for the first,
-    // third and fourth rows; (1, 4) with (2, 0, 0) for the second, a different valid match.
+    // (None), the fourth with the only-section check alone (None), and the fifth with the minimum
+    // check alone (None: the folded insertion leaves no substitution to meet the minimum).
+    // Upstream: None for the first, third, fourth and fifth rows; (1, 4) with (2, 0, 0) for the
+    // second, a different valid match. The fifth's twins agree on one substitution in both engines:
+    // `(?fi)(?:s){1<=s<=1,i<=1,e<=1}t` over 'ßt' and `(?fi)(?:st){1<=s<=1,i<=1,e<=1}` over 'xt'
+    // (measured 2026-09-29). It needs `i<=1`: naming `s` sets the other maxima to 0, so without it no
+    // insertion is permitted and the check is never reached. And it is spelt `1<=s<=1`, because
+    // `{1<=s,e<=1}` is not a constraint at all: both engines match its braces as literal text.
     [Test]
     [Arguments("(?efi)(?:stst){s<=2,i<=1}", "ßfﬆﬁ", "fullmatch", 0, 4, 2, 1, 0)]
     [Arguments("(?fi)(?:sstt){s<=2,i<=1}", "ﬆxﬆǰx", "search", 0, 4, 2, 1, 0)]
     [Arguments("(?fi)(?:stsst){1s+2i<=4}", "ßßisß", "fullmatch", 0, 5, 4, 0, 0)]
     [Arguments("(?fi)(?:(?:st){e<=2}){1<=s<=2,e<=3}", "ßs", "fullmatch", 0, 2, 2, 0, 0)]
+    [Arguments("(?fi)(?:st){1<=s<=1,i<=1,e<=1}", "ßt", "fullmatch", 0, 2, 1, 0, 0)]
     public void A_whole_substitution_is_left_out_only_where_it_repeats_a_folded_insertion(
         string pattern,
         string text,

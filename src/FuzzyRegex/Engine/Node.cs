@@ -110,6 +110,36 @@ internal sealed class Node
     /// </summary>
     internal bool Match;
 
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): how many items the fuzzy run starting at this node has, or 0 if
+    /// this node does not start one. Set by <c>PatternObject.SetFuzzyRunLengths</c> when the
+    /// pattern is compiled; read by <c>Matcher.ExactDeletionMayMatch</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A run is a chain, by <see cref="Next1"/>, of fuzzy one-character items and fuzzy
+    /// <c>STRING</c> and <c>STRING_IGN</c> nodes, either way round: items that each consume exactly
+    /// one subject character per pattern character when they match. Anything else ends the run.
+    /// </para>
+    /// <para>
+    /// The run's exit is kept on the pattern (<c>PatternObject.FuzzyRunExits</c>), not here: this
+    /// field and <see cref="HasEarlierDeletionTwin"/> fit in the padding a node already has, where
+    /// a reference would add 8 bytes to every node of every pattern.
+    /// </para>
+    /// </remarks>
+    internal int FuzzyRunLength;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): whether this node is a fuzzy one-character item that is a whole
+    /// alternative of an alternation, after an earlier alternative of the same alternation that is
+    /// one too. Both go on to the alternation's join, so deleting either leaves the same state. Set
+    /// by <c>NodeCompiler.BuildBranch</c>, where the alternatives are known: read back from the
+    /// compiled graph, an empty alternative or one that starts with a group looks like another
+    /// link of the chain (blind review of 6a39732). Read by
+    /// <c>Matcher.DeletionRepeatsAnEarlierAlternative</c>.
+    /// </summary>
+    internal bool HasEarlierDeletionTwin;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

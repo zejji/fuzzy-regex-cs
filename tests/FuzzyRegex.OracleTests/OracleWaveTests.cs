@@ -486,6 +486,122 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_exact_deletion_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-exact-item-offered-as-a-deletion`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 42, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-exact-item-offered-as-a-deletion", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
+    public void A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-insertion-before-a-failing-lookaround` (ledger entry 50), built as
+        // entry 42's: upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a match at 1 of length 1 with no errors, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live answer
+        // must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-insertion-before-a-failing-lookaround", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                ?.Id.Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_minimum_order_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-minimum-met-by-a-trailing-insertion` (ledger entry 51), built as
+        // entry 50's: upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a match at 1 of length 1 with no errors, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live answer
+        // must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-minimum-met-by-a-trailing-insertion", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                ?.Id.Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_needed_rule_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-empty-iteration-needed-rule`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 44, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-empty-iteration-needed-rule", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
     public void A_row_this_port_answers_upstreams_way_is_not_accounted_for_by_the_three_judged_entries()
     {
         // The over-classification guard for S48b's second sitting, and the control its three entries
