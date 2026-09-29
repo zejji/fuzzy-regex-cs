@@ -109,14 +109,16 @@ test('a mode nobody offers prints the walk', () => {
 // length-capped, so a trim that is not linear is a frozen tab. Written as a regex with an
 // unanchored `[ws]+$` alternative it was quadratic - measured 66 ms, 253 ms, 986 ms and 3,927 ms
 // for 12.5k, 25k, 50k and 100k characters of U+00A0 in the flag box on 2026-09-19 - and the index
-// walk that replaced it does the same 100k in a millisecond. The budget is loose enough not to
-// flake on a busy machine and tight enough that the quadratic version could not pass it.
+// walk that replaced it does the same 100k in a millisecond. The run is 400k, where the quadratic
+// version would take about a minute, so a two-second bound is hundreds of times the linear cost and
+// still far below the quadratic one: until 2026-09-28 it was 200 ms over 100k, a margin a busy
+// machine could eat (D13).
 test('a long run of whitespace does not freeze the panel', () => {
-    const flags = `a${'\u{a0}'.repeat(100_000)}b`;
+    const flags = `a${'\u{a0}'.repeat(400_000)}b`;
     const started = performance.now();
     toCSharp({ ...walk('a', flags, 's'), namedLists: '' });
 
-    expect(performance.now() - started).toBeLessThan(200);
+    expect(performance.now() - started).toBeLessThan(2000);
 });
 
 // DemoEngine.TryParseMode reads `mode.Trim().ToLowerInvariant()`, and the fragment hands the mode

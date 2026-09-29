@@ -315,6 +315,122 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM (finding F-A): whether <c>Matcher.ExactDeletionMayMatch</c> may leave out the
+    /// "delete it instead" choice of an item that matched exactly when that choice cannot lead to a
+    /// match the search has not already ruled out. Set when the pattern is compiled.
+    /// </summary>
+    /// <remarks>
+    /// The argument behind it (see <c>Matcher.ExactDeletionMayMatch</c>) exchanges one deletion for
+    /// another, which can remove an error, so it does not hold where a section restricts which
+    /// characters an error may touch (a <c>FUZZY</c> node with a test, which is asked at the
+    /// deletion's position). And it shows only that the left-out choice holds no match, where a
+    /// <c>(*SKIP)</c> or <c>(*PRUNE)</c> reached inside it would still change what the search does
+    /// next. Either turns it off. A minimum error count does not; the matcher narrows there only
+    /// once every minimum is met (<c>Matcher.AllMinimumsMet</c>).
+    /// </remarks>
+    internal bool NarrowExactDeletions;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): the most items an exact match's "delete it instead" choice can
+    /// have left to delete and still be offered; <see cref="long.MaxValue"/> where there is no such
+    /// ceiling. Set when the pattern is compiled; read first by <c>Matcher.ExactDeletionMayMatch</c>,
+    /// so the common case, a character with more of its string left than the budget has deletions,
+    /// costs one comparison.
+    /// </summary>
+    /// <remarks>
+    /// With the narrowing on and no minimum error count, <c>ExactDeletionMayMatch</c> refuses a
+    /// choice when the items left exceed <c>DeletionRoom</c>, and that room is at most the current
+    /// section's deletion limit, its error limit and its cost limit over a deletion's cost, since
+    /// counts are never negative. So the largest of those over every section is a ceiling no room
+    /// can pass. Elsewhere <c>ExactDeletionMayMatch</c> does not compare the count with the room,
+    /// and the ceiling is off.
+    /// </remarks>
+    internal long ExactDeletionCeiling = long.MaxValue;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule, finding F-A): whether some fuzzy section has a minimum
+    /// error count. Only then can an empty iteration that spent errors be admitted for a section
+    /// minimum (<c>Matcher.RaisesUnmetMinimum</c>), only then can an exact item's deletion be
+    /// needed for one (<c>Matcher.AllMinimumsMet</c>), and only then does the matcher keep
+    /// <c>MatchState.SectionFrame</c>. Set when the pattern is compiled.
+    /// </summary>
+    internal bool HasFuzzyMinimum;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): whether the repeat memo runs (<c>Matcher.RepeatMemoHit</c>):
+    /// for a fuzzy pattern whose tested groups, the groups a backreference or conditional reads,
+    /// fit in <see cref="MemoGroups"/>. Set when the pattern is compiled.
+    /// </summary>
+    internal bool UseRepeatMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the tested groups' numbers, at most two, whose spans are
+    /// part of a repeat memo key.
+    /// </summary>
+    internal int[] MemoGroups = [];
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): whether <c>GROUP_CALL</c> may fail a call at once
+    /// because an earlier call with the same entry key ran out of choices without returning
+    /// (<c>Matcher.FailedCallKey</c>). Set when the pattern is compiled, for a pattern with a group
+    /// call and none of the constructs that let a failed call leave something behind.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A call that fails is undone completely by backtracking, except where a construct succeeds
+    /// and throws away the undo entries of its body. A lookaround, an atomic group, a possessive
+    /// repeat or a conditional's test does that, so a capture list keeps an entry from a path that
+    /// later failed, and skipping the failed call would leave that entry out:
+    /// <c>(?r)(a)(?:b(?:(?R)|)(?R)?(?:(?!.(?R)(?R))(?:a.))*?.){2&lt;=e&lt;=3}</c> over <c>aa</c>
+    /// changed group 1's capture list with the memo. A fuzzy section that ends in there does the
+    /// same to the whole-match error total, which <c>END_FUZZY</c> restores only from the entry the
+    /// construct threw away: <c>(?e)((?=(?:a){e&lt;=1}))(((?&gt;a)){1}()?(.?(?1)|(?0))){d&lt;=1}((?0)(a))?</c>
+    /// over <c>xa</c> answered (0, 1) with two errors with the memo and (1, 1) with one without. So one
+    /// of those constructs whose body holds a capture group, a call, a fuzzy section or a
+    /// <c>\K</c> turns the memo off (<see cref="WritesInDiscardingConstruct"/>,
+    /// <see cref="KeepInSubmatch"/>). That also covers a call inside a lookbehind, which runs the
+    /// other way and so can meet open calls the key does not hold.
+    /// </para>
+    /// <para>
+    /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a
+    /// witness, as <see cref="RepeatInfo.FailureMemo"/> does. A partial match does not use it either
+    /// (<c>MatchState.InitMatch</c>): a path that reaches the end of the text records a partial
+    /// result even if it then fails. See <c>docs/plan/2026-09-27-recursion-failure-memo-design.md</c>.
+    /// </para>
+    /// </remarks>
+    internal bool UseCallMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): how many <c>GROUP_CALL</c> nodes the pattern has. A pass
+    /// makes (slice length + 1) x this many calls before the memo starts to build keys, so ordinary
+    /// recursion, which makes about one call per character, pays one counter per call and nothing
+    /// more.
+    /// </summary>
+    internal int GroupCallSites;
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): whether a capture group, a group call or a fuzzy section
+    /// sits inside an atomic group, a possessive repeat, a lookaround or a conditional's lookaround
+    /// test. Written by <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
+    /// </summary>
+    internal bool WritesInDiscardingConstruct;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the failed-call memo is off whatever
+    /// <see cref="UseCallMemo"/> says. Tests and <c>tools/probes/recursion-failure-memo/memo-grid.cs</c>
+    /// set it on a pattern compiled for one call, to compare every answer with the memo on and off.
+    /// </summary>
+    internal bool SkipCallMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the failed-call memo builds keys from
+    /// the first call of a pass rather than after (slice length + 1) x
+    /// <see cref="GroupCallSites"/> calls. Tests and the memo grid set it, since the small subjects
+    /// they use never reach that count and would otherwise never exercise the memo.
+    /// </summary>
+    internal bool EagerCallMemo;
+
+    /// <summary>
     /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
     /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
     /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which
@@ -342,6 +458,52 @@ internal sealed class PatternObject
 
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the code offsets of the <c>NEXT</c> words that
+    /// <c>Branch.OptionalPassEndWord</c> marks (<see cref="CompiledPattern.OptionalPassEnds"/>). Read
+    /// by <c>NodeCompiler.BuildBranch</c>; <see langword="null"/> when there are none, as there
+    /// are in most patterns.
+    /// </summary>
+    internal HashSet<int>? OptionalPassEnds { get; private init; }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the 2-way branch of each alternative that has an
+    /// alternative written empty after it, with the <c>END_OPTIONAL_PASS</c> node that ends its
+    /// pass, as <c>NodeCompiler.BuildBranch</c> makes them; <see langword="null"/> when there are
+    /// none. Compile turns it into <see cref="OptionalPassEndOf"/> once the nodes are numbered.
+    /// </summary>
+    internal List<(Node Branch, Node PassEnd)>? OptionalPassBranches;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): by <see cref="Node.Index"/>, the
+    /// <c>END_OPTIONAL_PASS</c> node that ends the pass a 2-way branch opens, or null for a node
+    /// that opens none; <see langword="null"/> for a pattern with no such branch. Taking the branch
+    /// records where the pass began in the node's slot, and that node reads it back
+    /// (<c>Matcher.OptionalPassAdmitted</c>).
+    /// </summary>
+    /// <remarks>
+    /// A table on the pattern rather than a field on every node: only a fuzzy pattern with an
+    /// alternative written empty has one, and a field would cost every node of every pattern.
+    /// </remarks>
+    internal Node?[]? OptionalPassEndOf;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): by <see cref="Node.Index"/>, the first node after the fuzzy run
+    /// through that node that is not an <c>END_FUZZY</c>, <c>START_GROUP</c> or <c>END_GROUP</c>,
+    /// which read no text; null for a node in no run or where the chain ends. Set by
+    /// <see cref="SetFuzzyRunLengths"/>, and <see langword="null"/> for a pattern with no run. Read
+    /// by <c>Matcher.ExactDeletionMayMatch</c> for a node whose <see cref="Node.FuzzyRunLength"/>
+    /// is not 0. On the pattern for the reason <see cref="OptionalPassEndOf"/> is.
+    /// </summary>
+    internal Node?[]? FuzzyRunExits;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): how many alternations have an
+    /// <c>END_OPTIONAL_PASS</c>, and so a slot in <see cref="MatchState.OptionalPasses"/>. Counted
+    /// by <c>NodeCompiler.BuildBranch</c>.
+    /// </summary>
+    internal int OptionalPassCount;
 
     /// <summary>
     /// The zero-width position assertions the pattern must pass before it can match anything, or
@@ -417,6 +579,13 @@ internal sealed class PatternObject
     internal bool SkipLeftoverTakeBack;
 
     /// <summary>
+    /// Oracle-only: a fuzzy <c>STRING_FLD</c> item edits a subject character that expands under full
+    /// case folding one folded character at a time, as upstream does, and never whole (D7). Set only
+    /// by <c>OracleComparer</c>'s ablation; never by the library. See <c>Matcher.FoldWholeSub</c>.
+    /// </summary>
+    internal bool SkipWholeFoldedCharEdits;
+
+    /// <summary>
     /// Oracle-only: a <c>(*SKIP)</c> moves the slice the moment it runs, as upstream's
     /// <c>RE_OP_SKIP</c> does (<c>:14551-14555</c>), instead of when backtracking reaches it (ledger
     /// entry 45). Set only by <c>OracleComparer</c>'s ablation; never by the library.
@@ -475,6 +644,57 @@ internal sealed class PatternObject
     /// <c>Matcher.AtUpstreamDefaultBoundary</c> and <c>docs/DIVERGENCES.md</c>.
     /// </remarks>
     internal bool UpstreamDefaultBoundary;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether an item that matched exactly is never
+    /// offered as a deletion, which is upstream's rule. The oracle sets it on a pattern it compiled
+    /// for one call, to show that the ledger entry 42 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream tries errors on a fuzzy item only when it fails to match
+    /// (<c>upstream/src/_regex.c</c>:10185-10258), so <c>(?:a){d&lt;=1}a</c> finds nothing in
+    /// <c>a</c>. See <c>Matcher.ExactDeletionMayMatch</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool SkipExactDeletionRetry;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a lookaround that fails in a fuzzy
+    /// section is never passed by an insertion, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the ledger entry 50 fix is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes a failing <c>\b</c> or <c>$</c> (<c>upstream/src/_regex.c</c>:12060-12075) but
+    /// not a failing lookaround (:12918-13000, :17115-17168), so <c>(?:b(?=c)){i&lt;=1}</c> finds
+    /// nothing in <c>bxc</c>. See <c>Matcher.InsertBeforeAFailedLookaround</c>.
+    /// </remarks>
+    internal bool SkipLookaroundInsertion;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
+    /// below its minimum error count fails at once, without trying the trailing insertions that
+    /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one
+    /// call, to show that the ledger entry 51 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's forward <c>END_FUZZY</c> checks the minimums (<c>upstream/src/_regex.c</c>:12461)
+    /// before it pushes the frame that offers trailing insertions (:12500-12511), so
+    /// <c>(?:a){1&lt;=e&lt;=2}b</c> finds nothing in 'aab'. See <c>Matcher.InsertionsCanMeetMinimum</c>.
+    /// </remarks>
+    internal bool CheckMinimumBeforeTrailingInsertions;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a repeat's end reads progress as
+    /// upstream does, counting any fuzzy edit, even one since undone, and stopping at the end of the
+    /// slice, instead of the "needed" rule and the repeat memo. The oracle sets it on a pattern it
+    /// compiled for one call, to show that the ledger entry 44 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's rule is <c>upstream/src/_regex.c</c>:12550-12557; under it some patterns loop
+    /// until the backtracking stack is exhausted, which the oracle's own deadline bounds. See
+    /// <c>Matcher.EmptyIterationAdmitted</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool UpstreamEmptyIterations;
 
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
@@ -542,6 +762,7 @@ internal sealed class PatternObject
             ReqOffset = compiled.ReqOffset,
             RequiredChars = reqChars,
             ReqFlags = compiled.ReqFlags,
+            OptionalPassEnds = compiled.OptionalPassEnds.Count == 0 ? null : [.. compiled.OptionalPassEnds],
         };
 
         // Compile the regular expression code to nodes.
@@ -616,6 +837,8 @@ internal sealed class PatternObject
         // Number the nodes, so the matcher can put a node reference on a byte stack where upstream
         // puts a pointer (Node.Index). Last, because the optimiser has by now removed the
         // unreachable nodes from the list and the required-string node has been added to it.
+        bool noNarrowing = false;
+        bool hasPrune = false;
         for (int i = 0; i < self.NodeList.Count; i++)
         {
             self.NodeList[i].Index = i;
@@ -626,12 +849,245 @@ internal sealed class PatternObject
             {
                 self.HasSkipVerb = true;
             }
+
+            // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
+            Node node = self.NodeList[i];
+            if (
+                node.Op == Opcode.Fuzzy
+                && (
+                    node.Values[FuzzyValue.MinSub] > 0
+                    || node.Values[FuzzyValue.MinIns] > 0
+                    || node.Values[FuzzyValue.MinDel] > 0
+                    || node.Values[FuzzyValue.MinErr] > 0
+                )
+            )
+            {
+                self.HasFuzzyMinimum = true;
+            }
+
+            if (node.Op == Opcode.Prune || (node.Op == Opcode.Fuzzy && node.Next2.Node is not null))
+            {
+                noNarrowing = true;
+            }
+
+            // NOT UPSTREAM (the failed-call memo): see UseCallMemo.
+            hasPrune |= node.Op == Opcode.Prune;
+            if (node.Op == Opcode.GroupCall)
+            {
+                ++self.GroupCallSites;
+            }
+        }
+
+        self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+        if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)
+        {
+            self.ExactDeletionCeiling = DeletionCeiling(self);
+        }
+
+        // NOT UPSTREAM (the failed-call memo): see UseCallMemo.
+        self.UseCallMemo =
+            self.GroupCallSites > 0
+            && !self.WritesInDiscardingConstruct
+            && !self.KeepInSubmatch
+            && !hasPrune
+            && !self.HasSkipVerb
+            && (self.Flags & RegexFlags.Posix) == 0;
+
+        // NOT UPSTREAM (empty-iteration rule): the groups a repeat memo key must hold. A key has
+        // room for two spans; with more tested groups the memo is off, which only costs pruning.
+        // SHORTCUT: two tested groups is the ceiling; a pattern with more would need a key that
+        // holds a variable number of spans.
+        var tested = new List<int>();
+        for (int g = 1; g <= self.GroupInfoList.Count; g++)
+        {
+            if (self.GroupInfoList[g - 1].Referenced)
+            {
+                tested.Add(g);
+            }
+        }
+
+        self.UseRepeatMemo = self.IsFuzzy && tested.Count <= 2;
+        self.MemoGroups = [.. tested];
+
+        // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
+        // nodes are numbered, since the walk marks nodes by Node.Index. A run is of fuzzy items, so
+        // an exact pattern has none.
+        if (self.IsFuzzy)
+        {
+            SetFuzzyRunLengths(self);
+        }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
+        if (self.OptionalPassBranches is { } optionalPassBranches)
+        {
+            self.OptionalPassEndOf = new Node?[self.NodeList.Count];
+            foreach ((Node branch, Node passEnd) in optionalPassBranches)
+            {
+                if (branch.Index < self.NodeList.Count && ReferenceEquals(self.NodeList[branch.Index], branch))
+                {
+                    self.OptionalPassEndOf[branch.Index] = passEnd;
+                }
+            }
+
+            self.OptionalPassBranches = null;
         }
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
 
         return self;
+    }
+
+    /// <summary>
+    /// The largest number of deletions any fuzzy section of <paramref name="pattern"/> permits: its
+    /// deletion limit, error limit and cost limit over a deletion's cost, whichever is least.
+    /// </summary>
+    /// <param name="pattern">A compiled pattern.</param>
+    /// <returns>The ceiling for <see cref="ExactDeletionCeiling"/>; 0 with no fuzzy section.</returns>
+    private static long DeletionCeiling(PatternObject pattern)
+    {
+        long ceiling = 0;
+        foreach (Node node in pattern.NodeList)
+        {
+            if (node.Op != Opcode.Fuzzy)
+            {
+                continue;
+            }
+
+            List<uint> values = node.Values;
+            long cap = Math.Min(values[FuzzyValue.MaxBase + FuzzyValue.Del], values[FuzzyValue.MaxErr]);
+            long unitCost = values[FuzzyValue.CostBase + FuzzyValue.Del];
+            if (unitCost > 0)
+            {
+                cap = Math.Min(cap, values[FuzzyValue.MaxCost] / unitCost);
+            }
+
+            ceiling = Math.Max(ceiling, cap);
+        }
+
+        return ceiling;
+    }
+
+    /// <summary>
+    /// Sets <see cref="Node.FuzzyRunLength"/> and <see cref="FuzzyRunExits"/> for every node of a
+    /// compiled pattern.
+    /// </summary>
+    /// <remarks>
+    /// Each node is visited once: a run is a chain by <c>next_1</c>, so the length at a node is its
+    /// own width plus the length at the node after it, which is set first. A run cannot loop back
+    /// on itself, because a repeat's body reaches its repeat's end node, which ends the run; the
+    /// visited marks stop the walk even if it did.
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern, with its nodes numbered.</param>
+    private static void SetFuzzyRunLengths(PatternObject pattern)
+    {
+        var visited = new bool[pattern.NodeList.Count];
+        var chain = new List<Node>();
+
+        foreach (Node start in pattern.NodeList)
+        {
+            // Walk forward to the end of the run, then set the lengths on the way back.
+            chain.Clear();
+            Node? node = start;
+            while (
+                node is not null
+                && node.Index < visited.Length
+                && ReferenceEquals(pattern.NodeList[node.Index], node)
+                && !visited[node.Index]
+                && IsFuzzyRunItem(node)
+            )
+            {
+                visited[node.Index] = true;
+                chain.Add(node);
+                node = node.Next1.Node;
+            }
+
+            if (chain.Count == 0)
+            {
+                continue;
+            }
+
+            int length = 0;
+            Node? exit = SkipTextlessNodes(pattern, node);
+            if (node is not null && IsFuzzyRunItem(node))
+            {
+                // A node outside the list, or one in this chain, has no exit recorded yet.
+                length = node.FuzzyRunLength;
+                exit =
+                    node.Index < visited.Length && ReferenceEquals(pattern.NodeList[node.Index], node)
+                        ? pattern.FuzzyRunExits?[node.Index]
+                        : null;
+            }
+
+            pattern.FuzzyRunExits ??= new Node?[pattern.NodeList.Count];
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                length += RunItemWidth(chain[i]);
+                chain[i].FuzzyRunLength = length;
+                pattern.FuzzyRunExits[chain[i].Index] = exit;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a node is a fuzzy item that consumes exactly one subject character per pattern
+    /// character when it matches: a one-character item, or a case-sensitive or simply case-folded
+    /// string, either way round.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> if the node can be part of a fuzzy run.</returns>
+    private static bool IsFuzzyRunItem(Node node) =>
+        (node.Status & NodeStatus.Fuzzy) != 0
+        && (
+            node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev
+            || NodeQueries.MatchesOneCharacter(node)
+        );
+
+    /// <summary>How many characters a fuzzy run item consumes when it matches exactly.</summary>
+    /// <param name="node">A node <see cref="IsFuzzyRunItem"/> accepts.</param>
+    /// <returns>The string's length, or 1.</returns>
+    private static int RunItemWidth(Node node) =>
+        node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev ? node.Values.Count : 1;
+
+    /// <summary>
+    /// The first node from <paramref name="node"/> on that is not an <c>END_FUZZY</c>, or a
+    /// <c>START_GROUP</c> or <c>END_GROUP</c> of a group nothing tests: nodes that always succeed,
+    /// read no text and leave nothing the rest of the match reads.
+    /// </summary>
+    /// <remarks>
+    /// The boundary of a group a backreference or conditional tests (<see cref="GroupInfo.Referenced"/>)
+    /// is where the walk stops. <c>Matcher.ExactDeletionMayMatch</c> uses the node found here to ask
+    /// whether the character an exact item read can be read after its run, which rests on
+    /// exchanging a trailing insertion at a section's end for the item's own match; across a tested
+    /// group's boundary that exchange moves the group's span and a later backreference can then
+    /// fail. <c>(?:(a)){e&lt;=2}b\1</c> over 'ab' matches only by deleting the fuzzy 'a', so group 1
+    /// is empty, and inserting the 'a' after the group (found by the blind review of af59be7,
+    /// 2026-09-26). A group nothing tests changes only what a match reports, and the exchanged
+    /// match, which would be reported, was found first.
+    /// </remarks>
+    /// <param name="pattern">The pattern, for which groups are tested.</param>
+    /// <param name="node">The node, or <see langword="null"/>.</param>
+    /// <returns>The node, or <see langword="null"/>.</returns>
+    internal static Node? SkipTextlessNodes(PatternObject pattern, Node? node)
+    {
+        // A bound only against a malformed cycle; a real chain of these is short.
+        for (int i = 0; i < 64 && node is not null; i++)
+        {
+            bool textless =
+                node.Op == Opcode.EndFuzzy
+                || (
+                    node.Op is Opcode.StartGroup or Opcode.EndGroup
+                    && !pattern.GroupInfoAt((int)node.Values[0]).Referenced
+                );
+            if (!textless)
+            {
+                break;
+            }
+
+            node = node.Next1.Node;
+        }
+
+        return node;
     }
 
     /// <summary>

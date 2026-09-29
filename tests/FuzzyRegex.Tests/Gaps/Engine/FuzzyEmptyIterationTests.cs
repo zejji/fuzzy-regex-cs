@@ -57,12 +57,16 @@ public sealed class FuzzyEmptyIterationTests
         // V1 search(r'(?:(?:x){d<=1})+y', 'y'): MemoryError.
         // V1 search(r'(?:(?:x){d<=1})+', ''): span=(0, 0) counts=(0, 0, 2) changes=([], [], [0, 1]),
         // upstream's own stop at the end of the slice.
+        // NEEDED RULE (2026-09-26): the answer is the reference matcher's in mode "needed"
+        // (tools/probes/fuzzy-reference-matcher.py), which admits a deleting empty iteration only
+        // when the minimum, a section minimum or a tested group needs it; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
         Match m = new FuzzyRegex(@"(?:(?:x){d<=1})+y", FuzzyRegexOptions.None, _timeout).Match("y");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
-        m.FuzzyChanges.Deletions.Should().Equal(0, 1);
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        m.FuzzyChanges.Deletions.Should().Equal(0);
     }
 
     [Test]
@@ -71,11 +75,15 @@ public sealed class FuzzyEmptyIterationTests
         // V1 search(r'(?r)y(?:(?:x){d<=1})+', 'y'): MemoryError.
         // V1 search(r'(?r)(?:(?:x){d<=1})+y', 'y'): span=(0, 1) counts=(0, 0, 2), where the repeat
         // meets the start of the slice.
+        // NEEDED RULE (2026-09-26): the answer is the reference matcher's in mode "needed"
+        // (tools/probes/fuzzy-reference-matcher.py), which admits a deleting empty iteration only
+        // when the minimum, a section minimum or a tested group needs it; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
         Match m = new FuzzyRegex(@"(?r)y(?:(?:x){d<=1})+", FuzzyRegexOptions.None, _timeout).Match("y");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     [Test]
@@ -85,11 +93,15 @@ public sealed class FuzzyEmptyIterationTests
         // V1 search(r'(?:(?:x){d<=1}){3,}', 'x'): span=(0, 1) counts=(0, 0, 3), the stop at the end
         // of the slice. V1 search(r'(?:(?:x){d<=1}){3,3}y', 'xy') is two deletions; the loop adds
         // one more past the written-out minimum, as '+' does above.
+        // NEEDED RULE (2026-09-26): the answer is the reference matcher's in mode "needed"
+        // (tools/probes/fuzzy-reference-matcher.py), which admits a deleting empty iteration only
+        // when the minimum, a section minimum or a tested group needs it; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
         Match m = new FuzzyRegex(@"(?:(?:x){d<=1}){3,}y", FuzzyRegexOptions.None, _timeout).Match("xy");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
     }
 
     [Test]
@@ -114,10 +126,13 @@ public sealed class FuzzyEmptyIterationTests
         {
             Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout).Match("c");
 
+            // NEEDED RULE: after the c, a pass at the end deletes x and moves group 1 from (0, 0) to
+            // (1, 1), a change to a tested group, so rule (c) admits it; upstream skips it only
+            // because it is at the end of the text. The reference matcher agrees on the first form.
             m.Success.Should().BeTrue();
             (m.Index, m.Length).Should().Be((0, 1));
-            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
-            m.FuzzyChanges.Deletions.Should().Equal(0);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+            m.FuzzyChanges.Deletions.Should().Equal(0, 2);
         }
     }
 
@@ -129,12 +144,14 @@ public sealed class FuzzyEmptyIterationTests
         // outer counts without checking the outer limit, so the outer budget never ends the loop.
         // V1 search(r'(?:(?:(?:x){d<=1})+){e<=5}', ''): span=(0, 0) counts=(0, 0, 2) changes=([], [],
         // [0, 1]), upstream's own stop at the end of the slice, and the answer this gives before 'y'.
+        // NEEDED RULE (2026-09-26): the reference matcher's answer in mode "needed"; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
         Match m = new FuzzyRegex(@"(?:(?:(?:x){d<=1})+y){e<=5}", FuzzyRegexOptions.None, _timeout).Match("y");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
-        m.FuzzyChanges.Deletions.Should().Equal(0, 1);
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        m.FuzzyChanges.Deletions.Should().Equal(0);
     }
 
     [Test]
@@ -149,8 +166,10 @@ public sealed class FuzzyEmptyIterationTests
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 8));
-        m.FuzzyChanges.Deletions.Should().Equal(0, 1, 2, 3, 4, 5, 6, 7);
+        // NEEDED RULE (2026-09-26): the reference matcher's answer in mode "needed"; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        m.FuzzyChanges.Deletions.Should().Equal(0, 1);
     }
 
     [Test]
@@ -167,8 +186,10 @@ public sealed class FuzzyEmptyIterationTests
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
-        m.FuzzyChanges.Deletions.Should().Equal(0, 2, 3);
+        // NEEDED RULE (2026-09-26): the reference matcher's answer in mode "needed"; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        m.FuzzyChanges.Deletions.Should().Equal(0, 2);
     }
 
     [Test]
@@ -182,8 +203,11 @@ public sealed class FuzzyEmptyIterationTests
         foreach (
             (string pattern, string subject, (int, int)? span, int[] deletions) in new[]
             {
-                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$", "c", ((int, int)?)(1, 0), new[] { 1 }),
-                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})+d", "cd", (1, 1), new[] { 1, 2 }),
+                // NEEDED RULE: an iteration through (?1) changes no tested group, so past the
+                // minimum its deletion is not admitted: no deletion in the first row, one in the
+                // second (its '+' needs one iteration).
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$", "c", ((int, int)?)(1, 0), Array.Empty<int>()),
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})+d", "cd", (1, 1), new[] { 1 }),
                 (@"(?(DEFINE)(()))(?:(?1)(?:x){d<=1})+\2d", "d", null, []),
             }
         )
@@ -203,11 +227,13 @@ public sealed class FuzzyEmptyIterationTests
     public void A_bounded_repeat_keeps_upstreams_answer()
     {
         // V1 search(r'(?:(?:x){d<=1}){1,3}y', 'y'): span=(0, 1) counts=(0, 0, 3)
+        // NEEDED RULE (2026-09-26): the reference matcher's answer in mode "needed"; see
+        // FuzzyNeededEmptyIterationTests. Upstream's answers are quoted as they were measured.
         Match m = new FuzzyRegex(@"(?:(?:x){d<=1}){1,3}y", FuzzyRegexOptions.None, _timeout).Match("y");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.

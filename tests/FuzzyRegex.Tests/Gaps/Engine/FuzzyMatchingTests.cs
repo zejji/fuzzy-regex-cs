@@ -201,6 +201,114 @@ public sealed class FuzzyMatchingTests
             .BeFalse();
     }
 
+    // Ledger entry 48: `\G` inside a fuzzy section. `\G` holds only at the search anchor - the
+    // position the search started from, not each candidate start - which PCRE2 10.47, .NET 10 and
+    // upstream's own exact matcher all agree on (tools/probes/search-anchor-survey, 2026-09-27).
+    // An error cannot make a zero-width assertion true: deletion and substitution need a character
+    // to act on, and an insertion only moves the position further from the anchor. So a fuzzy `\G`
+    // means what an exact one means. Upstream agrees wherever `\G` holds, but where it fails and the
+    // insertion taken past it is later backtracked over, upstream raises "RuntimeError: invalid RE
+    // code", because its backtrack switch has no SEARCH_ANCHOR arm (upstream/src/_regex.c:15330-15344
+    // lists every other zero-width opcode). Every assertion below that goes through that backtrack is
+    // this port's answer, argued from the rule above; upstream's is quoted beside it.
+
+    [Test]
+    public void A_search_anchor_inside_a_called_group_in_a_fuzzy_section_is_answered()
+    {
+        // `\G` holds only at the search anchor, 0 here, where the text is 'z', so the exact tail
+        // `(?:x|(\Gab))` matches nowhere and nothing can match.
+        // regex: RuntimeError: invalid RE code (matrix wave rows 7:52 and six more, 2026-09-27)
+        new FuzzyRegex(@"(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))")
+            .Match("zab")
+            .Success.Should()
+            .BeFalse();
+    }
+
+    [Test]
+    public void A_search_anchor_that_fails_in_a_fuzzy_section_is_backtracked_over()
+    {
+        // 'a' leaves the position at 1, where `\G` fails; an insertion moves it to 2, where it fails
+        // again, and backtracking has to undo that insertion. Nothing else can match.
+        // regex.match(r'(?:a\G){i<=1}', 'ab'): RuntimeError: invalid RE code
+        new FuzzyRegex(@"(?:a\G){i<=1}")
+            .MatchAtStart("ab")
+            .Success.Should()
+            .BeFalse();
+
+        // The same dead end in the first branch, then the second branch matches exactly. The answer
+        // is the same under all three operations, because the match starts at the anchor and ends at
+        // the end of the text.
+        // regex.search / match / fullmatch(r'(?:a\Gb|ab){i<=1}', 'ab'): RuntimeError: invalid RE code
+        FuzzyRegex pattern = new(@"(?:a\Gb|ab){i<=1}");
+
+        foreach (Match m in new[] { pattern.Match("ab"), pattern.MatchAtStart("ab"), pattern.FullMatch("ab") })
+        {
+            (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+        }
+    }
+
+    [Test]
+    public void A_search_anchor_in_a_fuzzy_section_holds_at_the_start_position_it_was_given()
+    {
+        // With the search starting at 1, the anchor is 1. The first branch fails as above; the
+        // second holds `\G` at 1 and matches 'ab' there.
+        // regex.search(r'(?:a\Gb|\Gab){i<=1}', 'zab', pos=1): RuntimeError: invalid RE code
+        Match m = new FuzzyRegex(@"(?:a\Gb|\Gab){i<=1}").Match("zab", 1);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void A_reversed_search_anchor_in_a_fuzzy_section_holds_at_the_end()
+    {
+        // A reversed search starts at the end, 3, so that is the anchor. The first branch reaches its
+        // `\G` last, at 1, where it fails, and an insertion to 0 fails it again. The second branch
+        // tests `\G` first, at 3, where it holds, and then matches 'b' and 'a' leftwards.
+        // regex.search(r'(?r)(?:\Gab|ab\G){i<=1}', 'xab'): RuntimeError: invalid RE code
+        Match m = new FuzzyRegex(@"(?r)(?:\Gab|ab\G){i<=1}").Match("xab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void An_insertion_may_follow_a_search_anchor_that_holds_in_a_fuzzy_section()
+    {
+        // The control, which upstream answers: `\G` holds at 0 and 'b' fails there, so one inserted
+        // character puts 'b' at 1.
+        // regex.match(r'(?:\Gb){i<=1}', 'ab'): span=(0, 2) counts=(0, 1, 0) changes=([], [0], [])
+        Match control = new FuzzyRegex(@"(?:\Gb){i<=1}").MatchAtStart("ab");
+
+        (control.Success, control.Index, control.Length).Should().Be((true, 0, 2));
+        control.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        control.FuzzyChanges.Insertions.Should().Equal(0);
+
+        // The same insertion after the first branch's `\G` has failed and been backtracked over.
+        // regex.match(r'(?:a\G|\Gb){i<=1}', 'ab'): RuntimeError: invalid RE code
+        Match m = new FuzzyRegex(@"(?:a\G|\Gb){i<=1}").MatchAtStart("ab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        m.FuzzyChanges.Insertions.Should().Equal(0);
+    }
+
+    [Test]
+    [Arguments("(?b)")]
+    [Arguments("(?e)")]
+    public void A_failed_search_anchor_in_a_fuzzy_section_is_backtracked_over_under_a_best_match_flag(string flag)
+    {
+        // BESTMATCH and ENHANCEMATCH go on looking after the first match, so they backtrack over
+        // every frame the first attempt left, the failed `\G`'s among them. The only match is the
+        // one above: no start after 0 can hold `\G`.
+        // regex.match(flag + r'(?:a\G|\Gb){i<=1}', 'ab'): RuntimeError: invalid RE code
+        Match m = new FuzzyRegex(flag + @"(?:a\G|\Gb){i<=1}").MatchAtStart("ab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    }
+
     [Test]
     public void A_reverse_fuzzy_match_records_the_position_after_the_character_it_changed()
     {

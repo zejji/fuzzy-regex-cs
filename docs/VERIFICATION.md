@@ -53,8 +53,8 @@ design spec section 8 and amendments 9-10.
     so the assertions fire. An assumption that cannot be asserted gets a witness test instead.
 11. **A grid is green only if it could have gone red.** For every construct the change reads - each
     key field, each exclusion, each listed assumption - the grid reports how many rows had that
-    construct present AND the new mechanism active. A zero means the grid is blind to it, not that
-    it is safe: extend the grammar or write the row by hand, then rerun.
+    construct present AND the new mechanism active. A zero means the grid is blind to it and proves
+    nothing about it: extend the grammar or write the row by hand, then rerun.
 12. **Every part is justified before the first commit, by the builder.** Each key field, exclusion,
     guard and prune has either a witness test that goes red when the part is removed, or a written
     argument with `file:line` that no witness can exist. "None found yet" is neither; it is an

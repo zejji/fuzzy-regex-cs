@@ -237,6 +237,11 @@ public sealed class FuzzyRegex
     /// order. The oracle sets it to show that ledger entry 43 is the whole of a divergence; see
     /// <see cref="Parsing.Info.UpstreamReverseGrapheme"/>.
     /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// NOT UPSTREAM, and never set by this library: compile a fuzzy full-case-folded run to its
+    /// folding alone, as upstream does. The oracle sets it to show that ledger entry 49 is the whole
+    /// of a divergence; see <see cref="Parsing.Info.UpstreamFoldedRuns"/>.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(
         string pattern,
@@ -244,7 +249,8 @@ public sealed class FuzzyRegex
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
         int defaultVersion,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     ) =>
         new(
             pattern,
@@ -253,7 +259,8 @@ public sealed class FuzzyRegex
             namedLists,
             defaultVersion,
             DefaultMaxCompiledNodes,
-            upstreamReverseGrapheme
+            upstreamReverseGrapheme,
+            upstreamFoldedRuns
         );
 
     /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
@@ -267,6 +274,7 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
     /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
@@ -274,7 +282,8 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
         int defaultVersion,
         int maxCompiledNodes,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
@@ -291,7 +300,8 @@ public sealed class FuzzyRegex
             (int)options,
             ToCompilerNamedLists(namedLists),
             defaultVersion,
-            upstreamReverseGrapheme
+            upstreamReverseGrapheme,
+            upstreamFoldedRuns
         );
 
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
@@ -357,6 +367,16 @@ public sealed class FuzzyRegex
     /// <summary>
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
     /// </summary>
+    /// <remarks>
+    /// Set one when a pattern mixes fuzzy sections with recursion (<c>(?R)</c>, <c>(?1)</c>,
+    /// <c>(?&amp;name)</c>). The engine remembers recursive calls that failed, which keeps most such
+    /// patterns fast, but a call that succeeds and whose caller then fails is tried again under
+    /// every way of reaching it, and some patterns of that shape take time exponential in the
+    /// length of the text. The timeout is their bound: a call that runs out of time throws
+    /// <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> and never returns a
+    /// wrong answer. Upstream raises <c>MemoryError</c> on these patterns. See the fuzzy recursion
+    /// row of <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
     public TimeSpan MatchTimeout { get; }
 
     /// <summary>

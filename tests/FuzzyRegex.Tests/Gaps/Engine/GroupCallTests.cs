@@ -702,19 +702,32 @@ public sealed class GroupCallTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_nested_call_that_reaches_no_further_is_still_refused()
     {
         // The genuinely infinite shapes: the inner call of G at 0 is made with nothing reached
         // since the outer one opened, so it can only repeat the outer call's failure one level
         // deeper, for ever. PCRE2 10.47's interpreter raises "nested recursion at the same subject
         // position" on every row (2026-09-27); upstream raises MemoryError. The guard fails the
-        // path, so each answers no match, and quickly: the budget is a tenth of a second.
-        TimeSpan tight = TimeSpan.FromMilliseconds(100);
+        // path, so each answers no match, and quickly. "Quickly" is counted in engine steps rather
+        // than as a tenth of a second, because a busy machine is not a slow engine (D13): the four
+        // calls take 16 to 333 steps each (Debug, 2026-09-28).
+        TimeSpan guard = EngineWork.HangGuard;
 
-        new FuzzyRegex("(?:|(?R)a)", FuzzyRegexOptions.None, tight).FullMatch("b").Success.Should().BeFalse();
-        new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, tight).Match("b").Success.Should().BeFalse();
-        new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, tight).Match("aaaaaaaab").Success.Should().BeFalse();
-        new FuzzyRegex("(?:(?R))", FuzzyRegexOptions.None, tight).Match("ab").Success.Should().BeFalse();
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                new FuzzyRegex("(?:|(?R)a)", FuzzyRegexOptions.None, guard).FullMatch("b").Success.Should().BeFalse();
+                new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, guard).Match("b").Success.Should().BeFalse();
+                new FuzzyRegex("^(?<g>|(?&g)a)$", FuzzyRegexOptions.None, guard)
+                    .Match("aaaaaaaab")
+                    .Success.Should()
+                    .BeFalse();
+                new FuzzyRegex("(?:(?R))", FuzzyRegexOptions.None, guard).Match("ab").Success.Should().BeFalse();
+            },
+            100_000,
+            "the guard fails each repeated call at once"
+        );
     }
 
     [Test]

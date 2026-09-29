@@ -151,8 +151,9 @@ Console.WriteLine((m.Index, m.Length));   // (6, 7)
 
 ### `{0<e<5}`: two-sided form, at least one error and fewer than five
 
-Reads as a range on the total error count, so an exact match is rejected as firmly as one with too
-many errors.
+Reads as a range on the total error count, so a match with no errors is rejected as firmly as one
+with too many. An exact occurrence can still match with one error, by leaving out its last letter;
+Python's `regex` answers None there, which this port treats as a bug (`docs/DIVERGENCES.md`).
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -161,7 +162,7 @@ Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection)
 Console.WriteLine((fuzzy.Index, fuzzy.Length));   // (0, 16)
 
 Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}");
-Console.WriteLine(exact.Success);   // False
+Console.WriteLine((exact.Index, exact.Length, exact.FuzzyCounts.Deletions));   // (0, 16, 1)
 ```
 
 ### `{e<=n:[set]}`: constrain which characters an edit may touch
@@ -419,6 +420,26 @@ final form `ς` here and does not there, and that pairing survives both `(?V0)` 
 folding itself belongs to version 1, so either of those turns it off and leaves single-character
 folding behind. The Turkic `I` pairings are the one fold upstream applies that this port does not;
 see "**The Turkic `I` pairings are not applied by default**" below.
+
+### A repeat pass that matched nothing but changed a tested group goes round again
+
+Every backtracking engine stops a repeat whose pass matched no text, or `(a?)*` would loop for
+ever. The built-in engine, like Perl and PCRE2, looks only at the position: a pass that read nothing
+ends the repeat. Here, as upstream, a pass that read nothing but changed a group that a conditional
+or backreference later tests counts as progress, because the next pass can now match something the
+first could not.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Pass 1 cannot read 'c' (group 1 unset), so it sets group 1 and reads nothing; pass 2 reads 'c'.
+Console.WriteLine(FuzzyRegex.Match("c", @"^(?:(?(1)c|z)|())*$").Success);   // True
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("c", @"^(?:(?(1)c|z)|())*$"));   // False - the repeat stops after pass 1
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("c", @"^(?:(?(1)c|z)|()){2,}$"));   // True - so there, {2,} matches what * does not
+```
+
+The rule keeps `X*` matching everything `X{2,}` matches, which position-only checking does not.
+The survey and the reasoning are in `docs/plan/2026-09-26-empty-iteration-survey.md` (D12).
 
 ## Behaviour that differs and why
 
@@ -827,13 +848,16 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success);  
 Under `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}` and `\p{Lower}` mean "any cased letter"
 wherever they appear, which is what Perl and .NET's `Regex` do. Upstream uses that rule for a bare
 property and a different one inside a set, so wrapping a property in brackets changed its answer.
-`\p{Upper=No}` is the complement of `\p{Upper}`.
+It also changes when the property can start the match after an optional item, because upstream
+then checks each start position against a set of the possible first items. `\p{Upper=No}` is
+the complement of `\p{Upper}`.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 Console.WriteLine(FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success);  // True - upstream's set form refuses
 Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success);     // False - upstream matches
+Console.WriteLine(FuzzyRegex.Match("\u2102aa", @"(?i)\p{Ll}?a{2}", FuzzyRegexOptions.Version0).Index);  // 0 - upstream: 1, skipping U+2102
 ```
 
 ### A case-insensitive set matches each member first, then combines them
@@ -868,7 +892,7 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // T
 `(?i)(?a:k)` means exactly what `(?ai)k` means, for every construct whose answer depends on the
 encoding: case-insensitive letters, ranges, sets, backreferences and named lists, fuzzy matching,
 `\m` and `\M`, the `(?w)` word and line rules, `\X`, and full case folding. So under ASCII rules the
-Kelvin sign U+212A is not a 'k', whether ASCII is set for the whole pattern or only for a group.
+Kelvin sign U+212A never matches 'k', whether ASCII is set for the whole pattern or only for a group.
 Python's `re` and Perl answer this way. Upstream applies a scoped encoding only to `\p{...}`
 properties and `\b`, and reads the pattern's encoding everywhere else.
 
@@ -989,6 +1013,29 @@ using Fuzzy.Text.RegularExpressions;
 
 Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
 Console.WriteLine((m.Index, m.Length));   // (0, 4)
+```
+
+### A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay exponential, and `MatchTimeout` is their bound
+
+When a recursive call runs out of choices without ever returning, the engine remembers what the
+call could see when it started - its position, its error budget and a little more - and fails any
+later call that starts the same way at once. A fuzzy recursive pattern reaches the same call in
+many ways, because the callers spent their errors differently, so this turns searches that took
+minutes into ones that take milliseconds. Upstream raises `MemoryError` on the same patterns.
+
+It does not cover a call that returns and whose caller then fails, so some patterns of that shape
+still take time exponential in the length of the text. Give a pattern that mixes fuzzy sections
+with recursion a `matchTimeout`: a match that runs out of time throws
+`RegexMatchTimeoutException`, and never returns a wrong answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(
+    "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+    FuzzyRegexOptions.None,
+    TimeSpan.FromSeconds(2));
+Console.WriteLine(regex.Match("baxbax").Success);   // False, in milliseconds
 ```
 
 ### In a branch reset, a group never takes a number another group in the same branch will use
@@ -1258,26 +1305,35 @@ Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two s
 upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
 inner `{s<=1}` removed. There is no option to restore the upstream answer.
 
-### A greedy repeat with no maximum stops at a fuzzy iteration that only deleted
+### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
-A fuzzy group inside a repeat can match by deleting its whole body, without moving through the
-text. Upstream counts each such pass as progress and, with no maximum, goes round until it runs out
-of memory. Here the repeat stops at the first such pass once it has its minimum, which is what
-upstream already does when the pass happens at the end of the text.
+Inside a repeat, a fuzzy pattern can match nothing at all by leaving out every character of the
+body, at one deletion each. Upstream counts each such pass as progress, so a greedy repeat takes as
+many of them as its budget allows before a character it cannot match, except at the end of the
+text; and where a fuzzy group inside the repeat gets a fresh budget on every pass, it goes round
+until it runs out of memory. Here such a pass is taken only when something needs it: the repeat's
+minimum count, a minimum error count that its deletions raise, or a group that the pattern tests
+later. Everything else is unchanged, including a pass that matches nothing without an error.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-// Two passes delete the x, then the y matches.
-var loop = new FuzzyRegex("(?:(?:x){d<=1})+y");
-Match m = loop.Match("y");
-Console.WriteLine(m.FuzzyCounts.Deletions);   // 2 - upstream: MemoryError
+// The digits match exactly; nothing needs the two passes that leave out a digit.
+Match digits = FuzzyRegex.Match("42kg", "(?:[0-9]+){d<=2}");
+Console.WriteLine(digits.FuzzyCounts.Deletions);   // 0 - upstream: 2 (and 0 over "42")
+
+// "At least one deletion": one pass after 42 leaves out a digit.
+Match needed = FuzzyRegex.Match("42", "(?:[0-9]+){1<=d<=2}");
+Console.WriteLine((needed.Index, needed.Length, needed.FuzzyCounts.Deletions));   // (0, 2, 1) - upstream: (1, 1, 1)
+
+// The + needs one pass, which leaves out the x; then y matches.
+Match loop = FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y");
+Console.WriteLine(loop.FuzzyCounts.Deletions);   // 1 - upstream: MemoryError
 ```
 
-Upstream gives two deletions for `(?:(?:x){d<=1})+` over the empty string. A repeat with a maximum,
-such as `{1,3}`, keeps upstream's answer, and so does a repeat whose body holds a capture group,
-since a pass that sets a group can change what the next pass matches. There is no option to
-restore the upstream behaviour.
+The rule, the alternatives, what other engines do and the evidence are in
+`docs/plan/2026-09-26-empty-iteration-survey.md`. There is no option to restore the upstream
+behaviour. Ledger entries 33 and 44.
 
 ### A literal under a scoped `(?i:...)` is found in text that holds only its full case folding
 
@@ -1299,8 +1355,8 @@ A lazy repeat such as `[^k]??` first tries to match nothing, then one character.
 version 1 the literal after it is matched with full folding, and upstream, looking ahead for that
 literal, stops reading at the last position the repeat can reach. A literal that starts there is
 never read to its end, so the match at the start of the text is lost and the search reports a later
-one or none at all. Upstream finds the match in version 0, which folds simply, and with a greedy
-repeat. Python's `re` and Perl agree with this port.
+one or none at all. Upstream finds the match in version 0, which uses simple case folding, and with
+a greedy repeat. Python's `re` and Perl agree with this port.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -1450,6 +1506,162 @@ Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); /
 
 A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
 Boost; PCRE2 alone makes the call fail instead.
+
+### A fuzzy item that matched exactly can still be deleted, and that choice comes before any earlier one
+
+A deletion leaves a pattern character out of the match. Upstream tries that only for a character
+that failed to match: when a fuzzy character matches and something after it then fails, leaving it
+out is never tried, so a match within the budget is missed. Here the choice is tried as soon as
+everything after the exact match has failed, before going back to any earlier choice, which is the
+order upstream's own README gives for `(?:cats|cat){e<=1}`.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Leaving out the fuzzy a is one deletion, within d<=1.
+Match m = FuzzyRegex.MatchAtStart("a", "(?:a){d<=1}a");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Deletions));   // (0, 1, 1) - upstream: no match
+
+// At 0 the match leaves out the b that matched; upstream skips it and answers (3, 3), the exact abb.
+Match first = FuzzyRegex.Match("abxabb", "(?:ab){d<=1}b");
+Console.WriteLine((first.Index, first.Length));   // (0, 2) - upstream: (3, 3)
+
+// The first branch, with its a left out, comes before the second branch.
+Match branch = FuzzyRegex.Match("ab", "(?:(?:a){d<=1}ab|a)");
+Console.WriteLine((branch.Index, branch.Length));   // (0, 2) - upstream: (0, 1)
+```
+
+Upstream finds such a match when the character happens to fail first: `(?:a|b){d<=1}a` matches
+`a`, because its `b` branch fails and tries the deletion. There is no option to restore the
+upstream answer. Ledger entry 42.
+
+### A `\G` inside a fuzzy section is answered where upstream raises an error
+
+`\G` holds only where the search started. An error cannot make it true, so inside a fuzzy section
+it means what it means outside one. When a `\G` fails there, the matcher may try an insertion after
+it, and if that insertion later has to be undone, upstream stops with `RuntimeError: invalid RE
+code` instead of answering. This port answers.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The first branch fails its \G at 1; the second holds it at 0 and inserts 'a' before 'b'.
+Console.WriteLine(new FuzzyRegex(@"(?:a\G|\Gb){i<=1}").MatchAtStart("ab").Length); // 2 - upstream: RuntimeError
+Console.WriteLine(new FuzzyRegex(@"(?:a\G){i<=1}").MatchAtStart("ab").Success);    // False - upstream: RuntimeError
+```
+
+### A fuzzy run can edit `ß` or a ligature as one character
+
+Under full case folding `ß` matches `ss`, and a fuzzy section can also treat it as the one character
+it is: substitute it with one other character, or delete it. Upstream allows that only when the `ß`
+stands alone. Written next to other letters, it becomes its two-letter folding, and replacing it
+costs two edits. This port treats both the same way.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ß){s<=1}x").Match("ax").Length); // 2 - upstream: 2
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){s<=1}").Match("ax").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){d<=1}").Match("x").Length);  // 1 - upstream: no match
+```
+
+### A lookaround that fails inside a fuzzy section can be passed by inserting a text character in front of it
+
+An insertion is a text character the pattern does not account for. Upstream lets one stand in front
+of a failing `\b` or `$`, which moves the assertion one character on, but never in front of a
+failing lookaround. Here a lookaround is treated like every other zero-width assertion: when it
+fails, one inserted character is tried in front of it and the lookaround is tried again.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The inserted x puts the lookahead in front of the c.
+Match m = FuzzyRegex.Match("bxc", "(?:b(?=c)){i<=1}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 2, 1) - upstream: no match
+
+// With any error allowed, the insertion at 0 comes before upstream's substitution at 1.
+Match e = FuzzyRegex.Match("bxc", "(?:b(?=c)){e<=1}");
+Console.WriteLine((e.Index, e.Length));   // (0, 2) - upstream: (1, 1)
+```
+
+Negative lookarounds and lookbehinds work the same way. A lookaround can still be neither
+substituted nor deleted, since it matches no character. There is no option to restore the upstream
+answer. Ledger entry 50.
+
+### A fuzzy section's minimum error count can be met by a text character inserted after its last item
+
+A constraint such as `{1<=e<=2}` asks for at least one error. When the section's text matches
+exactly, upstream fails it at the section's end without trying the one error still open to it: a
+text character inserted after the last item. It finds that insertion after a string of two or more
+characters, but not after a single character or a class. Here the minimum is checked after the
+trailing insertions, so both find it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The second 'a' is the inserted character that meets the minimum.
+Match m = FuzzyRegex.MatchAtStart("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 3, 1) - upstream: no match
+
+// A search now finds that match at 0, before upstream's deletion at 2.
+Match s = FuzzyRegex.Match("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
+```
+
+A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
+neither. There is no option to restore the upstream answer. Ledger entry 51.
+
+### A fuzzy run can edit an expanding subject character as one character
+
+The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a
+combining caron, and upstream edits a folding one folded character at a time, so replacing a letter
+of a run with `ǰ` costs two edits, although it costs one where the fuzzy section covers only that
+letter. This port also lets the run substitute or insert the whole subject character.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:s){s<=1}sx").Match("ǰsx").Length);  // 3 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ssx){s<=1}").Match("ǰsx").Length);  // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?fi)(?:fst){i<=1}").FullMatch("fßst").Length); // 4 - upstream: no match
+```
+
+A fuzzy backreference edits its subject the same way. Upstream edits one fine, for example
+substituting `a` for a letter of the group, but not `ǰ`:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxas").Length); // 5 - upstream: 5
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxǰs").Length); // 5 - upstream: no match
+```
+
+So does a captured character that expands. Upstream edits the literal `ß` as one character, but
+the same `ß` captured by the group costs two edits:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:ß){s<=1}").FullMatch("ßxa").Length);  // 3 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:\1){s<=1}").FullMatch("ßxa").Length); // 3 - upstream: no match
+```
+
+### `BestMatch` keeps a fit that ends in trailing insertions
+
+`(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
+Upstream can lose a match whose best fit ends in inserted characters, because the check that
+allows one more trailing insertion counts the errors made so far twice. The match is lost
+wherever the fit has to reach the end of the text: `FullMatch`, or a pattern ending in `$`. This
+port counts each error once, so it answers what upstream answers without the flag.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'b' matches the first character and the other two are insertions.
+Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}").FullMatch("bba").Length);      // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}$").MatchAtStart("bba").Length);  // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?:b){e<=2}").FullMatch("bba").Length);          // 3 - upstream: 3
+```
 
 ### Inherited upstream bugs are fixed here
 

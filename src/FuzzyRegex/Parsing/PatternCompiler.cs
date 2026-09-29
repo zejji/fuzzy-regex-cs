@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -63,18 +65,29 @@ internal static class PatternCompiler
     /// <param name="upstreamReverseGrapheme">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamReverseGrapheme"/>.
     /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFoldedRuns"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
         int flags = 0,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
         int defaultVersion = DefaultVersion,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         try
         {
-            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion, upstreamReverseGrapheme);
+            return CompileUnderVersion(
+                pattern,
+                flags,
+                namedLists,
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns
+            );
         }
         catch (FuzzyRegexParseException unterminated)
             when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
@@ -158,7 +171,8 @@ internal static class PatternCompiler
         int flags,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
         int defaultVersion,
-        bool upstreamReverseGrapheme = false
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -183,6 +197,7 @@ internal static class PatternCompiler
                 {
                     GuessEncoding = guessEncoding,
                     UpstreamReverseGrapheme = upstreamReverseGrapheme,
+                    UpstreamFoldedRuns = upstreamFoldedRuns,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -309,6 +324,20 @@ internal static class PatternCompiler
         // Flatten the code into a list of ints.
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
+        // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
+        // None in most patterns, so the list is made only for the first.
+        List<int>? optionalPassEnds = null;
+        int offset = 0;
+        foreach (uint[] word in code)
+        {
+            if (ReferenceEquals(word, Branch.OptionalPassEndWord))
+            {
+                (optionalPassEnds ??= []).Add(offset);
+            }
+
+            offset += word.Length;
+        }
+
         if (!parsed.HasSimpleStart())
         {
             // Get the first set, if possible.
@@ -318,12 +347,21 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
+                if (optionalPassEnds is not null)
+                {
+                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                }
             }
             catch (FirstSetErrorException)
             {
                 // No usable first set; the engine simply scans from every position.
             }
         }
+
+        Debug.Assert(
+            optionalPassEnds is null || optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            "every recorded offset is a NEXT word"
+        );
 
         // NOT PORTED: index_group, which CompiledPattern derives from GroupIndex on demand.
 
@@ -337,7 +375,10 @@ internal static class PatternCompiler
             reqChars,
             reqFlags,
             info.GroupCount
-        );
+        )
+        {
+            OptionalPassEnds = optionalPassEnds ?? [],
+        };
     }
 
     /// <summary>

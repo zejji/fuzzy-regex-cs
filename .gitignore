@@ -85,3 +85,4 @@ ORCHESTRATOR-PROMPT.md
 # how a layout claim gets proved, and the evidence it drops must not fail the slice
 # (S73, 2026-09-19).
 .playwright-mcp/
+tools/probes/empty-iteration-survey/needed_counts.tsv

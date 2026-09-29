@@ -562,10 +562,15 @@ public sealed class FuzzyCountsAndChangesTests
             FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline
         ).Match(subject, partial: true);
 
+        // Moved by the empty-iteration rule (2026-09-26), which no longer counts undone edits as a
+        // repeat's progress: the partial now starts at 0, where it was (2, 4) with (2, 0, 0) and
+        // substitutions at 2 and 5. The point of the row, that the changes agree with the counts,
+        // holds either way.
         astral.PartialMatch.Should().BeTrue();
-        (astral.Index, astral.Length).Should().Be((2, 4));
-        astral.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
-        astral.FuzzyChanges.Substitutions.Should().Equal(2, 5);
+        (astral.Index, astral.Length).Should().Be((0, 6));
+        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        astral.FuzzyChanges.Substitutions.Should().Equal(0);
+        astral.FuzzyChanges.Insertions.Should().Equal(2);
         AssertChangesAgreeWithCounts(astral);
     }
 

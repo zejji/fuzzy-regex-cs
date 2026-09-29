@@ -306,6 +306,24 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// <param name="node">The node to push, or <see langword="null"/> for upstream's <c>NULL</c>.</param>
     internal void PushNode(Node? node) => PushSize(node?.Index ?? _nullNode);
 
+    /// <summary>
+    /// NOT UPSTREAM: the value <see cref="PushSize"/> wrote at <paramref name="offset"/>, read in
+    /// place. The caller must know a value was pushed there; see <c>MatchState.TryOuterSection</c>.
+    /// </summary>
+    /// <param name="offset">The byte offset of the value, below <see cref="Count"/>.</param>
+    /// <returns>The value.</returns>
+    internal long SizeAt(int offset) => MemoryMarshal.Read<long>(_storage.AsSpan(offset, sizeof(long)));
+
+    /// <summary>NOT UPSTREAM: the node <see cref="PushNode"/> wrote at <paramref name="offset"/>.</summary>
+    /// <param name="pattern">The pattern whose nodes the index is into.</param>
+    /// <param name="offset">The byte offset of the value, below <see cref="Count"/>.</param>
+    /// <returns>The node, or <see langword="null"/>.</returns>
+    internal Node? NodeAt(PatternObject pattern, int offset)
+    {
+        long index = SizeAt(offset);
+        return index == _nullNode ? null : pattern.NodeList[(int)index];
+    }
+
     /// <summary>Upstream <c>pop_pointer</c> (line 2645), for a node.</summary>
     /// <param name="pattern">The pattern whose <see cref="PatternObject.NodeList"/> the index is into.</param>
     /// <param name="node">Receives the node, or <see langword="null"/> for upstream's <c>NULL</c>.</param>

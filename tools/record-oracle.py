@@ -60,7 +60,13 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = REPO_ROOT / "TestResults" / "oracle" / "wave.jsonl"
+
+# .scratch/, not TestResults/oracle/wave.jsonl: that path is what tools/run-oracle.ps1 has a
+# running oracle read while it compares (via FUZZYREGEX_ORACLE_WAVE_PATH), and a bare, ad hoc
+# invocation of this recorder used to write straight into it - replacing a running oracle's wave
+# out from under its own consumer (D20, docs/KNOWN-DEFECTS.md). Point an ad hoc recording at a
+# specific file with --output when it needs to feed a consumer.
+DEFAULT_OUTPUT = REPO_ROOT / ".scratch" / "oracle" / "wave.jsonl"
 
 # Upstream never published the pinned release to PyPI, so a dev machine's `pip install regex`
 # gives the previous one. The changelog delta between them is the single line "Support Python
@@ -6762,6 +6768,8 @@ def _generate_matrix(rng: random.Random, count: int):
         flags = rng.sample(MATRIX_INLINE_FLAGS, rng.choice((0, 1, 1, 2)))
         if "b" in flags and "e" in flags:
             flags.remove("e")
+        if _has_weighted_cost(fragment):
+            flags = [f for f in flags if f not in ("b", "e")]
         pattern = "".join(f"(?{f})" for f in flags) + fragment
 
         length = rng.randrange(MAX_MATRIX_SUBJECT_LENGTH + 1)
