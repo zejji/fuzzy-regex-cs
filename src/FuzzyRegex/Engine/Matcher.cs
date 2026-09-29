@@ -55,14 +55,6 @@ internal struct FuzzyData
     internal bool PermitInsertion;
 
     /// <summary>
-    /// NOT UPSTREAM (D22): whether a whole-character insertion may be tried in a <c>REF_GROUP_FLD</c>
-    /// attempt. It is <see cref="PermitInsertion"/> except on a retry, where upstream spells its own
-    /// rule so that it always holds at the start of a forward folding (:11019); the whole insertion
-    /// keeps the rule every other site applies (<c>Matcher.PermitInsertionInFold</c>).
-    /// </summary>
-    internal bool PermitWholeInsertion;
-
-    /// <summary>
     /// Upstream <c>new_string_pos</c>: how far into the item the comparison has got. For a
     /// <c>STRING*</c> node that is an index into the node's values; for a <c>REF_GROUP*</c> node it
     /// is a position in the subject, which is what <see cref="StringPosIsText"/> distinguishes.
@@ -5276,13 +5268,12 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="data">The attempt; its folded position moves past the whole folding.</param>
-    /// <param name="permitted">Whether an insertion may be made here at all.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    private static int WholeFoldedCharInsertion(MatchState state, ref FuzzyData data, bool permitted)
+    private static int WholeFoldedCharInsertion(MatchState state, ref FuzzyData data)
     {
         Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
 
-        if (!permitted || !FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+        if (!data.PermitInsertion || !FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
         {
             return MatchStatus.Failure;
         }
@@ -5395,7 +5386,7 @@ internal static class Matcher
                 return MatchStatus.Success;
             case FoldWholeIns:
                 // NOT UPSTREAM (D7): could the whole subject character have been inserted?
-                return WholeFoldedCharInsertion(state, ref data, data.PermitInsertion);
+                return WholeFoldedCharInsertion(state, ref data);
             default:
                 return MatchStatus.Failure;
         }
@@ -5404,7 +5395,7 @@ internal static class Matcher
     /// <summary>
     /// Upstream's "an insertion inside a folding is free" rule, spelled out four times
     /// (<c>upstream/src/_regex.c</c> lines 10659-10665, 10761-10767, 10905-10911 and, in a different
-    /// shape, 11019).
+    /// shape, 11019, which this port does not keep; see <see cref="RetryFuzzyMatchGroupFld"/>).
     /// </summary>
     /// <remarks>
     /// Once the comparison is part way through a subject character's folding, the search anchor has
@@ -6025,7 +6016,7 @@ internal static class Matcher
                 return MatchStatus.Success;
             case FoldWholeIns:
                 // NOT UPSTREAM (D22): could the whole subject character have been inserted?
-                return WholeFoldedCharInsertion(state, ref data, data.PermitWholeInsertion);
+                return WholeFoldedCharInsertion(state, ref data);
             default:
                 return MatchStatus.Failure;
         }
@@ -6078,7 +6069,6 @@ internal static class Matcher
         data.FoldChangesStart = foldChangesStart;
         data.FoldEncoding = node.Encoding;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
-        data.PermitWholeInsertion = data.PermitInsertion;
 
         int status = MatchStatus.Failure;
 
@@ -6205,20 +6195,16 @@ internal static class Matcher
         data.FoldChangesStart = foldChangesStart;
         data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
-        // Permit insertion except initially when searching. Upstream spells the folding half of the
-        // rule differently here from the three places PermitInsertionInFold covers (:11019): one
-        // '||' chain, and with no step test, so a reverse retry asks 'folded_pos != folded_len'
-        // where the first attempt would have asked 'folded_pos != 0'. Ported as written.
-        // ...plus the issue 563 and 564 fix, NOT UPSTREAM, exactly as at the other seven sites.
-        data.PermitInsertion =
-            !search
-            || state.TextPos != state.SearchAnchor
-            || AnchorIsPinned(state, data.Step)
-            || data.NewFoldedPos != data.FoldedLen;
-
-        // NOT UPSTREAM (D22): the whole insertion keeps the first attempt's rule. With upstream's
-        // above, '(?fi)(?=.*?(js))(?:\1){i<=1}' searched over 'ǰjs' inserted the ǰ at the anchor.
-        data.PermitWholeInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
+        // Permit insertion except initially when searching.
+        // NOT UPSTREAM (D25): with the first attempt's rule. Upstream spells it here as one '||'
+        // chain ending 'new_folded_pos != folded_len' (:11019), which a forward retry meets at the
+        // start of every folding, where the first attempt asks 'folded_pos != 0'. Upstream never
+        // shows the difference, because its re-entry drops a retried insertion that finishes a
+        // folding (ledger entry 30). With S84's re-entry steps it opened a search with one:
+        // '(?i)(?=.*?(xtj))(?:\1){e<=1}' over 'axtj' retried the substitution at 0 as an
+        // insertion and gave (0, 4), where upstream and the literal give (1, 4). Reversed, the two
+        // rules are the same test. D22's whole insertion shares the rule.
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 

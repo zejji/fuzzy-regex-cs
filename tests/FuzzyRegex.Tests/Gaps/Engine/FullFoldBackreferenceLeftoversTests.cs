@@ -196,6 +196,39 @@ public sealed class FullFoldBackreferenceLeftoversTests
         reverse.FuzzyChanges.Insertions.Should().Equal(3);
     }
 
+    // Known defect D25. Because the retried insertion now steps past the character it inserts,
+    // it has to obey the rule every first attempt obeys: a search does not open a match with an
+    // insertion at its first position, since starting one character later is better. Upstream's
+    // retry writes the rule as 'folded_pos != folded_len' (_regex.c:11019), which forwards holds at
+    // the start of every folding; upstream never showed it, because its re-entry dropped the
+    // insertion. So the substitution a-for-x at 0 was retried as an insertion of the a, and the
+    // search opened at 0 with one edit. Upstream: (1, 4) with no errors for the first two rows,
+    // as for the literal (?i)(?:xtj){e<=1}. The rest are controls that already agreed with the
+    // literal: (?-i) is REF_GROUP; over 'bbxtj' the search anchor stays at 0, so the insertion of
+    // the b at 1 is allowed, and the literal gives (1, 5) with it (upstream's backreference gives
+    // (2, 5), ledger entry 30's dropped insertion); and reversed, upstream's retry rule is the
+    // first attempt's.
+    [Test]
+    [Arguments(@"(?i)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?fi)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?-i)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?fi)(?=.*?(xtj))(?:\1){e<=1}", "bbxtj", 1, 4, 1)]
+    [Arguments(@"(?rfi)(?:\1){e<=1}(?<=(xtj).*)", "xtja", 0, 3, 0)]
+    public void A_retried_insertion_does_not_open_a_search_at_its_anchor(
+        string pattern,
+        string text,
+        int index,
+        int length,
+        int insertions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, insertions, 0));
+    }
+
     [Test]
     public void A_retried_deletion_steps_past_the_deleted_group_character()
     {
