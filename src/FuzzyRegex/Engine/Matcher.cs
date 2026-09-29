@@ -4027,13 +4027,13 @@ internal static class Matcher
     /// A verb's unwinding drops the marks above its target by design (section 4.2). An atomic
     /// group, possessive repeat or <c>\X</c> reaches here only unblocked, with no mark above its
     /// frame (build chunk 4, <see cref="BlockAtomicCut"/>), and so does a <c>(*PRUNE)</c> or
-    /// <c>(*SKIP)</c> (build chunk 5, <see cref="SkipABlockedVerb"/>). For the other cuts
-    /// (lookarounds, conditions' tests) the drop is interim. SHORTCUT: until the cut rule of build
-    /// chunks 6 and 7, those cuts are taken as they were before D11, and a touch mark above one goes
-    /// with the entries it discards. Ceiling: such a cut after a read of the text to come can
-    /// discard an alternative that some continuation needs (the witnesses of those chunks, such as
-    /// T4-T6), which S57d's escalation still answers until chunk 9. Upgrade: the cut rule blocks such a cut instead of
-    /// taking it.
+    /// <c>(*SKIP)</c> (build chunk 5, <see cref="SkipABlockedVerb"/>), and a lookaround's end (build
+    /// chunk 6, <see cref="EndALookaroundInTheSecondPass"/>). For a condition's test the drop is
+    /// interim. SHORTCUT: until the cut rule of build chunk 7, that cut is taken as it was before
+    /// D11, and a touch mark above one goes with the entries it discards. Ceiling: such a cut after a
+    /// read of the text to come can discard an alternative that some continuation needs (rows
+    /// T4-T6), which S57d's escalation still answers until chunk 9. Upgrade: the cut rule blocks such
+    /// a cut instead of taking it.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="count">The new count.</param>
@@ -4312,7 +4312,7 @@ internal static class Matcher
             frame,
             [.. state.Groups.Select(static g => g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1))],
             [.. state.FuzzyCounts],
-            [.. state.FuzzyChanges]
+            (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0 ? [.. state.FuzzyChanges] : []
         );
         if (state.LookaroundSuccesses.Exists(success.SameContinuation))
         {

@@ -40,7 +40,8 @@ internal readonly record struct WMark(int Position, WMarkKind Kind);
 /// <param name="Frame">The backtracking-stack position of the lookaround's frame.</param>
 /// <param name="Captures">Each group's current capture, or (-1, -1) when it has none.</param>
 /// <param name="FuzzyCounts">The fuzzy counts, which count against the enclosing budget (row F1).</param>
-/// <param name="FuzzyChanges">The fuzzy changes, which <c>(?b)</c> and <c>(?e)</c> rank on.</param>
+/// <param name="FuzzyChanges">Under <c>(?b)</c> and <c>(?e)</c>, the fuzzy changes, which they rank
+/// on; otherwise empty, since only the counts reach what follows.</param>
 internal sealed record LookaroundSuccess(
     int Frame,
     GroupSpan[] Captures,

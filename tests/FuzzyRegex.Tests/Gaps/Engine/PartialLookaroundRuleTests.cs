@@ -137,6 +137,26 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
+    /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
+    /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over
+    /// 60 s (measured 2026-09-29, 5.8 s at 20), where it takes under 20,000 steps with it.
+    /// </summary>
+    // Upstream answers None too.
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_lookaround_success_that_repeats_an_earlier_one_is_not_continued() =>
+        EngineWork.ShouldTakeAtMostSteps(
+            static () =>
+                new FuzzyRegex(@"(?:(?=.*$|)a)*b", FuzzyRegexOptions.None, EngineWork.HangGuard)
+                    .MatchAtStart(new string('a', 24) + "c", partial: true)
+                    .Success.Should()
+                    .BeFalse(),
+            20_000,
+            "the dedup keeps the second pass polynomial"
+        );
+
+    /// <summary>
     /// SHORTCUT until build chunk 8: a pattern that reads a capture while it matches keeps the
     /// run-out partial, because the body's captures after the edge are unknown. Going on after the
     /// lookaround with the group unset would refuse rows T3 and Q2 ('a' + 'a' completes both).
