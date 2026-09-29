@@ -300,13 +300,14 @@ public sealed class PartialEdgeReadTests
     /// as the wave generated them (ExpectedDivergences <c>partial-edge-read</c>, which judges each).
     /// </summary>
     /// <remarks>
-    /// Rows 4841 and 5367 are real completions upstream refuses; row 6399 is a partial upstream
-    /// answers that no text completes, because <c>\A</c> at the edge is false for every
-    /// continuation. Rows 5098, 5310 and 6589 are phantoms of the design's limit C2 (known defect
-    /// D19), pinned so that the day D19 is fixed they move on purpose: the brute-force judge answers
-    /// None to all three.
+    /// Rows 4841 and 5367 are real completions upstream refuses. Rows 5098, 5310, 6399 and 6589 are
+    /// phantoms of the design's limit C2 (known defect D19), pinned so that the day D19 is fixed
+    /// they move on purpose: the brute-force judge answers None to all four. Rows 6399 and 6589
+    /// moved in chunk 2 and are back at upstream's and 11ccae7's answers since RC5 (build chunk 3):
+    /// an insertion at the edge runs out of text, which presumes the rest.
     /// </remarks>
-    // DIVERGES FROM UPSTREAM on every row, deliberately on four and as a registered limit on two.
+    // DIVERGES FROM UPSTREAM on rows 4841, 5367, 5098 and 5310, deliberately on two and as a
+    // registered limit on two.
     [Test]
     public void The_rows_the_seed_7_wave_found()
     {
@@ -343,19 +344,77 @@ public sealed class PartialEdgeReadTests
 
         (m5367.PartialMatch, m5367.Index, m5367.Length).Should().Be((true, 0, 0));
 
-        // Row 6399: upstream's partial, which no continuation completes.
-        new FuzzyRegex(@"(?fi)(?r)\m(?:(?:b+?\A){e<=3}){e<=2}", FuzzyRegexOptions.Version0)
-            .FullMatch("BB", partial: true)
-            .Success.Should()
-            .BeFalse();
-        // Row 6589 searched: the attempt from inside the text to come passes `\B` and `\Z` as
-        // undetermined and its `[a-f]` runs out, a phantom of limit C2 (D19; the judge answers None).
+        // Row 6399, a phantom of limit C2: an insertion runs out of text on the left.
+        Match m6399 = new FuzzyRegex(@"(?fi)(?r)\m(?:(?:b+?\A){e<=3}){e<=2}", FuzzyRegexOptions.Version0).FullMatch(
+            "BB",
+            partial: true
+        );
+
+        (m6399.PartialMatch, m6399.Index, m6399.Length).Should().Be((true, 0, 2));
+
+        // Row 6589 searched: the attempt at 4 runs out of text through an insertion at the edge,
+        // a phantom of limit C2 (D19; the judge answers None).
         Match m6589 = new FuzzyRegex(@"(?b)\B(?:\Z[a-f]\p{L}\Wa+){e<=2}", FuzzyRegexOptions.Version0).Match(
             "bb.aa",
             partial: true
         );
 
-        (m6589.PartialMatch, m6589.Index, m6589.Length).Should().Be((true, 5, 0));
+        (m6589.PartialMatch, m6589.Index, m6589.Length).Should().Be((true, 4, 1));
+    }
+
+    /// <summary>
+    /// A fuzzy insertion at the edge needs the character after it, so it runs out of text like any
+    /// consuming item, and the path is a partial (design RC5, rows Z1 and Z2).
+    /// </summary>
+    /// <remarks>
+    /// Brought forward from build chunk 9, because chunk 2 made it a regression. Before chunk 2 the
+    /// test after the last character was read against the held text and S57d's note escalated the
+    /// failed path to a partial, which hid RC5. M1 now decides <c>\m</c> after a word character and
+    /// <c>\M</c> after a non-word one without that note, and the insertion that would get past them
+    /// failed instead of running out. The judge answers P(0, 1) to every row ('a' + ' ' completes
+    /// the first, and ' ' + 'a' the next three), as 11ccae7 did; upstream 2026.9.10 answers None.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, as 11ccae7 did: upstream's insertion arm has the same slip.
+    [Test]
+    [Arguments("match", @"(?:a\m){i<=1}", "a")]
+    [Arguments("match", @"(?: ?\M){e<=1}", " ")]
+    [Arguments("fullmatch", @"(?: \M){i<=1}", " ")]
+    [Arguments("fullmatch", @"(?b)(?: ?\M){e<=1}", " ")]
+    [Arguments("match", @"(?r)(?:\Ma){i<=1}", "a")]
+    public void An_insertion_at_the_edge_runs_out_of_text(string operation, string pattern, string text)
+    {
+        Match m = Partial(operation, pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+    }
+
+    /// <summary>
+    /// A second-pass success is returned as the partial at once, from BasicMatch, whatever the
+    /// search goes on to do after a success (design section 4.3, rows M5 and M6): POSIX keeps no
+    /// match to go on comparing, and best match and enhanced match get it back unrefined, as a
+    /// run-out partial already was.
+    /// </summary>
+    /// <remarks>
+    /// The judge answers P(0, 1) to both ('a' + 'a'). Upstream answers None to both. With the early
+    /// return removed, POSIX saves the success as a complete match (FoundMatch) and asserts A1 and
+    /// A2 fire in Debug.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on both rows, as 11ccae7 did through S57d's note.
+    [Test]
+    [Arguments(@"(?p)a\B")]
+    [Arguments(@"(?b)(?:a\B){e<=1}")]
+    [Arguments(@"(?e)(?:a\B){e<=1}")]
+    public void A_second_pass_success_is_the_partial_whatever_the_search_does_next(string pattern)
+    {
+        using MatchState state = RunPartial(pattern, "a");
+
+#if DEBUG
+        const long one = 1;
+#else
+        const long one = 0;
+#endif
+        (state.FoundMatch, state.PartialEventCount(PartialEvent.SuccessTurnedPartial)).Should().Be((false, one));
+        Partial("match", pattern, "a").PartialMatch.Should().BeTrue();
     }
 
     private static MatchState RunPartial(string pattern, string text)

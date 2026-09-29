@@ -4875,7 +4875,19 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, data.NewTextPos);
+                // NOT UPSTREAM'S, D11 RC5 (design section 4.5): the position after the insertion,
+                // as the substitution arm below passes. Upstream passes the position before it
+                // (:10156), which is never past the edge, so an insertion that needs the character
+                // after the text failed instead of running out. S57d's note hid that until M1
+                // decided the tests at the edge: `(?:a\m){i<=1}` over 'a' ('a' + ' ' matches).
+                if (CheckFuzzyPartial(state, newPos) == MatchStatus.Partial)
+                {
+                    state.NotePartialEvent(PartialEvent.InsertionRunOut);
+
+                    return MatchStatus.Partial;
+                }
+
+                return MatchStatus.Failure;
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 if (step == 0)
@@ -7116,7 +7128,14 @@ internal static class Matcher
                     return -1;
                 }
 
-                if (!isPartial)
+                if (isPartial)
+                {
+                    // D11: the required string runs into the text to come, so this start is
+                    // admitted through it. The attempt must still consume the rest of the string,
+                    // which runs out, so no success follows from it that the first pass missed (A1).
+                    state.NotePartialEvent(PartialEvent.PrefilterCandidate);
+                }
+                else
                 {
                     // Record where the required string matched. Upstream adds 'value_count', which
                     // is a character count; the needle's code-unit length is the same number of
@@ -7300,7 +7319,7 @@ internal static class Matcher
 
         while (true)
         {
-            // D11 M1: a start whose test is undetermined is one some continuation completes.
+            // Never undetermined: the prefilter runs in no second pass (see SearchStart).
             if (TryMatchZeroWidth(state, test, pos) != MatchStatus.Failure)
             {
                 return pos;
@@ -7426,6 +7445,12 @@ internal static class Matcher
         // operation is an allocation upstream does not make.
         int startPos = state.TextPos;
         newPosition = new Position(node, startPos);
+
+        // D11: BasicMatch withholds this from a partial call's second pass (narrowing 1, the
+        // PartialSide clause of 'searchStartAllowed'), so no answer here is undetermined and no
+        // start is admitted through the text to come. The design's "prefilter" of the second pass
+        // is the required-string locator (LocateRequiredString).
+        Debug.Assert(state.PartialSide == MatchState.PartialNone, "D11: the prefilter runs in no second pass");
 
         // Upstream's opening bound test (:8400-8416). Its partial halves are narrowing 1's; what is
         // left is the reverse arm, because the forward arm upstream has no failure case at all.
@@ -11286,21 +11311,22 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    // NOT UPSTREAM'S, D11 M3's core (design section 4.3). The two passes run the
-                    // same code from the same start, so a path reaches here in the second pass only
-                    // through a test that read the text to come (M1): the match needs a
-                    // continuation, which makes it a partial. A full match would need the
-                    // continuation to be empty, which the first pass has already judged, so under
-                    // fullmatch it backtracks. M1 cannot land without this; the rest of M3 (asserts
-                    // A1 and A2) is build chunk 3.
-                    // Only a success whose attempt read the text to come (design assert A1's
-                    // condition). Any other second-pass success is one the first pass could have
-                    // found, and it takes the path it took before D11: under BESTMATCH and
-                    // ENHANCEMATCH the driver outside BasicMatch refines it, and `(?b)` row 3834 of
-                    // seed 4242 answered (3, 6) until this test, where that refinement answers
-                    // upstream's (6, 6).
+                    // NOT UPSTREAM'S, D11 M3 (design section 4.3). The two passes run the same code
+                    // from the same start, so a second-pass path differs from the first only after
+                    // it read the text to come: an undetermined test, a decided one that differs
+                    // from the first pass, or any test of the attempt from inside that text
+                    // (MatchState.AttemptTouchedTheTextToCome). A run-out answers the partial
+                    // itself. A success after such a read needs a continuation, so it is a partial;
+                    // under fullmatch it backtracks, because a full match would need the
+                    // continuation to be empty, which the first pass has already judged.
                     if (state.PartialSide != MatchState.PartialNone && state.AttemptTouchedTheTextToCome)
                     {
+                        // Design assert A2. POSIX saves a match and keeps looking, and a partial here
+                        // would drop the one saved. Only a success A1 exempts can save one, and none
+                        // of the suite's or the grids' second passes reach one before a touched
+                        // success (measured 2026-09-29, Debug).
+                        Debug.Assert(!state.FoundMatch, "D11 A2: a second-pass partial drops no saved POSIX match");
+
                         if (state.MatchAll)
                         {
                             state.NotePartialEvent(PartialEvent.FullmatchBacktrack);
@@ -11328,6 +11354,23 @@ internal static class Matcher
                             goto backtrack;
                         }
                     }
+
+                    // Design assert A1: a second-pass success that read nothing of the text to come
+                    // is one the first pass found, and the first pass failed. The exception is a
+                    // driver that refines a success outside BasicMatch: under BESTMATCH and
+                    // ENHANCEMATCH the first pass can find this success and refuse it, and then it
+                    // takes the path it took before D11. `(?b)` row 3834 of seed 4242 is one: M3
+                    // turned it into the partial (3, 6) until chunk 2's review, where the
+                    // refinement answers upstream's (6, 6)
+                    // (PartialEdgeReadTests.A_second_pass_success_that_read_nothing_to_come_is_refined_as_before).
+                    Debug.Assert(
+                        state.PartialSide == MatchState.PartialNone
+                            || (
+                                pattern.IsFuzzy
+                                && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0
+                            ),
+                        "D11 A1: a second-pass success read the text to come"
+                    );
 
                     if ((pattern.Flags & RegexFlags.Posix) != 0)
                     {

@@ -89,10 +89,16 @@ internal enum PartialEvent
     /// <summary>M3: a second-pass success under <c>fullmatch</c> backtracked instead.</summary>
     FullmatchBacktrack,
 
-    /// <summary>M3: the prefilter admitted a start through an undetermined test.</summary>
+    /// <summary>
+    /// M3: the required-string locator admitted a start because the string runs into the text to
+    /// come. It is the only prefilter of the second pass: the start-test prefilter is withheld there.
+    /// </summary>
     PrefilterCandidate,
 
-    /// <summary>M3: the prefilter found no start and the search answered the edge partial.</summary>
+    /// <summary>
+    /// M3: a search found no start in the held text, and its attempt from inside the text to come
+    /// answered the edge partial.
+    /// </summary>
     PrefilterNoCandidatePartial,
 
     /// <summary>M4: the fork budget fired.</summary>
