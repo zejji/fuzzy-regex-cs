@@ -230,6 +230,22 @@ public sealed class FullFoldBackreferenceLeftoversTests
     }
 
     [Test]
+    public void The_oracle_switch_restores_upstream_s_re_entry_for_upstream_s_own_kinds_only()
+    {
+        // PatternObject.SkipRetriedFoldSteps restores upstream's re-entry for the oracle's
+        // ablation, but not after one of ledger entry 52's whole-character edits, which upstream
+        // does not have (MatchState.RetriedAWholeFoldEdit). Known defect D24's frame at an
+        // expanding group character holds upstream's folded kinds under GroupCharFirst codes, so
+        // the test for a whole edit reads the kind the code stands for. Read as the raw code, the
+        // folded substitutions stepped past the ﬀ and gave (0, 4) with two substitutions.
+        // Upstream: fullmatch(r'(?rfi)(?:\1){s<=2}-(ﬀ)', 'ﬀs-ﬀ') is None.
+        var regex = new FuzzyRegex(@"(?rfi)(?:\1){s<=2}-(ﬀ)");
+        regex.PatternObject.SkipRetriedFoldSteps = true;
+
+        regex.FullMatch("ﬀs-ﬀ").Success.Should().BeFalse();
+    }
+
+    [Test]
     public void A_retried_deletion_steps_past_the_deleted_group_character()
     {
         // S83's BESTMATCH case. Deleting the second s of ß's folding costs one edit. Upstream finds
