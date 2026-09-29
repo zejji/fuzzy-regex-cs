@@ -5091,7 +5091,11 @@ internal static class Matcher
     private static bool AnyErrorPermitted(MatchState state)
     {
         long[] fuzzyCounts = state.FuzzyCounts;
-        Node fuzzyNode = state.FuzzyNode!;
+
+        // A fuzzy item is compiled only inside a fuzzy section or a fuzzy copy of a called group,
+        // and a copy runs only from a call inside a section. D40 was a copy that broke this.
+        Debug.Assert(state.FuzzyNode is not null, "A fuzzy item ran with no fuzzy section in force.");
+        Node fuzzyNode = state.FuzzyNode;
         List<uint> values = fuzzyNode.Values;
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 

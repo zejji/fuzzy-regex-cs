@@ -3253,6 +3253,85 @@ internal static class ParseFunctions
         info.AdditionalGroups = additionalGroups;
     }
 
+    /// <summary>
+    /// Points the calls inside one additional copy at the references for the copy's own direction
+    /// and fuzziness, just before the copy is compiled. Not in upstream (D40).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A copy shares its call nodes with the group as written, and <see cref="CheckGroupFeatures"/>
+    /// resolved each of those for where it is written. Upstream compiles the copy with them as they
+    /// are, so an exact copy of a group in a fuzzy section calls the fuzzy compile of the next
+    /// group, whose items then fail with no section in force: upstream segfaults and this port read
+    /// a null section, on <c>(?&amp;g4)(?:(?P&lt;g4&gt;(?&amp;g3))){s&lt;=1}(?P&lt;g3&gt;a)</c> over
+    /// 'ba'. A fuzzy copy likewise called the exact compile and lost matches.
+    /// </para>
+    /// <para>
+    /// This walks the copy with <see cref="RegexBase.FixGroups"/>, the walk that gave every other
+    /// call its features, from the copy's features, and sets each call's reference for this compile.
+    /// Setting it in place is sound because the code is compiled one copy at a time and a call node
+    /// reads its reference only when compiled. The walk also records each group it passes, and that
+    /// record is put back: it says where a group is written, and later copies are made from it.
+    /// </para>
+    /// <para>
+    /// A reference first needed here always gets a copy of its own, even for the features the group
+    /// was written with, because the group as written is compiled already without the reference.
+    /// Those copies are appended to <see cref="Info.AdditionalGroups"/>, and the caller's loop
+    /// reaches them in turn. It ends: each (group, direction, fuzziness) is added once.
+    /// </para>
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, which the walk needs for its errors (none can arise: the pattern's own walk passed).</param>
+    /// <param name="parsed">The parsed pattern, for a copy of the whole pattern.</param>
+    /// <param name="copy">The copy about to be compiled.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    internal static void ResolveCallsInCopy(
+        Info info,
+        string pattern,
+        RegexBase parsed,
+        RegexBase copy,
+        bool reverse,
+        bool fuzzy
+    )
+    {
+        int firstCall = info.GroupCalls.Count;
+        KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)>[] definitions = [.. info.DefinedGroups];
+
+        copy.FixGroups(pattern, reverse, fuzzy);
+
+        info.DefinedGroups.Clear();
+        foreach (KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)> definition in definitions)
+        {
+            info.DefinedGroups.Add(definition.Key, definition.Value);
+        }
+
+        for (int i = firstCall; i < info.GroupCalls.Count; i++)
+        {
+            (RegexBase call, bool callReverse, bool callFuzzy) = info.GroupCalls[i];
+            var callGroup = (CallGroup)call;
+            (int, bool, bool) key = (callGroup.GroupNumber, callReverse, callFuzzy);
+            if (!info.CallRefs.TryGetValue(key, out int reference))
+            {
+                reference = info.CallRefs.Count;
+                info.CallRefs[key] = reference;
+                info.AdditionalGroups.Add(
+                    (
+                        callGroup.GroupNumber == 0
+                            ? new CallRef(reference, parsed)
+                            : info.DefinedGroups[callGroup.GroupNumber].Group,
+                        callReverse,
+                        callFuzzy
+                    )
+                );
+            }
+
+            callGroup.CallRefIndex = reference;
+        }
+
+        info.GroupCalls.RemoveRange(firstCall, info.GroupCalls.Count - firstCall);
+    }
+
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>
     /// <param name="parsed">The parsed pattern.</param>
     /// <param name="flags">The resolved flags.</param>

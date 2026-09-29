@@ -315,9 +315,13 @@ internal static class PatternCompiler
         // Add the final 'success' opcode.
         code.Add([(uint)Opcode.Success]);
 
-        // Compile the additional copies of the groups that we need.
-        foreach ((RegexBase group, bool rev, bool fuz) in info.AdditionalGroups)
+        // Compile the additional copies of the groups that we need. NOT UPSTREAM (D40): each copy's
+        // calls are first resolved for the copy's own features, which can append more copies, so
+        // the loop reads the list's count afresh.
+        for (int i = 0; i < info.AdditionalGroups.Count; i++)
         {
+            (RegexBase group, bool rev, bool fuz) = info.AdditionalGroups[i];
+            ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
             code.AddRange(group.Compile(rev, fuz));
         }
 

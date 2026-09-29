@@ -2153,6 +2153,14 @@ internal sealed class CallRef : RegexBase
 
     /// <inheritdoc />
     /// <remarks>
+    /// Not in upstream, which never walks a copy (D40): <see cref="ParseFunctions.ResolveCallsInCopy"/>
+    /// walks this one to point its calls at the references for its own features.
+    /// </remarks>
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        _parsed.FixGroups(pattern, reverse, fuzzy);
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Upstream calls <c>self.parsed._compile(...)</c>, not <c>compile</c>. The two are the same
     /// call for every node - <c>RegexBase.compile</c> only forwards - so this uses the public one.
     /// </remarks>
