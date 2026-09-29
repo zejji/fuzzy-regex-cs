@@ -142,6 +142,25 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         Count = newCount;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: moves the top <paramref name="length"/> bytes of this stack
+    /// onto <paramref name="target"/>, in the same order, without an intermediate buffer.
+    /// </summary>
+    /// <param name="target">The stack that receives the bytes.</param>
+    /// <param name="length">How many bytes to move.</param>
+    /// <returns><see langword="false"/> if this stack holds fewer bytes than that.</returns>
+    internal bool MoveTopTo(ByteStack target, int length)
+    {
+        if (length < 0 || length > Count)
+        {
+            return false;
+        }
+
+        target.PushBlock(_storage.AsSpan(Count - length, length));
+        Count -= length;
+        return true;
+    }
+
     /// <summary>Upstream <c>ByteStack_pop</c> (line 2372).</summary>
     /// <param name="item">Receives the byte.</param>
     /// <returns><see langword="false"/> if the stack is empty.</returns>

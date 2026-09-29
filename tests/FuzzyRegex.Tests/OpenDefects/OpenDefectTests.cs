@@ -211,6 +211,40 @@ public sealed class OpenDefectTests
         Partial(operation, pattern, text).Success.Should().BeFalse();
     }
 
+    // D11 amendment 2, left to build chunk 8 (run-outs inside bodies). The lookahead's body runs
+    // out inside a fuzzy section with a minimum error count. Before amendment 2 the unfinished
+    // section stayed open and its minimum went on constraining what follows, which by chance gave
+    // the judge's answers; a blocked end now steps out of the section as a normal end does, and
+    // what follows is judged without it. No continuation of 'aby' completes a match at 0, so the
+    // match rows are None and the searches start at the edge (tools/probes/d11-brute-judge.py,
+    // 2026-09-29); the port answers P(0, 3) to all eight.
+    [Test]
+    [Arguments("match", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
+    [Arguments("search", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
+    [Arguments("match", @"a(?=(?:(?:bcd|b){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
+    [Arguments("search", @"a(?=(?:(?:bcd|b){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
+    [Arguments("match", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
+    [Arguments("search", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
+    [Arguments("match", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", -1)]
+    [Arguments("search", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", -1)]
+    public void A_run_out_in_a_fuzzy_section_of_a_lookaround_leaves_no_residue(
+        string operation,
+        string pattern,
+        int start
+    )
+    {
+        Match m = Partial(operation, pattern, "aby");
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, 3 - start));
+        }
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

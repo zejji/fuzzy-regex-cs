@@ -83,6 +83,15 @@ internal enum PartialEvent
     /// <summary>M2: a condition's test could not cut.</summary>
     CutBlockedCondition,
 
+    /// <summary>Amendment 2: a blocked positive end moved the saved-stack bytes it parked.</summary>
+    BlockedEndMovedSstack,
+
+    /// <summary>Amendment 2: the moved bytes were longer than the parked state (a run-out's residue).</summary>
+    BlockedEndMovedMore,
+
+    /// <summary>Amendment 2: a <c>REOPEN</c> put the moved bytes back on the saved stack.</summary>
+    ReopenRestoredSstack,
+
     /// <summary>M2: a negative lookaround or negative test passed undetermined.</summary>
     NegativeUndetermined,
 

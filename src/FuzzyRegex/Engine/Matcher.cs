@@ -4326,10 +4326,46 @@ internal static class Matcher
         TaintTheFrame(state, frame);
         state.LookaroundSuccesses.Add(success);
         _ = state.Pstack.DropSize();
+
+        // Amendment 2: the continuation starts from the saved stack a normal end leaves (S0, the
+        // count before the construct parked its state), with the calls and fuzzy sections opened in
+        // the body closed. What lies above S0 moves to the backtracking stack, where REOPEN puts it
+        // back for the body's other paths. SHORTCUT: a run-out inside a fuzzy section of the body
+        // leaves that section's entries above S0 and so moves them too, which is right, but the
+        // continuation is then judged without the section's minimum, where before it wrongly went
+        // on constraining it; 8 rows turn from the judge's answer to a phantom partial or an earlier
+        // start (OpenDefectTests.A_run_out_in_a_fuzzy_section_of_a_lookaround_leaves_no_residue).
+        // Ceiling: those phantoms. Upgrade: build chunk 8's run-outs inside bodies.
+        if (!state.Bstack.ReadSizeBelow((int)mark - 1, out long savedSstack))
+        {
+            return LookaroundEnd.Cut;
+        }
+
+        int s0 = (int)savedSstack - _lookaroundStateDataSize;
+        Debug.Assert(
+            state.Sstack.Count >= savedSstack,
+            "D11 amendment 2, assert 1: the parked state is on the saved stack"
+        );
+        int moved = state.Sstack.Count - s0;
+        _ = state.Sstack.MoveTopTo(state.Bstack, moved);
+        state.Bstack.PushSize(moved);
+        state.Bstack.PushSize(state.SectionFrame);
         state.Bstack.PushSize(mark);
         state.Bstack.PushUInt8((byte)Opcode.Reopen);
 
-        /* bstack: pstack_mark REOPEN */
+        /* bstack: sstack_bytes length section_frame pstack_mark REOPEN */
+
+        Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
+        CloseFramesAbove(state);
+        Debug.Assert(
+            state.OpenCalls.Count == 0 || state.OpenCalls[^1].SstackDepth <= s0,
+            "D11 amendment 2, assert 3: no call opened in the body is open"
+        );
+        state.NotePartialEvent(PartialEvent.BlockedEndMovedSstack);
+        if (moved > _lookaroundStateDataSize)
+        {
+            state.NotePartialEvent(PartialEvent.BlockedEndMovedMore);
+        }
 
         state.TextPos = look.TextPos;
         state.SliceStart = look.SliceStart;
@@ -4685,6 +4721,9 @@ internal static class Matcher
             state.SliceStart = skipPos;
         }
     }
+
+    /// <summary>NOT UPSTREAM'S, D11 amendment 2: the bytes <see cref="PushLookaroundStateData"/> pushes, four sizes.</summary>
+    private const int _lookaroundStateDataSize = 4 * sizeof(long);
 
     /// <summary>
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_l, sizeof(data_l))</c>, field by field.
@@ -10341,6 +10380,11 @@ internal static class Matcher
                         )
                     )
                     {
+                        Debug.Assert(
+                            state.Bstack.ReadSizeBelow((int)atomicBstackCount - 1, out long atomicSaved)
+                                && state.Sstack.Count == atomicSaved,
+                            "D11 amendment 2, assert 5: a blocked atomic end leaves the saved stack as its frame found it"
+                        );
                         BlockAtomicCut(state, (int)atomicBstackCount);
                         node = node.Next1.Node!;
                         break;
@@ -15629,16 +15673,45 @@ internal static class Matcher
 
                     // The group is open again, as it was before its end, so that the body's other
                     // paths end at the group's end once more. A lookaround's body, and a condition's
-                    // test, match over the whole text, as their forward arms set them up to.
-                    state.Pstack.PushSize(reopenedFrameEnd);
+                    // test, match over the whole text, as their forward arms set them up to, and get
+                    // back the saved-stack bytes and section link their blocked end moved off
+                    // (amendment 2).
                     if (
                         state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
                         && reopenedOp is (byte)Opcode.Lookaround or (byte)Opcode.Conditional
                     )
                     {
+                        /* bstack: sstack_bytes length section_frame */
+
+                        if (
+                            !state.Bstack.PopSize(out long reopenedSection)
+                            || !state.Bstack.PopSize(out long reopenedLength)
+                            || !state.Bstack.ReadSizeBelow((int)reopenedFrameEnd - 1, out long reopenedSaved)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        Debug.Assert(
+                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize,
+                            "D11 amendment 2, assert 4: the continuation is undone in full"
+                        );
+                        if (!state.Bstack.MoveTopTo(state.Sstack, (int)reopenedLength))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        Debug.Assert(
+                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
+                            "D11 amendment 2, assert 4: the body's bytes are back"
+                        );
+                        state.SectionFrame = (int)reopenedSection;
                         state.SliceStart = state.TextStart;
                         state.SliceEnd = state.TextEnd;
+                        state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
                     }
+
+                    state.Pstack.PushSize(reopenedFrameEnd);
                     break;
                 }
                 case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
