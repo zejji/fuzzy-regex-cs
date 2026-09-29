@@ -661,6 +661,20 @@ internal sealed class MatchState : IDisposable
     internal Node? FuzzyNode;
 
     /// <summary>
+    /// NOT UPSTREAM (D22): whether the last retried <c>REF_GROUP_FLD</c> edit was one of ledger
+    /// entry 52's whole-character kinds, which the arm must step past even when
+    /// <see cref="PatternObject.SkipRetriedFoldSteps"/> restores upstream's re-entry.
+    /// </summary>
+    /// <remarks>
+    /// That switch reproduces upstream's re-entry for upstream's own edits, which compare the used-up
+    /// character again. A whole-character edit always uses up the subject character and upstream has
+    /// none, so skipping its step would only undo it, and the oracle's
+    /// <c>full-fold-backreference-retry</c> entry would claim the rows the edit explains. Set on
+    /// every successful retry, which is the one way into the arm's re-entry.
+    /// </remarks>
+    internal bool RetriedAWholeFoldEdit;
+
+    /// <summary>
     /// Upstream <c>fuzzy_changes</c> (<c>RE_FuzzyChangesList</c>, <c>:397</c>): every error used so
     /// far, in the order it was used.
     /// </summary>
@@ -923,6 +937,7 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         Array.Clear(FuzzyCounts);
         FuzzyNode = null;
+        RetriedAWholeFoldEdit = false;
         FuzzyChanges.Clear();
 
         VisibleCaptures = visibleCaptures;
@@ -1226,6 +1241,7 @@ internal sealed class MatchState : IDisposable
         {
             Array.Clear(FuzzyCounts);
             FuzzyNode = null;
+            RetriedAWholeFoldEdit = false;
             FuzzyChanges.Clear();
         }
 
