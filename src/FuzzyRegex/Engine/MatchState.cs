@@ -706,6 +706,27 @@ internal sealed class MatchState : IDisposable
     internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
+    /// NOT UPSTREAM (D17): the last run number handed to a repeat (<see cref="RepeatData.RunId"/>).
+    /// It only counts up, so a number is never reused within one call.
+    /// </summary>
+    internal long NextRunId;
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): the states that empty iterations have led to in this attempt, keyed by
+    /// run. Emptied by <see cref="ResetGuards"/>; <see langword="null"/> until a pattern that tests
+    /// a group makes such an iteration. See <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal HashSet<EmptyIterationState>? EmptyIterationStates;
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): the key <c>Matcher.RevisitsEmptyIterationState</c> fills for each lookup,
+    /// so that only a new state allocates. <see langword="null"/> exactly when the pattern tests no
+    /// group. Every lookup overwrites all of it before reading; <see cref="Init"/> clears it anyway,
+    /// so that a reused state starts exactly as a new one does.
+    /// </summary>
+    internal readonly long[]? EmptyIterationScratch;
+
+    /// <summary>
     /// NOT UPSTREAM (empty-iteration rule): where on <see cref="Sstack"/> the frame of the fuzzy
     /// section now open ends, or -1 when no section entered in this attempt is open. Kept only for a
     /// pattern with a minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), which is what
@@ -966,6 +987,8 @@ internal sealed class MatchState : IDisposable
             Repeats[r] = new RepeatData();
         }
 
+        EmptyIterationScratch =
+            pattern.TestedGroups.Length > 0 ? new long[2 + FuzzyValue.Count + (2 * pattern.TestedGroups.Length)] : null;
         OptionalPasses = pattern.OptionalPassCount == 0 ? [] : new OptionalPassStart[pattern.OptionalPassCount];
         FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
     }
@@ -1120,6 +1143,14 @@ internal sealed class MatchState : IDisposable
             repeat.CaptureChange = 0;
             repeat.ChangesAtStart = 0;
             repeat.ClearMemo();
+            repeat.RunId = 0;
+        }
+
+        NextRunId = 0;
+        EmptyIterationStates?.Clear();
+        if (EmptyIterationScratch is not null)
+        {
+            Array.Clear(EmptyIterationScratch);
         }
 
         // Every pass writes its slot before its end reads it, so this is for reuse alone.
@@ -1302,6 +1333,23 @@ internal sealed class MatchState : IDisposable
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
+
+        // NOT UPSTREAM (D17). The states belong to this call, so a kept state must not hold a
+        // large set for the next one, as the stacks above give back what they grew past their limit.
+        // The capacity, not the count: ResetGuards empties the set at each start position and
+        // leaves it the size it grew to.
+        if (EmptyIterationStates is { } states)
+        {
+            if (states.Capacity > 1024)
+            {
+                EmptyIterationStates = null;
+            }
+            else
+            {
+                states.Clear();
+            }
+        }
+
         Text = default;
         CaptureTexts.Reset(default);
         _characterIndex = null;
@@ -1683,6 +1731,10 @@ internal sealed class MatchState : IDisposable
             repeat.BodyGuardList.Reset();
             repeat.TailGuardList.Reset();
         }
+
+        // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
+        // begins new runs, so they could never be read again.
+        EmptyIterationStates?.Clear();
     }
 
     /// <summary>

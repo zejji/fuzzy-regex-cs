@@ -1035,7 +1035,7 @@ var regex = new FuzzyRegex(
     "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
     FuzzyRegexOptions.None,
     TimeSpan.FromSeconds(2));
-Console.WriteLine(regex.Match("baxbax").Success);   // False, in milliseconds
+Console.WriteLine(regex.Match("baxbax").Success);   // False - in milliseconds
 ```
 
 ### In a branch reset, a group never takes a number another group in the same branch will use

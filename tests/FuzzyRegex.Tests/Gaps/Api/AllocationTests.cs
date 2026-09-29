@@ -25,6 +25,8 @@ public sealed class AllocationTests
     [Arguments(@"(\w+)@(\w+)\.com", "no address in this one", FuzzyRegexOptions.None)]
     [Arguments("(?:amber lantern works){e<=2}", "the Amber Lantern Wroks are shut", FuzzyRegexOptions.IgnoreCase)]
     [Arguments("(?:amber lantern works){e<=2}", "nothing close to it here", FuzzyRegexOptions.IgnoreCase)]
+    // D17: a repeat around a tested group, with no empty iteration, records no state.
+    [Arguments(@"(a)(?:\1|b)*c", "abababac", FuzzyRegexOptions.None)]
     public void A_warm_IsMatch_allocates_nothing(string pattern, string subject, FuzzyRegexOptions options)
     {
         bool expected = false;
@@ -39,6 +41,27 @@ public sealed class AllocationTests
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a predicate on a warm pattern has nothing it needs to build");
+    }
+
+    [Test]
+    public void The_empty_iteration_record_allocates_only_for_the_states_it_keeps()
+    {
+        // D17. Every position here makes one empty iteration that sets group 1, so the record
+        // keeps one state per position. A lookup must not allocate a key of its own: with a key per
+        // lookup, 10,000 characters allocated 6.6 GB (review, 2026-09-29). One kept state is a
+        // small array and its share of the set, about 200 bytes.
+        string subject = new string('a', 2_000) + "b";
+        bool actual = true;
+
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
+            _ = regex.IsMatch(subject);
+            return () => actual = regex.IsMatch(subject);
+        });
+
+        actual.Should().BeFalse();
+        allocated.Should().BeLessThan(400L * subject.Length);
     }
 
     [Test]
