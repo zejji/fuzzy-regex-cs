@@ -1565,6 +1565,52 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){s<=1}").Match("ax").Length); // 
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ßx){d<=1}").Match("x").Length);  // 1 - upstream: no match
 ```
 
+### A lookaround that fails inside a fuzzy section can be passed by inserting a text character in front of it
+
+An insertion is a text character the pattern does not account for. Upstream lets one stand in front
+of a failing `\b` or `$`, which moves the assertion one character on, but never in front of a
+failing lookaround. Here a lookaround is treated like every other zero-width assertion: when it
+fails, one inserted character is tried in front of it and the lookaround is tried again.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The inserted x puts the lookahead in front of the c.
+Match m = FuzzyRegex.Match("bxc", "(?:b(?=c)){i<=1}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 2, 1) - upstream: no match
+
+// With any error allowed, the insertion at 0 comes before upstream's substitution at 1.
+Match e = FuzzyRegex.Match("bxc", "(?:b(?=c)){e<=1}");
+Console.WriteLine((e.Index, e.Length));   // (0, 2) - upstream: (1, 1)
+```
+
+Negative lookarounds and lookbehinds work the same way. A lookaround can still be neither
+substituted nor deleted, since it matches no character. There is no option to restore the upstream
+answer. Ledger entry 50.
+
+### A fuzzy section's minimum error count can be met by a text character inserted after its last item
+
+A constraint such as `{1<=e<=2}` asks for at least one error. When the section's text matches
+exactly, upstream fails it at the section's end without trying the one error still open to it: a
+text character inserted after the last item. It finds that insertion after a string of two or more
+characters, but not after a single character or a class. Here the minimum is checked after the
+trailing insertions, so both find it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The second 'a' is the inserted character that meets the minimum.
+Match m = FuzzyRegex.MatchAtStart("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Insertions));   // (0, 3, 1) - upstream: no match
+
+// A search now finds that match at 0, before upstream's deletion at 2.
+Match s = FuzzyRegex.Match("aab", "(?:a){1<=e<=2}b");
+Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
+```
+
+A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
+neither. There is no option to restore the upstream answer. Ledger entry 51.
+
 ### A fuzzy run can edit an expanding subject character as one character
 
 The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a

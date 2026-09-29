@@ -213,7 +213,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
-    /// <see cref="RunWithTheUpstreamSkipTiming"/> and <see cref="RunWithTheUpstreamVerbScope"/> and by
+    /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
+    /// <see cref="RunWithoutTheLookaroundInsertion"/> and <see cref="RunWithTheUpstreamMinimumOrder"/> and by
     /// nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
@@ -233,6 +234,12 @@ internal static class OracleComparer
     /// with entry 42 (see the comment where they are applied). Used by
     /// <see cref="RunWithoutTheExactDeletion"/> and by nothing else.
     /// </param>
+    /// <param name="keepMinimumOrderFix">
+    /// Leave ledger entry 51's minimum order on in an ablated run, which otherwise switches it off
+    /// with entries 42 and 44. The three fuzzy-search entries that sit before entry 51's in
+    /// <c>ExpectedDivergences</c> keep it on, so that none of them claims a row entry 51 alone
+    /// explains.
+    /// </param>
     /// <param name="upstreamFoldedRuns">
     /// Compile every fuzzy full-case-folded run to its folding alone, as upstream does (ledger entry
     /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
@@ -247,6 +254,7 @@ internal static class OracleComparer
         bool upstreamReverseGrapheme = false,
         bool withoutTheFuzzySearchFixes = false,
         bool keepEmptyIterationRule = false,
+        bool keepMinimumOrderFix = false,
         bool upstreamFoldedRuns = false
     )
     {
@@ -312,6 +320,11 @@ internal static class OracleComparer
         {
             compiled.PatternObject.SkipExactDeletionRetry = true;
             compiled.PatternObject.UpstreamEmptyIterations = !keepEmptyIterationRule;
+
+            // Ledger entry 51 widens the fuzzy search the same way: a section below its minimum
+            // now tries trailing insertions, so with it on, taking another fix away need not bring
+            // back upstream's answer on a pattern with a minimum.
+            compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = !keepMinimumOrderFix;
         }
 
         ablate?.Invoke(compiled);
@@ -660,7 +673,8 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipExactDeletionRetry = true,
-            keepEmptyIterationRule: true
+            keepEmptyIterationRule: true,
+            keepMinimumOrderFix: true
         );
     }
 
@@ -692,6 +706,63 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.UpstreamEmptyIterations = true;
                 compiled.PatternObject.SkipExactDeletionRetry = true;
+            },
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the ledger entry 50 lookaround insertion switched off.
+    /// </summary>
+    /// <remarks>
+    /// Upstream never fuzzes a lookaround that fails, so <c>(?:b(?=c)){i&lt;=1}</c> finds nothing in
+    /// 'bxc'. Setting <c>PatternObject.SkipLookaroundInsertion</c> stops every such insertion, which
+    /// is the whole of the fix. The <c>fuzzy-insertion-before-a-failing-lookaround</c> entry keys on
+    /// this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheLookaroundInsertion(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a section's minimum checked before its trailing
+    /// insertions, as upstream checks it (ledger entry 51 switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream fails a section that reaches its end below its minimum without trying the trailing
+    /// insertion that could meet it, so <c>(?:a){1&lt;=e&lt;=2}b</c> finds nothing in 'aab' at 0.
+    /// Setting <c>PatternObject.CheckMinimumBeforeTrailingInsertions</c> restores that order, which
+    /// is the whole of the fix. Ledger entry 50's lookaround insertion is switched off too, so that
+    /// a row both fixes move is claimed here rather than by neither. The
+    /// <c>fuzzy-minimum-met-by-a-trailing-insertion</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamMinimumOrder(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = true;
+                compiled.PatternObject.SkipLookaroundInsertion = true;
             }
         );
     }

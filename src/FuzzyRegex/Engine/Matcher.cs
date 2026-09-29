@@ -4563,6 +4563,80 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether counts that fail <see cref="FuzzyWithinConstraints"/> at the end of their section
+    /// fail it only for want of insertions: an insertion or error minimum is unmet, and the section
+    /// would be legal with just enough more insertions to meet it.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 51, known defect D9). Counts only rise along a path, and a trailing
+    /// insertion raises the insertion and error counts and nothing else, so no run of them can meet
+    /// an unmet substitution or deletion minimum, or bring back a maximum already passed. Adding the
+    /// fewest insertions that would meet the minimums and asking the constraints again answers both:
+    /// with more than that, every count limited above is only higher.
+    /// <para>
+    /// The same holds for each enclosing section, whose counts will include these insertions once
+    /// this section closes (END_FUZZY adds the inner counts to the outer ones,
+    /// <c>upstream/src/_regex.c</c>:12475-12481). Where one of them cannot take that many more
+    /// insertions or errors, the insertions only lead to its own END_FUZZY failing. Row A of
+    /// <c>FailedCallMemoTests</c>, whose outer section permits no insertion at all, spent a quarter
+    /// more time on them without that check (2026-09-28).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, for the enclosing sections.</param>
+    /// <param name="fuzzyCounts">The section's counts.</param>
+    /// <param name="fuzzyNode">The section.</param>
+    /// <returns><see langword="true"/> if trailing insertions can make the section legal.</returns>
+    private static bool InsertionsCanMeetMinimum(MatchState state, ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
+    {
+        List<uint> values = fuzzyNode.Values;
+        long needed = Math.Max(
+            values[FuzzyValue.MinIns] - fuzzyCounts[FuzzyValue.Ins],
+            values[FuzzyValue.MinErr] - TotalErrors(fuzzyCounts)
+        );
+        if (needed <= 0)
+        {
+            return false;
+        }
+
+        Span<long> raised = stackalloc long[FuzzyValue.Count];
+        fuzzyCounts.CopyTo(raised);
+        raised[FuzzyValue.Ins] += needed;
+        if (!FuzzyWithinConstraints(raised, fuzzyNode, state.MaxErrors))
+        {
+            return false;
+        }
+
+        // The enclosing sections: see the remarks. Their counts at entry plus this section's.
+        int frame = state.SectionFrame;
+        if (frame < 0)
+        {
+            return true;
+        }
+
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+        {
+            for (int kind = 0; kind < FuzzyValue.Count; kind++)
+            {
+                raised[kind] += outerCounts[kind];
+            }
+
+            List<uint> outerValues = outer.Values;
+            if (
+                raised[FuzzyValue.Ins] > outerValues[FuzzyValue.MaxIns]
+                || TotalErrors(raised) > outerValues[FuzzyValue.MaxErr]
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Whether a reversed match has run out of the text it is allowed to match, which is the
     /// question every left-hand partial match turns on. <b>This is the one place the left edge is
     /// decided</b>; every site that reports a partial on the left asks it here.
@@ -5830,7 +5904,7 @@ internal static class Matcher
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(state.TextPos);
         state.Bstack.PushUInt8((byte)data.FuzzyType);
-        state.Bstack.PushUInt8((byte)node.Op);
+        state.Bstack.PushUInt8(FuzzyFrameOp(node));
 
         /* bstack: node step text_pos fuzzy_type op */
 
@@ -5843,6 +5917,61 @@ internal static class Matcher
         node = data.NewNode!;
 
         return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// The tag <see cref="FuzzyMatchItem"/> pushes above its frame: the item's own opcode, except for
+    /// a lookaround, whose opcode already tags the lookaround's frame (ledger entry 50).
+    /// </summary>
+    /// <param name="node">The item being fuzzed.</param>
+    /// <returns>The opcode the backtrack switch dispatches the frame on.</returns>
+    private static byte FuzzyFrameOp(Node node) =>
+        node.Op == Opcode.Lookaround ? (byte)Opcode.FuzzyLookaround : (byte)node.Op;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 50): a lookaround in a fuzzy section that has failed as a whole is
+    /// fuzzed as the zero-width item it is, so an inserted text character can move it one place on.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes every other failing zero-width assertion this way (<c>\b</c> at
+    /// <c>upstream/src/_regex.c</c>:12060-12075, <c>$</c> at :13052-13062), but a positive lookaround
+    /// whose body has run out of choices just carries on backtracking (:17115-17168), and a negative
+    /// one whose body matched goes straight to <c>backtrack</c> (:12918-13000). Called at those two
+    /// places, after the lookaround's block is popped, so the text position, the fuzzy counts and the
+    /// captures are what they were when the lookaround started. On success the insertion leaves
+    /// <paramref name="node"/> on the lookaround, which then starts again one character on; its retry
+    /// is the zero-width one (<see cref="Opcode.FuzzyLookaround"/> in the backtrack switch), where
+    /// only deletion and substitution are left, and neither applies to a step of 0.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, the lookaround, to be matched again.</param>
+    /// <param name="lookaround">The lookaround that failed, in a fuzzy section.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int InsertBeforeAFailedLookaround(MatchState state, bool search, ref Node node, Node lookaround)
+    {
+        // The callers test the fuzzy flag themselves, so a lookaround outside a fuzzy section pays a
+        // bit test and no call.
+        Debug.Assert(lookaround.Op == Opcode.Lookaround, "only a lookaround's own node is fuzzed here");
+        Debug.Assert((lookaround.Status & NodeStatus.Fuzzy) != 0, "the caller tested the fuzzy flag");
+
+        if (state.Pattern.SkipLookaroundInsertion)
+        {
+            return MatchStatus.Failure;
+        }
+
+        Node at = lookaround;
+        int status = FuzzyMatchItem(state, search, ref at, 0);
+
+        if (status == MatchStatus.Success)
+        {
+            // A step of 0 rules out deletion and substitution (NextFuzzyMatchItem), so the error was
+            // an insertion, which leaves the item where it was.
+            Debug.Assert(ReferenceEquals(at, lookaround), "an insertion does not move past the item");
+            node = at;
+        }
+
+        return status;
     }
 
     /// <summary>Upstream <c>retry_fuzzy_match_item</c> (line 10262): the next kind of error.</summary>
@@ -5872,11 +6001,12 @@ internal static class Matcher
         }
 
         // The frame is fuzzy_match_item's, pushed with the item's own opcode (FuzzyMatchItem's
-        // PushUInt8((byte)node.Op)). A zero-width item pushed a step of 0 (the forward zero-width
+        // PushUInt8(FuzzyFrameOp(node)), which tags a lookaround's frame FuzzyLookaround, ledger
+        // entry 50). A zero-width item pushed a step of 0 (the forward zero-width
         // case's 'FuzzyMatchItem(state, search, ref node, 0)'), and with a step of 0 an insertion is
         // the only error NextFuzzyMatchItem can take, so that is what the frame holds.
         System.Diagnostics.Debug.Assert(
-            currNode is not null && (byte)currNode.Op == op,
+            currNode is not null && FuzzyFrameOp(currNode) == op,
             "a fuzzy item frame carries its own opcode"
         );
         System.Diagnostics.Debug.Assert(advance || step == 0, "a zero-width item's frame carries a step of 0");
@@ -9360,9 +9490,26 @@ internal static class Matcher
                     // Are the inner constraints OK? This is the one place a 'min' is consulted: an
                     // item asks whether one more error fits, and only the end of the section can ask
                     // whether the section as a whole is legal.
+                    //
+                    // NOT UPSTREAM (ledger entry 51, known defect D9): a section below an insertion
+                    // or error minimum is not failed yet. Upstream fails it here (':12461-12462'),
+                    // before pushing the frame that offers trailing insertions (':12500-12511'), so
+                    // the one error that could still meet the minimum is never tried:
+                    // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
+                    // section were legal, pushes that frame, and then backtracks into it; the
+                    // backtrack arm asks the constraints again after each insertion.
+                    bool minimumAwaitsInsertions = false;
                     if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
                     {
-                        goto backtrack;
+                        if (
+                            pattern.CheckMinimumBeforeTrailingInsertions
+                            || !InsertionsCanMeetMinimum(state, state.FuzzyCounts, state.FuzzyNode!)
+                        )
+                        {
+                            goto backtrack;
+                        }
+
+                        minimumAwaitsInsertions = true;
                     }
 
                     // MERGING, not restoring: the section's own changes are part of the answer this
@@ -9471,6 +9618,12 @@ internal static class Matcher
                      * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
                      * end_fuzzy_node END_FUZZY
                      */
+
+                    // Ledger entry 51: zero trailing insertions do not meet the minimum, so try one.
+                    if (minimumAwaitsInsertions)
+                    {
+                        goto backtrack;
+                    }
 
                     node = node.Next1.Node!;
                     break;
@@ -9933,6 +10086,22 @@ internal static class Matcher
                         if (endLookHasGroups && !PopCaptures(state, state.Bstack))
                         {
                             return MatchStatus.Illegal;
+                        }
+
+                        // NOT UPSTREAM (ledger entry 50): try an insertion in front of it first.
+                        if ((endLookNode.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            status = InsertBeforeAFailedLookaround(state, search, ref node, endLookNode);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Success)
+                            {
+                                break;
+                            }
                         }
 
                         // Go to the 'false' branch.
@@ -12472,6 +12641,7 @@ internal static class Matcher
                     break;
                 // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
                 // puts a step of 0 back into next_fuzzy_match_item.
+                case Opcode.FuzzyLookaround: // NOT UPSTREAM (ledger entry 50).
                 // NOT UPSTREAM: SEARCH_ANCHOR is here too, ledger entry 48. Upstream's forward case
                 // (:14431) fuzzes a failed \G exactly like the others, but its list here omits it, so
                 // backtracking over that insertion raises "invalid RE code".
@@ -12866,6 +13036,24 @@ internal static class Matcher
                             // above. The section that used these errors is the inner one just
                             // popped, which is the node the trailing insertion was tried against.
                             state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
+
+                            // NOT UPSTREAM (ledger entry 51): the forward arm let a section below
+                            // its minimum through to here, so the constraints are asked again. Until
+                            // they hold, the frame just pushed is backtracked into for one more
+                            // insertion. The limits were checked above, so only a minimum can fail.
+                            if (
+                                pattern.HasFuzzyMinimum
+                                && !FuzzyWithinConstraints(innerCounts, innerNode, state.MaxErrors)
+                            )
+                            {
+                                Debug.Assert(
+                                    !pattern.CheckMinimumBeforeTrailingInsertions
+                                        && innerCounts[FuzzyValue.Sub] >= innerNode.Values[FuzzyValue.MinSub]
+                                        && innerCounts[FuzzyValue.Del] >= innerNode.Values[FuzzyValue.MinDel],
+                                    "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
+                                );
+                                goto backtrack;
+                            }
 
                             node = node.Next1.Node!;
                             goto advance;
@@ -13726,6 +13914,23 @@ internal static class Matcher
                         // whole has succeeded.
                         node = lookNode.Next2.Node!;
                         goto advance;
+                    }
+
+                    // It's a positive lookaround that's failed. NOT UPSTREAM (ledger entry 50): try
+                    // an insertion in front of it before backtracking further.
+                    if ((lookNode.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        status = InsertBeforeAFailedLookaround(state, search, ref node, lookNode);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Success)
+                        {
+                            goto advance;
+                        }
                     }
 
                     break;

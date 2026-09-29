@@ -5136,6 +5136,125 @@ unchanged. The fuzzy literal prefilter accepts the reading's lone `CHARACTER_IGN
 engines, although `(?fi)(?:s){s<=1}sx` matches it: a `STRING_FLD` substitution consumes one folded
 character of the subject, and U+01F0 folds to two. That is a matcher change, fixed as ledger entry 52.
 
+## 50. A lookaround that fails inside a fuzzy section is never passed by an insertion - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D8, finding S3-F2 of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-50-lookaround-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?:b(?=c)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?!x)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?<=x)c){i<=1}', 'bxc')   -> None                       expected (0, 3), one insertion
+search(r'(?:b(?=c)){e<=1}', 'bxc')     -> (1, 2), one substitution   expected (0, 2), one insertion
+match(r'(?:(?=b)b){i<=1}', 'xb')       -> None                       expected (0, 2), one insertion
+search(r'(?r)(?:(?<=c)b){i<=1}', 'cxb') -> None                      expected (1, 3), one insertion
+search(r'(?:b\b){i<=1}', 'bx c')       -> (0, 2), one insertion      (the control: a \b is fuzzed)
+search(r'(?:ab(?=c)){i<=1}', 'abxc')   -> (0, 3), one insertion      (upstream passes it after a string)
+```
+
+**Why upstream is wrong.** An insertion is a text character the pattern does not account for
+(`upstream/README.rst:538-566`), and nothing restricts where it may stand. A lookaround consumes
+nothing, so it can be neither substituted nor deleted, and an insertion in front of it is the one
+error that can make it hold. Upstream applies exactly this to every other zero-width assertion: a
+failing `\b`, `$` or `\G` in a fuzzy section goes to `fuzzy_match_item` with a step of 0
+(`_regex.c:12060-12075`, `:13052-13062`), whose only possible error is an insertion. A lookaround
+never gets there: a positive one whose body has run out of choices just carries on backtracking
+(`RE_OP_LOOKAROUND` in the backtrack switch, `:17115-17168`), and a negative one whose body matched
+goes straight to `backtrack` (`RE_OP_END_LOOKAROUND`, `:12918-13000`). Upstream is not even
+consistent about lookarounds: after a multi-character string the string's own retry reaches the
+insertion, so `(?:ab(?=c)){i<=1}` over 'abxc' is (0, 3) with one insertion while `(?:b(?=c)){i<=1}`
+over 'bxc' is None. None of the engines the port's correctness survey uses (PCRE2, Python `re`,
+.NET, Perl, JavaScript) has fuzzy matching, so the question is settled from the definition and
+upstream's own `\b` rule.
+
+**Proposed fix upstream:** when a lookaround in a fuzzy section fails as a whole (the two places
+above), restore its text position, fuzzy counts and captures, as both places already do, then call
+`fuzzy_match_item(state, search, &node, 0)` with `node` the lookaround, and on success start the
+lookaround again at the new position. The retry frame needs a tag of its own, since
+`RE_OP_LOOKAROUND` already tags the lookaround's frame, and joins the zero-width block of the
+backtrack switch (`:15330-15344`).
+
+**This port.** `Matcher.InsertBeforeAFailedLookaround` in `src/FuzzyRegex/Engine/Matcher.cs`, called
+from both places; its retry frame is tagged `Opcode.FuzzyLookaround`. A lookaround outside a fuzzy
+section pays one bit test. Pinned by `Gaps/Engine/FuzzyLookaroundInsertionTests` (lookahead,
+lookbehind, positive and negative, reversed, captures, two insertions, every error kind, the search
+anchor rule). `tools/probes/fuzzy-reference-matcher.py` gained lookarounds (its rule 10), and
+`tools/probes/lookaround-insertion-grid.py` compares the port with it on a Debug build: 6,000 rows
+at seeds 50 and 7, 0 disagreements. The rule moves 16 to 36 rows of each of the four lookaround
+kinds at each seed, and all but 3 of the moved rows are upstream's answer once the reference drops
+rule 10 and entry 42's deletion (one is the string case above, two are entry 44's needed rule). The default oracle waves at seeds 7, 4242
+and 20260927 draw about 27 fuzzy lookaround rows each and move none. The oracle entry
+`fuzzy-insertion-before-a-failing-lookaround` keys on `PatternObject.SkipLookaroundInsertion`.
+
+## 51. A section below its minimum error count never tries the insertion that would meet it - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D9, finding F-D of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-51-minimum-trailing-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+match(r'(?:a){1<=e<=2}b', 'aab')             -> None                   expected (0, 3), one insertion
+match(r'(?:a){1<=e<=1}c', 'axc')             -> None                   expected (0, 3), one insertion
+fullmatch(r'(?:a){1<=e<=2}', 'aa')           -> None                   expected (0, 2), one insertion
+match(r'(?:(?:a){1<=e<=1}b){e<=1}', 'aab')   -> None                   expected (0, 3), one insertion
+search(r'(?:a){1<=e<=2}b', 'aab')            -> (2, 3), one deletion   expected (0, 3), one insertion
+match(r'(?:ab){1<=e<=2}c', 'abxc')           -> (0, 4), one insertion  (the control: a string's retry)
+match(r'(?:a){1<=e<=2}b', 'cab')             -> (0, 3), (1, 1, 0)      (the control: minimum met first)
+```
+
+**Why upstream is wrong.** A minimum error count says the match must hold at least that many
+errors (`upstream/README.rst:538-566`), and an insertion is a text character the pattern does not
+account for, which may stand after a section's last item as well as between two of them: upstream
+itself offers insertions there when backtracking into `END_FUZZY` (`_regex.c:15512-15563`). But the
+frame that offers them is pushed by the forward `END_FUZZY` only after it has checked the minimums
+(`fuzzy_within_constraints` at `:12461-12462`, the push at `:12500-12511`), so a section that reaches
+its end below its minimum backtracks at once and the one error that could still meet it is never
+tried. Upstream is not consistent about it: a multi-character string pushes its own insertion retry
+before the section ends (`fuzzy_insert`, `:14764-14768`), so `(?:ab){1<=e<=2}c` over 'abxc' is
+(0, 4) with one insertion, while `(?:a){1<=e<=1}c` over 'axc', the same situation with a
+one-character item, is None. The last control shows the order is the defect, not the insertion:
+once a substitution has met the minimum, the trailing insertion is found. None of the engines the
+port's correctness survey uses (PCRE2, Python `re`, .NET, Perl, JavaScript) has fuzzy matching, so
+the question is settled from the definition and upstream's own string rule.
+
+**Proposed fix upstream:** in the forward `END_FUZZY`, when `fuzzy_within_constraints` fails only
+because an insertion or error minimum is unmet, and the section would pass with enough more
+insertions, carry on to push the frame and then `goto backtrack`, so the backtrack case tries one
+trailing insertion; in that case, after each insertion, check the constraints again and backtrack
+into the frame just pushed while they still fail. A substitution or deletion minimum cannot be met
+by insertions, and neither can a maximum already passed, so those still fail at once.
+
+**This port.** The forward and backtrack `END_FUZZY` arms of `src/FuzzyRegex/Engine/Matcher.cs`, with
+`Matcher.InsertionsCanMeetMinimum` deciding which sections wait: only those that enough insertions
+would make legal, and whose enclosing sections can absorb them (without the second check row A of
+`FailedCallMemoTests`, whose outer section permits no insertion, ran about 25% slower; with it, base and
+fix are within noise, 134-140 ms against 135-145 ms at 15 characters, Release, 2026-09-28). A pattern with no minimum pays
+nothing: the forward arm's new work runs only where the constraint check already failed, and the
+backtrack arm's re-check is behind `PatternObject.HasFuzzyMinimum`. Pinned by
+`Gaps/Engine/FuzzyMinimumErrorTests` (e and i minimums, two insertions, a group reference, nested
+sections, a full match, the earlier search start, a reversed section, `(?b)` and `(?e)`, and s, d,
+fuzzy-test and budget controls). `tools/probes/fuzzy-reference-matcher.py` already checked minimums
+after the trailing insertions (its rule 6) and gains a switch for upstream's order;
+`tools/probes/fuzzy-minimum-grid.py` compares the port with it on a Debug build, reversing the
+pattern and subject for `(?r)` rows and checking the fewest errors over every path for `(?b)` and
+`(?e)` rows: 6,000 rows at seeds 51 and 7, 0 disagreements. The rule moves 4 to 41 rows of each
+construct (e, i, d, s, mixed, nested, `(?r)`, `(?b)`, `(?e)`) at each seed; a d or s section on its
+own moves none (every moved d or s row at seed 51 also holds an e, i or mixed section). All but 8 of the moved flag-free rows are upstream's answer once the
+reference drops rules 6, 3 and 10, and upstream already gives the reference's answer on those 8, each
+through a string's own insertion retry. The oracle entry `fuzzy-minimum-met-by-a-trailing-insertion`
+keys on `PatternObject.CheckMinimumBeforeTrailingInsertions`. Every other named ablation switches entry 51
+off with entries 42 and 44, except the three fuzzy-search ablations that sit before it (42, 44 and 50),
+so a row entry 51 alone explains is claimed by its own entry; without that, seed 7 row 7203
+(`full-fold-backreference-retry`) went unclassified. One judged answer of
+`turkic-default-folding-without-spans` moved with the fix (row 9, a `{1<=e<=2}` split) and returns
+to the old one with the ablation set. Default oracle waves at seeds 7, 4242 and 20260927: only the
+known row 3732 at 20260927 diverges.
+
 ## 52. A fuzzy full-folded run cannot edit a subject character that expands under folding as one character - FIXED HERE (2026-09-28)
 
 **Status:** not filed, per the owner's rule. Found beside ledger entry 49 as its subject-side twin

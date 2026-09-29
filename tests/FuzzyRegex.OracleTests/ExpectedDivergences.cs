@@ -3121,6 +3121,38 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The six rows of <c>fuzzy-insertion-before-a-failing-lookaround</c>, recorded 2026-09-28 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/lookaround-insertion-rows.jsonl</c>: a
+    /// positive and a negative lookahead, a lookbehind, an insertion that comes before a substitution
+    /// at a later start, an anchored match with the lookaround first, and a reversed lookbehind.
+    /// </summary>
+    private const string _lookaroundInsertionRows = """
+        {"generator": "rows", "pattern": "(?:b(?=c)){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?!x)){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?<=x)c){i<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:b(?=c)){e<=1}", "flags": 0, "namedLists": {}, "subject": "bxc", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?:(?=b)b){i<=1}", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?r)(?:(?<=c)b){i<=1}", "flags": 0, "namedLists": {}, "subject": "cxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// The eight rows of <c>fuzzy-minimum-met-by-a-trailing-insertion</c>, recorded 2026-09-28 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/fuzzy-minimum-rows.jsonl</c>: an e and an
+    /// i minimum, a search that now starts earlier, a full match, nested sections, a group
+    /// reference, a reversed section and a best match.
+    /// </summary>
+    private const string _minimumTrailingInsertionRows = """
+        {"generator": "rows", "pattern": "(?:a){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:a){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}]}
+        {"generator": "rows", "pattern": "(?:a){2<=i<=2}b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:a){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?:a){1<=e<=1}b){e<=1}", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(a)(?:\\1){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?r)b(?:a){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "baa", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?b)(?:a){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}}
+        """;
+
+    /// <summary>
     /// The five rows of <c>default-word-boundary-follows-uax29</c>, from the <c>boundaries</c> wave
     /// generator; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -3337,6 +3369,65 @@ internal static class ExpectedDivergences
             Example: _neededEmptyIterationRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithUpstreamEmptyIterations(row))
+        ),
+        new(
+            Id: "fuzzy-insertion-before-a-failing-lookaround",
+            Reason: "THIS PORT PASSES A LOOKAROUND THAT FAILS INSIDE A FUZZY SECTION BY INSERTING A TEXT "
+                + "CHARACTER IN FRONT OF IT, and upstream never does. Ledger entry 50, known defect D8 "
+                + "(finding S3-F2), fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as "
+                + "a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: every other zero-width assertion that fails in a fuzzy section is "
+                + "fuzzed with a step of 0, which leaves an insertion as the only error "
+                + "(`fuzzy_match_item` for `\\b` at upstream/src/_regex.c:12060-12075), but a positive "
+                + "lookaround whose body runs out of choices only backtracks (:17115-17168) and a negative "
+                + "one whose body matched goes straight to `backtrack` (:12918-13000). So "
+                + "`regex.search(r'(?:b\\b){i<=1}', 'bx c')` is (0, 2) with one insertion while "
+                + "`regex.search(r'(?:b(?=c)){i<=1}', 'bxc')` is None.\n"
+                + "THE FIX fuzzes the lookaround's own node at both places, after its block is popped, so "
+                + "the insertion is tried at the position, counts and captures the lookaround started "
+                + "from and the lookaround then starts again one character on "
+                + "(`Matcher.InsertBeforeAFailedLookaround`). Answers move from None to a match, and to "
+                + "an earlier start: `(?:b(?=c)){e<=1}` over 'bxc' is (0, 2) with an insertion where "
+                + "upstream finds a substitution at 1.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithoutTheLookaroundInsertion`, which sets "
+                + "`PatternObject.SkipLookaroundInsertion` with entries 42 and 44 off, reproduces "
+                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
+                + "judged. The control is "
+                + "`A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FuzzyLookaroundInsertionTests",
+            Example: _lookaroundInsertionRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
+        ),
+        new(
+            Id: "fuzzy-minimum-met-by-a-trailing-insertion",
+            Reason: "THIS PORT LETS A TRAILING INSERTION MEET A FUZZY SECTION'S MINIMUM ERROR COUNT, and "
+                + "upstream checks the minimum first. Ledger entry 51, known defect D9 (finding F-D), "
+                + "fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: the forward END_FUZZY fails a section below its minimum "
+                + "(upstream/src/_regex.c:12461-12462) before it pushes the frame whose backtrack case "
+                + "offers insertions after the section's last item (:12500-12511, :15512-15563), so the "
+                + "one error that could still meet the minimum is never tried. A string's own retry "
+                + "inserts before the section ends (:14764-14768), so "
+                + "`regex.match(r'(?:ab){1<=e<=2}c', 'abxc')` is (0, 4) with one insertion while "
+                + "`regex.match(r'(?:a){1<=e<=1}c', 'axc')` is None.\n"
+                + "THE FIX lets a section whose insertion or error minimum is unmet through END_FUZZY, "
+                + "pushes the frame and backtracks into it, and asks the constraints again after each "
+                + "insertion (`Matcher.InsertionsCanMeetMinimum`). Answers move from None to a match, "
+                + "and to an earlier start: `(?:a){1<=e<=2}b` over 'aab' is (0, 3) with an insertion "
+                + "where upstream finds a deletion at 2.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamMinimumOrder`, which sets "
+                + "`PatternObject.CheckMinimumBeforeTrailingInsertions` with entries 42, 44 and 50 off, "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
+                + "being judged. The control is "
+                + "`A_row_the_minimum_order_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FuzzyMinimumErrorTests",
+            Example: _minimumTrailingInsertionRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamMinimumOrder(row))
         ),
         new(
             Id: "search-start-partial",

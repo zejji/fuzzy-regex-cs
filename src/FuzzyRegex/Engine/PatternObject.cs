@@ -658,6 +658,32 @@ internal sealed class PatternObject
     internal bool SkipExactDeletionRetry;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a lookaround that fails in a fuzzy
+    /// section is never passed by an insertion, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the ledger entry 50 fix is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes a failing <c>\b</c> or <c>$</c> (<c>upstream/src/_regex.c</c>:12060-12075) but
+    /// not a failing lookaround (:12918-13000, :17115-17168), so <c>(?:b(?=c)){i&lt;=1}</c> finds
+    /// nothing in <c>bxc</c>. See <c>Matcher.InsertBeforeAFailedLookaround</c>.
+    /// </remarks>
+    internal bool SkipLookaroundInsertion;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
+    /// below its minimum error count fails at once, without trying the trailing insertions that
+    /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one
+    /// call, to show that the ledger entry 51 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's forward <c>END_FUZZY</c> checks the minimums (<c>upstream/src/_regex.c</c>:12461)
+    /// before it pushes the frame that offers trailing insertions (:12500-12511), so
+    /// <c>(?:a){1&lt;=e&lt;=2}b</c> finds nothing in 'aab'. See <c>Matcher.InsertionsCanMeetMinimum</c>.
+    /// </remarks>
+    internal bool CheckMinimumBeforeTrailingInsertions;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a repeat's end reads progress as
     /// upstream does, counting any fuzzy edit, even one since undone, and stopping at the end of the
     /// slice, instead of the "needed" rule and the repeat memo. The oracle sets it on a pattern it

@@ -17,38 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 [Explicit]
 public sealed class OpenDefectTests
 {
-    // Queue item 7 (S3-F2). One inserted 'x' after the 'b' puts the lookahead in front of the 'c',
-    // so the first match is (0, 2) with one insertion. Upstream: None (it never tries an insertion
-    // before a failing lookaround).
-    [Test]
-    public void A_fuzzy_insertion_is_tried_before_a_failing_lookahead()
-    {
-        Match m = new FuzzyRegex("(?:b(?=c)){i<=1}").Match("bxc");
-
-        m.Success.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
-    }
-
-    // Queue item 8 (F-D). Each section's only item matches exactly, but the section needs at least
-    // one error; inserting one text character before the item meets it. Upstream: None for all three.
-    [Test]
-    [Arguments(@"(?:a){1<=e<=2}b", "aab", 3)]
-    [Arguments(@"(?:[ab]){1<=e<=2}a", "bba", 3)]
-    [Arguments(@"(a)(?:\1){1<=e<=2}b", "aaab", 4)]
-    public void A_section_minimum_error_count_is_met_by_an_insertion_before_an_exact_item(
-        string pattern,
-        string text,
-        int length
-    )
-    {
-        Match m = new FuzzyRegex(pattern).MatchAtStart(text);
-
-        m.Success.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, length));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
-    }
-
     // Queue item 9. A negative lookahead succeeds only when its body fails, so nothing its body
     // captured survives; group 1 keeps only its own capture. Upstream agrees when the body spells
     // the group out (`(?!.(?:a))` gives ['a']) but keeps an entry when the body calls it (['a', 'a']).
