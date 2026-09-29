@@ -3413,7 +3413,7 @@ internal static class Matcher
             if (
                 (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
                 && openReach == reach
-                && SetsTheSameReadGroups(state, i)
+                && CouldRefuseInside(state, i)
             )
             {
                 // Insertion sort: the calls that pass the filter are few, one per call target
@@ -3458,21 +3458,55 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Whether open call <paramref name="call"/> was made with the same read groups set as now,
-    /// whatever their texts: the filter on the failed-call memo's ancestors.
+    /// Whether open call <paramref name="call"/> could refuse a call made inside the one about to be
+    /// made: the filter on the failed-call memo's ancestors (addendum 1, A2).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two tests, each true of every call I made inside the new call C, at position p. First, the
+    /// read groups that are set never shrink inside an open call, so an ancestor with a different
+    /// set of them can never show I's state (A2 ii).
+    /// </para>
+    /// <para>
+    /// Second, for a group compared by span (<see cref="CallRead.Span"/>): at I the group holds
+    /// either C's span, or a span captured inside C's run, since every restore puts back a snapshot
+    /// taken inside that run or at its entry. A capture inside C's run starts at or after p (ends at
+    /// or before it in a reverse pattern), because matching moves one way from p and the called
+    /// group's captures are well nested inside it. So an ancestor whose span differs from C's and
+    /// starts before p can never show I's span, and cannot refuse I. Without this, ancestors that
+    /// differ only in which earlier position set each group all entered the key, and every order of
+    /// setting k groups was its own key: <c>(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x|(?:qq){s&lt;=1}</c>
+    /// over <c>aay</c> took 1.6 s against 20 ms (review of 687e011, 2026-09-29). A capture made
+    /// against the pattern's direction, in a lookbehind of a forward pattern or a lookahead of a
+    /// reverse one, can start before p, so there the second test is off
+    /// (<see cref="PatternObject.CapturesAgainstDirection"/>).
+    /// </para>
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="call">An index into <see cref="MatchState.OpenCalls"/>.</param>
-    /// <returns><see langword="true"/> if the set groups are the same.</returns>
-    private static bool SetsTheSameReadGroups(MatchState state, int call)
+    /// <returns><see langword="false"/> if it can never refuse such a call.</returns>
+    private static bool CouldRefuseInside(MatchState state, int call)
     {
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        bool spansMoveOneWay = !state.Pattern.CapturesAgainstDirection;
         for (int g = 0; g < readGroups.Length; g++)
         {
-            bool unsetThen = state.OpenCallSpans[(call * readGroups.Length) + g] == -1;
-            if (unsetThen != (state.Groups[readGroups[g].Index].Current < 0))
+            long then = state.OpenCallSpans[(call * readGroups.Length) + g];
+            GroupData group = state.Groups[readGroups[g].Index];
+            bool unsetThen = then == -1;
+            if (unsetThen != (group.Current < 0))
             {
                 return false;
+            }
+
+            if (spansMoveOneWay && then != -1 && readGroups[g].Read == CallRead.Span && then != PackedSpan(group))
+            {
+                int start = (int)(then >> 32);
+                int end = (int)(uint)then;
+                if (state.Reverse ? end > state.TextPos : start < state.TextPos)
+                {
+                    return false;
+                }
             }
         }
 

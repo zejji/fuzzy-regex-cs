@@ -776,6 +776,10 @@ public sealed class GroupCallTests
         0
     )]
     [Arguments(@"(?:()|()|()|()|a)(?R)|\3\4x", "aax", false, 0, 3)]
+    [Arguments(@"(?:()|()|()|()|a)(?R)|\1\2\3\4x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|a)(?R)|\1\2\3\4\5x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x|(?:qq){s<=1}", "aay", false, -1, 0)]
+    [Arguments(@"(?:(?:())?|(?:())?|(?:())?|(?:())?|(?:())?|a)(?R)|\1\2\3\4\5x", "aay", false, -1, 0)]
     [Arguments(@"(?(DEFINE)(?<H>(?&G)|.*z|(?&G)|a)(?<G>(?&H)b))(?&H)", "ab", true, 0, 2)]
     public void A_call_guard_keyed_on_what_is_read_stays_polynomial(
         string pattern,

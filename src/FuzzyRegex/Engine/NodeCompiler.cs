@@ -1159,6 +1159,9 @@ internal static class NodeCompiler
             args.Pattern.GroupInfoAt((int)publicGroup).CapturedInRepeat = true;
         }
 
+        // NOT UPSTREAM: see PatternObject.CapturesAgainstDirection.
+        args.Pattern.CapturesAgainstDirection |= forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+
         // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
         // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.
 

@@ -390,6 +390,14 @@ internal sealed class PatternObject
     /// </summary>
     internal (int Index, CallRead Read)[] CallReadGroups = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S: whether a capture group is matched against the pattern's direction, inside a
+    /// lookbehind of a forward pattern or a lookahead of a reverse one, where its span can lie
+    /// behind the position it is captured from. <c>Matcher.CouldRefuseInside</c> reads it. Written
+    /// by <c>NodeCompiler</c>.
+    /// </summary>
+    internal bool CapturesAgainstDirection;
+
     /// <summary>What the call guard keys a read group on; see <c>CallRead</c>.</summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="info">The group, which a conditional or backreference reads.</param>
