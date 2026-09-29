@@ -3255,6 +3255,61 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the fuzzy part of a repeat end's progress test, the
+    /// "needed" rule and the repeat memo, which drop an iteration or say whether it counts as
+    /// progress. See <see cref="EmptyIterationAdmitted"/>.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat's data, for the iteration just ended.</param>
+    /// <param name="node">The repeat's end node.</param>
+    /// <param name="changed">Whether the iteration moved through the text or changed a capture.</param>
+    /// <returns>-1 to drop the iteration, otherwise 1 if it is progress and 0 if not.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int FuzzyIterationStands(MatchState state, RepeatData rpData, Node node, bool changed)
+    {
+        bool keyed = true;
+        if (state.TextPos == rpData.Start)
+        {
+            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
+            bool groupChanged =
+                MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(rpData.CaptureChange);
+            if (edited)
+            {
+                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                {
+                    changed = true;
+                }
+                else if (CrossedAVerb(state, rpData))
+                {
+                    // It stands, but no iteration follows it; see CrossedAVerb.
+                    changed = false;
+                    keyed = false;
+                }
+                else
+                {
+                    return -1;
+                }
+            }
+            else
+            {
+                // Error-free: upstream's rule, a tested group's change is progress.
+                changed = groupChanged;
+                keyed = false;
+            }
+        }
+
+        if (keyed && state.Pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+        {
+            return -1;
+        }
+
+        return changed ? 1 : 0;
+    }
+
+    /// <summary>
     /// Pops the link to the enclosing section's frame that <c>FUZZY</c> pushed for a pattern with a
     /// minimum error count, into <see cref="MatchState.SectionFrame"/>. Kept out of
     /// <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
@@ -4843,6 +4898,19 @@ internal static class Matcher
     private const byte _exactFuzzyType = byte.MaxValue;
 
     /// <summary>
+    /// The fuzzy type of a full-case-folded frame whose exact-deletion retry
+    /// (<see cref="_exactFuzzyType"/>) has been taken. Its retry takes the deletion back and fails.
+    /// </summary>
+    /// <remarks>
+    /// Pushed back as an ordinary deletion, the frame would go on, at an expanding subject
+    /// character, to the whole-character kinds: the edits <c>OfferWholeFoldedCharEdit</c>'s frame
+    /// beneath it tries anyway, without that frame's filter on a substitution that repeats a folded
+    /// insertion. Measured on <c>(?fi)fi(?:(?:ssaffiffii){e&lt;=3}(?:ffis|fitstss)|)</c>: 1.94 times
+    /// the engine steps, and 7% more over 8,000 random <c>(?fi)</c> rows (review, 2026-09-29).
+    /// </remarks>
+    private const byte _exactDeletionDone = byte.MaxValue - 1;
+
+    /// <summary>
     /// The "needed" rule: whether a repeat iteration that consumed no text and spent fuzzy edits may
     /// stand. Otherwise it fails.
     /// </summary>
@@ -4909,10 +4977,23 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="branch">The 2-way branch.</param>
-    /// <param name="passEnd">The pass's <c>END_OPTIONAL_PASS</c> node, whose value is the slot.</param>
-    private static void OpenOptionalPass(MatchState state, Node branch, Node passEnd)
+    /// <param name="branch">
+    /// The 2-way branch of a pattern with optional passes. One that opens none pushes the branch's
+    /// own entry: the table lookup is here rather than in <c>BasicMatch</c>, whose frame every call
+    /// zeroes.
+    /// </param>
+    private static void OpenOptionalPass(MatchState state, Node branch)
     {
+        if (state.Pattern.OptionalPassEndOf![branch.Index] is not { } passEnd)
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+            /* bstack: text_pos node BRANCH */
+            return;
+        }
+
         uint slot = passEnd.Values[0];
         if (passEnd.Values[1] != 0)
         {
@@ -6775,6 +6856,14 @@ internal static class Matcher
         bool exactDeletion = poppedType == _exactFuzzyType;
         bool exactTaken = exactDeletion || poppedType is FoldExactTaken or FoldExactTakenInsOnly;
 
+        // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
+        if (poppedType == _exactDeletionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
         if (!exactTaken)
         {
             state.UnrecordFuzzy();
@@ -6829,7 +6918,7 @@ internal static class Matcher
         state.Bstack.PushSize(currFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
         state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
@@ -8839,9 +8928,9 @@ internal static class Matcher
                         // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
                         // one after it opens a pass, whose entry does the branch's job too; see
                         // OpenOptionalPass.
-                        if (pattern.OptionalPassEndOf is { } passEnds && passEnds[node.Index] is { } passEnd)
+                        if (pattern.OptionalPassEndOf is not null)
                         {
-                            OpenOptionalPass(state, node, passEnd);
+                            OpenOptionalPass(state, node);
                         }
                         else
                         {
@@ -9099,44 +9188,14 @@ internal static class Matcher
                     // iteration whose state this run of the repeat has already reached.
                     if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
-                        bool keyed = true;
-                        if (state.TextPos == rpData.Start)
-                        {
-                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
-                            bool groupChanged =
-                                MatchState.GroupChanges(state.CaptureChange)
-                                != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edited)
-                            {
-                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
-                                {
-                                    changed = true;
-                                }
-                                else if (CrossedAVerb(state, rpData))
-                                {
-                                    // It stands, but no iteration follows it; see CrossedAVerb.
-                                    changed = false;
-                                    keyed = false;
-                                }
-                                else
-                                {
-                                    --rpData.Count;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                // Error-free: upstream's rule, a tested group's change is progress.
-                                changed = groupChanged;
-                                keyed = false;
-                            }
-                        }
-
-                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
                         {
                             --rpData.Count;
                             goto backtrack;
                         }
+
+                        changed = stands > 0;
                     }
                     else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
                     {
@@ -9321,44 +9380,14 @@ internal static class Matcher
                     // iteration whose state this run of the repeat has already reached.
                     if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
-                        bool keyed = true;
-                        if (state.TextPos == rpData.Start)
-                        {
-                            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
-                            bool groupChanged =
-                                MatchState.GroupChanges(state.CaptureChange)
-                                != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edited)
-                            {
-                                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
-                                {
-                                    changed = true;
-                                }
-                                else if (CrossedAVerb(state, rpData))
-                                {
-                                    // It stands, but no iteration follows it; see CrossedAVerb.
-                                    changed = false;
-                                    keyed = false;
-                                }
-                                else
-                                {
-                                    --rpData.Count;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                // Error-free: upstream's rule, a tested group's change is progress.
-                                changed = groupChanged;
-                                keyed = false;
-                            }
-                        }
-
-                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
                         {
                             --rpData.Count;
                             goto backtrack;
                         }
+
+                        changed = stands > 0;
                     }
                     else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
                     {

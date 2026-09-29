@@ -231,6 +231,23 @@ public sealed class FailedCallMemoTests
         (m.Index, m.Length).Should().Be((0, 2));
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void The_key_holds_the_text_reached(bool eager)
+    {
+        // match('(?1)|((?2)|aa|(?2)|a)((?1)c)', 'ac')   MemoryError
+        // The re-entry guard lets a nested call of a group at the same position through once the
+        // attempt has reached further than when the open call was made, so a call that failed
+        // before the text reached grew can succeed after it. Without the reached text and the open
+        // calls' reach in the key, the later call is failed and the match is (0, 1).
+        FuzzyRegex regex = WithMemo("(?1)|((?2)|aa|(?2)|a)((?1)c)", eager);
+
+        Match m = regex.Match("ac");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+    }
+
     /// <summary>A pattern compiled for one test, with the memo on from the first call, or off.</summary>
     private static FuzzyRegex WithMemo(string pattern, bool eager)
     {

@@ -77,6 +77,29 @@ public sealed class FuzzyExactDeletionTests
         new FuzzyRegex("(?:ab){2d<=3}ab").FullMatch("ab").Success.Should().BeFalse();
     }
 
+    // AGREES WITH UPSTREAM 2026.9.10. A full-folded string's exact-deletion retry, once taken, is
+    // only taken back: at an expanding subject character the whole-character edits belong to the
+    // frame D7 leaves beneath it (Matcher._exactDeletionDone). Retried as an ordinary deletion it
+    // tried them again, 2,653 steps here where it now takes 1,418 (Debug, 2026-09-29).
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_taken_full_fold_deletion_retry_does_not_repeat_the_whole_character_edits()
+    {
+        // search('(?fi)fi(?:(?:ssaffiffii){e<=3}(?:ffis|fitstss)|)', 'ﬁßaﬀﬁﬃﬁﬁ')
+        //   (0, 1) (0, 0, 0)
+        var regex = new FuzzyRegex(
+            "(?fi)fi(?:(?:ssaffiffii){e<=3}(?:ffis|fitstss)|)",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => ShouldMatch(regex.Match("ﬁßaﬀﬁﬃﬁﬁ"), 0, 1, new FuzzyCounts(0, 0, 0)),
+            2_000,
+            "a taken deletion retry is only taken back"
+        );
+    }
+
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     [Test]
     public void Every_item_after_the_exact_one_may_be_deleted_too()
