@@ -2916,7 +2916,8 @@ internal static class Matcher
     /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
     /// the matcher's own arm pushes the touch mark, and the prefilter and
     /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
-    /// <c>(?w)</c> and grapheme tests keep answering against the held text until build chunk 10.
+    /// <c>(?w)</c> tests keep answering against the held text until build chunk 10; the grapheme
+    /// test is decided at the edge itself since chunk 4 (<see cref="GraphemeBoundaryAtEdge"/>).
     /// It stays one method, as before D11: a wrapper around the switch added a call to every
     /// zero-width test and cost a call without partial about 3% on a multiline <c>$</c> scan
     /// (measured 2026-09-29).
