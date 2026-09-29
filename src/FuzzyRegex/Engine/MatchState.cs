@@ -1078,9 +1078,11 @@ internal sealed class MatchState : IDisposable
 
         // NOT UPSTREAM (D17). The states belong to this call, so a kept state must not hold a
         // large set for the next one, as the stacks above give back what they grew past their limit.
-        if (EmptyIterationStates is { Count: > 0 } states)
+        // The capacity, not the count: ResetGuards empties the set at each start position and
+        // leaves it the size it grew to.
+        if (EmptyIterationStates is { } states)
         {
-            if (states.Count > 1024)
+            if (states.Capacity > 1024)
             {
                 EmptyIterationStates = null;
             }

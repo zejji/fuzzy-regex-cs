@@ -137,6 +137,11 @@ public sealed class EmptyIterationCycleTests
     // A minimum makes an error useful, so a count cannot be cut for being higher than another.
     [Arguments(@"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=e<=1}", "abb", 3)]
     [Arguments(@"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=e<=1}", "abbb", 4)]
+    // The loop inside an unbounded section, inside a bounded one: only the outer limit tells the
+    // states apart, so the cap takes every section's limits (review round 2). No answer is known
+    // to depend on it; these rows keep upstream's answer either way.
+    [Arguments(@"(?:(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}){i}(?=(?P<g>b))$){i<=1}", "abb", 3)]
+    [Arguments(@"(?:(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}){i}(?=(?P<g>b))$){i<=1}", "abbb", 4)]
     public void A_state_is_keyed_by_the_errors_the_open_section_has_made(string pattern, string subject, int end)
     {
         // Witness for the fuzzy counts in the key. The inner repeat reaches the same position and

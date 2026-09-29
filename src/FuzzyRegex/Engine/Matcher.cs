@@ -2900,8 +2900,8 @@ internal static class Matcher
 
     /// <summary>
     /// The value at which an error count stops mattering to the rest of the match, for
-    /// <see cref="RevisitsEmptyIterationState"/>: one more than the largest finite bound anything
-    /// still to come compares the counts with, or 0 when nothing does. <b>Not upstream</b> (D17).
+    /// <see cref="RevisitsEmptyIterationState"/>: one more than the largest finite limit in the
+    /// pattern or on the whole match, or 0 when there is none. <b>Not upstream</b> (D17).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -2912,41 +2912,35 @@ internal static class Matcher
     /// <c>x</c> each time round. Keyed exactly, no state would ever repeat.
     /// </para>
     /// <para>
-    /// The rest of the match reads the counts only through comparisons with bounds: the open
-    /// section's minimums, maximums and cost limit, at its END_FUZZY and in each edit's permission
-    /// (<see cref="FuzzyWithinConstraints"/>, <see cref="ThisErrorPermitted"/>), and the whole
+    /// The rest of the match reads the counts only by comparing them, alone, summed, or weighted
+    /// into a cost, with limits: the open section's minimums, maximums and cost limit (its
+    /// END_FUZZY, <see cref="FuzzyWithinConstraints"/>, and each edit's permission,
+    /// <see cref="ThisErrorPermitted"/>); every enclosing section's, since each END_FUZZY adds the
+    /// counts into the section around it, which checks the sums at its own END_FUZZY; and the whole
     /// match's <see cref="MatchState.MaxErrors"/> and <see cref="MatchState.MaxCost"/>, which the
-    /// ranking modes lower. Outside any section only the last two remain. Two counts at or above
-    /// one more than the largest finite bound give the same answer to every comparison, now and
-    /// after any further edits, since counts only rise and no cost weight is negative: a kind of
-    /// error with weight 1 or more puts both over any cost limit, and one with weight 0 adds
-    /// nothing to either. So clipping there keeps the key exact and makes it finite. It is not a
-    /// dominance cut: below the cap every count is kept, which a minimum such as <c>{1&lt;=e}</c>
-    /// needs.
+    /// ranking modes lower. The enclosing sections' own counts wait on the stack, fixed for the
+    /// run, since the run began inside the open section. So every comparison still to come is
+    /// with some section's limit or a match limit, and
+    /// <see cref="PatternObject.LargestFuzzyLimit"/> covers every section.
     /// </para>
     /// <para>
-    /// With no finite bound anywhere (a <c>{e}</c> section, or none, in a plain match) the cap is 0
-    /// and the counts drop out of the key, which is exact because nothing reads them. SHORTCUT: the
-    /// cap is recomputed at each lookup; precompute it per section if a profile ever shows it.
+    /// Two counts at or above one more than the largest of those limits give the same answer to
+    /// every such comparison, now and after any further edits: counts only rise, a sum containing
+    /// either is at or above the cap too, and no cost weight is negative, so a kind of error with
+    /// weight 1 or more puts both over any cost limit and one with weight 0 adds nothing to either.
+    /// So clipping there keeps the key exact and makes it finite. It is not a dominance cut: below
+    /// the cap every count is kept, which a minimum such as <c>{1&lt;=e}</c> needs.
+    /// </para>
+    /// <para>
+    /// With no finite limit anywhere (only <c>{e}</c> sections, in a plain match) the cap is 0 and
+    /// the counts drop out of the key, which is exact because nothing reads them.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns>The cap for every count in <see cref="MatchState.FuzzyCounts"/>.</returns>
     private static long ErrorCountCap(MatchState state)
     {
-        long largest = -1;
-
-        if (state.FuzzyNode is { } section)
-        {
-            List<uint> bounds = section.Values;
-            for (int i = FuzzyValue.MinBase; i <= FuzzyValue.MaxErr; i++)
-            {
-                largest = LargerFiniteBound(largest, bounds[i]);
-            }
-
-            largest = LargerFiniteBound(largest, bounds[FuzzyValue.MaxCost]);
-        }
-
+        long largest = state.Pattern.LargestFuzzyLimit;
         largest = LargerFiniteBound(largest, state.MaxErrors);
         largest = LargerFiniteBound(largest, state.MaxCost);
         return largest + 1;
@@ -2956,7 +2950,7 @@ internal static class Matcher
     /// <param name="largest">The largest finite bound so far, or -1.</param>
     /// <param name="bound">A bound; <see cref="RegexFlags.Unlimited"/> or more is none.</param>
     /// <returns>The larger of the two, never below 0 once a finite bound is seen.</returns>
-    private static long LargerFiniteBound(long largest, long bound) =>
+    internal static long LargerFiniteBound(long largest, long bound) =>
         bound < RegexFlags.Unlimited ? Math.Max(largest, Math.Max(bound, 0)) : largest;
 
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>

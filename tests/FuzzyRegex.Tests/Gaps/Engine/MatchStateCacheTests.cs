@@ -210,6 +210,38 @@ public sealed class MatchStateCacheTests
     }
 
     [Test]
+    public void A_returned_state_lets_go_of_a_large_set_that_a_later_start_position_emptied()
+    {
+        // D17, review round 2. Start position 0 records about 1,200 states and fails; each later
+        // start clears the set and fails at once on the anchor, and 'b' matches at the last one.
+        // So the call ends with no states in a set still sized for 1,200, which a check of the
+        // count kept (capacity 1,931).
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$|b");
+        string subject = new string('a', 1_200) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Capacity.Should().BeGreaterThan(1_024);
+        state.EmptyIterationStates.Count.Should().BeLessThan(1_024);
+
+        cache.Return(state);
+
+        state.EmptyIterationStates.Should().BeNull();
+    }
+
+    [Test]
     public void The_comparison_sees_a_field_that_Init_forgets()
     {
         // Non-vacuity: a difference in one scalar, one list and one nested buffer must each show.

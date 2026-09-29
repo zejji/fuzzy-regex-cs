@@ -59,12 +59,18 @@ limits, so the counts rise without end and, keyed exactly, no state would ever r
 version of this fix keyed them exactly, and the error and cost totals too, and so still looped on
 that pattern (review, 2026-09-29).
 
-The rest of the match reads the counts only by comparing them with bounds: the open section's
-minimums, maximums and cost limit (its END_FUZZY and each edit's permission check), and the whole
-match's error and cost limits, which only the ranking modes lower. Two counts at or above one more
-than the largest finite bound among those give the same answer to every comparison, now and after
-any further edits, because counts only rise and no cost weight is negative. So the key clips each
-count there (`Matcher.ErrorCountCap`). That is exact, not a dominance cut: below the cap every
+The rest of the match reads the counts only by comparing them, alone, summed or weighted into a
+cost, with limits: the open section's minimums, maximums and cost limit (its END_FUZZY and each
+edit's permission check); every enclosing section's, because each END_FUZZY adds the counts into
+the section around it, which checks the sums at its own END_FUZZY; and the whole match's error and
+cost limits, which only the ranking modes lower. Two counts at or above one more than the largest
+finite limit among those give the same answer to every comparison, now and after any further
+edits, because counts only rise, a sum containing either is at or above that too, and no cost
+weight is negative. So the key clips each count there (`Matcher.ErrorCountCap`), taking the
+largest limit of any section in the pattern (`PatternObject.LargestFuzzyLimit`, found once at
+compile time) with the match's two. The first version of the cap read only the open section, so
+inside `(?:(?:LOOP){d}...){d<=1}` it was 0 while the outer limit still told the states apart
+(review round 2, 2026-09-29); no answer was found that it changed. That is exact, not a dominance cut: below the cap every
 count is kept, as a minimum such as `{1<=e}` needs, since more errors can then be what makes a
 match. With no finite bound anywhere, the cap is 0 and the counts drop out, which is exact because
 nothing reads them.
@@ -82,7 +88,9 @@ nothing still to come reads the old values.
   repeat re-entered by recursion).
 - `MatchState.EmptyIterationStates`: one set per match attempt, keyed by run id and the state
   above. It is emptied when the guards are reset for a new start position, and at the end of a
-  call a set of more than 1,024 states is dropped rather than kept on the cached state.
+  call a set with room for more than 1,024 states is dropped rather than kept on the cached
+  state. It is judged by its capacity, since the reset at each start position empties it without
+  shrinking it.
 - `END_GREEDY_REPEAT` and `END_LAZY_REPEAT` consult it only when the iteration read no text and
   the group half of `capture_change` moved, and set `changed = false` on a hit. A lookup fills the
   state's scratch array and allocates only when the state is new.

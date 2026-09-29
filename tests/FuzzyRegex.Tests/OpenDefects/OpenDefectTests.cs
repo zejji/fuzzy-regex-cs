@@ -100,4 +100,24 @@ public sealed class OpenDefectTests
         (search.Success, search.Index, search.Length).Should().Be((true, 0, 1));
         (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
     }
+
+    // D17 review round 2, 2026-09-29: the D2 / ledger 33 family, not D17's. Traced at 0: every
+    // empty iteration leaves g at (1, 2) and the counts at zero, but the section's edit count rises
+    // by one, so the edit alone counts as progress and the loop never ends; the D17 record is never
+    // consulted, since no group changed. The answer is no match: '(?(g))' has no item to edit, and
+    // a lookaround is matched exactly, so the loop adds nothing that the same pattern without the
+    // '(?(g))' alternative lacks, and that pattern is no match here, in upstream and the port alike
+    // (measured 2026-09-29). Upstream: MemoryError. The port exhausts its backtrack stack (1.1 GB),
+    // on main too.
+    [Test]
+    public void A_fuzzy_edit_that_changes_nothing_else_ends_an_empty_iteration_loop()
+    {
+        var regex = new FuzzyRegex(
+            @"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){d<=1}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        );
+
+        regex.Match("xb").Success.Should().BeFalse();
+    }
 }
