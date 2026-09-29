@@ -511,6 +511,14 @@ internal sealed class MatchState : IDisposable
     internal HashSet<EmptyIterationState>? EmptyIterationStates;
 
     /// <summary>
+    /// NOT UPSTREAM (D17): the key <c>Matcher.RevisitsEmptyIterationState</c> fills for each lookup,
+    /// so that only a new state allocates. <see langword="null"/> exactly when the pattern tests no
+    /// group. Every lookup overwrites all of it before reading; <see cref="Init"/> clears it anyway,
+    /// so that a reused state starts exactly as a new one does.
+    /// </summary>
+    internal readonly long[]? EmptyIterationScratch;
+
+    /// <summary>
     /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
     /// node index. Counted up and never restored. Allocated only
     /// for a fuzzy pattern.
@@ -738,6 +746,8 @@ internal sealed class MatchState : IDisposable
         }
 
         SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+        EmptyIterationScratch =
+            pattern.TestedGroups.Length > 0 ? new long[2 + FuzzyValue.Count + (2 * pattern.TestedGroups.Length)] : null;
         FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
     }
 
@@ -875,6 +885,10 @@ internal sealed class MatchState : IDisposable
 
         NextRunId = 0;
         EmptyIterationStates?.Clear();
+        if (EmptyIterationScratch is not null)
+        {
+            Array.Clear(EmptyIterationScratch);
+        }
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
@@ -1046,6 +1060,21 @@ internal sealed class MatchState : IDisposable
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
+
+        // NOT UPSTREAM (D17). The states belong to this call, so a kept state must not hold a
+        // large set for the next one, as the stacks above give back what they grew past their limit.
+        if (EmptyIterationStates is { Count: > 0 } states)
+        {
+            if (states.Count > 1024)
+            {
+                EmptyIterationStates = null;
+            }
+            else
+            {
+                states.Clear();
+            }
+        }
+
         Text = default;
         _characterIndex = null;
         BestMatchGroups = null;

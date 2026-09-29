@@ -24,7 +24,7 @@ is everything the rest of the match can depend on:
 - the text position;
 - the count, clipped to the minimum when the repeat has no maximum (counts past the minimum are
   alike then);
-- the fuzzy counts of the open section, and the match's error and cost totals;
+- the error counts, clipped where they stop mattering (below);
 - the spans of every group the pattern tests (`GroupInfo.Referenced`), unset told apart from empty.
 
 A revisited state is treated exactly as upstream treats an empty iteration that changed nothing:
@@ -42,11 +42,35 @@ Why this is exact where upstream terminates, and terminates where it does not:
 - It was reached on an earlier path that has been backtracked (a sibling): that path's whole
   future, body and tail, was explored and found no match, or the search would have returned it.
   The same state has the same future, so skipping the body loses nothing.
-- Every part of the key only rises along a path, or is fixed for the run, so a path that goes
-  round for ever must revisit a state, and the set is finite for a finite subject.
+- Every part of the key takes finitely many values within one run: the position is inside the
+  subject, the count is clipped or bounded by the maximum, spans lie inside the subject, and the
+  error counts are clipped (below). So a run of consecutive empty iterations at one position can
+  reach only finitely many states, and a path that would go round for ever must revisit one.
 
 With a bounded repeat the count keeps every state on a path distinct, so a bounded repeat ends
 exactly where upstream's does; only sibling repeats are skipped.
+
+## The error counts
+
+A body with a fuzzy section in it charges errors on every pass, even when the groups cycle:
+`^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d<=1})*$` deletes the `x` each time round.
+END_FUZZY merges the inner section's counts into the open ones without checking the open section's
+limits, so the counts rise without end and, keyed exactly, no state would ever repeat. The first
+version of this fix keyed them exactly, and the error and cost totals too, and so still looped on
+that pattern (review, 2026-09-29).
+
+The rest of the match reads the counts only by comparing them with bounds: the open section's
+minimums, maximums and cost limit (its END_FUZZY and each edit's permission check), and the whole
+match's error and cost limits, which only the ranking modes lower. Two counts at or above one more
+than the largest finite bound among those give the same answer to every comparison, now and after
+any further edits, because counts only rise and no cost weight is negative. So the key clips each
+count there (`Matcher.ErrorCountCap`). That is exact, not a dominance cut: below the cap every
+count is kept, as a minimum such as `{1<=e}` needs, since more errors can then be what makes a
+match. With no finite bound anywhere, the cap is 0 and the counts drop out, which is exact because
+nothing reads them.
+
+The totals are not in the key. END_FUZZY recomputes them from the counts each time it runs, so
+nothing still to come reads the old values.
 
 ## The mechanism
 
@@ -57,9 +81,11 @@ exactly where upstream's does; only sibling repeats are skipped.
   read by another run of the same repeat with a different continuation (a nested repeat, or a
   repeat re-entered by recursion).
 - `MatchState.EmptyIterationStates`: one set per match attempt, keyed by run id and the state
-  above. It is emptied when the guards are reset for a new start position.
+  above. It is emptied when the guards are reset for a new start position, and at the end of a
+  call a set of more than 1,024 states is dropped rather than kept on the cached state.
 - `END_GREEDY_REPEAT` and `END_LAZY_REPEAT` consult it only when the iteration read no text and
-  the group half of `capture_change` moved, and set `changed = false` on a hit.
+  the group half of `capture_change` moved, and set `changed = false` on a hit. A lookup fills the
+  state's scratch array and allocates only when the state is new.
 
 Existing memos considered:
 
@@ -79,23 +105,22 @@ Existing memos considered:
   pushed only when `PatternObject.TestedGroups` is not empty: one field test per repeat entry and
   per `push_repeats`.
 - An iteration that read text: one extra comparison (`TextPos == Start`) on a path already taken.
-- An empty iteration that changed a tested group: one allocation and one set lookup. This is the
-  only path that pays, and it is the one that could not end before.
+- An empty iteration that changed a tested group: one set lookup, and one small array when the
+  state is new. `AllocationTests` pins both: a warm `(a)(?:\1|b)*c` allocates nothing, and
+  `^(?:(?=(a))|a)*\1?$` over 2,000 characters allocates under 400 bytes per character (6.6 GB
+  over 10,000 before the scratch key).
 
 ## Tests
 
 `Gaps/Engine/EmptyIterationCycleTests`: the repro, a three-state cycle, cycles seen by a
 backreference and by a conditional (in the body and in the tail), a nested repeat, lazy and `{3,}`
 forms, a fuzzy section around the loop and after it, `(?r)` forms with lookbehinds and lookaheads,
-and the other alternatives still tried after a cycle. All 14 loop for ever without the check.
+the other alternatives still tried after a cycle, and six loops whose body also charges an error
+on every pass. All 20 loop for ever without the check.
 
 Each part of the key has a witness, a test whose answer changes when that part is left out
 (checked by zeroing the part in a scratch build, 2026-09-29): the position, the count, the run and
-the open section's fuzzy counts. Every witness's expected answer is upstream's, since upstream
+the error counts. Every witness's expected answer is upstream's, since upstream
 ends on each of them.
 
-The error and cost totals have no witness. They change only when a fuzzy section closes, which
-also changes the enclosing section's counts, and they matter only to the ranking modes; three
-random searches over generated fuzzy and BESTMATCH patterns, about 20 minutes in all, found no
-answer that depends on them. They
-are kept because an extra part can only make the check cut less, never cut wrongly.
+A `{1<=e<=1}` row pins that the counts matter under a minimum too.

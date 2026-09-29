@@ -377,16 +377,17 @@ internal sealed class RepeatData
 /// <c>Matcher.RevisitsEmptyIterationState</c>.
 /// </summary>
 /// <remarks>
-/// A class holding one array rather than a record struct, because the number of tested groups is
-/// the pattern's. Only an empty iteration that changed a tested group builds one.
+/// The values sit in an array because the number of tested groups is the pattern's. A lookup
+/// wraps the state's scratch array (<c>MatchState.EmptyIterationScratch</c>), so it allocates
+/// nothing; only a new state is stored, with a <see cref="Copy"/> of its values.
 /// </remarks>
-internal sealed class EmptyIterationState : IEquatable<EmptyIterationState>
+internal readonly struct EmptyIterationState : IEquatable<EmptyIterationState>
 {
     private readonly long _runId;
     private readonly long[] _values;
     private readonly int _hash;
 
-    /// <summary>Takes ownership of <paramref name="values"/>.</summary>
+    /// <summary>Wraps <paramref name="values"/> without copying them.</summary>
     /// <param name="runId">The run of the repeat.</param>
     /// <param name="values">The position, the count and the rest of the state, in a fixed order.</param>
     internal EmptyIterationState(long runId, long[] values)
@@ -404,15 +405,16 @@ internal sealed class EmptyIterationState : IEquatable<EmptyIterationState>
         _hash = hash.ToHashCode();
     }
 
-    /// <inheritdoc/>
-    public bool Equals(EmptyIterationState? other) =>
-        other is not null
-        && _hash == other._hash
-        && _runId == other._runId
-        && _values.AsSpan().SequenceEqual(other._values);
+    /// <summary>The same state over its own copy of the values, for storing.</summary>
+    /// <returns>The copy.</returns>
+    internal EmptyIterationState Copy() => new(_runId, [.. _values]);
 
     /// <inheritdoc/>
-    public override bool Equals(object? obj) => Equals(obj as EmptyIterationState);
+    public bool Equals(EmptyIterationState other) =>
+        _hash == other._hash && _runId == other._runId && _values.AsSpan().SequenceEqual(other._values);
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is EmptyIterationState other && Equals(other);
 
     /// <inheritdoc/>
     public override int GetHashCode() => _hash;

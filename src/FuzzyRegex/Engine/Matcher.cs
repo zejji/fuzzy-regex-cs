@@ -2822,12 +2822,12 @@ internal static class Matcher
     /// <para>
     /// The state is everything the rest of the match can depend on within the run: the position,
     /// the count (clipped to the minimum when there is no maximum, as the counts past it are
-    /// alike), the open section's fuzzy counts, the error and cost totals, and the spans of the
+    /// alike), the error counts as <see cref="ErrorCountCap"/> clips them, and the spans of the
     /// tested groups. If the state was reached earlier on this path, the body from here can only
     /// repeat what it did from there, and upstream never ends; if on a path already backtracked,
-    /// that path's whole future failed, and this one's is the same. Every part rises along a path
-    /// or is fixed for the run, so a loop that goes on for ever must revisit a state. With a
-    /// maximum the count keeps every state on a path apart, so only a repeated sibling is cut.
+    /// that path's whole future failed, and this one's is the same. Each part takes finitely many
+    /// values in one run, so a run of empty iterations must come back to a state it has seen. With
+    /// a maximum the count keeps every state on a path apart, so only a repeated sibling is cut.
     /// The design is <c>docs/plan/2026-09-29-d17-empty-iteration-cycle.md</c>.
     /// </para>
     /// </remarks>
@@ -2855,15 +2855,19 @@ internal static class Matcher
         }
 
         long[] counts = state.FuzzyCounts;
-        long[] values = new long[4 + counts.Length + (2 * tested.Length)];
+        long[] values = state.EmptyIterationScratch!;
+        Debug.Assert(
+            values.Length == 2 + counts.Length + (2 * tested.Length),
+            "the scratch key is sized for the pattern"
+        );
         int v = 0;
         values[v++] = state.TextPos;
         values[v++] = count;
-        values[v++] = state.TotalErrors;
-        values[v++] = state.TotalCost;
+
+        long cap = ErrorCountCap(state);
         foreach (long fuzzyCount in counts)
         {
-            values[v++] = fuzzyCount;
+            values[v++] = Math.Min(fuzzyCount, cap);
         }
 
         foreach (int group in tested)
@@ -2883,9 +2887,77 @@ internal static class Matcher
             }
         }
 
+        var key = new EmptyIterationState(rpData.RunId, values);
         state.EmptyIterationStates ??= [];
-        return !state.EmptyIterationStates.Add(new EmptyIterationState(rpData.RunId, values));
+        if (state.EmptyIterationStates.Contains(key))
+        {
+            return true;
+        }
+
+        state.EmptyIterationStates.Add(key.Copy());
+        return false;
     }
+
+    /// <summary>
+    /// The value at which an error count stops mattering to the rest of the match, for
+    /// <see cref="RevisitsEmptyIterationState"/>: one more than the largest finite bound anything
+    /// still to come compares the counts with, or 0 when nothing does. <b>Not upstream</b> (D17).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MatchState.FuzzyCounts"/> holds the open section's counts, with every inner
+    /// section's merged in by END_FUZZY without a check against the open section's limits, so a
+    /// body with a fuzzy section in it raises them on every pass:
+    /// <c>^(?:(?=(?P=g)b)(?=(?P&lt;g&gt;ab))|(?=(?P&lt;g&gt;a))(?:x){d&lt;=1})*$</c> deletes the
+    /// <c>x</c> each time round. Keyed exactly, no state would ever repeat.
+    /// </para>
+    /// <para>
+    /// The rest of the match reads the counts only through comparisons with bounds: the open
+    /// section's minimums, maximums and cost limit, at its END_FUZZY and in each edit's permission
+    /// (<see cref="FuzzyWithinConstraints"/>, <see cref="ThisErrorPermitted"/>), and the whole
+    /// match's <see cref="MatchState.MaxErrors"/> and <see cref="MatchState.MaxCost"/>, which the
+    /// ranking modes lower. Outside any section only the last two remain. Two counts at or above
+    /// one more than the largest finite bound give the same answer to every comparison, now and
+    /// after any further edits, since counts only rise and no cost weight is negative: a kind of
+    /// error with weight 1 or more puts both over any cost limit, and one with weight 0 adds
+    /// nothing to either. So clipping there keeps the key exact and makes it finite. It is not a
+    /// dominance cut: below the cap every count is kept, which a minimum such as <c>{1&lt;=e}</c>
+    /// needs.
+    /// </para>
+    /// <para>
+    /// With no finite bound anywhere (a <c>{e}</c> section, or none, in a plain match) the cap is 0
+    /// and the counts drop out of the key, which is exact because nothing reads them. SHORTCUT: the
+    /// cap is recomputed at each lookup; precompute it per section if a profile ever shows it.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The cap for every count in <see cref="MatchState.FuzzyCounts"/>.</returns>
+    private static long ErrorCountCap(MatchState state)
+    {
+        long largest = -1;
+
+        if (state.FuzzyNode is { } section)
+        {
+            List<uint> bounds = section.Values;
+            for (int i = FuzzyValue.MinBase; i <= FuzzyValue.MaxErr; i++)
+            {
+                largest = LargerFiniteBound(largest, bounds[i]);
+            }
+
+            largest = LargerFiniteBound(largest, bounds[FuzzyValue.MaxCost]);
+        }
+
+        largest = LargerFiniteBound(largest, state.MaxErrors);
+        largest = LargerFiniteBound(largest, state.MaxCost);
+        return largest + 1;
+    }
+
+    /// <summary>The larger of <paramref name="largest"/> and a bound, if the bound is finite.</summary>
+    /// <param name="largest">The largest finite bound so far, or -1.</param>
+    /// <param name="bound">A bound; <see cref="RegexFlags.Unlimited"/> or more is none.</param>
+    /// <returns>The larger of the two, never below 0 once a finite bound is seen.</returns>
+    private static long LargerFiniteBound(long largest, long bound) =>
+        bound < RegexFlags.Unlimited ? Math.Max(largest, Math.Max(bound, 0)) : largest;
 
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
     /// <param name="span1">One span.</param>

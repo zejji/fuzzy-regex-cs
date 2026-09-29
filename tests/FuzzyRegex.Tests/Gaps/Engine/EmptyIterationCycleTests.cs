@@ -42,6 +42,16 @@ public sealed class EmptyIterationCycleTests
     [Arguments(@"(?:^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a)))*$){e<=1}", "ab")]
     // A fuzzy section after the loop: 'ab' is two edits from 'c'. Upstream: MemoryError.
     [Arguments(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a)))*(?:c){e<=1}$", "ab")]
+    // Each pass also deletes the 'x' of a fuzzy section inside the body, so the error count rises
+    // on every lap while the groups cycle. Upstream: MemoryError for all five.
+    [Arguments(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d<=1})*$", "ab")]
+    [Arguments(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d})*$", "ab")]
+    [Arguments(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){i<=1,d<=1})*$", "ab")]
+    [Arguments(@"^(?:(?=(?P=g)b)(?=(?P<g>ab))(?:x){d<=1}|(?=(?P<g>a)))*$", "ab")]
+    [Arguments(@"(?b)^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d<=1})*$", "ab")]
+    // The same inside a section around the loop, whose counts take the inner deletions in.
+    // Upstream: MemoryError.
+    [Arguments(@"(?:^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d<=1})*$){e<=1}", "ab")]
     // Reversed, with lookbehinds; a reversed body runs right to left, so the test comes second.
     // Upstream: MemoryError.
     [Arguments(@"(?r)^(?:(?<=(?P<g>ab))(?<=a(?P=g))|(?<=(?P<g>b)))*$", "ab")]
@@ -123,22 +133,22 @@ public sealed class EmptyIterationCycleTests
     }
 
     [Test]
-    public void A_state_is_keyed_by_the_errors_the_open_section_has_made()
+    [Arguments(@"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}", "abb", 3)]
+    // A minimum makes an error useful, so a count cannot be cut for being higher than another.
+    [Arguments(@"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=e<=1}", "abb", 3)]
+    [Arguments(@"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=e<=1}", "abbb", 4)]
+    public void A_state_is_keyed_by_the_errors_the_open_section_has_made(string pattern, string subject, int end)
     {
         // Witness for the fuzzy counts in the key. The inner repeat reaches the same position and
         // spans with the section's one error spent and with it unspent. Keyed without the counts,
         // the two look alike, the one reached second is taken as already tried, and the first match
-        // starts at 1 instead of 0. Upstream: (0, 3) with one insertion, g = (2, 3).
-        Match m = new FuzzyRegex(
-            @"(?:(?:(?:b|(?(g)a)(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}",
-            FuzzyRegexOptions.None,
-            _timeout
-        ).Match("abb");
+        // starts at 1 instead of 0. Upstream: (0, end) with one insertion, g = (end - 1, end).
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout).Match(subject);
 
         m.Success.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 3));
+        (m.Index, m.Length).Should().Be((0, end));
         (m.FuzzyCounts.Insertions, m.FuzzyCounts.Total).Should().Be((1, 1));
-        (m.Groups["g"].Index, m.Groups["g"].Length).Should().Be((2, 1));
+        (m.Groups["g"].Index, m.Groups["g"].Length).Should().Be((end - 1, 1));
     }
 
     [Test]

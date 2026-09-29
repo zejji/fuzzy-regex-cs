@@ -172,6 +172,44 @@ public sealed class MatchStateCacheTests
     }
 
     [Test]
+    [Arguments(20, false)]
+    [Arguments(2_000, true)]
+    public void A_returned_state_lets_go_of_the_empty_iteration_states_its_call_recorded(int length, bool dropped)
+    {
+        // D17. One state per position is recorded, so the longer subject passes the 1,024 above
+        // which the set itself is dropped rather than kept on the cached state.
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
+        string subject = new string('a', length) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Count.Should().BeGreaterThan(length / 2);
+
+        cache.Return(state);
+
+        if (dropped)
+        {
+            state.EmptyIterationStates.Should().BeNull();
+        }
+        else
+        {
+            state.EmptyIterationStates.Should().NotBeNull().And.BeEmpty();
+        }
+    }
+
+    [Test]
     public void The_comparison_sees_a_field_that_Init_forgets()
     {
         // Non-vacuity: a difference in one scalar, one list and one nested buffer must each show.
@@ -230,11 +268,12 @@ public sealed class MatchStateCacheTests
             // readonly, so no call can set it. For a fuzzy pattern it is an array, which the long[]
             // rule below scribbles, and this test's fuzzy case then checks a reused state clears it.
             // MatchState.FilterMemory is the same: null exactly when the pattern has no fuzzy-literal
-            // filter, and readonly.
+            // filter, and readonly. MatchState.EmptyIterationScratch too, when the pattern tests no group.
             if (
                 (
                     string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
                 ) && field.GetValue(state) is null
             )
             {
