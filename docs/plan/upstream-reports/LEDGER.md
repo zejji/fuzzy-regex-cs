@@ -4995,4 +4995,6 @@ and a whole deletion of it (`Matcher.FoldWholeDel`); the backtrack point is also
 comparison at the start of such a group character, for 'ßxs'. Same switch, same oracle entry. A
 whole edit takes a whole character on each side it touches, so the group's ß is not substituted for
 the second half of a subject ﬀ, and the fi left over part way through a group ﬃ is not one deletion.
-Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.
+Three of entry 30's oracle examples (seed 7 row 6250, seed 20260922 row 6591 and S83's best-match
+deletion) have a captured ß or ﬆ, and are now held by this entry's oracle entry: with the edits on,
+switching the retry repair off alone no longer gives upstream's answer. Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.

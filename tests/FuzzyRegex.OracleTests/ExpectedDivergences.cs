@@ -3040,24 +3040,22 @@ internal static class ExpectedDivergences
     /// <c>tools/probes/s89-bestmatch-rows.jsonl</c>, recorded the same way on 2026-09-23.
     /// </summary>
     /// <remarks>
-    /// The staleness alarm only; the entry is keyed on an ablation. Rows 1 to 6 are the wave rows
-    /// the repair moved: seed 7 rows 6208, 6243, 6250 and 6471, seed 4242 row 6114 and seed
-    /// 20260922 row 6591. Row 3 was <c>full-fold-fuzzy-deletion</c>'s until S84. Rows 7 to 9 are
-    /// the defect minimised: an insertion forward and reversed, and S83's best-match deletion.
-    /// Row 10 is S85's BESTMATCH row minimised, which also needs upstream's doubled insertion
+    /// The staleness alarm only; the entry is keyed on an ablation. Rows 1 to 4 are the wave rows
+    /// the repair moved: seed 7 rows 6208, 6243 and 6471 and seed 4242 row 6114. Rows 5 and 6 are
+    /// the defect minimised: an insertion forward and reversed. Seed 7 row 6250, seed 20260922 row
+    /// 6591 and S83's best-match deletion minimised moved to
+    /// <c>full-fold-run-edits-an-expanding-subject-character-whole</c> with known defect D24
+    /// (2026-09-29), which edits their captured ß or ﬆ whole. Row 7 is S85's BESTMATCH row minimised, which also needs upstream's doubled insertion
     /// guard (ledger entry 12): the retry defect turns the one-insertion fit into a substitution
     /// and a trailing insertion, and the doubled guard refuses that insertion.
     /// </remarks>
     private const string _groupFoldRetryRows = """
         {"generator": "rows", "pattern": "(?fi)(a😀)(?:b\\p{L}\\b(?:\\1)){1<=e<=2:[^t]}", "flags": 0, "namedLists": {}, "subject": "a😀b😀ﬆ", "operation": "split", "count": 3, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a😀b😀ﬆ"]}}
         {"generator": "rows", "pattern": "(?fi)(ﬀo)(?:a*?😀(?:[ab]+(?:\\1)){e<=3:[a-s]}){e<=3,1i+1d+2s<=3:f}", "flags": 0, "namedLists": {}, "subject": "ﬀoaa😀affo", "operation": "fullmatch", "pos": 0, "endpos": 10, "codepointSlice": [0, 9], "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [7, 8, 9]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [7, 8, 9]}}]}
-        {"generator": "rows", "pattern": "(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa0a😀", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)\\m(ßa)(?:(?:\\1)b+?𝟮.){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "ßaTssAb𝟮TA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(?r)(?:\\p{Nd}\\A(?:\\1)){e<=3}(oba)", "flags": 0, "namedLists": {}, "subject": "\u200dOBaToba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?e)(?fi)\\m(ﬆx)(?:(?:\\1)[ab]*?a){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "ﬆxX", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
         {"generator": "rows", "pattern": "(?fi)(ab)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){e<=1}(ab)", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}]}
         {"generator": "rows", "pattern": "(?b)(?fi)(f)(?:(?:\\1)){e<=3}", "flags": 0, "namedLists": {}, "subject": "fxf", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
@@ -3125,7 +3123,11 @@ internal static class ExpectedDivergences
     /// defect D22's backreference rows, recorded the same way on 2026-09-29: a substitution, one
     /// after the first folded s of a ß matched, and a reversed one. Rows 12 to 15 are known defect
     /// D24's, the group side, recorded the same way that day: a captured ß substituted, substituted
-    /// after its first folded s matched, deleted, and substituted in reverse.
+    /// after its first folded s matched, deleted, and substituted in reverse. Rows 16 to 18 were
+    /// <c>full-fold-backreference-retry</c>'s until D24: seed 7 row 6250, seed 20260922 row 6591
+    /// and S83's best-match deletion minimised. Each has a captured ß or ﬆ the edits now take
+    /// whole, so the retry repair switched off alone no longer gives upstream's answer; with the
+    /// edits and the earlier full-fold fixes off it does, which is the entry's third arm.
     /// </summary>
     private const string _subjectFoldRows = """
         {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -3143,6 +3145,9 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfxs", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){s<=1}-(\u00dfx)", "flags": 0, "namedLists": {}, "subject": "ax-\u00dfx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa0a😀", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?fi)\\m(ﬆx)(?:(?:\\1)[ab]*?a){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "ﬆxX", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}]}
         """;
 
     /// <summary>
