@@ -101,10 +101,12 @@ Existing memos considered:
   group (`Optimiser`, Ref status), which is exactly where cycles happen.
 - The failure memo (`RepeatInfo.FailureMemo`) is off in any pattern with a backreference or a
   conditional.
-- The fuzzy repeat memo (`RepeatData.Memo`, `Matcher.RepeatMemoHit`) is on
-  `maint/fuzzy-exact-deletion-tidy`, not main, and keys at most two tested groups and no run. When
-  it merges, the two should share one key type: its key is this key without the run id, and its
-  hit drops the path where this one only stops the loop.
+- The fuzzy repeat memo (`RepeatData.Memo`, `Matcher.RepeatMemoHit`, from F-A) is on main now. It
+  runs only for an iteration that made a fuzzy edit, keys the position, the count, the raw counts
+  and at most two tested groups, and is scoped to a run by being emptied on each entry; a hit drops
+  the iteration. This record runs after it, and only for an empty iteration that changed a tested
+  group. The two should later share one key (this one's, with the counts clipped and every tested
+  group) and one per-repeat store, which would retire `RunId`; the two actions stay separate.
 
 ## Cost
 

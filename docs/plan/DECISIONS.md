@@ -1473,6 +1473,28 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
   `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
   no match.
+- 2026-09-26 (ledger entry 42): **a fuzzy item that matched exactly is offered as a deletion at the
+  moment it matches, so the search is complete and ordered.** Upstream tries errors on an item only
+  when it fails to match, so `(?:a){d<=1}a` finds nothing in 'a' (finding F-A, inherited, fixed
+  under the no-known-bugs rule). The first design, a second pass at a start whose first pass failed
+  (branch `spike/fuzzy-deletion-retry`), was reversed: it tried these deletions only after every
+  other path at the start, so `(?:(?:a){d<=1}ab|a)` over 'ab' took the later branch, and a
+  `(*SKIP)` reached through a deletion was ignored. Owner's direction: the reference semantics are
+  a complete, ordered depth-first search, graded by `tools/probes/fuzzy-reference-matcher.py`.
+  Answers upstream gets by skipping paths change to the ordered ones, for example
+  `(?:ab){e<=2}b` over 'bb' now has (1, 0, 1). The cost is kept near main's by leaving the choice
+  out where an exchange argument proves it holds no new match (run length, the node after the run,
+  minimums met, an item before a repeat of itself); every narrowing was graded to change no answer.
+- 2026-09-26 (ledger entry 44): **the "needed" rule for fuzzy empty iterations, with a repeat memo,
+  replaces entry 33's stop.** An iteration of a repeat that consumed no text and spent errors stands
+  only when the repeat's minimum, an unmet `d` or `e` minimum it raises, or a tested group needs it;
+  error-free empty iterations keep upstream's rule; a per-run memo of the state after each iteration
+  drops duplicate paths. Chosen by the owner after four blind reviews of
+  `docs/plan/2026-09-26-empty-iteration-survey.md`, over upstream's rule (inflated and
+  position-dependent counts, MemoryError), Perl's rule A and rule B (both lose matches, 426 and
+  1,801 in the sweeps) and minimum cost (changes the default mode's meaning). Sections with a
+  minimum error count still differ from the reference where upstream's END_FUZZY checks a minimum
+  before trying a trailing insertion (finding F-D, queued separately).
 - 2026-09-26: **the body guard of a safe repeat is a failure memo, so `(?:a|a)+c` and `(a|aa)+c`
   fail in linear time per attempt instead of exponential.** Option A of
   `docs/plan/2026-09-26-backtrack-memoisation-design.md`. Upstream already records a failure when

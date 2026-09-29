@@ -4051,6 +4051,12 @@ to MemoryError. **Both answer since 2026-09-25:**
 
 Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`.
 
+**Replaced by entry 44 (2026-09-26).** The stop above was narrower than it needed to be and left
+upstream's other empty deleting iterations in place. Entry 44's "needed" rule admits an empty
+iteration that spent errors only when the repeat's minimum, a section minimum or a tested group
+needs it, and its repeat memo keeps nested repeats polynomial; it answers every row above without a
+stop. The answers in this entry are S88's; `FuzzyEmptyIterationTests` now pins entry 44's.
+
 **A bounded repeat loops too, under BESTMATCH (measured 2026-09-25, regex 2026.9.10).** Over
 `'y'`, search:
 
@@ -4597,6 +4603,85 @@ the forward `\X` already passes all 766 lines of `GraphemeBreakTest.txt`. Pinned
 `Gaps/Engine/BoundaryTests.Default_word_boundary_breaks_between_an_apostrophe_and_a_vowel`;
 `ledger-reproductions.jsonl` re-checks upstream's answer to `(?w)a\b` over 'a:' U+0308 'a'.
 
+## 42. A fuzzy item that matched exactly is never tried as a deletion - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-42-exact-item-deletion.md`, for the
+owner to approve. Found 2026-09-26 by the overnight fuzzy sweep (finding F-A in
+`.claude/driver/fuzzy-findings-2026-09-26.md`).
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26:
+
+```
+match(r'(?:a){d<=1}a', 'a')                       -> None                 expected (0, 1), 1 deletion
+fullmatch(r'(?:ab){d<=1}b', 'ab')                 -> None                 expected (0, 2), 1 deletion
+search(r'(?:ab){d<=1}b', 'abxabb')                -> span=(3, 6)          expected (0, 2), 1 deletion
+search(r'(?:(?:a){d<=1}ab|a)', 'ab')              -> span=(0, 1)          expected (0, 2), 1 deletion
+match(r'(?:ab){e<=2}b', 'bb')                     -> (0, 2) (0, 0, 1)     expected (0, 2) (1, 0, 1)
+search(r'(?:(?:a){d<=1}ab(*SKIP)(*FAIL)|b)', 'ab') -> span=(1, 2)          expected None
+match(r'(?:a|b){d<=1}a', 'a')                     -> (0, 1) (0, 0, 1)     the same, a control
+```
+
+**Why upstream is wrong.** A deletion is "a pattern item absent from the text"
+(`upstream/README.rst:538-566`), so `(?:a){d<=1}` has the paths of `(?:a|)`: the `a` first, then
+nothing. The README's own example says an item's errors are tried before an earlier choice is
+retried: `fullmatch('(?:cats|cat){e<=1}', 'cat')` gives the first branch with one deletion,
+(0, 0, 1), not the exact second branch (`README.rst:609`). And it promises "the first match that
+meets the given constraints" (`README.rst:590`). The first row has such a match and gets None;
+`(?:a|b){d<=1}a` finds it, only because its failing `b` branch happens to try the deletion.
+Upstream issues 248 (2017) and 370 (2020) treat this class as a bug. The `(*SKIP)` row is the same
+fault seen through a verb: the equivalent `(?:a|)ab(*SKIP)(*FAIL)|b` gives None in upstream and in
+Perl 5.42.3, because the deletion path reaches the verb first.
+
+**Mechanism.** Errors are tried on an item only when it fails to match (`fuzzy_match_item`,
+`upstream/src/_regex.c:10185-10258`). An item that matches pushes no backtrack entry (the
+one-character arms at `:11924-11927`, the string arms at `:14742-14745`), so when the rest of the
+pattern fails, deleting that item is never tried.
+
+**Proposed fix upstream:** when a fuzzy item matches exactly and a deletion fits the budget, push
+the same entry `fuzzy_match_item` pushes, marked so that its retry goes straight to the deletion.
+That makes the search the complete, ordered one the README describes: the deletion is tried once
+everything after the exact match has failed, before any earlier choice.
+
+**This port.** `Matcher.PushExactItemDeletion` and its string, folded-string and folded-group
+twins do exactly that, at every exact-match site; the retry functions take the marked entry to the
+deletion. An earlier design (a second pass at a start whose first pass failed, on branch
+`spike/fuzzy-deletion-retry`) was rejected: it tried these deletions only after every other path
+at the start, so it answered `(?:(?:a){d<=1}ab|a)` over 'ab' with the later branch's (0, 1) and
+honoured no `(*SKIP)` reached through a deletion.
+
+Pushing a frame at every exact match costs time, so the port leaves the choice out where it
+provably holds no match the search has not already ruled out (`Matcher.ExactDeletionMayMatch`).
+If a later item of the same run of items uses the character the deleted item matched, letting the
+item match and deleting the later one instead is also a match, found earlier, with no more errors.
+So the choice matters only if the budget can delete the item and everything after it in its run,
+and the node after the run can read the character. The argument can remove an error, so in a
+section with a minimum error count it is used only once every minimum is met; a fuzzy test
+(`{e<=1:[a-z]}`) or a `(*SKIP)` or `(*PRUNE)` turns it off. An item followed by a repeat of
+itself, as the compiler writes `\w+`, is looked through the same way.
+
+Evidence, 2026-09-26: `tools/probes/fuzzy-reference-matcher.py`, a slow, complete, ordered
+backtracking matcher for the fuzzy subset, which reproduces upstream on every row where upstream
+explores the whole space and Perl on the equivalent `(?:x|)` spellings. The port equals it on all
+29,125 grid rows where the empty-iteration question (entry 44) does not arise, and on all 79,382
+rows without a minimum error count of the 153,619-row grid of entry 44. A brute-force edit-distance
+check over the same rows finds no match the port misses. The narrowing leaves every answer
+unchanged: its first form on 320,243 grid rows against the port without it, its second on
+833,862 against the first (partial, `(?i)`, `(?r)`, `(?e)`, `(?b)`, minimum sections).
+Cost against main (2d6249b), best of three: the fuzzy benchmarks 0.98 to 1.10, a failing
+`(?:\w+ ){d<=2}\d` over 1 MB 0.74 (935 ms against 1,271), and 10,000 slice calls of
+`(?i)(?:field stone){d<=2}zz` 1.43, where a folded `fi` or `st` ends a run.
+
+What moves: upstream's own `test_fuzzy#71` row, `match('(?:service detection){0<e<5}', 'service
+detection')`, is None upstream and (0, 16) with one deletion here, the answer upstream itself gives
+over `'service detectio'`; the port's test keeps it, asserting this port's answer. Sections with a
+minimum error count can still need an insertion or substitution on an exact item, which neither
+engine tries (finding F-D); that is not part of this entry.
+
+Pinned by `Gaps/Engine/FuzzyExactDeletionTests.cs`, with a mutation that disables the push turning
+eight of its tests red. `ledger-reproductions.jsonl` re-checks upstream's answer to the first row.
+
+---
+
 ## 43. A reversed `\X` takes one codepoint, not a grapheme cluster - FIXED HERE (2026-09-26)
 
 **Status:** not filed, per the owner's rule. **DRAFT:** `entry-43-reverse-grapheme.md`, for the
@@ -4641,6 +4726,152 @@ The default oracle wave drew twelve rows of this shape at its three seeds on 202
 `reverse-grapheme-takes-the-whole-cluster` claims them only when compiling `\X` in upstream's order
 (`Info.UpstreamReverseGrapheme`) reproduces upstream's answer exactly. `ledger-reproductions.jsonl`
 re-checks upstream's answer to `(?r)\X{2}` over 'e' U+0301 'a'.
+
+---
+
+## 44. A fuzzy repeat takes empty deleting iterations nothing needs, and loops where its budget restarts - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-44-empty-iteration-needed.md`, for
+the owner to approve. It replaces entry 33's narrower stop. The options, the other engines and the
+four blind reviews are in `docs/plan/2026-09-26-empty-iteration-survey.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26:
+
+```
+search(r'(?:[0-9]+){d<=2}', '42kg')                 -> (0, 2) (0, 0, 2)     expected (0, 2) (0, 0, 0)
+search(r'(?:[0-9]+){d<=2}', '42')                   -> (0, 2) (0, 0, 0)
+search(r'(?:(?:[0-9]+,){d<=1})+end', '12,end')      -> (0, 6) (0, 0, 1)     expected (0, 6) (0, 0, 0)
+search(r'(?:(?:[0-9]+,){d<=3})+end', 'end')         -> MemoryError          expected (0, 3) (0, 0, 2)
+search(r'(?:[0-9]+){1<=d<=2}', '42')                -> (1, 2) (0, 0, 1)     expected (0, 2) (0, 0, 1)
+fullmatch(r'(?:(?:b?)*){d<=1}', 'a')                -> MemoryError          expected None
+fullmatch(r'(?:(?:a|b|c|d)*){11<=d<=11}', 'x')      -> None in 1.28 s, and it grows 4 times with each step of the minimum
+```
+
+**Why upstream is wrong.** The first two rows read the same digits exactly, and the answer to the
+first charges two errors the text does not need: a program that keeps matches with at most one
+error throws away the exact `42` in `42kg`. The third row is an exact match reported with an error.
+The fourth runs out of memory where the answer is plain. The fifth skips the match at the start of
+`42` that its own minimum allows. A search that runs out of memory is wrong whatever the answer.
+
+**Mechanism.** A fuzzy edit increments `capture_change` (`upstream/src/_regex.c:10487`), and
+END_GREEDY_REPEAT (`:12550-12557`) counts an iteration as progress when `capture_change` or the
+text position moved, so an iteration that deleted its way through the body without moving counts
+as progress, and so does one whose edits were made and then undone. The one fuzzy exception stops
+the repeat at the end of the slice and nowhere else. So a greedy repeat takes as many deleting
+iterations as its budget allows, unless it is at the end of the text; and where a fuzzy section
+inside the body starts each iteration with a fresh budget it goes on until MemoryError (entry 33).
+
+**Proposed fix upstream:** the "needed" rule. An iteration of a repeat that consumed no text and
+spent fuzzy errors stands only if (a) the repeat is below its minimum, (b) its deletions raise a
+count that an open fuzzy section has an unmet minimum for (a deletion raises a `d` or `e` minimum,
+never an `s` or `i` one), or (c) it changed the span of a group a backreference or conditional
+tests. Otherwise it fails. An error-free empty iteration keeps upstream's rule, where a changed
+tested group is progress. Each admission raises a count toward a finite limit or moves a tested
+span, so a run of them ends. And a repeat memo drops a path whose state after an iteration an
+earlier path through the same run of the repeat already reached; the state is the position, the
+count (clipped to the minimum when there is no maximum), the open section's error counts and the
+tested groups' spans. Two paths with equal states are never on one branch, so the earlier one was
+explored to its end first with the same future, and dropping the later one never changes the
+answer. It is upstream's own repeat guard (`guard_repeat`, `:9446`), which `is_repeat_guarded`
+switches off under fuzzy matching (`:9564-9566`) because a position alone is not a state.
+
+**This port.** `Matcher.EmptyIterationAdmitted`, `RaisesUnmetMinimum` and `RepeatMemoHit`
+at the end of greedy and lazy repeats, with `MatchState.SectionOuter` keeping the enclosing
+sections' counts for (b). It replaces entry 33's stop and upstream's end-of-text check. Entry 33's
+own case, `(?:(?(1)c|z)|()(?:x){d<=1})*$` over 'c', gives (0, 1) with two deletions where upstream
+gives one: after the `c`, a pass at the end deletes `x` and moves group 1 from (0, 0) to (1, 1), a
+change to a tested group, which upstream skips only because it is at the end of the text.
+
+Evidence, 2026-09-26: the reference matcher's mode "needed". The port equals it on every one of
+the 79,382 rows without a minimum error count of a 153,619-row grid (the note's sweeps s1 to s6,
+its random sweep and the entry 42 grid), groups included, and a brute-force edit-distance check
+finds no match the port misses there. On the 74,237 rows with a minimum the answers differ on
+9,269, and every one of them equals the reference with upstream's END_FUZZY, which checks a
+minimum before it tries a trailing insertion (finding F-D, not part of this entry); 869 of those
+are brute-force misses. Against the port before this entry, over 68,909 rows: no answer worse, no
+match lost, 10,647 answers now equal to the reference that were not, and 1,153 exceptions or
+timeouts gone. `(?:(?:b?)*){d<=1}` and `(?fi)(?:(?:a){e<=1})+?(?=c)` over 'σ', which threw at the
+1 GB backtracking limit after two seconds, answer at once. On the note's slow families the port
+grows polynomially where upstream grows exponentially or runs out of memory: at n = 128,
+`(?:(?:a|b|c|d)*){3<=d<=3}` over 'a' * n + 'x' takes 1.9 ms against upstream's 10 s timeout. The
+repeat memo costs about 5 to 10 per cent where it never hits.
+
+Pinned by `Gaps/Engine/FuzzyNeededEmptyIterationTests.cs` (rule off: nine of ten red; dropping
+(b), dropping (c) or dropping the deletion count from the memo key each turns tests red) and
+`FuzzyEmptyIterationTests.cs`, re-pinned to the reference's answers. `ledger-reproductions.jsonl`
+re-checks upstream's answer to the first row.
+
+**Addendum (2026-09-28): an alternative written empty is the exit of an optional.** The rule above
+covered repeats only, so one optional written two ways gave two answers: `(?:a?){d<=1}` over `''`
+had no deletion here and `(?:a|){d<=1}` one, and over a 200,000-character text
+`(?:x(?:a|b|)y){e<=1}` found 62,683 matches where `(?:x(?:a|b)?y){e<=1}` found 62,233. Upstream
+gives both spellings the same answer, one deletion, which is the charge this entry removed. The
+owner chose option A of `docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md`: a pass
+through an alternative that has an alternative written empty after it is judged as an empty
+iteration is. If it consumed no text and spent errors, it stands only when its errors raise an unmet
+minimum of an open section or it changed a group a backreference or conditional tests; otherwise it
+fails, and the empty alternative matches with none.
+
+```
+search(r'(?:a|){d<=1}', '')              -> (0, 0) (0, 0, 1)     here (0, 0) (0, 0, 0)
+search(r'(?:a|b|){d<=1}', 'b')           -> (0, 0) (0, 0, 1)     here (0, 1) (0, 0, 0)
+search(r'(?:cat(?:s|)){e<=1}', 'cat')    -> (0, 3) (0, 0, 1)     here (0, 3) (0, 0, 0)
+search(r'(?:a|){1<=d<=1}', '')           -> (0, 0) (0, 0, 1)     here the same: the minimum needs it
+search(r'(?:cats|cat){e<=1}', 'cat')     -> (0, 3) (0, 0, 1)     here the same
+search(r'(?:a(?:b){d<=1}|a)', 'a')       -> (0, 1) (0, 0, 1)     here the same
+```
+
+A choice between alternatives that are not empty stays first-match, so the README's example keeps
+its deletion (`upstream/README.rst:609`, `test_regex.py:2784`). So does an empty alternative the
+compiler makes by factoring: `(?:a(?:b){d<=1}|a)` compiles to the same bytecode as
+`(?:a(?:(?:b){d<=1}|))` in both engines, and the last two rows keep one deletion where the written
+form has none. Factoring never runs inside a fuzzy section (a section's subpattern is not
+optimised), which is why `(?:cats|cat){e<=1}` stays two alternatives.
+
+This port: the parser records which alternatives it read as nothing at all, and
+`Branch.OptionalPassEndWord` marks the end of each alternative that has one of them after it in
+its own alternation, or in one enclosing it. An empty group `(?:)` or a zero repeat `b{0}` is not
+written empty, and flattening `(?:x|(?:b|))` into `x|b|` keeps `b` as the only alternative the
+empty one covers, as in `(?:x|(?:b)?)`. The bytecode stays upstream's, and the marks travel beside
+it (`CompiledPattern.OptionalPassEnds`). `NodeCompiler.BuildBranch` ends each marked alternative
+with an `END_OPTIONAL_PASS` node. Taking the alternative's 2-way branch records where
+the pass began in a slot the alternation owns (`MatchState.OptionalPasses`, saved with the repeats
+across a group call), `Matcher.OptionalPassAdmitted` applies the rule at the pass's end, and
+`DeletionEmptiesAnOptionalPass` leaves out a deletion of the alternative's last item that would
+only make such a pass. `UpstreamEmptyIterations` turns it off with the repeat's rule.
+
+**A pass or iteration that crossed a verb (blind review of 4349153).** The rule is this port's own
+pruning, so it must never do more than an ordinary failure would. A `(*PRUNE)` or `(*SKIP)` cuts
+the backtracking stack when it is crossed, and the choice of the empty exit, or of leaving the
+repeat, goes with it: failing the pass then ended the attempt, and `(?:b(*SKIP)|){d<=1}` and
+`(?:(?:b(*SKIP))?){d<=1}` over `''` answered None where upstream has (0, 0) with one deletion. A
+pass whose verb cut past its start now stands in plain order, which is upstream's answer; a verb
+confined to an atomic group or lookaround the pass opened and closed cuts nothing past it, and the
+rule applies (`Matcher.VerbCutPast`, second review). An empty iteration whose verb cut past it
+stands but is not followed by another, so
+the loop still ends where upstream's goes on to MemoryError. `(?:(?:(*PRUNE)a){1<=d<=1})+` over
+`'c'`, None until then, is (0, 0) with two deletions. Deciding before the verb is crossed would need
+to know that nothing after it in the pass consumes text, which only the pass's end knows.
+
+Evidence, 2026-09-28, on a Debug build so the assertions ran: the ruling's sweep of `X?` against
+`(?:X|)` spellings, 40,320 pairs, 0 differ (600 before); a second grid of 38,880 pairs that adds
+backreferences, conditionals, `(?r)`, lookahead, atomic groups, recursion and sections inside the
+alternatives, 0 differ (1,204 before); 3,072 rows of factored alternations, none changed, where
+their written twins changed on 570; 7,776 rows with verbs and 9,680 with recursion inside the
+alternatives, none differing from the `X?` spelling. Pinned by `FuzzyNeededEmptyIterationTests`: the
+rule off turns 24 tests red, and each of its conditions, each condition of the deletion prune, the
+factoring mark, the first-set offset, the slot's save across a call, the verb exemptions and both
+halves of the flattened marks has a row that goes red without it. The two deletion prunes change no answer (they skip only what the pass's end would
+fail) and are there for speed.
+
+Cost, 2026-09-28, Release, both builds loaded into one process and timed in turn (best of 84 runs
+each, all matches over the ruling's 200,000-character text): `(?:x(?:a|)y){e<=1}` 33.3 ms against
+31.9 before (+4%), `(?:x(?:a|b|)y){e<=1}` 36.1 against 34.0 (+6%), and `(?:x(?:a|b)y){e<=1}`, with no
+empty alternative, 32.5 against 30.9 (+5%), which puts the machine's noise at about the size of the
+change. The exact rows `x(?:a|)y` and `x(?:a|b|)y` stay within 1%. A first version that kept each
+start on the structure stack cost 25 to 30 per cent.
+
+---
 
 ## 45. `(*SKIP)` acts when it runs, not when backtracking reaches it, so a later `(*PRUNE)` cannot undo it - FIXED HERE (2026-09-26)
 
@@ -4904,6 +5135,125 @@ unchanged. The fuzzy literal prefilter accepts the reading's lone `CHARACTER_IGN
 **Not covered, and open:** the subject-side twin. `(?fi)(?:ssx){s<=1}` over 'ǰsx' is None in both
 engines, although `(?fi)(?:s){s<=1}sx` matches it: a `STRING_FLD` substitution consumes one folded
 character of the subject, and U+01F0 folds to two. That is a matcher change, fixed as ledger entry 52.
+
+## 50. A lookaround that fails inside a fuzzy section is never passed by an insertion - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D8, finding S3-F2 of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-50-lookaround-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?:b(?=c)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?!x)){i<=1}', 'bxc')     -> None                       expected (0, 2), one insertion
+search(r'(?:b(?<=x)c){i<=1}', 'bxc')   -> None                       expected (0, 3), one insertion
+search(r'(?:b(?=c)){e<=1}', 'bxc')     -> (1, 2), one substitution   expected (0, 2), one insertion
+match(r'(?:(?=b)b){i<=1}', 'xb')       -> None                       expected (0, 2), one insertion
+search(r'(?r)(?:(?<=c)b){i<=1}', 'cxb') -> None                      expected (1, 3), one insertion
+search(r'(?:b\b){i<=1}', 'bx c')       -> (0, 2), one insertion      (the control: a \b is fuzzed)
+search(r'(?:ab(?=c)){i<=1}', 'abxc')   -> (0, 3), one insertion      (upstream passes it after a string)
+```
+
+**Why upstream is wrong.** An insertion is a text character the pattern does not account for
+(`upstream/README.rst:538-566`), and nothing restricts where it may stand. A lookaround consumes
+nothing, so it can be neither substituted nor deleted, and an insertion in front of it is the one
+error that can make it hold. Upstream applies exactly this to every other zero-width assertion: a
+failing `\b`, `$` or `\G` in a fuzzy section goes to `fuzzy_match_item` with a step of 0
+(`_regex.c:12060-12075`, `:13052-13062`), whose only possible error is an insertion. A lookaround
+never gets there: a positive one whose body has run out of choices just carries on backtracking
+(`RE_OP_LOOKAROUND` in the backtrack switch, `:17115-17168`), and a negative one whose body matched
+goes straight to `backtrack` (`RE_OP_END_LOOKAROUND`, `:12918-13000`). Upstream is not even
+consistent about lookarounds: after a multi-character string the string's own retry reaches the
+insertion, so `(?:ab(?=c)){i<=1}` over 'abxc' is (0, 3) with one insertion while `(?:b(?=c)){i<=1}`
+over 'bxc' is None. None of the engines the port's correctness survey uses (PCRE2, Python `re`,
+.NET, Perl, JavaScript) has fuzzy matching, so the question is settled from the definition and
+upstream's own `\b` rule.
+
+**Proposed fix upstream:** when a lookaround in a fuzzy section fails as a whole (the two places
+above), restore its text position, fuzzy counts and captures, as both places already do, then call
+`fuzzy_match_item(state, search, &node, 0)` with `node` the lookaround, and on success start the
+lookaround again at the new position. The retry frame needs a tag of its own, since
+`RE_OP_LOOKAROUND` already tags the lookaround's frame, and joins the zero-width block of the
+backtrack switch (`:15330-15344`).
+
+**This port.** `Matcher.InsertBeforeAFailedLookaround` in `src/FuzzyRegex/Engine/Matcher.cs`, called
+from both places; its retry frame is tagged `Opcode.FuzzyLookaround`. A lookaround outside a fuzzy
+section pays one bit test. Pinned by `Gaps/Engine/FuzzyLookaroundInsertionTests` (lookahead,
+lookbehind, positive and negative, reversed, captures, two insertions, every error kind, the search
+anchor rule). `tools/probes/fuzzy-reference-matcher.py` gained lookarounds (its rule 10), and
+`tools/probes/lookaround-insertion-grid.py` compares the port with it on a Debug build: 6,000 rows
+at seeds 50 and 7, 0 disagreements. The rule moves 16 to 36 rows of each of the four lookaround
+kinds at each seed, and all but 3 of the moved rows are upstream's answer once the reference drops
+rule 10 and entry 42's deletion (one is the string case above, two are entry 44's needed rule). The default oracle waves at seeds 7, 4242
+and 20260927 draw about 27 fuzzy lookaround rows each and move none. The oracle entry
+`fuzzy-insertion-before-a-failing-lookaround` keys on `PatternObject.SkipLookaroundInsertion`.
+
+## 51. A section below its minimum error count never tries the insertion that would meet it - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Known defect D9, finding F-D of the 2026-09-26 fuzzy
+sweep. Draft report: `entry-51-minimum-trailing-insertion.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+match(r'(?:a){1<=e<=2}b', 'aab')             -> None                   expected (0, 3), one insertion
+match(r'(?:a){1<=e<=1}c', 'axc')             -> None                   expected (0, 3), one insertion
+fullmatch(r'(?:a){1<=e<=2}', 'aa')           -> None                   expected (0, 2), one insertion
+match(r'(?:(?:a){1<=e<=1}b){e<=1}', 'aab')   -> None                   expected (0, 3), one insertion
+search(r'(?:a){1<=e<=2}b', 'aab')            -> (2, 3), one deletion   expected (0, 3), one insertion
+match(r'(?:ab){1<=e<=2}c', 'abxc')           -> (0, 4), one insertion  (the control: a string's retry)
+match(r'(?:a){1<=e<=2}b', 'cab')             -> (0, 3), (1, 1, 0)      (the control: minimum met first)
+```
+
+**Why upstream is wrong.** A minimum error count says the match must hold at least that many
+errors (`upstream/README.rst:538-566`), and an insertion is a text character the pattern does not
+account for, which may stand after a section's last item as well as between two of them: upstream
+itself offers insertions there when backtracking into `END_FUZZY` (`_regex.c:15512-15563`). But the
+frame that offers them is pushed by the forward `END_FUZZY` only after it has checked the minimums
+(`fuzzy_within_constraints` at `:12461-12462`, the push at `:12500-12511`), so a section that reaches
+its end below its minimum backtracks at once and the one error that could still meet it is never
+tried. Upstream is not consistent about it: a multi-character string pushes its own insertion retry
+before the section ends (`fuzzy_insert`, `:14764-14768`), so `(?:ab){1<=e<=2}c` over 'abxc' is
+(0, 4) with one insertion, while `(?:a){1<=e<=1}c` over 'axc', the same situation with a
+one-character item, is None. The last control shows the order is the defect, not the insertion:
+once a substitution has met the minimum, the trailing insertion is found. None of the engines the
+port's correctness survey uses (PCRE2, Python `re`, .NET, Perl, JavaScript) has fuzzy matching, so
+the question is settled from the definition and upstream's own string rule.
+
+**Proposed fix upstream:** in the forward `END_FUZZY`, when `fuzzy_within_constraints` fails only
+because an insertion or error minimum is unmet, and the section would pass with enough more
+insertions, carry on to push the frame and then `goto backtrack`, so the backtrack case tries one
+trailing insertion; in that case, after each insertion, check the constraints again and backtrack
+into the frame just pushed while they still fail. A substitution or deletion minimum cannot be met
+by insertions, and neither can a maximum already passed, so those still fail at once.
+
+**This port.** The forward and backtrack `END_FUZZY` arms of `src/FuzzyRegex/Engine/Matcher.cs`, with
+`Matcher.InsertionsCanMeetMinimum` deciding which sections wait: only those that enough insertions
+would make legal, and whose enclosing sections can absorb them (without the second check row A of
+`FailedCallMemoTests`, whose outer section permits no insertion, ran about 25% slower; with it, base and
+fix are within noise, 134-140 ms against 135-145 ms at 15 characters, Release, 2026-09-28). A pattern with no minimum pays
+nothing: the forward arm's new work runs only where the constraint check already failed, and the
+backtrack arm's re-check is behind `PatternObject.HasFuzzyMinimum`. Pinned by
+`Gaps/Engine/FuzzyMinimumErrorTests` (e and i minimums, two insertions, a group reference, nested
+sections, a full match, the earlier search start, a reversed section, `(?b)` and `(?e)`, and s, d,
+fuzzy-test and budget controls). `tools/probes/fuzzy-reference-matcher.py` already checked minimums
+after the trailing insertions (its rule 6) and gains a switch for upstream's order;
+`tools/probes/fuzzy-minimum-grid.py` compares the port with it on a Debug build, reversing the
+pattern and subject for `(?r)` rows and checking the fewest errors over every path for `(?b)` and
+`(?e)` rows: 6,000 rows at seeds 51 and 7, 0 disagreements. The rule moves 4 to 41 rows of each
+construct (e, i, d, s, mixed, nested, `(?r)`, `(?b)`, `(?e)`) at each seed; a d or s section on its
+own moves none (every moved d or s row at seed 51 also holds an e, i or mixed section). All but 8 of the moved flag-free rows are upstream's answer once the
+reference drops rules 6, 3 and 10, and upstream already gives the reference's answer on those 8, each
+through a string's own insertion retry. The oracle entry `fuzzy-minimum-met-by-a-trailing-insertion`
+keys on `PatternObject.CheckMinimumBeforeTrailingInsertions`. Every other named ablation switches entry 51
+off with entries 42 and 44, except the three fuzzy-search ablations that sit before it (42, 44 and 50),
+so a row entry 51 alone explains is claimed by its own entry; without that, seed 7 row 7203
+(`full-fold-backreference-retry`) went unclassified. One judged answer of
+`turkic-default-folding-without-spans` moved with the fix (row 9, a `{1<=e<=2}` split) and returns
+to the old one with the ablation set. Default oracle waves at seeds 7, 4242 and 20260927: only the
+known row 3732 at 20260927 diverges.
 
 ## 52. A fuzzy full-folded run cannot edit a subject character that expands under folding as one character - FIXED HERE (2026-09-28)
 

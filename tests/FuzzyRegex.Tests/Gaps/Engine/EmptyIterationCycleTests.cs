@@ -52,6 +52,12 @@ public sealed class EmptyIterationCycleTests
     // The same inside a section around the loop, whose counts take the inner deletions in.
     // Upstream: MemoryError.
     [Arguments(@"(?:^(?:(?=(?P=g)b)(?=(?P<g>ab))|(?=(?P<g>a))(?:x){d<=1})*$){e<=1}", "ab")]
+    // Each pass leaves g alone but makes a fuzzy edit that is undone, which upstream counts as
+    // progress; the D2 / ledger 33 family, ended by the empty-iteration "needed" rule (F-A), not
+    // by the state record. '(?(g))' has no item to edit and a lookaround is matched exactly, so the
+    // answer is that of the pattern without '(?(g))': no match, in upstream and the port alike.
+    // Upstream: MemoryError (D17 review round 2, 2026-09-29).
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){d<=1}", "xb")]
     // Reversed, with lookbehinds; a reversed body runs right to left, so the test comes second.
     // Upstream: MemoryError.
     [Arguments(@"(?r)^(?:(?<=(?P<g>ab))(?<=a(?P=g))|(?<=(?P<g>b)))*$", "ab")]
