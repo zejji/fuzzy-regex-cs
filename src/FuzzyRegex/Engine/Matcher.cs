@@ -5088,6 +5088,13 @@ internal static class Matcher
     /// <see cref="FoldWholeSub"/>, which replaces the whole group character with one whole subject
     /// character, and this deletion, after upstream's three kinds and behind the same switch as
     /// D22's subject-side kinds (<see cref="AtStartOfAnExpandingFolding"/>).
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of 15, <c>Count</c>
+    /// over 40,000 characters of ASCII words, against main at 894c495, D25 included): the V1
+    /// <c>(?i)(\w{4}) (?:\1){e&lt;=1}</c> takes 6.24 against 6.26 ms and <c>{s&lt;=1}</c> 4.38 against
+    /// 4.25 ms, the untouched simple-fold <c>(?V0i)</c> form 5.47 against 5.30 ms and the
+    /// case-sensitive one 5.30 against 5.30 ms: the same spread as a path this change does not
+    /// reach. Where every sixth character is ß the fuzzy search takes 6.46 against 6.18 ms (+4%)
+    /// and finds 303 matches where it found 269.
     /// </remarks>
     internal const int GroupFoldEditKinds = FoldEditKinds + 1;
 
