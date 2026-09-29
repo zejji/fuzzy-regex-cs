@@ -5396,3 +5396,46 @@ So at the start of an expanding group character the frame tries the literal's or
 substitution, the insertion, the whole deletion, then upstream's folded substitution and deletion
 (`Matcher.GroupCharFirst`). Pinned by the backreference tests in
 `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.
+
+## 54. A group call inside a lookaround leaves a capture behind when the lookaround's body is thrown away - FIXED HERE (2026-09-29)
+
+**Status:** not filed, per the owner's rule. Known defect D10. Draft report:
+`entry-54-lookaround-call-capture.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-29 (expected = this port's answer, argued
+below):
+
+```
+search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1)          -> [(0, 1), (2, 3)]           expected [(0, 1)]
+search(r'(a)(?:(?=.(?1))x|.)+?b', 'aaab').spans(1)         -> [(0, 1), (2, 3)]           expected [(0, 1)]
+search(r'(a)(?:(?<!(?1)).|.)+?b', 'aaab').spans(1)         -> [(0, 1), (0, 1), (1, 2)]   expected [(0, 1)]
+search(r'(?P<x>a)(?:(?!.(?P<x>a))|.)+?b', 'aaab').spans(1) -> [(0, 1)]                   (the control: the same group written directly)
+search(r'(a)(?:(?!.()(?1))|.)+?b', 'aaab').spans(1)        -> [(0, 1)]                   (the control: an empty group in the body)
+```
+
+**Why upstream is wrong.** A negative lookaround holds only when its body fails, and a positive one
+the match backtracks past is undone, so neither leaves anything behind; upstream does exactly that
+for a capture group written in the body, and the only difference in the call's case is how the
+compiler flags the body. `RE_OP_LOOKAROUND` saves the captures only when its node carries
+`RE_STATUS_HAS_GROUPS` (`upstream/src/_regex.c:13772`), set when the body built a capture group
+(`build_LOOKAROUND`, `:25022`; `build_GROUP`, `:24811`). `build_GROUP_CALL` flags only its own node
+(`:24850`), which nothing reads. Every engine surveyed discards what a failed assertion captured:
+`(?:(?!(a)b)\w|a)` over 'ab' and `(?:(?=(a))x|a)` over 'a' leave group 1 unset in regex, `re`,
+PCRE2 10.47, Perl 5.42.3 and node, and .NET 10 gives it an empty capture list. PCRE2 and Perl give
+the same span and group 1 for every row above; they keep no capture lists and restore a called
+group on return, so they cannot show the entry.
+
+**Proposed fix upstream:** `args->has_groups = TRUE;` in `build_GROUP_CALL`.
+
+**This port.** `NodeCompiler.BuildGroupCall` sets `args.HasGroups`. Only capture lists change.
+Pinned by `Gaps/Engine/LookaroundTests` (the four lookaround kinds, a call by name, a fuzzy call, a
+fuzzy and a partial match, and a control whose lookaround holds). A grid of 4,500 random patterns
+with a group call in a lookaround (`tools/probes/d10-lookaround-call-grid/`, seeds 20260929 and 7,
+Debug build, every lookaround kind, numbered
+and named calls, `(?R)`, fuzzy and partial rows) changed 58 rows, each by removing capture-list
+entries only, and every one equals upstream's own answer, or where upstream errs this port's, with
+an empty capture group added to each lookaround body. The default oracle waves at seeds 7, 4242 and
+20260927 draw six such rows, all conditionals whose yes branch calls a group inside a lookaround;
+the oracle entry `group-call-in-a-discarded-lookaround-leaves-no-capture` keys on
+`PatternObject.LookaroundsSavingOnlyForCalls`. The failed-call memo's capture-list witnesses (design
+C1) answer the same with the memo forced on; the memo's exclusion stays for its other reasons.

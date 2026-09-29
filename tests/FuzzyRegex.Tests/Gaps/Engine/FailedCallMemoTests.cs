@@ -140,10 +140,12 @@ public sealed class FailedCallMemoTests
     [Test]
     public void A_call_inside_a_lookaround_keeps_the_memo_off()
     {
-        // When a lookaround succeeds it throws away the undo entries of the captures made inside
-        // it, so a capture list keeps an entry from a path that later failed. Skipping a failed
-        // call leaves that entry out: with the memo forced on, group 1's list here loses an entry.
-        // Spans and counts do not change, so only the capture lists can show it.
+        // Before D10 a lookaround whose body only called a group kept the call's capture after the
+        // body was thrown away, so skipping a failed call left an entry out: with the memo forced
+        // on, group 1's list here lost one. D10 saves the captures around such a body, and this row
+        // now answers the same with the memo forced on (measured 2026-09-29). The switch stays off
+        // because the called group may hold a fuzzy section (see the fuzzy test below) and a call
+        // in a lookbehind meets open calls the key does not hold; this pins the switch.
         const string pattern = "(?r)(((?R)?R(?!.(?)(?R))(.))){2<=e<3}";
 
         FuzzyRegex on = WithMemo(pattern, eager: true);

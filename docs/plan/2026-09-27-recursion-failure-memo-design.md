@@ -192,6 +192,15 @@ path still leaves a mark:
   with itself here, so this looks like a bug it and the port both inherited, not a design choice;
   it is queued separately for an upstream-bug check, and if it is fixed the capture-list exclusion
   can go.
+
+  **Update 2026-09-29 (D10, ledger entry 54).** It was a bug, and it is fixed here: LOOKAROUND saved
+  the captures only for a body that built a capture group, and a call did not count as one. Both
+  capture-list witnesses above now give the same lists with the memo forced on. The exclusion for a
+  call in a discarding construct stays anyway, because it has two other grounds that the fix does
+  not touch: the called group may hold a fuzzy section, whose `END_FUZZY` then runs inside the
+  construct and leaves the error total changed ("A wider exclusion, found by the grid", below), and a call in a
+  lookbehind meets open calls the key does not hold. Narrowing it to calls in patterns with no fuzzy
+  section, no `\K` and no lookbehind call would need its own grid, so it was not done.
 - **`\K` inside such a construct.** This is the same mechanism that `PatternObject.KeepInSubmatch`
   already excludes from the failure memo.
 - **Partial matching.** A path that reaches the end of the text records a partial result

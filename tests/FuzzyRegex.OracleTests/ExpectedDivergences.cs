@@ -3420,7 +3420,7 @@ internal static class ExpectedDivergences
         new(
             Id: "group-call-in-a-discarded-lookaround-leaves-no-capture",
             Reason: "A GROUP CALL INSIDE A LOOKAROUND WHOSE BODY IS THROWN AWAY LEAVES NO CAPTURE HERE, "
-                + "as a capture group there leaves none in both engines. Ledger entry 53, known defect "
+                + "as a capture group there leaves none in both engines. Ledger entry 54, known defect "
                 + "D10, fixed 2026-09-29 under the owner's no-known-bugs rule and recorded as a "
                 + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM DEFECT: LOOKAROUND saves the captures only when its node carries "
@@ -4669,7 +4669,7 @@ internal static class ExpectedDivergences
                     && CallsThroughAnOppositeDirectionLookaround(row)
                     && (
                         UpstreamFoundStrictlyLess(row, ours)
-                        // A row that also carries D10's stray capture (ledger entry 53) renders
+                        // A row that also carries D10's stray capture (ledger entry 54) renders
                         // upstream's matches identically only with that fix switched off, as the
                         // second row of the examples does: g2's second [1, 3] is the call's capture
                         // from a negative lookbehind that failed.

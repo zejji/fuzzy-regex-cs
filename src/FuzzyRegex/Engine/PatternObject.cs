@@ -432,11 +432,15 @@ internal sealed class PatternObject
     /// of those constructs whose body holds a call, a fuzzy section or a <c>\K</c> turns the memo
     /// off (<see cref="WritesInDiscardingConstruct"/>, <see cref="KeepInSubmatch"/>). That also
     /// covers a call inside a lookbehind, which runs the other way and so can meet open calls the
-    /// key does not hold. A capture group in there does not: the stray entry appears only when a
-    /// call writes the capture. Upstream 2026.9.10 and the port both give group 1 no capture for
-    /// <c>(?:(?=(a))ax|a)b</c> over <c>ab</c>, and <c>(a)(?:(?!.(a))|.)+?b</c> over <c>aaab</c> gives
-    /// only [0,1] in both, where <c>(a)(?:(?!.(?1))|.)+?b</c> gives [0,1][2,1]. Keeping the memo on
-    /// there is what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
+    /// key does not hold. A capture group in there does not: the stray entry appeared only when a
+    /// call wrote the capture, because a lookaround saved the captures only for a body holding a
+    /// capture group, so <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> gave group 1 [0,1][2,1] where
+    /// <c>(a)(?:(?!.(a))|.)+?b</c> gives [0,1] (upstream 2026.9.10 still does). D10 made a call count
+    /// as a group (<c>NodeCompiler.BuildGroupCall</c>), and the capture-list witness above now
+    /// answers the same with the memo forced on. A call in there still turns the memo off: the group
+    /// it calls may hold a fuzzy section, which leaves the error total as above, and in a lookbehind
+    /// it meets open calls the key does not hold. Keeping the memo on for a capture group there is
+    /// what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
     /// </para>
     /// <para>
     /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a

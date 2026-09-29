@@ -127,7 +127,7 @@ public sealed class LookaroundTests
     // its body holds a group, and a call did not count as one, so a lookaround whose body only
     // calls a group left the call's capture behind on every path that threw the body away: a
     // negative lookaround that failed, and a positive one the match backtracked past. Upstream
-    // 2026.9.10 has the same flaw, measured 2026-09-29 (.scratch survey, draft report entry 53):
+    // 2026.9.10 has the same flaw, measured 2026-09-29 (.scratch survey, draft report entry 54):
     // regex.search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1) == [(0, 1), (2, 3)], where the same
     // pattern with a capture group in place of the call, r'(?P<x>a)(?:(?!.(?P<x>a))|.)+?b', gives
     // [(0, 1)]. PCRE2 and Perl keep no capture lists and restore a called group on return, so they
