@@ -785,6 +785,11 @@ public sealed class ThreadSafetyTests
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
+            // D10 (ledger entry 53) added LookaroundsSavingOnlyForCalls, filled by
+            // NodeCompiler.BuildLookaround inside Compile and never read by the library. Only
+            // OracleComparer.RunWithTheUpstreamLookaroundCallCaptures reads it, to clear its nodes'
+            // flag on a pattern compiled for that one call.
+            "PatternObject.LookaroundsSavingOnlyForCalls",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

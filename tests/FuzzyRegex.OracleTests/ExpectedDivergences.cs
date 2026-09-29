@@ -3136,6 +3136,23 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The eight rows of <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c>, recorded
+    /// 2026-09-29 by <c>python tools/record-oracle.py --rows tools/probes/lookaround-call-capture-rows.jsonl</c>:
+    /// the four lookaround kinds, a call by name, a partial match, a fuzzy call and a conditional
+    /// whose yes branch holds the lookaround, which is the shape the default waves draw.
+    /// </summary>
+    private const string _lookaroundCallCaptureRows = """
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?1))|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?=.(?1))x|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?<!(?1)).|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?<=(?1))x|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?<n>a)(?:(?!.(?&n))|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": "n", "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?1))|.)+?bc", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?:(?1)){e<=1})|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a?)(?:(?(1)(?!(?1))b|.)){0,2}", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [2, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}, {"number": 1, "success": true, "index": 2, "length": 0, "captures": [[2, 0], [2, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}, {"number": 1, "success": true, "index": 3, "length": 0, "captures": [[3, 0], [3, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [3, 3]}]}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>fuzzy-minimum-met-by-a-trailing-insertion</c>, recorded 2026-09-28 by
     /// <c>python tools/record-oracle.py --rows tools/probes/fuzzy-minimum-rows.jsonl</c>: an e and an
     /// i minimum, a search that now starts earlier, a full match, nested sections, a group
@@ -3399,6 +3416,38 @@ internal static class ExpectedDivergences
             Example: _lookaroundInsertionRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
+        ),
+        new(
+            Id: "group-call-in-a-discarded-lookaround-leaves-no-capture",
+            Reason: "A GROUP CALL INSIDE A LOOKAROUND WHOSE BODY IS THROWN AWAY LEAVES NO CAPTURE HERE, "
+                + "as a capture group there leaves none in both engines. Ledger entry 53, known defect "
+                + "D10, fixed 2026-09-29 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: LOOKAROUND saves the captures only when its node carries "
+                + "RE_STATUS_HAS_GROUPS (upstream/src/_regex.c:13772), which `build_LOOKAROUND` sets "
+                + "only when the body built a capture group (:25023, set by `build_GROUP` at :24811). "
+                + "`build_GROUP_CALL` flags only its own node (:24850), so a body that only calls a "
+                + "group is not saved, and the call's entry in the group's capture list outlives a "
+                + "negative body that matched or a positive one the match backtracked past: "
+                + "`regex.search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1)` is [(0, 1), (2, 3)], "
+                + "while `(?P<x>a)(?:(?!.(?P<x>a))|.)+?b`, writing the same group directly, gives "
+                + "[(0, 1)]. Adding an empty capture group to each lookaround body gives upstream's "
+                + "own answer this port now gives.\n"
+                + "THE FIX counts a call as a group for the enclosing sequence "
+                + "(`NodeCompiler.BuildGroupCall`). Only capture lists change; spans, group values and "
+                + "fuzzy counts do not. PCRE2 10.47 and Perl 5.42 keep no capture lists and restore a "
+                + "called group on return, so they cannot show the entry; every engine discards what "
+                + "a failed assertion captured.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamLookaroundCallCaptures`, which clears the flag on "
+                + "every lookaround in `PatternObject.LookaroundsSavingOnlyForCalls` with entries 42 "
+                + "and 44 off, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. The control is "
+                + "`A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.LookaroundTests",
+            Example: _lookaroundCallCaptureRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row))
         ),
         new(
             Id: "fuzzy-minimum-met-by-a-trailing-insertion",
@@ -4618,7 +4667,18 @@ internal static class ExpectedDivergences
                 (
                     HasGroupCall(row.Pattern)
                     && CallsThroughAnOppositeDirectionLookaround(row)
-                    && UpstreamFoundStrictlyLess(row, ours)
+                    && (
+                        UpstreamFoundStrictlyLess(row, ours)
+                        // A row that also carries D10's stray capture (ledger entry 53) renders
+                        // upstream's matches identically only with that fix switched off, as the
+                        // second row of the examples does: g2's second [1, 3] is the call's capture
+                        // from a negative lookbehind that failed.
+                        || (
+                            OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row) is { } withTheStrayCapture
+                            && UpstreamFoundStrictlyLess(row, withTheStrayCapture)
+                            && IsTheLiveAnswer(row, ours)
+                        )
+                    )
                 )
                 // ...plus the rows the predicate cannot reach, judged one at a time. See
                 // _groupCallLostMatchJudgedRows for why widening the predicate instead is the worse
