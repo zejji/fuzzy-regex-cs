@@ -684,21 +684,49 @@ public sealed class GroupCallTests
     // group's span let the recursion open one call per order of setting the k empty groups, about
     // k! paths: over 5 s for k = 9 and 0.6-3.3 s for k = 8, where the guard without captures took
     // 0 ms. Upstream raises MemoryError in 0.8 s. By the grammar, G -> ()_i G | \1 x matches 'x'
-    // (set group 1 empty, then \1x) and nothing that holds any other letter. The budget is a tenth
-    // of a second, so a return to the blowup fails with a timeout.
+    // (set group 1 empty, then \1x) and nothing that holds any other letter. Bounded in engine
+    // steps, not wall time (D13): the four calls take about 1,500 steps at k = 8 and 1,700 at k = 9
+    // (Debug, 2026-09-29), and a key on every group runs past the bound.
     [Test]
+    [Category(EngineWork.Category)]
     [Arguments(9)]
     [Arguments(8)]
     public void A_group_nothing_reads_is_left_out_of_the_call_guard_key(int k)
     {
         string pattern = "(?:" + string.Join("|", Enumerable.Repeat("()", k)) + @")(?R)|\1x";
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(100));
 
-        Match full = regex.FullMatch("x");
-        (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
-        regex.FullMatch("ax").Success.Should().BeFalse();
-        regex.Match("y").Success.Should().BeFalse();
-        regex.Match("abc").Success.Should().BeFalse();
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+                Match full = regex.FullMatch("x");
+                (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
+                regex.FullMatch("ax").Success.Should().BeFalse();
+                regex.Match("y").Success.Should().BeFalse();
+                regex.Match("abc").Success.Should().BeFalse();
+            },
+            20_000,
+            "only the group a backreference reads is in the key"
+        );
+    }
+
+    // Found by a grid of fuzzy recursive patterns (2026-09-29): in a fuzzy pattern the call guard
+    // compares every read group by its span, because an optional pass and the fuzzy repeat memo
+    // read the capture-change counter, which sees spans. Comparing group 1 by its text here
+    // refused a call that does not repeat the open one, and fullmatch answered None, although
+    // 'abb' matches with one substitution: the answer below is a path the matcher itself finds.
+    // Upstream 2026.9.10 raises MemoryError, so it gives no reference.
+    [Test]
+    public void A_group_read_in_a_fuzzy_pattern_is_compared_by_its_span()
+    {
+        Match m = new FuzzyRegex(
+            @"(?e)()(?:(?R)(?R)(?:(?=a\1)b|)(?:(?:b(?(1)a|b))*)?\1|b){s<=1}",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("abb");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
 
     // D5, found in the capture-dependent recursion design's grids (2026-09-28, section 3). Upstream
