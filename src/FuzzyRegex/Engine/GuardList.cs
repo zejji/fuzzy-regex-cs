@@ -361,4 +361,59 @@ internal sealed class RepeatData
     /// (ledger 33). See <c>MatchState.EditsChargedBy</c>.
     /// </summary>
     internal long SectionEdits;
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): which run of this repeat is under way, one entry into it with its fixed
+    /// continuation, so that the states one run records are never read by another. Numbered from
+    /// <c>MatchState.NextRunId</c>, and only when the pattern tests a group. See
+    /// <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal long RunId;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D17): the state an empty iteration of a repeat led to, which is everything the rest
+/// of the match can depend on within one run of the repeat. See
+/// <c>Matcher.RevisitsEmptyIterationState</c>.
+/// </summary>
+/// <remarks>
+/// A class holding one array rather than a record struct, because the number of tested groups is
+/// the pattern's. Only an empty iteration that changed a tested group builds one.
+/// </remarks>
+internal sealed class EmptyIterationState : IEquatable<EmptyIterationState>
+{
+    private readonly long _runId;
+    private readonly long[] _values;
+    private readonly int _hash;
+
+    /// <summary>Takes ownership of <paramref name="values"/>.</summary>
+    /// <param name="runId">The run of the repeat.</param>
+    /// <param name="values">The position, the count and the rest of the state, in a fixed order.</param>
+    internal EmptyIterationState(long runId, long[] values)
+    {
+        _runId = runId;
+        _values = values;
+
+        var hash = new HashCode();
+        hash.Add(runId);
+        foreach (long value in values)
+        {
+            hash.Add(value);
+        }
+
+        _hash = hash.ToHashCode();
+    }
+
+    /// <inheritdoc/>
+    public bool Equals(EmptyIterationState? other) =>
+        other is not null
+        && _hash == other._hash
+        && _runId == other._runId
+        && _values.AsSpan().SequenceEqual(other._values);
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => Equals(obj as EmptyIterationState);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => _hash;
 }

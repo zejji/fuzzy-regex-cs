@@ -311,6 +311,7 @@ public sealed class MatchStateCacheTests
                     repeat.Count = 7;
                     repeat.Start = 7;
                     repeat.CaptureChange = 7;
+                    repeat.RunId = 7;
                     ScribbleGuards(repeat.BodyGuardList);
                     ScribbleGuards(repeat.TailGuardList);
                 }
@@ -330,6 +331,12 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 set.Add((7, 7));
+                break;
+            case HashSet<EmptyIterationState> states:
+                states.Add(new EmptyIterationState(7, [7]));
+                break;
+            case null when field.FieldType == typeof(HashSet<EmptyIterationState>):
+                field.SetValue(state, new HashSet<EmptyIterationState> { new(7, [7]) });
                 break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
@@ -413,7 +420,7 @@ public sealed class MatchStateCacheTests
                 RenderItems($"{path}.Captures", group.Captures.Take(group.Count), lines);
                 break;
             case RepeatData repeat:
-                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange})");
+                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange},{repeat.RunId})");
                 Render($"{path}.Body", repeat.BodyGuardList, lines);
                 Render($"{path}.Tail", repeat.TailGuardList, lines);
                 break;
@@ -433,6 +440,10 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case HashSet<EmptyIterationState> states:
+                // Allocated on first use and then kept, so an empty one is the same as none.
+                lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
                 break;
             case Array array and (long[] or GroupData[] or RepeatData[]):
                 int index = 0;

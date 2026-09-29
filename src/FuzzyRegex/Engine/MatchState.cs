@@ -498,6 +498,19 @@ internal sealed class MatchState : IDisposable
     internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
+    /// NOT UPSTREAM (D17): the last run number handed to a repeat (<see cref="RepeatData.RunId"/>).
+    /// It only counts up, so a number is never reused within one call.
+    /// </summary>
+    internal long NextRunId;
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): the states that empty iterations have led to in this attempt, keyed by
+    /// run. Emptied by <see cref="ResetGuards"/>; <see langword="null"/> until a pattern that tests
+    /// a group makes such an iteration. See <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal HashSet<EmptyIterationState>? EmptyIterationStates;
+
+    /// <summary>
     /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
     /// node index. Counted up and never restored. Allocated only
     /// for a fuzzy pattern.
@@ -857,7 +870,11 @@ internal sealed class MatchState : IDisposable
             repeat.Start = 0;
             repeat.CaptureChange = 0;
             repeat.SectionEdits = 0;
+            repeat.RunId = 0;
         }
+
+        NextRunId = 0;
+        EmptyIterationStates?.Clear();
 
         ActiveCalls.Clear();
         OpenCalls.Clear();
@@ -1361,6 +1378,10 @@ internal sealed class MatchState : IDisposable
             repeat.BodyGuardList.Reset();
             repeat.TailGuardList.Reset();
         }
+
+        // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
+        // begins new runs, so they could never be read again.
+        EmptyIterationStates?.Clear();
     }
 
     /// <summary>

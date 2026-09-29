@@ -2806,6 +2806,87 @@ internal static class Matcher
         }
     }
 
+    /// <summary>
+    /// Whether an iteration that read no text but moved the capture-change counter led the current
+    /// run of its repeat back to a state it had already reached; if not, records the state.
+    /// <b>Not upstream</b> (D17).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream counts any span change of a tested group as progress (D12), so a body that flips a
+    /// group between spans at one position goes round for ever:
+    /// <c>^(?:(?=(?P=g)b)(?=(?P&lt;g&gt;ab))|(?=(?P&lt;g&gt;a)))*$</c> over <c>ab</c> raises
+    /// MemoryError. A revisited state is instead no progress, which ends the loop the way upstream
+    /// ends one that changed nothing: the iteration stands and only the tail is tried from it.
+    /// </para>
+    /// <para>
+    /// The state is everything the rest of the match can depend on within the run: the position,
+    /// the count (clipped to the minimum when there is no maximum, as the counts past it are
+    /// alike), the open section's fuzzy counts, the error and cost totals, and the spans of the
+    /// tested groups. If the state was reached earlier on this path, the body from here can only
+    /// repeat what it did from there, and upstream never ends; if on a path already backtracked,
+    /// that path's whole future failed, and this one's is the same. Every part rises along a path
+    /// or is fixed for the run, so a loop that goes on for ever must revisit a state. With a
+    /// maximum the count keeps every state on a path apart, so only a repeated sibling is cut.
+    /// The design is <c>docs/plan/2026-09-29-d17-empty-iteration-cycle.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration counted.</param>
+    /// <param name="endNode">The repeat's end node: minimum in its second value, maximum in its third.</param>
+    /// <returns><see langword="true"/> if the state was already reached in this run.</returns>
+    private static bool RevisitsEmptyIterationState(MatchState state, RepeatData rpData, Node endNode)
+    {
+        // A fuzzy edit alone moves only the counter's high half; that case is ledger 33's.
+        if (MatchState.GroupChanges(state.CaptureChange) == MatchState.GroupChanges(rpData.CaptureChange))
+        {
+            return false;
+        }
+
+        // START_GROUP and END_GROUP move the group half only for a referenced group, so a pattern
+        // that gets here tests one, and its repeats were numbered on entry.
+        int[] tested = state.Pattern.TestedGroups;
+        Debug.Assert(tested.Length > 0 && rpData.RunId > 0, "a group change without a tested group or a run number");
+
+        long count = rpData.Count;
+        if (~endNode.Values[2] == 0)
+        {
+            count = Math.Min(count, endNode.Values[1]);
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long[] values = new long[4 + counts.Length + (2 * tested.Length)];
+        int v = 0;
+        values[v++] = state.TextPos;
+        values[v++] = count;
+        values[v++] = state.TotalErrors;
+        values[v++] = state.TotalCost;
+        foreach (long fuzzyCount in counts)
+        {
+            values[v++] = fuzzyCount;
+        }
+
+        foreach (int group in tested)
+        {
+            GroupData data = state.Groups[group - 1];
+            if (data.Current >= 0)
+            {
+                GroupSpan span = data.Captures[data.Current];
+                values[v++] = span.Start;
+                values[v++] = span.End;
+            }
+            else
+            {
+                // Unset, which no span is: a span's ends are never negative.
+                values[v++] = -1;
+                values[v++] = -1;
+            }
+        }
+
+        state.EmptyIterationStates ??= [];
+        return !state.EmptyIterationStates.Add(new EmptyIterationState(rpData.RunId, values));
+    }
+
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
     /// <param name="span1">One span.</param>
     /// <param name="span2">The other.</param>
@@ -2944,7 +3025,8 @@ internal static class Matcher
     /// <param name="stack">The stack to push onto.</param>
     /// <param name="repeatData">The repeat to save.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy)
+    /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
+    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs)
     {
         repeatData.BodyGuardList.PushTo(stack);
         repeatData.TailGuardList.PushTo(stack);
@@ -2955,15 +3037,27 @@ internal static class Matcher
         {
             stack.PushSize(repeatData.SectionEdits);
         }
+
+        if (runs)
+        {
+            stack.PushSize(repeatData.RunId);
+        }
     }
 
     /// <summary>Upstream <c>pop_repeat_data</c> (line 2726).</summary>
     /// <param name="stack">The stack to pop from.</param>
     /// <param name="repeatData">The repeat to restore.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy)
+    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs)
     {
+        long runId = 0;
+        if (runs && !stack.PopSize(out runId))
+        {
+            return false;
+        }
+
         long sectionEdits = 0;
         if (fuzzy && !stack.PopSize(out sectionEdits))
         {
@@ -2983,6 +3077,7 @@ internal static class Matcher
 
         repeatData.CaptureChange = captureChange;
         repeatData.SectionEdits = sectionEdits;
+        repeatData.RunId = runId;
         repeatData.Start = (int)start;
         repeatData.Count = count;
         return true;
@@ -2999,9 +3094,10 @@ internal static class Matcher
     /// <param name="stack">The stack to push onto.</param>
     private static void PushRepeats(MatchState state, ByteStack stack)
     {
+        bool runs = state.Pattern.TestedGroups.Length > 0;
         foreach (RepeatData repeat in state.Repeats)
         {
-            PushRepeatData(stack, repeat, state.IsFuzzy);
+            PushRepeatData(stack, repeat, state.IsFuzzy, runs);
         }
     }
 
@@ -3011,9 +3107,10 @@ internal static class Matcher
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeats(MatchState state, ByteStack stack)
     {
+        bool runs = state.Pattern.TestedGroups.Length > 0;
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy))
+            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs))
             {
                 return false;
             }
@@ -7899,6 +7996,13 @@ internal static class Matcher
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
 
+                    // NOT UPSTREAM (D17): a changed group is no progress if it only brought the run
+                    // back to a state it had already reached.
+                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+                    {
+                        changed = false;
+                    }
+
                     // Additional checks are needed if there's fuzzy matching. Unreachable in this
                     // slice: a fuzzy pattern throws in do_match_2 before it gets here.
                     if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
@@ -8109,6 +8213,12 @@ internal static class Matcher
 
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
+
+                    // NOT UPSTREAM (D17), as in END_GREEDY_REPEAT above.
+                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+                    {
+                        changed = false;
+                    }
 
                     // Additional checks are needed if there's fuzzy matching. Unreachable in this
                     // slice, as in END_GREEDY_REPEAT above.
@@ -8548,6 +8658,13 @@ internal static class Matcher
                     RepeatData rpData = state.Repeats[index];
 
                     // We might need to backtrack into the head, so save the current repeat.
+                    // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    bool numbersRuns = pattern.TestedGroups.Length > 0;
+                    if (numbersRuns)
+                    {
+                        state.Bstack.PushSize(rpData.RunId);
+                    }
+
                     PushRepeatStateData(
                         state.Bstack,
                         new RepeatStateData(
@@ -8562,9 +8679,14 @@ internal static class Matcher
                     );
                     state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
 
-                    /* bstack: count start capture_change index text_pos GREEDY_REPEAT */
+                    /* bstack: [run_id] count start capture_change index text_pos GREEDY_REPEAT */
 
                     // Initialise the new repeat.
+                    if (numbersRuns)
+                    {
+                        rpData.RunId = ++state.NextRunId;
+                    }
+
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
@@ -8957,6 +9079,13 @@ internal static class Matcher
                     RepeatData rpData = state.Repeats[index];
 
                     // We might need to backtrack into the head, so save the current repeat.
+                    // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    bool numbersRuns = pattern.TestedGroups.Length > 0;
+                    if (numbersRuns)
+                    {
+                        state.Bstack.PushSize(rpData.RunId);
+                    }
+
                     PushRepeatStateData(
                         state.Bstack,
                         new RepeatStateData(
@@ -8971,9 +9100,14 @@ internal static class Matcher
                     );
                     state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
 
-                    /* bstack: count start capture_change index text_pos LAZY_REPEAT */
+                    /* bstack: [run_id] count start capture_change index text_pos LAZY_REPEAT */
 
                     // Initialise the new repeat.
+                    if (numbersRuns)
+                    {
+                        rpData.RunId = ++state.NextRunId;
+                    }
+
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
@@ -11447,9 +11581,13 @@ internal static class Matcher
                 case Opcode.GreedyRepeat: // Greedy repeat.
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
-                    /* bstack: count start capture_change index text_pos */
+                    /* bstack: [run_id] count start capture_change index text_pos */
 
-                    if (!PopRepeatStateData(state.Bstack, out RepeatStateData dataR, state.IsFuzzy))
+                    long runId = 0;
+                    if (
+                        !PopRepeatStateData(state.Bstack, out RepeatStateData dataR, state.IsFuzzy)
+                        || (pattern.TestedGroups.Length > 0 && !state.Bstack.PopSize(out runId))
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -11465,6 +11603,7 @@ internal static class Matcher
                     rpData.Start = dataR.Start;
                     rpData.CaptureChange = dataR.CaptureChange;
                     rpData.SectionEdits = dataR.SectionEdits;
+                    rpData.RunId = runId;
                     break;
                 }
                 case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
