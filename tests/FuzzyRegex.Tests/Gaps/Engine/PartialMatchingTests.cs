@@ -185,11 +185,17 @@ public sealed class PartialMatchingTests
         //   compile('(?=ab)(?=cd)').match('', partial=True)   -> (0,0) partial True
         //   compile('(?=ab)(?=cd)').match('a')                -> None
         //   compile(r'(?=\d*[02468]$)(?=\d*[13579]$)\d+').match('1234', partial=True) -> (0,4) True
+        //
+        // D11 build chunk 6 moved the 'a' row, which is not issue 367's case: the held 'a' already
+        // fails the second lookahead's 'c', whatever follows, so no continuation completes it (the
+        // brute-force judge, tools/probes/d11-brute-judge.py, 2026-09-29: None), the reasoning of
+        // design row L2 (docs/plan/2026-09-28-partial-boundary-design.md). The first lookahead's
+        // run-out no longer ends the attempt, so the second is asked. DIVERGES FROM UPSTREAM,
+        // deliberately, which answers (0, 1) partial. The empty subject and the even prime are the
+        // issue's case, two lookaheads that each run out: they stay partial (D11's limit C3, D18).
         var impossible = new FuzzyRegex("(?=ab)(?=cd)");
 
-        Match m = impossible.MatchAtStart("a", partial: true);
-        m.PartialMatch.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        impossible.MatchAtStart("a", partial: true).Success.Should().BeFalse();
 
         Match empty = impossible.MatchAtStart("", partial: true);
         empty.PartialMatch.Should().BeTrue();

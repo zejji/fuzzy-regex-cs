@@ -1405,6 +1405,7 @@ internal static class NodeCompiler
 
         // Create the node to terminate the subpattern.
         Node endNode = CreateNode(args.Pattern, Opcode.EndLookaround, 0, 0, 0);
+        lookaroundNode.LookaroundEnd = endNode;
 
         // Make a continuation node.
         Node nextNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);

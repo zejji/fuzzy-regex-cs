@@ -257,6 +257,15 @@ internal sealed class MatchState : IDisposable
     internal readonly List<WMark> WMarks = [];
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 M2, the dedup: the successes of each open positive lookaround that a
+    /// partial call's second pass continued after a blocked end, by the frame's backtracking-stack
+    /// position (design section 4.2). A second success with the same captures, fuzzy counts and
+    /// fuzzy changes leads where the first did, so it is not continued again. An entry goes when
+    /// its frame goes (A12).
+    /// </summary>
+    internal readonly List<LookaroundSuccess> LookaroundSuccesses = [];
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the attempt running is the one that starts inside the text to
     /// come, with both sides of its start unknown (<c>Matcher.MatchFromInsideTheTextToCome</c>).
     /// </summary>
@@ -1055,6 +1064,7 @@ internal sealed class MatchState : IDisposable
         // What a new state holds by default, and a reused one must be given back. A call that
         // succeeded leaves its stack, and so its marks, where they were (D11).
         WMarks.Clear();
+        LookaroundSuccesses.Clear();
         InsideW = false;
         AttemptTouchedTheTextToCome = false;
 #if DEBUG
@@ -1258,6 +1268,7 @@ internal sealed class MatchState : IDisposable
         // had taken them from the pool's shared stacks in between: 280 B at a time in the parallel
         // native-AOT run, and deterministically in AllocationTests (2026-09-25).
         WMarks.Clear();
+        LookaroundSuccesses.Clear();
         InsideW = false;
         AttemptTouchedTheTextToCome = false;
         Sstack.KeepUpTo(_cachedStackLimit);
@@ -1473,6 +1484,19 @@ internal sealed class MatchState : IDisposable
         Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
     }
 
+    /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
+    /// <param name="position">The lowest frame position dropped.</param>
+    internal void DropLookaroundSuccessesFrom(int position)
+    {
+        int keep = LookaroundSuccesses.Count;
+        while (keep > 0 && LookaroundSuccesses[keep - 1].Frame >= position)
+        {
+            keep--;
+        }
+
+        LookaroundSuccesses.RemoveRange(keep, LookaroundSuccesses.Count - keep);
+    }
+
     /// <summary>A7's test: whether every live w-mark lies below <paramref name="count"/>.</summary>
     /// <param name="count">A backtracking-stack count.</param>
     /// <returns><see langword="true"/> if no mark would be left above that count.</returns>
@@ -1500,6 +1524,7 @@ internal sealed class MatchState : IDisposable
     {
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
+        LookaroundSuccesses.Clear();
         Sstack.Reset();
         SetBstackCount(0);
         Pstack.Reset();

@@ -33,6 +33,32 @@ internal enum WMarkKind : byte
 internal readonly record struct WMark(int Position, WMarkKind Kind);
 
 /// <summary>
+/// NOT UPSTREAM'S, D11 M2: one success of a positive lookaround that the second pass continued, the
+/// dedup's key (design section 4.2): what follows the lookaround depends on its start, which the
+/// frame fixes, and on these.
+/// </summary>
+/// <param name="Frame">The backtracking-stack position of the lookaround's frame.</param>
+/// <param name="Captures">Each group's current capture, or (-1, -1) when it has none.</param>
+/// <param name="FuzzyCounts">The fuzzy counts, which count against the enclosing budget (row F1).</param>
+/// <param name="FuzzyChanges">The fuzzy changes, which <c>(?b)</c> and <c>(?e)</c> rank on.</param>
+internal sealed record LookaroundSuccess(
+    int Frame,
+    GroupSpan[] Captures,
+    long[] FuzzyCounts,
+    FuzzyChange[] FuzzyChanges
+)
+{
+    /// <summary>Whether another success of the same frame leads to the same continuation.</summary>
+    /// <param name="other">The other success.</param>
+    /// <returns><see langword="true"/> if the keys are equal.</returns>
+    internal bool SameContinuation(LookaroundSuccess other) =>
+        Frame == other.Frame
+        && Captures.AsSpan().SequenceEqual(other.Captures)
+        && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
+        && FuzzyChanges.AsSpan().SequenceEqual(other.FuzzyChanges);
+}
+
+/// <summary>
 /// NOT UPSTREAM'S, D11: the second-pass events the port grid counts per row (design 8.1, item 2),
 /// through <see cref="MatchState.NotePartialEvent"/>.
 /// </summary>

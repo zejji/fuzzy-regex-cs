@@ -800,6 +800,8 @@ public sealed class ThreadSafetyTests
             // while the pattern is built and only read afterwards.
             "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
+            "PatternObject.HasBacktrackingVerb",
+            "PatternObject.ReadsCapturesWhileMatching",
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
@@ -856,6 +858,8 @@ public sealed class ThreadSafetyTests
             "Node.FuzzyRunLength",
             // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
+            // D11: written by NodeCompiler.BuildLookaround while the graph is built.
+            "Node.LookaroundEnd",
             "Node.Match",
             "Node.Op",
             "Node.Status",

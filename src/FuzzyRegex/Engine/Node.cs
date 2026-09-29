@@ -70,6 +70,12 @@ internal sealed class Node
     /// <summary>Upstream <c>nonstring.true_node</c>: used by a <c>CONDITIONAL</c> node.</summary>
     internal Node? TrueNode;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: for a lookaround, the node that ends its body, where a partial call's
+    /// second pass goes when the body runs out of text (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// </summary>
+    internal Node? LookaroundEnd;
+
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
 

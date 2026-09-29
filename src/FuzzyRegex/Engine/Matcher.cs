@@ -4044,6 +4044,11 @@ internal static class Matcher
             state.DropWMarksFrom(count);
         }
 
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom(count);
+        }
+
         state.SetBstackCount(count);
     }
 
@@ -4138,7 +4143,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if it holds.</returns>
     private static bool ReopenedFrameIsTheBlockedOne(MatchState state, int frameEnd) =>
         state.Bstack.ReadUInt8Below(frameEnd, out byte frameOp)
-        && frameOp == (byte)Opcode.Atomic
+        && frameOp is (byte)Opcode.Atomic or (byte)Opcode.Lookaround
         && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
 
     /// <summary>
@@ -4230,43 +4235,218 @@ internal static class Matcher
         return false;
     }
 
+    /// <summary>What <see cref="EndALookaroundInTheSecondPass"/> tells the END_LOOKAROUND arm to do.</summary>
+    private enum LookaroundEnd
+    {
+        /// <summary>Cut, as outside the second pass.</summary>
+        Cut,
+
+        /// <summary>Cut, and move the frame's own cut taint to the end entry.</summary>
+        CutTainted,
+
+        /// <summary>Carry on after the lookaround: its end was blocked and nothing was discarded.</summary>
+        Continue,
+
+        /// <summary>Backtrack: back into the body, or out of the lookaround.</summary>
+        Backtrack,
+    }
+
     /// <summary>
-    /// NOT UPSTREAM'S, D11 M2: whether the negative lookaround whose body has just succeeded may take
-    /// the definite decision, failing the assertion. Not when a verb of its scope was skipped: in
-    /// the continuations where the verb acted, the body failed and the assertion holds (rows Q1 and
-    /// T2).
+    /// NOT UPSTREAM'S, D11 M2: the cut rule at the end of a lookaround's body, in a partial call's
+    /// second pass (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2).
     /// </summary>
     /// <remarks>
-    /// Blocked, the body's success happens only for some continuations, so the frame gets a cut
-    /// taint and backtracking goes back into the body; once it is exhausted, the
-    /// <see cref="Opcode.Lookaround"/> arm passes the assertion with a touch. SHORTCUT: the other
-    /// half of the rule, a touch or cut taint above the frame, is build chunk 6's (lookarounds), so
-    /// until then a body success after a read of the text to come still fails the assertion for
-    /// every continuation, which S57d's escalation answers until chunk 9. Upgrade: ask that here
-    /// too.
+    /// <para>
+    /// The end is blocked when a touch or cut taint lies above the frame (the body's success read
+    /// the text to come, or came back through a skipped cut: rows C2, G1 and the double negative
+    /// <c>(?!(?!a$(*PRUNE)(?&lt;=b)|a))a</c>), or a verb taint lies at it (a verb of the scope was
+    /// skipped: rows Q1 and T2). A cut taint at the frame itself does not block (row L6).
+    /// </para>
+    /// <para>
+    /// Negative and blocked: the success holds only for some continuations, so the frame gets a cut
+    /// taint and backtracking goes back into the body; once the body is exhausted the
+    /// <see cref="Opcode.Lookaround"/> arm passes the assertion with a touch. Unblocked, the body's
+    /// success fails the assertion for every continuation, as outside the second pass.
+    /// </para>
+    /// <para>
+    /// Positive and blocked: as an atomic group's blocked end (<see cref="BlockAtomicCut"/>), the
+    /// frame gets a cut taint, the pruning mark goes into a <see cref="Opcode.Reopen"/> entry, and
+    /// matching carries on after the lookaround from where it started, with the body's entries kept
+    /// for the continuations where it matched otherwise. The dedup comes first: a success with the
+    /// captures, fuzzy counts and fuzzy changes of one already continued from this frame fails where
+    /// that one failed, so a blocked end backtracks into the body, and an unblocked one cuts and
+    /// fails.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state, with at least one w-mark.</param>
-    /// <returns><see langword="true"/> if the lookaround is negative and blocked.</returns>
-    private static bool BlockANegativeLookaround(MatchState state)
+    /// <param name="node">The END_LOOKAROUND node; on <see cref="LookaroundEnd.Continue"/>, where
+    /// matching carries on.</param>
+    /// <returns>What the arm does next.</returns>
+    private static LookaroundEnd EndALookaroundInTheSecondPass(MatchState state, ref Node node)
     {
         if (
             !state.Pstack.TopSize(out long mark)
-            || !HasWMarkAt(state, (int)mark - 1, WMarkKind.VerbTaint)
             || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
             || op != Opcode.Lookaround
-            || look.Node.Match
         )
         {
-            return false;
+            return LookaroundEnd.Cut;
         }
 
-        if (!HasWMarkAt(state, (int)mark - 1, WMarkKind.CutTaint))
+        int frame = (int)mark - 1;
+        bool blocked = state.WMarks[^1].Position > frame || HasWMarkAt(state, frame, WMarkKind.VerbTaint);
+
+        if (!look.Node.Match)
         {
-            state.AddWMark((int)mark - 1, WMarkKind.CutTaint);
+            if (!blocked)
+            {
+                return LookaroundEnd.Cut;
+            }
+
+            TaintTheFrame(state, frame);
+            state.NotePartialEvent(PartialEvent.CutBlockedLookaround);
+            return LookaroundEnd.Backtrack;
         }
 
+        LookaroundSuccess success = new(
+            frame,
+            [.. state.Groups.Select(static g => g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1))],
+            [.. state.FuzzyCounts],
+            [.. state.FuzzyChanges]
+        );
+        if (state.LookaroundSuccesses.Exists(success.SameContinuation))
+        {
+            state.NotePartialEvent(PartialEvent.Dedup);
+            if (!blocked)
+            {
+                // Cut and fail: the frame's entry is next, and its arm fails the lookaround.
+                CutBstack(state, (int)mark);
+            }
+
+            return LookaroundEnd.Backtrack;
+        }
+
+        if (!blocked)
+        {
+            return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
+        }
+
+        TaintTheFrame(state, frame);
+        state.LookaroundSuccesses.Add(success);
+        _ = state.Pstack.DropSize();
+        state.Bstack.PushSize(mark);
+        state.Bstack.PushUInt8((byte)Opcode.Reopen);
+
+        /* bstack: pstack_mark REOPEN */
+
+        state.TextPos = look.TextPos;
+        state.SliceStart = look.SliceStart;
+        state.SliceEnd = look.SliceEnd;
+        node = node.Next1.Node!;
         state.NotePartialEvent(PartialEvent.CutBlockedLookaround);
-        return true;
+        return LookaroundEnd.Continue;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    private static void TaintTheFrame(MatchState state, int frame)
+    {
+        if (!HasWMarkAt(state, frame, WMarkKind.CutTaint))
+        {
+            state.AddWMark(frame, WMarkKind.CutTaint);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: a consuming item has run out of text inside a lookaround's body in a
+    /// partial call's second pass. The body may match for some continuations, so matching carries
+    /// on at the body's end with a touch above the frame, which blocks the end (design section 4.2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The atomic groups still open inside the body are closed as blocked ends close them, each with
+    /// a cut taint: in the continuations where the body goes on, any of them may commit (the run-out
+    /// taint, row N8). When the pattern has a verb, each of their frames and the lookaround's get a
+    /// verb taint too, since one may lie after the edge (row Q3).
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the captures the body would make after the edge are unknown, which build chunk 8
+    /// models. Until then a pattern that reads captures while it matches, one with group calls, and
+    /// a run-out inside a condition's test answer the run-out partial, as before D11; so does the
+    /// oracle's pre-D11 ablation. Ceiling: those answer a partial at the attempt's start whatever
+    /// follows. Upgrade: chunk 8's unknown captures, and chunk 7's conditions.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
+    private static Node? RunOutInALookaroundBody(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            state.PartialSide == MatchState.PartialNone
+            || pattern.SecondPassAsBeforeD11
+            || pattern.ReadsCapturesWhileMatching
+            || pattern.HasGroupCalls
+        )
+        {
+            return null;
+        }
+
+        // The innermost open lookaround, with only atomic groups open above it.
+        int atomics = 0;
+        int offset = state.Pstack.Count - sizeof(long);
+        LookaroundStateData look;
+        long lookMark;
+        while (true)
+        {
+            if (offset < 0)
+            {
+                return null;
+            }
+
+            lookMark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)lookMark, out Opcode op, out look))
+            {
+                return null;
+            }
+
+            if (op == Opcode.Lookaround)
+            {
+                break;
+            }
+
+            if (op != Opcode.Atomic)
+            {
+                return null;
+            }
+
+            atomics++;
+            offset -= sizeof(long);
+        }
+
+        bool verbs = pattern.HasBacktrackingVerb;
+        for (int i = 0; i < atomics; i++)
+        {
+            _ = state.Pstack.PopSize(out long atomicMark);
+            BlockAtomicCut(state, (int)atomicMark);
+            if (verbs && !HasWMarkAt(state, (int)atomicMark - 1, WMarkKind.VerbTaint))
+            {
+                state.AddWMark((int)atomicMark - 1, WMarkKind.VerbTaint);
+            }
+
+            state.NotePartialEvent(PartialEvent.RunOutTaintSet);
+        }
+
+        if (verbs && !HasWMarkAt(state, (int)lookMark - 1, WMarkKind.VerbTaint))
+        {
+            state.AddWMark((int)lookMark - 1, WMarkKind.VerbTaint);
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        PushTouchMark(state);
+        state.NotePartialEvent(PartialEvent.RunOutInBody);
+        return look.Node.LookaroundEnd;
     }
 
     /// <summary>
@@ -9918,6 +10098,11 @@ internal static class Matcher
                     status = TryMatchAny(state, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -9937,6 +10122,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -9955,6 +10145,11 @@ internal static class Matcher
                     status = TryMatchAnyAll(state, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -9974,6 +10169,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -9992,6 +10192,11 @@ internal static class Matcher
                     status = TryMatchAnyU(state, node, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -10011,6 +10216,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -10041,6 +10251,11 @@ internal static class Matcher
 
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -10060,6 +10275,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -10289,6 +10509,11 @@ internal static class Matcher
                     status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -10674,7 +10899,7 @@ internal static class Matcher
 
                     if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     // Record info in case we backtrack into the body.
@@ -10866,7 +11091,7 @@ internal static class Matcher
 
                     if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     // Record info in case we backtrack into the body.
@@ -10953,11 +11178,20 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // D11 M2: a negative lookaround whose scope saw a verb skipped keeps its body's
-                    // other paths, because the success holds only for some continuations.
-                    if (state.WMarks.Count != 0 && BlockANegativeLookaround(state))
+                    // D11 M2: the cut rule, in a partial call's second pass.
+                    LookaroundEnd lookEnd = LookaroundEnd.Cut;
+                    if (state.WMarks.Count != 0)
                     {
-                        goto backtrack;
+                        lookEnd = EndALookaroundInTheSecondPass(state, ref node);
+                        if (lookEnd == LookaroundEnd.Continue)
+                        {
+                            break;
+                        }
+
+                        if (lookEnd == LookaroundEnd.Backtrack)
+                        {
+                            goto backtrack;
+                        }
                     }
 
                     // Everything the body pushed while it matched goes: a lookaround is atomic, so
@@ -10969,11 +11203,9 @@ internal static class Matcher
 
                     CutBstack(state, (int)endLookBstackCount);
 
-                    // The frame goes, and its marks with it. SHORTCUT: a verb taint here is a positive
-                    // lookaround's only under the oracle's confined-verb ablation, and a cut taint a
-                    // negative's only after a blocked end, whose body then succeeded unblocked; both
-                    // are dropped until build chunk 6 gives lookarounds the cut rule. Upgrade: block
-                    // or move them as EndAtomic does.
+                    // The frame goes, and its marks with it: a negative lookaround that fails drops its
+                    // own cut taint, and a positive one moves it to the end entry below (A7's
+                    // exception), because the path after it is reached only for some continuations.
                     if (state.WMarks.Count != 0)
                     {
                         state.DropWMarksFrom((int)endLookBstackCount - 1);
@@ -11011,6 +11243,11 @@ internal static class Matcher
                         // It's a positive lookaround that's succeeded. The captures its body made
                         // stay visible; the block stays on the stack for the backtrack case to undo.
                         state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
+
+                        if (lookEnd == LookaroundEnd.CutTainted)
+                        {
+                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                        }
 
                         /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
 
@@ -11050,6 +11287,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -11101,7 +11343,7 @@ internal static class Matcher
                 case Opcode.SetUnionIgn: // Set union, ignoring case.
                     if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     if (
@@ -11123,6 +11365,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -11157,7 +11404,7 @@ internal static class Matcher
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
                     if (RanOutOnTheLeft(state, state.TextPos))
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     if (
@@ -11179,6 +11426,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -11218,6 +11470,11 @@ internal static class Matcher
 
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
@@ -11240,6 +11497,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -11383,7 +11645,7 @@ internal static class Matcher
 
                     if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     if (tryBody)
@@ -11469,7 +11731,7 @@ internal static class Matcher
                     if (isPartial)
                     {
                         state.TextPos = pos;
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     // Unmatch until it's not guarded. 'pos' is upstream's
@@ -11832,7 +12094,7 @@ internal static class Matcher
 
                     if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
                     {
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     if (tryTail)
@@ -11912,7 +12174,7 @@ internal static class Matcher
                     if (isPartial)
                     {
                         state.TextPos = pos;
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     // Have we matched at least the minimum?
@@ -12061,7 +12323,7 @@ internal static class Matcher
                     {
                         if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -12085,6 +12347,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12130,7 +12397,7 @@ internal static class Matcher
                     {
                         if (RanOutOnTheLeft(state, state.TextPos))
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -12152,6 +12419,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12196,7 +12468,7 @@ internal static class Matcher
                     {
                         if (RanOutOnTheLeft(state, state.TextPos))
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -12218,6 +12490,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12313,7 +12590,7 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             foldedLen =
@@ -12395,6 +12672,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12441,6 +12723,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12545,7 +12832,7 @@ internal static class Matcher
                         {
                             if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             foldedLen =
@@ -12624,6 +12911,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12675,6 +12967,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12728,7 +13025,7 @@ internal static class Matcher
                     {
                         if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -12750,6 +13047,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -12862,7 +13164,7 @@ internal static class Matcher
                         {
                             if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -12887,6 +13189,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -12966,7 +13273,7 @@ internal static class Matcher
                             {
                                 if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                                 {
-                                    return MatchStatus.Partial;
+                                    goto runOut;
                                 }
 
                                 foldedLen =
@@ -13033,6 +13340,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13076,6 +13388,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13129,7 +13446,7 @@ internal static class Matcher
                         {
                             if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -13154,6 +13471,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13204,7 +13526,7 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -13226,6 +13548,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13275,7 +13602,7 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -13301,6 +13628,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13380,7 +13712,7 @@ internal static class Matcher
                             {
                                 if (RanOutOnTheLeft(state, state.TextPos))
                                 {
-                                    return MatchStatus.Partial;
+                                    goto runOut;
                                 }
 
                                 foldedLen =
@@ -13447,6 +13779,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13488,6 +13825,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -13600,6 +13942,19 @@ internal static class Matcher
                     throw Seam.For(node.Op);
             }
         }
+
+        // NOT UPSTREAM'S, D11 M2: a consuming item ran out of text. Inside a lookaround's body in a
+        // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
+        // anywhere else the attempt answers the partial, as it always has.
+        runOut:
+        Node? runOutEnd = RunOutInALookaroundBody(state);
+        if (runOutEnd is null)
+        {
+            return MatchStatus.Partial;
+        }
+
+        node = runOutEnd;
+        goto advance;
 
         backtrack:
         // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
@@ -14404,6 +14759,12 @@ internal static class Matcher
                 {
                     /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change */
 
+                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     // The 'true' branch of a positive lookaround is being given up, so the captures
                     // its body made go with it. Leaving this out is invisible to any test that does
                     // not backtrack past the lookaround.
@@ -14437,6 +14798,8 @@ internal static class Matcher
                     {
                         state.DropWMarksFrom(state.Bstack.Count);
                     }
+
+                    state.LookaroundSuccesses.Clear();
 
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
@@ -14929,6 +15292,11 @@ internal static class Matcher
                         state.DropWMarksFrom(state.Bstack.Count);
                     }
 
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
+                    }
+
                     // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
                     // the parked count, here the body's own entries have already been popped by the
                     // backtracking that brought us here, so the pstack entry is simply dropped.
@@ -15123,8 +15491,17 @@ internal static class Matcher
                     );
 
                     // The group is open again, as it was before its end, so that the body's other
-                    // paths end at the group's end once more.
+                    // paths end at the group's end once more. A lookaround's body matches over the
+                    // whole text, as its forward arm set it up to.
                     state.Pstack.PushSize(reopenedFrameEnd);
+                    if (
+                        state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
+                        && reopenedOp == (byte)Opcode.Lookaround
+                    )
+                    {
+                        state.SliceStart = state.TextStart;
+                        state.SliceEnd = state.TextEnd;
+                    }
                     break;
                 }
                 case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.

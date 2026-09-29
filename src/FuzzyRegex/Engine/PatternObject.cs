@@ -315,6 +315,20 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
+    /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
+    /// </summary>
+    internal bool HasBacktrackingVerb;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the pattern reads a group's capture while it matches, through a
+    /// backreference or a group condition. A run-out in a lookaround body leaves the body's later
+    /// captures unknown, which build chunk 8 models; until then such a pattern keeps the run-out
+    /// partial (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// </summary>
+    internal bool ReadsCapturesWhileMatching;
+
+    /// <summary>
     /// NOT UPSTREAM (finding F-A): whether <c>Matcher.ExactDeletionMayMatch</c> may leave out the
     /// "delete it instead" choice of an item that matched exactly when that choice cannot lead to a
     /// match the search has not already ruled out. Set when the pattern is compiled.
@@ -875,6 +889,26 @@ internal sealed class PatternObject
             if (self.NodeList[i].Op == Opcode.Skip)
             {
                 self.HasSkipVerb = true;
+            }
+
+            // NOT UPSTREAM'S, D11: see HasBacktrackingVerb and ReadsCapturesWhileMatching.
+            if (self.NodeList[i].Op is Opcode.Skip or Opcode.Prune)
+            {
+                self.HasBacktrackingVerb = true;
+            }
+
+            if (
+                self.NodeList[i].Op
+                is Opcode.GroupExists
+                    or Opcode.RefGroup
+                    or Opcode.RefGroupFld
+                    or Opcode.RefGroupFldRev
+                    or Opcode.RefGroupIgn
+                    or Opcode.RefGroupIgnRev
+                    or Opcode.RefGroupRev
+            )
+            {
+                self.ReadsCapturesWhileMatching = true;
             }
 
             // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
