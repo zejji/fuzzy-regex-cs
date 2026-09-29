@@ -15,7 +15,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// measured 2026-09-29. S57d's escalation turns a failed second pass into a partial whenever a word
 /// test stood at the edge, until build chunk 9 deletes it, and it clears the groups. So the
 /// witnesses read the text to come through <c>$</c>, which S57d never notes, or show that the answer
-/// came from a path: a group the path set, or, in a Debug build, the count of second-pass events.
+/// came from a path: a group the path set, or, in a Debug build, the count of second-pass events. A
+/// count is checked after the test's answers, which a Release build checks too, and a Release build
+/// then skips the test with <see cref="EngineWork.DebugOnly"/> as the reason.
 /// </remarks>
 public sealed class PartialVerbRuleTests
 {
@@ -61,17 +63,20 @@ public sealed class PartialVerbRuleTests
     /// <summary>
     /// Row V4 and its <c>$</c> twin: the verb runs before the read, so it prunes for every
     /// continuation and nothing completes. S57d still answers V4 itself with a phantom partial until
-    /// build chunk 9, so there the Debug counts are the witness.
+    /// build chunk 9, so there the Debug counts are the witness, and the twin is the one a Release
+    /// build checks.
     /// </summary>
     // Upstream answers None to the twin too.
     [Test]
+    [Category(EngineWork.Category)]
     public void A_verb_before_the_read_prunes()
     {
         using MatchState state = RunPartial(@"(?:a(*PRUNE)\b(?<=b)|a.)", "a");
 
+        new FuzzyRegex(@"(?:a(*PRUNE)$(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
+        EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(0);
         state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(0);
-        new FuzzyRegex(@"(?:a(*PRUNE)$(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
     }
 
     /// <summary>
@@ -80,12 +85,14 @@ public sealed class PartialVerbRuleTests
     /// </summary>
     // Upstream answers None too.
     [Test]
+    [Category(EngineWork.Category)]
     public void A_verb_after_a_decided_read_prunes()
     {
         using MatchState state = RunPartial(@"(?:a\Z(?<=b)|a(*PRUNE)(?<=b)|a)", "a");
 
-        state.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(0);
         new FuzzyRegex(@"(?:a\Z(?<=b)|a(*PRUNE)(?<=b)|a)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(0);
     }
 
     /// <summary>
@@ -93,10 +100,12 @@ public sealed class PartialVerbRuleTests
     /// lookahead's failure when the body's other branch, <c>a</c>, succeeds: in the continuations
     /// where the prune acted ('a' + '1' fails the <c>\b</c> of Q1's atomic group, and makes T2's
     /// <c>\B</c> true), the body fails and the assertion holds. Without the taint the second pass
-    /// finds nothing, which S57d hides.
+    /// finds nothing, which S57d hides, so the Debug counts are the witness here, and the
+    /// <c>$</c> twin below is the one a Release build checks.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to both.
     [Test]
+    [Category(EngineWork.Category)]
     [Arguments(@"(?!(?>a\b|)(?<!a)a(*PRUNE)(?<=b)|a)")]
     [Arguments(@"(?!a\B(*PRUNE)(?<=b)|a)")]
     public void A_skipped_verb_blocks_its_own_scope(string pattern)
@@ -104,9 +113,10 @@ public sealed class PartialVerbRuleTests
         using MatchState state = RunPartial(pattern, "a");
         Match m = new FuzzyRegex(pattern).MatchAtStart("a", partial: true);
 
-        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(_one);
-        state.PartialEventCount(PartialEvent.NegativeUndetermined).Should().Be(_one);
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(1);
+        state.PartialEventCount(PartialEvent.NegativeUndetermined).Should().Be(1);
     }
 
     /// <summary>
@@ -129,13 +139,15 @@ public sealed class PartialVerbRuleTests
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to both.
     [Test]
+    [Category(EngineWork.Category)]
     public void A_verb_reached_back_through_a_skipped_cut_does_nothing()
     {
         using MatchState state = RunPartial(@"(?:(?>a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)", "a");
         Match twin = new FuzzyRegex(@"(?:(?>a$|)(?<!a)a(*PRUNE)(?<=b)|a\n)").MatchAtStart("a", partial: true);
 
-        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(_one);
         (twin.PartialMatch, twin.Index, twin.Length).Should().Be((true, 0, 1));
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(1);
     }
 
     /// <summary>
@@ -156,28 +168,47 @@ public sealed class PartialVerbRuleTests
     }
 
     /// <summary>
+    /// A verb whose scope is a condition's test acts as before, whatever its path read, until build
+    /// chunk 7 gives conditions the cut rule. Skipped, it would leave the test's other branch, which
+    /// succeeds on the held text, to decide the condition for every continuation, and the branch
+    /// that 'a' + '\n' needs would be lost (review of chunk 5, round 1). The judge, upstream and the
+    /// port before chunk 5 all answer these.
+    /// </summary>
+    [Test]
+    [Arguments("match", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "a", 0)]
+    [Arguments("match", @"(?(?=a$(*SKIP)(?<=b)|a)x|a\n)", "a", 0)]
+    [Arguments("match", @"(?(?!a$(*PRUNE)(?<=b)|a)a\n|x)", "a", 0)]
+    [Arguments("fullmatch", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "a", 0)]
+    [Arguments("search", @"(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)", "ba", 1)]
+    public void A_verb_in_a_condition_s_test_is_not_skipped(string operation, string pattern, string text, int start)
+    {
+        Match m = Run(operation, pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, text.Length - start));
+    }
+
+    /// <summary>
     /// The port grid's counter (VERIFICATION rule 11): the skipped verb of row V1, asked once when it
     /// runs, and none in a call without partial. Debug builds only.
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_skipped_verb_is_counted_in_a_debug_build()
     {
         using MatchState skipped = RunPartial(@"(?:a$(*PRUNE)(?<=b)|a.)", "a");
 
-        skipped.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(_one);
         new FuzzyRegex(@"(?:a$(*PRUNE)(?<=b)|a.)").MatchAtStart("a").Success.Should().BeFalse();
+        EngineWork.SkipUnlessCounting();
+        skipped.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(1);
     }
 
-#if DEBUG
-    private const long _one = 1;
-#else
-    private const long _one = 0;
-#endif
-
     private static Match Run(string operation, string pattern, string text) =>
-        string.Equals(operation, "search", StringComparison.Ordinal)
-            ? new FuzzyRegex(pattern).Match(text, partial: true)
-            : new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+        operation switch
+        {
+            "search" => new FuzzyRegex(pattern).Match(text, partial: true),
+            "fullmatch" => new FuzzyRegex(pattern).FullMatch(text, partial: true),
+            _ => new FuzzyRegex(pattern).MatchAtStart(text, partial: true),
+        };
 
     private static MatchState RunPartial(string pattern, string text)
     {

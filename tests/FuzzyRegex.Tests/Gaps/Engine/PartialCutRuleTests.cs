@@ -43,6 +43,7 @@ public sealed class PartialCutRuleTests
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to all three.
     [Test]
+    [Category(EngineWork.Category)]
     [Arguments(@"(?>x\b|)(?<!x)x", "x", 1)]
     [Arguments(@"(?>ab\b|a)(?<=a)b", "ab", 2)]
     [Arguments(@"(?:a\b)?+(?<!a)a", "a", 1)]
@@ -51,8 +52,9 @@ public sealed class PartialCutRuleTests
         using MatchState state = RunPartial(pattern, text);
         Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
 
-        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(_one);
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, end));
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(1);
     }
 
     /// <summary>
@@ -85,14 +87,16 @@ public sealed class PartialCutRuleTests
     /// entry 43); this port's own matcher matches '\r\n' at (0, 2), which is the completion.
     /// </remarks>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_reversed_grapheme_test_at_the_edge_blocks_the_cut_of_its_cluster()
     {
         using MatchState state = RunPartial(@"(?r)(?!\n)\X", "\n");
         Match m = new FuzzyRegex(@"(?r)(?!\n)\X").MatchAtStart("\n", partial: true);
 
         new FuzzyRegex(@"(?r)(?!\n)\X").MatchAtStart("\r\n").Length.Should().Be(2);
-        state.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(_one);
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(1);
     }
 
     /// <summary>
@@ -127,12 +131,14 @@ public sealed class PartialCutRuleTests
     /// second-pass successes is the witness.
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void The_design_row_of_a_tainted_frame_is_no_second_pass_success()
     {
         using MatchState state = RunPartial(@"(?>x\b|x|)(?<!x)x", "x");
 
+        EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(0);
-        state.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(_one);
+        state.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(1);
     }
 
     /// <summary>
@@ -160,19 +166,15 @@ public sealed class PartialCutRuleTests
     /// partial. Debug builds only.
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_blocked_cut_is_counted_in_a_debug_build()
     {
         using MatchState blocked = RunPartial(@"(?>x$|)(?<!x)x", "x");
 
-        blocked.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(_one);
         new FuzzyRegex(@"(?>x$|)(?<!x)x").MatchAtStart("x").Success.Should().BeFalse();
+        EngineWork.SkipUnlessCounting();
+        blocked.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(1);
     }
-
-#if DEBUG
-    private const long _one = 1;
-#else
-    private const long _one = 0;
-#endif
 
     private static MatchState RunPartial(string pattern, string text)
     {

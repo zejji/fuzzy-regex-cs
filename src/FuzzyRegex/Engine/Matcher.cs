@@ -4170,7 +4170,15 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the verb was blocked and must do nothing.</returns>
     private static bool SkipABlockedVerb(MatchState state)
     {
-        if (!FindTheVerbTarget(state, out long targetMark))
+        // SHORTCUT: a verb whose scope is a condition's test acts as it did before D11, whatever its
+        // path read, until build chunk 7 gives conditions the cut rule. Skipped, it would leave the
+        // test's other branches to decide the condition for every continuation, which loses the
+        // branch a continuation needs: `(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)` over 'a' is P(0, 1), and
+        // None with the verb skipped (review of chunk 5, round 1). Ceiling: a verb in a test after a
+        // read of the text to come still discards the test's other paths (row T6), which S57d's
+        // escalation answers until chunk 9. Upgrade: skip it, and let the blocked test take both
+        // branches.
+        if (!FindTheVerbTarget(state, out long targetMark, out Opcode targetOp) || targetOp == Opcode.Conditional)
         {
             return false;
         }
@@ -4199,24 +4207,26 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="targetMark">Receives the scope's pruning mark.</param>
+    /// <param name="targetOp">Receives the opcode of the construct that pushed it.</param>
     /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
-    private static bool FindTheVerbTarget(MatchState state, out long targetMark)
+    private static bool FindTheVerbTarget(MatchState state, out long targetMark, out Opcode targetOp)
     {
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
             targetMark = state.Pstack.SizeAt(offset);
-            if (!ReadPruningMark(state, (int)targetMark, out Opcode op, out LookaroundStateData look))
+            if (!ReadPruningMark(state, (int)targetMark, out targetOp, out LookaroundStateData look))
             {
                 break;
             }
 
-            if (state.Pattern.VerbsAreConfinedToTheInnermostGroup || !IsTransparentToVerbs(op, look))
+            if (state.Pattern.VerbsAreConfinedToTheInnermostGroup || !IsTransparentToVerbs(targetOp, look))
             {
                 return true;
             }
         }
 
         targetMark = 0;
+        targetOp = Opcode.Failure;
         return false;
     }
 
@@ -10195,11 +10205,9 @@ internal static class Matcher
 
                     CutBstack(state, (int)endCondBstackCount);
 
-                    // The frame goes, and its marks with it. SHORTCUT: a verb taint here means a verb
-                    // in the test was skipped, and the test's decision is taken for every
-                    // continuation all the same until build chunk 7 gives conditions the cut rule
-                    // (row T6), which S57d's escalation answers until chunk 9. Upgrade: take both
-                    // branches.
+                    // The frame goes, and any mark at it. None is made there until build chunk 7,
+                    // because no verb in a test is skipped before then (the SHORTCUT in
+                    // SkipABlockedVerb); the drop keeps A7 when chunk 7 makes one.
                     if (state.WMarks.Count != 0)
                     {
                         state.DropWMarksFrom((int)endCondBstackCount - 1);
