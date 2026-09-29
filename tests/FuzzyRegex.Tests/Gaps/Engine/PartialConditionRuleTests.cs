@@ -66,6 +66,24 @@ public sealed class PartialConditionRuleTests
     }
 
     /// <summary>
+    /// A condition test's dedup records go with its frame, as a lookaround's do: when its unblocked
+    /// success cuts (the END_CONDITIONAL arm), and when it is backtracked out of (the CONDITIONAL
+    /// arm). The second alternative's test opens its frame at the first one's stack position, and
+    /// a record left behind would drop its blocked success, the one 'a' + '\n' needs (review of
+    /// chunk 7, round 1).
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments(@"(?:(?(?=(?<g>a)$|(?<h>a))(*FAIL))|(?(?=(?<g>a)$|(?<h>a))(?(h)(*FAIL)|a\n))|z)")]
+    [Arguments(@"(?:(?(?=(?<g>a)$)(*FAIL)|(*FAIL))|(?(?=(?<g>a)$|(?<h>a))(?(h)(*FAIL)|a\n))|z)")]
+    public void A_condition_s_dedup_records_go_with_its_frame(string pattern)
+    {
+        Match m = Run("match", pattern, "a");
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+    }
+
+    /// <summary>
     /// The design rows whose read is a word test, which S57d answers with the same span: T4 and T5
     /// take both branches, T6 skips the <c>(*PRUNE)</c> in its test, and L4 is a second-pass success.
     /// </summary>

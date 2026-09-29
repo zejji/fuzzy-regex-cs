@@ -188,6 +188,25 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// A lookaround's dedup records go with its frame when an unblocked success cuts. The first
+    /// lookahead's blocked success (g set, read through the <c>$</c>) is recorded; its second
+    /// success, <c>(?&lt;h&gt;a)</c>, cuts unblocked. The second alternative's lookahead then opens
+    /// its frame at the same stack position, and a record left behind would drop its own first
+    /// success as a repeat, the one 'a' + '\n' needs (review of chunk 7, round 1).
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments("match", 0)]
+    [Arguments("fullmatch", 0)]
+    [Arguments("search", 0)]
+    public void A_lookaround_s_dedup_records_go_with_its_frame(string operation, int start)
+    {
+        Match m = Run(operation, @"(?:(?=(?<g>a)$|(?<h>a))(*FAIL)|(?=(?<g>a)$|(?<h>a))(?(h)(*FAIL)|a\n)|z)", "a");
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, 1 - start));
+    }
+
+    /// <summary>
     /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
     /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
     /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over

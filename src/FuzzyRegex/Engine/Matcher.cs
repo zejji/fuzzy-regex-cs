@@ -4519,9 +4519,15 @@ internal static class Matcher
             return false;
         }
 
+        // A condition's parked state is read only in a partial call's second pass, the one place
+        // that asks for it (EndALookaroundInTheSecondPass and RunOutInALookaroundBody); the verb
+        // paths read a lookaround's alone (IsTransparentToVerbs), so other calls skip the read.
         bool read = state.Bstack.ReadUInt8Below(mark, out byte code);
+        bool parked =
+            (Opcode)code == Opcode.Lookaround
+            || ((Opcode)code == Opcode.Conditional && state.PartialSide != MatchState.PartialNone);
         long sstackCount = 0;
-        if (read && (Opcode)code is Opcode.Lookaround or Opcode.Conditional)
+        if (read && parked)
         {
             read = state.Bstack.ReadSizeBelow(mark - 1, out sstackCount);
         }
@@ -4532,9 +4538,9 @@ internal static class Matcher
         }
 
         op = (Opcode)code;
-        if (op is not (Opcode.Lookaround or Opcode.Conditional))
+        if (!parked)
         {
-            return op is Opcode.Failure or Opcode.Atomic;
+            return op is Opcode.Failure or Opcode.Atomic or Opcode.Conditional;
         }
 
         int sstackTop = state.Sstack.Count;
@@ -11226,12 +11232,19 @@ internal static class Matcher
 
                     CutBstack(state, (int)endLookBstackCount);
 
-                    // The frame goes, and its marks with it: a negative lookaround that fails drops its
-                    // own cut taint, and a positive one moves it to the end entry below (A7's
-                    // exception), because the path after it is reached only for some continuations.
+                    // The frame goes, and its marks and dedup records with it: a negative lookaround
+                    // that fails drops its own cut taint, and a positive one moves it to the end entry
+                    // below (A7's exception), because the path after it is reached only for some
+                    // continuations. A record left at the frame's position would dedup a later
+                    // lookaround's success there (review of chunk 7, round 1).
                     if (state.WMarks.Count != 0)
                     {
                         state.DropWMarksFrom((int)endLookBstackCount - 1);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom((int)endLookBstackCount - 1);
                     }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
