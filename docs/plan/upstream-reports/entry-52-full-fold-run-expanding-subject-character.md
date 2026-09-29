@@ -59,5 +59,24 @@ The same two edits fix it there. A whole substitution should replace a whole cha
 group, so it applies only at the start of one and uses up all of its folding: then ǰ for a captured
 'ß' is one edit, and ǰ after the first s of that 'ß' has matched is not offered.
 
+The backreference folds the captured text as it goes, and edits that folding one folded character
+at a time too, so a captured 'ß' costs two edits to replace or delete, where the literal it stands
+for costs one:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ß)x(?:ß){s<=1}', 'ßxa')
+<regex.Match object; span=(0, 3), match='ßxa', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ß)x(?:ß){d<=1}', 'ßx')
+<regex.Match object; span=(0, 2), match='ßx', fuzzy_counts=(0, 0, 1)>
+>>> regex.fullmatch(r'(?fi)(ß)x(?:\1){s<=1}', 'ßxa')
+>>> regex.fullmatch(r'(?fi)(ß)x(?:\1){d<=1}', 'ßx')
+>>>
+```
+
+The group-side fix mirrors the subject-side one: at the start of a group character whose folding
+is longer than one character, also offer the whole substitution (one whole group character for one
+whole subject character) and a deletion of the whole group character, and offer them too when the
+first folded character matched, so that `(?fi)(ß)x(?:\1){s<=1}` matches 'ßxs'.
+
 None of PCRE2, Python `re`, .NET, JavaScript or Perl has fuzzy matching, so there is no second
 answer to compare with.

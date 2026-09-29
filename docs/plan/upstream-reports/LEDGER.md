@@ -3884,6 +3884,23 @@ retry with the group used up, a state upstream never reaches. Pinned by the same
 rows of the default wave at three seeds. Each agrees with upstream once `(?:\1)` is replaced by the
 group's text; the probe prints both.
 
+**A retried insertion at the search anchor (known defect D25, fixed 2026-09-29).** Taking the step
+made a retried insertion count, and so exposed the insertion rule upstream's retry spells
+differently: `data.permit_insertion = !search || state->text_pos != state->search_anchor ||
+data.new_folded_pos != data.folded_len` (`_regex.c:11019`). Going forwards the last test holds at
+the start of every folding, where `fuzzy_match_group_fld` asks `folded_pos != 0` (`:10905-10911`),
+so a search could open with an insertion at its first position, which every other item refuses.
+Upstream never shows it, because it drops the retried insertion:
+
+```
+search(r'(?fi)(?:xtj){e<=1}', 'axtj')             -> (1, 4), no errors   (the control)
+search(r'(?fi)(?=.*?(xtj))(?:\1){e<=1}', 'axtj')  -> (1, 4), no errors   this port before the fix: (0, 4), one insertion
+```
+
+The port's retry now uses the first attempt's rule (`Matcher.PermitInsertionInFold`); reversed, the
+two rules were already the same test. Nothing upstream answers changes, so this is not an upstream
+report. Pinned by `FullFoldBackreferenceLeftoversTests.A_retried_insertion_does_not_open_a_search_at_its_anchor`.
+
 ## 31. A fuzzy deletion in a full-folded item's leftovers deletes nothing - FIXED HERE (S85)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-31-full-fold-leftover-deletion.md`.
@@ -4956,7 +4973,26 @@ substitution there replaces a whole group character: it needs the group at the s
 takes all of its folding, so ǰ for a captured ß is one edit and ǰ after half of that ß is refused.
 Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzySubjectCharacterEditTests`.
 
-**Not covered, and open:** the group side. A group character that expands is still edited one
-folded character at a time, as a pattern `ß` was before entry 49: `fullmatch(r'(?fi)(ß)x(?:\1){s<=1}',
-'ßxa')` is None in both engines, while `(?fi)(ß)x(?:ß){s<=1}` gives (0, 3) with one substitution
-(measured 2026-09-29).
+**The group side (known defect D24, fixed 2026-09-29).** The backreference folds its group as it
+goes, and the same function edits that folding one folded character at a time too, so a captured
+character that expands cost two edits to replace or delete, as a pattern `ß` did before entry 49.
+The literal the group stands for, split out so that upstream reads its `ß` as one character, is the
+control:
+
+```
+fullmatch(r'(?fi)(ß)x(?:ß){s<=1}', 'ßxa')     -> (0, 3), one substitution     (the control)
+fullmatch(r'(?fi)(ß)x(?:ß){d<=1}', 'ßx')      -> (0, 2), one deletion         (the control)
+fullmatch(r'(?fi)(ß)x(?:\1){s<=1}', 'ßxa')    -> None                         expected (0, 3), one substitution
+fullmatch(r'(?fi)(ß)x(?:\1){s<=1}', 'ßxs')    -> None                         expected (0, 3), one substitution
+fullmatch(r'(?fi)(ß)x(?:\1){d<=1}', 'ßx')     -> None                         expected (0, 2), one deletion
+fullmatch(r'(?fi)(ﬁx)-(?:\1){s<=1}', 'ﬁx-ax') -> None                         expected (0, 5), one substitution
+fullmatch(r'(?rfi)(?:\1){s<=1}-(ßx)', 'ax-ßx') -> None                        expected (0, 5), one substitution
+```
+
+At the start of a group character whose folding is longer than one character, the frame now also
+tries the whole substitution, which replaces that group character with one whole subject character,
+and a whole deletion of it (`Matcher.FoldWholeDel`); the backtrack point is also left after an exact
+comparison at the start of such a group character, for 'ßxs'. Same switch, same oracle entry. A
+whole edit takes a whole character on each side it touches, so the group's ß is not substituted for
+the second half of a subject ﬀ, and the fi left over part way through a group ﬃ is not one deletion.
+Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.

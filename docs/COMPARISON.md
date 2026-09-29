@@ -1529,6 +1529,16 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxas").L
 Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxǰs").Length); // 5 - upstream: no match
 ```
 
+So does a captured character that expands. Upstream edits the literal `ß` as one character, but
+the same `ß` captured by the group costs two edits:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:ß){s<=1}").FullMatch("ßxa").Length);  // 3 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:\1){s<=1}").FullMatch("ßxa").Length); // 3 - upstream: no match
+```
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

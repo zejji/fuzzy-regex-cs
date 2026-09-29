@@ -10,3 +10,7 @@
 {"pattern":"(?fi)(fst)x(?:\\1){s<=1}","flags":0,"subject":"fstxfßt","operation":"fullmatch"}
 {"pattern":"(?rfi)(?:\\1){s<=1}x(ss)","flags":0,"subject":"ǰsxss","operation":"fullmatch"}
 {"pattern":"(?fi)(ß)x(?:\\1){s<=1}","flags":0,"subject":"ßxǰ","operation":"fullmatch"}
+{"pattern":"(?fi)(ß)x(?:\\1){s<=1}","flags":0,"subject":"ßxa","operation":"fullmatch"}
+{"pattern":"(?fi)(ß)x(?:\\1){s<=1}","flags":0,"subject":"ßxs","operation":"fullmatch"}
+{"pattern":"(?fi)(ß)x(?:\\1){d<=1}","flags":0,"subject":"ßx","operation":"fullmatch"}
+{"pattern":"(?rfi)(?:\\1){s<=1}-(ßx)","flags":0,"subject":"ax-ßx","operation":"fullmatch"}

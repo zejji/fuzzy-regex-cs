@@ -3123,7 +3123,9 @@ internal static class ExpectedDivergences
     /// answers as it did before; with the whole-character edits left on, S85's ablation stopped
     /// reproducing upstream's answer, so the entry's third arm claims it. Rows 9 to 11 are known
     /// defect D22's backreference rows, recorded the same way on 2026-09-29: a substitution, one
-    /// after the first folded s of a ß matched, and a reversed one.
+    /// after the first folded s of a ß matched, and a reversed one. Rows 12 to 15 are known defect
+    /// D24's, the group side, recorded the same way that day: a captured ß substituted, substituted
+    /// after its first folded s matched, deleted, and substituted in reverse.
     /// </summary>
     private const string _subjectFoldRows = """
         {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -3137,6 +3139,10 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?fi)(ss)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "ssx\u01f0s", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(fst)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "fstxf\u00dft", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){s<=1}x(ss)", "flags": 0, "namedLists": {}, "subject": "\u01f0sxss", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfxa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfxs", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){s<=1}-(\u00dfx)", "flags": 0, "namedLists": {}, "subject": "ax-\u00dfx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
     /// <summary>
@@ -7154,6 +7160,12 @@ internal static class ExpectedDivergences
                 + "`(?fi)(ss)x(?:\\1){s<=1}` fullmatched over 'ssxǰs' finds nothing, while 'ssxas' is "
                 + "(0, 5) with one substitution. The same two kinds, behind the same switch, apply there, "
                 + "and a whole substitution replaces a whole group character.\n"
+                + "THE GROUP SIDE (known defect D24, 2026-09-29): the same function edits the group's "
+                + "folding one folded character at a time, so `(?fi)(ß)x(?:\\1){s<=1}` fullmatched over "
+                + "'ßxa' finds nothing, while the literal `(?fi)(ß)x(?:ß){s<=1}` gives (0, 3) with one "
+                + "substitution. At the start of an expanding group character the frame also tries the "
+                + "whole substitution and a whole deletion (`Matcher.FoldWholeDel`), behind the same "
+                + "switch; pinned by `Gaps.Engine.FullFoldFuzzyCharacterEditTests`.\n"
                 + "NO OTHER ENGINE IS FUZZY; the expected values rest on the argument above.\n"
                 + "KEYED ON AN ABLATION: a row belongs here only when "
                 + "`OracleComparer.RunWithTheUpstreamSubjectFoldEdits`, which sets "

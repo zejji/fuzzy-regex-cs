@@ -30,3 +30,4 @@
 {"entry": "ledger 49", "row": {"generator": "rows", "pattern": "(?fi)(?:\u00dfx){s<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}}
 {"entry": "ledger 52", "row": {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}}
 {"entry": "ledger 52", "row": {"generator": "rows", "pattern": "(?fi)(ss)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "ssx\u01f0s", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}}
+{"entry": "ledger 52", "row": {"generator": "rows", "pattern": "(?fi)(\u00df)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u00dfxa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}}
