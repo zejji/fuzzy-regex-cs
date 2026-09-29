@@ -76,7 +76,16 @@ for costs one:
 The group-side fix mirrors the subject-side one: at the start of a group character whose folding
 is longer than one character, also offer the whole substitution (one whole group character for one
 whole subject character) and a deletion of the whole group character, and offer them too when the
-first folded character matched, so that `(?fi)(ß)x(?:\1){s<=1}` matches 'ßxs'.
+first folded character matched, so that `(?fi)(ß)x(?:\1){s<=1}` matches 'ßxs'. Try them before
+the folded edits, as the lone literal does (it compiles to the character first and its folding
+second), or a looser budget still charges the captured 'ß' twice:
+
+```python
+>>> regex.fullmatch(r'(?fi)(ß)-(?:ß){e<=2}', 'ß-a')
+<regex.Match object; span=(0, 3), match='ß-a', fuzzy_counts=(1, 0, 0)>
+>>> regex.fullmatch(r'(?fi)(ß)-(?:\1){e<=2}', 'ß-a')
+<regex.Match object; span=(0, 3), match='ß-a', fuzzy_counts=(1, 0, 1)>
+```
 
 None of PCRE2, Python `re`, .NET, JavaScript or Perl has fuzzy matching, so there is no second
 answer to compare with.

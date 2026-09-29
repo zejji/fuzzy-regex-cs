@@ -4997,4 +4997,21 @@ whole edit takes a whole character on each side it touches, so the group's ß is
 the second half of a subject ﬀ, and the fi left over part way through a group ﬃ is not one deletion.
 Three of entry 30's oracle examples (seed 7 row 6250, seed 20260922 row 6591 and S83's best-match
 deletion) have a captured ß or ﬆ, and are now held by this entry's oracle entry: with the edits on,
-switching the retry repair off alone no longer gives upstream's answer. Pinned by the backreference tests in `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.
+switching the retry repair off alone no longer gives upstream's answer.
+
+Where the budget allows both readings, the order matters too. A backreference matches as the literal
+text it captured, and upstream's lone literal ß tries the character before its folding
+(`Character._compile`, `upstream/regex/_regex_core.py:2629-2632`), so its first answer edits the ß
+whole. Upstream's backreference finds the folded edits first:
+
+```
+fullmatch(r'(?fi)(ß)-(?:ß){e<=2}', 'ß-')      -> (0, 2), one deletion         (the control)
+fullmatch(r'(?fi)(ß)-(?:ß){e<=2}', 'ß-a')     -> (0, 3), one substitution     (the control)
+fullmatch(r'(?fi)(ß)-(?:\1){e<=2}', 'ß-')     -> (0, 2), two deletions        expected one deletion
+fullmatch(r'(?fi)(ß)-(?:\1){e<=2}', 'ß-a')    -> (0, 3), a substitution and a deletion   expected one substitution
+```
+
+So at the start of an expanding group character the frame tries the literal's order: the whole
+substitution, the insertion, the whole deletion, then upstream's folded substitution and deletion
+(`Matcher.GroupCharFirst`). Pinned by the backreference tests in
+`Gaps/Engine/FullFoldFuzzyCharacterEditTests`.

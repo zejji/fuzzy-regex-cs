@@ -149,7 +149,10 @@ public sealed class FullFoldFuzzyCharacterEditTests
     // cannot be substituted for the second f; part way through the group's ﬃ, the fi left over is
     // not one character to delete, with or without an expanding subject ß next; at the end of the
     // subject no character is left to substitute for the ß; and part way through the subject's ﬃ,
-    // the fi left over is not one character to insert.
+    // the fi left over is not one character to insert. The last four rows are the same limit
+    // after an earlier edit: substituting a for the first folded s of the subject's ß (or the f of
+    // its ﬀ) leaves half of that character, which a whole substitution cannot take for the group's
+    // next character.
     [Test]
     [Arguments(@"(?fi)(ss)x(?:\1){s<=1}", "ssxa")]
     [Arguments(@"(?fi)(ß)x(?:\1){s<=1:[a-z]}", "ßxé")]
@@ -159,9 +162,56 @@ public sealed class FullFoldFuzzyCharacterEditTests
     [Arguments(@"(?fi)(ﬃ)x(?:\1){d<=1}ß", "ﬃxfß")]
     [Arguments(@"(?fi)(ß)x(?:\1){s<=1}", "ßx")]
     [Arguments(@"(?fi)(fß)-(?:\1){i<=1}", "fß-ﬃß")]
+    [Arguments(@"(?fi)(aß)-(?:\1){s<=2}", "aß-ß")]
+    [Arguments(@"(?rfi)(?:\1){s<=2}-(ßa)", "ß-ßa")]
+    [Arguments(@"(?fi)(sﬀ)-(?:\1){s<=2}", "sﬀ-ﬀ")]
+    [Arguments(@"(?rfi)(?:\1){s<=2}-(ﬀs)", "ﬀ-ﬀS")]
     public void A_fuzzy_backreference_edits_a_group_character_whole_only_within_its_limits(string pattern, string text)
     {
         new FuzzyRegex(pattern).FullMatch(text).Success.Should().BeFalse();
+    }
+
+    // A backreference matches as the literal text it captured, so under a budget loose enough for
+    // either reading, a captured ß is edited as one character first, as the literal ß is: upstream's
+    // (?fi)(ß)-(?:ß){e<=2} gives one deletion over 'ß-' and one substitution over 'ß-a'. Upstream's
+    // backreference gives two deletions, and a substitution and a deletion, for the same spans.
+    [Test]
+    [Arguments(@"(?fi)(ß)-(?:\1){e<=2}", "ß-", 0, 2, 0, 0, 1)]
+    [Arguments(@"(?fi)(ß)-(?:\1){e<=2}", "ß-a", 0, 3, 1, 0, 0)]
+    [Arguments(@"(?rfi)(?:\1){e<=2}-(ß)", "-ß", 0, 2, 0, 0, 1)]
+    [Arguments(@"(?rfi)(?:\1){e<=2}-(ß)", "a-ß", 0, 3, 1, 0, 0)]
+    [Arguments(@"(?fi)(ßx)-(?:\1){e<=2}", "ßx-ax", 0, 5, 1, 0, 0)]
+    public void A_captured_expanding_character_is_edited_whole_first(
+        string pattern,
+        string text,
+        int index,
+        int length,
+        int substitutions,
+        int insertions,
+        int deletions
+    ) => ShouldMatch(pattern, text, index, length, new FuzzyCounts(substitutions, insertions, deletions));
+
+    // Backtracking into that frame still reaches the other kinds, in the literal's order: the
+    // insertion of the x once the whole substitution x-for-ß fails at the end, and upstream's
+    // folded substitution a-for-s once the insertion and the whole deletion fail. Upstream's
+    // literal (?fi)(ß)-(?:ß){e<=1} gives (0, 4) with one insertion and with one substitution; its
+    // backreference gives None for the first row (ledger entry 30) and the same for the others.
+    [Test]
+    [Arguments(@"(?fi)(ß)-(?:\1){e<=1}", "ß-xß", 0, 1, 0)]
+    [Arguments(@"(?fi)(ß)-(?:\1){e<=1}", "ß-as", 1, 0, 0)]
+    [Arguments(@"(?rfi)(?:\1){e<=1}-(ß)", "sa-ß", 1, 0, 0)]
+    public void A_captured_expanding_character_still_backtracks_into_the_other_edits(
+        string pattern,
+        string text,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).FullMatch(text);
+
+        m.Success.Should().BeTrue();
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, deletions));
     }
 
     private static void ShouldMatch(string pattern, string text, int index, int length, FuzzyCounts counts)

@@ -5118,16 +5118,60 @@ internal static class Matcher
     /// </summary>
     internal const int FoldExactTakenInsOnly = GroupFoldEditKinds + 1;
 
-    /// <summary>The error type a <c>STRING_FLD</c> error kind is counted and recorded as.</summary>
-    /// <param name="kind">An error kind, below <see cref="GroupFoldEditKinds"/>.</param>
+    /// <summary>
+    /// NOT UPSTREAM (D24): the first of the codes a <c>REF_GROUP_FLD</c> frame uses at the start of
+    /// an expanding group character, where it tries the kinds in the order
+    /// <see cref="GroupCharFirstOrder"/> gives rather than upstream's.
+    /// </summary>
+    /// <remarks>
+    /// A backreference matches as the literal text it captured, and upstream compiles a lone
+    /// literal ß as the character first and its folding second (<c>Character._compile</c>,
+    /// <c>upstream/regex/_regex_core.py:2629-2632</c>), so its fuzzy edits take the whole ß before
+    /// any folded s: <c>(?fi)(ß)-(?:ß){e&lt;=2}</c> gives one deletion over 'ß-' and one
+    /// substitution over 'ß-a'. With upstream's order the backreference found two edits first for
+    /// the same spans. The codes run in sequence, so a retry moves on with <c>++</c> as for any
+    /// other frame; each stands for the kind <see cref="GroupCharFirstOrder"/> maps it to.
+    /// </remarks>
+    internal const int GroupCharFirst = FoldExactTakenInsOnly + 1;
+
+    /// <summary>One past the last <see cref="GroupCharFirst"/> code.</summary>
+    internal const int GroupCharFirstEnd = GroupCharFirst + 6;
+
+    /// <summary>
+    /// The kind a <see cref="GroupCharFirst"/> code stands for: the literal ß's own order (the whole
+    /// substitution, the insertion and the whole deletion), then upstream's folded substitution and
+    /// deletion, then D22's whole insertion of an expanding subject character. Any other kind is
+    /// itself.
+    /// </summary>
+    /// <param name="code">A <c>REF_GROUP_FLD</c> error kind or code.</param>
+    /// <returns>The error kind.</returns>
+    private static int GroupCharFirstOrder(int code) =>
+        (code - GroupCharFirst) switch
+        {
+            0 => FoldWholeSub,
+            1 => FuzzyValue.Ins,
+            2 => FoldWholeDel,
+            3 => FuzzyValue.Sub,
+            4 => FuzzyValue.Del,
+            5 => FoldWholeIns,
+            _ => code,
+        };
+
+    /// <summary>
+    /// The error type a <c>STRING_FLD</c> or <c>REF_GROUP_FLD</c> error kind is counted and
+    /// recorded as.
+    /// </summary>
+    /// <param name="code">
+    /// An error kind, below <see cref="GroupFoldEditKinds"/>, or a <see cref="GroupCharFirst"/> code.
+    /// </param>
     /// <returns>A <see cref="FuzzyValue"/> error type.</returns>
-    private static int FoldCountedAs(int kind) =>
-        kind switch
+    private static int FoldCountedAs(int code) =>
+        GroupCharFirstOrder(code) switch
         {
             FoldWholeSub => FuzzyValue.Sub,
             FoldWholeIns => FuzzyValue.Ins,
             FoldWholeDel => FuzzyValue.Del,
-            _ => kind,
+            int kind => kind,
         };
 
     /// <summary>
@@ -6017,7 +6061,7 @@ internal static class Matcher
 
         int newPos;
 
-        switch (data.FuzzyType)
+        switch (GroupCharFirstOrder(data.FuzzyType))
         {
             case FuzzyValue.Del:
                 // Could a character at text_pos have been deleted?
@@ -6180,10 +6224,12 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        // D22: D7's two kinds, on the same terms as in FuzzyMatchStringFld; D24: and the group's.
-        int kinds = GroupFoldKinds(state, in data);
+        // D22: D7's two kinds, on the same terms as in FuzzyMatchStringFld; D24: and the group's,
+        // whole edits first at an expanding group character.
+        bool groupCharFirst = AtStartOfAnExpandingGroupCharacter(state, in data);
+        int kinds = groupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
 
-        for (data.FuzzyType = 0; data.FuzzyType < kinds; data.FuzzyType++)
+        for (data.FuzzyType = groupCharFirst ? GroupCharFirst : 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchGroupFld(state, ref data);
 
@@ -6316,7 +6362,7 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        int kinds = GroupFoldKinds(state, in data);
+        int kinds = poppedType >= GroupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
 
         for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
@@ -6361,7 +6407,7 @@ internal static class Matcher
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
-        state.RetriedAWholeFoldEdit = data.FuzzyType >= FoldWholeSub;
+        state.RetriedAWholeFoldEdit = GroupCharFirstOrder(data.FuzzyType) >= FoldWholeSub;
         node = newNode!;
         groupPos = newGroupPos;
         foldedPos = data.NewFoldedPos;
@@ -9774,7 +9820,7 @@ internal static class Matcher
                                     state,
                                     node,
                                     -1,
-                                    foldedLen,
+                                    foldedPos,
                                     foldedLen,
                                     stringPos,
                                     gfoldedPos,
@@ -9984,7 +10030,7 @@ internal static class Matcher
                                     state,
                                     node,
                                     1,
-                                    0,
+                                    foldedPos,
                                     foldedLen,
                                     stringPos,
                                     gfoldedPos,
