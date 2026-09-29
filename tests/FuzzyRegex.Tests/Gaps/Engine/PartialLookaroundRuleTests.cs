@@ -207,6 +207,25 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// A nested lookaround's dedup records go when its body is exhausted, whatever order they were
+    /// made in. The outer lookahead's blocked end records its success after the inner one's, which
+    /// sits at a higher frame; dropping only from the list's end stopped at the outer record and
+    /// left the inner one, which then dropped the inner lookahead's later success as a repeat, the
+    /// one 'a' + '\nx' needs (review of chunk 7, round 2).
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments("match", 0)]
+    [Arguments("fullmatch", 0)]
+    [Arguments("search", 0)]
+    public void A_nested_lookaround_s_dedup_records_go_in_any_order(string operation, int start)
+    {
+        Match m = Run(operation, @"(?=(?:(?=a$)(?<p>)|(?=a(?m:$))|z))(?(p)(*FAIL)|a\nx)", "a");
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, 1 - start));
+    }
+
+    /// <summary>
     /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
     /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
     /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over

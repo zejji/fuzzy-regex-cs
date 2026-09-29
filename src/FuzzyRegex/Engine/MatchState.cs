@@ -1485,16 +1485,32 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
+    /// <remarks>
+    /// The list is not sorted by frame: a blocked outer lookaround records its success after a
+    /// nested one's, whose frame is higher, so every entry is tested rather than only a run at the
+    /// end (review of chunk 7, round 2). The list is short: entries are made only by a blocked
+    /// positive end in a partial call's second pass (<c>Matcher.EndALookaroundInTheSecondPass</c>),
+    /// each for a frame still on the backtracking stack, and the attempt's FAILURE arm and
+    /// <see cref="InitMatch"/> clear it. Every caller asks <c>LookaroundSuccesses.Count != 0</c>
+    /// first, so a call without partial pays that test alone.
+    /// </remarks>
     /// <param name="position">The lowest frame position dropped.</param>
     internal void DropLookaroundSuccessesFrom(int position)
     {
-        int keep = LookaroundSuccesses.Count;
-        while (keep > 0 && LookaroundSuccesses[keep - 1].Frame >= position)
+        int keep = 0;
+        for (int i = 0; i < LookaroundSuccesses.Count; i++)
         {
-            keep--;
+            if (LookaroundSuccesses[i].Frame < position)
+            {
+                LookaroundSuccesses[keep++] = LookaroundSuccesses[i];
+            }
         }
 
         LookaroundSuccesses.RemoveRange(keep, LookaroundSuccesses.Count - keep);
+        Debug.Assert(
+            !LookaroundSuccesses.Exists(s => s.Frame >= position),
+            "D11 A12: no dedup entry outlives its frame"
+        );
     }
 
     /// <summary>A7's test: whether every live w-mark lies below <paramref name="count"/>.</summary>
