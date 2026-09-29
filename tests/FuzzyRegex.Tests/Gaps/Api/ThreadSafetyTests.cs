@@ -293,6 +293,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<StatesInitialised>k__BackingField",
                 "WorkCounter.<StepLimit>k__BackingField",
                 "WorkCounter.<Steps>k__BackingField"

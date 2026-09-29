@@ -3094,10 +3094,22 @@ internal static class Matcher
     /// <param name="repeatData">The repeat to save.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
-    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs)
+    /// <param name="keepGuards">
+    /// NOT UPSTREAM (D35): whether the guard lists are left out, so the matching pop leaves them as
+    /// they are then; see <see cref="PushRepeats"/>. Push and pop must be given the same value.
+    /// </param>
+    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs, bool keepGuards)
     {
-        repeatData.BodyGuardList.PushTo(stack);
-        repeatData.TailGuardList.PushTo(stack);
+        if (keepGuards)
+        {
+            PushGuardEditCounts(stack, repeatData);
+        }
+        else
+        {
+            repeatData.BodyGuardList.PushTo(stack);
+            repeatData.TailGuardList.PushTo(stack);
+        }
+
         stack.PushSize(repeatData.Count);
         stack.PushSize(repeatData.Start);
         stack.PushSize(repeatData.CaptureChange);
@@ -3117,8 +3129,20 @@ internal static class Matcher
     /// <param name="repeatData">The repeat to restore.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
+    /// <param name="keepGuards">What the matching push was given.</param>
+    /// <param name="testJustEnded">
+    /// Whether a conditional's test has only just ended, so that nothing but the test has run since
+    /// the push.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs)
+    private static bool PopRepeatData(
+        ByteStack stack,
+        RepeatData repeatData,
+        bool fuzzy,
+        bool runs,
+        bool keepGuards,
+        bool testJustEnded
+    )
     {
         long runId = 0;
         if (runs && !stack.PopSize(out runId))
@@ -3136,11 +3160,15 @@ internal static class Matcher
             !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long start)
             || !stack.PopSize(out long count)
-            || !repeatData.TailGuardList.PopFrom(stack)
-            || !repeatData.BodyGuardList.PopFrom(stack)
+            || (!keepGuards && (!repeatData.TailGuardList.PopFrom(stack) || !repeatData.BodyGuardList.PopFrom(stack)))
         )
         {
             return false;
+        }
+
+        if (keepGuards)
+        {
+            CheckKeptGuards(stack, repeatData, testJustEnded);
         }
 
         repeatData.CaptureChange = captureChange;
@@ -3154,19 +3182,66 @@ internal static class Matcher
 
     /// <summary>Upstream <c>push_repeats</c> (line 2570): every repeat's state, in index order.</summary>
     /// <remarks>
+    /// <para>
     /// Unlike the captures, this saves the guard lists in full. A conditional's test can run a repeat
     /// and guard positions inside it, and those guards have to go when the test is undone - otherwise
     /// the yes-branch inherits "already failed here" from a subpattern that was only being asked
     /// about.
+    /// </para>
+    /// <para>
+    /// NOT UPSTREAM (D35): a repeat whose guards are a failure memo on this call
+    /// (<see cref="MatchState.KeepsFailureMemo"/>) keeps its lists instead. Upstream saves them all
+    /// (<c>push_repeat_data</c>, <c>_regex.c:2552</c>), and the conditional's backtrack arms put
+    /// them back (<c>:15423</c>, <c>:15475</c>, and the negative test's success at <c>:12431</c>).
+    /// Putting them back also throws away what the repeat learned after the test had ended. At each
+    /// position of <c>(?:(?(?=a)a|a)|a)*b</c> the path through the conditional explores the rest of
+    /// the run and records where the body failed; backtracking out of the conditional deletes those
+    /// records, and the plain <c>a</c> beside it explores the same rest again, which is 2^n.
+    /// </para>
+    /// <para>
+    /// Keeping them is sound. A guard records that the body entered at p, or the tail tried from p,
+    /// reached no success (upstream <c>guard_repeat</c>, <c>:9446</c>, read by
+    /// <c>is_repeat_guarded</c>, <c>:9559</c>; the lists are reset only per attempt,
+    /// <c>reset_guards</c>, <c>:3383</c>). For a memo repeat that record holds for every path that
+    /// reaches p in the same attempt, the premise the memo already relies on across every other kind
+    /// of backtracking (<see cref="RepeatInfo.FailureMemo"/>): nothing after the repeat reads more
+    /// than the position, because the pattern has no backreference, group-exists conditional, group
+    /// call, <c>(*PRUNE)</c>, <c>(*SKIP)</c>, fuzzy or POSIX matching, or <c>\K</c> in a submatch.
+    /// So the captures a test or an arm sets, which the restore still puts back, are never read by
+    /// what follows; there are no fuzzy counts; and no verb cuts below the repeat. A memo list never
+    /// holds a success mark, the one entry that is a heuristic rather than a fact:
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> skip it, and tail guards are only ever
+    /// failures.
+    /// </para>
+    /// <para>
+    /// What the save protects is the guards recorded inside the test, and a memo repeat has none
+    /// there: it is not inside a test (<c>NodeCompiler.BuildRepeat</c>), and with no group call none
+    /// of its nodes can run inside one. So a pop straight after the test finds its lists as they
+    /// were, and a pop when the yes-arm is undone finds only records made after the test, each true
+    /// whatever runs next. A <c>BRANCH</c> already treats the guards that way; for a memo repeat a
+    /// conditional is now a branch between its arms. The rest of the saved state (count, start,
+    /// capture change, run) is still put back, and every other repeat keeps upstream's save,
+    /// including every repeat in the partial pass of a partial call, where the memo is off. <see cref="CheckKeptGuards"/> asserts both facts.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to push onto.</param>
     private static void PushRepeats(MatchState state, ByteStack stack)
     {
         bool runs = state.Pattern.TestedGroups.Length > 0;
-        foreach (RepeatData repeat in state.Repeats)
+        for (int r = 0; r < state.Repeats.Length; r++)
         {
-            PushRepeatData(stack, repeat, state.IsFuzzy, runs);
+            bool keepGuards = state.KeepsFailureMemo(r);
+
+            // The proof's premises (see the remarks): a memo pattern has no group call, the only
+            // other caller, and is not fuzzy. PartialSide, the call's half of KeepsFailureMemo,
+            // changes only between the two passes of a partial call (DoMatch), and each pass starts
+            // from empty stacks (MatchState.InitMatch), so the pop sees the value the push did.
+            Debug.Assert(
+                !keepGuards || (!state.Pattern.HasGroupCalls && !state.IsFuzzy),
+                "a failure-memo repeat is never saved by a group call or in a fuzzy pattern"
+            );
+            PushRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, keepGuards);
         }
 
         // NOT UPSTREAM (ledger entry 44's addendum): the optional passes' slots, which a call
@@ -3174,11 +3249,73 @@ internal static class Matcher
         stack.PushBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan()));
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D35), Debug only: in place of a kept repeat's guard lists, how many edits each
+    /// had seen, for <see cref="CheckKeptGuards"/>.
+    /// </summary>
+    /// <param name="stack">The stack to push onto.</param>
+    /// <param name="repeatData">The repeat whose lists are kept.</param>
+    [Conditional("DEBUG")]
+    private static void PushGuardEditCounts(ByteStack stack, RepeatData repeatData)
+    {
+        stack.PushSize(repeatData.BodyGuardList.Edits);
+        stack.PushSize(repeatData.TailGuardList.Edits);
+        stack.PushSize(KeptGuardsMarker);
+    }
+
+    /// <summary>
+    /// What <see cref="PushGuardEditCounts"/> pushes last, so a pop that expects kept lists where
+    /// the push saved them in full is caught.
+    /// </summary>
+    internal const long KeptGuardsMarker = 0x35_6B_65_70_74;
+
+    /// <summary>
+    /// NOT UPSTREAM (D35), Debug only: pops what <see cref="PushGuardEditCounts"/> pushed and asserts
+    /// the two facts <see cref="PushRepeats"/> rests on.
+    /// </summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <param name="repeatData">The repeat whose lists were kept.</param>
+    /// <param name="testJustEnded">Whether only a conditional's test has run since the push.</param>
+    [Conditional("DEBUG")]
+    private static void CheckKeptGuards(ByteStack stack, RepeatData repeatData, bool testJustEnded)
+    {
+        bool markerPopped = stack.PopSize(out long marker);
+        bool tailPopped = stack.PopSize(out long tailEdits);
+        bool bodyPopped = stack.PopSize(out long bodyEdits);
+        Debug.Assert(
+            markerPopped && tailPopped && bodyPopped && marker == KeptGuardsMarker,
+            "the push kept this repeat's guard lists too"
+        );
+        Debug.Assert(
+            !testJustEnded
+                || (bodyEdits == repeatData.BodyGuardList.Edits && tailEdits == repeatData.TailGuardList.Edits),
+            "a conditional's test never guards a failure-memo repeat, which is not inside it"
+        );
+        if (bodyEdits != repeatData.BodyGuardList.Edits)
+        {
+            WorkCounter.GuardListKept();
+        }
+
+        if (tailEdits != repeatData.TailGuardList.Edits)
+        {
+            WorkCounter.GuardListKept();
+        }
+
+        Debug.Assert(
+            repeatData.BodyGuardList.HoldsFailuresOnly() && repeatData.TailGuardList.HoldsFailuresOnly(),
+            "a kept list records failures only: a failure-memo repeat leaves no success mark"
+        );
+    }
+
     /// <summary>Upstream <c>pop_repeats</c> (line 2744).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to pop from.</param>
+    /// <param name="testJustEnded">
+    /// Whether this is a conditional's test that has only just ended, when a kept guard list must be
+    /// exactly as the push left it; see <see cref="PushRepeats"/>.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeats(MatchState state, ByteStack stack)
+    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded)
     {
         bool runs = state.Pattern.TestedGroups.Length > 0;
         if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
@@ -3188,7 +3325,7 @@ internal static class Matcher
 
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs))
+            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, state.KeepsFailureMemo(r), testJustEnded))
             {
                 return false;
             }
@@ -9848,7 +9985,7 @@ internal static class Matcher
 
                         if (
                             !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                            || !PopRepeats(state, state.Bstack)
+                            || !PopRepeats(state, state.Bstack, testJustEnded: true)
                             || !PopCaptures(state, state.Bstack)
                         )
                         {
@@ -11251,7 +11388,7 @@ internal static class Matcher
                         // are untouched, which is how a called group's capture survives the return.
                         if (
                             !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                            || !PopRepeats(state, state.Sstack)
+                            || !PopRepeats(state, state.Sstack, testJustEnded: false)
                             || !PopGroups(state, state.Sstack)
                         )
                         {
@@ -13435,7 +13572,7 @@ internal static class Matcher
 
                     if (
                         !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                        || !PopRepeats(state, state.Bstack)
+                        || !PopRepeats(state, state.Bstack, testJustEnded: true)
                         || !PopCaptures(state, state.Bstack)
                     )
                     {
@@ -13462,7 +13599,7 @@ internal static class Matcher
 
                     if (
                         !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                        || !PopRepeats(state, state.Bstack)
+                        || !PopRepeats(state, state.Bstack, testJustEnded: false)
                         || !PopCaptures(state, state.Bstack)
                     )
                     {
@@ -13675,7 +13812,7 @@ internal static class Matcher
                     if (
                         !state.Sstack.DropSize()
                         || !state.Sstack.PopSize(out long groupCallCaptureChange)
-                        || !PopRepeats(state, state.Sstack)
+                        || !PopRepeats(state, state.Sstack, testJustEnded: false)
                         || !PopGroups(state, state.Sstack)
                     )
                     {
@@ -13756,7 +13893,7 @@ internal static class Matcher
                         // For the callee.
                         if (
                             !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                            || !PopRepeats(state, state.Bstack)
+                            || !PopRepeats(state, state.Bstack, testJustEnded: false)
                             || !PopGroups(state, state.Bstack)
                         )
                         {
