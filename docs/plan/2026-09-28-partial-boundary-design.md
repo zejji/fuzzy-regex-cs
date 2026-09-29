@@ -1056,3 +1056,162 @@ upgrade path. Found on the way, and not caused by this: `(x)?(?(?=.*z)a|a)b(?(1)
 `(x)?(?(?=.*z)a|a)b\1` over 'ac', match, answer P(0, 2) in the port and in upstream, where the judge
 says None; without the backreference or group condition they answer None. It needs triage, likely
 with chunk 8's unknown captures.
+
+### Amendment 2 (2026-09-29): what a blocked end leaves on the saved stack
+
+Chunks 6 and 7 let a positive lookaround, or a condition's positive test, go on after a blocked end
+with the body's entries kept (`EndALookaroundInTheSecondPass`, `Matcher.cs:4326-4339`). That path
+leaves the saved stack (`Sstack`) as the body left it, and the constructs after the lookaround read
+the wrong entries. Two repair rounds went to the symptom in called groups; this amendment derives
+the rule from the normal ends instead. Measured on a copy of 9ee671b6 with the fix prototyped behind
+environment switches (`.scratch/d11-call/`, Release and Debug), 2026-09-29.
+
+**What a normal end leaves.** `LOOKAROUND` and `CONDITIONAL` push their parked state (node, slice
+start, slice end, text position: four sizes, 32 bytes) onto `Sstack` and record the new count in
+their frame (`Matcher.cs:10382-10393`). Call the count before that push S0. A normal positive end
+(`:11228-11292`, `:10441-10502`) cuts the backtracking stack to the frame, sets `Sstack.Count` back
+to the frame's count, closes the calls and fuzzy sections above it (`CloseFramesAbove`, `:3989`),
+and pops the parked state. So the continuation always starts with `Sstack` at S0, holding exactly
+what it held before the construct began, with no call or section opened in the body still open.
+Everything the continuation pops from `Sstack` (a capture group's parked start, a called group's
+return frame at `GROUP_RETURN`, `:11966`, an enclosing section's frame at `END_FUZZY`, `:10698`)
+was pushed below S0.
+
+**What a blocked end leaves today.** The same backtracking stack plus a `REOPEN` entry, which is
+right: the body's other paths must stay. But `Sstack` is left at S0 + 32 or more: the parked state
+is still on top, and after a run-out in the body (`RunOutInALookaroundBody`) so are the entries of
+whatever the body had open. The continuation's first pop below S0 reads the parked state instead.
+A short story, `(?(DEFINE)(?<c>(?=a$)))(?&c)a\n` over 'a': the call pushes its return frame, group
+c parks its start, the lookahead parks its state; `$` reads the edge, so the end is blocked and
+matching goes on. `END_GROUP` for c pops the lookahead's text position as c's start; `GROUP_RETURN`
+pops the parked slice end as its return node, and `PopOpenCall` then indexes an empty list. So the
+crash is a symptom, and calls are only where it is loudest. Without a call the same misread is
+silent:
+
+- `(x(?=a$))a\n` over 'xa', match: P(0, 2) with group 1 at (1, 1); the completion 'xa\n' gives (0, 1).
+- `(a(?=b(cd)))` over 'ab' (a run-out in the body): group 1 at (2, 1), an end before its start.
+- `(?:a(?=b\b)b){1<=e<=1}\n` over 'ab': match gives P(0, 1), a partial that stops short of the
+  text's end; search gives P(2, 2) where the judge answers P(1, 2), so a start is denied (a miss).
+
+**The rule.** A blocked positive end must leave the continuation exactly what a normal end leaves
+(S0, and the calls and section link of that depth), and `REOPEN` must hand the body back exactly
+what it had. The backtracking stack is where the engine keeps what it must undo, so the bytes move
+there:
+
+1. At the blocked end (`EndALookaroundInTheSecondPass`, after the dedup record is added): read the
+   frame's saved count (`ReadSizeBelow(mark - 1)`, as `ReadPruningMark` does, `:4532`); S0 is that
+   count less 32. Move the `Sstack` bytes from S0 to the top onto the backtracking stack, then push
+   their length and `SectionFrame`, then the existing mark and `REOPEN`
+   (`bstack: sstack_bytes length section_frame pstack_mark REOPEN`). Then call `CloseFramesAbove`,
+   as a normal end does. Add a `ByteStack` method that moves the top n bytes of one stack onto
+   another (beside `PushBlock`, `ByteStack.cs:126`), so the move allocates nothing.
+2. In the `REOPEN` arm (`:15616`), for a lookaround or condition frame (the opcode below the mark,
+   which the arm already reads): pop `SectionFrame`, the length and the bytes, and push the bytes
+   back onto `Sstack`. An atomic frame's `REOPEN` is unchanged (`BlockAtomicCut`, `:4068`).
+3. Nothing else changes. The negative and dedup arms of the same method backtrack into the body, or
+   cut and fail, and never run a continuation; the frame's own backtrack arms (`:14328`, `:15394`)
+   already restore `Sstack`.
+
+**The options, measured.** Rows are partial `match` unless noted; the judge is
+`tools/probes/d11-brute-judge.py`. A miss is a None (or an exception) where the judge finds a
+completion; a phantom is a partial where it finds none, which the design allows (section 1).
+
+| option | 2,400-row call grid: exceptions / misses | call-free captures (K1-K3), F1 | cost |
+|---|---|---|---|
+| today (9ee671b6) | 204 / 84 | wrong | - |
+| A. Unwind as a normal end, park the bytes in `REOPEN` (the rule above) | 0 / 0 | right; F1 sound | a 32-byte move per blocked positive end, second pass only |
+| B. Answer `Cut` for a pattern with group calls, as `RunOutInALookaroundBody` does (`:4386`) | 0 / 0 while S57d's escalation masks them; **19 misses** once chunk 9 deletes it | still wrong: B changes nothing without a call | none |
+| A without the `REOPEN` restore (step 2) | 46 exceptions | - | - |
+
+The grid is `tools/probes/d11-blocked-end-grid.py`: five tests (lookahead, condition, their
+negatives, lookbehind) over six bodies and six tails, each inline, after a prefix, in a called
+group, in a nested call, in a numbered call and under `(?R)`. B's misses are D11's own fixes undone
+in called groups: `(?(DEFINE)(?<c>(?!a\b)))(?&c)a` over 'a' is P(0, 1) (the completion 'a:'), and B
+answers None because a blocked negative end cuts again. B would also leave a called group answering
+differently from its inlined copy for a reason no rule states. Further grids, all 0 exceptions and 0
+misses under A: 1,280 rows of atomic groups and possessive repeats (in calls, `(?1)`, `(?R)`,
+lookarounds and conditions; today 125 exceptions), and 1,482 fuzzy rows with minimum error counts
+inside and around the lookaround (the restore is needed there too: without step 2,
+`a(?=(?:bcd){1<=e<=1}|b)x` over 'ab' throws).
+
+A changes no answer that is not a crash or a misread, with two exceptions, both sound:
+
+- 8 of the 1,482 fuzzy rows change, all where the body ran out inside a fuzzy section with a
+  minimum: 7 turn from None (the judge's answer) to a phantom partial and one phantom changes its
+  span. For example `a(?=(?:bcd){1<=e<=1})(?:b|c){1<=e<=1}x` over 'aby'
+  (P(0, 3), judge None). Today's None there comes from the run-out's residue: the lookaround's
+  unfinished section stays `FuzzyNode`, and its minimum goes on constraining the continuation
+  through a section link that A correctly steps out of. Chunk 8 owns that residue (run-outs inside
+  bodies); a SHORTCUT comment at the move names it.
+- Rows where S57d's HitEnd escalation answers a phantom (C4 and X1 below) keep it until chunk 9
+  deletes the escalation, as section 11.1 plans.
+
+**Recommendation: A.** It is the only option that fixes the root cause, it fixes the call-free
+misreads that B leaves, it keeps D11's answers in called groups, and it costs nothing outside a
+blocked end. `RunOutInALookaroundBody`'s group-call exclusion stays: it is what keeps a call opened
+inside a body from being open at the end (assert 3). Lifting it needs `REOPEN` to re-open those
+calls as well; that is chunk 8's, and on this grid it would remove only 6 of the 30 run-out phantoms
+in called groups.
+
+**Asserts** (rule 10; all held on the grids above in a Debug build of the prototype, whose own
+asserts were shown to fire):
+
+1. At a blocked positive end, `Sstack.Count` is at least the frame's saved count, and the parked
+   state read there is the frame's (`look`).
+2. After the move, `Sstack.Count` equals the frame's saved count less 32: the depth a normal end
+   leaves.
+3. After `CloseFramesAbove`, no call opened inside the body is open (`OpenCalls` is empty or its top
+   depth is at most S0). It holds because a body that reaches its end has returned from its calls,
+   and a run-out, which has not, is refused for patterns with calls (`:4386`).
+4. In `REOPEN` for a lookaround or condition frame, `Sstack.Count` equals S0 before the bytes go
+   back (the continuation has been undone in full), and S0 plus the length after.
+5. At a blocked `END_ATOMIC` (`:10336-10346`), `Sstack.Count` equals the frame's saved count: an
+   atomic group parks nothing and its body is complete. 441 blocked atomic ends on the atomic grid.
+
+Rule 11 counters (`PartialEvent`, `WMark.cs:66`): blocked ends that moved bytes, `REOPEN`s that
+restored them, and moves longer than 32 bytes (a run-out with open body entries: one row in the
+3,146-row Debug set, K3, and 68 on the 450-row fuzzy grid, so the build's grid adds run-out rows).
+
+**Witnesses** (rule 12; `tools/probes/d11-blocked-end-sstack-rows.jsonl`, judged by
+`tools/probes/d11-judge-rows.py`, which also prints group 1 of the judge's completion). "Today" is
+9ee671b6 in Release. Each test is red today, or red with step 2 removed where marked; controls are
+green today and guard the paths that do not misread.
+
+| id | pattern | subject | judge | today | A |
+|---|---|---|---|---|---|
+| C1 | `(?(DEFINE)(?<c>(?(?=a$)a\|a)))(?&c)\n`, match and search | a | P(0,1), g1 (0,1) | IndexOutOfRange | P(0,1), g1 (0,1) |
+| C2 | `(?(DEFINE)(?<c>(?=a$)))(?&c)a\n`, match and search | a | P(0,1), g1 (0,0) | ArgumentOutOfRange | P(0,1), g1 (0,0) |
+| C3 | `(?(DEFINE)(?<c>(?=a$)))(?&c)b`, match | a | None | ArgumentOutOfRange | None |
+| C3s | the same, search | a | None | ArgumentOutOfRange | P(1,1): the edge attempt of section 1, rule 3, as `(?=a$)b` and upstream answer |
+| C4 | `(?(DEFINE)(?<c>(?=a\b\|a)))(?&c)(b)` | a | None | IndexOutOfRange | P(0,1) until chunk 9 (S57d); None without it |
+| C5 | `(?(DEFINE)(?<c>(?!a\b)))(?&c)a` | a | P(0,1) | P(0,1) | P(0,1); control, B's miss |
+| C6 | `(?(DEFINE)(?<c>(?!a$)))(?&c)a\n` | a | P(0,1) | P(0,1) | P(0,1); control, B's miss |
+| C7 | `(?(DEFINE)(?<c>(?(?!a$)b\|a)))(?&c)\n` | a | P(0,1), g1 (0,1) | P(0,1) | P(0,1); control |
+| C8 | `(?(DEFINE)(?<c>(?<=a\b)))a(?&c)\n` | a | P(0,1), g1 (1,1) | IndexOutOfRange | P(0,1), g1 (1,1) |
+| C9 | `(?(DEFINE)(?<c>(?>a\b\|)))(?&c)\n` | a | P(0,1), g1 (0,1) | P(0,1) | P(0,1); control (atomic, assert 5) |
+| C10 | `(?(DEFINE)(?<c>(?=(?>a$\|a))))(?&c)(a)\n`, match and search | a | P(0,1), g1 (0,0) | IndexOutOfRange | P(0,1), g1 (0,0) |
+| N1 | `(?(DEFINE)(?<c>(?=a$))(?<d>(?&c)))(?&d)a\n` | a | P(0,1), g1 (0,0) | IndexOutOfRange | P(0,1), g1 (0,0) |
+| N2 | `(?(DEFINE)(?<c>a)(?<d>(?(?=(?&c)\b)(?&c)\|b)))(?&d)\n` | a | P(0,1), g1 (0,1),(0,1) | P(0,1) | P(0,1); control (a call inside the test) |
+| N3 | `(?(DEFINE)(?<c>(?=a\b))(?<d>x(?&c)))(?&d)a\n` | xa | P(0,2), g1 (1,1) | ArgumentOutOfRange | P(0,2), g1 (1,1) |
+| R1 | `(?:x(?R)\|(?=a\b)a)\n` | xa | P(0,2) | P(0,2) | P(0,2); control |
+| R2 | `(?:x(?R)\|(?(?=a\b)a\|b))\n` | xa | P(0,2) | P(0,2) | P(0,2); control |
+| R3 | `(?:x(?R)\|(?=a\b)a)\n`, match and search | xxa | P(0,3) | P(0,3) | P(0,3); control |
+| R4 | `(?:x(?R)\|(?(?=(?>a$\|a))a\|b))(a)\n` | xa | P(0,2) | P(0,2) | P(0,2); control |
+| G1 | `(?:((?=a\b)a)\|x(?1))\n` | xa | P(0,2), g1 (1,2) | IndexOutOfRange | P(0,2), g1 (1,2) |
+| G2 | `(?:((?(?=a\b)a\|b))\|x(?1))\n` | xa | P(0,2), g1 (1,2) | ArgumentOutOfRange | P(0,2), g1 (1,2) |
+| G3 | `(x(?1)?(?=a\b)a)\n` | xa | P(0,2), g1 (0,2) | ArgumentOutOfRange | P(0,2), g1 (0,2) |
+| K1 | `(x(?=a$))a\n` | xa | P(0,2), g1 (0,1) | g1 (1,1) | g1 (0,1) |
+| K2 | `(x(?(?=a$)a\|b))\n` | xa | P(0,2), g1 (0,2) | g1 (1,2) | g1 (0,2) |
+| K3 | `(a(?=b(cd)))` | ab | P(0,2), g1 (0,1) | g1 (2,1) | g1 (0,1) (upstream reports no group) |
+| F1 | `(?:a(?=b\b)b){1<=e<=1}\n`, match | ab | None | P(0,1), short of the edge | P(0,2), a sound phantom |
+| F1s | the same, search | ab | P(1,2) | P(2,2), a miss | P(0,2) |
+| X1 | `(?(?=(?:a\|ab)\b)a\|b)(a)(\n)` | ab | None | P(0,2) (S57d) | P(0,2) until chunk 9; NullReference without step 2 |
+| X2 | `a(?=(?:bcd){1<=e<=1}\|b)x` | ab | None | None | None; InvalidOperation without step 2 |
+
+32 rows. Each test asserts the span, and group 1 where the table gives it. The build also runs this
+amendment's grid on a Debug build and requires 0 exceptions and 0 misses, and for called rows the
+same answer as the inlined twin outside the 30 run-out rows named above.
+
+**Performance.** Only a blocked positive end and its `REOPEN` do more: one move of 32 bytes in the
+usual case, and two sizes, both behind the `state.WMarks.Count != 0` test that already guards the
+second-pass path (`:10425`, `:11212`). A call without partial, and a first pass, pay nothing.
