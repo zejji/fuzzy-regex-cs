@@ -556,4 +556,95 @@ public sealed class FuzzyNeededEmptyIterationTests
         // fullmatch(pattern, 'zx')   upstream (0, 2) (0, 0, 1) on all four
         ShouldMatch(new FuzzyRegex(pattern).FullMatch("zx"), 0, 2, new FuzzyCounts(0, 0, 0));
     }
+
+    // Known defects D27 and D30: loops that upstream never leaves (TimeoutError or MemoryError in
+    // regex 2026.9.10, 2026-09-29), and this port did not either before F-A merged at fa42f231
+    // (both time out at 7cecdb35). In each, an empty iteration changes no tested group and only
+    // spends an edit, which upstream counts as progress; under the needed rule it stands only
+    // while something needs it, so the loop ends. `(?P=g)` inside D27's loop only ever reads an
+    // empty g, and `(?(g))` in D30's has no item to edit, so neither can change the answer: every
+    // row equals upstream's answer to the pattern with that alternative removed, which upstream
+    // does answer. docs/plan/2026-09-29-d27-d30-fuzzy-empty-loops.md.
+    [Test]
+    // D27. Upstream TimeoutError on each; with pos=1 upstream answers (1, 3) with one insertion.
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}", "abb", false, 1, 3, 0, 1, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}", "abb", true, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){d<=1}", "abb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){s<=1}", "abb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){i<=1}", "abb", true, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=e<=1}", "abb", false, 1, 3, 0, 1, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){1<=d<=2}", "abb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){i<=1,d<=1}", "abb", false, 1, 3, 0, 1, 0)]
+    // D27 nested: the repeat inside another repeat, three tested groups (so no repeat memo), and
+    // an inner section inside an outer one. Upstream TimeoutError on each.
+    [Arguments(@"(?:(?:(?:(?:b|(?P=g))*(?P<g>)){0,2})+(?=(?P<g>b))$){e<=1}", "abb", false, 1, 3, 0, 1, 0)]
+    [Arguments(@"(?:(?:(?:(?:b|(?P=g))*(?P<g>)){0,2})+(?=(?P<g>b))$){s<=1}", "abb", false, -1, 0, 0, 0, 0)]
+    [Arguments(
+        @"(?:(?:(?:b|(?P=g)|(?P=h)|(?P=k))*(?P<g>)(?P<h>)(?P<k>)){0,2}(?=(?P<g>b))$){e<=1}",
+        "abb",
+        false,
+        1,
+        3,
+        0,
+        1,
+        0
+    )]
+    [Arguments(@"(?:(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){d<=1}){e<=1}", "abb", false, -1, 0, 0, 0, 0)]
+    // D27 where upstream does answer, so the rule is seen to keep its answer.
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e}", "abb", false, 0, 3, 1, 1, 0)]
+    [Arguments(@"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}", "bb", false, 0, 2, 0, 1, 0)]
+    [Arguments(@"(?r)(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}", "abb", false, -1, 0, 0, 0, 0)]
+    // D30. Upstream MemoryError, or TimeoutError at 0.3 s, on each.
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){d<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){d<=1}", "xb", true, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){e<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){s<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){1<=e<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){1<=d<=2}", "xxb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*?(?P=g)$){d<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    // D30 nested, and with three tested groups (so no repeat memo).
+    [Arguments(@"(?:(?:(?:(?(g))|(?=.(?P<g>b)))*)*(?P=g)$){d<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?(h))|(?(k))|(?=.(?P<g>b)))*(?P=g)$){e<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    // D30 where upstream does answer.
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){i<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    [Arguments(@"(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){e}", "xb", false, 0, 2, 1, 1, 0)]
+    [Arguments(@"(?r)(?:(?:(?(g))|(?=.(?P<g>b)))*(?P=g)$){d<=1}", "xb", false, -1, 0, 0, 0, 0)]
+    public void An_empty_iteration_that_only_spends_an_edit_does_not_loop(
+        string pattern,
+        string subject,
+        bool full,
+        int start,
+        int end,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5));
+
+        Match m = full ? regex.FullMatch(subject) : regex.Match(subject);
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            ShouldMatch(m, start, end - start, new FuzzyCounts(substitutions, insertions, deletions));
+        }
+    }
+
+    // D27's answer keeps upstream's captures: search at pos=1 gives g ['', '', 'b'] upstream.
+    [Test]
+    public void The_d27_match_keeps_the_captures_upstream_gives_from_the_next_position()
+    {
+        Match m = new FuzzyRegex(
+            @"(?:(?:(?:b|(?P=g))*(?P<g>)){0,2}(?=(?P<g>b))$){e<=1}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(5)
+        ).Match("abb");
+
+        ShouldMatch(m, 1, 2, new FuzzyCounts(0, 1, 0));
+        m.Groups["g"].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((2, 0), (2, 0), (2, 1));
+    }
 }
