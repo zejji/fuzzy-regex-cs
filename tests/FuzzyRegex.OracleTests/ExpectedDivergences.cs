@@ -3121,7 +3121,9 @@ internal static class ExpectedDivergences
     /// on 2026-09-28: four hand-minimised, then seed 7 rows 6112 and 7477 and seed 4242 row 6392 of
     /// that day's waves. Row 8 is <c>full-fold-leftover-take-back</c>'s fifth row, which this port
     /// answers as it did before; with the whole-character edits left on, S85's ablation stopped
-    /// reproducing upstream's answer, so the entry's third arm claims it.
+    /// reproducing upstream's answer, so the entry's third arm claims it. Rows 9 to 11 are known
+    /// defect D22's backreference rows, recorded the same way on 2026-09-29: a substitution, one
+    /// after the first folded s of a ß matched, and a reversed one.
     /// </summary>
     private const string _subjectFoldRows = """
         {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -3132,6 +3134,9 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?e)(?fi)(?r)(?:(?:\\1)\ufb00oab){e<=3}(ff)", "flags": 0, "namedLists": {}, "subject": "\ufb00fxf\u00dfOaBbff", "operation": "subf", "template": "<>", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb00fxf\u00dfOaBbff", "count": 0}}
         {"generator": "rows", "pattern": "(?fi)\\b(?:\ufb00o(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "\u00dfFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u00dfFOz", "count": 0}}
         {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?fi)(ss)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "ssx\u01f0s", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(fst)x(?:\\1){s<=1}", "flags": 0, "namedLists": {}, "subject": "fstxf\u00dft", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){s<=1}x(ss)", "flags": 0, "namedLists": {}, "subject": "\u01f0sxss", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
     /// <summary>
@@ -6648,7 +6653,11 @@ internal static class ExpectedDivergences
                 + "KEYED ON AN ABLATION, like `full-fold-fuzzy-deletion`: a row belongs here when "
                 + "`OracleComparer.RunWithoutTheGroupFoldLeftovers`, which sets "
                 + "`PatternObject.SkipGroupFoldLeftovers`, reproduces upstream's recorded answer "
-                + "exactly, AND this port's live answer is the one being judged. A second arm also "
+                + "exactly, AND this port's live answer is the one being judged. Since known defect D22 "
+                + "(2026-09-29) the minimal case has a second route, substituting the whole ß for the "
+                + "group's s, so an arm sets `PatternObject.SkipWholeFoldedCharEdits` as well "
+                + "and claims a row only when neither fix switched off alone gives upstream's answer. "
+                + "Another arm also "
                 + "sets `PatternObject.DoubleCountTrailingInsertions`, upstream's doubled insertion "
                 + "guard (ledger entry 12), for a BESTMATCH row that needs both: S89's row 5, "
                 + "`fuzzy-overhang` row 67 at seed 20260923, `(?b)(?fi)(f)(?:\\d+a00(?:\\1)){e<=3}` "
@@ -6660,17 +6669,10 @@ internal static class ExpectedDivergences
             PinnedBy: "FullFoldBackreferenceLeftoversTests",
             Example: _groupFoldLeftoverRows,
             Applies: static (row, ours) =>
-                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheGroupFoldLeftovers(row))
+                TheGroupFoldLeftoversExplainIt(row, ours, withoutTheSubjectFoldEdits: false)
                 || (
-                    OnlyTheAblationExplainsIt(
-                        row,
-                        ours,
-                        OracleComparer.RunWithTheDoubledInsertionGuard(
-                            row,
-                            withoutTheRetriedFoldSteps: false,
-                            withoutTheGroupFoldLeftovers: true
-                        )
-                    ) && !TheDoubledGuardAloneExplainsIt(row, ours)
+                    TheGroupFoldLeftoversExplainIt(row, ours, withoutTheSubjectFoldEdits: true)
+                    && !OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSubjectFoldEdits(row))
                 )
         ),
         new(
@@ -6799,6 +6801,13 @@ internal static class ExpectedDivergences
                         row,
                         ours,
                         OracleComparer.RunWithoutTheGroupFoldLeftovers(row)
+                    )
+                    // Known defect D22: the whole-character edits give the backreference a second
+                    // route to the leftovers loop's matches (TheGroupFoldLeftoversExplainIt).
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheGroupFoldLeftovers(row, withoutTheSubjectFoldEdits: true)
                     )
                     || TheAblationAndTheInnermostCountExplainIt(
                         row,
@@ -7140,6 +7149,11 @@ internal static class ExpectedDivergences
                 + "insertion of the whole subject character after them, at the start of its folding "
                 + "(`Matcher.FoldWholeSub`), so no match upstream finds is lost; the first answer's mix of "
                 + "edits can change, because the new edits are tried before older alternatives.\n"
+                + "THE BACKREFERENCE (known defect D22, 2026-09-29): REF_GROUP_FLD edits its subject the "
+                + "same way (`next_fuzzy_match_group_fld`, `_regex.c:10824-10877`), so "
+                + "`(?fi)(ss)x(?:\\1){s<=1}` fullmatched over 'ssxǰs' finds nothing, while 'ssxas' is "
+                + "(0, 5) with one substitution. The same two kinds, behind the same switch, apply there, "
+                + "and a whole substitution replaces a whole group character.\n"
                 + "NO OTHER ENGINE IS FUZZY; the expected values rest on the argument above.\n"
                 + "KEYED ON AN ABLATION: a row belongs here only when "
                 + "`OracleComparer.RunWithTheUpstreamSubjectFoldEdits`, which sets "
@@ -7601,6 +7615,49 @@ internal static class ExpectedDivergences
             row,
             ours,
             OracleComparer.RunWithoutTheFoldFixes(row, withTheUpstreamFoldedRuns: true)
+        );
+
+    /// <summary>
+    /// Whether S84's leftovers loop switched off, alone or with upstream's doubled insertion guard
+    /// (ledger entry 12) and, if asked, ledger entry 52's whole-character edits, is the whole of the
+    /// difference between the two engines on a row.
+    /// </summary>
+    /// <remarks>
+    /// The edits are asked for since known defect D22 (2026-09-29), which gives a backreference a
+    /// second route to some of the leftovers loop's matches: over 'sß', <c>(?fi)(s)(?:\1){e&lt;=1}</c>
+    /// charges the rest of the ß as an edit through the loop, or substitutes the whole ß for the
+    /// group's s. Such a row needs both off before this port gives upstream's None. The caller asks
+    /// with the edits off only once the loop alone has failed to explain the row, and only for a
+    /// row the edits alone do not explain, which belongs to
+    /// <c>full-fold-run-edits-an-expanding-subject-character-whole</c>. Without this the row fell to
+    /// <c>full-fold-backreference-retry</c>, which stopped the edits by the side effect of not
+    /// stepping past the folding they use up.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="withoutTheSubjectFoldEdits">Whether to switch the whole-character edits off too.</param>
+    /// <returns><see langword="true"/> if the ablation explains the divergence.</returns>
+    private static bool TheGroupFoldLeftoversExplainIt(
+        OracleRow row,
+        IOracleOutcome ours,
+        bool withoutTheSubjectFoldEdits
+    ) =>
+        OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithoutTheGroupFoldLeftovers(row, withoutTheSubjectFoldEdits)
+        )
+        || (
+            OnlyTheAblationExplainsIt(
+                row,
+                ours,
+                OracleComparer.RunWithTheDoubledInsertionGuard(
+                    row,
+                    withoutTheRetriedFoldSteps: false,
+                    withoutTheGroupFoldLeftovers: true,
+                    withoutTheSubjectFoldEdits
+                )
+            ) && !TheDoubledGuardAloneExplainsIt(row, ours)
         );
 
     /// <summary>

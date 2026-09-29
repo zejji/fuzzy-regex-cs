@@ -1519,6 +1519,16 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(?:ssx){s<=1}").Match("ǰsx").Length);  
 Console.WriteLine(new FuzzyRegex(@"(?fi)(?:fst){i<=1}").FullMatch("fßst").Length); // 4 - upstream: no match
 ```
 
+A fuzzy backreference edits its subject the same way. Upstream edits one fine, for example
+substituting `a` for a letter of the group, but not `ǰ`:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxas").Length); // 5 - upstream: 5
+Console.WriteLine(new FuzzyRegex(@"(?fi)(ss)x(?:\1){s<=1}").FullMatch("ssxǰs").Length); // 5 - upstream: no match
+```
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
