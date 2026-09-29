@@ -143,7 +143,8 @@ public sealed class PartialCutRuleTests
     /// cut, and the second pass would find nothing.
     /// </summary>
     /// <remarks>
-    /// Row T1 itself needs a skipped <c>(*PRUNE)</c>, which is build chunk 5's.
+    /// Row T1 itself needs a skipped <c>(*PRUNE)</c>, build chunk 5's: see
+    /// <see cref="PartialVerbRuleTests.A_verb_reached_back_through_a_skipped_cut_does_nothing"/>.
     /// </remarks>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None.
     [Test]
