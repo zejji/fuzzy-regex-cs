@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime;
 using AwesomeAssertions;
@@ -47,21 +48,40 @@ public sealed class AllocationTests
     public void The_empty_iteration_record_allocates_only_for_the_states_it_keeps()
     {
         // D17. Every position here makes one empty iteration that sets group 1, so the record
-        // keeps one state per position. A lookup must not allocate a key of its own: with a key per
-        // lookup, 10,000 characters allocated 6.6 GB (review, 2026-09-29). One kept state is a
-        // small array and its share of the set, about 200 bytes.
-        string subject = new string('a', 2_000) + "b";
-        bool actual = true;
+        // keeps one state per position. A kept state is one array of seven longs (the position, the
+        // count, three error counts and group 1's two ends), 24 + 7 * 8 = 80 bytes, and nothing
+        // else: a lookup must not allocate a key of its own, and with a key per lookup, 10,000
+        // characters allocated 6.6 GB (review, 2026-09-29). The difference of two lengths is the
+        // part that grows with the subject, so a cost paid once per call does not blur it.
+        //
+        // D32: both subjects are short enough that the backtracking stack stays inside the 64 KB a
+        // warm state keeps (MatchState._cachedStackLimit; 256 characters still rented nothing,
+        // 300 rented 12 buffers). A longer one grows the stack from ArrayPool<byte>.Shared on every
+        // call, and that pool empties its per-thread cache after a gen2 collection when memory is
+        // short, so the call then allocates the stack afresh: 961,600 B instead of 437,064 B at
+        // 2,000 characters, reproduced with DOTNET_GCHighMemPercent set just above the machine's
+        // memory load (2026-09-29).
+        (long shorter, bool shorterMatched) = Measure(64);
+        (long longer, bool longerMatched) = Measure(128);
 
-        long allocated = AllocatedBy(() =>
+        shorterMatched.Should().BeFalse();
+        longerMatched.Should().BeFalse();
+        (longer - shorter).Should().Be(64 * 80, "each extra position keeps one state, an array of seven longs");
+
+        static (long Allocated, bool Matched) Measure(int length)
         {
-            FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
-            _ = regex.IsMatch(subject);
-            return () => actual = regex.IsMatch(subject);
-        });
+            string subject = new string('a', length) + "b";
+            bool actual = true;
 
-        actual.Should().BeFalse();
-        allocated.Should().BeLessThan(400L * subject.Length);
+            long allocated = AllocatedBy(() =>
+            {
+                FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
+                _ = regex.IsMatch(subject);
+                return () => actual = regex.IsMatch(subject);
+            });
+
+            return (allocated, actual);
+        }
     }
 
     [Test]
@@ -165,6 +185,10 @@ public sealed class AllocationTests
         // A span cannot be kept, so these two still copy it, but into a buffer rented from
         // ArrayPool<char>.Shared and returned when the call ends. Before, the copy was a string of
         // two bytes a character: 2,097,176 B over this subject (owner's option (c), 2026-09-23).
+        // The pool is the test's own (D32): ArrayPool<char>.Shared empties its per-thread cache
+        // after a gen2 collection when memory is short, and the second call would then allocate
+        // the 2 MB buffer again, which says nothing about the copy. The public overloads pass
+        // Shared to these.
         char[] buffer = new char[1 << 20];
         buffer.AsSpan().Fill('a');
         "cat".CopyTo(buffer.AsSpan(buffer.Length - 10));
@@ -174,12 +198,13 @@ public sealed class AllocationTests
         long allocated = AllocatedBy(() =>
         {
             FuzzyRegex regex = new("cat");
-            _ = regex.IsMatch(buffer.AsSpan());
-            _ = regex.Count(buffer.AsSpan());
+            ArrayPool<char> pool = ArrayPool<char>.Create();
+            _ = regex.IsMatch(buffer.AsSpan(), pool, timeout: null, CancellationToken.None);
+            _ = regex.Count(buffer.AsSpan(), pool, timeout: null, CancellationToken.None);
             return () =>
             {
-                found = regex.IsMatch(buffer.AsSpan());
-                count = regex.Count(buffer.AsSpan());
+                found = regex.IsMatch(buffer.AsSpan(), pool, timeout: null, CancellationToken.None);
+                count = regex.Count(buffer.AsSpan(), pool, timeout: null, CancellationToken.None);
             };
         });
 
@@ -193,24 +218,26 @@ public sealed class AllocationTests
     {
         // The owner's gate for ValueMatchEnumerator (DECISIONS 2026-09-22): a measured gain. The
         // string walk builds a Match per match; this one yields an index and a length, and borrows
-        // its copy and its state, so a warm walk to the end has nothing left to allocate.
+        // its copy and its state, so a warm walk to the end has nothing left to allocate. Its own
+        // pool, as in the test above (D32).
         string words = string.Concat(Enumerable.Repeat("word ", 20_000));
         int count = 0;
 
         long allocated = AllocatedBy(() =>
         {
             FuzzyRegex regex = new(@"\w+");
-            _ = Walk(regex, words);
-            return () => count = Walk(regex, words);
+            ArrayPool<char> pool = ArrayPool<char>.Create();
+            _ = Walk(regex, words, pool);
+            return () => count = Walk(regex, words, pool);
         });
 
         count.Should().Be(20_000);
         allocated.Should().Be(0);
 
-        static int Walk(FuzzyRegex regex, ReadOnlySpan<char> subject)
+        static int Walk(FuzzyRegex regex, ReadOnlySpan<char> subject, ArrayPool<char> pool)
         {
             int n = 0;
-            foreach (ValueMatch match in regex.EnumerateMatches(subject))
+            foreach (ValueMatch match in regex.EnumerateMatches(subject, pool, timeout: null, CancellationToken.None))
             {
                 n += match.Length == 4 ? 1 : 0;
             }
