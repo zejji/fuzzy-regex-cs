@@ -64,8 +64,8 @@ such test is a mistake: reopen it.
 | F14 | Full-fold fuzzy backreference, subject side: a subject character that folds to several characters is now edited as one character inside a backreference (extends ledger 52; upstream is wrong, pinned). It shares D7's whole-insertion helper. ASCII within noise; dense expanding text +19% from new valid matches (was D22) | main 894c495 |
 | F15 | Fuzzy backreference retry opened a search with an insertion at the search anchor, ASCII included (it kept upstream's retry rule `new_folded_pos != folded_len`; it now uses PermitInsertionInFold, as D7 does) (was D25) | main e67ef400 |
 | F16 | Full-fold fuzzy backreference, group side: an expanding character inside the captured group (ß) is edited as one character, in the literal ß's order of edit kinds, so a backreference costs what its literal costs. It also fixes an impossible match (`(?fi)(aß)-(?:){s<=2}` over 'aß-ß') and a read past the slice edge (extends ledger 52) (was D24) | main e67ef400 |
-| F17 | Fuzzy exact-deletion retry and failed-call memo (ledgers 42 and 44, C1), plus ruling A: an explicit empty alternative is an optional exit. Compile-time ExactDeletionCeiling keeps FuzzyShort within noise of main (was D1) | main (F-A merge) |
-| F18 | A fuzzy repeat of a section that only spends errors iterated until the stack ran out; fixed by D1's needed rule, pinned in FuzzyNeededEmptyIterationTests (was D2) | main (F-A merge) |
+| F17 | Fuzzy exact-deletion retry and failed-call memo (ledgers 42 and 44, C1), plus ruling A: an explicit empty alternative is an optional exit. Compile-time ExactDeletionCeiling keeps FuzzyShort within noise of main (was D1) | main fa42f231 |
+| F18 | A fuzzy repeat of a section that only spends errors iterated until the stack ran out; fixed by D1's needed rule, pinned in FuzzyNeededEmptyIterationTests (was D2) | main fa42f231 |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
