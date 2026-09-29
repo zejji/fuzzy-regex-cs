@@ -450,6 +450,21 @@ internal sealed class PatternObject
     internal bool KeepInSubmatch;
 
     /// <summary>
+    /// The private numbers of the groups a backreference or a conditional tests
+    /// (<see cref="GroupInfo.Referenced"/>), in order. <b>This port's own field</b> (D17), written by
+    /// <c>Optimiser.CollectTestedGroups</c>; when it is empty the matcher neither numbers repeat runs
+    /// nor records empty-iteration states. See <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal int[] TestedGroups = [];
+
+    /// <summary>
+    /// The largest finite limit any fuzzy section in the pattern sets, on one kind of error, on all
+    /// errors or on cost, or -1 when none sets one. <b>This port's own field</b> (D17), written by
+    /// <c>Optimiser.FindFuzzyLimit</c> and read by <c>Matcher.ErrorCountCap</c>.
+    /// </summary>
+    internal long LargestFuzzyLimit = -1;
+
+    /// <summary>
     /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or
     /// <see langword="null"/>. <b>This port's own field</b> (S60b item 10); see
     /// <see cref="Engine.FuzzyLiteralFilter"/>.

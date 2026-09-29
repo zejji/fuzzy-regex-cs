@@ -173,6 +173,76 @@ public sealed class MatchStateCacheTests
     }
 
     [Test]
+    [Arguments(20, false)]
+    [Arguments(2_000, true)]
+    public void A_returned_state_lets_go_of_the_empty_iteration_states_its_call_recorded(int length, bool dropped)
+    {
+        // D17. One state per position is recorded, so the longer subject passes the 1,024 above
+        // which the set itself is dropped rather than kept on the cached state.
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
+        string subject = new string('a', length) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Count.Should().BeGreaterThan(length / 2);
+
+        cache.Return(state);
+
+        if (dropped)
+        {
+            state.EmptyIterationStates.Should().BeNull();
+        }
+        else
+        {
+            state.EmptyIterationStates.Should().NotBeNull().And.BeEmpty();
+        }
+    }
+
+    [Test]
+    public void A_returned_state_lets_go_of_a_large_set_that_a_later_start_position_emptied()
+    {
+        // D17, review round 2. Start position 0 records about 1,200 states and fails; each later
+        // start clears the set and fails at once on the anchor, and 'b' matches at the last one.
+        // So the call ends with no states in a set still sized for 1,200, which a check of the
+        // count kept (capacity 1,931).
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$|b");
+        string subject = new string('a', 1_200) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Capacity.Should().BeGreaterThan(1_024);
+        state.EmptyIterationStates.Count.Should().BeLessThan(1_024);
+
+        cache.Return(state);
+
+        state.EmptyIterationStates.Should().BeNull();
+    }
+
+    [Test]
     public void The_comparison_sees_a_field_that_Init_forgets()
     {
         // Non-vacuity: a difference in one scalar, one list and one nested buffer must each show.
@@ -228,10 +298,14 @@ public sealed class MatchStateCacheTests
             }
 
             // MatchState.FilterMemory is null exactly when the pattern has no fuzzy-literal filter,
-            // and readonly, so no call can set it.
+            // and readonly, so no call can set it. MatchState.EmptyIterationScratch is the same,
+            // null exactly when the pattern tests no group; otherwise it is an array, which the
+            // long[] rule below scribbles, and a reused state must clear it.
             if (
-                string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
-                && field.GetValue(state) is null
+                (
+                    string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
+                ) && field.GetValue(state) is null
             )
             {
                 continue;
@@ -310,6 +384,7 @@ public sealed class MatchStateCacheTests
                     repeat.Count = 7;
                     repeat.Start = 7;
                     repeat.CaptureChange = 7;
+                    repeat.RunId = 7;
                     ScribbleGuards(repeat.BodyGuardList);
                     ScribbleGuards(repeat.TailGuardList);
                 }
@@ -329,6 +404,12 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 set.Add((7, 7));
+                break;
+            case HashSet<EmptyIterationState> states:
+                states.Add(new EmptyIterationState(7, [7]));
+                break;
+            case null when field.FieldType == typeof(HashSet<EmptyIterationState>):
+                field.SetValue(state, new HashSet<EmptyIterationState> { new(7, [7]) });
                 break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
@@ -421,7 +502,7 @@ public sealed class MatchStateCacheTests
                 RenderItems($"{path}.Captures", group.Captures.Take(group.Count), lines);
                 break;
             case RepeatData repeat:
-                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange})");
+                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange},{repeat.RunId})");
                 Render($"{path}.Body", repeat.BodyGuardList, lines);
                 Render($"{path}.Tail", repeat.TailGuardList, lines);
                 break;
@@ -441,6 +522,10 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case HashSet<EmptyIterationState> states:
+                // Allocated on first use and then kept, so an empty one is the same as none.
+                lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
                 break;
             case HashSet<long[]> keys:
                 RenderItems(
