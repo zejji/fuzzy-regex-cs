@@ -1017,6 +1017,47 @@ public sealed class FuzzyBestMatchTests
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     //
+    // Reported on 2026-09-28 as a possible new bug in BESTMATCH's retries under fullmatch, and it is
+    // ledger entry 12 in the shape of that entry's own reproduction: a one-character body with two
+    // trailing insertions. Upstream, measured by tools/probes/bestmatch-fullmatch-trailing-insertions.py:
+    //
+    //   regex.fullmatch(r'(?b)(?:b){e<=2}', 'bba')       ->  None     ({i<=2} and {e<=9} too)
+    //   regex.fullmatch(r'(?:b){e<=2}', 'bba')           ->  (0, 3) counts=(0, 2, 0), insertions [1, 2]
+    //   regex.fullmatch(r'(?e)(?:b){e<=2}', 'bba')       ->  the same
+    //   regex.match(r'(?b)(?:b){e<=2}$', 'bba')          ->  None, so fullmatch itself is not the cause
+    //
+    // The door is not the cause: '$' under plain match loses the fit the same way, and so does (?r).
+    // What every lost row needs is a second trailing insertion, which only END_FUZZY's backtrack arm
+    // can make, and that arm's guard counts the section's errors twice (_regex.c:15516-15517). The
+    // control below puts that doubled term back and gets upstream's None.
+    [Test]
+    public void Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end()
+    {
+        foreach (string pattern in new[] { "(?b)(?:b){e<=2}", "(?b)(?:b){i<=2}", "(?b)(?r)(?:b){e<=2}" })
+        {
+            Match m = new FuzzyRegex(pattern).FullMatch("bba");
+
+            m.Success.Should().BeTrue($"{pattern} - upstream answers no match at all");
+            (m.Index, m.Index + m.Length).Should().Be((0, 3), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0), pattern);
+        }
+
+        Match anchored = new FuzzyRegex("(?b)(?:b){e<=2}$").MatchAtStart("bba");
+
+        anchored.Success.Should().BeTrue("upstream answers no match at all");
+        (anchored.Index, anchored.Index + anchored.Length).Should().Be((0, 3));
+        anchored.FuzzyChanges.Insertions.Should().Equal(1, 2);
+
+        // The attribution control: upstream's doubled term restored, and nothing else changed.
+        FuzzyRegex doubled = new("(?b)(?:b){e<=2}");
+        doubled.PatternObject.DoubleCountTrailingInsertions = true;
+
+        doubled.FullMatch("bba").Success.Should().BeFalse("upstream's guard refuses the second insertion");
+        doubled.FullMatch("bb").Success.Should().BeTrue("one trailing insertion survives upstream too");
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
     // STATE finding 4, seed 20260923 row 3821 of a 2000-row `fuzzy-literal,fuzzy-anchored` wave.
     // Upstream's `subf` gives '<><>😀': its first match is (0, 2) at a substitution and a deletion,
     // because the doubled term refuses the trailing insertion the (0, 3) fit needs. That fit costs
@@ -1157,5 +1198,26 @@ public sealed class FuzzyBestMatchTests
         string?[] parts = pattern.Split("\U0001d7ee\r\n\U0001d518\U0001d518\U0001d518\rAa");
 
         parts.Should().Equal("", "\r\n", "\U0001d518\U0001d518\rAa");
+    }
+
+    // S42-2G, tools/controls.json: the whole-match cost bound on END_FUZZY's trailing-insertion
+    // retry ('Matcher.cs', the third test beside the 'ponytail:' note). Found by a blind review's
+    // 686-candidate sweep of the '(?1)$' self-recursive-call family (2026-09-28); this is the
+    // smallest of the 56 that fired. Dropping the bound's 'TotalCost(state.FuzzyCounts, innerNode)'
+    // term (leaving only the trailing insertion's own cost) lets the retry re-enter the section on
+    // every walk-0 step without ever spending down the budget, and the match times out rather than
+    // answering wrong - so this test is the control's whole signal; the ratchet's normal answer
+    // never sees a wrong value to assert against. Upstream, regex 2026.9.10, checked 2026-09-28:
+    // search('(?b)((?:a){1s+2i<=2})(?1)$', 'bab') -> (1, 3) counts=(1, 0, 0).
+    [Test]
+    public void Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion()
+    {
+        Match m = new FuzzyRegex("(?b)((?:a){1s+2i<=2})(?1)$", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match(
+            "bab"
+        );
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
 }

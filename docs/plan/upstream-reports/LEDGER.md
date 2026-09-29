@@ -2114,6 +2114,51 @@ walk on and none do with it off, and all nine are `fullmatch` rows whose cheapes
 insertion-heavy. That is the honest price of the ranking change until this is fixed, and it is why
 the example row for that entry uses substitutions.
 
+**A CANDIDATE "NEW" BUG TRIAGED ON 2026-09-28 IS THIS ENTRY, AND LEDGER NUMBER 49 WAS NOT TAKEN.**
+It came in as "`BESTMATCH` retries under `fullmatch` lose a match": `regex.fullmatch(r'(?b)(?:b){e<=2}',
+'bba')` and `{i<=2}` are None, while the flagless and `(?e)` forms are (0, 3) at `(0, 2, 0)`. That
+is row 1 of this entry with `x` spelled `b`. `python tools/probes/bestmatch-fullmatch-trailing-insertions.py`
+(regex 2026.9.10, 2026-09-28) isolates it:
+
+- **The door is not the cause.** `match` and `search` are (0, 1) with no error under both flags,
+  which is right. `fullmatch` loses the fit, and so does a plain `match` of `(?b)(?:b){e<=2}$`,
+  so `fullmatch`'s retries are not where it goes wrong: anything that makes the fit reach the end
+  of the text needs trailing insertions, and those are what the flag loses.
+- **The budget is not the cause.** `{e<=9}` is None too.
+- **The count is this entry's k <= 1 boundary.** 'bb' (one trailing insertion) survives `(?b)`;
+  'bba', 'baa' and 'bbb' (two) do not. 'abb' is lost as well: its flagless fit is insertions at
+  0 and 2, and the one at 2 is trailing. Substitution and deletion budgets cannot fullmatch these
+  subjects at all, with the flag or without.
+- **`pos`/`endpos` and `(?r)` move nothing.** The slice `'xbbay'[1:4]` is None under `(?b)` and
+  (1, 4) without it; `(?b)(?r)` is None where `(?r)` and `(?e)(?r)` are (0, 3).
+
+**The claim, stated so that a blind reviewer can check it.** Under `(?b)`, upstream fullmatches
+`(?:b){e<=2}` against 'bba' with no answer because (1) the first pass of `do_best_fuzzy_match`
+(`:17590`) runs with unbounded `max_errors`, finds the two-insertion fit and sets `fewest_errors = 2`
+(`:17653-17655`); (2) the second pass sets `error_limit = fewest_errors` (`:17703`) and climbs
+`state->max_errors` from 1 to 2 (`:17736-17738`), and the widened-slice fallback also uses 2
+(`:17832`); (3) the second insertion can only come from `END_FUZZY`'s backtrack arm, whose guard
+`total_errors(state->fuzzy_counts) + total_errors(inner_counts) < state->max_errors`
+(`:15516-15517`) adds the section's errors to counts they have already been merged into (`:12475`),
+so after one insertion it computes 1 + 1 < 2 and refuses. So the whole call returns None. The claim
+is falsified if any of these fail:
+
+1. The probe's blocks do not reproduce on regex 2026.9.10.
+2. This port, with `PatternObject.DoubleCountTrailingInsertions` set (the doubled term restored and
+   nothing else changed), does NOT answer None on 'bba' and a match on 'bb'. Asserted in
+   `Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end`.
+3. A build of upstream with the second term deleted from `:15517` still answers None. **Run, and it
+   does not:** `python tools/probes/bestmatch-fullmatch-trailing-insertions.py --patched`
+   (2026-09-28, MSVC `/Od` build of the pinned submodule) answers (0, 3) at `(0, 2, 0)` with
+   insertions at 1 and 2 on the `{e<=2}`, `{i<=2}` and `$` rows, (0, 3) on `(?r)` and on 'abb',
+   leaves the flagless row unchanged, and still refuses `(?b)(?:b){e<=1}` - this port's answer on
+   every row, so deleting the term lets through exactly what the budget allows and nothing more.
+
+Pinned as rows 35 to 38 of `bestmatch-loses-a-candidate`, recorded from
+`tools/probes/bestmatch-fullmatch-rows.jsonl`; `docs/DIVERGENCES.md` and `docs/COMPARISON.md` gained
+this entry's own row and section, which it had not had. The draft report is
+`entry-12-bestmatch-trailing-insertions.md`.
+
 **Related:** entries 9 and 11, the other inherited fuzzy bugs the oracle cannot see, and Phase 6's
 inherited-bug sweep.
 
@@ -2459,6 +2504,62 @@ upstream CAN answer are exactly the ones the guard must not touch and drawing th
 instrument that shows it does not. The earlier attempt to keep the cell by forcing progress
 (`(?P<g1>A(?:Ab){C}(?&g1)?)`) is still not sufficient on its own and is not what landed: progress
 bounds the depth and does nothing about the branching.
+
+**The guard refined (2026-09-28): it refused a finite left recursion, a port bug.** Found by the
+2026-09-27 matrix wave (seed 4242 row 1719; `docs/plan/2026-09-27-matrix-wave-triage.md`, "The
+same-position call guard"). The guard as first made failed ANY call of group `i` at `p` while a call
+of `i` at `p` was open. That is not always infinite: with `G -> '' | G 'a'`, matching `'aa'` goes
+G(G('') 'a') 'a', two calls of G open at 0 at once, and the inner one returns at once. The port
+answered None for `(?:|(?R)a)` fullmatch `'aa'` and (1, 2) for `(?P<g>|(?&g)a)$`, where upstream and
+PCRE2 10.47 answer (0, 2).
+
+PCRE2's own check is narrower, and it is now the port's. `OP_RECURSE` (`pcre2_match.c` 10.47, lines
+5686-5709, re-read 2026-09-27) raises `PCRE2_ERROR_RECURSELOOP` only when the subject pointer AND
+`last_used_ptr`, the furthest character inspected, are both unchanged since the enclosing call of
+the same group; `last_used_ptr` is reset at each start position (line 7953). So an inner call is let
+through when the attempt has looked further into the text since the outer call opened: the outer
+call's first try failed further on, and the inner call is a genuinely different path. With nothing
+new reached it is failed as before.
+
+**That is still too strict: a new capture can make the inner call different (open, 2026-09-28).**
+A blind review found `(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))` over `'x'`: upstream answers (0, 1),
+the port None, PCRE2 "nested recursion at the same subject position". Two calls of the whole
+pattern are open at 0 and nothing new is reached, but the group set between them changes which
+branch the conditional takes, so the inner call is not a repeat and the path is finite. The same
+holds for backreferences: `(?:\1x|\2()(?R)|()(?R))` and its named form, (0, 1) upstream, None here.
+Red and `[Explicit]` as
+`OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`.
+
+The planned fix makes the key `(call, position, reach, captures read)`: the current spans of the
+groups a conditional or backreference reads (`GroupInfo.Referenced`), taken only when the pattern
+has such groups, saved on the backtracking stack at `GROUP_RETURN` so a re-opened call keeps its
+own. It still terminates: each such group's span is one of at most `(TextLength + 1)^2 + 1` values,
+so the entries per position stay finite. A capture-change COUNTER would be cheaper but does not
+terminate in principle - a group that alternates between two spans counts up for ever - so it is
+not the fix.
+
+In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
+touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.
+`Matcher.NoteReached` widens it at every group call and wherever a path fails; `start_match` resets
+it per attempt, as PCRE2 does. The reach is saved beside the call key at `GROUP_RETURN` and restored
+by its backtrack arm, so a re-opened call is the call it was. It terminates: the width only grows
+during an attempt and cannot pass the text length, so at most `TextLength + 1` calls of one group
+can be open at one position. The one difference from PCRE2 stays: the port fails the path, not the
+match.
+
+Measured on the new tests in `Gaps/Engine/GroupCallTests.cs`: left recursion nests to (0, n) for n up
+to 20 (upstream and PCRE2 agree); `(?:b.*x|(?<g>|(?&g)a)c)` over `'baac'` answers (1, 3), which needs
+the per-attempt reset (upstream MemoryError, PCRE2 RECURSELOOP, so neither has an answer); and the
+infinite shapes (`(?:|(?R)a)` over `'b'`, `(?:(?R))`) still answer no match inside 100 ms. Each part
+is load-bearing, shown by ablation on 2026-09-27: dropping the note at a failed path fails 5 of the
+19 group-call tests, dropping the low end (so reversed patterns never grow) fails 1, dropping the
+per-attempt reset fails 1, re-opening a call with the current reach instead of the saved one fails
+5, and removing the guard fails the 3 infinite-shape tests.
+
+One known difference in scope, not chased: PCRE2 compares only with the innermost enclosing call of
+the same group, at whatever position; the port refuses on a match with any open call of that group
+at that position, with the same reach. Whether any pattern answers differently because of that is
+not measured.
 
 **Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.
 
@@ -4111,11 +4212,86 @@ The oracle's dotless-i control also regressed with this fix: its property gate O
 already flagged UNICODE, upstream raised, and every such row lost its control. Fixed in
 `tools/record-oracle.py`.
 
-**Proposed fix upstream:** the same changes, A to G.
+**H. The first-set precheck is a set the pattern never wrote (2026-09-28).** Oracle row
+20260927:3732 (`interactions`), `(?r)(?P<g1>\p{ASCII}{2})(\p{Ll}+?)??` with flags 10 (IGNORECASE |
+MULTILINE) as a `sub` over '\n\r' U+1D518 U+1F600 with template U+1F600 `\1]`, came in as a
+possible reversed-sub surrogate bug. It is C, reached through the compiler. IGNORECASE is in play
+through the flags, not the pattern text; without it upstream and this port agree, because U+1D518
+MATHEMATICAL FRAKTUR CAPITAL U is Lu. Neither `(?r)`, `sub` nor the surrogate pair matters:
+
+```python
+>>> regex.search(r'(?i)\p{Ll}', '\u2102').span()          # bare: any cased letter
+(0, 1)
+>>> regex.search(r'(?i)\p{Ll}?a{2}', '\u2102aa').span()   # 'Aaa' gives (0, 3)
+(1, 3)
+>>> regex.search(r'(?ri)a{2}\p{Ll}?', 'aa\u2102').span()  # (?ri)a{2}\p{Ll}, not optional: (0, 3)
+(0, 2)
+```
+
+When the first item the matcher meets can match nothing, `_check_firstset`
+(`upstream/regex/_regex_core.py:380-409`) gathers every item that could start the match into one
+`SET_UNION` with the pattern's case flags, and `_main.py:646` puts it in front of the code as a
+precheck. `(?ri)a{2}\p{Ll}?` compiles to `67 3 [12 1 97] [37 1 1966093] 20 ...`:
+SET_UNION_IGN_REV over 'a' and PROPERTY Ll. A property member of a case-insensitive set is answered
+by `matches_member_ign` (`upstream/src/_regex.c:3085-3107`), which asks the plain property of each
+case variant (`:3103-3105`). U+2102 and U+1D518 have no case variant and are not Ll, so the
+precheck refuses the one position the match needs, although the matcher's own
+`matches_PROPERTY_IGN` (`:2958-2966`) would have accepted it. Letters with a partner are
+unaffected ('A' has 'a'). `tools/probes/ignorecase-property-precheck.py` isolates it and ablates
+it: with `_compile_firstset` returning no precheck and nothing else changed, upstream answers
+(0, 3) on both minimised rows and gives this port's `sub` on row 3732.
+
+The survey (same probe, and `tools/probes/ignorecase-property-precheck.cs`, 2026-09-28): is a
+case-insensitive `\p{Ll}`, bare and then in `[\p{Ll}x]`, true of U+2102, U+1D518, 'A', 'a'?
+
+| Engine | Bare | Set |
+|---|---|---|
+| upstream regex 2026.9.10 | 1 1 1 1 | 0 0 1 1 |
+| PCRE2 10.47 (pip `pcre2` 0.7.1), CASELESS | 1 1 1 1 | 1 1 1 1 |
+| Perl 5.42.3 `/i` | 1 1 1 1 | 1 1 1 1 |
+| .NET 10.0.12 `Regex`, IgnoreCase | 1 - 1 1 | 1 - 1 1 |
+| node 24.16 `/iu` | 0 0 1 1 | 0 0 1 1 |
+| Python `re` | `\p` is "bad escape" | |
+
+(.NET cannot ask U+1D518: its classes read one UTF-16 unit.) Every engine but upstream gives the
+bare and the set form one answer. PCRE2, Perl and .NET take the cased-letter rule this port applies
+everywhere since C; JavaScript takes case closure for both. Upstream's README says nothing about a
+precheck, and its changelog treats a first set that changes an answer as a bug (Hg issues 139 and
+216). The pattern here wrote a bare property, whose meaning upstream fixes as "any cased letter", so
+upstream is wrong on its own terms whichever rule is right.
+
+**This port.** Nothing to fix: C's `Matcher.MatchesMemberIgn` answers a property member with
+`HasPropertyIgn`, the bare rule, so the precheck the port compiles (the same bytes as upstream's,
+under version 0) accepts the letter. Under version 1, this port's default, IGNORECASE brings
+FULLCASE and `_check_firstset` builds no precheck at all, so the door is shut there on both sides.
+
+**The claim, stated so that a blind reviewer can falsify it.** Upstream's answer to row 3732 keeps
+U+1D518 only because the compiled first-set precheck, a case-insensitive set holding `\p{Ll}`,
+refuses U+1D518 at the one position where the match `\n\r` + U+1D518 starts, and it refuses it
+because `matches_member_ign` asks plain `\p{Ll}` of U+1D518's case variants, of which it has none.
+It is falsified if any of these holds:
+
+1. With `regex._main._compile_firstset` replaced by `lambda info, fs: []` (no precheck, nothing
+   else changed), upstream still keeps U+1D518 in the row's `sub`, or still answers (1, 3) and
+   (0, 2) on the two minimised rows. **Run:** it answers the port's `sub`, (0, 3) and (0, 3).
+2. The refusal does not follow the missing case partner: `(?i)\p{Ll}?a{2}` is (0, 3) upstream
+   over U+2102 'aa', or (1, 3) over 'Aaa', or the written set `(?i)[\p{Ll}x]` accepts U+2102.
+   **Run:** (1, 3), (0, 3) and no match, as the claim says.
+3. This port with control `R3732-A` applied (`python tools/run-controls.py --ids R3732-A`: the
+   property arm of `MatchesMemberIgn` put back to upstream's per-variant `has_property`, nothing
+   else changed) does NOT give upstream's answers. **Run, 2026-09-28:** FIRED, 24 tests red and
+   exactly the expected ones: the 18 existing tests of entries 34 and 35, the five precheck rows and the row-3732 test.
+
+**Proposed fix upstream:** the same changes, A to G. H needs no change of its own: with C's
+fix to `matches_member_ign` the precheck answers as the bare property does. The draft report for
+C and H is `entry-35-case-insensitive-property-in-a-set.md`. Ledger number 49 was not taken.
 
 **Tests.** `Gaps/Engine/ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it`,
-`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does` and
-`.A_no_value_of_a_cased_property_is_its_complement`; the oracle pin is
+`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does`,
+`.A_no_value_of_a_cased_property_is_its_complement`, and for H
+`.A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner` and
+`.Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches`, with control
+`R3732-A` in `tools/controls.json`; the oracle pin is
 `scoped-encoding-and-case-insensitive-property-rules`.
 
 ---
@@ -4855,3 +5031,143 @@ answer moves from one PCRE2 disagreement to another: this port's partial rule is
 PARTIAL_SOFT, and about 80 partial rows per seed differ from it before and after). 20,000 verb-free rows answer identically before and after.
 `ledger-reproductions.jsonl` re-checks upstream's answer to the first row above, and the oracle entry
 `verb-unwinds-through-unfinished-groups` keys on `PatternObject.VerbsAreConfinedToTheInnermostGroup`.
+
+## 48. A `\G` that fails inside a fuzzy section raises "invalid RE code" once its insertion is backtracked over - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found 2026-09-27 by the interaction-matrix wave: 7
+rows over seeds 7, 4242 and 20260927, every "invalid RE code" row the saved waves hold, all with
+`\G` in a fuzzy section.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+match(r'(?:a\G){i<=1}', 'ab')                  -> RuntimeError: invalid RE code   expected None
+match(r'(?:a\G|\Gb){i<=1}', 'ab')              -> RuntimeError: invalid RE code   expected (0, 2), one insertion
+search(r'(?:a\Gb|\Gab){i<=1}', 'zab', pos=1)   -> RuntimeError: invalid RE code   expected (1, 3)
+search(r'(?r)(?:\Gab|ab\G){i<=1}', 'xab')      -> RuntimeError: invalid RE code   expected (1, 3)
+search(r'(?b)(?:.??(?1)){e<=1}(?:x|(\Gab))', 'zab') -> RuntimeError: invalid RE code   expected None
+match(r'(?:\Gb){i<=1}', 'ab')                  -> (0, 2), one insertion (the control: no backtrack over the insertion)
+```
+
+**Why upstream is wrong.** The forward matcher fuzzes a failed `SEARCH_ANCHOR` like every other
+zero-width item (`_regex.c:14431`), pushing a retry frame, but the backtrack switch's zero-width
+list (`:15330-15344`) omits `SEARCH_ANCHOR`, so popping that frame reaches the switch's default and
+raises. There is no semantic question to settle: PCRE2 10.47, .NET 10.0.12 and upstream's own exact
+matcher agree that `\G` holds only at the position the search started from, honours `pos`, and
+holds at the end under right-to-left (`tools/probes/search-anchor-survey/`, measured 2026-09-27). An
+error cannot make a zero-width assertion true - deletion and substitution need a character, and an
+insertion only moves away from the anchor - so a fuzzy `\G` means what an exact one does.
+
+**Proposed fix upstream:** add `case RE_OP_SEARCH_ANCHOR:` to the zero-width block at `:15330`.
+
+**This port.** `Opcode.SearchAnchor` joins the zero-width block of the backtrack switch in
+`src/FuzzyRegex/Engine/Matcher.cs`. Pinned by the seven `\G` cases in
+`Gaps/Engine/FuzzyMatchingTests`; the oracle entry `fuzzy-search-anchor-backtracked` classifies
+rows where upstream raises this error and this port answers.
+
+## 49. A fuzzy run that holds `ß` or a ligature cannot edit it as one character, although a lone one can - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found as open-defect queue item 17
+(`(?fi)(?:ß){s<=1}` over 'a' matches, `(?fi)(?:ßx){s<=1}` over 'ax' does not). Draft report:
+`entry-49-full-fold-run-expanding-character.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?fi)(?:ß){s<=1}', 'a')      -> (0, 1), one substitution     (the control)
+search(r'(?fi)(?:ß){s<=1}x', 'ax')    -> (0, 2), one substitution     (the control)
+search(r'(?fi)(?:ßx){s<=1}', 'ax')    -> None                         expected (0, 2), one substitution
+search(r'(?fi)(?:ßx){d<=1}', 'x')     -> None                         expected (0, 1), one deletion
+search(r'(?fi)(?:ßx){s<=1}', 'sx')    -> None                         expected (0, 2), one substitution
+search(r'(?fi)(?:ﬁx){s<=1}', 'ax')    -> None                         expected (0, 2), one substitution
+search(r'(?bfi)(?:ßx){e<=2}', 'ax')   -> (0, 2), counts (1, 0, 1)     expected counts (1, 0, 0)
+search(r'(?fi)(?:ßßx){s<=1}', 'ssax') -> None                         expected (0, 4), one substitution
+```
+
+**Why upstream is wrong.** On its own, a character that expands under full case folding compiles
+to a choice between the character and its folding: `Character._compile` builds
+`Branch([CHARACTER ß, String('ss')])` (`upstream/regex/_regex_core.py:2629-2632`). A fuzzy section
+can therefore replace the whole `ß` with one substitution. Next to another literal,
+`Sequence.pack_characters` (`:3525`) packs both into one `String`, which compiles to `STRING_FLD`
+holding only the folded characters `ssx` (`:4017-4025`, `:4041-4048`). Each fuzzy edit there is one
+folded letter, so replacing the `ß` needs a substitution and a deletion. A fuzzy section that covers
+more of the pattern allows every error placement a narrower one does, so `(?:ßx){s<=1}` cannot match
+less than `(?:ß){s<=1}x`; upstream's answer depends on whether the `ß` happened to be packed.
+Upstream's own chunking shows the same split: `(?fi)(?:xß){s<=1}` over 'xa' matches, because
+`_fix_full_casefold`'s drifted offsets leave that `ß` as a lone character.
+
+No second engine is fuzzy. PCRE2 10.47, Python `re`, .NET 10 and JavaScript do not fold `ß` to `ss`
+at all; Perl 5.42.3 does, and agrees that `ß`, `ßx` and `sß` match `ss`, `ssx` and `ßs` exactly
+(measured 2026-09-28). The expected values rest on the argument above.
+
+**Proposed fix upstream:** in a fuzzy section, compile a full-folded `String` holding an expanding
+character as `Branch([String, Sequence of its characters])`, the lone character's own choice
+extended to the run.
+
+**This port.** `String.CharacterReading` (`src/FuzzyRegex/Parsing/Nodes.cs`) adds that
+character-by-character reading as a second alternative when the run is fuzzy; the packed run stays
+first, so every exact match and every match upstream already finds through the folding is
+unchanged. The fuzzy literal prefilter accepts the reading's lone `CHARACTER_IGN ß`
+(`FuzzyLiteralFilter.TheSearchSeesAsTheEngineDoes`). Pinned by
+`Gaps/Engine/FullFoldFuzzyCharacterEditTests`; the oracle entry
+`full-fold-run-edits-an-expanding-character-whole` classifies rows by switching the reading off
+(`Info.UpstreamFoldedRuns`).
+
+**Not covered, and open:** the subject-side twin. `(?fi)(?:ssx){s<=1}` over 'ǰsx' is None in both
+engines, although `(?fi)(?:s){s<=1}sx` matches it: a `STRING_FLD` substitution consumes one folded
+character of the subject, and U+01F0 folds to two. That is a matcher change, fixed as ledger entry 52.
+
+## 52. A fuzzy full-folded run cannot edit a subject character that expands under folding as one character - FIXED HERE (2026-09-28)
+
+**Status:** not filed, per the owner's rule. Found beside ledger entry 49 as its subject-side twin
+(known defect D7). Draft report: `entry-52-full-fold-run-expanding-subject-character.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-28 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?fi)(?:s){s<=1}sx', 'ǰsx')     -> (0, 3), one substitution     (the control)
+search(r'(?fi)(?:ssx){s<=1}', 'asx')     -> (0, 3), one substitution     (the control)
+search(r'(?fi)(?:ssx){s<=1}', 'ǰsx')     -> None                         expected (0, 3), one substitution
+search(r'(?fi)(?:ssx){s<=1}', 'sǰx')     -> None                         expected (0, 3), one substitution
+search(r'(?rfi)(?:ssx){s<=1}', 'ǰsx')    -> None                         expected (0, 3), one substitution
+fullmatch(r'(?fi)(?:fst){i<=1}', 'fßst') -> None                         expected (0, 4), one insertion
+fullmatch(r'(?fi)(?:fst){s<=1}', 'fßt')  -> None                         expected (0, 3), one substitution
+```
+
+**Why upstream is wrong.** A fuzzy edit applies to one subject character. `STRING_FLD` compares the
+pattern with each subject character's full case folding, and `next_fuzzy_match_string_fld`
+(`upstream/src/_regex.c:10580-10633`) moves one folded character per edit. U+01F0 folds to j and
+U+030C, so replacing a pattern letter with it inside a run costs two edits. Where the section covers
+only that letter, the letter is its own item and the substitution is one edit, as it is for any
+character that does not expand ('asx'). A fuzzy section that covers more of the pattern allows every
+error placement the narrower one does, so it cannot match less. This is ledger entry 49 seen from the
+subject: there a pattern `ß` could not be edited whole, here a subject one cannot.
+
+Upstream's folded-character edits are kept, as entry 49 kept them on the pattern side, so no match
+upstream finds is lost. No other engine is fuzzy, so the expected values rest on the argument
+above. İ is the one class upstream already answers, by another route: its
+default tables fold İ to a lone i (the Turkic rows this port leaves out, `docs/DIVERGENCES.md`).
+
+**Proposed fix upstream:** at the start of a subject character's folding, when it is longer than one
+character, also try a substitution and an insertion of the whole character, after the three existing
+kinds; and leave a backtrack point when the first folded character matched, so that matching half of
+the character does not rule out editing all of it.
+
+**This port.** `Matcher.FoldWholeSub` and `FoldWholeIns` are two extra error kinds in the
+`STRING_FLD` frame, tried after upstream's three, only at the start of a folding longer than one
+character; `Matcher.OfferWholeFoldedCharEdit` leaves the backtrack point after an exact comparison
+there. Each is counted and recorded as a substitution or an insertion. The fuzzy literal prefilter
+needs no change: a whole-character edit damages one piece at most, and a differential over 55,080
+filtered searches, 10,320 of them answered differently by the new edits, found no answer the filter
+changes. Pinned by `Gaps/Engine/FullFoldFuzzySubjectCharacterEditTests` and
+`FuzzyLiteralPrefilterTests.An_expanding_subject_character_edited_whole_is_found_through_the_filter`;
+the oracle entry `full-fold-run-edits-an-expanding-subject-character-whole` classifies rows by
+switching the edits off (`PatternObject.SkipWholeFoldedCharEdits`).
+
+**Not covered, and open:** `REF_GROUP_FLD`, a full-folded backreference, edits its subject the same
+way (`next_fuzzy_match_group_fld`, `upstream/src/_regex.c:10824`) and was not changed here:
+`fullmatch(r'(?fi)(ss)x(?:\1){s<=1}', 'ssxǰs')` is None in both engines, while 'ssxas' is (0, 5) with
+one substitution (measured 2026-09-28).

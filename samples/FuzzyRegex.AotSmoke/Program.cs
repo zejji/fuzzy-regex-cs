@@ -182,7 +182,7 @@ internal static class Program
         Console.WriteLine(Mark("to Main", toMain, "runtime init, before a line of this app runs"));
         Console.WriteLine(Mark("to console", toConsoleReady, "Console.OutputEncoding = UTF8"));
         Console.WriteLine(Mark("to 1st answer", toFirstAnswer, "first pattern compiled and matched"));
-        Console.WriteLine(Mark("to end", total, "all cases, including the timeout case's 50 ms"));
+        Console.WriteLine(Mark("to end", total, "all cases, including the timeout case's 1 ms"));
 
         if (misses.Count > 0)
         {
@@ -486,12 +486,13 @@ internal static class Program
         // Since 2026-09-26 the pattern is `(a|aa){1,99}$`. The failure memo (RepeatInfo.FailureMemo)
         // made `(a|aa)+$` fail at once, and a repeat with a maximum gets no memo, so the bounded
         // form is the same search at the old speed: 2,107 ms over this subject (Release, one run).
+        // So the budget is 1 ms since 2026-09-28, not 50 (D13): a 2,000x margin, not 42x.
         yield return (
             "match-timeout",
             "RegexMatchTimeoutException",
             static () =>
             {
-                FuzzyRegex pattern = new(@"(a|aa){1,99}$", FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(50));
+                FuzzyRegex pattern = new(@"(a|aa){1,99}$", FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(1));
                 try
                 {
                     pattern.Match(new string('a', 32) + "b");

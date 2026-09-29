@@ -299,6 +299,9 @@ public sealed class DemoEngineContractTests
         Error(Run("(", "", "abc")).Should().Contain("missing )");
     }
 
+    /// <summary>A budget no runaway fits in on any machine; see the runaway test.</summary>
+    private static readonly TimeSpan _oneMillisecond = TimeSpan.FromMilliseconds(1);
+
     /// <summary>
     /// The pathological pattern <c>TimeoutAndCancellationTests</c> and
     /// <c>LazyEnumerationTests</c> already use: exponential backtracking with no way to succeed.
@@ -306,45 +309,84 @@ public sealed class DemoEngineContractTests
     /// harness proves that half in a browser.
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_runaway_pattern_comes_back_as_a_timeout_error_not_as_an_exception()
     {
-        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-
         // S60 changed the tail from 'b': the required-string prefilter refuses a subject with no
         // 'b' in it before matching starts, so the old pattern is no longer a runaway anywhere.
         // '\b\B' is false at every position and offers no literal to key on, so it still is. The
         // '\1' keeps it a runaway since the failure memo: a pattern with a backreference gets none
         // (TimeoutAndCancellationTests' pattern says why).
-        Error(Run(@"(a|a)*\1\b\B", "", new string('a', 30))).Should().Contain("timed out");
-
+        //
         // The message alone is not the contract - returning is. Asserting only on the text is how
-        // the suite stayed green while Run could take forever (S70 review). The bound is loose
-        // because the walk polls its deadline between steps and each step carries its own budget,
-        // so the true ceiling is about twice MatchTimeout, not once.
-        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
+        // the suite stayed green while Run could take forever (S70 review). So the call is bounded
+        // in engine steps, where until 2026-09-28 it was bounded at ten seconds (D13). The budget
+        // is a millisecond rather than the shipped two seconds, so that neither bound depends on
+        // the machine: thirty 'a's are about 2^30 steps, which no machine takes in a millisecond,
+        // and a millisecond of steps is a few thousand here, so a machine would have to be
+        // thousands of times faster to reach the bound. A walk that ignored the budget stops at it.
+        EngineWork.ShouldTakeAtMostSteps(
+            static () =>
+                Error(DemoEngine.Run(@"(a|a)*\1\b\B", "", new string('a', 30), "", "", "", _oneMillisecond))
+                    .Should()
+                    .Contain("timed out"),
+            20_000_000,
+            "the budget stops a runaway"
+        );
     }
 
     /// <summary>
     /// <c>EnumerateMatches</c>'s <c>timeout</c> is documented as "How long ONE step may run...
     /// this is not the whole walk's budget" (<c>src/FuzzyRegex/FuzzyRegex.cs:947</c>), so a lazy
     /// walk of a thousand matches gets a thousand budgets. Measured before the fix: 31.6 seconds
-    /// for this subject, returning success rather than a timeout.
+    /// for this subject under <c>(a|a)*\1?b</c>, returning success rather than a timeout.
     /// </summary>
     /// <remarks>
-    /// Each chunk is eighteen <c>a</c>s, a <c>c</c> the pattern cannot pass, and the <c>b</c> that
-    /// finally matches - so every single step finishes well inside a per-step budget and two
-    /// hundred of them do not come close to fitting in one.
+    /// Each chunk is eighteen <c>a</c>s, a <c>c</c> and a <c>b</c>, so the subject holds two
+    /// hundred matches of <c>b</c>.
     /// </remarks>
     [Test]
     public void The_whole_walk_shares_one_time_budget_rather_than_one_per_match()
     {
+        // The walk polls the caller's deadline between matches, so a deadline that has already
+        // passed stops it at the first match whatever the machine's speed, and a walk that left
+        // the budget to each step would return all two hundred. Until 2026-09-28 this ran an
+        // exponential pattern against the real two seconds and bounded the wall clock, which a
+        // busy machine can break (D13). With the deadline given, each match can be cheap.
         string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "cb", 200));
-        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        var regex = new FuzzyRegex("b", FuzzyRegexOptions.None, EngineWork.HangGuard);
 
-        // The optional '\1' keeps each step exponential; see the runaway test above.
-        Error(Run(@"(a|a)*\1?b", "", subject)).Should().Contain("timed out");
+        bool finished = DemoEngine.TryWalk(
+            regex,
+            subject,
+            System.Diagnostics.Stopwatch.GetTimestamp(),
+            out List<DemoMatch> matches,
+            out bool _
+        );
 
-        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
+        finished.Should().BeFalse("the deadline had passed before the first match was found");
+        matches.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The other half of <see cref="The_whole_walk_shares_one_time_budget_rather_than_one_per_match"/>:
+    /// that a search really hands the walk a deadline. Each of the thousand matches costs 2.3 ms in
+    /// Release and 14.5 ms in Debug (2026-09-28), so every one fits in a 200 ms budget of its own
+    /// and the thousand together do not.
+    /// </summary>
+    /// <remarks>
+    /// Robust to the machine in both directions. Slower, a single match may exceed the budget,
+    /// which is a timeout too. Faster, the thousand still overrun one budget unless each match
+    /// took under a fifth of a millisecond, about eleven times faster than Release here.
+    /// </remarks>
+    [Test]
+    public void A_search_hands_the_walk_one_deadline_for_every_match()
+    {
+        string subject = string.Concat(Enumerable.Repeat(new string('a', 12) + "cb", DemoEngine.MaxMatches));
+
+        string answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "", "", "", TimeSpan.FromMilliseconds(200));
+
+        Error(answer).Should().Contain("timed out");
     }
 
     /// <summary>
@@ -356,18 +398,14 @@ public sealed class DemoEngineContractTests
     /// </summary>
     /// <remarks>
     /// <b>This test and
-    /// <see cref="A_partial_answer_whose_capture_list_was_clipped_says_truncated"/> fail under
-    /// coverage instrumentation, and only there.</b> Both assert a SIZE cap and both run the
-    /// shipped path, which also carries <see cref="DemoEngine.MatchTimeout"/> - a two-second wall
-    /// clock. Measured 2026-09-20 (S57), Release, <c>tools/probes/demo-cap-timing.cs</c>: the match
-    /// itself takes 27 ms here and 44 ms there, so the plain gate has a 45-to-70-fold margin and
-    /// the whole suite - 6,475 tests on the day, and it only grows - passes in 7 s. The same suite
-    /// under <c>--coverage --coverage-output-format cobertura</c> takes 35 s and fails one of two at
-    /// 2s 044ms, having spent the budget inside the instrumented engine; run the 61 tests of this
-    /// class alone under coverage and both pass. Reaching the cap costs 50,000 spans by
-    /// definition, so no smaller subject avoids the race - the answer is that the coverage run is
-    /// a one-off analysis tool and not a gate, not that these tests are flaky or that the machine
-    /// was loaded.
+    /// <see cref="A_partial_answer_whose_capture_list_was_clipped_says_truncated"/> run with
+    /// <see cref="EngineWork.HangGuard"/> in place of <see cref="DemoEngine.MatchTimeout"/></b>,
+    /// because both assert a SIZE cap and the shipped two-second wall clock made them a race.
+    /// Measured 2026-09-20 (S57), Release, <c>tools/probes/demo-cap-timing.cs</c>: the match itself
+    /// takes 27 ms here and 44 ms there, yet under <c>--coverage</c> one of the two failed at
+    /// 2s 044ms, and on 2026-09-28 the partial one failed at 2s 141ms with the suite running beside
+    /// a CPU burner (D13). Reaching the cap costs 50,000 spans by definition, so no smaller subject
+    /// avoids the race; a budget that is not the thing under test does.
     /// </remarks>
     [Test]
     public void One_match_cannot_carry_unbounded_capture_spans()
@@ -375,7 +413,7 @@ public sealed class DemoEngineContractTests
         string pattern = new string('(', 20) + @"\w" + new string(')', 20) + "+";
         string subject = new('a', 5_000);
 
-        string answer = Run(pattern, "", subject);
+        string answer = DemoEngine.Run(pattern, "", subject, "", "", "", EngineWork.HangGuard);
 
         using JsonDocument json = JsonDocument.Parse(answer);
         json.RootElement.GetProperty("matches").GetArrayLength().Should().Be(1);
@@ -768,16 +806,23 @@ public sealed class DemoEngineContractTests
     /// The blind review of 2026-09-19 found this reported <c>truncated: false</c> with 49,997 of
     /// 60,000 captures rendered, which is an answer that is short of the truth and does not say so.
     /// <para>
-    /// This is the test that fails under coverage instrumentation; see
-    /// <see cref="One_match_cannot_carry_unbounded_capture_spans"/> for the measurements and why
-    /// no smaller subject avoids it.
+    /// It runs with a budget of its own, not the shipped two seconds; see
+    /// <see cref="One_match_cannot_carry_unbounded_capture_spans"/> for why.
     /// </para>
     /// </remarks>
     [Test]
     public void A_partial_answer_whose_capture_list_was_clipped_says_truncated()
     {
         using JsonDocument json = JsonDocument.Parse(
-            DemoEngine.Run(@"(\w)+", "", new string('a', DemoEngine.MaxSpans + 10_000), "partial", "", "")
+            DemoEngine.Run(
+                @"(\w)+",
+                "",
+                new string('a', DemoEngine.MaxSpans + 10_000),
+                "partial",
+                "",
+                "",
+                EngineWork.HangGuard
+            )
         );
 
         json.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue();
@@ -828,17 +873,24 @@ public sealed class DemoEngineContractTests
     /// </para>
     /// </remarks>
     [Test]
+    [Category(EngineWork.Category)]
     public void Replace_mode_answers_inside_one_budget_when_the_pattern_runs_away()
     {
         string subject = string.Concat(Enumerable.Repeat(new string('a', 22) + "c", 10)) + "aaab";
-        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
         // The optional '\1' keeps the search exponential; see the runaway test above. Twenty-two
         // 'a's a chunk rather than eighteen since 2026-09-26: with the '\1', the eighteen-'a'
         // subject's whole replacement pass took 1.1 s in Release, inside the two-second budget.
-        Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "")).Should().Contain("timed out");
-
-        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(6));
+        // Bounded in engine steps with a one-millisecond budget, for the reasons the runaway test
+        // gives, where until 2026-09-28 it was bounded at six seconds (D13).
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+                Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "", _oneMillisecond))
+                    .Should()
+                    .Contain("timed out"),
+            20_000_000,
+            "the budget stops a runaway replacement"
+        );
     }
 
     /// <summary>

@@ -233,6 +233,11 @@ internal static class OracleComparer
     /// with entry 42 (see the comment where they are applied). Used by
     /// <see cref="RunWithoutTheExactDeletion"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// Compile every fuzzy full-case-folded run to its folding alone, as upstream does (ledger entry
+    /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
+    /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
@@ -241,7 +246,8 @@ internal static class OracleComparer
         Action<FuzzyRegex>? ablate = null,
         bool upstreamReverseGrapheme = false,
         bool withoutTheFuzzySearchFixes = false,
-        bool keepEmptyIterationRule = false
+        bool keepEmptyIterationRule = false,
+        bool upstreamFoldedRuns = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -275,7 +281,8 @@ internal static class OracleComparer
                 // the public constructor a trailing int of its own and this row's version became a
                 // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion,
-                upstreamReverseGrapheme: upstreamReverseGrapheme
+                upstreamReverseGrapheme: upstreamReverseGrapheme,
+                upstreamFoldedRuns: upstreamFoldedRuns
             );
         }
         catch (NotImplementedException)
@@ -776,6 +783,128 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             upstreamReverseGrapheme: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with every fuzzy full-case-folded run compiled to its
+    /// folding alone, as upstream compiles it.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 49 gives such a run a second, character-by-character reading, so an expanding
+    /// character such as <c>ß</c> can be edited as one character, as it can on its own.
+    /// <c>upstreamFoldedRuns</c> drops that reading at compile time. The
+    /// <c>full-fold-run-edits-an-expanding-character-whole</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's compile, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamFoldedRuns(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            upstreamFoldedRuns: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a fuzzy full-folded string editing a subject
+    /// character that expands under full case folding one folded character at a time, as upstream
+    /// does, and never whole.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 52 lets such a string substitute or insert the whole subject character, so
+    /// <c>(?fi)(?:ssx){s&lt;=1}</c> over 'ǰsx' is (0, 3) with one substitution where upstream finds
+    /// nothing. Setting <c>PatternObject.SkipWholeFoldedCharEdits</c> restores upstream's edits. The
+    /// <c>full-fold-run-edits-an-expanding-subject-character-whole</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamSubjectFoldEdits(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.SkipWholeFoldedCharEdits = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with ledger entry 52's whole-character edits switched
+    /// off together with ledger entry 49's character reading and, if asked, the four earlier
+    /// full-fold fixes.
+    /// </summary>
+    /// <remarks>
+    /// For the second arm of <c>full-fold-run-edits-an-expanding-subject-character-whole</c>: rows
+    /// the earlier full-fold entries explained until the whole-character edits, left on, changed
+    /// what their ablations answer.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withTheSubjectFoldEdits">Whether to leave ledger entry 52's edits ON.</param>
+    /// <param name="withoutTheEarlierFoldFixes">Whether to switch off S83, S84, S85 and the retried fold steps too.</param>
+    /// <returns>What this port answers so ablated, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheFoldReadings(
+        OracleRow row,
+        bool withTheSubjectFoldEdits,
+        bool withoutTheEarlierFoldFixes
+    )
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: compiled =>
+            {
+                compiled.PatternObject.SkipWholeFoldedCharEdits = !withTheSubjectFoldEdits;
+
+                if (withoutTheEarlierFoldFixes)
+                {
+                    compiled.PatternObject.ChargeUntouchedFoldings = true;
+                    compiled.PatternObject.SkipGroupFoldLeftovers = true;
+                    compiled.PatternObject.SkipLeftoverTakeBack = true;
+                    compiled.PatternObject.SkipRetriedFoldSteps = true;
+                }
+            },
+            upstreamFoldedRuns: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the four earlier full-fold fixes switched off
+    /// together - S83's untouched foldings, S84's group leftovers, S85's leftover take-back and
+    /// the retried fold steps - and, if asked, ledger entry 49's character reading too.
+    /// </summary>
+    /// <remarks>
+    /// For the second arm of <c>full-fold-run-edits-an-expanding-character-whole</c>: rows those
+    /// fixes explained until the reading, left on, changed what their ablations answer.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withTheUpstreamFoldedRuns">Whether to drop the character reading as well.</param>
+    /// <returns>What this port answers so ablated, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheFoldFixes(OracleRow row, bool withTheUpstreamFoldedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.ChargeUntouchedFoldings = true;
+                compiled.PatternObject.SkipGroupFoldLeftovers = true;
+                compiled.PatternObject.SkipLeftoverTakeBack = true;
+                compiled.PatternObject.SkipRetriedFoldSteps = true;
+            },
+            upstreamFoldedRuns: withTheUpstreamFoldedRuns
         );
     }
 

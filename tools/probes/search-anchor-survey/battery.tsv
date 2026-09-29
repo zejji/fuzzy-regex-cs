@@ -1,0 +1,6 @@
+# id	pattern	subject	pos	what the row asks
+after	a\G	ab	0	does \G hold anywhere but the search start (after a consumed char)?
+later	\Gb	ab	0	does a search retry \G at each later candidate start?
+pos	\Gab	zab	1	does pos/startat move the anchor?
+alt	a\Gb|ab	ab	0	a failed \G branch falls through to the next branch
+revafter	b\G	ab	-	right-to-left: \G at the search start (the end); .NET RightToLeft, mrab (?r)

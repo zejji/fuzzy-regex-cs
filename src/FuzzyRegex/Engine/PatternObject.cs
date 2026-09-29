@@ -180,6 +180,13 @@ internal sealed class PatternObject
     /// <summary>Upstream <c>call_ref_info</c> and <c>call_ref_info_count</c>.</summary>
     internal readonly List<CallRefInfo> CallRefInfoList = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S: whether the pattern holds a group call. Only then does the matcher track the
+    /// text an attempt has reached (<see cref="MatchState.ReachedLow"/>), so a pattern without
+    /// calls pays nothing for the call guard on its backtracking path.
+    /// </summary>
+    internal bool HasGroupCalls;
+
     /// <summary>Upstream <c>repeat_info</c>.</summary>
     internal readonly List<RepeatInfo> RepeatInfoList = [];
 
@@ -570,6 +577,13 @@ internal sealed class PatternObject
     /// and <c>docs/DIVERGENCES.md</c>.
     /// </remarks>
     internal bool SkipLeftoverTakeBack;
+
+    /// <summary>
+    /// Oracle-only: a fuzzy <c>STRING_FLD</c> item edits a subject character that expands under full
+    /// case folding one folded character at a time, as upstream does, and never whole (D7). Set only
+    /// by <c>OracleComparer</c>'s ablation; never by the library. See <c>Matcher.FoldWholeSub</c>.
+    /// </summary>
+    internal bool SkipWholeFoldedCharEdits;
 
     /// <summary>
     /// Oracle-only: a <c>(*SKIP)</c> moves the slice the moment it runs, as upstream's

@@ -531,6 +531,69 @@ public sealed class CaseInsensitiveMatchingTests
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     /// <summary>
+    /// A bare case-insensitive <c>\p{Ll}</c> that can start the match accepts a capital with no
+    /// lower-case partner, although the compiler folds it into a first-set precheck.
+    /// </summary>
+    /// <remarks>
+    /// Oracle row 20260927:3732, ledger entry 35 H. When the first item can match nothing, upstream's
+    /// <c>_check_firstset</c> (<c>upstream/regex/_regex_core.py:380</c>) compiles every possible first
+    /// item into one case-insensitive set, here <c>[\p{Ll}a]</c>, and tests it before each attempt.
+    /// A property member of that set is answered by <c>matches_member_ign</c>
+    /// (<c>upstream/src/_regex.c:3085-3107</c>), which asks plain <c>\p{Ll}</c> of each case variant.
+    /// U+2102 and U+1D518 are capitals with no case variant, so the precheck refuses the position
+    /// that the bare property, by <c>matches_PROPERTY_IGN</c> (<c>:2958-2966</c>), accepts.
+    /// Upstream, measured 2026-09-28 on regex 2026.9.10 by
+    /// <c>tools/probes/ignorecase-property-precheck.py</c>:
+    /// <code>
+    /// (?i)\p{Ll}         U+2102      (0, 1)
+    /// (?i)\p{Ll}?a{2}    U+2102 aa   (1, 3)     'A' aa gives (0, 3)
+    /// (?ri)a{2}\p{Ll}?   aa U+2102   (0, 2)     (?ri)a{2}\p{Ll}, not optional, gives (0, 3)
+    /// </code>
+    /// PCRE2 10.47, Perl 5.42 and .NET 10 accept U+2102 for a case-insensitive <c>\p{Ll}</c>, bare
+    /// and in a set alike. This port answers every spelling with the bare rule.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="index">The expected match index, in UTF-16 code units.</param>
+    /// <param name="length">The expected match length, in UTF-16 code units.</param>
+    [Test]
+    [Arguments(@"(?i)\p{Ll}?a{2}", "\u2102aa", 0, 3)]
+    [Arguments(@"(?i)\p{Ll}?aa", "\u2102aa", 0, 3)]
+    [Arguments(@"(?ri)a{2}\p{Ll}?", "aa\u2102", 0, 3)]
+    [Arguments(@"(?i)\p{Ll}?a{2}", "\U0001D518aa", 0, 4)]
+    [Arguments(@"(?ri)a{2}\p{Ll}?", "aa\U0001D518", 0, 4)]
+    public void A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        // Version 0, as the oracle asks it: under Version 1 IGNORECASE brings FULLCASE with it, and
+        // _check_firstset builds no precheck for a full-case pattern, so the door is shut.
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.Version0).Match(subject);
+
+        (m.Index, m.Length).Should().Be((index, length), pattern);
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately: oracle row 20260927:3732 as the oracle asked it, flags
+    // IGNORECASE | MULTILINE. Upstream's sub leaves U+1D518 in place, so its answer keeps U+1D518
+    // before the final U+1F600; see the test above for why.
+    [Test]
+    public void Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches()
+    {
+        string subject = "\n\r\U0001D518\U0001F600";
+
+        string result = new FuzzyRegex(
+            @"(?im)(?r)(?P<g1>\p{ASCII}{2})(\p{Ll}+?)??",
+            FuzzyRegexOptions.Version0
+        ).Replace(subject, "\U0001F600\\1]");
+
+        result.Should().Be("\U0001F600\n\r]\U0001F600");
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
     /// Under IGNORECASE each member of a set matches case-insensitively first, and only then do
     /// the set's operations combine the answers, so nesting a member or naming it in an operation
     /// never changes what it matches.

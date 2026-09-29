@@ -142,7 +142,7 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The thirty-four rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The thirty-eight rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -350,6 +350,20 @@ internal static class ExpectedDivergences
     /// recorded <c>bestmatchFreeOutcome</c>, and the recorder flags <c>bestmatch-no-worse</c>. This
     /// port answers that fit to the position. Measured 2026-09-25 on regex 2026.9.10.
     /// </para>
+    /// <para>
+    /// Rows 35 to 38 came in on 2026-09-28 as a candidate new bug, "BESTMATCH retries under
+    /// fullmatch lose a match", and are this entry's row 1 with a different letter:
+    /// <c>(?b)(?:b){e&lt;=2}</c> and <c>{i&lt;=2}</c> fullmatched against 'bba', the first reversed,
+    /// and a plain <c>match</c> of <c>(?b)(?:b){e&lt;=2}$</c>. Upstream answers no match to all four;
+    /// its flagless answer is (0, 3) with insertions at 1 and 2, which is this port's. Row 38 is why
+    /// the candidate's framing was wrong: a trailing <c>$</c> loses the fit with no fullmatch in the
+    /// question. Setting <c>PatternObject.DoubleCountTrailingInsertions</c> makes this port answer
+    /// None, pinned in
+    /// <c>FuzzyBestMatchTests.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end</c>.
+    /// Recorded by <c>pwsh -File tools/run-oracle.ps1 -Rows tools/probes/bestmatch-fullmatch-rows.jsonl</c>
+    /// and isolated by <c>python tools/probes/bestmatch-fullmatch-trailing-insertions.py</c>, both
+    /// on regex 2026.9.10, 2026-09-28.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -386,6 +400,10 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?b)(?r)\\m(?:\ud83d\ude00\\d\ud83d\ude00){e:[a-z]}", "flags": 0, "namedLists": {}, "subject": "b\ud83d\ude00\ud83d\ude00", "operation": "subf", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<><>\ud83d\ude00", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>", "count": 2}}
         {"generator": "rows", "pattern": "(?b)(\\p{L}){i,d}c", "flags": 0, "namedLists": {}, "subject": "\nc", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": [0]}}}
         {"generator": "fuzzy", "pattern": "(?b)(?e)(?fi)(?:[ab]+\\s(?:0\u00dfa){e<=2,s<=1}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "BAa 0SsTA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [7], "insertions": [8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){i<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?r)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}$", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -835,7 +853,6 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "\\b(?P<g1>[^a-f])*?(?P<g2>[A-Z]{1}?)", "flags": 16386, "namedLists": {}, "subject": "\u00df\u00df\u0131\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "\u00df", "\u0131", "\u0131"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[0, 1], [1, 1]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 3]}]}
         {"generator": "verbs", "pattern": "[A-Z]{1,3}(?<![a\\d](*SKIP))[\\w\\s]\\d*+(?=(*PRUNE))[^a][^a]*(?!(*SKIP)\u0131)\\S", "flags": 10, "namedLists": {}, "subject": "A\u0130\ufb00\u0131\r\nS", "operation": "subf", "template": "{0}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 7]}]}
         {"generator": "interactions", "pattern": "(?p)(?P<g1>\\d)??\\L<w1>{e<=2:\\s}", "flags": 266, "namedLists": {"w1": ["a", "\ufb01"]}, "subject": "\u0130\ufb01\r\n\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", null, "", null, "", null, "\u0131", null, ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "codepointSpan": [1, 4]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [4, 4]}, {"groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [5, 5]}], "posixFreeOutcome": {"kind": "split", "parts": ["", null, "", null, "", null, "", null, "", null, "", null, "", null, "\u0131", null, ""]}}
-        {"generator": "interactions", "pattern": "(?b)(?r)(?:ﬀ\\ ){1<=e<=2}(?P<g1>\\p{Ll})(?:(?(1)(?<=(?P>g1))[a-f]))", "flags": 16386, "namedLists": {}, "subject": "ﬀﬀ İİıı", "operation": "split", "count": 1, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["ıı", "İ", "ﬀ"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 4, "captures": [[1, 4]]}, {"number": 1, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}, "codepointSpan": [1, 5]}], "bestmatchFreeOutcome": {"kind": "split", "parts": ["ı", "ı", "ﬀ"]}}
         {"generator": "verbs", "pattern": "^(?P<g1>[A-Z]*(?<=(*SKIP)[[:alpha:]])S)", "flags": 16386, "namedLists": {}, "subject": "ııSSßßﬀ", "operation": "split", "count": 1, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 4]}], "pruneOutcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}}
         {"generator": "verbs", "pattern": "(?r)(?>[A-Z]++(*SKIP)[[:alpha:]])(?:[[:alpha:]](*PRUNE)){2,3}", "flags": 10, "namedLists": {}, "subject": "ıAııa ﬀ", "operation": "sub", "template": "]😀]", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b\\K([A-Z])(?:([^\\p{L}]+)(\\p{L}*?)(?:([a\\d])){s<=1}){1<=e<=2:[a-z]}", "flags": 2, "namedLists": {}, "subject": "ııa", "operation": "sub", "template": "\\\\", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\\ııa", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 4, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}, "codepointSpan": [0, 0]}]}
@@ -851,7 +868,6 @@ internal static class ExpectedDivergences
         {"generator": "lookaround", "pattern": "I", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
         {"generator": "verbs", "pattern": "(?r)(?:[abz]*(*SKIP)a|[a-f])(?P<g1>(?:[^\\p{L}]*(*PRUNE)[A-Z]|[a]))", "flags": 10, "namedLists": {}, "subject": "\u0131a\u0130A\n\u0131", "operation": "sub", "template": "\\\\\\g<g1>\\g<g1>\\n", "count": 2, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u0131a\u0130\\\n\u0131\n\u0131\n", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [3, 6]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [3, 6]}], "pruneOutcome": {"kind": "sub", "text": "\u0131a\u0130\\\n\u0131\n\u0131\n", "count": 1}}
         {"generator": "verbs", "pattern": "I", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "x", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
-        {"generator": "interactions", "pattern": "\\b(?>(?:\u0130\u00df[^a]{2,2}){1i+2d+1s<=3:\\w})(?:[[:digit:]](*SKIP)[\\w\\s]|[^a])", "flags": 16394, "namedLists": {}, "subject": "\ufb00\ufb01a\u0130\u00df\u00df", "operation": "subf", "template": "{0[-1]}-{0[-1]}", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "\ufb00\ufb01a\u0130\u00df-\ufb00\ufb01a\u0130\u00df\u00df", "count": 1}}
         """;
 
     /// <summary>
@@ -884,6 +900,14 @@ internal static class ExpectedDivergences
     // 'as\u00df\u0131S', left on 2026-09-25: its alternation compiles to a set, and ledger entry 35
     // gave a set member the bare property's cased-letter rule, under which U+0131 is a cased letter
     // without any Turkic row. Both engines now answer the same, so it is no longer a divergence.
+    // A 26th, the old row 9 (`interactions` `(?b)(?r)(?:\ufb00\ ){1<=e<=2}(?P<g1>\p{Ll})...` as a
+    // split over '\ufb00\ufb00 \u0130\u0130\u0131\u0131'), left on 2026-09-28: ledger entry 49 lets
+    // the fuzzy run insert the U+0130 as one character, where its two-letter folding cost two, so
+    // this port now finds upstream's (1, 5) with one insertion and the two engines agree.
+    // A 27th, seed 103 row 3829 of the 2026-09-26 triage (`interactions`
+    // `\b(?>(?:\u0130\u00df[^a]{2,2}){1i+2d+1s<=3:\w})...` as a subf over
+    // '\ufb00\ufb01a\u0130\u00df\u00df'), left on 2026-09-28 for the same reason: the fuzzy run
+    // `\u0130\u00df` can now substitute each of its letters as one character, and the engines agree.
     private static readonly string[] _turkicWithoutSpansOurs =
     [
         "sub 0 '\\u0131'",
@@ -894,13 +918,12 @@ internal static class ExpectedDivergences
         "split 1 '\\u00df\\u00df\\u0131\\u0131'",
         "sub 0 'A\\u0130\\ufb00\\u0131\\u000d\\u000aS'",
         "split 9 '' <null> '\\u0130' <null> '' <null> '\\u0131' <null> ''",
-        "split 3 ' \\u0130\\u0130\\u0131\\u0131' '\\ufb00' ''",
         "split 1 '\\u0131\\u0131SS\\u00df\\u00df\\ufb00'",
         "sub 0 '\\u0131A\\u0131\\u0131a \\ufb00'",
         "sub 0 '\\u0131\\u0131a'",
         "sub 0 '\\ufb01\\ufb01\\u0131\\u0131'",
         "sub 0 '\\u0131\\u0131aaA'",
-        // Rows 16 to 18 are S57f's, rows 74120, 76484 and 116428 of the 6000-row date-seed gate.
+        // Rows 15 to 17 (16 to 18 until 2026-09-28) are S57f's, rows 74120, 76484 and 116428 of the 6000-row date-seed gate.
         // Each was judged by the same one-variable pair, run through BOTH engines rather than
         // inferred: remove IGNORECASE and the two agree, and swap the row's Turkic letter for one
         // whose fold this port shares - `g` on row 16, `A` on row 17, `b` on row 18, in the pattern
@@ -922,10 +945,6 @@ internal static class ExpectedDivergences
         "split 1 '\\u0131'",
         "sub 0 '\\u0131a\\u0130A\\u000a\\u0131'",
         "sub 0 '\\u0131'",
-        // From the 2026-09-26 triage of seeds 101-104 (`verbs,partial,interactions`, 1500 rows): seed 103 row 3829.
-        // Swap the U+0130 for `A` or `g` in pattern and subject, or drop IGNORECASE, and the two engines
-        // agree, so the fold is the only variable. Measured 2026-09-26 on regex 2026.9.10 with `-Rows`.
-        "sub 0 '\\ufb00\\ufb01a\\u0130\\u00df\\u00df'",
     ];
 
     /// <summary>
@@ -1127,21 +1146,17 @@ internal static class ExpectedDivergences
     /// </para>
     /// </remarks>
     private const string _turkicPatternSideRows = """
-        {"generator": "interactions", "pattern": "(?(?=\\D)[\\p{L}||\\p{N}])\\L<w1>{e<=2}\\K", "flags": 16642, "namedLists": {"w1": ["İı", "ﬀ"]}, "subject": "ﬀ\r ﬀ", "operation": "match", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3, 4]}}]}
         {"generator": "partial-sliced", "pattern": "^İ\\K\\b", "flags": 16650, "namedLists": {}, "subject": "sﬁﬀıİ", "operation": "search", "partial": true, "pos": 5, "endpos": 5, "codepointSlice": [5, 5], "oracle": "prefilter-free", "codepointSpan": [5, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
-        {"generator": "interactions", "pattern": "\\L<w1>{1i+2d+1s<=3}([[:digit:]]{3,3}){0}?", "flags": 266, "namedLists": {"w1": ["aa", "İﬁS"]}, "subject": "aassAA\rA ", "operation": "match", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [], "deletions": []}}]}
         """;
 
     /// <summary>
     /// This port's judged answer to each row of <see cref="_turkicPatternSideRows"/>, in the same
     /// order, as the report renders it.
     /// </summary>
-    private static readonly string[] _turkicPatternSideOurs =
-    [
-        "match 0:(2,0)[(2,0)] last=-1/- fuzzy=(1,0,0)[s:1][i:][d:]",
-        "no match",
-        "match 0:(0,2)[(0,2)] 1:unset last=-1/-",
-    ];
+    // Rows 25482 and sweep row 34, the two named-list rows, left on 2026-09-28: ledger entry 49 lets
+    // a fuzzy run substitute an expanding list letter as one character, as upstream's one-letter
+    // U+0130 always could, so this port now gives upstream's answer to both.
+    private static readonly string[] _turkicPatternSideOurs = ["no match"];
 
     /// <summary>
     /// <see cref="_turkicPatternSideRows"/> by its question, mapped to this port's judged answer.
@@ -2743,7 +2758,10 @@ internal static class ExpectedDivergences
 
     /// <summary>
     /// The rows of <c>scoped-encoding-and-case-insensitive-property-rules</c>, recorded 2026-09-25 on
-    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each.
+    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each. The last three are
+    /// door H, recorded 2026-09-28 by <c>python tools/record-oracle.py --rows
+    /// tools/probes/ignorecase-property-precheck-rows.jsonl</c>: oracle row 20260927:3732 and its two
+    /// minimised forms, where the first-set precheck is the set.
     /// </summary>
     private const string _scopedEncodingPropertyRulesRows = """
         {"generator": "rows", "pattern": "(?a:(?s:\\w))", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
@@ -2752,6 +2770,9 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?i)x?\\p{Lt}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?i)\\p{Upper=No}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?i)(?a:[[:upper:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "interactions", "pattern": "(?r)(?P<g1>\\p{ASCII}{2})(\\p{Ll}+?)??", "flags": 10, "namedLists": {}, "subject": "\n\r\ud835\udd18\ud83d\ude00", "operation": "sub", "template": "\ud83d\ude00\\1]", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ud83d\ude00\n\r]\ud835\udd18\ud83d\ude00", "count": 1}}
+        {"generator": "rows", "pattern": "(?i)\\p{Ll}?a{2}", "flags": 0, "namedLists": {}, "subject": "\u2102aa", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ri)a{2}\\p{Ll}?", "flags": 0, "namedLists": {}, "subject": "aa\u2102", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         """;
 
     /// <summary>This port's judged answer to each row of <see cref="_scopedEncodingPropertyRulesRows"/>.</summary>
@@ -2763,6 +2784,9 @@ internal static class ExpectedDivergences
         "match 0:(0,1)[(0,1)] last=-1/-",
         "no match",
         "no match",
+        "sub 1 '\\ud83d\\ude00\\u000a\\u000d]\\ud83d\\ude00'",
+        "match 0:(0,3)[(0,3)] last=-1/-",
+        "match 0:(0,3)[(0,3)] last=-1/-",
     ];
 
     /// <summary><see cref="_scopedEncodingPropertyRulesRows"/> by its question, mapped to this port's judged answer.</summary>
@@ -2995,25 +3019,23 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The ten rows of <c>full-fold-fuzzy-deletion</c>, rows 2 to 11 of what is recorded by
+    /// The five rows of <c>full-fold-fuzzy-deletion</c>, from what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s83-fold-deletion-rows.jsonl</c> on
     /// 2026-09-22.
     /// </summary>
     /// <remarks>
-    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Rows 1 to 6
-    /// are the wave rows the fix moved: seed 7 row 6587, seed 4242 rows 6047, 6106, 6392 and 6443,
-    /// and seed 20260922 row 6080. Rows 7 to 10 are the defect minimised, one per site the fix
-    /// touched: a folded string forward and reversed, and a folded backreference forward and
+    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Row 1 is seed
+    /// 4242 row 6443, a wave row the fix moved. Rows 2 to 5 are the defect minimised, one per site
+    /// the fix touched: a folded string forward and reversed, and a folded backreference forward and
     /// reversed. Seed 7 row 6250 was row 1 until S84; since S84 it needs that slice's retry repair
-    /// as well, so it moved to <see cref="_groupFoldRetryRows"/>.
+    /// as well, so it moved to <see cref="_groupFoldRetryRows"/>. Five more wave rows left on
+    /// 2026-09-28 - seed 7 row 6587, seed 4242 rows 6047, 6106 and 6392, and seed 20260922 row
+    /// 6080 - because each deletes a pattern ligature or sharp s, and ledger entry 49's character
+    /// reading now deletes it as one character too. Either fix alone gives this port's answer, so
+    /// only switching both off gives upstream's, and they moved to <see cref="_fullFoldRunRows"/>.
     /// </remarks>
     private const string _foldFixRows = """
-        {"generator": "rows", "pattern": "(?fi)(?r)\\B(?:ﬀo[ab]){d<=1}", "flags": 0, "namedLists": {}, "subject": "xßFOA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
-        {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?straße){d<=2}", "flags": 0, "namedLists": {}, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": []}}
-        {"generator": "rows", "pattern": "(?fi)(?:ﬀo(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "namedLists": {}, "subject": "FaFOBAaQb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?fi)\\b(?:ﬀo(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "ßFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ßFOz", "count": 0}}
         {"generator": "rows", "pattern": "(?fi)\\b(oba)(?:.(?:\\1)){2i+1d+1s<=2:f}", "flags": 0, "namedLists": {}, "subject": "obabO0", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
-        {"generator": "rows", "pattern": "(?fi)(?:ﬆx😀𝟮){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": " 0t😀𝟮", "operation": "split", "count": 1, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" 0t😀𝟮"]}}
         {"generator": "rows", "pattern": "(?fi)(?:fi){d<=1}", "flags": 0, "namedLists": {}, "subject": "fe", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:fi){d<=1}", "flags": 0, "namedLists": {}, "subject": "ei", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(fi)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "fife", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -3134,6 +3156,46 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>full-fold-run-edits-an-expanding-character-whole</c>. Rows 1 to 5 are
+    /// hand-minimised, recorded by <c>python tools/record-oracle.py --rows
+    /// tools/probes/fi-sharp-s/rows.jsonl</c> on 2026-09-28. Rows 6 to 9 are seed 7 row 6587, seed
+    /// 4242 rows 6047 and 6106, and seed 20260922 row 6080, which
+    /// <c>full-fold-fuzzy-deletion</c> held until then and which the entry's second arm now claims.
+    /// Seed 4242 row 6392 was here too until ledger entry 52's whole-character edits changed what
+    /// this entry's ablations answer; it is in <see cref="_subjectFoldRows"/>.
+    /// </summary>
+    private const string _fullFoldRunRows = """
+        {"generator": "rows", "pattern": "(?fi)(?:\u00dfx){s<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:\u00dfx){d<=1}", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\u00dfx){s<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?bfi)(?:\u00dfx){e<=2}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?fi)(?:\ufb01x){s<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?r)\\B(?:ﬀo[ab]){d<=1}", "flags": 0, "namedLists": {}, "subject": "xßFOA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?straße){d<=2}", "flags": 0, "namedLists": {}, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?fi)(?:ﬀo(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "namedLists": {}, "subject": "FaFOBAaQb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:ﬆx😀𝟮){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": " 0t😀𝟮", "operation": "split", "count": 1, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" 0t😀𝟮"]}}
+        """;
+
+    /// <summary>
+    /// The rows of <c>full-fold-run-edits-an-expanding-subject-character-whole</c>. Rows 1 to 7 are
+    /// recorded by <c>python tools/record-oracle.py --rows tools/probes/d7-subject-fold/rows.jsonl</c>
+    /// on 2026-09-28: four hand-minimised, then seed 7 rows 6112 and 7477 and seed 4242 row 6392 of
+    /// that day's waves. Row 8 is <c>full-fold-leftover-take-back</c>'s fifth row, which this port
+    /// answers as it did before; with the whole-character edits left on, S85's ablation stopped
+    /// reproducing upstream's answer, so the entry's third arm claims it.
+    /// </summary>
+    private const string _subjectFoldRows = """
+        {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "s\u01f0x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:ssx){s<=1}", "flags": 0, "namedLists": {}, "subject": "\u01f0sx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:fst){i<=1}", "flags": 0, "namedLists": {}, "subject": "f\u00dfst", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?fi)(?:\ufb00o\\p{L}){e<=2,s<=1}", "flags": 0, "namedLists": {}, "subject": "a\ufb06fO\ufb06", "operation": "split", "count": 2, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a\ufb06fO\ufb06"]}}
+        {"generator": "rows", "pattern": "(?e)(?fi)(?r)(?:(?:\\1)\ufb00oab){e<=3}(ff)", "flags": 0, "namedLists": {}, "subject": "\ufb00fxf\u00dfOaBbff", "operation": "subf", "template": "<>", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb00fxf\u00dfOaBbff", "count": 0}}
+        {"generator": "rows", "pattern": "(?fi)\\b(?:\ufb00o(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "\u00dfFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u00dfFOz", "count": 0}}
+        {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
+        """;
+
+    /// <summary>
     /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
     /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -3146,9 +3208,10 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
+    /// Seven of the eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s85-leftover-take-back-rows.jsonl</c> on
-    /// 2026-09-23.
+    /// 2026-09-23. The fifth, <c>(?fi)(?:xfff){i&lt;=1,d&lt;=2}</c> over 'ﬀﬃfi', moved to
+    /// <see cref="_subjectFoldRows"/> on 2026-09-28.
     /// </summary>
     /// <remarks>
     /// The staleness alarm only; the entry is keyed on an ablation. No wave row at the three
@@ -3162,7 +3225,6 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?rfi)(?:sss){d<=1}", "flags": 0, "namedLists": {}, "subject": "ßß", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
         {"generator": "rows", "pattern": "(?fi)(?:ff){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬃ", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}]}
         {"generator": "rows", "pattern": "(?fi)(?:fffx){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃ", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
         {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){d<=1}(s)", "flags": 0, "namedLists": {}, "subject": "ßs", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "fSﬄ", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
@@ -4474,12 +4536,20 @@ internal static class ExpectedDivergences
                 + "forms match; Perl 5.42 and .NET 10's Regex give the bare and the set form the "
                 + "cased-letter answer, which this port now gives everywhere. (D) `(?i)\\p{Upper=No}` "
                 + "answers as `\\p{Upper}` because the collapse ignores the value (:2981); Perl gives "
-                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10.\n"
+                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10. (H) The same set "
+                + "rule reaches a pattern that wrote no set: when the first item can match nothing, "
+                + "_check_firstset (_regex_core.py:380) compiles a case-insensitive SET_UNION precheck "
+                + "of every possible first item, and its property member refuses a capital with no "
+                + "case partner (matches_member_ign, _regex.c:3085-3107), so `(?i)\\p{Ll}?a{2}` over "
+                + "U+2102 then 'aa' is (1, 3) and oracle row 20260927:3732 keeps U+1D518; with no precheck "
+                + "compiled upstream answers (0, 3) and this port's sub. Measured 2026-09-28.\n"
                 + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the generators rarely draw scoped "
                 + "encodings or `=No` values, and the rows keep the recheck asking upstream.",
             PinnedBy: "ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it, "
-                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does "
-                + "and .A_no_value_of_a_cased_property_is_its_complement",
+                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does, "
+                + ".A_no_value_of_a_cased_property_is_its_complement, "
+                + ".A_cased_property_hoisted_into_the_first_set_precheck_still_matches_a_capital_with_no_partner "
+                + "and .Oracle_row_3732_replaces_the_capital_its_optional_lower_case_group_matches",
             Example: _scopedEncodingPropertyRulesRows,
             Applies: static (row, ours) =>
                 _scopedEncodingPropertyRules.TryGetValue(Question(row), out string? judged)
@@ -5379,8 +5449,9 @@ internal static class ExpectedDivergences
                 + ".Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds, and for S89's rows, "
                 + ".Bestmatch_keeps_a_match_that_is_all_trailing_insertions, "
                 + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
-                + ".Bestmatch_reversed_replaces_the_whole_emoji_run",
-            // Thirty-four rows rather than one, because each is a judged member of the family and the
+                + ".Bestmatch_reversed_replaces_the_whole_emoji_run, and for the 2026-09-28 'bba' rows, "
+                + ".Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end",
+            // Thirty-eight rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
@@ -6097,11 +6168,17 @@ internal static class ExpectedDivergences
                 + "2026-09-14 ruling for this file. Widening means judging another row with the probe "
                 + "and adding it, never loosening a condition - and there is no condition here that "
                 + "could be loosened safely, because 'the pattern holds a U+0130' describes every "
-                + "correct row of the `case-folding` generator as well as these.",
+                + "correct row of the `case-folding` generator as well as these.\n"
+                + "ROWS 25482 AND SWEEP ROW 34 LEFT THIS ENTRY ON 2026-09-28. Both are fuzzy named-list "
+                + "rows, and ledger entry 49 lets a fuzzy run substitute or insert an expanding letter "
+                + "as one character. U+0130 is one character to upstream, so it always could; now "
+                + "U+00DF, U+FB00 and U+01F0 can too, the first row's grid reads (3,3) with two "
+                + "substitutions in every cell here, and this port gives upstream's answer to both "
+                + "rows. The swap cells for U+00DF, U+FB00 and U+01F0 are ledger entry 49's divergence, "
+                + "not this one's. Row 34508 is not fuzzy and is unchanged.",
             PinnedBy: "Gaps.Engine.CaseFoldingTests.A_leading_literal_that_folds_longer_than_itself_"
-                + "reports_no_partial_on_an_empty_slice and .A_named_list_word_starting_on_an_"
-                + "expanding_fold_costs_one_substitution_not_two, both of which run the whole control "
-                + "grid above, plus the 25-cell grid the first Turkic entry names",
+                + "reports_no_partial_on_an_empty_slice, which runs the whole control grid above, plus "
+                + "the 25-cell grid the first Turkic entry names",
             Example: _turkicPatternSideRows,
             Applies: static (row, ours) =>
                 _turkicPatternSide.TryGetValue(Question(row), out string? judged)
@@ -6233,7 +6310,7 @@ internal static class ExpectedDivergences
                 + "`no match` can carry. What alarms instead is "
                 + "the gap test named below, whose second half asserts the POSITIVE control: this "
                 + "port's `[A-Z]` must still reach an ASCII `i` under IGNORECASE. Two older entries "
-                + "carry the same shape (`_turkicPatternSideOurs[1]` and `_boundedLazyOurs`), so "
+                + "carry the same shape (`_turkicPatternSideOurs[0]` and `_boundedLazyOurs`), so "
                 + "this is a known limit of a row-keyed pin on a row this port answers nothing to, "
                 + "not a new one - and it is why `OracleWaveTests`'s over-classification guard lists "
                 + "the three entries it can list rather than all of them.",
@@ -6675,7 +6752,10 @@ internal static class ExpectedDivergences
                 + "THE WAVE ROWS all agree with upstream V0 once the pattern's ligatures are spelled "
                 + "out (sharp s as ss, the ff and st ligatures as two letters), or are valid matches "
                 + "within budget where V1 finds none. Seed 7 row 6250 was one of them until S84; it "
-                + "now needs S84's retry repair too, and belongs to `full-fold-backreference-retry`.\n"
+                + "now needs S84's retry repair too, and belongs to `full-fold-backreference-retry`. "
+                + "Five more left on 2026-09-28 (seed 7 row 6587, seed 4242 rows 6047, 6106 and 6392, "
+                + "seed 20260922 row 6080): ledger entry 49 now gives the same answer by another "
+                + "route, and they belong to `full-fold-run-edits-an-expanding-character-whole`.\n"
                 + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`. A row belongs "
                 + "here when `OracleComparer.RunWithoutTheFoldFix`, which sets "
                 + "`PatternObject.ChargeUntouchedFoldings` and so restores upstream's test at every "
@@ -7099,6 +7179,120 @@ internal static class ExpectedDivergences
                 && theirs.Groups.Skip(1).All(static group => !group.Success)
                 && HasABoundaryEscape(row.Pattern)
         ),
+        new(
+            Id: "fuzzy-search-anchor-backtracked",
+            Reason: "THIS PORT ANSWERS A `\\G` INSIDE A FUZZY SECTION where upstream raises "
+                + "`RuntimeError: invalid RE code`. Ledger entry 48; fixed on 2026-09-27 under the "
+                + "owner's no-known-bugs rule, and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a failed SEARCH_ANCHOR in a fuzzy section takes an insertion "
+                + "and pushes a retry frame like every other zero-width item "
+                + "(upstream/src/_regex.c:14431), but the backtrack switch's zero-width list "
+                + "(:15330-15344) omits SEARCH_ANCHOR, so popping that frame reaches the default arm "
+                + "and raises. `(?:\\Gb){i<=1}` over 'ab', whose insertion is never backtracked over, "
+                + "is answered by both engines.\n"
+                + "WHAT `\\G` MEANS is not in question: PCRE2 10.47, .NET 10.0.12 and upstream's exact "
+                + "matcher agree it holds only at the search start, honours pos, and holds at the end "
+                + "under right-to-left (tools/probes/search-anchor-survey, 2026-09-27).\n"
+                + "FOUND BY the interaction-matrix wave, 7 rows over seeds 7, 4242 and 20260927; the "
+                + "example rows are hand-minimised and recorded by `record-oracle.py --rows` on "
+                + "2026-09-28.\n"
+                + "THE PREDICATE: upstream's recorded answer is exactly that error, raised while "
+                + "matching; the pattern holds a live `\\G` and a fuzzy constraint; and this port "
+                + "ANSWERED - a match, no match, or a scan result, never an error of its own, a "
+                + "timeout or an unported seam. Upstream raises this message for nothing else the "
+                + "saved waves hold. The control is "
+                + "`A_row_the_search_anchor_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyMatchingTests: the seven search-anchor cases, from "
+                + ".A_search_anchor_inside_a_called_group_in_a_fuzzy_section_is_answered to "
+                + ".A_failed_search_anchor_in_a_fuzzy_section_is_backtracked_over_under_a_best_match_flag",
+            Example: """
+            {"generator": "rows", "pattern": "(?:a\\G){i<=1}", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            {"generator": "rows", "pattern": "(?b)(?:.??(?1)){e<=1}(?:x|(\\Gab))", "flags": 0, "namedLists": {}, "subject": "zab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            {"generator": "rows", "pattern": "(?r)(?:\\Gab|ab\\G){i<=1}", "flags": 0, "namedLists": {}, "subject": "xab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code", "whileMatching": true}}
+            """,
+            Applies: static (row, ours) =>
+                row.Expected
+                    is ErrorOutcome { Exception: "RuntimeError", Message: "invalid RE code", WhileMatching: true }
+                && ours is MatchOutcome or NoMatchOutcome or MatchesOutcome or SubOutcome or SplitOutcome
+                && HasASearchAnchorEscape(row.Pattern)
+                && row.Pattern.Contains('{', StringComparison.Ordinal)
+        ),
+        new(
+            Id: "full-fold-run-edits-an-expanding-character-whole",
+            Reason: "A CHARACTER THAT EXPANDS UNDER FULL CASE FOLDING CAN BE EDITED AS ONE CHARACTER "
+                + "INSIDE A FUZZY RUN HERE, AS IT CAN ON ITS OWN IN BOTH ENGINES. Ledger entry 49; "
+                + "fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a lone `(?fi)ß` compiles to a choice between the character and "
+                + "its folding `ss` (`_regex_core.py:2629-2632`), so `(?fi)(?:ß){s<=1}` over 'a' is "
+                + "(0, 1) with one substitution. `Sequence.pack_characters` packs `ßx` into one "
+                + "STRING_FLD item holding only the folding `ssx`, whose edits are one folded letter "
+                + "each, so `(?fi)(?:ßx){s<=1}` over 'ax' needs a substitution and a deletion and "
+                + "finds nothing, although `(?fi)(?:ß){s<=1}x` matches it. A fuzzy section that covers "
+                + "more of the pattern allows every error placement the narrower one does, so it "
+                + "cannot match less. This port keeps the packed run first and adds the "
+                + "character-by-character reading as a second alternative in a fuzzy section "
+                + "(`String.CharacterReading`), so every exact match is unchanged.\n"
+                + "NO OTHER ENGINE IS FUZZY. PCRE2 10.47, Python re, .NET 10 and JavaScript do not fold "
+                + "ß to ss at all; Perl 5.42 does, and agrees that ß, ßx and sß match ss, ssx and ßs "
+                + "(measured 2026-09-28). The expected values rest on the argument above.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamFoldedRuns`, which compiles every fuzzy full-folded "
+                + "run to its folding alone (`Info.UpstreamFoldedRuns`), reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. A "
+                + "second arm switches off the four earlier full-fold fixes as well (S83, S84, S85 "
+                + "and the retried fold steps), for the rows that sat in those entries until this "
+                + "reading changed their answer too: seed 7 rows 6587, 7216, 7266, 7301 and 7480 of "
+                + "the 2026-09-28 wave, which those entries claimed before and which this port answers "
+                + "exactly as it did then. Their ablations stopped reproducing upstream because the "
+                + "reading stayed on: each row gives upstream's answer with the reading off as well "
+                + "(row 6587 needs S83's fix off too, rows 7216, 7301 and 7480 S84's, row 7266 more "
+                + "than one). The arm also demands that the older fixes switched off with the reading "
+                + "left on do NOT give upstream's answer, so it claims only rows the reading is part "
+                + "of. The control is `A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FullFoldFuzzyCharacterEditTests",
+            Example: _fullFoldRunRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamFoldedRuns(row))
+                || TheFoldedRunsAndTheEarlierFoldFixesExplainIt(row, ours)
+        ),
+        new(
+            Id: "full-fold-run-edits-an-expanding-subject-character-whole",
+            Reason: "A SUBJECT CHARACTER THAT EXPANDS UNDER FULL CASE FOLDING CAN BE EDITED AS ONE "
+                + "CHARACTER INSIDE A FUZZY RUN HERE, AS IT CAN IN BOTH ENGINES WHERE THE SECTION COVERS "
+                + "ONLY THE PATTERN LETTER IT REPLACES. Ledger entry 52, the subject-side twin of ledger "
+                + "entry 49; fixed 2026-09-28 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a fuzzy STRING_FLD item compares the pattern with the subject "
+                + "character's folding and edits that folding one folded character at a time "
+                + "(`next_fuzzy_match_string_fld`, `_regex.c:10580-10633`). U+01F0 folds to j and "
+                + "U+030C, so replacing a pattern letter with it inside a run costs two edits: "
+                + "`(?fi)(?:ssx){s<=1}` over 'ǰsx' finds nothing, although `(?fi)(?:s){s<=1}sx` over the "
+                + "same text is (0, 3) with one substitution. A fuzzy section that covers more of the "
+                + "pattern allows every error placement the narrower one does, so it cannot match less. "
+                + "This port keeps upstream's folded-character edits and tries a substitution and an "
+                + "insertion of the whole subject character after them, at the start of its folding "
+                + "(`Matcher.FoldWholeSub`), so no match upstream finds is lost; the first answer's mix of "
+                + "edits can change, because the new edits are tried before older alternatives.\n"
+                + "NO OTHER ENGINE IS FUZZY; the expected values rest on the argument above.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamSubjectFoldEdits`, which sets "
+                + "`PatternObject.SkipWholeFoldedCharEdits`, reproduces upstream's recorded answer "
+                + "exactly, AND this port's live answer is the one being judged. A second arm switches "
+                + "off ledger entry 49's character reading as well, and a third the four earlier "
+                + "full-fold fixes too, for rows those entries held until the whole-character edits "
+                + "changed what their ablations answer. Each of those arms also demands that the same "
+                + "ablation with the edits left on does NOT give upstream's answer, so it claims only "
+                + "rows the edits are part of. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FullFoldFuzzySubjectCharacterEditTests",
+            Example: _subjectFoldRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSubjectFoldEdits(row))
+                || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: false)
+                || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: true)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -7521,6 +7715,51 @@ internal static class ExpectedDivergences
 
         return IsTheLiveAnswer(row, ours);
     }
+
+    /// <summary>
+    /// Whether ledger entry 49's character reading and the four earlier full-fold fixes, switched
+    /// off together, are the whole of the difference between the two engines on a row.
+    /// </summary>
+    /// <remarks>
+    /// A fuzzy full-folded run that the S83, S84 or S85 fixes also reach can need the reading off
+    /// as well before this port gives upstream's answer. With the older fixes off and the reading
+    /// on, the answer must still differ from upstream's, so a row the older fixes explain on their
+    /// own is left to their entries.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the five fixes together explain the divergence.</returns>
+    private static bool TheFoldedRunsAndTheEarlierFoldFixesExplainIt(OracleRow row, IOracleOutcome ours) =>
+        OracleComparer.RunWithoutTheFoldFixes(row, withTheUpstreamFoldedRuns: false) is { } readingOn
+        && OracleComparer.Compare(row, readingOn) != OracleVerdict.Agree
+        && OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithoutTheFoldFixes(row, withTheUpstreamFoldedRuns: true)
+        );
+
+    /// <summary>
+    /// Whether ledger entry 52's whole-character edits, switched off with ledger entry 49's
+    /// character reading and, if asked, the four earlier full-fold fixes, are the whole of the
+    /// difference between the two engines on a row, and the edits are part of it.
+    /// </summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="withoutTheEarlierFoldFixes">Whether to switch off S83, S84, S85 and the retried fold steps too.</param>
+    /// <returns><see langword="true"/> if the fixes together explain the divergence.</returns>
+    private static bool TheFoldReadingsTogetherExplainIt(
+        OracleRow row,
+        IOracleOutcome ours,
+        bool withoutTheEarlierFoldFixes
+    ) =>
+        OracleComparer.RunWithoutTheFoldReadings(row, withTheSubjectFoldEdits: true, withoutTheEarlierFoldFixes)
+            is { } editsOn
+        && OracleComparer.Compare(row, editsOn) != OracleVerdict.Agree
+        && OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithoutTheFoldReadings(row, withTheSubjectFoldEdits: false, withoutTheEarlierFoldFixes)
+        );
 
     /// <summary>
     /// Whether one ablated run is the whole of the difference between the two engines on a row.
@@ -8040,6 +8279,26 @@ internal static class ExpectedDivergences
         for (int i = pattern.IndexOf('\\'); i >= 0 && i + 1 < pattern.Length; i = pattern.IndexOf('\\', i + 2))
         {
             if (pattern[i + 1] is 'b' or 'B' or 'm' or 'M' or 'X')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the pattern holds a live <c>\G</c>, for <c>fuzzy-search-anchor-backtracked</c>. The scan
+    /// steps over an escaped backslash, as <see cref="HasABoundaryEscape"/> does, so <c>\\G</c> does
+    /// not count.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> if it contains <c>\G</c>.</returns>
+    private static bool HasASearchAnchorEscape(string pattern)
+    {
+        for (int i = pattern.IndexOf('\\'); i >= 0 && i + 1 < pattern.Length; i = pattern.IndexOf('\\', i + 2))
+        {
+            if (pattern[i + 1] == 'G')
             {
                 return true;
             }

@@ -1211,6 +1211,7 @@ internal static class NodeCompiler
 
         // Create the node.
         Node node = CreateNode(args.Pattern, Opcode.GroupCall, 0, 0, 1);
+        args.Pattern.HasGroupCalls = true;
 
         node.Values[0] = callRef;
 

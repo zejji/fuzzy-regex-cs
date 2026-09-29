@@ -120,6 +120,8 @@ public sealed class MatchStateCacheTests
     [Arguments("(?:(a)b)+(?:bc){e<=1}", "ababx")]
     [Arguments(@"(?r)(?:(\w)x)+(?1)", "x\U0001F600axbx")]
     [Arguments("(?:(a|)b)+(?:bc){e<=1}", "ababx")]
+    // A fuzzy literal, whose filter keeps what it learns about the subject on the state (D14).
+    [Arguments("(?:amber lantern works){e<=2}", "amber lantxrn works")]
     public void A_reused_state_forgets_every_field_its_last_call_set(string pattern, string subject)
     {
         // The wave above dirties what real matches dirty, which is not every field: a match that
@@ -220,12 +222,24 @@ public sealed class MatchStateCacheTests
                 .Concat(fields.Where(static field => field.FieldType != typeof(CharacterIndex)))
         )
         {
-            // A pattern with no alternation that has an empty alternative after another has no
-            // optional-pass slots to scribble; the third row of the test that calls this has one.
+            if (string.Equals(field.Name, nameof(MatchState.Pattern), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // MatchState.FilterMemory is null exactly when the pattern has no fuzzy-literal filter,
+            // and readonly, so no call can set it.
             if (
-                string.Equals(field.Name, nameof(MatchState.Pattern), StringComparison.Ordinal)
-                || field.GetValue(state) is OptionalPassStart[] { Length: 0 }
+                string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                && field.GetValue(state) is null
             )
+            {
+                continue;
+            }
+
+            // An empty array holds nothing to carry over: the groups and repeats of a pattern with
+            // none, such as the fuzzy literal, which may have no group and keep its filter.
+            if (field.GetValue(state) is Array { Length: 0 })
             {
                 continue;
             }
@@ -304,14 +318,23 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 stack.Push(7);
                 break;
-            case HashSet<long> set:
-                set.Add(7);
+            case FuzzyLiteralFilter.ScanMemory memory:
+                Array.Fill(memory.From, 7);
+                Array.Fill(memory.Found, 7);
+                Array.Fill(memory.AbsentBelow, 7);
+                memory.SliceEnd = 7;
+                memory.SliceStart = 7;
+                memory.WitnessEnd = 7;
+                _ = memory.IsAscii("scribbled", 3, 5);
+                break;
+            case HashSet<(long Key, int Reach)> set:
+                set.Add((7, 7));
                 break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int SstackDepth, long[]? MemoKey)> calls:
-                calls.Add((7, 7, null));
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
+                calls.Add((7, 7, 7, null));
                 break;
             case List<long> numbers:
                 numbers.Add(7);
@@ -408,7 +431,15 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
                 break;
-            case HashSet<long> set:
+            case FuzzyLiteralFilter.ScanMemory memory:
+                RenderItems($"{path}.From", memory.From, lines);
+                RenderItems($"{path}.Found", memory.Found, lines);
+                RenderItems($"{path}.AbsentBelow", memory.AbsentBelow, lines);
+                lines.Add(
+                    $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd})"
+                );
+                break;
+            case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
                 break;
             case HashSet<long[]> keys:

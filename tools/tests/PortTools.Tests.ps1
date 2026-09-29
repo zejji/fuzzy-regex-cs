@@ -91,6 +91,23 @@ Describe 'Test-Ratchet' {
         $verdict.IsGreen | Should -BeFalse
     }
 
+    It 'accepts a baselined work-counter test that skipped itself in a Release build, and no other skip' {
+        $id = 'Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.FailureMemoTests.A_repeat_fails_fast'
+        $skipped = [pscustomobject]@{
+            Id         = $id
+            Outcome    = 'Skipped'
+            SkipReason = 'Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here'
+        }
+        (Test-Ratchet -Results @($skipped) -BaselinePassing @($id)).IsGreen | Should -BeTrue
+
+        $other = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'needs:lookbehind - not implemented' }
+        (Test-Ratchet -Results @($other) -BaselinePassing @($id)).IsGreen | Should -BeFalse
+
+        # A reason that only starts the same way is some other skip.
+        $prefix = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'Debug-only work counter: something else' }
+        (Test-Ratchet -Results @($prefix) -BaselinePassing @($id)).IsGreen | Should -BeFalse
+    }
+
     It 'stays red on a missing test unless removals are explicitly accepted' {
         # Renaming or deleting a test removes it from the run, which is indistinguishable from
         # losing coverage. The operator has to say so on purpose.

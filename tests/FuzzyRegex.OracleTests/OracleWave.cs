@@ -39,11 +39,32 @@ internal static class OracleWave
     private static readonly string _repoRoot = FindRepoRoot();
 
     /// <summary>Where the recorder writes the wave and where this consumer reads it.</summary>
-    public static string WavePath { get; } = Path.Combine(_repoRoot, "TestResults", "oracle", "wave.jsonl");
+    /// <remarks>
+    /// <c>FUZZYREGEX_ORACLE_WAVE_PATH</c> overrides the fixed default when set. <c>tools/run-oracle.ps1</c>
+    /// sets it to a per-run file (<c>TestResults/oracle/wave-run-&lt;pid&gt;-&lt;seed&gt;.jsonl</c>) so that
+    /// a second recording in the same worktree - an ad hoc <c>tools/record-oracle.py</c> run, or an
+    /// overlapping <c>run-oracle.ps1</c> - cannot replace the wave this run is mid-comparison against
+    /// (D20, docs/KNOWN-DEFECTS.md). The <c>-run-</c> infix keeps this scratch name out of the
+    /// <c>wave-&lt;seed&gt;.jsonl</c> archive namespace (D20/D21 repair round 2).
+    /// </remarks>
+    public static string WavePath { get; } =
+        Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_WAVE_PATH") is { Length: > 0 } overridden
+            ? overridden
+            : Path.Combine(_repoRoot, "TestResults", "oracle", "wave.jsonl");
 
     /// <summary>Where the run's verdict and every divergence block is written.</summary>
-    /// <remarks>Under <c>TestResults/</c>, which is what oracle.yml uploads as an artifact.</remarks>
-    public static string ReportPath { get; } = Path.Combine(_repoRoot, "TestResults", "oracle", "report.txt");
+    /// <remarks>
+    /// Under <c>TestResults/</c>, which is what oracle.yml uploads as an artifact.
+    /// <c>FUZZYREGEX_ORACLE_REPORT_PATH</c> overrides the fixed default when set, the same way
+    /// <see cref="WavePath"/>'s override works. <c>tools/run-oracle.ps1</c> sets it to a per-run file
+    /// so that two overlapping runs in the same worktree cannot overwrite each other's evidence
+    /// before either reads it back - found from <see cref="ScreenCandidatesPath"/>'s row numbers
+    /// answering for the wrong wave when this path was still shared (D20, docs/KNOWN-DEFECTS.md).
+    /// </remarks>
+    public static string ReportPath { get; } =
+        Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_REPORT_PATH") is { Length: > 0 } overriddenReport
+            ? overriddenReport
+            : Path.Combine(_repoRoot, "TestResults", "oracle", "report.txt");
 
     private static string FindRepoRoot()
     {
@@ -449,8 +470,19 @@ internal static class OracleWave
     }
 
     /// <summary>Where the consumer exports every expected divergence's example rows for <c>record-oracle.py --recheck</c>.</summary>
+    /// <remarks>
+    /// Named from <see cref="ReportPath"/>'s own filename, the same as <see cref="ScreenCandidatesPath"/>
+    /// below, rather than the fixed <c>expected-examples.jsonl</c> this used to be: two overlapping
+    /// runs' consumers used to write the same sibling file, so whichever finished last could hand
+    /// <c>record-oracle.py --recheck</c> the other run's rows (D20/D21 repair round 1; the content is
+    /// the same fixed ledger for every run, so the only cost of this is one identical copy per run
+    /// rather than a shared name to race on).
+    /// </remarks>
     public static string ExpectedExamplesPath =>
-        Path.Combine(Path.GetDirectoryName(ReportPath)!, "expected-examples.jsonl");
+        Path.Combine(
+            Path.GetDirectoryName(ReportPath)!,
+            Path.GetFileNameWithoutExtension(ReportPath) + ".expected-examples.jsonl"
+        );
 
     /// <summary>
     /// Every example row of every entry, one JSON object per line: the entry's id and the row as the
@@ -478,8 +510,17 @@ internal static class OracleWave
     }
 
     /// <summary>Where the consumer lists the rows tools/screen-undefined.py should screen.</summary>
+    /// <remarks>
+    /// Named from <see cref="ReportPath"/>'s own filename rather than a fixed sibling name, so that
+    /// two overlapping runs - each with its own <c>FUZZYREGEX_ORACLE_REPORT_PATH</c> - never share
+    /// this file either: a shared list of row NUMBERS is meaningless once it might be answering for
+    /// the other run's wave, not this run's (D20, docs/KNOWN-DEFECTS.md).
+    /// </remarks>
     public static string ScreenCandidatesPath =>
-        Path.Combine(Path.GetDirectoryName(ReportPath)!, "screen-candidates.txt");
+        Path.Combine(
+            Path.GetDirectoryName(ReportPath)!,
+            Path.GetFileNameWithoutExtension(ReportPath) + ".screen-candidates.txt"
+        );
 
     /// <summary>
     /// Writes the numbers of the rows whose verdict rests on upstream's answer, one per line, for

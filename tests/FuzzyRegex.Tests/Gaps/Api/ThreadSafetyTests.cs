@@ -267,6 +267,39 @@ public sealed class ThreadSafetyTests
     }
 
     [Test]
+    public void Only_the_debug_work_counters_are_thread_static()
+    {
+        // The scans in this file leave thread-static fields out, because a field each thread has
+        // its own copy of is not shared. That exclusion must not become a way round them, so the
+        // set is pinned: the Debug-only counters of WorkCounter (D13), which a Release build
+        // never writes.
+        IReadOnlyList<string> threadStatic =
+        [
+            .. _library
+                .GetTypes()
+                .SelectMany(static type =>
+                    type.GetFields(
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly
+                    )
+                )
+                .Where(IsThreadStatic)
+                .Select(static field => $"{field.DeclaringType!.Name}.{field.Name}")
+                .OrderBy(static name => name, StringComparer.Ordinal),
+        ];
+
+        threadStatic
+            .Should()
+            .Equal(
+                "WorkCounter.<CharacterLimit>k__BackingField",
+                "WorkCounter.<CharactersSearched>k__BackingField",
+                "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<StatesInitialised>k__BackingField",
+                "WorkCounter.<StepLimit>k__BackingField",
+                "WorkCounter.<Steps>k__BackingField"
+            );
+    }
+
+    [Test]
     public void The_compilers_own_static_caches_are_single_reference_publications()
     {
         // Compiler-generated closure types hold a static cache field per lambda, and those are not
@@ -612,7 +645,17 @@ public sealed class ThreadSafetyTests
                 type.GetFields(
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly
                 )
-            );
+            )
+            .Where(static field => !IsThreadStatic(field));
+
+    /// <summary>
+    /// Whether each thread has its own copy of the field, so that it is not shared state at all.
+    /// <see cref="Only_the_debug_work_counters_are_thread_static"/> bounds which fields may be.
+    /// </summary>
+    /// <param name="field">The field.</param>
+    /// <returns>Whether it carries <see cref="ThreadStaticAttribute"/>.</returns>
+    private static bool IsThreadStatic(FieldInfo field) =>
+        field.IsDefined(typeof(ThreadStaticAttribute), inherit: false);
 
     /// <summary>
     /// Whether a static field's type is one that is safe to reach from several threads: immutable
@@ -729,14 +772,20 @@ public sealed class ThreadSafetyTests
             // Ledger entry 44's addendum: counted by NodeCompiler.BuildBranch, and reset by
             // CompileToNodes in a pattern with no fuzzy section.
             "PatternObject.OptionalPassCount",
+            // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
+            // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
+            "PatternObject.SkipWholeFoldedCharEdits",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
             // S60b added FuzzyLiteralFilter, written once by Compile after node numbering. The
-            // filter itself is immutable; the per-search piece cache lives on the stack.
+            // filter itself is immutable; what a scan learns lives on its MatchState (D14).
             "PatternObject.FuzzyLiteralFilter",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
+            // Ledger entry 14's refined call guard added HasGroupCalls, set by the node compiler
+            // while the pattern is built and only read afterwards.
+            "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
