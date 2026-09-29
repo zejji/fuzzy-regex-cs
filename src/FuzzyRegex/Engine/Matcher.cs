@@ -2387,6 +2387,7 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Undetermined"/>.</returns>
     private static int UndeterminedRead(MatchState state)
     {
+        state.AttemptTouchedTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.UndeterminedRead);
 
         return MatchStatus.Undetermined;
@@ -2419,6 +2420,7 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Failure"/>.</returns>
     private static int DecidedFalseAtEdge(MatchState state)
     {
+        state.AttemptTouchedTheTextToCome = true;
         state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
 
         return MatchStatus.Failure;
@@ -7406,14 +7408,17 @@ internal static class Matcher
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
-        // Is the pattern anchored to the start or end of the string?
+        // Is the pattern anchored to the start or end of the string? NOT UPSTREAM'S (D11): the
+        // attempt from inside the text to come collapses the window to the edge, so it would pass
+        // the position test below, but no position inside that text is the start of the string, or
+        // its end reversed. Hence the InsideW clause (review of fa3880d: search `\Ax` over ':').
         switch (startTest.Op)
         {
             case Opcode.EndOfString:
                 if (state.Reverse)
                 {
                     // Searching backwards.
-                    if (state.TextPos != state.TextEnd)
+                    if (state.TextPos != state.TextEnd || state.InsideW)
                     {
                         return MatchStatus.Failure;
                     }
@@ -7427,7 +7432,7 @@ internal static class Matcher
                 if (!state.Reverse)
                 {
                     // Searching forwards.
-                    if (state.TextPos != state.TextStart)
+                    if (state.TextPos != state.TextStart || state.InsideW)
                     {
                         return MatchStatus.Failure;
                     }
@@ -7502,6 +7507,7 @@ internal static class Matcher
         }
 
         Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
+        state.AttemptTouchedTheTextToCome = state.InsideW;
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
@@ -10939,7 +10945,13 @@ internal static class Matcher
                     // continuation to be empty, which the first pass has already judged, so under
                     // fullmatch it backtracks. M1 cannot land without this; the rest of M3 (asserts
                     // A1 and A2) is build chunk 3.
-                    if (state.PartialSide != MatchState.PartialNone)
+                    // Only a success whose attempt read the text to come (design assert A1's
+                    // condition). Any other second-pass success is one the first pass could have
+                    // found, and it takes the path it took before D11: under BESTMATCH and
+                    // ENHANCEMATCH the driver outside BasicMatch refines it, and `(?b)` row 3834 of
+                    // seed 4242 answered (3, 6) until this test, where that refinement answers
+                    // upstream's (6, 6).
+                    if (state.PartialSide != MatchState.PartialNone && state.AttemptTouchedTheTextToCome)
                     {
                         if (state.MatchAll)
                         {

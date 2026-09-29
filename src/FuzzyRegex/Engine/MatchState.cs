@@ -254,6 +254,19 @@ internal sealed class MatchState : IDisposable
     internal bool InsideW;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the attempt running in a partial call's second pass has read
+    /// the text to come: an undetermined test, a decided one that differs from the first pass, or
+    /// any test of the attempt from inside that text. Cleared at each attempt's start. It is the
+    /// per-attempt flag of the design's assert A1; M3 turns a success into a partial only when it
+    /// is set, because any other success is one the first pass could have found.
+    /// </summary>
+    /// <remarks>
+    /// A touch mark cannot say this: a cut discards it with the path it marks, and a decided read
+    /// leaves none. A run-out needs no flag, because it answers the partial itself.
+    /// </remarks>
+    internal bool AttemptTouchedTheTextToCome;
+
+    /// <summary>
     /// Whether consumption past the right edge of the text is a run-out (a partial) rather than a
     /// failure: forward partial calls, and the attempt from inside the text to come either way.
     /// </summary>
@@ -891,6 +904,7 @@ internal sealed class MatchState : IDisposable
         // succeeded leaves its stack, and so its marks, where they were (D11).
         WMarks.Clear();
         InsideW = false;
+        AttemptTouchedTheTextToCome = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
 #endif
@@ -1077,6 +1091,7 @@ internal sealed class MatchState : IDisposable
         // native-AOT run, and deterministically in AllocationTests (2026-09-25).
         WMarks.Clear();
         InsideW = false;
+        AttemptTouchedTheTextToCome = false;
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);

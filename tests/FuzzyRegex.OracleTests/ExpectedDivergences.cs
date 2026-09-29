@@ -492,15 +492,30 @@ internal static class ExpectedDivergences
     /// partial (4, 4): a <c>\p{Lu}+?</c> runs out of text and the rest is presumed, a phantom of
     /// limit C2, known defect D19. The ablation keeps S57d, which answers (0, 4), so
     /// it cannot account for the row.
+    /// <para>
+    /// Seed 4242 row 6526, <c>(?b)(?r)\B(?:a😀(?:\1)){i&lt;=1}(abx)</c> matched over 'a😀babxabx'. PORT
+    /// RIGHT: the judge answers the partial (0, 9) in codepoints, (0, 10) here, and upstream None.
+    /// Before D11 S57d's escalation answered the same span with no groups; D11's second pass
+    /// reaches it through the undetermined <c>\B</c> at the left edge, with group 1 at (7, 10). The
+    /// ablation keeps S57d, so it cannot give upstream's None either.
+    /// </para>
     /// </remarks>
     private const string _edgeReadJudgedRows = """
         {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "fuzzy-anchored", "pattern": "(?b)(?r)\\B(?:a\ud83d\ude00(?:\\1)){i<=1}(abx)", "flags": 0, "namedLists": {}, "subject": "a\ud83d\ude00babxabx", "operation": "match", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
         """;
+
+    /// <summary>This port's judged answer to each row of <see cref="_edgeReadJudgedRows"/>, in order.</summary>
+    private static readonly string[] _edgeReadJudgedOurs =
+    [
+        "match 0:(4,0)[(4,0)] 1:unset last=-1/- partial",
+        "match 0:(0,10)[(0,10)] 1:(7,3)[(7,3)] last=1/- partial fuzzy=(0,1,0)[s:][i:4][d:]",
+    ];
 
     /// <summary><see cref="_edgeReadJudgedRows"/> by its question, mapped to this port's judged answer.</summary>
     private static readonly Dictionary<string, string> _edgeReadJudged = OracleWave
         .ParseRows(_edgeReadJudgedRows)
-        .Select(static row => (Key: Question(row), Ours: "match 0:(4,0)[(4,0)] 1:unset last=-1/- partial"))
+        .Select(static (row, i) => (Key: Question(row), Ours: _edgeReadJudgedOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>

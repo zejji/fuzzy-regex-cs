@@ -227,6 +227,10 @@ internal static class OracleComparer
     /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
     /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
     /// </param>
+    /// <param name="composeWithD11">
+    /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
+    /// composed runs themselves pass <see langword="false"/>.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
@@ -234,7 +238,8 @@ internal static class OracleComparer
         bool lazy = false,
         Action<FuzzyRegex>? ablate = null,
         bool upstreamReverseGrapheme = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool composeWithD11 = true
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -289,6 +294,59 @@ internal static class OracleComparer
         }
 
         ablate?.Invoke(compiled);
+
+        // NOT A PORT BEHAVIOUR, D11: upstream has none of this port's fixes, so on a partial row an
+        // ablation that takes one fix away must also take D11's second pass away before its answer
+        // can be upstream's. Seed 4242 row 7401 is the case: without the fold fix the first pass
+        // fails as upstream's does, and it is D11's second pass that then differs. The composed run
+        // is used only where the ablation alone does not agree and D11's ablation alone does not
+        // either, so each fix is still shown to be needed.
+        if (ablate is not null && composeWithD11 && row.Partial)
+        {
+            IOracleOutcome? alone = Run(
+                row,
+                timeout,
+                lazy,
+                ablate,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                composeWithD11: false
+            );
+
+            if (alone is null || Compare(row, alone) == OracleVerdict.Agree)
+            {
+                return alone;
+            }
+
+            IOracleOutcome? d11Alone = Run(
+                row,
+                timeout,
+                lazy,
+                static c => c.PatternObject.SecondPassAsBeforeD11 = true,
+                composeWithD11: false
+            );
+
+            if (d11Alone is not null && Compare(row, d11Alone) == OracleVerdict.Agree)
+            {
+                return alone;
+            }
+
+            IOracleOutcome? both = Run(
+                row,
+                timeout,
+                lazy,
+                c =>
+                {
+                    ablate(c);
+                    c.PatternObject.SecondPassAsBeforeD11 = true;
+                },
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                composeWithD11: false
+            );
+
+            return both is not null && Compare(row, both) == OracleVerdict.Agree ? both : alone;
+        }
 
         try
         {
@@ -741,7 +799,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true
+            ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true,
+            composeWithD11: false
         );
     }
 

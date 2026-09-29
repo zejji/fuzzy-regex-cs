@@ -190,6 +190,60 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// A search anchored to the start of the string, or reversed to its end, finds nothing that
+    /// begins inside the text to come: no position there is the start (or the end) of the string.
+    /// </summary>
+    /// <remarks>
+    /// Found by review of fa3880d (2026-09-29): the attempt from inside the text to come collapses
+    /// the window to the edge, so the anchored-start test ahead of the search (`TextPos` against
+    /// `TextStart`, or `TextEnd` reversed) passed, and every row below answered the edge partial.
+    /// Upstream 2026.9.10, the brute-force judge and 11ccae7 all answer None. The review's eighth
+    /// row, <c>(?r)b+$</c> over ' ', is not here: it answers P(0, 0) at 11ccae7 and upstream too
+    /// (measured 2026-09-29), so it predates D11 and is not this attempt's doing.
+    /// </remarks>
+    [Test]
+    [Arguments(@"\Ax", ":", 0, 1)]
+    [Arguments(@"(?:\A)x", ":", 0, 1)]
+    [Arguments(@"^x", ":", 0, 1)]
+    [Arguments(@"\Ab+", " ", 0, 1)]
+    [Arguments(@"\Ax", ":b", 1, 1)]
+    [Arguments(@"(?r)b+\Z", " ", 0, 1)]
+    [Arguments(@"(?r)^b\Z", " ", 0, 1)]
+    public void An_anchored_search_finds_nothing_that_begins_in_the_text_to_come(
+        string pattern,
+        string text,
+        int start,
+        int length
+    )
+    {
+        new FuzzyRegex(pattern).Match(text, start, length, partial: true).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A second-pass success whose attempt read nothing of the text to come stays a success, as
+    /// before D11, so that the best-match refinement around it answers as it did.
+    /// </summary>
+    /// <remarks>
+    /// Seed 4242 row 3834 of the oracle, 2026-09-29. Under <c>(?b)</c> the first pass refines and
+    /// refuses the held text's match (3, 5), which upstream's own non-partial matcher refuses too.
+    /// From 5f3d184 to fa3880d M3 turned that raw success into the partial (3, 6), which depends on
+    /// nothing to come. Now only a success whose attempt read the text to come is a partial (the
+    /// design's assert A1), and the answer is upstream's (6, 6) with group 1 at (3, 4), whose
+    /// completions put <c>\K</c> at 6 ('bba\r\na' + '\n' matches at (6, 7)).
+    /// </remarks>
+    [Test]
+    public void A_second_pass_success_that_read_nothing_to_come_is_refined_as_before()
+    {
+        Match m = new FuzzyRegex(@"(?b)(?:(?P<g1>[^a])[^\d]+?([\w\s])){e<=1}\K(?:[abz][^a-f]+){d<=1}").MatchAtStart(
+            "bba\r\na",
+            partial: true
+        );
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 6, 0));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((3, 1));
+    }
+
+    /// <summary>
     /// Where the held text decides a line test, the continuation changes nothing. Without
     /// <c>(?w)</c> only LF ends a line, so <c>^</c> after a CR is false whatever follows.
     /// </summary>
