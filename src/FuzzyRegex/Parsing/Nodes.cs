@@ -2597,7 +2597,12 @@ internal class String : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
-        if (Required)
+        // NOT UPSTREAM (D34): only the exact compile carries the mark. A call to the whole pattern
+        // from a fuzzy section compiles the marked run again as fuzzy (_regex_core.py:4432-4441),
+        // and upstream marks that copy too (:4045). The engine skips comparing a marked run where
+        // the prefilter found it, which in a fuzzy run would also skip the choices of deleting its
+        // matched characters (ledger entry 42). Upstream loses nothing: it pushes no such choices.
+        if (Required && !fuzzy)
         {
             flags |= NodeFlags.Required;
         }
@@ -2613,10 +2618,8 @@ internal class String : RegexBase
             code[3 + i] = (uint)FoldedCharacters[i];
         }
 
-        // NOT UPSTREAM: see CharacterReading. A fuzzy run is never the required string, which the
-        // Branch below would hide from the engine: Fuzzy inherits RegexBase.GetRequiredString, which
-        // offers none, so nothing inside a fuzzy section is ever marked.
-        System.Diagnostics.Debug.Assert(!fuzzy || !Required, "A fuzzy run was marked as the required string.");
+        // NOT UPSTREAM: see CharacterReading. The Branch below never hides a marked run from the
+        // engine, since a fuzzy compile leaves the mark off (above).
         if (fuzzy && !UpstreamFoldingOnly && CharacterReading() is { } characters)
         {
             return new Branch([new PrecompiledCode(code), characters]).Compile(reverse, fuzzy);
