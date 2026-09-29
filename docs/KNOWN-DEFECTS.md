@@ -65,8 +65,8 @@ such test is a mistake: reopen it.
 | F18 | A fuzzy repeat of a section that only spends errors iterated until the stack ran out; fixed by D1's needed rule, pinned in FuzzyNeededEmptyIterationTests (was D2) | main fa42f231 |
 | F19 | A fuzzy insertion was never tried before a failing lookaround (S3-F2; upstream wrong, ledger 50, pinned). Failing fuzzy lookarounds search up to about 13% longer, because more candidates are valid (was D8) | main bdf87df6 |
 | F20 | A section's minimum error count was met in the wrong order (F-D; upstream's END_FUZZY is wrong, ledger 51, pinned). It unblocked D7's minimum-check witness `(?fi)(?:st){1<=s<=1,i<=1,e<=1}` over 'ßt' (was D9) | main bdf87df6 |
-| F21 | An empty iteration that flipped a tested group between spans at one position counted as progress for ever. Now a per-run record of repeat states (position, capped count, error counts clipped at the pattern's largest limit, tested-group spans) ends the loop; cleared at the end of each call. Removes a doubling-per-character slowdown on main (was D17) | main (D17 merge) |
-| F22 | A fuzzy repeat whose empty iterations only spent edits looped until the stack ran out; already fixed by F-A's needed rule (F18), pinned in EmptyIterationCycleTests (was D30) | main (D17 merge) |
+| F21 | An empty iteration that flipped a tested group between spans at one position counted as progress for ever. Now a per-run record of repeat states (position, capped count, error counts clipped at the pattern's largest limit, tested-group spans) ends the loop; cleared at the end of each call. Removes a doubling-per-character slowdown on main (was D17) | main eb5124ad |
+| F22 | A fuzzy repeat whose empty iterations only spent edits looped until the stack ran out; already fixed by F-A's needed rule (F18), pinned in EmptyIterationCycleTests (was D30) | main eb5124ad |
 
 Defects fixed before 2026-09-27 are recorded in `docs/plan/upstream-reports/LEDGER.md` (upstream
 bugs, entries 1-49) and `docs/DIVERGENCES.md`.
