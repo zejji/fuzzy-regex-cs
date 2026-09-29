@@ -4141,6 +4141,124 @@ internal static class Matcher
         && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: the cut rule for a <c>(*PRUNE)</c> or <c>(*SKIP)</c> about to act
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). The verb discards the
+    /// paths of its scope, which is a decision about the text to come whenever the path to the verb
+    /// read that text; then it does nothing, and its scope's frame gets a verb taint.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Blocked when a touch or cut taint lies above the scope's frame (the path since the scope
+    /// opened reached the verb only for some continuations: rows V1-V3, and T1 through the atomic
+    /// group's skipped cut), or a verb taint lies at the frame (an earlier verb of the scope was
+    /// skipped, and in the continuations where it acted the scope has ended already). A cut taint at
+    /// the frame itself does not block, as it does not block an atomic group's own cut (row N1).
+    /// </para>
+    /// <para>
+    /// The taint stands for the continuations where the verb acted, in which the scope's other
+    /// paths are gone. It blocks the scope's own decision (a negative lookaround's failure, rows Q1
+    /// and T2) and every enclosing one, and not a construct opened later inside the scope, which
+    /// no such continuation reaches. The frame's own arms drop it.
+    /// </para>
+    /// <para>
+    /// Only a partial call's second pass makes marks (A6), so every caller asks
+    /// <c>state.WMarks.Count != 0</c> first, and a call without partial pays that test alone.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <returns><see langword="true"/> if the verb was blocked and must do nothing.</returns>
+    private static bool SkipABlockedVerb(MatchState state)
+    {
+        if (!FindTheVerbTarget(state, out long targetMark))
+        {
+            return false;
+        }
+
+        int frame = (int)targetMark - 1;
+        if (state.WMarks[^1].Position <= frame && !HasWMarkAt(state, frame, WMarkKind.VerbTaint))
+        {
+            return false;
+        }
+
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass skips a verb");
+        if (!HasWMarkAt(state, frame, WMarkKind.VerbTaint))
+        {
+            state.AddWMark(frame, WMarkKind.VerbTaint);
+        }
+
+        state.NotePartialEvent(PartialEvent.VerbSkipped);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the pruning mark of the scope a verb acts on, read without disturbing
+    /// either stack: the innermost mark, or under ledger entry 47 the innermost that is not an
+    /// unfinished atomic group or positive lookaround (<see cref="UnwindToTheVerbTarget"/>, which
+    /// drops the marks this walks past).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">Receives the scope's pruning mark.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
+    private static bool FindTheVerbTarget(MatchState state, out long targetMark)
+    {
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            targetMark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)targetMark, out Opcode op, out LookaroundStateData look))
+            {
+                break;
+            }
+
+            if (state.Pattern.VerbsAreConfinedToTheInnermostGroup || !IsTransparentToVerbs(op, look))
+            {
+                return true;
+            }
+        }
+
+        targetMark = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: whether the negative lookaround whose body has just succeeded may take
+    /// the definite decision, failing the assertion. Not when a verb of its scope was skipped: in
+    /// the continuations where the verb acted, the body failed and the assertion holds (rows Q1 and
+    /// T2).
+    /// </summary>
+    /// <remarks>
+    /// Blocked, the body's success happens only for some continuations, so the frame gets a cut
+    /// taint and backtracking goes back into the body; once it is exhausted, the
+    /// <see cref="Opcode.Lookaround"/> arm passes the assertion with a touch. SHORTCUT: the other
+    /// half of the rule, a touch or cut taint above the frame, is build chunk 6's (lookarounds), so
+    /// until then a body success after a read of the text to come still fails the assertion for
+    /// every continuation, which S57d's escalation answers until chunk 9. Upgrade: ask that here
+    /// too.
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <returns><see langword="true"/> if the lookaround is negative and blocked.</returns>
+    private static bool BlockANegativeLookaround(MatchState state)
+    {
+        if (
+            !state.Pstack.TopSize(out long mark)
+            || !HasWMarkAt(state, (int)mark - 1, WMarkKind.VerbTaint)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op != Opcode.Lookaround
+            || look.Node.Match
+        )
+        {
+            return false;
+        }
+
+        if (!HasWMarkAt(state, (int)mark - 1, WMarkKind.CutTaint))
+        {
+            state.AddWMark((int)mark - 1, WMarkKind.CutTaint);
+        }
+
+        state.NotePartialEvent(PartialEvent.CutBlockedLookaround);
+        return true;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, ledger entry 47: whether the innermost construct open around a
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> is one that backtracking onto the verb passes straight
     /// through - an atomic group (which is also what a possessive repeat compiles to) or a positive
@@ -9979,7 +10097,16 @@ internal static class Matcher
                     // D11 M2, the cut rule: a mark above the frame means the path since the group
                     // began depends on the text to come, so the cut is not taken. Only a partial
                     // call's second pass makes marks (A6).
-                    if (state.WMarks.Count != 0 && state.WMarks[^1].Position >= atomicBstackCount)
+                    // A verb taint at the frame blocks too: only the oracle's ablation that confines verbs
+                    // to the innermost group (PatternObject.VerbsAreConfinedToTheInnermostGroup) makes
+                    // the group a verb's scope.
+                    if (
+                        state.WMarks.Count != 0
+                        && (
+                            state.WMarks[^1].Position >= atomicBstackCount
+                            || HasWMarkAt(state, (int)atomicBstackCount - 1, WMarkKind.VerbTaint)
+                        )
+                    )
                     {
                         BlockAtomicCut(state, (int)atomicBstackCount);
                         node = node.Next1.Node!;
@@ -10066,6 +10193,16 @@ internal static class Matcher
                     }
 
                     CutBstack(state, (int)endCondBstackCount);
+
+                    // The frame goes, and its marks with it. SHORTCUT: a verb taint here means a verb
+                    // in the test was skipped, and the test's decision is taken for every
+                    // continuation all the same until build chunk 7 gives conditions the cut rule
+                    // (row T6), which S57d's escalation answers until chunk 9. Upgrade: take both
+                    // branches.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom((int)endCondBstackCount - 1);
+                    }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
                     {
@@ -10807,6 +10944,13 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: a negative lookaround whose scope saw a verb skipped keeps its body's
+                    // other paths, because the success holds only for some continuations.
+                    if (state.WMarks.Count != 0 && BlockANegativeLookaround(state))
+                    {
+                        goto backtrack;
+                    }
+
                     // Everything the body pushed while it matched goes: a lookaround is atomic, so
                     // there is nothing left to backtrack into once it has succeeded.
                     if (!state.Pstack.PopSize(out long endLookBstackCount))
@@ -10815,6 +10959,16 @@ internal static class Matcher
                     }
 
                     CutBstack(state, (int)endLookBstackCount);
+
+                    // The frame goes, and its marks with it. SHORTCUT: a verb taint here is a positive
+                    // lookaround's only under the oracle's confined-verb ablation, and a cut taint a
+                    // negative's only after a blocked end, whose body then succeeded unblocked; both
+                    // are dropped until build chunk 6 gives lookarounds the cut rule. Upgrade: block
+                    // or move them as EndAtomic does.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom((int)endLookBstackCount - 1);
+                    }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
                     {
@@ -11838,9 +11992,10 @@ internal static class Matcher
 
                         /* bstack: ... | ... PRUNE */
                     }
-                    else
+                    else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state))
                     {
-                        // Prune the backtracking back to an appropriate backtracking point.
+                        // Prune the backtracking back to an appropriate backtracking point, unless
+                        // the path here read the text to come (D11 M2, the cut rule for a verb).
                         TopBstack(state);
 
                         /* bstack: ...
@@ -12621,8 +12776,12 @@ internal static class Matcher
                     // Prune the backtracking back to an appropriate backtracking point - unless the
                     // verb is in an unfinished atomic group or positive lookaround, where it prunes
                     // nothing until backtracking reaches it (ledger entry 47; see the Prune arm).
+                    // D11 M2: in a partial call's second pass the verb does nothing when the path
+                    // here read the text to come; the backtrack arm below asks again.
                     bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
-                    if (!skipIsInsideATransparentGroup)
+                    bool skipIsBlocked =
+                        !skipIsInsideATransparentGroup && state.WMarks.Count != 0 && SkipABlockedVerb(state);
+                    if (!skipIsInsideATransparentGroup && !skipIsBlocked)
                     {
                         TopBstack(state);
                     }
@@ -12644,7 +12803,10 @@ internal static class Matcher
                     // oracle alone.
                     if (state.Pattern.SkipMovesTheSliceWhenItRuns)
                     {
-                        MoveTheSliceForASkip(state, node, state.TextPos);
+                        if (!skipIsBlocked)
+                        {
+                            MoveTheSliceForASkip(state, node, state.TextPos);
+                        }
 
                         // Ledger 45's ablation on its own: the slice has moved already, and
                         // backtracking onto the verb must still unwind (ledger entry 47).
@@ -13724,6 +13886,12 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11: the frame's marks go with it (the SHORTCUT at END_CONDITIONAL's forward arm).
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     // The condition failed to match. As with LOOKAROUND, the condition's own bstack
                     // entries have already been popped by the backtracking that got here, so the
                     // pstack entry is simply dropped.
@@ -14255,6 +14423,12 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Failure: // Failure.
+                    // D11 M2: the attempt's frame goes, and the verb taint a skipped verb left there.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
                     {
@@ -14737,6 +14911,15 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the frame's marks go with it. A cut taint means a success of the body
+                    // was blocked, so a negative lookaround holds only for some continuations.
+                    bool lookWasBlocked = false;
+                    if (state.WMarks.Count != 0)
+                    {
+                        lookWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
                     // the parked count, here the body's own entries have already been popped by the
                     // backtracking that brought us here, so the pstack entry is simply dropped.
@@ -14790,7 +14973,14 @@ internal static class Matcher
                     if (!lookNode.Match)
                     {
                         // It's a negative lookaround that's failed, which means the lookaround as a
-                        // whole has succeeded.
+                        // whole has succeeded: for every continuation, unless a success of its body
+                        // was blocked (D11 M2).
+                        if (lookWasBlocked)
+                        {
+                            PushTouchMark(state);
+                            state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                        }
+
                         node = lookNode.Next2.Node!;
                         goto advance;
                     }
@@ -14937,6 +15127,13 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
+                    // D11 M2: a verb whose path read the text to come does nothing, and the attempt
+                    // keeps its ordinary bump-along, which visits every start the skip would.
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state))
+                    {
+                        break;
+                    }
+
                     // Ledger entry 47: in an unfinished atomic group or positive lookaround the verb
                     // unwinds to its target now. Only the attempt takes the skip position; a
                     // negative lookaround or condition puts its own slice back.
@@ -14964,6 +15161,12 @@ internal static class Matcher
                 }
                 case Opcode.Prune: // NOT UPSTREAM'S: backtracking has reached a (*PRUNE), ledger entry 47.
                     /* bstack: - */
+
+                    // D11 M2: a verb whose path read the text to come does nothing.
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state))
+                    {
+                        break;
+                    }
 
                     // Pushed only inside an unfinished atomic group or positive lookaround, so the
                     // unwind always has somewhere to go.
