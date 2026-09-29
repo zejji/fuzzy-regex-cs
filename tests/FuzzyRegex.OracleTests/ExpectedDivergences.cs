@@ -2903,10 +2903,17 @@ internal static class ExpectedDivergences
     /// the list is counted. Upstream's drawn answer to the first row does not, and the recorder
     /// flags that on the row itself as <c>selfContradiction</c>.
     /// </remarks>
+    // D11 M1 (2026-09-29) moved both answers: a `\m`, `$` or `\B` at the end now passes for the
+    // continuations that pass it, so an earlier path reaches the end of the pattern. Row 1 is now
+    // (3, 5) with one substitution, a phantom of the design's limit C3 (D18: `\m$` holds for no
+    // text, and tools/probes/d11-brute-judge.py answers None); row 2 is (2, 6) with one
+    // substitution at 2, where upstream counts one too and lists it, stale, at codepoint 0. On
+    // both the change list still agrees with the counts, which is what the entry judges.
+    // FuzzyCountsAndChangesTests.A_partial_lists_every_change_its_own_counts_claim pins them.
     private static readonly string[] _leakBesideTruncationOurs =
     [
-        "match 0:(4,1)[(4,1)] 1:(4,0)[(4,0)] last=1/- partial fuzzy=(0,1,1)[s:][i:4][d:4]",
-        "match 0:(2,4)[(2,4)] 1:(2,2)[(2,2)] 2:(4,1)[(4,1)] 3:(5,1)[(5,1)] 4:unset last=3/- partial fuzzy=(2,0,0)[s:2,5][i:][d:]",
+        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] last=1/- partial fuzzy=(1,0,0)[s:4][i:][d:]",
+        "match 0:(2,4)[(2,4)] 1:(2,2)[(2,2)] 2:(4,2)[(4,2)] 3:unset 4:unset last=2/- partial fuzzy=(1,0,0)[s:2][i:][d:]",
     ];
 
     /// <summary>
@@ -6359,7 +6366,10 @@ internal static class ExpectedDivergences
                 + "'abxbaobaya' - upstream reports (0,3,0) with insertions at 2, 5 and 7 and this "
                 + "port reports (0,5,0) with insertions at 2, 5, 7, 8 and 9. Upstream's three ARE "
                 + "this port's first three, which is what a stack truncated to a wrong total looks "
-                + "like and is not what a port computing different positions would look like.\n"
+                + "like and is not what a port computing different positions would look like. That "
+                + "row was measured before D11 and is no longer an example: D11 M1 (2026-09-29) makes "
+                + "its `\\Z` false at the end for every text to come, so this port now answers "
+                + "(9, 10) and the row no longer shows this shape (see _innermostPartialCountRows).\n"
                 + "PREDICATE RATHER THAN ROWS, unlike its mechanism-A sibling, because here the "
                 + "shape of the disagreement IS the evidence. Measured over the three-seed 6000-row "
                 + "gate of 2026-09-14: 39 rows, every one a partial, the prefix relation holding on "

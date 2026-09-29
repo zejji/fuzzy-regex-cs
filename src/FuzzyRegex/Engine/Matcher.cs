@@ -2271,19 +2271,37 @@ internal static class Matcher
     /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchBoundary(MatchState state, Node node, int textPos)
-    {
-        if (state.PartialSide != MatchState.PartialNone)
-        {
-            if (AtContinuationEdge(state, textPos))
-            {
-                return WordTestAtEdge(state, node, textPos);
-            }
+    internal static int TryMatchBoundary(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtBoundary(state, node.Encoding, textPos) == node.Match);
 
-            NoteBoundaryAtTruncationPoint(state, textPos);
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: <c>\b</c>, <c>\B</c>, <c>\m</c> and <c>\M</c> in a partial call, kept
+    /// out of line so that a call without partial runs the three predicates as they were.
+    /// </summary>
+    /// <remarks>
+    /// The first pass reads the text as ending at the edge, as upstream does; the second decides
+    /// the test at the edge for the text to come (M1). Off the edge the answer is the held text's in
+    /// both passes, and S57d notes the test where it stands at the truncation point.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>Boundary</c>, <c>StartOfWord</c> or <c>EndOfWord</c> node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int WordTestInAPartialCall(MatchState state, Node node, int textPos)
+    {
+        if (AtContinuationEdge(state, textPos))
+        {
+            return WordTestAtEdge(state, node, textPos);
         }
 
-        return MatchStatus.From(AtBoundary(state, node.Encoding, textPos) == node.Match);
+        NoteBoundaryAtTruncationPoint(state, textPos);
+
+        return MatchStatus.From(
+            WordTest(node, WordLeft(state, node.Encoding, textPos), WordRight(state, node.Encoding, textPos))
+        );
     }
 
     /// <summary>
@@ -2475,20 +2493,10 @@ internal static class Matcher
     /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfWord(MatchState state, Node node, int textPos)
-    {
-        if (state.PartialSide != MatchState.PartialNone)
-        {
-            if (AtContinuationEdge(state, textPos))
-            {
-                return WordTestAtEdge(state, node, textPos);
-            }
-
-            NoteBoundaryAtTruncationPoint(state, textPos);
-        }
-
-        return MatchStatus.From(AtWordEnd(state, node.Encoding, textPos));
-    }
+    internal static int TryMatchEndOfWord(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtWordEnd(state, node.Encoding, textPos));
 
     /// <summary>Upstream <c>try_match_START_OF_WORD</c> (line 7376).</summary>
     /// <remarks>The node's own encoding decides; see <see cref="TryMatchEndOfWord"/>.</remarks>
@@ -2496,20 +2504,10 @@ internal static class Matcher
     /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfWord(MatchState state, Node node, int textPos)
-    {
-        if (state.PartialSide != MatchState.PartialNone)
-        {
-            if (AtContinuationEdge(state, textPos))
-            {
-                return WordTestAtEdge(state, node, textPos);
-            }
-
-            NoteBoundaryAtTruncationPoint(state, textPos);
-        }
-
-        return MatchStatus.From(AtWordStart(state, node.Encoding, textPos));
-    }
+    internal static int TryMatchStartOfWord(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtWordStart(state, node.Encoding, textPos));
 
     /// <summary>
     /// Upstream <c>try_match_GRAPHEME_BOUNDARY</c> (line 7147). The ASCII and locale encodings have
@@ -2747,33 +2745,6 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
-    /// switch into the sixteen matcher cases that share it (<c>:12060</c> and the fifteen lines
-    /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
-    /// same question about a position the matcher is not standing on.
-    /// </summary>
-    /// <remarks>
-    /// In a partial call's second pass the word, line and string tests may also answer
-    /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
-    /// the matcher's own arm pushes the touch mark, and the prefilter and
-    /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
-    /// <c>(?w)</c> and grapheme tests keep answering against the held text until build chunk 10.
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
-    /// <param name="textPos">The position to ask about.</param>
-    /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos)
-    {
-        if (state.PartialSide != MatchState.PartialNone && state.Pattern.EdgeReadsTheHeldText)
-        {
-            return ZeroWidthAgainstTheHeldText(state, node, textPos);
-        }
-
-        return ZeroWidth(state, node, textPos);
-    }
-
-    /// <summary>
     /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.EdgeReadsTheHeldText"/>):
     /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
     /// the held text, with S57d noting a word or grapheme test at the truncation point.
@@ -2800,37 +2771,54 @@ internal static class Matcher
 
         int partialSide = state.PartialSide;
         state.PartialSide = MatchState.PartialNone;
-        int status = ZeroWidth(state, node, textPos);
+        int status = TryMatchZeroWidth(state, node, textPos);
         state.PartialSide = partialSide;
 
         return status;
     }
 
-    /// <summary>The dispatch of <see cref="TryMatchZeroWidth"/>.</summary>
+    /// <summary>
+    /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
+    /// switch into the sixteen matcher cases that share it (<c>:12060</c> and the fifteen lines
+    /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
+    /// same question about a position the matcher is not standing on.
+    /// </summary>
+    /// <remarks>
+    /// In a partial call's second pass the word, line and string tests may also answer
+    /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
+    /// the matcher's own arm pushes the touch mark, and the prefilter and
+    /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
+    /// <c>(?w)</c> and grapheme tests keep answering against the held text until build chunk 10.
+    /// It stays one method, as before D11: a wrapper around the switch added a call to every
+    /// zero-width test and cost a call without partial about 3% on a multiline <c>$</c> scan
+    /// (measured 2026-09-29).
+    /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="node">The assertion.</param>
+    /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
     /// <param name="textPos">The position to ask about.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    private static int ZeroWidth(MatchState state, Node node, int textPos) =>
-        node.Op switch
-        {
-            Opcode.Boundary => TryMatchBoundary(state, node, textPos),
-            Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
-            Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, node, textPos),
-            Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, node, textPos),
-            Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
-            Opcode.EndOfLineU => TryMatchEndOfLineU(state, node, textPos),
-            Opcode.EndOfString => TryMatchEndOfString(state, textPos),
-            Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
-            Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, node, textPos),
-            Opcode.EndOfWord => TryMatchEndOfWord(state, node, textPos),
-            Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, node, textPos),
-            Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
-            Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
-            Opcode.StartOfLineU => TryMatchStartOfLineU(state, node, textPos),
-            Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
-            _ => TryMatchStartOfString(state, textPos),
-        };
+    internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone && state.Pattern.EdgeReadsTheHeldText
+            ? ZeroWidthAgainstTheHeldText(state, node, textPos)
+            : node.Op switch
+            {
+                Opcode.Boundary => TryMatchBoundary(state, node, textPos),
+                Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
+                Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, node, textPos),
+                Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, node, textPos),
+                Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
+                Opcode.EndOfLineU => TryMatchEndOfLineU(state, node, textPos),
+                Opcode.EndOfString => TryMatchEndOfString(state, textPos),
+                Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
+                Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, node, textPos),
+                Opcode.EndOfWord => TryMatchEndOfWord(state, node, textPos),
+                Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, node, textPos),
+                Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
+                Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
+                Opcode.StartOfLineU => TryMatchStartOfLineU(state, node, textPos),
+                Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
+                _ => TryMatchStartOfString(state, textPos),
+            };
 
     /// <summary>
     /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
