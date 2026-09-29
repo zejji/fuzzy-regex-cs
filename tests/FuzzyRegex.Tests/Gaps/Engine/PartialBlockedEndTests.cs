@@ -146,22 +146,81 @@ public sealed class PartialBlockedEndTests
         string text,
         int start,
         int end
-    )
-    {
-        var regex = new FuzzyRegex(pattern);
-        Match m = string.Equals(operation, "search", StringComparison.Ordinal)
-            ? regex.Match(text, partial: true)
-            : regex.MatchAtStart(text, partial: true);
+    ) => ShouldAnswer(operation, pattern, text, start, end);
 
-        if (start < 0)
-        {
-            m.Success.Should().BeFalse();
-        }
-        else
-        {
-            (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, end));
-        }
-    }
+    /// <summary>
+    /// Repair 2: the open-section link a REOPEN restores. A fuzzy section with a minimum, opened
+    /// before the lookahead (in the inner call's body, or in an outer call's body around the inner
+    /// call), lies below the parked state; the backtracking arms have already put its link back at
+    /// the depth the stack has now, and it moves with its own call's frame, not the innermost's, so
+    /// REOPEN keeps that value. Only a section the body itself left open (the last two rows: a
+    /// run-out in <c>bcd</c>) lies in the bytes REOPEN puts back and takes the saved link. Before:
+    /// shifting every link above the innermost call's frame end threw in InsertionsCanMeetMinimum
+    /// on the outer-call rows, and restoring the saved link unshifted threw on all 24 call rows;
+    /// keeping the current link on the last two rows breaks the Debug assert at END_FUZZY. The
+    /// answers are the port's inlined twins' (<c>(?:(?:x?(?=ab?$)){1&lt;=e&lt;=1})*\n</c> over 'ab'
+    /// is P(0, 2) too): the port's empty-iteration rule for sections with a minimum lets an empty
+    /// iteration carry the error where upstream loops (MemoryError inline, None called), so the
+    /// judge, which runs upstream, differs on these rows for that reason alone.
+    /// </summary>
+    [Test]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d)*\n", "ab", 0, 2)]
+    [Arguments(
+        "search",
+        @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d)*\n",
+        "ab",
+        0,
+        2
+    )]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c)*\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c)*\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c)*\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c)*\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d)*\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d)*\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d)+\n", "ab", 0, 2)]
+    [Arguments(
+        "search",
+        @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d)+\n",
+        "ab",
+        0,
+        2
+    )]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c)+\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c)+\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c)+\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c)+\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d)+\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d)+\n", "ab", 0, 2)]
+    [Arguments(
+        "match",
+        @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d){1,3}\n",
+        "ab",
+        0,
+        2
+    )]
+    [Arguments(
+        "search",
+        @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&d){1,3}\n",
+        "ab",
+        0,
+        2
+    )]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c){1,3}\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1})(?<z>(?:q){1<=e<=1}))(?&c){1,3}\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c){1,3}\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?:x?(?=ab?$)){1<=e<=1}))(?&c){1,3}\n", "ab", 0, 2)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d){1,3}\n", "ab", 0, 2)]
+    [Arguments("search", @"(?(DEFINE)(?<c>(?=ab?$))(?<d>(?:x?(?&c)){1<=e<=1}))(?&d){1,3}\n", "ab", 0, 2)]
+    [Arguments("match", @"a(?=(?:bcd|b){1<=e<=1})x", "ab", -1, -1)]
+    [Arguments("search", @"a(?=(?:bcd|b){1<=e<=1})x", "ab", 2, 2)]
+    public void A_reopened_section_link_is_the_one_the_stack_holds_now(
+        string operation,
+        string pattern,
+        string text,
+        int start,
+        int end
+    ) => ShouldAnswer(operation, pattern, text, start, end);
 
     /// <summary>
     /// The port grid's counters (VERIFICATION rule 11): K1's blocked end moves the parked state and
@@ -197,5 +256,22 @@ public sealed class PartialBlockedEndTests
 
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(Enum.Parse<PartialEvent>(counted)).Should().Be(count);
+    }
+
+    private static void ShouldAnswer(string operation, string pattern, string text, int start, int end)
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "search", StringComparison.Ordinal)
+            ? regex.Match(text, partial: true)
+            : regex.MatchAtStart(text, partial: true);
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        }
     }
 }

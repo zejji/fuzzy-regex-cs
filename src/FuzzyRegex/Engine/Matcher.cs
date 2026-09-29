@@ -10771,6 +10771,14 @@ internal static class Matcher
                     // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
                     // section were legal, pushes that frame, and then backtracks into it; the
                     // backtrack arm asks the constraints again after each insertion.
+                    // D11 amendment 2, repair 2: the open-section link is this section's own frame,
+                    // which the saved stack's top is back at. A REOPEN that restored a body's open
+                    // section with a stale link would break it (MatchState.SectionFrame).
+                    Debug.Assert(
+                        !pattern.HasFuzzyMinimum || state.SectionFrame == state.Sstack.Count,
+                        "D11 amendment 2, repair 2: the open-section link is the closing section's frame"
+                    );
+
                     bool minimumAwaitsInsertions = false;
                     if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
                     {
@@ -15765,10 +15773,27 @@ internal static class Matcher
                             state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
                             "D11 amendment 2, assert 4: the body's bytes are back"
                         );
-                        state.SectionFrame =
-                            reopenedSection > reopenedCallBase
-                                ? (int)reopenedSection + reopenedDelta
-                                : (int)reopenedSection;
+                        // Repair 2: the open-section link. Below the parked state the backtracking
+                        // arms have already restored it, at the depths the stack has now (a section
+                        // re-opened by END_FUZZY's backtrack arm records the depth it finds, and one
+                        // opened in an outer call's body moves with that call's frame, not the
+                        // innermost's). Only a section the body left open, which lies in the bytes
+                        // just put back, takes the saved value, moved with them. That happens only
+                        // after a run-out, which a pattern with group calls does not continue
+                        // (RunOutInALookaroundBody), so no call frame has moved then.
+                        int parkedS0 = (int)reopenedSaved - _lookaroundStateDataSize - reopenedDelta;
+                        Debug.Assert(
+                            reopenedDelta == 0 || reopenedLength == _lookaroundStateDataSize,
+                            "D11 amendment 2, repair 2: only a run-out moves more than the parked state, and no call frame moves then"
+                        );
+                        Debug.Assert(
+                            reopenedSection > parkedS0 || reopenedDelta != 0 || state.SectionFrame == reopenedSection,
+                            "D11 amendment 2, repair 2: below the parked state the backtracking arms restored the section link"
+                        );
+                        if (reopenedSection > parkedS0)
+                        {
+                            state.SectionFrame = (int)reopenedSection + reopenedDelta;
+                        }
                         state.SliceStart = state.TextStart;
                         state.SliceEnd = state.TextEnd;
                         state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
