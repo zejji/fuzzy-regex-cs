@@ -3064,27 +3064,6 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// The indexes into <see cref="MatchState.Groups"/> of the groups a conditional or
-    /// backreference reads (<see cref="GroupInfo.Referenced"/>): the only ones the call guard keys
-    /// on. See <see cref="CallCaptures"/>.
-    /// </summary>
-    /// <param name="pattern">The pattern.</param>
-    /// <returns>The indexes, in group order.</returns>
-    private static int[] GroupsSomethingReads(PatternObject pattern)
-    {
-        var read = new List<int>();
-        for (int i = 0; i < pattern.GroupInfoList.Count; i++)
-        {
-            if (pattern.GroupInfoList[i].Referenced)
-            {
-                read.Add(i);
-            }
-        }
-
-        return [.. read];
-    }
-
-    /// <summary>
     /// Widens the text this attempt has reached to take in <paramref name="textPos"/>. See
     /// <see cref="MatchState.ReachedLow"/>.
     /// </summary>
@@ -3124,14 +3103,27 @@ internal static class Matcher
     /// </para>
     /// <para>
     /// What the key holds, in order: the call target and the position; the open section's node and
-    /// counts, since every error the called group makes is judged by them; the current span of each
-    /// group a backreference or a conditional reads; for each enclosing section, its node and how far it still is from each
-    /// minimum, counting the errors of the sections inside it, which is all
-    /// <see cref="RaisesUnmetMinimum"/> and <see cref="AllMinimumsMet"/> read of it; and the open
-    /// calls the called group can reach, those at or after the position (at or before it in a
-    /// reverse pattern), with the text each had reached when it was made, and the text the attempt
-    /// has reached, all of which the re-entry guard reads. A call inside a lookbehind could reach the
-    /// others, and <see cref="PatternObject.UseCallMemo"/> is off for it.
+    /// counts, since every error the called group makes is judged by them; what each group a
+    /// backreference or a conditional reads shows (<see cref="CallCaptures"/>: set or not, or the
+    /// text); for each enclosing section, its node and how far it still is from each minimum,
+    /// counting the errors of the sections inside it, which is all <see cref="RaisesUnmetMinimum"/>
+    /// and <see cref="AllMinimumsMet"/> read of it; the text the attempt has reached; and, as a
+    /// set, the open calls the re-entry guard could refuse a call of the called group against.
+    /// </para>
+    /// <para>
+    /// That set is the capture-dependent recursion design's addendum 1 (A1, A2). The guard reads the
+    /// open calls only as a set (<c>ActiveCalls.Add</c>), so their order is left out, and it holds
+    /// only an open call O that could ever refuse a call I made inside this one: O at or after the
+    /// position (at or before it in a reverse pattern; a call inside a lookbehind could reach the
+    /// others, and <see cref="PatternObject.UseCallMemo"/> is off for it), O's reach equal to the
+    /// reach now, and O's read groups set exactly where this call's are. The reach only grows, so
+    /// an O with a smaller reach never equals I's. The read groups that are set never shrink inside
+    /// an open call (a group is only ever set going forward, and every restore puts back a snapshot
+    /// taken inside that call's run), so O's set groups are a subset of this call's and this
+    /// call's of I's, and an O whose set groups differ from this call's can never show I's state.
+    /// Keying the ordered chain instead gave every order of setting k empty groups its own key:
+    /// <c>(?:()|()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7\8x</c> over <c>aay</c> took over a million
+    /// steps.
     /// </para>
     /// <para>
     /// What it leaves out, and why that is safe: the caller's repeats, since the called group starts
@@ -3156,8 +3148,9 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="callIndex">The call-ref index the <c>GROUP_CALL</c> node carries.</param>
+    /// <param name="captures">What the read groups show, as the guard keys the call; <see langword="null"/> when none is read.</param>
     /// <returns>The key, valid until the next call of this method.</returns>
-    private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex)
+    private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex, CallCaptures? captures)
     {
         List<long> key = state.CallMemoKey;
         key.Clear();
@@ -3170,13 +3163,14 @@ internal static class Matcher
         key.Add(counts[FuzzyValue.Del]);
         key.Add(state.FuzzyNode?.Index ?? -1);
 
-        foreach (int group in state.Pattern.MemoGroups)
+        if (captures is not null)
         {
-            key.Add(PackedSpan(state.Groups[group - 1]));
+            key.AddRange(captures.Values);
         }
 
         // The enclosing sections, as RaisesUnmetMinimum walks them. Ends: MatchState.TryOuterSection
         // only steps to a lower frame.
+        int sectionsAt = key.Count;
         if (state.SectionFrame >= 0 && state.FuzzyNode is not null)
         {
             long sub = counts[FuzzyValue.Sub];
@@ -3199,23 +3193,73 @@ internal static class Matcher
             }
         }
 
-        // The text the attempt has reached, and each reachable open call's reach, which the
-        // re-entry guard compares (MatchState.ActiveCalls): a nested call is let through only once
-        // the reach has grown past the open call's, and how far the called group's own positions
-        // grow it depends on where the reach already stands.
+        // The text the attempt has reached, which the re-entry guard compares
+        // (MatchState.ActiveCalls): a nested call is let through only once the reach has grown past
+        // the open call's, and how far the called group's own positions grow it depends on where
+        // the reach already stands.
+        // How many values the sections took, so no two keys of different shapes can be equal.
+        key.Add(key.Count - sectionsAt);
         key.Add(state.ReachedLow);
         key.Add(state.ReachedHigh);
-        foreach ((long openCall, int openReach, _, _, _) in state.OpenCalls)
+
+        // The open calls the guard could refuse a call inside this one against, as a set: see the
+        // remarks. Their reach is the reach now, so it is already in the key.
+        int reach = state.ReachedWidth;
+        List<int> ancestors = state.CallMemoAncestors;
+        ancestors.Clear();
+        for (int i = 0; i < state.OpenCalls.Count; i++)
         {
+            (long openCall, int openReach, CallCaptures? openCaptures, _, _) = state.OpenCalls[i];
             int openPos = (int)(uint)openCall;
-            if (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
+            if (
+                (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
+                && openReach == reach
+                && (captures is null || captures.SetsTheSameGroups(openCaptures!))
+            )
             {
-                key.Add(openCall);
-                key.Add(openReach);
+                // Insertion sort: the calls that pass the filter are few, one per call target
+                // when only conditionals read (A3).
+                int at = ancestors.Count;
+                ancestors.Add(i);
+                while (at > 0 && CompareOpenCalls(state, ancestors[at - 1], i) > 0)
+                {
+                    ancestors[at] = ancestors[at - 1];
+                    --at;
+                }
+
+                ancestors[at] = i;
+            }
+        }
+
+        key.Add(ancestors.Count);
+        foreach (int i in ancestors)
+        {
+            key.Add(state.OpenCalls[i].Key);
+            if (state.OpenCalls[i].Captures is { } openCaptures)
+            {
+                key.AddRange(openCaptures.Values);
             }
         }
 
         return CollectionsMarshal.AsSpan(key);
+    }
+
+    /// <summary>
+    /// Orders two open calls by their guard key and then by what their read groups showed, so
+    /// <see cref="FailedCallKey"/> lists a set of them the same way whatever order they opened in.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="first">An index into <see cref="MatchState.OpenCalls"/>.</param>
+    /// <param name="second">Another.</param>
+    /// <returns>Negative, zero or positive, as for <see cref="IComparer{T}.Compare"/>.</returns>
+    private static int CompareOpenCalls(MatchState state, int first, int second)
+    {
+        (long firstKey, _, CallCaptures? firstCaptures, _, _) = state.OpenCalls[first];
+        (long secondKey, _, CallCaptures? secondCaptures, _, _) = state.OpenCalls[second];
+        int byKey = firstKey.CompareTo(secondKey);
+        return byKey != 0 || firstCaptures is null
+            ? byKey
+            : firstCaptures.Values.AsSpan().SequenceCompareTo(secondCaptures!.Values);
     }
 
     /// <summary>The most keys <see cref="MatchState.FailedCalls"/> records in one pass.</summary>
@@ -3235,11 +3279,12 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="callIndex">The called group's index.</param>
+    /// <param name="captures">What the read groups show; see <see cref="FailedCallKey"/>.</param>
     /// <returns><see langword="true"/> if a call with this key has already failed in this pass.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool CallAlreadyFailed(MatchState state, int callIndex)
+    private static bool CallAlreadyFailed(MatchState state, int callIndex, CallCaptures? captures)
     {
-        ReadOnlySpan<long> key = FailedCallKey(state, callIndex);
+        ReadOnlySpan<long> key = FailedCallKey(state, callIndex, captures);
         if (state.FailedCalls is { } failedCalls && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(key))
         {
             ++state.CallMemoHits;
@@ -8723,8 +8768,8 @@ internal static class Matcher
 
         // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
         // part of what makes a call a repeat, so the call guard keys on them too.
-        bool keysOnCaptures = tracksReach && pattern.GroupInfoList.Exists(static info => info.Referenced);
-        int[] readGroups = keysOnCaptures ? GroupsSomethingReads(pattern) : [];
+        (int Index, bool TextRead)[] readGroups = pattern.CallReadGroups;
+        bool keysOnCaptures = readGroups.Length > 0;
 
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
@@ -10600,15 +10645,13 @@ internal static class Matcher
                     // without returning fails the same way, so it fails now. Nothing has been pushed
                     // yet, so backtracking resumes where the call's own backtrack arm would have left
                     // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
+                    CallCaptures? groupCallCaptures = keysOnCaptures ? CallCaptures.Take(state, readGroups) : null;
+
                     bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
-                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
+                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex, groupCallCaptures))
                     {
                         goto backtrack;
                     }
-
-                    CallCaptures? groupCallCaptures = keysOnCaptures
-                        ? CallCaptures.Take(state.Groups, readGroups)
-                        : null;
 
                     if (!state.ActiveCalls.Add((groupCallKey, groupCallReach, groupCallCaptures)))
                     {
@@ -10734,7 +10777,7 @@ internal static class Matcher
                         state.Bstack.PushSize(groupReturnCallReach);
                         if (groupReturnCaptures is not null)
                         {
-                            foreach (long value in groupReturnCaptures.Spans)
+                            foreach (long value in groupReturnCaptures.Values)
                             {
                                 state.Bstack.PushSize(value);
                             }
@@ -13198,16 +13241,16 @@ internal static class Matcher
                         CallCaptures? groupReturnBackCaptures = null;
                         if (keysOnCaptures)
                         {
-                            long[] spans = new long[readGroups.Length * 2];
-                            for (int i = spans.Length - 1; i >= 0; i--)
+                            long[] values = new long[readGroups.Length];
+                            for (int i = values.Length - 1; i >= 0; i--)
                             {
-                                if (!state.Bstack.PopSize(out spans[i]))
+                                if (!state.Bstack.PopSize(out values[i]))
                                 {
                                     return MatchStatus.Illegal;
                                 }
                             }
 
-                            groupReturnBackCaptures = new CallCaptures(spans);
+                            groupReturnBackCaptures = new CallCaptures(values);
                         }
 
                         if (

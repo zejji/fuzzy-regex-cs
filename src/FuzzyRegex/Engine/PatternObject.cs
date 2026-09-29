@@ -18,6 +18,13 @@ internal sealed class GroupInfo
     /// <summary>Upstream <c>referenced</c>: something refers back to this group.</summary>
     internal bool Referenced;
 
+    /// <summary>
+    /// NOT UPSTREAM'S: a backreference reads this group's text, as opposed to only a conditional
+    /// reading whether it is set. The call guard keys such a group on its text and any other
+    /// <see cref="Referenced"/> group on one bit (<c>CallCaptures</c>).
+    /// </summary>
+    internal bool TextRead;
+
     /// <summary>Upstream <c>has_name</c>: the group is named.</summary>
     internal bool HasName;
 }
@@ -368,6 +375,13 @@ internal sealed class PatternObject
     /// part of a repeat memo key.
     /// </summary>
     internal int[] MemoGroups = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the groups the call guard keys a call on (<c>CallCaptures</c>), as indexes into
+    /// <c>MatchState.Groups</c>, each with whether a backreference reads its text; empty when the
+    /// pattern has no group call. Set when the pattern is compiled.
+    /// </summary>
+    internal (int Index, bool TextRead)[] CallReadGroups = [];
 
     /// <summary>
     /// NOT UPSTREAM (the failed-call memo): whether <c>GROUP_CALL</c> may fail a call at once
@@ -908,6 +922,10 @@ internal sealed class PatternObject
 
         self.UseRepeatMemo = self.IsFuzzy && tested.Count <= 2;
         self.MemoGroups = [.. tested];
+        if (self.HasGroupCalls)
+        {
+            self.CallReadGroups = [.. tested.Select(g => (g - 1, self.GroupInfoList[g - 1].TextRead))];
+        }
 
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index. A run is of fuzzy items, so

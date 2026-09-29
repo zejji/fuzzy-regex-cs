@@ -40,41 +40,97 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
-/// NOT UPSTREAM'S: the current span of each group a conditional or backreference reads, when a
-/// group call was made - the part of the call guard's key that can change what the call does.
-/// See <see cref="MatchState.ActiveCalls"/>. Compared by value.
+/// NOT UPSTREAM'S: what each group a conditional or backreference reads showed when a group call
+/// was made - the part of the call guard's key that can change what the call does. See
+/// <see cref="MatchState.ActiveCalls"/>. Compared by value.
 /// </summary>
 /// <remarks>
+/// <para>
+/// Each read group gives one value, and it holds exactly what a reader can see (the
+/// capture-dependent recursion design, <c>docs/plan/2026-09-28-capture-dependent-recursion-design.md</c>
+/// section 4d). A conditional reads only whether its group is set, so a group only conditionals
+/// read gives <see cref="SetGroup"/> or <see cref="UnsetGroup"/>. A backreference compares the
+/// group's text with the text ahead, so a group a backreference reads
+/// (<see cref="GroupInfo.TextRead"/>) gives the id of its text (<see cref="CaptureTextIds"/>): two
+/// captures with equal text behave the same for every backreference, wherever they sit. Keying on
+/// the spans instead walked a new call chain for every position at which an empty group had been
+/// set, 2^n of them on <c>(?:()|a)(?R)|(?(1)x)</c> over <c>a...ay</c>. Exact text is finer than a
+/// case-insensitive or fuzzy comparison needs, so it can keep apart two states that could have
+/// been merged, but never merges two that differ.
+/// </para>
+/// <para>
 /// SHORTCUT: one small array per call, and only in a pattern that has both a group call and a
-/// group some conditional or backreference reads. Packing one or two spans into the key tuple
+/// group some conditional or backreference reads. Packing one or two values into the key tuple
 /// would remove it for the common case, if a benchmark ever shows it matters.
+/// </para>
 /// </remarks>
-/// <param name="spans">Start then end of each read group, -1 for both when the group is unset.</param>
-internal sealed class CallCaptures(long[] spans) : IEquatable<CallCaptures>
+/// <param name="values">One value per read group, in group order.</param>
+internal sealed class CallCaptures(long[] values) : IEquatable<CallCaptures>
 {
-    /// <summary>Start then end of each group, -1 for both when the group is unset.</summary>
-    internal long[] Spans { get; } = spans;
+    /// <summary>The value of a read group that is unset.</summary>
+    internal const long UnsetGroup = -1;
 
-    /// <summary>Takes the current spans of the groups that are read.</summary>
-    /// <param name="groups">The match state's groups.</param>
-    /// <param name="readGroups">Indexes into <paramref name="groups"/> of the groups that are read.</param>
+    /// <summary>The value of a group only conditionals read, when it is set.</summary>
+    internal const long SetGroup = 0;
+
+    /// <summary>One value per read group: <see cref="UnsetGroup"/>, <see cref="SetGroup"/> or a text id.</summary>
+    internal long[] Values { get; } = values;
+
+    /// <summary>Takes what the read groups show now.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="readGroups">
+    /// Indexes into <see cref="MatchState.Groups"/> of the groups that are read, each with whether a
+    /// backreference reads its text.
+    /// </param>
     /// <returns>The snapshot.</returns>
-    internal static CallCaptures Take(GroupData[] groups, int[] readGroups)
+    internal static CallCaptures Take(MatchState state, (int Index, bool TextRead)[] readGroups)
     {
-        long[] spans = new long[readGroups.Length * 2];
+        long[] values = new long[readGroups.Length];
         for (int i = 0; i < readGroups.Length; i++)
         {
-            GroupData group = groups[readGroups[i]];
-            bool set = group.Current >= 0;
-            spans[2 * i] = set ? group.Captures[group.Current].Start : -1;
-            spans[(2 * i) + 1] = set ? group.Captures[group.Current].End : -1;
+            (int index, bool textRead) = readGroups[i];
+            GroupData group = state.Groups[index];
+            if (group.Current < 0)
+            {
+                values[i] = UnsetGroup;
+            }
+            else if (!textRead)
+            {
+                values[i] = SetGroup;
+            }
+            else
+            {
+                GroupSpan span = group.Captures[group.Current];
+                values[i] = state.CaptureTexts.IdOf(span.Start, span.End - span.Start);
+            }
         }
 
-        return new CallCaptures(spans);
+        return new CallCaptures(values);
+    }
+
+    /// <summary>
+    /// Whether the same read groups are set here as in <paramref name="other"/>, whatever their
+    /// texts: the filter on the failed-call memo's ancestors (<c>Matcher.FailedCallKey</c>).
+    /// </summary>
+    /// <param name="other">A snapshot taken for the same pattern.</param>
+    /// <returns><see langword="true"/> if the set groups are the same.</returns>
+    internal bool SetsTheSameGroups(CallCaptures other)
+    {
+        Debug.Assert(other.Values.Length == Values.Length, "both snapshots read the same groups");
+        for (int i = 0; i < Values.Length; i++)
+        {
+            bool unset = Values[i] == UnsetGroup;
+            if (unset != (other.Values[i] == UnsetGroup))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <inheritdoc/>
-    public bool Equals(CallCaptures? other) => other is not null && Spans.AsSpan().SequenceEqual(other.Spans);
+    public bool Equals(CallCaptures? other) => other is not null && Values.AsSpan().SequenceEqual(other.Values);
 
     /// <inheritdoc/>
     public override bool Equals(object? obj) => Equals(obj as CallCaptures);
@@ -83,7 +139,7 @@ internal sealed class CallCaptures(long[] spans) : IEquatable<CallCaptures>
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        foreach (long value in Spans)
+        foreach (long value in Values)
         {
             hash.Add(value);
         }
@@ -92,7 +148,69 @@ internal sealed class CallCaptures(long[] spans) : IEquatable<CallCaptures>
     }
 
     /// <inheritdoc/>
-    public override string ToString() => string.Join(",", Spans);
+    public override string ToString() => string.Join(",", Values);
+}
+
+/// <summary>
+/// NOT UPSTREAM'S: numbers the distinct texts that groups a backreference reads have captured, so
+/// the call guard and the failed-call memo can key a group on its text with one number
+/// (<see cref="CallCaptures"/>). Two spans get the same id exactly when their texts are equal,
+/// compared ordinally.
+/// </summary>
+/// <remarks>
+/// The ids hold for one subject: <see cref="MatchState.Init"/> calls <see cref="Reset"/>, and every
+/// key that holds an id (the open calls, the backtracking stack and the failed-call memo) is
+/// cleared there too. SHORTCUT: the table only grows while one subject is matched. It gains an
+/// entry only for a new text a group call has seen, so it is no larger than the calls made; a cap
+/// with a fallback to keying on spans would bound it, if a workload ever shows it matters.
+/// </remarks>
+internal sealed class CaptureTextIds : IEqualityComparer<(int Start, int Length)>
+{
+    private readonly Dictionary<(int Start, int Length), long> _ids;
+    private ReadOnlyMemory<char> _text;
+
+    /// <summary>Initializes a new instance of the <see cref="CaptureTextIds"/> class.</summary>
+    internal CaptureTextIds()
+    {
+        _ids = new Dictionary<(int Start, int Length), long>(this);
+    }
+
+    /// <summary>How many distinct texts have an id.</summary>
+    internal int Count => _ids.Count;
+
+    /// <summary>Forgets every id and starts numbering the texts of <paramref name="text"/>.</summary>
+    /// <param name="text">The subject.</param>
+    internal void Reset(ReadOnlyMemory<char> text)
+    {
+        _ids.Clear();
+        _text = text;
+    }
+
+    /// <summary>The id of the text at <paramref name="start"/>, numbering it if it is new.</summary>
+    /// <param name="start">Where the text starts in the subject.</param>
+    /// <param name="length">Its length.</param>
+    /// <returns>
+    /// The id, at least 1, so it is never <see cref="CallCaptures.SetGroup"/> or
+    /// <see cref="CallCaptures.UnsetGroup"/>.
+    /// </returns>
+    internal long IdOf(int start, int length)
+    {
+        ref long id = ref CollectionsMarshal.GetValueRefOrAddDefault(_ids, (start, length), out bool exists);
+        if (!exists)
+        {
+            id = _ids.Count;
+        }
+
+        return id;
+    }
+
+    /// <inheritdoc/>
+    public bool Equals((int Start, int Length) x, (int Start, int Length) y) =>
+        x.Length == y.Length && _text.Span.Slice(x.Start, x.Length).SequenceEqual(_text.Span.Slice(y.Start, y.Length));
+
+    /// <inheritdoc/>
+    public int GetHashCode((int Start, int Length) obj) =>
+        string.GetHashCode(_text.Span.Slice(obj.Start, obj.Length), StringComparison.Ordinal);
 }
 
 /// <summary>
@@ -220,6 +338,12 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal ReadOnlyMemory<char> Text;
 
+    /// <summary>
+    /// NOT UPSTREAM'S: the ids of the texts the call guard has keyed a backreferenced group on. See
+    /// <see cref="CallCaptures"/>.
+    /// </summary>
+    internal readonly CaptureTextIds CaptureTexts = new();
+
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
 
@@ -309,8 +433,9 @@ internal sealed class MatchState : IDisposable
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
     /// attempt has reached no text since that call opened AND with every group a conditional or
-    /// backreference reads holding the span it held then, can only repeat the open call's
-    /// work one level deeper, so that path recurses for ever and is failed. The captures matter
+    /// backreference reads showing what it showed then (<see cref="CallCaptures"/>: set or not for a
+    /// conditional, the text for a backreference), can only repeat the open call's work one level
+    /// deeper, so that path recurses for ever and is failed. The captures matter
     /// because a group set between the two calls can change what a conditional or backreference
     /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
     /// PCRE2 refuses those shapes, upstream answers them). If the attempt HAS reached
@@ -323,9 +448,10 @@ internal sealed class MatchState : IDisposable
     /// </para>
     /// <para>
     /// Why it terminates: the width only grows during an attempt and never passes the text length,
-    /// each read group's span is one of at most <c>(n + 1)^2 + 1</c> values (n the text length), and
-    /// the set holds each entry once, so at most <c>(n + 1) * ((n + 1)^2 + 1)^r</c> calls of one group
-    /// can be open at one position, r the number of groups read. Groups nothing reads are left out
+    /// each read group shows one of at most <c>(n + 1)^2 + 1</c> values (n the text length: a text
+    /// or unset; a group only conditionals read has two), and the set holds each entry once, so at
+    /// most <c>(n + 1) * ((n + 1)^2 + 1)^r</c> calls of one group can be open at one position, r the
+    /// number of groups read. Groups nothing reads are left out
     /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
     /// for every order of setting the empty groups, about k! paths. When no group is read at all
     /// (<see cref="CallCaptures"/> is null) the bound is <c>n + 1</c>.
@@ -431,6 +557,12 @@ internal sealed class MatchState : IDisposable
     /// allocates nothing.
     /// </summary>
     internal readonly List<long> CallMemoKey = [];
+
+    /// <summary>
+    /// Where <c>Matcher.FailedCallKey</c> collects the open calls its key holds, as indexes into
+    /// <see cref="OpenCalls"/>, kept so building a key allocates nothing.
+    /// </summary>
+    internal readonly List<int> CallMemoAncestors = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): how many calls the memo has failed at once since the
@@ -1026,6 +1158,7 @@ internal sealed class MatchState : IDisposable
 
         Text = text;
         TextLength = text.Length;
+        CaptureTexts.Reset(text);
         // The ushort form of the same search allocates nothing; the char form allocated 96 B on
         // every call, even after tier-up, in Debug and Release (measured 2026-09-22, .NET 10).
         // That 96 B was the whole of a warm IsMatch's allocation; AllocationTests pins the 0.
@@ -1059,6 +1192,7 @@ internal sealed class MatchState : IDisposable
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
         CallMemoKey.Clear();
+        CallMemoAncestors.Clear();
         VerbMarks.Clear();
         CallMemoHits = 0;
         ReachedLow = int.MaxValue;
@@ -1228,6 +1362,7 @@ internal sealed class MatchState : IDisposable
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
         Text = default;
+        CaptureTexts.Reset(default);
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;

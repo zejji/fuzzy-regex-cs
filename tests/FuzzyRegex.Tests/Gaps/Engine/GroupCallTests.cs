@@ -701,6 +701,84 @@ public sealed class GroupCallTests
         regex.Match("abc").Success.Should().BeFalse();
     }
 
+    // D5, found in the capture-dependent recursion design's grids (2026-09-28, section 3). Upstream
+    // 2026.9.10 answers (0, 3). A call of the pattern at 0 made after g has captured a new text in
+    // the lookahead can do something different from the call at 0 already open, but the guard
+    // without captures refused it as a repeat, so the attempt at 0 failed and the answer was the
+    // attempt at 1, (1, 3).
+    [Test]
+    public void A_capture_taken_inside_a_lookahead_is_part_of_the_call_guard_key()
+    {
+        Match m = new FuzzyRegex(@".*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)", FuzzyRegexOptions.None, _budget).Match(
+            "aab"
+        );
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+    }
+
+    // The design's grid 2 row that upstream settles (section 6, 30 s run, 2026-09-28): (0, 2). The
+    // guard without captures answered None.
+    [Test]
+    public void A_group_set_empty_between_two_calls_lets_the_inner_call_through()
+    {
+        Match m = new FuzzyRegex(
+            @"(?:(?(g)|(?<g>)))*|(?(g)b|a)(?R)(?:(?<g>)(?P=g))+|(?:(?<g>)(?P=g))+(?:(?<g>))*(?R)",
+            FuzzyRegexOptions.None,
+            _budget
+        ).FullMatch("ab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
+
+    // The design's shapes where keying on the captured spans walks a new call chain for every order
+    // or position at which the read groups were set (sections 2 and A4). What a reader sees is
+    // only whether a conditional's group is set and what text a backreference's group holds, so
+    // the key holds only that, and the failed-call memo keys its ancestors as a set. By the
+    // grammar the k-group rows match nothing over 'aay' (no x), the lookahead row matches (0, 20)
+    // and the gk row (0, 3); upstream raises MemoryError on all of them. The reach witness is the
+    // row that fails when the memo's ancestors are not filtered by their reach. The \1x row with
+    // a lookahead gives group 1 a new text at every position, so only the memo keeps it
+    // polynomial, and it needs the memo on for a capture group inside a lookahead.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|(?(1)x)", "aaaaaaaaaaaaaaaaaaaay", false, 0, 20)]
+    [Arguments(@"(?:()|a)(?R)|(?(1)x)", "aaaaaaaaaaaaaaaaaaaaaaaay", false, 0, 24)]
+    [Arguments(@"(?:()|()|()|a)(?R)|(?(1)x)|(?(2)x)|(?(3)x)", "aaaaaaaaaaaay", false, 0, 12)]
+    [Arguments(@"(?:()|a)(?R)|\1x", "aaaaaaaaaaaaaaaaaaaay", false, -1, 0)]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|\1x", "aaaaaaaaaaaaaaaaaaaay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7\8x", "aay", false, -1, 0)]
+    [Arguments(@"(?:()|()|()|()|()|()|a)(?R)|(?(1)|z)(?(2)|z)(?(3)|z)(?(4)|z)(?(5)|z)(?(6)|z)x", "aay", false, -1, 0)]
+    [Arguments(
+        @"(?:()|()|()|()|()|()|()|()|a)(?R)|(?(1)|z)(?(2)|z)(?(3)|z)(?(4)|z)(?(5)|z)(?(6)|z)(?(7)|z)(?(8)|z)x",
+        "aay",
+        false,
+        -1,
+        0
+    )]
+    [Arguments(@"(?:()|()|()|()|a)(?R)|\3\4x", "aax", false, 0, 3)]
+    [Arguments(@"(?(DEFINE)(?<H>(?&G)|.*z|(?&G)|a)(?<G>(?&H)b))(?&H)", "ab", true, 0, 2)]
+    public void A_call_guard_keyed_on_what_is_read_stays_polynomial(
+        string pattern,
+        string subject,
+        bool full,
+        int start,
+        int end
+    )
+    {
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+                Match m = full ? regex.FullMatch(subject) : regex.Match(subject);
+                (m.Success ? (m.Index, m.Index + m.Length) : (-1, 0)).Should().Be((start, end));
+            },
+            1_000_000,
+            "the guard and the memo key only what a conditional or backreference reads"
+        );
+    }
+
     [Test]
     [Category(EngineWork.Category)]
     public void A_nested_call_that_reaches_no_further_is_still_refused()

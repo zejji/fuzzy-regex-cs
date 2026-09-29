@@ -42,4 +42,23 @@ public sealed class OpenDefectTests
             .Success.Should()
             .BeFalse();
     }
+
+    // D4 (the capture-dependent recursion design, section 6b). The `.*z` branch fails only after
+    // reading the whole text, so the attempt's reach is already full when the first call is made,
+    // no later call can show growth, and the finite left recursion `(?:|(?R)a)` is refused one
+    // level down. Upstream 2026.9.10 answers (0, 2) on both rows; PCRE2 10.47 raises "nested
+    // recursion at the same subject position" on the first. Without the `.*z|` branch the port
+    // answers (0, 2) as well (GroupCallTests).
+    [Test]
+    [Arguments(@".*z|(?:|(?R)a)", "aa")]
+    [Arguments(@"(?:a|(?<g>))*?(?P=g)|(?<g>)a(?R)|(?R)(?P=g)x", "ax")]
+    public void A_left_recursion_is_let_through_when_the_reach_is_full_before_the_first_call(
+        string pattern,
+        string subject
+    )
+    {
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(30)).FullMatch(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
 }

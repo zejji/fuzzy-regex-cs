@@ -1151,8 +1151,8 @@ internal static class NodeCompiler
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
-        // NOT UPSTREAM: see PatternObject.UseCallMemo.
-        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
+        // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
+        // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.
 
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
@@ -1484,6 +1484,9 @@ internal static class NodeCompiler
 
         // Record that we have a reference to a group.
         RecordRefGroup(args.Pattern, (int)group);
+
+        // NOT UPSTREAM: a backreference reads the group's text. See GroupInfo.TextRead.
+        args.Pattern.GroupInfoAt((int)group).TextRead = true;
 
         // Append the reference.
         AddNode(args.End!, node);

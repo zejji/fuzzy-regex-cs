@@ -330,6 +330,10 @@ public sealed class MatchStateCacheTests
             case HashSet<(long Key, int Reach, CallCaptures? Captures)> set:
                 set.Add((7, 7, null));
                 break;
+            case CaptureTextIds ids:
+                ids.Reset("scribbled".AsMemory());
+                _ = ids.IdOf(1, 2);
+                break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
@@ -441,6 +445,9 @@ public sealed class MatchStateCacheTests
                 break;
             case HashSet<(long Key, int Reach, CallCaptures? Captures)> set:
                 RenderItems(path, set.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
+                break;
+            case CaptureTextIds ids:
+                lines.Add($"{path}=({ids.Count},{(ReadOnlyMemory<char>)Private(ids, "_text")})");
                 break;
             case HashSet<long[]> keys:
                 RenderItems(
