@@ -2524,9 +2524,92 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchGraphemeBoundary(MatchState state, Node node, int textPos)
     {
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return GraphemeBoundaryInAPartialCall(state, node, textPos);
+        }
+
+        return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the grapheme boundary <c>\X</c> ends on, in a partial call's second pass.
+    /// Kept out of line so that a call without partial runs the test as it was.
+    /// </summary>
+    /// <remarks>
+    /// Brought forward from build chunk 10 for chunk 4, because without it no <c>\X</c> ever reads
+    /// the text to come and the cut rule has nothing to block (row C3). Off the edge the answer is
+    /// the held text's, and S57d notes the test where it stands at the truncation point. SHORTCUT:
+    /// under <c>(?r)</c> a boundary a little right of the edge can still depend on the text to come
+    /// (GB9c, GB11 and GB12/GB13 look left through a run that can reach the edge), and it is answered
+    /// against the held text. Ceiling: a reversed <c>\X</c> over such a run can refuse a completion.
+    /// Upgrade: chunk 10's property cores, which enumerate the unknown side as <c>(?w)</c> does.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>GraphemeBoundary</c> node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int GraphemeBoundaryInAPartialCall(MatchState state, Node node, int textPos)
+    {
+        if (node.Encoding != CaseEncoding.Ascii && AtContinuationEdge(state, textPos))
+        {
+            return GraphemeBoundaryAtEdge(state, textPos);
+        }
+
         NoteBoundaryAtTruncationPoint(state, textPos);
 
         return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: a grapheme boundary at the edge of a partial call's second pass
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    /// <remarks>
+    /// One side of the edge is the first character of the text to come, and UAX #29 decides a
+    /// boundary from that character and the text on the other side. Every class of character can
+    /// come, so the test is decided only where one rule fixes the answer for all of them: after a
+    /// Control or LF (GB4), or before a Control or CR (GB5), there is always a break, which is also
+    /// what the first pass, reading the edge as the end of the text (GB1, GB2), answered. Everywhere
+    /// else an Extend character keeps the cluster going (GB9, and GB3 for a CR before an LF) and a
+    /// Control breaks it (GB5, GB4), so the test is undetermined. The known side always holds a
+    /// character here, because <c>\X</c> tests its boundary only after taking one
+    /// (<c>Nodes.cs</c>, <c>Grapheme.CompileCore</c>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The edge.</param>
+    /// <returns><see cref="MatchStatus.Success"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int GraphemeBoundaryAtEdge(MatchState state, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+
+        Debug.Assert(
+            forward ? textPos > state.TextStart : textPos < state.TextEnd,
+            "D11 M1: a grapheme boundary at the edge has a character on its known side"
+        );
+
+        uint knownProp = UnicodeTables.GetGraphemeClusterBreak(
+            state.CharAt(forward ? state.PrevPos(textPos) : textPos)
+        );
+
+        bool alwaysBreaks = forward
+            ? knownProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakLf
+            : knownProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr;
+
+        if (alwaysBreaks)
+        {
+            Debug.Assert(
+                AtGraphemeBoundary(state, textPos),
+                "D11 A4: a decided grapheme test answers what the first pass answered"
+            );
+
+            return MatchStatus.Success;
+        }
+
+        NoteBoundaryAtTruncationPoint(state, textPos);
+
+        return UndeterminedRead(state);
     }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
@@ -3777,13 +3860,15 @@ internal static class Matcher
     /// w-marks of the entries it discards before <see cref="MatchState.SetBstackCount"/> checks A7.
     /// </summary>
     /// <remarks>
-    /// A verb's unwinding drops the marks above its target by design (section 4.2). For the cuts
-    /// (atomic groups and possessive repeats, lookarounds, conditions' tests, a <c>(*PRUNE)</c>
-    /// that runs forward) the drop is interim. SHORTCUT: until the cut rule of build chunks 4 to 6,
-    /// every cut is taken as it was before D11, and a touch mark above it goes with the entries it
-    /// discards. Ceiling: a cut after a read of the text to come can discard an alternative that
-    /// some continuation needs (design rows D1-D3, V1-V3), which S57d's escalation still answers
-    /// until chunk 9. Upgrade: the cut rule blocks such a cut instead of taking it.
+    /// A verb's unwinding drops the marks above its target by design (section 4.2). An atomic
+    /// group, possessive repeat or <c>\X</c> reaches here only unblocked, with no mark above its
+    /// frame (build chunk 4, <see cref="BlockAtomicCut"/>). For the other cuts (lookarounds,
+    /// conditions' tests, a <c>(*PRUNE)</c> that runs forward) the drop is interim. SHORTCUT: until
+    /// the cut rule of build chunks 5 and 6, those cuts are taken as they were before D11, and a
+    /// touch mark above one goes with the entries it discards. Ceiling: such a cut after a read of
+    /// the text to come can discard an alternative that some continuation needs (design rows
+    /// V1-V3), which S57d's escalation still answers until chunk 9. Upgrade: the cut rule blocks
+    /// such a cut instead of taking it.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="count">The new count.</param>
@@ -3796,6 +3881,100 @@ internal static class Matcher
 
         state.SetBstackCount(count);
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: the end of an atomic group, possessive repeat or <c>\X</c> whose cut
+    /// is blocked, because a mark lies above its frame (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>,
+    /// section 4.2). The cut would discard the body's other paths, and some continuation of the text
+    /// needs them (rows D1-D3: 'x' + 'a' fails the <c>\b</c> in <c>(?&gt;x\b|)</c>, and only the
+    /// empty path then matches).
+    /// </summary>
+    /// <remarks>
+    /// Nothing is discarded. The frame gets a cut taint, once however often its end is blocked, and
+    /// the pruning-stack mark the end popped is saved in a <see cref="Opcode.Reopen"/> entry, whose
+    /// backtracking arm pushes it back. The saved-stack count the frame holds is left alone, as a
+    /// group that is not atomic leaves it, because the body's entries are still live. The frame's
+    /// own backtracking arm drops the taint when the group is backtracked out of.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The pruning-stack mark: the backtracking stack's count just after the
+    /// frame's <see cref="Opcode.Atomic"/> entry.</param>
+    private static void BlockAtomicCut(MatchState state, int frameEnd)
+    {
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass blocks a cut");
+
+        if (!HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint))
+        {
+            state.AddWMark(frameEnd - 1, WMarkKind.CutTaint);
+        }
+
+        state.Bstack.PushSize(frameEnd);
+        state.Bstack.PushUInt8((byte)Opcode.Reopen);
+
+        /* bstack: pstack_mark REOPEN */
+
+        state.NotePartialEvent(PartialEvent.CutBlockedAtomic);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: drops the cut taint an atomic group's own frame carries before an
+    /// unblocked cut pops the frame, so that the caller can move it to the end entry it pushes (the
+    /// exception to A7 that design section 4.5 names).
+    /// </summary>
+    /// <remarks>
+    /// Called after the cut, when no mark lies above the frame. A taint at the frame does not block
+    /// the group's own cut: in the continuations where the group committed at an earlier end, none
+    /// of its other paths is needed (row N1).
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <param name="frameEnd">The pruning-stack mark the end popped.</param>
+    /// <returns><see langword="true"/> if the frame carried a taint.</returns>
+    private static bool DropOwnCutTaint(MatchState state, int frameEnd)
+    {
+        if (state.WMarks[^1].Position < frameEnd - 1)
+        {
+            return false;
+        }
+
+        Debug.Assert(
+            state.WMarks[^1] == new WMark(frameEnd - 1, WMarkKind.CutTaint),
+            "D11: after an unblocked cut, the only mark at the frame is its own cut taint"
+        );
+        state.DropWMarksFrom(frameEnd - 1);
+
+        return true;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: whether a w-mark of a kind lies at a position.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="position">The backtracking-stack position.</param>
+    /// <param name="kind">The kind.</param>
+    /// <returns><see langword="true"/> if the mark is there.</returns>
+    private static bool HasWMarkAt(MatchState state, int position, WMarkKind kind)
+    {
+        for (int i = state.WMarks.Count - 1; i >= 0 && state.WMarks[i].Position >= position; i--)
+        {
+            if (state.WMarks[i] == new WMark(position, kind))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// D11 A9: the pruning-stack mark a <see cref="Opcode.Reopen"/> entry pushes back is its frame's:
+    /// the entry just below it is an <see cref="Opcode.Atomic"/> frame's, and that frame carries the
+    /// cut taint its blocked end made.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The mark the entry saved.</param>
+    /// <returns><see langword="true"/> if it holds.</returns>
+    private static bool ReopenedFrameIsTheBlockedOne(MatchState state, int frameEnd) =>
+        state.Bstack.ReadUInt8Below(frameEnd, out byte frameOp)
+        && frameOp == (byte)Opcode.Atomic
+        && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
 
     /// <summary>
     /// NOT UPSTREAM'S, ledger entry 47: whether the innermost construct open around a
@@ -9633,7 +9812,22 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
+                    // D11 M2, the cut rule: a mark above the frame means the path since the group
+                    // began depends on the text to come, so the cut is not taken. Only a partial
+                    // call's second pass makes marks (A6).
+                    if (state.WMarks.Count != 0 && state.WMarks[^1].Position >= atomicBstackCount)
+                    {
+                        BlockAtomicCut(state, (int)atomicBstackCount);
+                        node = node.Next1.Node!;
+                        break;
+                    }
+
                     CutBstack(state, (int)atomicBstackCount);
+
+                    // D11 M2: a cut taint the group's own frame carries (an earlier end was blocked)
+                    // does not block this cut, and moves to the end entry pushed below, because the
+                    // path after the group is still reached only for some continuations.
+                    bool atomicTainted = state.WMarks.Count != 0 && DropOwnCutTaint(state, (int)atomicBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
@@ -9642,7 +9836,13 @@ internal static class Matcher
 
                     state.Sstack.Count = (int)atomicSstackCount;
                     CloseFramesAbove(state);
+
                     state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
+
+                    if (atomicTainted)
+                    {
+                        state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                    }
 
                     /* bstack: captures fuzzy_counts capture_change END_ATOMIC
                      *
@@ -13249,6 +13449,12 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the cut taint a blocked end left at the frame goes with it.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
                         return MatchStatus.Illegal;
@@ -13274,6 +13480,12 @@ internal static class Matcher
                 case Opcode.EndAtomic: // End of an atomic group.
                 {
                     /* bstack: captures fuzzy_counts capture_change */
+
+                    // D11 M2: the cut taint an unblocked cut moved here from the frame goes with it.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
 
                     if (!state.Bstack.PopSize(out long endAtomicCaptureChange))
                     {
@@ -14490,6 +14702,25 @@ internal static class Matcher
                     );
                     state.DropWMarksFrom(state.Bstack.Count);
                     break;
+                case Opcode.Reopen: // NOT UPSTREAM'S, D11 M2: back into a group whose cut was blocked.
+                {
+                    /* bstack: pstack_mark */
+
+                    if (!state.Bstack.PopSize(out long reopenedFrameEnd))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    Debug.Assert(
+                        ReopenedFrameIsTheBlockedOne(state, (int)reopenedFrameEnd),
+                        "D11 A9: a reopened group's mark is its own frame's, which its blocked end tainted"
+                    );
+
+                    // The group is open again, as it was before its end, so that the body's other
+                    // paths end at the group's end once more.
+                    state.Pstack.PushSize(reopenedFrameEnd);
+                    break;
+                }
                 case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
                 {
                     /* bstack: text_pos node */

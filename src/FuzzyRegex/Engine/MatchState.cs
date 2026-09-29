@@ -1369,8 +1369,10 @@ internal sealed class MatchState : IDisposable
     /// <remarks>
     /// The one check is A7: no live w-mark lies at or above the new count, so the caller must have
     /// dropped the marks it discards. The design's one exception, an unblocked construct's own-frame
-    /// cut taint, which moves to the entry its cut pushes, arrives with its only caller, the cut rule
-    /// (build chunk 4). The check is Debug only, so a Release build pays nothing here.
+    /// cut taint, which moves to the entry its cut pushes, needs nothing here: the frame lies below
+    /// the count its cut sets, and the cut drops the taint before it pops the frame and adds it
+    /// again at the end entry (<c>Matcher.DropOwnCutTaint</c>, build chunk 4). The check is Debug
+    /// only, so a Release build pays nothing here.
     /// </remarks>
     /// <param name="count">The new count, at most the current one.</param>
     internal void SetBstackCount(int count)

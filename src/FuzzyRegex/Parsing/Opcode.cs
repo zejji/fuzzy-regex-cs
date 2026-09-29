@@ -349,4 +349,13 @@ internal enum Opcode : uint
     /// node or in a code list, and its backtracking arm only drops the mark.
     /// </summary>
     WTouch = 100,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a blocked atomic group,
+    /// possessive repeat or <c>\X</c> leaves where its cut would have been, holding the pruning-stack
+    /// mark its end popped (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2).
+    /// Backtracking onto it pushes the mark back, so the group is open again for its body's other
+    /// paths. It never appears on a node or in a code list.
+    /// </summary>
+    Reopen = 101,
 }
