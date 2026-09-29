@@ -3066,17 +3066,15 @@ internal static class Matcher
             return (key, reach);
         }
 
-        ref int open = ref CollectionsMarshal.GetValueRefOrNullRef(state.ActiveCallCounts, (key, reach));
-        Debug.Assert(
-            !Unsafe.IsNullRef(ref open) && open > 0,
-            "ActiveCallCounts counts exactly the calls OpenCalls holds"
-        );
-        if (--open == 0)
+        // One lookup in the common case, where this was the only open call with its key and reach.
+        bool counted = state.ActiveCallCounts.Remove((key, reach), out int open);
+        Debug.Assert(counted && open > 0, "ActiveCallCounts counts exactly the calls OpenCalls holds");
+        if (open > 1)
         {
-            _ = state.ActiveCallCounts.Remove((key, reach));
+            state.ActiveCallCounts[(key, reach)] = open - 1;
         }
 
-        state.OpenCallSpans.RemoveRange(state.OpenCallSpans.Count - readCount, readCount);
+        CollectionsMarshal.SetCount(state.OpenCallSpans, state.OpenCallSpans.Count - readCount);
         return (key, reach);
     }
 
@@ -3108,9 +3106,12 @@ internal static class Matcher
         }
 
         ++open;
-        foreach ((int index, _) in readGroups)
+        int at = state.OpenCallSpans.Count;
+        CollectionsMarshal.SetCount(state.OpenCallSpans, at + readGroups.Length);
+        Span<long> spans = CollectionsMarshal.AsSpan(state.OpenCallSpans)[at..];
+        for (int g = 0; g < readGroups.Length; g++)
         {
-            state.OpenCallSpans.Add(PackedSpan(state.Groups[index]));
+            spans[g] = PackedSpan(state.Groups[readGroups[g].Index]);
         }
 
         return true;
@@ -3159,7 +3160,7 @@ internal static class Matcher
             {
                 long then = state.OpenCallSpans[(i * readGroups.Length) + g];
                 long now = PackedSpan(state.Groups[readGroups[g].Index]);
-                same = ReadValue(state, then, readGroups[g].Read) == ReadValue(state, now, readGroups[g].Read);
+                same = SameRead(state, then, now, readGroups[g].Read);
             }
 
             if (same)
@@ -3172,10 +3173,46 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether a reader sees the same of a read group with these two packed spans
+    /// (<see cref="PackedSpan"/>): <see cref="ReadValue"/> compared, without numbering any text.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="then">One packed span, -1 when unset.</param>
+    /// <param name="now">The other.</param>
+    /// <param name="read">What is read of the group.</param>
+    /// <returns><see langword="true"/> if the two read the same.</returns>
+    private static bool SameRead(MatchState state, long then, long now, CallRead read)
+    {
+        if (then == now)
+        {
+            return true;
+        }
+
+        if (then == -1 || now == -1 || read == CallRead.Span)
+        {
+            return false;
+        }
+
+        if (read == CallRead.SetOrUnset)
+        {
+            return true;
+        }
+
+        ReadOnlySpan<char> text = state.Text.Span;
+        int thenStart = (int)(then >> 32);
+        int nowStart = (int)(now >> 32);
+        int length = (int)(uint)then - thenStart;
+        return length == (int)(uint)now - nowStart
+            && text.Slice(thenStart, length).SequenceEqual(text.Slice(nowStart, length));
+    }
+
+    /// <summary>
     /// What a reader can see of a read group with this packed span, as one number: -1 unset, 0 set
-    /// for a group only conditionals read, the id of its text for a backreferenced group
-    /// (<see cref="CaptureTextIds"/>), or the span itself, made negative, where the span is read
-    /// (<see cref="CallRead.Span"/>). Equal numbers mean equal read states.
+    /// for a group only conditionals read, its text for a backreferenced group (spelled out when
+    /// it is at most three characters, else its id in <see cref="CaptureTextIds"/>), or the span
+    /// itself, made negative, where the span is read (<see cref="CallRead.Span"/>). Equal numbers
+    /// mean equal read states. Only the failed-call memo needs the number; the guard compares with
+    /// <see cref="SameRead"/>.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="packed">The packed span (<see cref="PackedSpan"/>), -1 when unset.</param>
@@ -3193,10 +3230,36 @@ internal static class Matcher
         return read switch
         {
             CallRead.SetOrUnset => 0,
-            CallRead.Text => state.CaptureTexts.IdOf(start, end - start),
+            CallRead.Text => TextValue(state, start, end - start),
             // Negative and never -1, since a start is never negative.
             _ => long.MinValue | packed,
         };
+    }
+
+    /// <summary>
+    /// The <see cref="ReadValue"/> of a text: up to three characters spelled out above bit 62, so
+    /// the common empty and one-character captures need no table, and a longer text's id from
+    /// <see cref="CaptureTextIds"/>, which is below 2^31. The two ranges never meet.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="start">Where the text starts.</param>
+    /// <param name="length">Its length.</param>
+    /// <returns>The value, always positive.</returns>
+    private static long TextValue(MatchState state, int start, int length)
+    {
+        if (length > 3)
+        {
+            return state.CaptureTexts.IdOf(start, length);
+        }
+
+        ReadOnlySpan<char> text = state.Text.Span.Slice(start, length);
+        long value = (1L << 62) | ((long)length << 48);
+        for (int i = 0; i < length; i++)
+        {
+            value |= (long)text[i] << (16 * i);
+        }
+
+        return value;
     }
 
     /// <summary>
@@ -9098,9 +9161,13 @@ internal static class Matcher
         // open, and the abandoned one may have left some - a verb that cuts the backtracking drops
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
-        state.ActiveCallCounts.Clear();
         state.OpenCalls.Clear();
-        state.OpenCallSpans.Clear();
+        if (state.Pattern.CallReadGroups.Length > 0)
+        {
+            state.ActiveCallCounts.Clear();
+            state.OpenCallSpans.Clear();
+        }
+
         state.ReachedLow = int.MaxValue;
         state.ReachedHigh = int.MinValue;
 
@@ -10946,9 +11013,9 @@ internal static class Matcher
                         state.Bstack.PushSize(state.CaptureChange);
                         state.Bstack.PushSize(state.OpenCalls[^1].Key);
                         state.Bstack.PushSize(state.OpenCalls[^1].Reach);
-                        for (int i = state.OpenCallSpans.Count - readGroupCount; i < state.OpenCallSpans.Count; i++)
+                        foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
                         {
-                            state.Bstack.PushSize(state.OpenCallSpans[i]);
+                            state.Bstack.PushSize(span);
                         }
 
                         _ = PopOpenCall(state);
