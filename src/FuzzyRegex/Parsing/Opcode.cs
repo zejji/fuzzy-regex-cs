@@ -358,4 +358,13 @@ internal enum Opcode : uint
     /// paths. It never appears on a node or in a code list.
     /// </summary>
     Reopen = 101,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a fuzzy zero-width test leaves
+    /// when a partial call's second pass passes it undetermined, holding the node and the text
+    /// position. The continuations that fail the test may still match it with an insertion, so
+    /// backtracking onto the entry tries that, as the forward arm does for a test that failed. It
+    /// never appears on a node or in a code list.
+    /// </summary>
+    UndeterminedFuzzyRetry = 102,
 }

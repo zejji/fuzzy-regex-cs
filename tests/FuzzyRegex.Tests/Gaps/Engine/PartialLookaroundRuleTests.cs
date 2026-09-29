@@ -52,6 +52,57 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// A negative lookaround whose body runs out inside a string, followed by a string that needs
+    /// the text to come: 'a' + 'c' completes each row. The run-out left the matcher's position in
+    /// the body's string behind, and the next string then resumed from it instead of from its start
+    /// (review of chunk 6, round 1).
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments("match", @"(?!ab)ac", "a", 0)]
+    [Arguments("fullmatch", @"(?!ab)ac", "a", 0)]
+    [Arguments("search", @"(?!ab)ac", "a", 0)]
+    [Arguments("match", @"(?!ab)ax", "a", 0)]
+    [Arguments("match", @"(?!a[b])ac", "a", 0)]
+    [Arguments("match", @"(?!ab)[a]c", "a", 0)]
+    [Arguments("match", @"(?!ab)a(?:c|cc)", "a", 0)]
+    [Arguments("match", @"(?!ab)a\n", "a", 0)]
+    [Arguments("match", @"(?i)(?!ab)ac", "a", 0)]
+    [Arguments("match", @"(?:(?!ab)a)c", "a", 0)]
+    [Arguments("match", @"(?r)ca(?<!ba)", "a", 0)]
+    [Arguments("match", @"(?!ab)acd", "a", 0)]
+    [Arguments("match", @"(?!abc)abd", "ab", 0)]
+    public void A_string_after_a_body_that_ran_out_starts_from_its_first_character(
+        string operation,
+        string pattern,
+        string text,
+        int start
+    )
+    {
+        Match m = Run(operation, pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, text.Length - start));
+    }
+
+    /// <summary>
+    /// A fuzzy zero-width test passed undetermined keeps its failing side's insertion: over '', the
+    /// continuations that fail the <c>\B</c> (a word character to come) match it by inserting that
+    /// character, after which <c>(?!^)</c> holds. The first row is the review's (chunk 6, round 1),
+    /// which chunk 5 answered only because the inner lookahead's run-out ended the attempt.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately, on the second row: upstream answers None to it and
+    // P(0, 0) to the first.
+    [Test]
+    [Arguments(@"(?m)(?:\B){i<=1}(*SKIP)(?!$(?!a|\Maa)|^)")]
+    [Arguments(@"(?:\B){i<=1}(?!^)")]
+    public void A_fuzzy_test_passed_undetermined_keeps_the_insertion_of_its_failing_side(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 0));
+    }
+
+    /// <summary>
     /// Row C2 with <c>$</c> for the read, and the double negative from chunk 5's review: a negative
     /// lookaround whose body succeeded after a read of the text to come holds for the other
     /// continuations ('True' + ' ' fails the <c>$</c>; ' ' fails the inner lookaround's <c>$</c>,

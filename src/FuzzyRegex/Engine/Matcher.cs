@@ -11485,7 +11485,19 @@ internal static class Matcher
                     else if (status == MatchStatus.Undetermined)
                     {
                         // D11 M1: some continuations pass the test, so the path goes on and leaves a
-                        // touch mark. The continuations that fail it are ordinary backtracking.
+                        // touch mark. The continuations that fail it are ordinary backtracking, and
+                        // in a fuzzy section they may still match it with an insertion, which an
+                        // entry below the touch tries: `(?:\B){i<=1}(?!^)` over '' ('' + 'a' inserts
+                        // the 'a'; review of chunk 6, round 1).
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node);
+                            state.Bstack.PushUInt8((byte)Opcode.UndeterminedFuzzyRetry);
+
+                            /* bstack: text_pos node UNDETERMINED_FUZZY_RETRY */
+                        }
+
                         PushTouchMark(state);
                         node = node.Next1.Node!;
                     }
@@ -13953,6 +13965,10 @@ internal static class Matcher
             return MatchStatus.Partial;
         }
 
+        // The item that ran out is abandoned, so the next STRING item starts at its own first
+        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
+        // (review of chunk 6, round 1).
+        stringPos = -1;
         node = runOutEnd;
         goto advance;
 
@@ -15466,6 +15482,38 @@ internal static class Matcher
 
                     // The tail may have failed to match at this position.
                     state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    break;
+                }
+                case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.
+                {
+                    /* bstack: text_pos node */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? retryNode) || !state.Bstack.PopSize(out long retryPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // As the forward arm does for a zero-width test that failed: an insertion is the
+                    // only error a zero-width item can take.
+                    state.TextPos = (int)retryPos;
+                    node = retryNode!;
+                    status = FuzzyMatchItem(state, search, ref node, 0);
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
                     break;
                 }
                 case Opcode.WTouch: // NOT UPSTREAM'S, D11: backtracking has passed a touch mark.
