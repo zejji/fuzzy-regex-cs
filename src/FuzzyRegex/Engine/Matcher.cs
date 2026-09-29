@@ -12406,6 +12406,12 @@ internal static class Matcher
                         // LIVE SINCE S60, and dead code before it: the locator is the only thing
                         // that sets 'req_pos', and this is the one arm it sets it for. The string
                         // the prefilter has already compared is not compared a second time.
+                        // Only an exact run is marked (String.CompileCore, D34): skipping a fuzzy
+                        // one would skip its exact-deletion choices too.
+                        Debug.Assert(
+                            (node.Status & NodeStatus.Fuzzy) == 0,
+                            "A fuzzy run was marked as the required string."
+                        );
                         state.TextPos = state.ReqEnd;
                     }
                     else
