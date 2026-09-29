@@ -1229,6 +1229,13 @@ internal static class NodeCompiler
         node.Status |= NodeStatus.HasGroups;
         node.Status |= NodeStatus.HasRepeats;
 
+        // NOT UPSTREAM (D10): a call writes the called group's captures, so it counts as a group for
+        // the enclosing sequence. Upstream sets only the call node's own flag, but the flag is read
+        // only on a LOOKAROUND node (:13772), so a lookaround whose body only calls a group never
+        // saves the captures and keeps the call's capture after a negative body succeeded or a
+        // positive one was backtracked past.
+        args.HasGroups = true;
+
         args.Code += 2;
 
         // Record that we used a call_ref.
