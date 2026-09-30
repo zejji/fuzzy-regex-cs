@@ -182,8 +182,8 @@ Measured 2026-09-21 on this build, `dotnet run -c Release` over `.scratch/flags-
 | `Ascii` | `(?a)` | off | `\w`, `\s`, `\d` and the word boundaries cover ASCII only. Rejected together with `Unicode`. |
 | `RightToLeft` | `(?r)` | off | Search backwards from the end of the subject. |
 | `Word` | `(?w)` | off | `\b`/`\B` follow Unicode's own word-boundary rules (UAX #29) rather than a `\w`-to-`\W` transition, so `can't` never splits. |
-| `BestMatch` | `(?b)` | off | Rank fuzzy candidates by cost rather than by error count, under the conditions in `docs/COMPARISON.md`'s "Fuzzy syntax in one page". |
-| `EnhanceMatch` | `(?e)` | off | After finding a fuzzy match, try to improve its fit; same ranking change as `BestMatch`. |
+| `BestMatch` | `(?b)` | off | Rank fuzzy candidates by cost rather than by error count, under the conditions in `docs/COMPARISON.md`'s "Fuzzy syntax in one page". See [choosing between them](#choosing-between-plain-fuzzy-enhancematch-and-bestmatch). |
+| `EnhanceMatch` | `(?e)` | off | After finding a fuzzy match, try to improve its fit; same ranking change as `BestMatch`. See [choosing between them](#choosing-between-plain-fuzzy-enhancematch-and-bestmatch). |
 | `Posix` | `(?p)` | off | Leftmost-longest matching instead of leftmost-first. Can be much slower; set `matchTimeout`. |
 | `Version0` | `(?V0)` | off | Upstream's own default: simple case-folding, and an unescaped `[` inside a set is a literal. |
 | *(no enum member)* | `(?L)` | off | Upstream's locale-dependent matching. Not exposed as a flag because .NET has no equivalent locale to ask for; see `FuzzyRegexOptions`'s own remarks. |
@@ -230,6 +230,92 @@ error, where `colour` is supplied through the `namedLists` constructor or static
 parameter. `NamedLists` reads a compiled pattern's own lists back as
 `IReadOnlyDictionary<string, IReadOnlySet<string>>`. See "`\L<name>`: fuzzy matching against a
 named list of words" in `docs/COMPARISON.md` for the full syntax and a worked example.
+
+### Choosing between plain fuzzy, EnhanceMatch and BestMatch
+
+A plain fuzzy search returns the first match that fits the budget, which is not always the
+closest one. Two flags change that. Both are off by default, as they are upstream.
+
+**`EnhanceMatch`, `(?e)`, refines the match it finds.** It takes the first match, with some
+number of errors n, then searches again only inside that match's text, allowing n-1 errors. It
+repeats until a search finds nothing or the match is exact, and returns the last match it kept:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var plain = new FuzzyRegex(@"(dog){e<=1}");
+var enhanced = new FuzzyRegex(@"(?e)(dog){e<=1}");
+Match first = plain.Match("the dog");
+Console.WriteLine($"{first.Index} '{first.Value}' {first.FuzzyCounts.Insertions}");
+Match refined = enhanced.Match("the dog");
+Console.WriteLine($"{refined.Index} '{refined.Value}' {refined.FuzzyCounts.Total}");
+// 3 ' dog' 1
+// 4 'dog' 0
+```
+
+The plain search stops at ' dog', counting the space as an inserted character. With `(?e)` a
+second pass searches ' dog' for a match with no errors and finds 'dog'.
+
+Its limit is that it never looks outside the first match. **`BestMatch`, `(?b)`, searches the
+whole text** for the match with the fewest errors:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var enhanced = new FuzzyRegex(@"(?e)(?:abc){e<=1}");
+var best = new FuzzyRegex(@"(?b)(?:abc){e<=1}");
+Match refined = enhanced.Match("abxabc");
+Console.WriteLine($"{refined.Index} {refined.Value} {refined.FuzzyCounts.Substitutions}");
+Match lowest = best.Match("abxabc");
+Console.WriteLine($"{lowest.Index} {lowest.Value} {lowest.FuzzyCounts.Total}");
+// 0 abx 1
+// 3 abc 0
+```
+
+`(?e)` keeps 'abx' with one substitution, because the exact 'abc' at index 3 lies outside the
+first match. `(?b)` finds it.
+
+Neither flag costs much on a simple pattern. For `(?:haystack){e<=3}` over a sentence ending in
+'haystakc', `EnhanceMatch` took about 1% longer than the plain search and `BestMatch` about 2.5%
+longer (`WorkloadBenchmarks` `FuzzyBudgetThree`, `EnhanceMatch` and `BestMatch` in
+`bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/net10.0.json`). That is one pattern
+on one machine; a large budget or a pattern that backtracks heavily may cost more.
+
+Which to use:
+
+- `(?e)` when you want the best fit for the match you find, such as looking up a word. This is
+  a sensible default for most fuzzy searches.
+- `(?b)` when you want the lowest-error match anywhere in the text.
+- Neither when you need the leftmost match, because both can move its start (from index 3 to 4
+  in the first example), or when you use partial matching, where a partial result keeps the
+  leftmost start that could still match whatever the flags say (see the partial example under
+  [Reading a result](#reading-a-result)).
+
+**A match never begins with an insertion at the position a search starts from.** An insertion
+is a character in the text that the pattern does not have, such as the space in ' dog'. The rule
+matters most when walking matches with `EnumerateMatches` or `Matches`, because each search
+after the first starts where the previous match ended, usually on a separator:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var dog = new FuzzyRegex(@"(?:dog){e<=1}");
+foreach (Match m in dog.EnumerateMatches("dog dog dog"))
+{
+    Console.WriteLine($"{m.Index} '{m.Value}' {m.FuzzyCounts.Total}");
+}
+Match single = dog.Match("the dog");
+Console.WriteLine($"{single.Index} '{single.Value}' {single.FuzzyCounts.Insertions}");
+// 0 'dog' 0
+// 4 'dog' 0
+// 8 'dog' 0
+// 3 ' dog' 1
+```
+
+The second search starts on the space at index 3, so it cannot spend an insertion there, and it
+finds the exact 'dog' at 4 instead of ' dog'. A single search over 'the dog' starts at index 0,
+so the rule does not reach index 3, and it returns ' dog' with one insertion, as the last line
+shows, unless `(?e)` is set.
 
 ## Timeouts and cancellation
 
