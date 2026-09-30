@@ -84,6 +84,16 @@ internal sealed class Node
     /// </summary>
     internal Body? BodyInfo;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a node inside a lookaround body or condition test, the
+    /// capture groups whose start or end the innermost such body can still reach from it: the groups
+    /// a run-out at this node leaves unknown (<c>Matcher.MarkTheBodysCapturesUnknown</c>). A group
+    /// the body closed before it and cannot reach again keeps the span the held text gave it. Set
+    /// by <c>PatternObject.SetRunOutGroups</c>, only for a pattern that reads captures while it
+    /// matches and has no group calls, the patterns whose run-outs make captures unknown.
+    /// </summary>
+    internal (int Private, int Public)[]? RunOutGroups;
+
     /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end
     /// node, sorted.</param>

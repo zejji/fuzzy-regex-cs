@@ -40,6 +40,58 @@ public sealed class PartialUnknownCaptureTests
     }
 
     /// <summary>
+    /// Only a group the body can still reach after the edge is unknown. In each row the body runs out
+    /// at <c>b</c>, and group 1 closed before the edge, so every completion ('aa' + 'b') gives it the
+    /// span the held text gave it, and the partial reports that. Made unknown, the group was reported
+    /// with <c>Success</c> false and its capture still listed.
+    /// </summary>
+    // Upstream answers the same spans and groups.
+    [Test]
+    [Arguments(@"(?=a(.)b)\1", "match", 1)]
+    [Arguments(@"(?=a(.)b)\1", "search", 1)]
+    [Arguments(@"(?=(a)(?:(.)|x)b)\1", "match", 0)]
+    [Arguments(@"(?=(a)(.)b)\1\2", "match", 0)]
+    public void A_group_the_body_closed_before_the_edge_is_reported(string pattern, string operation, int start)
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "search", StringComparison.Ordinal)
+            ? regex.Match("aa", partial: true)
+            : regex.MatchAtStart("aa", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
+        (m.Groups[1].Success, m.Groups[1].Index, m.Groups[1].Length).Should().Be((true, start, 1));
+        m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((start, 1));
+    }
+
+    /// <summary>
+    /// A group that held a capture before the edge and that the body can capture again after it is
+    /// unknown, and reported unset with no captures listed: 'aa' + 'b' leaves group 1 at (1, 2) and
+    /// 'aa' + 'ab' moves it to (2, 3). The run-out is the <c>x?</c> after the second <c>(a)</c>,
+    /// which the repeat's end leads back to <c>(a)</c> from. A capture
+    /// made after an unknown one is reported with the unknown one left out of the list: 'a' + 'a'
+    /// captures (1, 2) inside the lookahead, then (0, 1).
+    /// </summary>
+    // Upstream lists the held captures of the first two rows and reports group 1 unset in the third.
+    [Test]
+    [Arguments(@"(?=(?:(a)x?)*b)\1", "aa", false, 0, 0)]
+    [Arguments(@"(?=(?:(a)x?)*b)(?(1)a|b)", "aa", false, 0, 0)]
+    [Arguments(@"(?=a(?P<n>.))(?P<n>a)(?P=n)", "a", true, 0, 1)]
+    public void A_group_the_body_can_still_capture_is_reported_consistently(
+        string pattern,
+        string text,
+        bool success,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, text.Length));
+        (m.Groups[1].Success, m.Groups[1].Index, m.Groups[1].Length).Should().Be((success, index, length));
+        m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal(success ? [(index, length)] : []);
+    }
+
+    /// <summary>
     /// A backreference to an unknown capture presumes the rest, as a run-out does: 'ab' + 'a'
     /// matches, with group 1 the 'a' to come and the backreference the held 'a'. Compared as an
     /// empty span the reference leaves <c>b</c> to fail on the held 'a'.

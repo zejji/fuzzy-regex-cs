@@ -199,6 +199,34 @@ public sealed class PartialVerbRuleTests
     }
 
     /// <summary>
+    /// An attempt whose start a touched attempt chose has touched the text to come too. The first
+    /// pass and the second run the same code only from the same start, and after a touched attempt
+    /// the next start is the ordinary bump-along's only when nothing can move it: a <c>(*SKIP)</c>
+    /// moves it, and so does a <c>\K</c> whose entry a cut discarded. In each row the first pass
+    /// jumps past start 1, the second pass reaches it, and <c>b</c> matches there on the held text:
+    /// a success some continuations need, so a partial. Answered as a complete match, the port
+    /// reported a match the held text does not have. The first two rows' completions are the port's
+    /// own (ledger entry 45: a skip acts when backtracking reaches it): 'ab' + 'c' matches at
+    /// (1, 2), where the non-partial search over 'ab' is None. The second row's truth is P(3, 3)
+    /// ('aab' + 'ab'), and start 1 is a phantom of class C4: both skips of attempt 0 are blocked, so
+    /// the second pass tries a start no continuation reaches. The other rows are the judge's.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream answers the first two rows F(1, 2) and F(1, 3)
+    // (its skip moves the slice when it runs) and the last three P(2, 2), a start too late.
+    [Test]
+    [Arguments(@"(?=ab(*SKIP)c|a)a(*SKIP)x|b", "ab", 1, 2)]
+    [Arguments(@"(?:(a)|b)(?=a(.)(*SKIP)b|a)a(*SKIP)\1|ab", "aab", 1, 3)]
+    [Arguments(@"ab\Z(*SKIP)(*F)|b", "ab", 1, 2)]
+    [Arguments(@"a(?=b\Z)(?>\K)x|b", "ab", 1, 2)]
+    [Arguments(@"a(?=b\Z)\K(*PRUNE)x|b", "ab", 1, 2)]
+    public void A_start_a_touched_attempt_chose_is_touched_too(string pattern, string text, int start, int end)
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+    }
+
+    /// <summary>
     /// The port grid's counter (VERIFICATION rule 11): the skipped verb of row V1, asked once when it
     /// runs, and none in a call without partial. Debug builds only.
     /// </summary>

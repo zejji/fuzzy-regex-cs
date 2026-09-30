@@ -321,6 +321,14 @@ internal sealed class PatternObject
     internal bool HasBacktrackingVerb;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether an attempt can choose a next start other than the ordinary
+    /// bump-along's: a <c>(*SKIP)</c> moves the slice, and a <c>\K</c> whose backtracking entry a cut
+    /// discards leaves the match position where it was set. A second-pass attempt that follows a
+    /// touched one then counts as touched (<c>Matcher.BasicMatch</c>, at the attempt's start).
+    /// </summary>
+    internal bool AnAttemptCanMoveTheNextStart;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern reads a group's capture while it matches, through a
     /// backreference or a group condition. A run-out in a lookaround body leaves the body's later
     /// captures unknown, which build chunk 8 models; until then such a pattern keeps the run-out
@@ -897,6 +905,11 @@ internal sealed class PatternObject
                 self.HasBacktrackingVerb = true;
             }
 
+            if (self.NodeList[i].Op is Opcode.Skip or Opcode.Keep)
+            {
+                self.AnAttemptCanMoveTheNextStart = true;
+            }
+
             if (
                 self.NodeList[i].Op
                 is Opcode.GroupExists
@@ -1082,6 +1095,69 @@ internal sealed class PatternObject
             int[] sorted = [.. nodes];
             Array.Sort(sorted);
             test.BodyInfo = new Node.Body(sorted, [.. groups]);
+        }
+
+        if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
+        {
+            SetRunOutGroups(pattern);
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.RunOutGroups"/>.</summary>
+    /// <remarks>
+    /// Per body, the groups each node reaches are its own and those of the nodes after it, which a
+    /// few passes over the body settle (a repeat's end leads back to its body, so the graph has
+    /// cycles). The bodies are taken largest first, so a node inside a nested body keeps the
+    /// innermost body's set, which is the one a run-out at it reads (assert A10).
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its bodies set.</param>
+    private static void SetRunOutGroups(PatternObject pattern)
+    {
+        var byIndex = new Dictionary<int, Node>();
+        foreach (Node n in pattern.NodeList)
+        {
+            byIndex[n.Index] = n;
+        }
+
+        IEnumerable<Node> tests = pattern
+            .NodeList.Where(static t => t.BodyInfo is not null)
+            .OrderByDescending(static t => t.BodyInfo!.Nodes.Length);
+        foreach (Node test in tests)
+        {
+            int[] body = test.BodyInfo!.Nodes;
+            var reach = new Dictionary<int, HashSet<(int Private, int Public)>>();
+            foreach (int i in body)
+            {
+                Node n = byIndex[i];
+                reach[i] =
+                    n.Op is Opcode.StartGroup or Opcode.EndGroup && n.Values[2] != 0
+                        ? [((int)n.Values[0], (int)n.Values[1])]
+                        : [];
+            }
+
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                for (int k = body.Length - 1; k >= 0; k--)
+                {
+                    Node n = byIndex[body[k]];
+                    foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                    {
+                        if (next is not null && reach.TryGetValue(next.Index, out var after))
+                        {
+                            int before = reach[body[k]].Count;
+                            reach[body[k]].UnionWith(after);
+                            changed |= reach[body[k]].Count != before;
+                        }
+                    }
+                }
+            }
+
+            foreach (int i in body)
+            {
+                byIndex[i].RunOutGroups = [.. reach[i]];
+            }
         }
     }
 

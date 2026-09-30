@@ -4438,16 +4438,27 @@ internal static class Matcher
     private static bool IsUnknown(GroupData group) => group.Captures[group.Current] == UnknownSpan;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11 chunk 8: gives every group inside a body that ran out an unknown capture
-    /// (design section 4.2, the run-out row, part 1), through an <see cref="Opcode.UnknownCapture"/>
-    /// entry each, whose backtracking arm takes it back as END_GROUP's arm takes a capture back.
+    /// NOT UPSTREAM'S, D11 chunk 8: gives every group a body that ran out can still reach an unknown
+    /// capture (design section 4.2, the run-out row, part 1), through an
+    /// <see cref="Opcode.UnknownCapture"/> entry each, whose backtracking arm takes it back as
+    /// END_GROUP's arm takes a capture back.
     /// </summary>
+    /// <remarks>
+    /// In the continuations where the body goes on, it goes on from the item that ran out, so only a
+    /// group whose start or end lies on a path from that item can take a value the held text did not
+    /// give it: a group open at the edge, one a repeat can enter again, or one not reached yet
+    /// (<see cref="Node.RunOutGroups"/>). A group the body closed before the item and cannot reach
+    /// again holds the same span in every such continuation, so it stays as it is (review of chunk 8,
+    /// round 1: `(?=a(.)b)\1` over 'aa', where every completion gives group 1 (1, 2)).
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="test">The LOOKAROUND or CONDITIONAL node whose body ran out.</param>
-    private static void MarkTheBodysCapturesUnknown(MatchState state, Node test)
+    /// <param name="item">The item that ran out.</param>
+    private static void MarkTheBodysCapturesUnknown(MatchState state, Node test, Node? item)
     {
         Debug.Assert(test.BodyInfo is not null, "D11 chunk 8: every lookaround and test has its body");
-        foreach ((int privateIndex, int publicIndex) in test.BodyInfo?.Groups ?? [])
+        Debug.Assert(item?.RunOutGroups is not null, "D11 chunk 8: an item in a body knows the groups it reaches");
+        foreach ((int privateIndex, int publicIndex) in item?.RunOutGroups ?? test.BodyInfo?.Groups ?? [])
         {
             GroupData group = state.Groups[privateIndex - 1];
             PushGroupStateData(
@@ -4474,11 +4485,24 @@ internal static class Matcher
     /// NOT UPSTREAM'S, D11 chunk 8: an unknown capture is reported unset (design section 4.3). Run
     /// on a second-pass partial, which ends the call, so the groups need not be restored.
     /// </summary>
+    /// <remarks>
+    /// A group whose current capture is unknown is reported with no captures at all, so that
+    /// <c>Success</c> and <c>Captures</c> agree: its earlier captures are the held text's, but which
+    /// of them, if any, a completion leaves last is not known. A group whose current capture is known
+    /// keeps its list, with the unknown ones left out.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     private static void ReportUnknownCapturesUnset(MatchState state)
     {
         foreach (GroupData group in state.Groups)
         {
+            if (group.Current >= 0 && IsUnknown(group))
+            {
+                group.Count = 0;
+                group.Current = -1;
+                continue;
+            }
+
             int kept = 0;
             int current = -1;
             for (int i = 0; i < group.Count; i++)
@@ -4614,7 +4638,7 @@ internal static class Matcher
         // held text made, as a run-out outside a body does.
         if (pattern.ReadsCapturesWhileMatching)
         {
-            MarkTheBodysCapturesUnknown(state, look.Node);
+            MarkTheBodysCapturesUnknown(state, look.Node, item);
         }
 
         state.AttemptTouchedTheTextToCome = true;
@@ -10046,7 +10070,16 @@ internal static class Matcher
         }
 
         Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
-        state.AttemptTouchedTheTextToCome = state.InsideW;
+
+        // D11 M3: the passes run the same code from the same start, and they try the same starts
+        // unless an attempt can move the next one. A (*SKIP) moves it, and so does a \K whose entry a
+        // cut discarded (FAILURE's bump-along starts from MatchPos). After a touched attempt the two
+        // passes may then try different starts, so the next attempt counts as touched too: a
+        // success there is one the first pass did not find (review of chunk 8, round 1:
+        // `(?=ab(*SKIP)c|a)a(*SKIP)x|b` search 'ab' was the complete match (1, 2)). A (*PRUNE)
+        // ends the attempt with the ordinary bump-along, so it needs nothing.
+        state.AttemptTouchedTheTextToCome =
+            state.InsideW || (state.AttemptTouchedTheTextToCome && pattern.AnAttemptCanMoveTheNextStart);
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
