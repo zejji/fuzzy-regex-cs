@@ -188,6 +188,11 @@ public sealed class FailedCallMemoTests
         const string pattern = "(?e)((?=(?:a){e<=1}))(((?>a)){1}()?(.?(?1)|(?0))){d<=1}((?0)(a))?";
 
         FuzzyRegex on = WithMemo(pattern, eager: true);
+
+        // The banned search is where the memo acted, so it is asked with rule H' off (D61): with H'
+        // the answer is (0, 1) with a substitution and a deletion whatever the memo does, because
+        // the banned search's (1, 1) starts at the attempt's end (FuzzyAnchorPinTests).
+        on.PatternObject.LiftsAnchorBan = false;
         Match m = on.Match("xa");
 
         on.PatternObject.UseCallMemo.Should().BeFalse();

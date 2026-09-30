@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names seventy-one, and under the JIT this set is exactly those seventy-one. A floor of
+        // The allowlist names seventy-three, and under the JIT this set is exactly those seventy-three. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names seventy-one writable fields, so a near-empty answer means the "
+                "the allowlist names seventy-three writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -719,7 +719,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all seventy-one, and it is the reason they are not readonly: the engine's
+            // ONE writer for all seventy-three, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -730,16 +730,22 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-one
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-three
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
             // passes (the required-string node, the start optimisations, the fuzzy survey).
             // S60 added two, both written by Compile and by nothing else: ReqStringText beside the
             // required-string node it belongs to, and HasSkipVerb in the node-numbering loop.
-            // S57c added AnchorGuards, written by Optimiser.FindAnchorGuards, the last pass
-            // OptimisePattern runs.
+            // D61 added LiftsAnchorBan (replacing S57c's AnchorGuards), written by
+            // Optimiser.FindAnchorBanLift, the last pass OptimisePattern runs, and cleared only by
+            // OracleComparer.RunWithoutTheAnchorPin on a pattern compiled for that one call.
+            "PatternObject.LiftsAnchorBan",
+            // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
+            // only since D61.
             "PatternObject.AnchorGuards",
+            // And LiftsAnchorBanWhenPartial, written beside it.
+            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",

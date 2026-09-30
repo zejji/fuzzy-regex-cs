@@ -871,6 +871,13 @@ internal sealed class MatchState : IDisposable
     internal bool IsFuzzy;
 
     /// <summary>
+    /// NOT UPSTREAM (D61): the storage rule H' keeps the banned search's match in while it tries the
+    /// attempt at the anchor (<c>Matcher.AnchorBanSnapshot</c>), reused across the searches of one
+    /// call. Dropped at reset.
+    /// </summary>
+    internal Matcher.AnchorBanSnapshot? AnchorBanScratch;
+
+    /// <summary>
     /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
     /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
     /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
@@ -1210,6 +1217,7 @@ internal sealed class MatchState : IDisposable
         ScreenClearedHigh = 0;
         FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
+        AnchorBanScratch = null;
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);

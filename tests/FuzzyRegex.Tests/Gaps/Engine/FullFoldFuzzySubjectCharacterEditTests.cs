@@ -243,11 +243,15 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
     [Test]
     public void A_backreference_makes_no_whole_character_insertion_at_the_search_anchor()
     {
-        // As for a literal, a search does not start a match with an insertion. Upstream: None.
-        new FuzzyRegex(@"(?fi)(?=.(ssx))(?:\1){i<=1}")
-            .Match("ǰssx")
-            .Success.Should()
-            .BeFalse();
+        // Upstream: None, as for a literal: its search does not start a match with an insertion.
+        // DIVERGES: nothing matches from a later start, so rule H' (known defect D61, FuzzyAnchorPinTests) keeps the
+        // attempt at the anchor, which inserts the whole ǰ. The ban's own answer is still None.
+        var regex = new FuzzyRegex(@"(?fi)(?=.(ssx))(?:\1){i<=1}");
+        Match m = regex.Match("ǰssx");
+        (m.Index, m.Length, m.FuzzyCounts.Insertions).Should().Be((0, 4, 1));
+
+        regex.PatternObject.LiftsAnchorBan = false;
+        regex.Match("ǰssx").Success.Should().BeFalse();
     }
 
     // The same rule when the whole insertion is reached by backtracking into an earlier edit's

@@ -7408,67 +7408,44 @@ internal static class ExpectedDivergences
         ),
         new(
             Id: "fuzzy-insertion-at-a-pinned-anchor",
-            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
-                + "assertion pins the match to it, and upstream does not. Upstream issues 563 and "
-                + "564, which are one bug; ledger entries 19 and 20; fixed by S57c on 2026-09-21 "
-                + "under the owner's no-known-bugs rule, and recorded as a deliberate divergence in "
-                + "`docs/DIVERGENCES.md`.\n"
+            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where upstream's search "
+                + "finds no match that starts inside the attempt at the anchor (rule H', DECISIONS "
+                + "2026-09-30 and its 2026-10-01 clarification, known defect D61). Upstream issues 563 "
+                + "and 564, which are one bug; ledger entries 19 and 20 and their D61 addendum; "
+                + "recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM RULE IS ONE LINE: `permit_insertion = !search || text_pos != "
                 + "search_anchor` (upstream/src/_regex.c:10214), under its own comment \"Permit "
                 + "insertion except initially when searching (it's better just to start searching "
-                + "one character later)\". `search_anchor` is set once per matching operation "
-                + "(`init_match`, :3410) and never per candidate start, so the ban lands on exactly "
-                + "one of the positions a scan visits, and WHICH one depends on where the caller "
-                + "started the search rather than on the pattern.\n"
-                + "UPSTREAM CONTRADICTS ITSELF ON IT, measured 2026-09-21 on regex 2026.9.10 by "
-                + "`python tools/probes/issue-563-anchor-rule.py`. `\\m(?:Y){i}\\M` finds ['YX'] "
-                + "over 'XY YX' and ['XY', 'YX'] over ' XY YX', the same shape one character along. "
-                + "One span answers two ways according to the start it was asked from: "
-                + "`search(' XY', 0)` is (1, 3) and `search(' XY', 1)` is None. And `^` and `\\A` "
-                + "already escape the rule, because `basic_match` turns a start-anchored pattern "
-                + "into an anchored match and stops searching, so `^(?:abc){i<=1}` keeps the "
-                + "inserted character over 'xabc' while `(?m)^(?:abc){i<=1}` loses it.\n"
-                + "THE RULE THIS PORT APPLIES INSTEAD is narrower than the prohibition it lifts: "
-                + "the insertion is permitted only where a zero-width position assertion at the "
-                + "head of the pattern holds AT the anchor and fails one character on, which is "
-                + "exactly the case where \"start searching one character later\" cannot find the "
-                + "same match minus an insertion. `Optimiser.FindAnchorGuards` collects those "
-                + "assertions at compile time and `Matcher.AnchorIsPinned` re-tests them per call.\n"
-                + "THE WAVE SEES IT IN THE REVERSED DIRECTION, which is where row 1 of the example "
-                + "comes from: seed 20260921 row 3752, `interactions`, minimised to "
-                + "`(?r)^a(?:b){i<=1}$` over 'ab\\r'. Reversed, the anchor is the END of the "
-                + "subject, so upstream bans the trailing insertion and answers None where its own "
-                + "forward spelling of the same pattern answers (0, 3) with one insertion. Before "
-                + "the fix both engines were wrong on every row of this family, which is why no "
-                + "wave had ever reported it (design spec amendment 13).\n"
-                + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE, and that is what stops it "
-                + "silencing anything. A row belongs here when taking away the one field the fix "
-                + "reads - `PatternObject.AnchorGuards`, emptied by "
-                + "`OracleComparer.RunWithoutTheAnchorPin` - makes this port reproduce upstream's "
-                + "recorded answer exactly, AND this port's live answer to the row is the one being "
-                + "judged. A row this port gets wrong for any other reason still diverges without "
-                + "the pin and is reported; a fabricated answer to a row of the family is reported "
-                + "too, which is the control in "
-                + "`A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
-                + "WHAT THE ABLATION CANNOT SEE, measured 2026-09-21 and stated here so nobody "
-                + "reads the wave as covering it: a change to the SHAPE of the rule. Drop the "
-                + "one-character-on test from `Matcher.AnchorIsPinned`, so the pin holds wherever "
-                + "an assertion holds at the anchor at all, and the rows that answer differently "
-                + "land right back in this family - emptying `AnchorGuards` restores upstream's "
-                + "answer under the broken rule exactly as it does under the shipped one. Run "
-                + "`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57c-one-step-on-rows.jsonl` "
-                + "with that edit in place and the wave is GREEN with three rows classified here, "
-                + "where the shipped code classifies one. No predicate that answers by running "
-                + "this engine can do better, because a broken engine breaks the reference run "
-                + "too. The rule's shape is held by tests that carry upstream's own answers "
-                + "instead: the three `InheritedIssueTests` named below, and the ported "
-                + "`test_fuzzy` named-list rows. That edit turns four of the ported suite's 6,510 "
-                + "tests red, measured 2026-09-21: `test_fuzzy` rows 51 and 56, the demo example "
-                + "`Fuzzy matching against a word list`, and "
-                + "`A_word_start_anchor_before_a_fuzzy_section_matches_at_position_zero_here`.",
-            PinnedBy: "InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_matches_at_"
-                + "position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_subject "
-                + "and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
+                + "one character later)\". It keeps a match from swallowing text where a later match "
+                + "could start, and it loses real matches where none can: `(?:^a){i<=1}` over 'xa' "
+                + "is None upstream and (0, 2) here, as `^(?:a){i<=1}` is in both.\n"
+                + "THE RULE THIS PORT APPLIES INSTEAD, once per pass: at anchor A, let u be the banned "
+                + "search's answer. If u starts at A it stands. Otherwise let c be the attempt at A "
+                + "without the ban; c is the answer if it exists and u is None or starts at or after "
+                + "c's end. `Matcher.DoMatch2LiftingTheAnchorBan` applies it to plain and "
+                + "ENHANCEMATCH searches. For them it replaces S57c's exemption (an assertion at the "
+                + "head of the pattern that holds at A and fails one character on), which glued a "
+                + "separator: `\\b(?:dog){e<=2}` finditer over 'dog  dog' gave (3, 8) with two "
+                + "insertions where upstream gives (5, 8).\n"
+                + "BESTMATCH IS UNCHANGED FOR NOW (DECISIONS 2026-10-01, scope cut): it keeps S57c's "
+                + "exemption (`PatternObject.AnchorGuards`, `Matcher.AnchorIsPinned`) and with it the "
+                + "fix for issue 564, `(?b)\\m(?:Y){1i+1d+1s<=2}\\M` over ' XY Z', until what H' means "
+                + "inside a best-match walk is researched.\n"
+                + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE. A row belongs here when "
+                + "`OracleComparer.RunWithoutTheAnchorPin`, which clears `PatternObject.LiftsAnchorBan` "
+                + "and `PatternObject.LiftsAnchorBanWhenPartial` and empties `PatternObject.AnchorGuards`, "
+                + "makes this port reproduce upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
+                + "WHAT THE ABLATION CANNOT SEE: a bug inside rule H' itself (dropping the overlap test, "
+                + "say) still gives upstream's answer "
+                + "when switched off and an insertion at the anchor live, so it would be classified "
+                + "here. The rule's shape is held by tests that carry the expected answers instead: "
+                + "FuzzyAnchorPinTests, which goes red on each of those plants, and the three "
+                + "InheritedIssueTests below.",
+            PinnedBy: "FuzzyAnchorPinTests, InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_"
+                + "matches_at_position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_"
+                + "subject and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
             Example: _anchorPinRows,
             Applies: static (row, ours) => OnlyTheAnchorPinExplainsIt(row, ours)
         ),
@@ -8417,7 +8394,8 @@ internal static class ExpectedDivergences
         && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
 
     /// <summary>
-    /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
+    /// Whether rule H' (D61, which replaced S57c's anchor pin) is the whole of the difference between
+    /// the two engines on a row.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -8428,9 +8406,9 @@ internal static class ExpectedDivergences
     /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
     /// </para>
     /// <para>
-    /// Neither run needs a switch in the engine. Emptying <c>AnchorGuards</c> on a compiled pattern
-    /// leaves <c>Matcher.AnchorIsPinned</c> returning false everywhere, which is upstream's rule
-    /// exactly, and the pattern it is emptied on was compiled for that one call.
+    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c>, and emptying
+    /// <c>AnchorGuards</c> (BESTMATCH's S57c exemption), on a compiled pattern makes every search keep
+    /// upstream's ban, and the pattern they are changed on was compiled for that one call.
     /// </para>
     /// </remarks>
     /// <param name="row">The row, carrying upstream's answer.</param>

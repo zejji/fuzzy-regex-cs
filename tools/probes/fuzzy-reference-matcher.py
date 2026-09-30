@@ -57,19 +57,14 @@ of mrab-regex 2026.9.10):
    the search began (search_anchor, set once in init_match, _regex.c:3410;
    rule at _regex.c:10211-10214). The section-end insertion (rule 4) has no
    such check. match() and fullmatch() have no such restriction. The port's
-   ruled exception (DIVERGENCES.md, "A fuzzy section may open with an inserted
-   character at the search anchor, where a position assertion pins the match
-   there"; ledger entries 19-20): the insertion is allowed once the attempt at
-   the anchor has passed a zero-width escape or anchor (rule 11) that holds
-   there and would fail one character on, because then starting one character
-   later cannot give the same match minus the insertion. Every example the
-   ruling gives has that assertion leading the pattern, outside any fuzzy
-   section and any alternation (\m(?:Y){i}\M, (?m)^(?:abc){i<=1}); the port
-   pins no other (measured 2026-09-30: (?:^a.){i<=2} over " xabb" is None in
-   the port and upstream, ^(?:a.){i<=2} is (0, 4)), and the ruling's text does
-   not say whether it should. So an insertion at the anchor after any other
-   such assertion is rejected (the row goes unjudged). A lookaround never
-   pins. PINNED_ANCHOR = False gives upstream's rule.
+   ruled exception, rule H' (DECISIONS 2026-09-30, known defect D61; it
+   replaced the ledger 19/20 exemption): at a search's anchor A, let u be the
+   banned search's answer. If u starts at A it stands. Otherwise let c be the
+   attempt at A without the ban; c is the answer if it exists and u is None or
+   starts at or after c's end (search_from, below). The ban exists so a match
+   never swallows text where a later match could start, and u is the leftmost
+   later start, so c is kept exactly when nothing later lies inside it.
+   PINNED_ANCHOR = False gives upstream's rule.
 6. Error limits are checked before each error (this_error_permitted,
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
    _regex.c:9709-9745). Here minimums are checked after the trailing
@@ -677,8 +672,6 @@ class State:
     anchor: int  # search start (rule 5), or -1 for match/fullmatch
     path: tuple = ()  # the errors taken: (kind, text position, item)
     keep: int = -1  # where \K was last passed (rule 12), or -1
-    pinned: bool = False  # rule 5's exception: an assertion pinned the attempt at the anchor
-    pin_unsettled: bool = False  # an assertion held there that only the ruling's reasoning pins
 
 
 class Prune(Exception):
@@ -689,8 +682,7 @@ class Prune(Exception):
 
 
 class Ctx:
-    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False, leading=frozenset()):
-        self.leading = leading  # ids of the anchors that lead the pattern (rule 5's exception)
+    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False):
         self.text = text
         self.referenced = referenced
         self.start = start  # where this search began, for \G (rule 11)
@@ -752,7 +744,7 @@ def look_state(node, st, ctx, in_test=False):
     return None
 
 
-def carried(st, body):
+def carried(st, body, positive=False):
     """st moved on by a lookaround body's match: its captures and its errors, not its position."""
     return replace(st, groups=body.groups, totals=body.totals, path=body.path)
 
@@ -760,10 +752,10 @@ def carried(st, body):
 def lookaround(node, st, ctx, k):
     body = look_state(node, st, ctx)
     if (body is not None) == node.positive:
-        yield from k(carried(st, body) if node.positive else st)
+        yield from k(carried(st, body, True) if node.positive else st)
         return
     if LOOKAROUND_INSERTION and st.counts is not None:
-        if st.pos < len(ctx.text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
+        if st.pos < len(ctx.text) and permitted(st, 1) and insertion_allowed_here(st, node, ctx):  # rule 5
             yield from lookaround(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -772,7 +764,8 @@ def cond_look(node, st, ctx, k):
     matched (a positive test that holds, or a negative one that fails)."""
     body = look_state(node.test, st, ctx, in_test=True)
     holds = (body is not None) == node.test.positive
-    return run(node.yes if holds else node.no, st if body is None else carried(st, body), ctx, k)
+    return run(node.yes if holds else node.no,
+               st if body is None else carried(st, body, node.test.positive), ctx, k)
 
 
 def atomic(node, st, ctx, k):
@@ -793,28 +786,20 @@ def holds(kind, pos, ctx):
             "m": not before and after, "M": before and not after}[kind]
 
 
-def insertion_allowed_here(st):
-    """Rule 5 and its ruled exception (call it last: it can reject the row)."""
-    if st.pos != st.anchor or st.pinned:
-        return True
-    if st.pin_unsettled:
-        raise ValueError("unsupported: an insertion at the search anchor after an assertion the "
-                         "pinned-anchor ruling does not cover (rule 5)")
-    return False
+def insertion_allowed_here(st, node, ctx):
+    """Rule 5: no insertion at the search anchor (rule H' lifts it per search, in search_from)."""
+    return st.pos != st.anchor
 
 
 def anchor(node, st, ctx, k):
     n = len(ctx.text)
     if holds(node.kind, st.pos, ctx):
-        if PINNED_ANCHOR and st.pos == st.anchor and not (st.pos < n and holds(node.kind, st.pos + 1, ctx)):
-            # rule 5's exception
-            st = replace(st, pinned=True) if id(node) in ctx.leading else replace(st, pin_unsettled=True)
         yield from k(st)
         return
     # A failing anchor in a fuzzy section may be passed by inserting a text character in front of
     # it (upstream _regex.c:12060-12075, the rule 10 cites; rule 5 applies). Measured 2026-09-30:
     # fullmatch "(?:a$){i<=1}" "ab" is (0, 2) with one insertion in upstream and the port.
-    if st.counts is not None and st.pos < n and permitted(st, 1) and insertion_allowed_here(st):
+    if st.counts is not None and st.pos < n and permitted(st, 1) and insertion_allowed_here(st, node, ctx):
         yield from anchor(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -931,7 +916,7 @@ def item(node, st, ctx, k):
     if not exact:  # rule 1: substitution and insertion only on a mismatch
         if pos < len(text) and permitted(st, 0):
             yield from k(add_error(st, 0, pos + 1, node))
-        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
+        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st, node, ctx):  # rule 5
             yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
     if (DELETE_AFTER_EXACT or not exact) and permitted(st, 2):  # rule 3
         yield from k(add_error(st, 2, pos, node))
@@ -1047,37 +1032,14 @@ class Compiled:
     referenced: frozenset
     ignorecase: bool
     posix: bool = False
-    leading: frozenset = frozenset()
     ascii_classes: bool = False
-
-
-def leading_anchors(node):
-    """Rule 5's exception: the anchors every match passes first, outside any fuzzy section or
-    alternation (a run of them at the head of the pattern, through plain groups). An atomic group
-    stops the walk: the ruling's examples have none, so an anchor in one only rejects the row."""
-    found = set()
-    while True:
-        if isinstance(node, Group):
-            node = node.body
-            continue
-        if isinstance(node, Seq):
-            for part in node.parts:
-                if isinstance(part, Anchor):
-                    found.add(id(part))
-                    continue
-                if isinstance(part, (Group, Seq)):
-                    found |= leading_anchors(part)
-                break
-        elif isinstance(node, Anchor):
-            found.add(id(node))
-        return frozenset(found)
 
 
 def attempt(c, text, start, anchor, must_end, search_start, not_empty=False):
     """The first match of an attempt at start. not_empty: rule 18, a match may not end at start."""
     st = State(start, ((-1, -1),) * (c.ngroups + 1), (0, 0, 0), None, None, (), anchor)
     best = None
-    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase, c.leading), lambda s: iter([s])):
+    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase), lambda s: iter([s])):
         if must_end and final.pos != len(text):
             continue
         if not_empty and final.pos == start:
@@ -1107,7 +1069,7 @@ def compile_pattern(pattern, flags=0):
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
     return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
-                    leading_anchors(tree), p.ascii_classes)
+                    ascii_classes=p.ascii_classes)
 
 
 def checked(c, text):
@@ -1119,7 +1081,21 @@ def checked(c, text):
 
 
 def search_from(c, text, pos, not_empty=False):
-    """One search from pos: rule 5's anchor and the \\G position are pos for every attempt."""
+    """One search from pos under rule 5 and rule H'."""
+    u = banned_search_from(c, text, pos, not_empty)
+    if u is not None and u.span[0] == pos or not PINNED_ANCHOR:
+        return u
+    try:
+        cand = attempt(c, text, pos, -1, False, pos, not_empty)
+    except Prune:
+        cand = None
+    if cand is not None and (u is None or u.span[0] >= cand.span[1]):
+        return cand
+    return u
+
+
+def banned_search_from(c, text, pos, not_empty=False):
+    """Upstream's search from pos: rule 5's anchor and the \\G position are pos for every attempt."""
     start = pos
     while start <= len(text):
         try:

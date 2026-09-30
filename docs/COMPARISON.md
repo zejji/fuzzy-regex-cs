@@ -1175,33 +1175,32 @@ the memory has already been spent by then, so a graph that is refused may be sma
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
 
-### A fuzzy section may open with an inserted character at the search anchor, where a position assertion pins the match there
+### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
-Upstream refuses to let a fuzzy section begin with an inserted character at the exact position the
-search started from, on the reasoning that starting the search one character later finds the same
-match without paying for the insertion. That reasoning holds only when the match is free to slide.
-Put a position assertion in front of the fuzzy section and it is not free: `^` in multiline mode
-holds at the start of `"xabc"` and nowhere else in it, so there is no later start to try, and
-upstream returns nothing.
+Upstream refuses to let a fuzzy match begin with an inserted character at the exact position the
+search started from, on the reasoning that starting one character later finds the same match
+without paying for the insertion. That keeps finditer from gluing a separator onto the next word:
+`(?:dog){e<=1}` over `"dog dog dog"` gives three exact matches rather than `" dog"`. But where no
+later start can match, it throws the match away. `^` holds at the start of `"xa"` and nowhere
+else, so upstream finds nothing:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 // One insertion, 'x', at the position the search began.
-Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
-Console.WriteLine(m.Success ? m.Value : "no match");   // xabc - upstream: no match
+Match m = new FuzzyRegex("(?:^a){i<=1}").Match("xa");
+Console.WriteLine(m.Success ? m.Value : "no match");   // xa - upstream: no match
 ```
 
-This port permits the insertion where a position assertion at the head of the pattern holds at the
-anchor and fails one character on, which is exactly the case upstream's own reasoning does not
-cover. Everywhere else the upstream rule stands, so `(?:abc){i<=1}` over `"xabc"` still matches
-`abc` rather than `xabc` in both engines.
-
-Upstream contradicts itself here, which is why this is a fix rather than a preference: the same
-pattern over the same span answers two ways according to where the caller started. With
-`\m(?:Y){i}\M`, upstream's `search(" XY", 0)` finds (1, 3) and `search(" XY", 1)` finds nothing.
-Upstream issues 563 and 564 have tracked it since 17 April 2025, with the maintainer's own comment
-"It looks like a bug". There is no option to restore the upstream answer.
+This port keeps the match at the starting position whenever the search with upstream's rule finds
+nothing that starts inside it, and otherwise returns upstream's match. So the separators stay out:
+`\b(?:dog){e<=2}` over `"dog  dog"` gives `dog` and `dog` in both engines, not `  dog` for the
+second. BESTMATCH keeps this port's earlier rule for now, a leading assertion that holds where the
+search started and fails one character on. Upstream contradicts itself here, which is why this is a fix rather than a preference:
+`^(?:a){i<=1}` over `"xa"` already gives `xa` upstream, and `\m(?:Y){i}\M` over `" XY"` answers
+two ways according to where the caller started. Upstream issues 563 and 564 have tracked it since
+17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to
+restore the upstream answer.
 
 ### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
 

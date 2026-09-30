@@ -3253,6 +3253,38 @@ position - that is what `(?b)` is for - but it cannot make a position stop match
 found - rather than an expected span list. That is true whatever the right answer set turns out to
 be, so it does not commit S50 to spans this slice has no authority to fix.
 
+### Addendum to 19 and 20, 2026-09-30: rule H' replaces the fix (known defect D61) - DRAFT - NOT FILED
+
+**Status:** not filed; the S57c fix above is replaced on `maint/d61-anchor-insertion` by rule H'
+(DECISIONS 2026-09-30). The S57c exemption lifted the ban where an assertion at the head of the
+pattern held at the anchor and failed one character on. It was unsound: it glued a separator.
+
+```python
+>>> [m.span() for m in regex.finditer(r'\b(?:dog){e<=2}', 'dog  dog')]
+[(0, 3), (5, 8)]            # upstream, and the right answer; S57c gave (3, 8) with two insertions
+>>> regex.search(r'(?:^a){i<=1}', 'xa')
+None                        # the same assertion inside the section, which S57c did not cover
+```
+
+Measured 2026-09-30 on regex 2026.9.10. Two generalisations (an assertion on the current path, then
+an assertion that dominates the item) were refuted by review with witnesses such as
+`(?:\M|)(?:dog){e<=1}` finditer over 'dog dog', `(?:(?!x)stone|abc){e<=2}` over 'stone xstone' and
+`(?:\Ma|a){i<=2}` over 'a-xa.'.
+
+**What a report would ask for.** At anchor A, run the banned search to get u. If u starts at A,
+return it. Otherwise run the attempt at A without the ban to get c, and return c if it exists and u
+is None or starts at or after c's end. Do this once per pass, so under partial matching a full c
+beats a later partial u. The answer is always u or c. The ban exists so a match never swallows text
+where a later match could start, and u is that later start. Upstream already does this when the
+search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)). The port applies it to
+plain and ENHANCEMATCH searches. BESTMATCH keeps the S57c exemption for now: its candidate walk
+searches again from each candidate's own start (`init_match`, `:3410`), which is entry 20's
+mechanism, and what the rule means inside that walk is not yet researched.
+
+**Known effect, not a defect.** An extra match can move the next finditer anchor, and so a later
+match:
+`(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'.
+
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
 **Status:** not filed; inherited here. **S50 FIXED IT AND THEN REVERTED THE FIX** - see the end of

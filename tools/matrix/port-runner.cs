@@ -64,6 +64,8 @@ FieldInfo minimumOrder = F("CheckMinimumBeforeTrailingInsertions");
 FieldInfo minWidth = F("MinWidth"),
     upstreamMinWidth = F("UpstreamMinWidth");
 FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
+    liftsAnchorBan = F("LiftsAnchorBan"),
+    liftsAnchorBanWhenPartial = F("LiftsAnchorBanWhenPartial"),
     anchorGuards = F("AnchorGuards"),
     upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
     skipTiming = F("SkipMovesTheSliceWhenItRuns"),
@@ -221,7 +223,12 @@ FuzzyRegex Compile(string pattern, string variant)
         if (variant is "x51" or "x50")
             skipLookaroundInsertion.SetValue(pobj, true); // RunWithTheUpstreamMinimumOrder sets both
         if (variant == "xanchor")
-            anchorGuards.SetValue(pobj, null);
+        {
+            // RunWithoutTheAnchorPin: rule H' off (D61).
+            liftsAnchorBan.SetValue(pobj, false);
+            liftsAnchorBanWhenPartial.SetValue(pobj, false);
+            anchorGuards.SetValue(pobj, null); // BESTMATCH keeps S57c's exemption (D61 scope cut)
+        }
         if (variant == "xboundary")
             upstreamDefaultBoundary.SetValue(pobj, true);
         if (variant == "xskip")

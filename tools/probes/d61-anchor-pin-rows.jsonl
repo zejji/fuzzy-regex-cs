@@ -1,0 +1,4 @@
+{"pattern": "(?:^a){i<=1}", "flags": 0, "subject": "xa", "operation": "search"}
+{"pattern": "(?:(?<!x)ab){i<=1}", "flags": 0, "subject": "xab", "operation": "search"}
+{"pattern": "(?:\\ba){i<=1}", "flags": 0, "subject": "xa xa", "operation": "finditer"}
+{"pattern": "(?r)(?:a$){i<=1}", "flags": 0, "subject": "ax", "operation": "search"}

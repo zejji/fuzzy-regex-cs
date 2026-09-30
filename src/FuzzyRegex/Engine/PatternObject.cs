@@ -600,10 +600,27 @@ internal sealed class PatternObject
     /// so every one of them is passed on every path to every item in the pattern. An assertion
     /// reachable only down one branch - <c>(?:\bq|)</c>, <c>(?:\bq)*</c>, the body of a negative
     /// lookaround - is not here, which is what stops the rule firing on a path the engine abandons.
-    /// <see cref="Optimiser"/> fills this in, for fuzzy patterns only.
+    /// <see cref="Optimiser"/> fills this in, for BESTMATCH fuzzy patterns only since D61: every other
+    /// search follows rule H' (<see cref="LiftsAnchorBan"/>).
     /// </para>
     /// </remarks>
     internal IReadOnlyList<Node>? AnchorGuards;
+
+    /// <summary>
+    /// Whether rule H' can change a search's answer, so that <c>Matcher.DoMatch2LiftingTheAnchorBan</c>
+    /// runs the attempt at the anchor without the ban. <b>This port's own field (known defect D61).</b>
+    /// Filled by <c>Optimiser.FindAnchorBanLift</c>; cleared by <c>OracleComparer.RunWithoutTheAnchorPin</c>,
+    /// the oracle's ablation, and by nothing in the library.
+    /// </summary>
+    internal bool LiftsAnchorBan;
+
+    /// <summary>
+    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
+    /// section that permits an insertion, since removing leading insertions can leave a partial match
+    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
+    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
+    /// </summary>
+    internal bool LiftsAnchorBanWhenPartial;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
@@ -1016,6 +1033,9 @@ internal sealed class PatternObject
                 ++self.GroupCallSites;
             }
         }
+
+        // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
+        Optimiser.FindAnchorBanLift(self);
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
         if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)

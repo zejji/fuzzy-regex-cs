@@ -2511,7 +2511,9 @@ internal static class Matcher
 
     /// <summary>
     /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
-    /// fuzzy section there may open with an inserted character.
+    /// fuzzy section there may open with an inserted character. BESTMATCH ONLY since D61: for every
+    /// other search rule H' replaced it (<see cref="DoMatch2LiftingTheAnchorBan"/>), and
+    /// <c>Optimiser.FindAnchorGuards</c> fills the guards only for a BESTMATCH pattern.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -7662,8 +7664,8 @@ internal static class Matcher
     /// already been left behind even though <c>text_pos</c> has not moved, so the "no insertion at
     /// the anchor" rule stops applying.
     /// </remarks>
-    /// <param name="state">The match state.</param>
     /// <param name="data">The attempt being set up.</param>
+    /// <param name="state">The match state.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
     /// <param name="atAnchor">Whether <c>text_pos</c> is still at the search anchor.</param>
     /// <returns>Whether an insertion may be tried.</returns>
@@ -16080,6 +16082,164 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// <see cref="DoMatch2"/> under rule H' (known defect D61): the search-anchor insertion ban is
+    /// lifted exactly when upstream's search would return no match that starts inside the candidate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>THIS PORT'S OWN RULE</b>, replacing the ledger 19/20 exemption (DECISIONS 2026-09-30, rule
+    /// H'). Upstream refuses a fuzzy insertion at the position a search began
+    /// (<c>permit_insertion = !search || text_pos != search_anchor</c>, <c>upstream/src/_regex.c</c>:10214)
+    /// so that a match never swallows text where a later match could start. At anchor A, let u be
+    /// that banned search's answer. If u starts at A it is the answer. Otherwise let c be the
+    /// attempt at A without the ban, which is an anchored match at A (<c>search</c> false, the one
+    /// case upstream's own line permits the insertion). The answer is c if it exists and u is None
+    /// or starts at or after c's end, and u otherwise. BESTMATCH is gated out and keeps the ledger
+    /// 19/20 exemption (<see cref="AnchorIsPinned"/>; see the SHORTCUT in
+    /// <c>Optimiser.FindAnchorBanLift</c>). u is by definition the leftmost later start,
+    /// so c is kept exactly when no later start lies inside it: <c>(?:^a){i&lt;=1}</c> over 'xa' is
+    /// (0, 2), and <c>\b(?:dog){e&lt;=2}</c> finditer over 'dog  dog' keeps upstream's (5, 8).
+    /// Reversed, "starts" and "ends" are in the direction of the search.
+    /// </para>
+    /// <para>
+    /// The caller runs this once per pass, so under partial matching the full pass decides first
+    /// and a full c beats a later partial u, which is upstream's own preference. A pattern with no
+    /// construct that depends on position, or no section that permits an insertion
+    /// (<see cref="PatternObject.LiftsAnchorBan"/>), keeps the plain ban and pays one field test.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoMatch2LiftingTheAnchorBan(MatchState state, bool search)
+    {
+        if (!search || !LiftsTheBan(state))
+        {
+            return DoMatch2(state, search);
+        }
+
+        int anchor = state.TextPos;
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+        int banned = DoMatch2(state, search);
+
+        bool bannedMatched = banned is MatchStatus.Success or MatchStatus.Partial;
+        if ((bannedMatched && state.MatchPos == anchor) || !(bannedMatched || banned == MatchStatus.Failure))
+        {
+            return banned;
+        }
+
+        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state) : null;
+
+        state.TextPos = anchor;
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+        int attempt = DoMatch2(state, search: false);
+
+        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream))
+        {
+            return attempt;
+        }
+        else if (attempt is < 0 and not MatchStatus.Partial)
+        {
+            return attempt;
+        }
+
+        if (upstream is null)
+        {
+            return MatchStatus.Failure;
+        }
+
+        upstream.Restore(state);
+        return banned;
+    }
+
+    /// <summary>
+    /// Rule H''s test, with the attempt at the anchor in <paramref name="state"/>: the banned match
+    /// is absent or starts at or after the attempt's end.
+    /// </summary>
+    /// <param name="state">The match state, holding the attempt at the anchor.</param>
+    /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
+    /// <returns><see langword="true"/> if the attempt is the answer.</returns>
+    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
+    {
+        if (upstream is null)
+        {
+            return true;
+        }
+
+        return state.Reverse ? upstream.MatchPos <= state.TextPos : upstream.MatchPos >= state.TextPos;
+    }
+
+    /// <summary>Whether rule H' can change this search's answer (the compile-time gate).</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the anchored attempt must be considered.</returns>
+    private static bool LiftsTheBan(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+            ? state.Pattern.LiftsAnchorBan
+            : state.Pattern.LiftsAnchorBanWhenPartial;
+
+    /// <summary>
+    /// The parts of a match <see cref="DoMatch"/> and its callers read, kept while
+    /// <see cref="DoMatch2LiftingTheAnchorBan"/> runs the attempt at the anchor, so that upstream's
+    /// match can be put back.
+    /// </summary>
+    internal sealed class AnchorBanSnapshot
+    {
+        internal int MatchPos;
+        internal int TextPos;
+        internal bool HitEnd;
+        internal int HitEndMatchPos;
+        internal long Errors;
+        internal long Cost;
+        internal long[] Counts = [];
+        internal List<FuzzyChange> Changes = [];
+        internal GroupData[] Groups = [];
+
+        /// <summary>
+        /// Saves the match into the state's one snapshot, reusing its storage: at most one is live at
+        /// a time, because the walk's snapshots are done with before the search's is taken.
+        /// </summary>
+        /// <param name="state">The match state.</param>
+        /// <returns>The snapshot.</returns>
+        internal static AnchorBanSnapshot Take(MatchState state)
+        {
+            AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
+            snapshot.MatchPos = state.MatchPos;
+            snapshot.TextPos = state.TextPos;
+            snapshot.HitEnd = state.HitEnd;
+            snapshot.HitEndMatchPos = state.HitEndMatchPos;
+            snapshot.Errors = state.TotalErrors;
+            snapshot.Cost = state.TotalCost;
+
+            if (snapshot.Counts.Length != state.FuzzyCounts.Length)
+            {
+                snapshot.Counts = new long[state.FuzzyCounts.Length];
+            }
+
+            state.FuzzyCounts.CopyTo(snapshot.Counts, 0);
+            snapshot.Changes.Clear();
+            snapshot.Changes.AddRange(state.FuzzyChanges);
+            snapshot.Groups = state.Groups.Length == 0 ? [] : GroupData.CopyGroups(state.Groups, state.Groups.Length);
+            return snapshot;
+        }
+
+        internal void Restore(MatchState state)
+        {
+            state.MatchPos = MatchPos;
+            state.TextPos = TextPos;
+            state.HitEnd = HitEnd;
+            state.HitEndMatchPos = HitEndMatchPos;
+            state.TotalErrors = Errors;
+            state.TotalCost = Cost;
+            Counts.CopyTo(state.FuzzyCounts, 0);
+            state.FuzzyChanges.Clear();
+            state.FuzzyChanges.AddRange(Changes);
+            RestoreGroups(state, Groups);
+        }
+    }
+
+    /// <summary>
     /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): which of the four match
     /// strategies a pattern gets.
     /// </summary>
@@ -16178,7 +16338,7 @@ internal static class Matcher
         if (state.PartialSide == MatchState.PartialNone)
         {
             // Normal match.
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
         }
         else
         {
@@ -16206,7 +16366,7 @@ internal static class Matcher
             // Try a normal match first.
             state.PartialSide = MatchState.PartialNone;
 
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
 
             state.PartialSide = partialSide;
 
@@ -16265,7 +16425,7 @@ internal static class Matcher
                 state.TextPos = textPos;
                 state.SliceStart = sliceStart;
                 state.SliceEnd = sliceEnd;
-                status = DoMatch2(state, search);
+                status = DoMatch2LiftingTheAnchorBan(state, search);
 
                 // PCRE2's model, and the point of the whole of S57d: a boundary decided at the
                 // truncation point only reports a partial once EVERYTHING else has failed. A

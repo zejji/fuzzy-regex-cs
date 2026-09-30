@@ -169,24 +169,19 @@ public sealed class InheritedIssueTests
         //   findall(r'\m(?:Y){i}\M', 'XY YX')   -> ['YX']          <- upstream, 'XY' missing
         //   findall(r'\m(?:Y){i}\M', ' XY YX')  -> ['XY', 'YX']    <- upstream, same shape, found
         //
-        // THE RULE THIS PORT APPLIES INSTEAD. "Start searching one character later" is the same
-        // match minus an insertion only while the pattern still fits one character later. So the
-        // prohibition is lifted where a zero-width position assertion at the head of the pattern
-        // holds at the anchor and FAILS one character on, and nowhere else. Both halves are load
-        // bearing: drop the one-character-on test and four of the ported suite's tests go red,
-        // upstream's own test_fuzzy rows 51 and 56 among them, where the assertion holds one
-        // character on too (measured 2026-09-21; S50 found the narrowing the same way, against a
-        // different implementation of the pin).
+        // THE RULE THIS PORT APPLIES INSTEAD, since D61: rule H' (DECISIONS 2026-09-30). At anchor A,
+        // take the banned search's answer u; if it starts at A it stands, and otherwise the attempt
+        // at A without the ban, c, is kept when u is None or starts at or after c's end. The ban
+        // exists so a match never swallows text where a later match could start, and u is the
+        // leftmost later start, so this keeps c exactly when nothing later lies inside it. S57c's
+        // exemption, which this replaced, lifted the ban where an assertion at the head of the
+        // pattern held at A and failed one character on, and glued a separator:
+        // `\b(?:dog){e<=2}` finditer over 'dog  dog' gave (3, 8) with two insertions where upstream
+        // gives (5, 8). See Gaps/Engine/FuzzyAnchorPinTests.
         //
-        // WHERE THE ANSWER LIVES, which is what S50 got wrong twice. It is a property of the
-        // PATTERN - `PatternObject.AnchorGuards`, filled by `Optimiser.FindAnchorGuards` - not a
-        // flag in `MatchState`. S50 used the flag, and because the backtracking engine neither
-        // saves nor restores it, it was wrong in both directions: an assertion that held only on
-        // an abandoned path still pinned the anchor, and the backtrack-arm clears that fixed that
-        // also threw away a pin set outside the construct. The guards are collected by walking the
-        // pattern's leading chain and stopping at the first node that can send matching down more
-        // than one path, so an assertion the engine can abandon is never collected in the first
-        // place. Every shape those two attempts broke is still below, and still green.
+        // WHERE THE ANSWER LIVES: Matcher.DoMatch2LiftingTheAnchorBan, which runs the two searches
+        // and keeps each one's own state, so no flag outlives the path that set it (S50's mistake).
+        // Every shape the two S50 attempts broke is still below, and still green.
 
         // THE ROW THE ISSUE REPORTS. Upstream answers ['YX'].
         Values(@"\m(?:Y){i}\M", "XY YX").Should().Equal("XY", "YX");
@@ -196,13 +191,13 @@ public sealed class InheritedIssueTests
         Values(@"\m(?:X){i}\M", "XY YX").Should().Equal("XY", "YX");
         Values(@"\m(?:Y){i}\M", " XY YX").Should().Equal("XY", "YX");
 
-        // Upstream already allows a RUNAWAY leading insertion at every position except the anchor,
-        // so these two subjects, one leading space apart, get different answers from it at the same
-        // relative position: findall(r'\m(?:Y){i}\M', 'q XY YX') -> ['XY', 'YX'] and over
-        // ' q XY YX' -> ['q XY', 'YX']. Here they agree. The runaway itself is upstream's own
-        // reading of an unbounded `{i}` and this port keeps it; what the fix removes is the
-        // position that answered differently from all the others.
-        Values(@"\m(?:Y){i}\M", "q XY YX").Should().Equal("q XY", "YX");
+        // Upstream allows a RUNAWAY leading insertion at every position except the anchor, so these
+        // two subjects, one leading space apart, get different answers from it at the same relative
+        // position: findall(r'\m(?:Y){i}\M', 'q XY YX') -> ['XY', 'YX'] and over ' q XY YX' ->
+        // ['q XY', 'YX']. Since D61 (rule H') this port gives upstream's answer to both: over
+        // 'q XY YX' the banned search's 'XY' starts inside the attempt at the anchor, 'q XY', so the
+        // runaway is not taken there; over ' q XY YX' the runaway starts at 1, not at the anchor.
+        Values(@"\m(?:Y){i}\M", "q XY YX").Should().Equal("XY", "YX");
         Values(@"\m(?:Y){i}\M", " q XY YX").Should().Equal("q XY", "YX");
 
         // A MATCH UPSTREAM LOSES ALTOGETHER rather than shortens, which is the clearest form of the
@@ -246,10 +241,10 @@ public sealed class InheritedIssueTests
         Values(@"\b(?:abc){i<=2}", "ab abc").Should().Equal(" abc");
         Values(@"\B(?:abc){i<=2}", "xy abc").Should().Equal("y abc");
 
-        // A LOOKAROUND IS NOT A POSITION ASSERTION, deliberately: it runs a subpattern, and
-        // `(?=x)` before a fuzzy section is a character test wearing an assertion's clothes.
-        // Upstream loses the leading insertion here and this port agrees with it.
-        Values("(?=x)(?:abc){i<=1}", "xabc").Should().BeEmpty();
+        // A lookaround needs no special case under rule H' (D61): `(?=x)` holds only at 0, so the
+        // banned search finds nothing later and the attempt at the anchor stands. S57c's exemption
+        // left lookarounds out and this row was [], upstream's answer.
+        Values("(?=x)(?:abc){i<=1}", "xabc").Should().Equal("xabc");
 
         // An assertion that holds at position 0 but only on a path the engine abandons: an
         // alternative it gives up on, the body of a NEGATIVE lookaround, or a repeat that matches
