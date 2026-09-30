@@ -442,6 +442,10 @@ public sealed class MatchStateCacheTests
             case null when field.FieldType == typeof(CharacterIndex):
                 _ = state.GetCharacterIndex();
                 break;
+            case null when field.FieldType == typeof(Matcher.AnchorBanSnapshot):
+                // D61's rule H' keeps one snapshot per state; a reused state must drop it.
+                field.SetValue(state, new Matcher.AnchorBanSnapshot { MatchPos = 7 });
+                break;
             default:
                 throw new InvalidOperationException(
                     $"{field.Name} is a {field.FieldType}, which Scribble has no rule for; add one"
@@ -558,6 +562,9 @@ public sealed class MatchStateCacheTests
                 break;
             case IList list:
                 RenderItems(path, list.Cast<object>(), lines);
+                break;
+            case Matcher.AnchorBanSnapshot snapshot:
+                lines.Add($"{path}=snapshot({snapshot.MatchPos},{snapshot.TextPos})");
                 break;
             default:
                 throw new InvalidOperationException(
