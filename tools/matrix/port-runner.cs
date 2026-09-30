@@ -67,12 +67,25 @@ FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
     anchorGuards = F("AnchorGuards"),
     upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
     skipTiming = F("SkipMovesTheSliceWhenItRuns"),
-    verbScope = F("VerbsAreConfinedToTheInnermostGroup");
+    verbScope = F("VerbsAreConfinedToTheInnermostGroup"),
+    doubledInsertions = F("DoubleCountTrailingInsertions");
 
 // Check C1x's pinned divergences: the fuzzy ablations OracleComparer's RunWith.../RunWithout...
 // helpers apply for ExpectedDivergences, one variant each. A C1x row whose difference from upstream
 // one of these takes away is accounted for, as check C1 accounts for it (matrix triage 2026-09-30).
-string[] pinned = ["x42", "x44", "x51", "x50", "xanchor", "xboundary", "xskip", "xverbscope", "xcallfeatures"];
+string[] pinned =
+[
+    "x42",
+    "x44",
+    "x51",
+    "x50",
+    "xanchor",
+    "xboundary",
+    "xskip",
+    "xverbscope",
+    "xcallfeatures",
+    "xdoubled",
+];
 Type repeatInfo = asm.GetType("Fuzzy.Text.RegularExpressions.Engine.RepeatInfo", throwOnError: true)!;
 FieldInfo failureMemo = repeatInfo.GetField("FailureMemo", Any)!;
 Type workCounter = asm.GetType("Fuzzy.Text.RegularExpressions.Engine.WorkCounter", throwOnError: true)!;
@@ -215,6 +228,8 @@ FuzzyRegex Compile(string pattern, string variant)
             skipTiming.SetValue(pobj, true); // RunWithTheUpstreamSkipTiming
         if (variant == "xverbscope")
             verbScope.SetValue(pobj, true); // RunWithTheUpstreamVerbScope
+        if (variant == "xdoubled")
+            doubledInsertions.SetValue(pobj, true); // RunWithTheDoubledInsertionGuard
     }
     if (variant == "off")
     {

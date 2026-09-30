@@ -323,6 +323,14 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
             kind = "phantom" if ans != "None" else "ok"
         if kind in ("ok", "phantom") and uj.startswith("P") and ans == "None":
             kind = "miss (upstream judge only)"
+        if (kind == "span-diff" and "\\K" in row["pattern"] and pj
+                and re.fullmatch(r"P\((\d+),(\d+)\)", ans) and ans.split(",")[1] == pj.split(",")[1]
+                and int(ans[2:].split(",")[0]) >= int(pj[2:].split(",")[0])):
+            # Both judges report a match/fullmatch partial as P(0,|t|), the attempt's start; with a
+            # \K passed before the edge the reported start is where \K was passed, as upstream's own
+            # partial answer has it (measured 2026-09-30: `(?:ba)*+.\K\w.` match 'baab' partial is
+            # P(3,4) upstream and here). A judge convention, not a disagreement (matrix triage).
+            kind = "ok"
         if kind == "ok":
             out["C4"] = ("pass", "", ans, f"port judge {pj}; upstream judge {uj}")
         elif kind == "phantom":
