@@ -1791,6 +1791,22 @@ Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); //
 
 There is no option to restore the upstream answer. Ledger entry 60.
 
+### An alternation at the start of a negative condition's yes branch keeps all its alternatives
+
+When a condition's test is a negative lookaround and the test holds, upstream tries only the first
+alternative of an alternation that starts the yes branch. Here every alternative is tried, as in
+PCRE2 and Perl. A positive test was never affected.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?(?!a)(?:x|))x").Match("x").Length); // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?(?<!q)(?:xz|x))c").Match("xc").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?(?=x)(?:x|))x").Match("x").Length); // 1 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 62.
+
 ### `BestMatch` and `EnhanceMatch` keep a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
