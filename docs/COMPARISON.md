@@ -96,7 +96,7 @@ itself has none:
 | `Match.NextMatch()` | `Match.NextMatch()` | Same name and meaning: resumes from where this match ended, within the same slice. The one input-dependent method with no per-call `timeout` or `CancellationToken`: it runs under the pattern's `MatchTimeout`, as `Regex`'s does. |
 | `Match.Result(replacement)` | `Match.Result(replacement)` | Same name, different template language - `\1`/`\g<name>` here, `$1` there. `$` is ordinary text in this port's templates. |
 | `Group.Success`, `.Value`, `.Index`, `.Length` | `Group.Success`, `.Value`, `.Index`, `.Length` | Same shape. |
-| `Group.Captures` | `Group.Captures` | Here, every group keeps its full capture list, oldest first, even outside a quantified construct; the built-in only populates this for a group inside a repeat. |
+| `Group.Captures` | `Group.Captures` | Here, every group keeps its full capture list, oldest first, even outside a quantified construct; the built-in only populates this for a group inside a repeat. Captures made inside a group call are dropped when it returns (see "A group call keeps none of the captures its body made"). |
 | `Capture.Value`, `.Index`, `.Length` | `Capture.Value`, `.Index`, `.Length`, plus `.ValueSpan` | Same shape, with an added zero-copy `ReadOnlySpan<char>` accessor. |
 | `GroupCollection[name]`, `[number]` | `GroupCollection[name]`, `[number]` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>` as well as a list**" below: the dictionary face here is total (every group), matching .NET 5+'s own `GroupCollection`, not upstream's named-only `groupdict`. |
 | `GroupCollection.Count` | `GroupCollection.Count` | Includes group 0 on both. |
@@ -1661,11 +1661,12 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:\1){s<=1}").FullMatch("ßxa").Le
 
 ### A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away
 
-A group call such as `(?1)` adds to the called group's capture list, as the group itself does.
-Upstream saves and restores the capture lists around a lookaround only when its body holds a
-capture group, so when the body only calls one, the call's capture outlives a negative lookaround
-whose body matched, or a positive one the match backtracked past. Here a call counts as a group, so
-the lists are restored, as they are for a group written directly.
+Upstream adds a group call's captures to the called group's capture list, as the group itself
+does, and saves and restores the capture lists around a lookaround only when its body holds a
+capture group. So when the body only calls one, the call's capture outlives a negative lookaround
+whose body matched, or a positive one the match backtracked past. Here a call keeps no captures at
+all (see the next section), and a call counts as a group, so the lists are restored, as they are
+for a group written directly.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -1677,6 +1678,31 @@ Console.WriteLine(m.Groups[1].Index);   // 0 - upstream: 0
 
 Spans, group values and fuzzy counts are unchanged; only capture lists differ. There is no option
 to restore the upstream answer. Ledger entry 54.
+
+### A group call keeps none of the captures its body made
+
+A call such as `(?1)`, `(?&name)` or `(?R)` runs like a subroutine, as in PCRE2 and Perl: when it
+returns, every group is exactly as the caller left it, value and capture list both. Upstream puts
+the value back but leaves the call's captures on the list, so a group can report no value while
+listing a capture, or a value that is not its last capture. Here a group's value is always its last
+capture, as .NET's `Group` promises.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("ab", "(?(DEFINE)(?<c>a))(?&c)b");
+Console.WriteLine(m.Groups["c"].Success);   // False - upstream: no value
+Console.WriteLine(m.Groups["c"].Captures.Count);   // 0 - upstream: 1
+
+Match n = FuzzyRegex.Match("aab", "(?<c>a)(?&c)b");
+Console.WriteLine(n.Groups["c"].Index);   // 0 - upstream: 0
+Console.WriteLine(n.Groups["c"].Captures.Count);   // 1 - upstream: 2
+```
+
+Spans, group values, fuzzy counts and which texts match are unchanged; only capture lists differ.
+A recursive pattern such as `(?<rec>\((?:[^()]++|(?&rec))*\))` therefore lists only its outermost
+run, where upstream lists every nested one. There is no option to restore the upstream answer.
+Ledger entry 63.
 
 ### A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller
 

@@ -5781,3 +5781,47 @@ it do.
 `negative-condition-keeps-its-alternatives` keys on `OracleComparer.RunWithTheUpstreamTrueBranchSkip`,
 which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
 does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.
+
+## 63. A group call's captures stay on the group's capture list after it returns - DIVERGES HERE BY RULING (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D51, owner ruling (a) of 2026-09-30
+(DECISIONS.md), which reverses the 2026-09-11 entry. Draft report, framed as a question:
+`entry-63-call-captures.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `.scratch/d51/survey.py` (upstream,
+PCRE2 10.47 through pip `pcre2` 0.7.1, Perl 5.42.3):
+
+```
+search(r'(?(DEFINE)(?<c>a))(?&c)b', 'ab')     c: None, captures ['a']        PCRE2 (-1, -1), Perl unset
+search(r'(?<c>a)(?&c)b', 'aab')               c: (0, 1), captures ['a', 'a']  PCRE2 and Perl (0, 1)
+fullmatch(r'(?P<x>.)*(?&x)', 'abc')           x: 'b', captures ['a', 'b', 'c']
+search(r'\((?<p>[^()]|(?R))*\)', '(a(b)c)')   p: (5, 6), captures ['a', 'b', '(b)', 'c']   PCRE2 and Perl (5, 6)
+```
+
+**Why the port differs.** Upstream's behaviour is deliberate (Hg issue 78; `test_hg_bugs#54`
+asserts every nested run of a recursive group), so this is not claimed as an upstream bug.
+`GROUP_CALL` saves only each group's `current` (`push_groups`, `upstream/src/_regex.c:2490`, called
+at `:13405`) and `GROUP_RETURN` restores only that (`pop_groups`, `:13516`), so `count` stays where
+the callee left it. Copied into .NET that breaks the `Group` contract: Success false with a capture
+listed, and a Value that is not the last capture. PCRE2 and Perl run a call as a subroutine and
+restore the group on return; every span and group value across 29 surveyed witnesses (backreference
+and conditional after a call, recursion, a call in a repeat and in a lookaround, nested groups)
+agrees between them and upstream, so only the lists differ.
+
+**This port.** `Matcher.ReturnToCallerCaptures`: GROUP_CALL saves each group's count and current
+(`PushCaptures`), GROUP_RETURN restores both and puts the spans the call added on the backtracking
+stack, and its backtrack arm writes them back (`PopCalleeCaptures`), because the caller can reuse
+the freed slots before it backtracks into the call. The span restore is load-bearing: planted out,
+`(?(DEFINE)(?<d>(.)(?:.)?\2))(?&d)(?:(?2)x)?ab` over 'aaab' answers None where every engine gives
+(0, 4). Pinned by `Gaps/Engine/CallCaptureTests` (24 tests, 20 red before the fix) and the ported
+rows listed in DIVERGENCES.md, which assert upstream's list through the ablation too. The oracle
+entry `group-call-discards-its-captures-on-return` keys on `OracleComparer.RunWithTheUpstreamCallCaptures`
+(`PatternObject.KeepCallCaptures`, which leaves the count where the callee left it and restores only
+`current` when backtracking past the call, as `pop_groups` does) plus `OnlyCallCapturesAreMissing`;
+every other ablation has the fix off too. Complete matrix over its 1,619 call rows: C2 502 to 9 and
+C7 68 to 0, no assert on the Debug build.
+
+**Open edge.** A partial match that runs out of text inside a call that has not returned keeps that
+call's captures: `(?<o>(?<i>a)b)(?&o)` over 'aba' partial lists i as [(0,1), (2,3)], where the
+written-out `(?<o>(?<i>a)b)(?:ab)` gives [(0,1)]. PCRE2 reports no groups for a partial match and
+Perl has none, so no engine settles it.
