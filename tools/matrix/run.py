@@ -218,8 +218,11 @@ def verdict(answer: str) -> str:
 
 
 def reference_form(answer: str) -> str:
+    """The parts of a port answer the reference matcher gives: span, counts and groups."""
     if answer == "None":
         return "None"
+    if answer.startswith("["):  # finditer
+        return "[" + " ; ".join(reference_form(m) for m in answer[1:-1].split(" ; ") if m) + "]"
     parts = answer.split(" ")
     return f"{parts[0].rstrip('P')} {parts[1]} {parts[3]}"
 

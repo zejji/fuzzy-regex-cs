@@ -76,6 +76,14 @@ CONTROLS = [
     # inside a negative lookahead makes the assertion true rather than ending the attempt.
     ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "n/a"),
     ({"pattern": "(?:(?!(?:a(*PRUNE)(*F)|xb))aba){1<=d<=2}", "subject": "aba", "operation": "search"}, "C6", "pass"),
+    # C6 over the constructs added on 2026-09-30 (reference rules 11-18). D55, inherited and still on
+    # main: a negative conditional drops the alternatives of a branch that starts its yes-branch;
+    # the reference, PCRE2 and Perl give (0,1), the port None (matrix triage NEW-1).
+    ({"pattern": "(?(?!a)(?:x|))x", "subject": "x", "operation": "search"}, "C6", "fail"),
+    ({"pattern": "(?>(?:ab){e<=1})\\Kb", "subject": "xbb", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?=a)|a", "subject": "aa", "operation": "finditer"}, "C6", "pass"),
+    # \K inside a lookaround has no written rule (perlre: "not well defined"), so it stays unjudged.
+    ({"pattern": "(?=a\\Kb)ab", "subject": "ab", "operation": "search"}, "C6", "n/a"),
 ]
 
 
