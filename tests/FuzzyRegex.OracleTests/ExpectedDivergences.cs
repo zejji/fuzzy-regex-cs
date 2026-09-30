@@ -1449,6 +1449,7 @@ internal static class ExpectedDivergences
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP)|a).", "flags": 0, "namedLists": {}, "subject": "\n ", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "A(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "QQA", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "aa(*SKIP)x", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "search", "partial": true, "codepointSpan": [4, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "aa(*SKIP)x(?:.\\w){s<=1}", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "finditer", "partial": true, "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [4, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [2, 4]}]}}
         """;
 
     /// <summary>
@@ -1544,6 +1545,10 @@ internal static class ExpectedDivergences
         // partial=True)` all answer (2, 4), which is this port's answer; 'axaax' completes at 2.
         // Measured 2026-10-01 on regex 2026.9.10.
         "match 0:(2,2)[(2,2)] last=-1/- partial",
+        // Complete-matrix row 12240 itself (C1x on 2026-09-30, recordable since the recorder asks
+        // `finditer` with `partial`, 2026-10-01): the row above's door as a scan. Upstream's scan
+        // reports the zero-width partial at 4; its `(*PRUNE)` spelling reports (2, 4).
+        "matches 1 | match 0:(2,2)[(2,2)] last=-1/- partial",
     ];
 
     /// <summary>

@@ -1140,6 +1140,12 @@ public sealed class PartialMatchingTests
         Match completed = regex.Match("axaax");
         (completed.Index, completed.Length, completed.PartialMatch).Should().Be((2, 3, false));
         regex.Match("axaa").Success.Should().BeFalse();
+
+        // Row 12240 itself, the scan form: upstream's finditer gives one partial at (4, 4), and its
+        // `(*PRUNE)` spelling (2, 4), measured 2026-10-01.
+        MatchCollection scan = new FuzzyRegex(@"aa(*SKIP)x(?:.\w){s<=1}").Matches("axaa", partial: true);
+        scan.Should().ContainSingle();
+        (scan[0].Index, scan[0].Length, scan[0].PartialMatch).Should().Be((2, 2, true));
     }
 
     [Test]

@@ -11,7 +11,7 @@ first unfinished stage (a half-written port or Python stage resumes at its next 
          and the base answers C1x and C6 are compared with;
   c1     tools/record-oracle.py --rows, then the oracle consumer's The_wave_agrees_with_upstream
          (Release), for every row the recorder can ask;
-  c1x    upstream's own finditer for the rows it cannot (partial or pos/endpos);
+  c1x    upstream's own finditer for the rows it cannot (none since 2026-10-01; kept for old results);
   c4up   tools/matrix/d11-brute-judge.py, upstream-based, for partial rows;
   c6     tools/probes/fuzzy-reference-matcher.py, for rows inside its subset;
   c7     tools/matrix/c7.py: PCRE2 and Perl (and node, .NET, re) through the answer key's survey
@@ -115,7 +115,10 @@ def prepare(rows_path: Path, out: Path, chunk: int) -> list[Path]:
 
 
 def oracle_row(row: dict) -> bool:
-    return not (row["operation"] == "finditer" and (row.get("partial") or row.get("pos") is not None))
+    # Every row since 2026-10-01, when the recorder learned to ask `finditer` with `partial` and
+    # pos/endpos. C1x is then n/a wherever C1 answered (judge_row); it stays for a run judged
+    # against results recorded before that date.
+    return True
 
 
 def stage(name: str, chunk: Path, out: Path, ablate: str) -> tuple[int, float, int]:
@@ -267,9 +270,9 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C1"] = ("n/a", "not asked through the oracle", None, None)
     else:
         out["C1"] = c1
-    # C1x: upstream's own finditer where the recorder cannot ask.
+    # C1x: upstream's own finditer where the recorder cannot ask, so never where C1 answered.
     up = extra.get("c1x", "n/a")
-    if up == "n/a":
+    if up == "n/a" or c1 is not None:
         out["C1x"] = ("n/a", "", None, None)
     elif not answered(up) or not answered(base):
         out["C1x"] = ("n/a", "unanswered", base, up)

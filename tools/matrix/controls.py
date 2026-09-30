@@ -19,19 +19,17 @@ CONTROLS = [
     # C1: an ExpectedDivergences example (ledger entry 42, fuzzy-exact-item-offered-as-a-deletion).
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match"}, "C1", "expected"),
     ({"pattern": "a", "subject": "xa", "operation": "search"}, "C1", "pass"),
-    # C1x: ledger entry 42's pinned divergence (the port deletes an exactly matched item, upstream
-    # never does), on a finditer the recorder cannot ask because it has a slice. Measured
-    # 2026-09-30: port (0,2) with one deletion then (3,6), upstream (3,6) only. C1x accounts for it
-    # through port-runner's x42 variant, as C1 does through ExpectedDivergences.
-    ({"pattern": "(?:ab){d<=1}b", "subject": "abxabb", "operation": "finditer", "pos": 0, "endpos": 6}, "C1x", "expected"),
-    # A divergence no pinned variant takes away still fails: BESTMATCH after a (*SKIP), where the
-    # port returns the exact (0,4) and upstream the one-substitution (0,5) (matrix triage NEW-3,
-    # unpinned on main 2026-09-30; replace this row once that divergence is pinned).
-    ({"pattern": "(?b)x(*SKIP)(?:ba+){e<=1}", "subject": "xbaabbbx", "operation": "finditer", "pos": 0, "endpos": 8}, "C1x", "fail"),
+    # C1 on finditer rows with a slice, which the recorder asks since 2026-10-01 (they were C1x's):
+    # ledger entry 42's pinned divergence (the port deletes an exactly matched item, upstream never
+    # does). Measured 2026-09-30: port (0,2) with one deletion then (3,6), upstream (3,6) only.
+    ({"pattern": "(?:ab){d<=1}b", "subject": "abxabb", "operation": "finditer", "pos": 0, "endpos": 6}, "C1", "expected"),
+    # A divergence no entry classifies still fails: BESTMATCH after a (*SKIP) (D56, ledger 5's sixth
+    # door), whose entry is keyed on judged rows, and this scan form is not one of them.
+    ({"pattern": "(?b)x(*SKIP)(?:ba+){e<=1}", "subject": "xbaabbbx", "operation": "finditer", "pos": 0, "endpos": 8}, "C1", "fail"),
     # C4: a \K passed before the edge moves a partial's reported start; the judges report the
     # attempt's start, so this is a judge convention and passes (upstream gives P(3,4) too).
     ({"pattern": "(?:ba)*+.\\K\\w.", "subject": "baab", "operation": "match", "partial": True}, "C4", "pass"),
-    ({"pattern": "a", "subject": "xaa", "operation": "finditer", "pos": 1, "endpos": 3}, "C1x", "pass"),
+    ({"pattern": "a", "subject": "xaa", "operation": "finditer", "pos": 1, "endpos": 3}, "C1", "pass"),
     # C2: D40, upstream's call features (tools/probes/call-site-features-rows.jsonl row 1).
     ({"pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "subject": "aab", "operation": "search",
       "writtenOut": {"8": "(?P<g3>a)(?P<g4>(?:a))(?:(?:(?:a))){s<=1}"}, "ablate": "callfeatures"}, "C2", "fail"),
