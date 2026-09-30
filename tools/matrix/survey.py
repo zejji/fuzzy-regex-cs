@@ -18,6 +18,8 @@ Engines, all measured, none recalled:
   node    node 24 (V8 Irregexp)
   dotnet  .NET 10 System.Text.RegularExpressions (backtracking; RightToLeft for reverse rows)
   re      python `re` (CPython 3.14)
+  boost   Boost.Regex a640597 (standalone headers, Perl syntax) in WSL, ASCII rows without a slice
+          or partial matching (survey_worker_boost.cpp)
   tre     TRE 0.8.0 in WSL, fuzzy rows with one whole-pattern budget, search only
           (tools/probes/tre-fuzzy-check.py's gate; TRE is leftmost-longest, so only "is there a
           match" and its cheapest cost are compared, never the span)
@@ -51,6 +53,7 @@ changes, each found on the harness's 12,457 rows (2026-09-30):
 
 import argparse
 import collections
+import hashlib
 import importlib.util
 import json
 import os
@@ -204,6 +207,41 @@ def _backrefs(p, style):
     return p
 
 
+def _boost_dollar(p):
+    r"""Every `$` outside a set as Perl's single-line `$`, (?=\n?\z). Boost compiles `$` under
+    (?-m) to the end of the buffer only (basic_regex_parser.hpp:357, no_mod_m), where Perl, PCRE2
+    and upstream also match before a final newline: 'a$' over 'a\n' is (0, 1) in all three and no
+    match in Boost (measured 2026-09-30)."""
+    out, k, in_set = [], 0, False
+    while k < len(p):
+        c = p[k]
+        if c == "\\":
+            out.append(p[k:k + 2])
+            k += 2
+            continue
+        if in_set:
+            if c == "]":
+                in_set = False
+        elif c == "[":
+            in_set = True
+            out.append(c)
+            k += 1
+            if k < len(p) and p[k] == "^":
+                out.append("^")
+                k += 1
+            if k < len(p) and p[k] == "]":
+                out.append("]")  # a leading ] is a literal
+                k += 1
+            continue
+        elif c == "$":
+            out.append(r"(?=\n?\z)")
+            k += 1
+            continue
+        out.append(c)
+        k += 1
+    return "".join(out)
+
+
 def translate(row, info, engine):
     """The engine's own row, or a string saying why the row is out of its dialect."""
     p = info["body"]
@@ -273,12 +311,30 @@ def translate(row, info, engine):
         return "a possessive quantifier"
     if engine == "re" and _COND_LOOK.search(p):
         return "a lookaround condition"
-    style = {"pcre2": "pcre", "perl": "perl", "dotnet": "dotnet", "node": "node", "re": "re"}[engine]
+    if engine == "boost" and not (row["subject"] + p).isascii():
+        # SHORTCUT: without ICU, Boost's char traits classify by the C locale, so \w, \s, case
+        # folding and the dot see a UTF-8 subject byte by byte. Upgrade: build against ICU and use
+        # boost::u32regex, which reads codepoints.
+        return "non-ASCII text (Boost is built without ICU)"
+    style = {"pcre2": "pcre", "perl": "perl", "dotnet": "dotnet", "node": "node", "re": "re", "boost": "pcre"}[engine]
     p = _backrefs(p, style)
-    if engine in ("pcre2", "perl", "dotnet"):
+    if engine in ("pcre2", "perl", "dotnet", "boost"):
         p = re.sub(r"(?<!\\)((?:\\\\)*)\\Z", r"\1\\z", p)
-    if engine == "perl":
+    if engine in ("perl", "boost"):
         p = re.sub(r"\(\?\((?!\?|<|'|\d|R|DEFINE)(\w+)\)", r"(?(<\1>)", p)
+    if engine == "boost":
+        # Boost spells Python's named group, reference and call in Perl's way.
+        p = re.sub(r"\(\?P<(\w+)>", r"(?<\1>", p)
+        p = re.sub(r"\(\?P=(\w+)\)", r"\\k<\1>", p)
+        p = re.sub(r"\(\?P>(\w+)\)", r"(?&\1)", p)
+        # Boost's line separators include \r and \f (perl_matcher_common.hpp is_separator), so ^, $
+        # and the dot read those subjects differently from Perl and upstream, which use \n only.
+        if any(c in row["subject"] for c in "\r\f"):
+            return "a \\r or \\f in the subject (Boost treats them as line separators)"
+        if re.search(r"\(\?[a-zA-Z]*m[a-zA-Z]*(?:-[a-zA-Z]*)?:|\(\?[a-zA-Z]*-[a-zA-Z]*m", p):
+            return "a scoped m flag (the $ rewrite below cannot see its scope)"
+        if "m" not in info["letters"]:
+            p = _boost_dollar(p)
     letters = info["letters"]
     out = {"subject": row["subject"], "op": op, "partial": partial, "ngroups": info["ngroups"],
            "groupnames": info["groupnames"]}
@@ -339,7 +395,44 @@ def _commands(engine, rows_path, start):
     if engine == "dotnet":
         return ["dotnet", "run", "-c", "Release",
                 str(HERE / "survey_bcl.cs"), "--", rows_path, str(start)], None
+    if engine == "boost":
+        # The outer `timeout` is a last guard: killing wsl.exe from here need not end the Linux
+        # process, so the worker cannot outlive an hour even if the watchdog loses it.
+        return ["wsl", "-d", WSL_DISTRO, "--", "timeout", "3600", _boost_worker(),
+                _wsl_path(rows_path), str(start)], None
     raise ValueError(engine)
+
+
+# Boost.Regex, standalone headers, built in WSL on first use (measured 2026-09-30: the clone is
+# 30 MB, the build about 20 s). The binary's name carries a hash of the source, so an edited
+# worker is rebuilt and a stale one is never run.
+WSL_DISTRO = "Ubuntu"
+BOOST_REPO, BOOST_COMMIT, BOOST_DIR = "https://github.com/boostorg/regex.git", "a640597", "/tmp/boost-regex"
+
+
+def _wsl_path(path):
+    p = Path(path).resolve()
+    return f"/mnt/{p.drive[0].lower()}{p.as_posix()[2:]}"
+
+
+def _boost_worker():
+    if "boost-binary" in _BUILT:
+        return _BUILT["boost-binary"]
+    src = HERE / "survey_worker_boost.cpp"
+    digest = hashlib.sha1(src.read_bytes()).hexdigest()[:12]
+    binary = f"/tmp/boost-survey/worker-{digest}"
+    script = (
+        f"set -e; test -x {binary} && exit 0; "
+        f"test -d {BOOST_DIR} || git clone -q {BOOST_REPO} {BOOST_DIR}; "
+        f"git -C {BOOST_DIR} checkout -q {BOOST_COMMIT}; mkdir -p /tmp/boost-survey; "
+        f"g++ -O2 -std=c++17 -I{BOOST_DIR}/include -o {binary} '{_wsl_path(src)}'"
+    )
+    done = subprocess.run(["wsl", "-d", WSL_DISTRO, "--", "bash", "-c", script], stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=600)
+    if done.returncode != 0:
+        raise RuntimeError(f"the Boost worker did not build: {done.stderr.strip()[:300]}")
+    _BUILT["boost-binary"] = binary
+    return binary
 
 
 _BUILT = {}
@@ -567,7 +660,7 @@ def verdict(row_results):
     return out
 
 
-ENGINES = ["regex", "pcre2", "perl", "node", "dotnet", "re", "tre", "fuzzyref", "brute"]
+ENGINES = ["regex", "pcre2", "perl", "node", "dotnet", "re", "boost", "tre", "fuzzyref", "brute"]
 ROW_TIMEOUT = {"brute": 30.0, "fuzzyref": 20.0}
 
 
