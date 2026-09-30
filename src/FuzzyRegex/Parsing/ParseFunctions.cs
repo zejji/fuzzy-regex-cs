@@ -3204,9 +3204,16 @@ internal static class ParseFunctions
     }
 
     /// <summary>Upstream <c>_check_group_features</c> (lines 4421-4458).</summary>
+    /// <remarks>
+    /// NOT UPSTREAM (D40): the calls inside each copy are then resolved for the copy's own
+    /// features (<see cref="ResolveCallsInCopy"/>), here and before anything is compiled, so that a
+    /// reference whose features are the group's own is carried by the group as written, as every
+    /// other reference is, rather than by a copy.
+    /// </remarks>
     /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, for the copies' walk.</param>
     /// <param name="parsed">The parsed pattern.</param>
-    internal static void CheckGroupFeatures(Info info, RegexBase parsed)
+    internal static void CheckGroupFeatures(Info info, string pattern, RegexBase parsed)
     {
         Dictionary<(int Group, bool Reverse, bool Fuzzy), int> callRefs = [];
         List<(RegexBase Group, bool Reverse, bool Fuzzy)> additionalGroups = [];
@@ -3254,11 +3261,36 @@ internal static class ParseFunctions
 
         info.CallRefs = callRefs;
         info.AdditionalGroups = additionalGroups;
+
+        if (info.UpstreamCallFeatures)
+        {
+            return;
+        }
+
+        // The copies' walks re-point the call nodes they share with the pattern as written, so the
+        // pattern's own references are put back afterwards; each copy's are set again just before
+        // it compiles. The list grows while this runs, and each (group, direction, fuzziness) is
+        // added once, so it ends.
+        (CallGroup Call, int Reference)[] written =
+        [
+            .. info.GroupCalls.Select(static entry => ((CallGroup)entry.Call, ((CallGroup)entry.Call).CallRefIndex)),
+        ];
+        for (int i = 0; i < additionalGroups.Count; i++)
+        {
+            (RegexBase copy, bool copyReverse, bool copyFuzzy) = additionalGroups[i];
+            ResolveCallsInCopy(info, pattern, parsed, copy, copyReverse, copyFuzzy);
+        }
+
+        foreach ((CallGroup call, int reference) in written)
+        {
+            call.CallRefIndex = reference;
+        }
     }
 
     /// <summary>
     /// Points the calls inside one additional copy at the references for the copy's own direction
-    /// and fuzziness, just before the copy is compiled. Not in upstream (D40).
+    /// and fuzziness: once before the pattern compiles, to find them, and again just before the copy
+    /// compiles. Not in upstream (D40).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -3277,10 +3309,11 @@ internal static class ParseFunctions
     /// record is put back: it says where a group is written, and later copies are made from it.
     /// </para>
     /// <para>
-    /// A reference first needed here always gets a copy of its own, even for the features the group
-    /// was written with, because the group as written is compiled already without the reference.
-    /// Those copies are appended to <see cref="Info.AdditionalGroups"/>, and the caller's loop
-    /// reaches them in turn. It ends: each (group, direction, fuzziness) is added once.
+    /// A reference first needed here gets a copy only where the group as written has other
+    /// features, as <see cref="CheckGroupFeatures"/> decides for the pattern's own calls; it runs
+    /// this for every copy before anything compiles, so the group as written then carries the
+    /// reference. New copies are appended to <see cref="Info.AdditionalGroups"/> and reached in
+    /// turn. It ends: each (group, direction, fuzziness) is added once.
     /// </para>
     /// </remarks>
     /// <param name="info">The parse state.</param>
@@ -3318,15 +3351,29 @@ internal static class ParseFunctions
             {
                 reference = info.CallRefs.Count;
                 info.CallRefs[key] = reference;
-                info.AdditionalGroups.Add(
-                    (
-                        callGroup.GroupNumber == 0
-                            ? new CallRef(reference, parsed)
-                            : info.DefinedGroups[callGroup.GroupNumber].Group,
-                        callReverse,
-                        callFuzzy
-                    )
-                );
+
+                // As CheckGroupFeatures decides for the pattern's own calls: a copy only where the
+                // group as written has other features.
+                bool written =
+                    callGroup.GroupNumber == 0
+                        ? (callReverse, callFuzzy) == ((info.Flags & RegexFlags.Reverse) != 0, parsed is Fuzzy)
+                        : (callReverse, callFuzzy)
+                            == (
+                                info.DefinedGroups[callGroup.GroupNumber].Reverse,
+                                info.DefinedGroups[callGroup.GroupNumber].Fuzzy
+                            );
+                if (!written)
+                {
+                    info.AdditionalGroups.Add(
+                        (
+                            callGroup.GroupNumber == 0
+                                ? new CallRef(reference, parsed)
+                                : info.DefinedGroups[callGroup.GroupNumber].Group,
+                            callReverse,
+                            callFuzzy
+                        )
+                    );
+                }
             }
 
             callGroup.CallRefIndex = reference;
@@ -3355,6 +3402,7 @@ internal static class ParseFunctions
         if (required is String requiredString)
         {
             requiredString.Required = true;
+            requiredString.RequiredReverse = (flags & RegexFlags.Reverse) != 0;
         }
 
         if (reqOffset >= RegexFlags.Unlimited)

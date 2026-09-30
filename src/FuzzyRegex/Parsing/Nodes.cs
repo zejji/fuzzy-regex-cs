@@ -2549,6 +2549,12 @@ internal class String : RegexBase
     internal bool Required { get; set; }
 
     /// <summary>
+    /// The direction the prefilter scans for this run, the pattern's own. Not in upstream (D47):
+    /// see <see cref="CompileCore"/>.
+    /// </summary>
+    internal bool RequiredReverse { get; set; }
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
     /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
     /// </summary>
@@ -2610,7 +2616,14 @@ internal class String : RegexBase
         // and upstream marks that copy too (:4045). The engine skips comparing a marked run where
         // the prefilter found it, which in a fuzzy run would also skip the choices of deleting its
         // matched characters (ledger entry 42). Upstream loses nothing: it pushes no such choices.
-        if (Required && !fuzzy)
+        //
+        // NOT UPSTREAM (D47): nor does a compile in the other direction. `(?R)` inside a
+        // lookbehind compiles the pattern again backwards, and at the prefilter's position the
+        // engine then moved a backwards run to the string's forward end (`ReqEnd`), so
+        // `aa(?:(?<=a(?R)){i<=1}a|)` matched 'aaaa' as (0, 3) with one insertion, in upstream too
+        // (`upstream/src/_regex.c:14892`). The mark only means something where the run is read in
+        // the direction the prefilter found it.
+        if (Required && !fuzzy && reverse == RequiredReverse)
         {
             flags |= NodeFlags.Required;
         }

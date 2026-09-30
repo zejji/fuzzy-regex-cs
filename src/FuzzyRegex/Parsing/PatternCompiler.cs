@@ -303,7 +303,7 @@ internal static class PatternCompiler
         ComplainUnusedArgs(kwargs, info);
 
         // Check the features of the groups.
-        ParseFunctions.CheckGroupFeatures(info, parsed);
+        ParseFunctions.CheckGroupFeatures(info, pattern, parsed);
 
         // Compile the parsed pattern. The result is a list of tuples.
         List<uint[]> code = parsed.Compile(reverse);
@@ -330,7 +330,15 @@ internal static class PatternCompiler
             (RegexBase group, bool rev, bool fuz) = info.AdditionalGroups[i];
             if (!info.UpstreamCallFeatures)
             {
+                int references = info.CallRefs.Count;
                 ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
+
+                // CheckGroupFeatures found every reference before the pattern compiled, so that
+                // the groups as written carry theirs; one found now would have no definition.
+                Debug.Assert(
+                    info.CallRefs.Count == references,
+                    "A copy needed a reference found after the pattern compiled."
+                );
             }
 
             code.AddRange(group.Compile(rev, fuz));

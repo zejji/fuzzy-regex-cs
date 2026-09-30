@@ -202,11 +202,12 @@ public sealed class FailedCallMemoTests
         // the position, which the key does not hold. The exclusion for a call inside any
         // lookaround covers it. This row does not go wrong with the memo forced on; it pins
         // the direction. Upstream: regex.search(r'(a)b(?<=(?1)b)', 'ab') is None, regex
-        // 2026.9.10.
+        // 2026.9.10, because it counts the call's backwards copy towards the pattern's minimum
+        // width; with the call written out, (a)b(?<=ab), it is (0, 2), as here since D49.
         FuzzyRegex regex = WithMemo("(a)b(?<=(?1)b)", eager: true);
 
         regex.PatternObject.UseCallMemo.Should().BeFalse();
-        regex.Match("ab").Success.Should().BeFalse();
+        (regex.Match("ab").Index, regex.Match("ab").Length).Should().Be((0, 2));
     }
 
     [Test]

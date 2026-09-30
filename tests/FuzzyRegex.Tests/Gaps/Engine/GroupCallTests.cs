@@ -88,16 +88,19 @@ public sealed class GroupCallTests
     }
 
     [Test]
-    public void A_group_called_from_inside_a_lookbehind_agrees_with_upstream_where_the_call_is_wider_than_the_text()
+    public void A_group_called_from_inside_a_lookbehind_matches_a_text_only_as_wide_as_the_pattern()
     {
-        // Upstream issue 614's area: a group reached through a call from inside a lookbehind. Both
-        // of these fail to match upstream and fail here, so the port reproduces them.
-        //
-        // Measured: both are None under upstream.
-        //   regex.search(r'(?(DEFINE)(?<ab>ab))..(?<=(?&ab))', 'ab')
-        //   regex.search(r'(?<x>ab)(?<=(?&x))', 'ab')
-        FuzzyRegex.Match("ab", "(?(DEFINE)(?<ab>ab))..(?<=(?&ab))").Success.Should().BeFalse();
-        FuzzyRegex.Match("ab", "(?<x>ab)(?<=(?&x))").Success.Should().BeFalse();
+        // Upstream issue 614's area: a group reached through a call from inside a lookbehind.
+        // DIVERGES FROM UPSTREAM since D49. Both of these are None upstream, because it adds the
+        // width of the call's backwards copy to the pattern's minimum width, although a lookbehind
+        // consumes nothing; with the call written out both are (0, 2) upstream (regex 2026.9.10,
+        // 2026-09-30):
+        //   regex.search(r'(?(DEFINE)(?<ab>ab))..(?<=(?&ab))', 'ab')   None; '..(?<=ab)' (0, 2)
+        //   regex.search(r'(?<x>ab)(?<=(?&x))', 'ab')                  None; '(?<x>ab)(?<=ab)' (0, 2)
+        Match defined = FuzzyRegex.Match("ab", "(?(DEFINE)(?<ab>ab))..(?<=(?&ab))");
+        (defined.Success, defined.Index, defined.Length).Should().Be((true, 0, 2));
+        Match named = FuzzyRegex.Match("ab", "(?<x>ab)(?<=(?&x))");
+        (named.Success, named.Index, named.Length).Should().Be((true, 0, 2));
 
         // And where the lookbehind is the whole pattern, both engines match:
         // regex.match(r'(?(DEFINE)(?<func>.)).(?<=(?&func))', 'abc').captures('func') == ['a'].
@@ -389,12 +392,11 @@ public sealed class GroupCallTests
         minimal.Success.Should().BeTrue("upstream answers None to this and (1, 3) with the call written out");
         (minimal.Index, minimal.Length).Should().Be((1, 2));
 
-        // The mask itself, stated as an assertion rather than as prose: one character shorter and
-        // both engines answer nothing, for the unrelated reason above.
-        new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W")
-            .Match("a ")
-            .Success.Should()
-            .BeFalse();
+        // The mask, gone since D49: one character shorter, upstream still answers nothing for the
+        // reason above, and this port answers what upstream gives with the call written out,
+        // regex.search(r'(?P<g1>\w)(?<=\w)\W', 'a ') == (0, 2).
+        Match mask = new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a ");
+        (mask.Success, mask.Index, mask.Length).Should().Be((true, 0, 2));
 
         // The isolation, in the two directions that matter. A call inside a lookaround running the
         // SAME way as the pattern is unaffected on both engines, which is what makes the title's
@@ -423,10 +425,15 @@ public sealed class GroupCallTests
     // memory-hungry test already has a home, or give ByteStack an injectable limit so the same
     // assertion costs a kilobyte.
 
-    // AGREES WITH UPSTREAM. S40c closed the verdict S40a left open, and it went the other way from
-    // both of that slice's readings: there is no group-call defect here at all.
+    // DIVERGES FROM UPSTREAM SINCE D49 (ledger entry 60). The history below is S40c's, when this
+    // port reproduced upstream's minimum width; the assertions are now the other way round. What
+    // upstream counts is not the call at all but the backwards COPY of the called group that the
+    // call needs, compiled after the pattern's SUCCESS (`build_CALL_REF`, `_regex.c:24460`). The
+    // width counts only where a call reaches the copy, and a lookbehind consumes nothing, so the
+    // copy's width is no part of what the pattern needs. Every called row below now answers what
+    // the same row with the call written out answers, in both engines.
     [Test]
-    public void A_group_call_counts_towards_min_width_even_inside_a_zero_width_lookaround()
+    public void A_group_call_inside_a_zero_width_lookaround_adds_nothing_to_min_width()
     {
         // S40a, rows 98956 (`partial`) and 103926 (`partial-sliced`) of a 6000-row seed-7 wave,
         // minimised by hand. It shares the two tests above's precondition - a group reached by a
@@ -477,15 +484,15 @@ public sealed class GroupCallTests
 
         forward.Success.Should().BeTrue();
         (forward.Index, forward.Length).Should().Be((0, 2));
-        forward.PartialMatch.Should().BeTrue("min_width is 2 and one character is available");
+        forward.PartialMatch.Should().BeFalse("the lookbehind adds nothing to min_width, as written out");
         forward.Groups["g1"].Success.Should().BeTrue();
 
         Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
 
         reversed.Success.Should().BeTrue();
         (reversed.Index, reversed.Length).Should().Be((0, 2));
-        reversed.PartialMatch.Should().BeTrue("the same early-out, through a lookahead under (?r)");
-        reversed.Groups["g1"].Success.Should().BeFalse("upstream drops g1 when the partial pass answers");
+        reversed.PartialMatch.Should().BeFalse("the same, through a lookahead under (?r)");
+        reversed.Groups["g1"].Success.Should().BeTrue("the non-partial pass answers, and sets g1");
 
         // THE CONTROL THAT ISOLATES THE CALL, and it is the one S40a read as evidence of a
         // group-call defect. Write the call out as the body it calls and upstream's partial goes
@@ -502,14 +509,17 @@ public sealed class GroupCallTests
         // The ASCII spellings, which agreed all along and still do. They are here because they are
         // what a regression would break first: the fix changed a character count, so the rows with
         // no astral character in them must not move at all.
+        // Written out, upstream answers both complete: search(r'(?P<g1>A)(?:(?<=A)\w)?', 'A',
+        // partial=True) and fullmatch(r'(?r)(?P<g1>\w+)(?:(?!\w+)\s)?', 'a', partial=True) are
+        // (0, 1) with partial False (regex 2026.9.10, 2026-09-30).
         new FuzzyRegex(@"(?P<g1>A)(?:(?<=(?P>g1))\w)?")
             .Match("A", partial: true)
             .PartialMatch.Should()
-            .BeTrue();
+            .BeFalse();
         new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?")
             .FullMatch("a", partial: true)
             .PartialMatch.Should()
-            .BeTrue();
+            .BeFalse();
 
         // A REQUIRED tail is a partial in both engines whatever min_width does, because the tail
         // itself asks for a character past the end. These rows never depended on the early-out and
