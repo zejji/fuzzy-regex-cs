@@ -2538,11 +2538,38 @@ internal static class Matcher
     /// <returns><see langword="true"/> if an insertion may open the match after all.</returns>
     private static bool AnchorIsPinned(MatchState state, long step)
     {
+        // D61: an assertion passed on this path pins it too (NotePinningAssertion).
+        if (state.AnchorPinnedOnPath)
+        {
+            return true;
+        }
+
         if (state.Pattern.AnchorGuards is not { Count: > 0 } guards)
         {
             return false;
         }
 
+        for (int i = 0; i < guards.Count; i++)
+        {
+            if (PinsTheAnchor(state, guards[i], step))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a position assertion holds at the search anchor and fails one character on, which is
+    /// what makes "start searching one character later" lose the match (see <see cref="AnchorIsPinned"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="assertion">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
+    /// <param name="step">Which way "one character on" is.</param>
+    /// <returns><see langword="true"/> if the assertion pins the anchor.</returns>
+    private static bool PinsTheAnchor(MatchState state, Node assertion, long step)
+    {
         int onePastAnchor = Step(state, state.SearchAnchor, step);
 
         if (onePastAnchor == state.SearchAnchor || onePastAnchor < state.SliceStart || onePastAnchor > state.SliceEnd)
@@ -2550,18 +2577,43 @@ internal static class Matcher
             return false;
         }
 
-        foreach (Node guard in guards)
-        {
-            if (
-                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success
-                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure
-            )
-            {
-                return true;
-            }
-        }
+        return TryMatchZeroWidth(state, assertion, state.SearchAnchor) == MatchStatus.Success
+            && TryMatchZeroWidth(state, assertion, onePastAnchor) == MatchStatus.Failure;
+    }
 
-        return false;
+    /// <summary>
+    /// NOT UPSTREAM (known defect D61): notes that the path passed a position assertion that pins the
+    /// search anchor, so that <see cref="AnchorIsPinned"/> lifts the insertion ban for the rest of
+    /// this path wherever the assertion was written - inside a fuzzy section, or down one branch of
+    /// an alternation, where <c>Optimiser.FindAnchorGuards</c> cannot collect it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Owner ruling 2026-09-30, option B (<c>docs/plan/DECISIONS.md</c>). The reason is S57c's: the
+    /// same path started one character later passes this assertion there, where it fails, so the
+    /// match the ban hopes to find later does not exist. Only a match that consumed nothing yet can
+    /// be at the anchor, so the caller asks only there.
+    /// </para>
+    /// <para>
+    /// The flag belongs to the path, which is what S50's flag got wrong. It is set once, with an
+    /// <see cref="Opcode.AnchorPin"/> frame that clears it when backtracking passes back over the
+    /// assertion, and <c>MatchState.PushSubAttemptFuzzyState</c> saves it for the constructs that
+    /// discard a sub-attempt's frames, so an abandoned alternative, a failed atomic group or a
+    /// lookaround whose continuation failed leaves it as it found it. "One character on" is the
+    /// direction the search scans, since the ban is about the next start position.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="assertion">The position assertion that has just held at the current position.</param>
+    private static void NotePinningAssertion(MatchState state, Node assertion)
+    {
+        if (PinsTheAnchor(state, assertion, state.Reverse ? -1 : 1))
+        {
+            state.AnchorPinnedOnPath = true;
+            state.Bstack.PushUInt8((byte)Opcode.AnchorPin);
+
+            /* bstack: ANCHOR_PIN */
+        }
     }
 
     /// <summary>
@@ -11003,6 +11055,17 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        // NOT UPSTREAM (D61). One test for a pattern the optimiser cleared.
+                        if (
+                            pattern.PinsAnchorOnPath
+                            && search
+                            && !state.AnchorPinnedOnPath
+                            && state.TextPos == state.SearchAnchor
+                        )
+                        {
+                            NotePinningAssertion(state, node);
+                        }
+
                         node = node.Next1.Node!;
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
@@ -14009,6 +14072,9 @@ internal static class Matcher
 
                     break;
                 }
+                case Opcode.AnchorPin: // NOT UPSTREAM (D61): back over the assertion that pinned it.
+                    state.AnchorPinnedOnPath = false;
+                    break;
                 case Opcode.Keep: // Keep.
                 {
                     /* bstack: match_pos */
@@ -14237,6 +14303,9 @@ internal static class Matcher
 
                     // Reset the guards.
                     state.ResetGuards();
+
+                    // NOT UPSTREAM (D61): a verb can cut away the frame that would have cleared it.
+                    state.AnchorPinnedOnPath = false;
 
                     // Reset the stacks.
                     state.Sstack.Reset();

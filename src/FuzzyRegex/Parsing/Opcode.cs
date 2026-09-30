@@ -340,4 +340,11 @@ internal enum Opcode : uint
     /// (<c>Matcher.FuzzyFrameOp</c>).
     /// </summary>
     FuzzyLookaround = 99,
+
+    /// <summary>
+    /// NOT UPSTREAM (known defect D61). Engine-only, and never a node: the backtrack tag that
+    /// clears <c>MatchState.AnchorPinnedOnPath</c> when backtracking passes back over the position
+    /// assertion that set it (<c>Matcher.NotePinningAssertion</c>).
+    /// </summary>
+    AnchorPin = 100,
 }

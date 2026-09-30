@@ -903,6 +903,16 @@ internal sealed class MatchState : IDisposable
     internal bool RetriedAWholeFoldEdit;
 
     /// <summary>
+    /// NOT UPSTREAM (known defect D61): whether the path the matcher is on passed, at the search
+    /// anchor, a position assertion that fails one character later, so that a fuzzy section may
+    /// open there with an insertion. Set by <c>Matcher.NotePinningAssertion</c>, which pushes an
+    /// <see cref="Opcode.AnchorPin"/> frame that clears it again when backtracking passes back over
+    /// the assertion; saved with <see cref="PushSubAttemptFuzzyState"/>, because the constructs that
+    /// throw a sub-attempt's frames away would otherwise throw that clear away with them.
+    /// </summary>
+    internal bool AnchorPinnedOnPath;
+
+    /// <summary>
     /// Upstream <c>fuzzy_changes</c> (<c>RE_FuzzyChangesList</c>, <c>:397</c>): every error used so
     /// far, in the order it was used.
     /// </summary>
@@ -1196,6 +1206,7 @@ internal sealed class MatchState : IDisposable
         Array.Clear(FuzzyCounts);
         FuzzyNode = null;
         RetriedAWholeFoldEdit = false;
+        AnchorPinnedOnPath = false;
         FuzzyChanges.Clear();
 
         VisibleCaptures = visibleCaptures;
@@ -1506,6 +1517,7 @@ internal sealed class MatchState : IDisposable
             Array.Clear(FuzzyCounts);
             FuzzyNode = null;
             RetriedAWholeFoldEdit = false;
+            AnchorPinnedOnPath = false;
             FuzzyChanges.Clear();
         }
 
@@ -1654,6 +1666,11 @@ internal sealed class MatchState : IDisposable
         stack.PushSize(TotalCost);
         stack.PushNode(FuzzyNode);
         PushFuzzyCounts(stack, FuzzyCounts);
+
+        if (Pattern.PinsAnchorOnPath)
+        {
+            stack.PushBool(AnchorPinnedOnPath);
+        }
     }
 
     /// <summary>
@@ -1685,8 +1702,11 @@ internal sealed class MatchState : IDisposable
             return true;
         }
 
+        bool anchorPinned = false;
+
         if (
-            !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
+            (Pattern.PinsAnchorOnPath && !stack.PopBool(out anchorPinned))
+            || !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
             || !stack.PopNode(Pattern, out Node? fuzzyNode)
             || !stack.PopSize(out long totalCost)
             || !stack.PopSize(out long totalErrors)
@@ -1707,6 +1727,7 @@ internal sealed class MatchState : IDisposable
         }
 
         TruncateFuzzyChanges(changeCount);
+        AnchorPinnedOnPath = anchorPinned;
 
         return true;
     }

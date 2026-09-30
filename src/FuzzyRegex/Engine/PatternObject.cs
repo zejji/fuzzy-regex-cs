@@ -606,6 +606,20 @@ internal sealed class PatternObject
     internal IReadOnlyList<Node>? AnchorGuards;
 
     /// <summary>
+    /// Whether the matcher watches for a position assertion that pins the search anchor on the path
+    /// it is on (<c>Matcher.NotePinningAssertion</c>): a fuzzy pattern with a position assertion that
+    /// is not one of the <see cref="AnchorGuards"/>. <b>This port's own field (known defect D61).</b>
+    /// </summary>
+    /// <remarks>
+    /// The guards cover an assertion passed on every path; this covers one inside a fuzzy section or
+    /// down one branch of an alternation, which only the path the engine is on can answer for. A
+    /// pattern without one leaves this <see langword="false"/> and pays one test per assertion
+    /// passed. Cleared by <c>OracleComparer</c>'s ablations and by nothing in the library.
+    /// <see cref="Optimiser"/> fills this in, with <see cref="AnchorGuards"/>.
+    /// </remarks>
+    internal bool PinsAnchorOnPath;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
     /// reference treats a subject folding it loaded but never used as half-matched, which is
     /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the

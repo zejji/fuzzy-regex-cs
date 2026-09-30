@@ -1,0 +1,126 @@
+using AwesomeAssertions;
+
+namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
+
+/// <summary>
+/// A position assertion that holds at the search anchor, and fails one character later, lifts the
+/// search-anchor insertion ban wherever it is written: before the fuzzy section, inside it, or in an
+/// alternation. Known defect D61, the extension of ledger entries 19 and 20.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Upstream refuses a fuzzy insertion at the position a search began
+/// (<c>permit_insertion = !search || text_pos != search_anchor</c>, <c>upstream/src/_regex.c</c>:10214),
+/// because "it's better just to start searching one character later". That is true only while the
+/// pattern still fits one character later. An assertion the path passed at the anchor, which fails
+/// one character on, says it does not: the same path started there fails at the assertion. S57c
+/// applied that to an assertion before the section; the owner's ruling of 2026-09-30 (option B,
+/// <c>docs/plan/DECISIONS.md</c>) applies it wherever the assertion is written. The ban itself
+/// stays, so a pattern with no such assertion answers as upstream does, and finditer still does not
+/// glue a separator onto the next match.
+/// </para>
+/// <para>
+/// The expected answers come from that rule: each red row is the match the assertion's path makes
+/// at the anchor with a leading insertion. No surveyed engine combines fuzzy matching with these
+/// assertions, so there is no engine survey. Every upstream answer quoted was measured on
+/// <c>regex</c> 2026.9.10 on 2026-09-30.
+/// </para>
+/// </remarks>
+public sealed class FuzzyAnchorPinTests
+{
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer. Upstream's answer is the
+    // last argument.
+    [Test]
+    [Arguments(@"(?:^a){i<=1}", "xa", 0, 2, 1, "None")] // as ^(?:a){i<=1}, which is (0, 2) in both
+    [Arguments(@"(?:^a.){i<=2}", " xabb", 0, 4, 2, "None")]
+    [Arguments(@"(?:\Aa.){i<=2}", " xabb", 0, 4, 2, "None")]
+    [Arguments(@"(?m)(?:^a){i<=1}", "xa", 0, 2, 1, "None")]
+    [Arguments(@"(?:\ba){i<=1}", "xa", 0, 2, 1, "None")]
+    [Arguments(@"(?:\ma){i<=1}", "xa", 0, 2, 1, "None")]
+    [Arguments(@"(?:\Ga){i<=1}", "xa", 0, 2, 1, "RuntimeError: invalid RE code")] // ledger 48
+    [Arguments(@"(?:^|q)(?:a){i<=1}", "xa", 0, 2, 1, "None")]
+    [Arguments(@"(?:q|^)(?:a){i<=1}", "xa", 0, 2, 1, "None")]
+    [Arguments(@"(?:\b|q)(?:abc){i<=1}", "xabc", 0, 4, 1, "None")]
+    // A position assertion inside a positive lookahead is passed at the anchor as well.
+    [Arguments(@"(?:(?=^)a){i<=1}", "xa", 0, 2, 1, "None")]
+    // Reversed, the anchor is the end of the subject and "one character later" is one to the left.
+    [Arguments(@"(?r)(?:a$){i<=1}", "ax", 0, 2, 1, "None")]
+    [Arguments(@"(?r)(?:a\Z){i<=1}", "ax", 0, 2, 1, "None")]
+    [Arguments(@"(?r)(?:a\M){i<=1}", "ax", 0, 2, 1, "None")]
+    public void An_assertion_that_pins_the_anchor_lifts_the_ban_wherever_it_is_written(
+        string pattern,
+        string text,
+        int start,
+        int end,
+        int insertions,
+        string upstream
+    )
+    {
+        _ = upstream;
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, insertions, 0));
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_partial_match_may_open_with_an_insertion_at_a_pinned_anchor()
+    {
+        // search('(?:^ab){i<=1}', 'xa', partial=True)  None. 'xab' is a complete match with the x
+        // inserted, so 'xa' is a prefix of one.
+        Match m = new FuzzyRegex("(?:^ab){i<=1}").Match("xa", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void Finditer_keeps_the_match_at_a_pinned_anchor_and_every_later_one()
+    {
+        // finditer('(?:\ba){i<=1}', 'xa xa')     [(3, 5)]
+        // finditer('(?:\ma){i<=1}', 'xa xa ya')  [(3, 5), (6, 8)]
+        // The second search starts at the space, where \b holds one character on too, so the ban
+        // still keeps the space out of the second match.
+        Spans(@"(?:\ba){i<=1}", "xa xa").Should().Equal((0, 2), (3, 5));
+        Spans(@"(?:\ma){i<=1}", "xa xa ya").Should().Equal((0, 2), (3, 5), (6, 8));
+    }
+
+    // Upstream's answer in every row, and this port's before and after D61.
+    [Test]
+    public void The_ban_stays_where_no_assertion_on_the_path_pins_the_anchor()
+    {
+        // No assertion: upstream's rule doing its job. The separator stays out of each match.
+        Spans("(?:dog){e<=1}", "dog dog dog").Should().Equal((0, 3), (4, 7), (8, 11));
+        Spans("(?:abc){i<=1}", "xabc").Should().Equal((1, 4));
+
+        // An assertion that holds one character later too pins nothing.
+        Spans(@"(?:\bdog){e<=1}", "dog dog dog").Should().Equal((0, 3), (4, 7), (8, 11));
+        Spans("(?m)(?:^x){i<=1}", "\nx").Should().Equal((1, 2));
+        Span(new FuzzyRegex(@"(?:\Bc){i<=1}").Match("abc", 1)).Should().Be((2, 3));
+
+        // A lookaround is not a position assertion (S57c's rule, which D61 does not change).
+        new FuzzyRegex("(?:(?=x)a){i<=1}")
+            .Match("xa")
+            .Success.Should()
+            .BeFalse();
+
+        // The assertion held only on a path the engine abandoned: a failed alternative, a lookahead
+        // whose continuation failed, an atomic group that failed, or a negative lookaround's body.
+        Spans("(?:^b|)(?:a){i<=1}", "xa").Should().Equal((1, 2));
+        Spans("(?:(?=^)(?!)|)(?:a){i<=1}", "xa").Should().Equal((1, 2));
+        Spans("(?:(?>^b)|)(?:a){i<=1}", "xa").Should().Equal((1, 2));
+        Spans("(?:(?!^b)a){i<=1}", "xa").Should().Equal((1, 2));
+
+        // An assertion after the first character is not passed at the anchor.
+        new FuzzyRegex("(?:a^){i<=1}")
+            .Match("xa")
+            .Success.Should()
+            .BeFalse();
+    }
+
+    private static (int Start, int End) Span(Match m) => (m.Index, m.Index + m.Length);
+
+    private static (int Start, int End)[] Spans(string pattern, string text) =>
+        [.. new FuzzyRegex(pattern).Matches(text).Select(Span)];
+}

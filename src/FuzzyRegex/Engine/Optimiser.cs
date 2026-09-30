@@ -83,7 +83,9 @@ internal static class Optimiser
     /// </para>
     /// <para>
     /// An assertion inside a fuzzy section is not collected, and stops the walk: an error can get
-    /// past it, so it pins nothing.
+    /// past it, so it does not pin every path. The path that passes it without an error is pinned
+    /// all the same, and so is a path down one branch of an alternation; for those this sets
+    /// <see cref="PatternObject.PinsAnchorOnPath"/> and the matcher decides as it goes (D61).
     /// </para>
     /// </remarks>
     /// <param name="pattern">The pattern.</param>
@@ -122,6 +124,12 @@ internal static class Optimiser
         }
 
         pattern.AnchorGuards = guards;
+
+        // D61: an assertion the walk did not collect - inside a fuzzy section, down one branch -
+        // can still pin the anchor on the path that passes it, which only the matcher can see. The
+        // walk collects each guard once, from the node list, so any assertion beyond the guards is
+        // one it did not collect.
+        pattern.PinsAnchorOnPath = pattern.NodeList.Count(static n => IsPositionAssertion(n.Op)) > (guards?.Count ?? 0);
     }
 
     /// <summary>
