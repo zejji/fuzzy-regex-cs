@@ -1197,8 +1197,8 @@ anchor and fails one character on, which is exactly the case upstream's own reas
 cover. Everywhere else the upstream rule stands, so `(?:abc){i<=1}` over `"xabc"` still matches
 `abc` rather than `xabc` in both engines.
 
-The assertion does not have to come first. Written inside the fuzzy section, or in one branch of an
-alternation in front of it, it pins the match on the path that passes it, for the same reason:
+The assertion does not have to come first. Written inside the fuzzy section it pins the match
+too, for the same reason, as long as every way to reach the fuzzy item passes it:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -1206,6 +1206,10 @@ using Fuzzy.Text.RegularExpressions;
 Match inside = new FuzzyRegex("(?:^a){i<=1}").Match("xa");
 Console.WriteLine(inside.Value);   // xa - upstream: no match
 ```
+
+An assertion on one branch of an alternation in front of the section does not pin, because a later
+start can take another branch: `(?:^|x)(?:ab){i<=1}` over `"xab"` is the exact match `xab` through
+`x` in both engines.
 
 Only insertions the upstream rule refuses are added, so a search that found a match still finds
 one, but it can be an earlier, shorter one: `(?:^a|abcd){i<=1}` over `"xabcd"` gives `xa` here and

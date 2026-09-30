@@ -65,12 +65,15 @@ of mrab-regex 2026.9.10):
    later cannot give the same match minus the insertion. Every example the
    ruling gives has that assertion leading the pattern (\m(?:Y){i}\M,
    (?m)^(?:abc){i<=1}). The owner's ruling of 2026-09-30 (option B, known
-   defect D61) extends it to such an assertion wherever the path passes it
-   before the first character is consumed: inside the fuzzy section, in one
-   branch of an alternation, in an atomic group, or in the body of a positive
-   lookaround (or a conditional's positive test) that matched. The pin is part
-   of the attempt's state, so a path that abandons the assertion abandons the
-   pin with it. A lookaround itself never pins: it is not a position assertion.
+   defect D61) extends it to such an assertion wherever it is written, and the
+   review that refuted a per-path reading narrowed it to an assertion that
+   DOMINATES the item taking the insertion: every path from the start of the
+   pattern to the item passes it (dominators(), below). With another path to
+   the item, a start one character later need not pass the assertion, so the
+   ban's reasoning stands: (?:^|x)(?:ab){i<=1} over 'xab' is the exact (0, 3).
+   A lookaround whose body is one character test counts as such an assertion;
+   an assertion inside a lookaround's body does not, since the body may have
+   moved on before testing it.
    PINNED_ANCHOR = False gives upstream's rule.
 6. Error limits are checked before each error (this_error_permitted,
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
@@ -679,7 +682,6 @@ class State:
     anchor: int  # search start (rule 5), or -1 for match/fullmatch
     path: tuple = ()  # the errors taken: (kind, text position, item)
     keep: int = -1  # where \K was last passed (rule 12), or -1
-    pinned: bool = False  # rule 5's exception: an assertion pinned the attempt at the anchor
 
 
 class Prune(Exception):
@@ -690,7 +692,8 @@ class Prune(Exception):
 
 
 class Ctx:
-    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False):
+    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False, dom=None):
+        self.dom = dom or {}  # rule 5: id(node) -> the pins that dominate it
         self.text = text
         self.referenced = referenced
         self.start = start  # where this search began, for \G (rule 11)
@@ -753,10 +756,8 @@ def look_state(node, st, ctx, in_test=False):
 
 
 def carried(st, body, positive=False):
-    """st moved on by a lookaround body's match: its captures and its errors, not its position;
-    and, for a positive lookaround, a pin its body made (rule 5)."""
-    return replace(st, groups=body.groups, totals=body.totals, path=body.path,
-                   pinned=st.pinned or (positive and body.pinned))
+    """st moved on by a lookaround body's match: its captures and its errors, not its position."""
+    return replace(st, groups=body.groups, totals=body.totals, path=body.path)
 
 
 def lookaround(node, st, ctx, k):
@@ -765,7 +766,7 @@ def lookaround(node, st, ctx, k):
         yield from k(carried(st, body, True) if node.positive else st)
         return
     if LOOKAROUND_INSERTION and st.counts is not None:
-        if st.pos < len(ctx.text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
+        if st.pos < len(ctx.text) and permitted(st, 1) and insertion_allowed_here(st, node, ctx):  # rule 5
             yield from lookaround(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -796,22 +797,90 @@ def holds(kind, pos, ctx):
             "m": not before and after, "M": before and not after}[kind]
 
 
-def insertion_allowed_here(st):
-    """Rule 5 and its ruled exception."""
-    return st.pos != st.anchor or st.pinned
+def insertion_allowed_here(st, node, ctx):
+    """Rule 5 and its ruled exception: an assertion that dominates node holds at the anchor and
+    fails one character on."""
+    if st.pos != st.anchor:
+        return True
+    if not PINNED_ANCHOR:
+        return False
+    a = st.anchor
+    return any(pin_holds(d, a, ctx) and not (a < len(ctx.text) and pin_holds(d, a + 1, ctx))
+               for d in ctx.dom.get(id(node), ()))
+
+
+def pin_holds(node, pos, ctx):
+    """An anchor, or a one-character lookaround, at pos."""
+    if isinstance(node, Anchor):
+        return holds(node.kind, pos, ctx)
+    body, text = one_char_body(node), ctx.text
+    if node.ahead:
+        matched = pos < len(text) and body.test(text[pos])
+    else:
+        matched = pos > 0 and body.test(text[pos - 1])
+    return matched == node.positive
+
+
+def one_char_body(node):
+    """The Item a lookaround's body is, or None."""
+    body = node.body
+    while isinstance(body, (Seq, Group)) and not (isinstance(body, Group) and body.index):
+        if isinstance(body, Seq):
+            if len(body.parts) != 1:
+                return None
+            body = body.parts[0]
+        else:
+            body = body.body
+    return body if isinstance(body, Item) else None
+
+
+def dominator_map(tree):
+    """Rule 5: id(node) -> the pins that dominate it (see dominators)."""
+    dom = {}
+    dominators(tree, frozenset(), dom)
+    return dom
+
+
+def dominators(node, before=frozenset(), dom=None):
+    """Rule 5: map id(node) to the pins (anchors and one-character lookarounds) every path from
+    the start of the pattern to that node passes, and return what every path through node passes."""
+    dom = {} if dom is None else dom
+    dom[id(node)] = before
+    kind = type(node)
+    if kind is Anchor:
+        return before | {node}
+    if kind is Seq:
+        for part in node.parts:
+            before = dominators(part, before, dom)
+        return before
+    if kind is Alt:
+        outs = [dominators(b, before, dom) for b in node.branches]
+        return frozenset.intersection(*outs) if outs else before
+    if kind in (Group, Fuzzy, Atomic):
+        return dominators(node.body, before, dom)
+    if kind is Repeat:
+        after = dominators(node.body, before, dom)
+        return after if node.lo > 0 else before
+    if kind is Look:
+        dominators(node.body, before, dom)
+        return before | {node} if one_char_body(node) is not None else before
+    if kind is CondLook:
+        dominators(node.test, before, dom)
+        return dominators(node.yes, before, dom) & dominators(node.no, before, dom)
+    if kind is Cond:
+        return dominators(node.yes, before, dom) & dominators(node.no, before, dom)
+    return before
 
 
 def anchor(node, st, ctx, k):
     n = len(ctx.text)
     if holds(node.kind, st.pos, ctx):
-        if PINNED_ANCHOR and st.pos == st.anchor and not (st.pos < n and holds(node.kind, st.pos + 1, ctx)):
-            st = replace(st, pinned=True)  # rule 5's exception
         yield from k(st)
         return
     # A failing anchor in a fuzzy section may be passed by inserting a text character in front of
     # it (upstream _regex.c:12060-12075, the rule 10 cites; rule 5 applies). Measured 2026-09-30:
     # fullmatch "(?:a$){i<=1}" "ab" is (0, 2) with one insertion in upstream and the port.
-    if st.counts is not None and st.pos < n and permitted(st, 1) and insertion_allowed_here(st):
+    if st.counts is not None and st.pos < n and permitted(st, 1) and insertion_allowed_here(st, node, ctx):
         yield from anchor(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -928,7 +997,7 @@ def item(node, st, ctx, k):
     if not exact:  # rule 1: substitution and insertion only on a mismatch
         if pos < len(text) and permitted(st, 0):
             yield from k(add_error(st, 0, pos + 1, node))
-        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
+        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st, node, ctx):  # rule 5
             yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
     if (DELETE_AFTER_EXACT or not exact) and permitted(st, 2):  # rule 3
         yield from k(add_error(st, 2, pos, node))
@@ -1045,13 +1114,14 @@ class Compiled:
     ignorecase: bool
     posix: bool = False
     ascii_classes: bool = False
+    dom: object = None  # rule 5's dominators, id(node) -> pins
 
 
 def attempt(c, text, start, anchor, must_end, search_start, not_empty=False):
     """The first match of an attempt at start. not_empty: rule 18, a match may not end at start."""
     st = State(start, ((-1, -1),) * (c.ngroups + 1), (0, 0, 0), None, None, (), anchor)
     best = None
-    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase), lambda s: iter([s])):
+    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase, c.dom), lambda s: iter([s])):
         if must_end and final.pos != len(text):
             continue
         if not_empty and final.pos == start:
@@ -1081,7 +1151,7 @@ def compile_pattern(pattern, flags=0):
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
     return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
-                    ascii_classes=p.ascii_classes)
+                    ascii_classes=p.ascii_classes, dom=dominator_map(tree))
 
 
 def checked(c, text):

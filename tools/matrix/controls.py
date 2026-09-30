@@ -111,13 +111,18 @@ CONTROLS = [
     ({"pattern": "(?x:a b c){e<=1}", "subject": "?x:a b c", "operation": "search"}, "C8", "n/a"),
     # ... and for C6: \b and \d read non-ASCII text by rules the reference does not model
     # (combining marks, '²'); a leading `]` in a class is a literal, not the end of an empty class.
-    # The pinned-anchor ruling covers an assertion wherever the path passes it (owner ruling
-    # 2026-09-30, option B, D61): in an atomic group, inside the section, in an alternation.
-    # Upstream gives None to the three searches and [(3, 5)] to the finditer.
+    # The pinned-anchor ruling covers an assertion that dominates the item wherever it is written
+    # (owner ruling 2026-09-30, option B, D61, narrowed to dominance by review): in an atomic group,
+    # inside the section, as a one-character lookbehind. Upstream gives None to those three
+    # searches and [(3, 5)] to the finditer. An assertion on one branch only does not pin: the last
+    # three rows give upstream's answers, None, (0, 3) exact and [(0, 3), (4, 7)] exact.
     ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?:^a){i<=1}", "subject": "xa", "operation": "search"}, "C6", "pass"),
-    ({"pattern": "(?:^|q)(?:a){i<=1}", "subject": "xa", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:(?<!x)ab){i<=1}", "subject": "xab", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?:\\ba){i<=1}", "subject": "xa xa", "operation": "finditer"}, "C6", "pass"),
+    ({"pattern": "(?:^|q)(?:a){i<=1}", "subject": "xa", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:^|x)(?:ab){i<=1}", "subject": "xab", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:\\M|)(?:dog){e<=1}", "subject": "dog dog", "operation": "finditer"}, "C6", "pass"),
     ({"pattern": "a\\b", "subject": "á", "operation": "search"}, "C6", "n/a"),
     ({"pattern": "[]a]", "subject": "x]", "operation": "search"}, "C6", "pass"),
     # A POSIX class is not modelled: read as "[[:alph]" plus a literal "]" it failed falsely.

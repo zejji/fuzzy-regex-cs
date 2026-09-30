@@ -3253,7 +3253,7 @@ position - that is what `(?b)` is for - but it cannot make a position stop match
 found - rather than an expected span list. That is true whatever the right answer set turns out to
 be, so it does not commit S50 to spans this slice has no authority to fix.
 
-### Addendum to 19 and 20, 2026-09-30: the assertion can be anywhere on the path (known defect D61) - DRAFT - NOT FILED
+### Addendum to 19 and 20, 2026-09-30: the assertion can be anywhere that dominates the item (known defect D61) - DRAFT - NOT FILED
 
 **Status:** not filed; fixed here on `maint/d61-anchor-insertion` under the owner's ruling of
 2026-09-30 (option B, `docs/plan/DECISIONS.md`). S57c lifted the ban only for an assertion collected
@@ -3265,7 +3265,7 @@ branch of an alternation, and there both engines still refused:
 <regex.Match object; span=(0, 2), match='xa', fuzzy_counts=(0, 1, 0)>
 >>> regex.search(r'(?:^a){i<=1}', 'xa')          # the same assertion, inside the section
 None
->>> regex.search(r'(?:^|q)(?:a){i<=1}', 'xa')    # in an alternation
+>>> regex.search(r'(?:(?<!x)ab){i<=1}', 'xab')   # a one-character lookbehind, inside
 None
 >>> [m.span() for m in regex.finditer(r'(?:\ba){i<=1}', 'xa xa')]
 [(3, 5)]                                         # the first 'xa' is lost
@@ -3273,14 +3273,19 @@ None
 
 Measured 2026-09-30 on regex 2026.9.10. The mechanism is entry 19's line,
 `permit_insertion = !search || text_pos != search_anchor` (`upstream/src/_regex.c:10214`), which
-does not ask what the path has passed. The port now notes, per path, a position assertion that
-holds at the anchor and fails one character on (`Matcher.NotePinningAssertion`), and lifts the ban
-for that path only. The ban itself stays: `(?:dog){e<=1}` over 'dog dog dog' still gives three exact
+does not ask what the pattern passes before the item. The port now works out at compile time which
+assertions dominate each fuzzy item - every path from the start of the pattern to it passes them
+(`Optimiser.FindAnchorPins`) - and lifts the ban where one of them holds at the anchor and fails one
+character on. Dominance matters: with another path to the item, a start one character later need not
+pass the assertion at all, so `(?:^|x)(?:ab){i<=1}` over 'xab' keeps the exact (0, 3) and
+`(?:\M|)(?:dog){e<=1}` finditer over 'dog dog' keeps `[(0, 3), (4, 7)]`. A first version that
+lifted the ban for any assertion the current path had passed got both wrong, and was refuted in
+review. The ban itself stays: `(?:dog){e<=1}` over 'dog dog dog' still gives three exact
 matches, and so does `(?:\bdog){e<=1}`, because `\b` holds one character on at each separator.
 
 **What a report would ask for.** The same one-line change as entry 19's: permit the insertion where
-an assertion the path passed at the anchor fails one character on. A lookaround is not counted, as
-in entry 19.
+an assertion that dominates the item fails one character on. A lookaround whose body is one
+character test counts; others are not counted yet (a SHORTCUT in the port).
 
 **Two effects a reader should know about.** Because the fix only permits insertions, a search
 that found a match still finds one, but it can be an earlier, shorter one that covers less text:
