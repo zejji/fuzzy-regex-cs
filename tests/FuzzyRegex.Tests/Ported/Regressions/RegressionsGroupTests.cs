@@ -10,14 +10,26 @@ public sealed class RegressionsGroupTests
 {
     // Hg issue 296: Group references are not taken into account when group is reporting the last
     // match.
+    //
+    // DIVERGES FROM UPSTREAM, deliberately (D51, ledger entry 63): the call keeps none of its
+    // captures, as in Perl and PCRE2, so 'c' is not listed; upstream lists ['a', 'b', 'c'], which
+    // the oracle's ablation gives. The group still reports 'b', the last capture it kept, which
+    // upstream's list could not say (its last entry is 'c'). A known divergence for the parity
+    // board.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#326-327")]
-    public void Subroutine_call_captures_every_iteration_but_group_reports_the_last()
+    public void Subroutine_call_keeps_no_capture_and_the_group_reports_its_own_last()
     {
         Match m = Upstream.FullMatch("abc", "(?P<x>.)*(?&x)");
 
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b");
         m.Groups["x"].Value.Should().Be("b");
+
+        FuzzyRegex kept = Upstream.Compile("(?P<x>.)*(?&x)");
+        kept.PatternObject.KeepCallCaptures = true;
+        Match upstream = kept.FullMatch("abc");
+        upstream.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
+        upstream.Groups["x"].Value.Should().Be("b");
     }
 
     [Test]

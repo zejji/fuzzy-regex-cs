@@ -1819,8 +1819,10 @@ internal static class ExpectedDivergences
         "sub 2 '\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\u000d\\u000daaa\\ud801\\udc28\\ud801\\udc28'",
         "sub 2 '\\u000a\\u000a\\ufb00\\u000d\\u000d\\ufb00\\u0130\\u0130'",
         // The COMPLETE match upstream degrades to a partial, trailing group and all - and the exact
-        // answer upstream's own inline copy of the lookbehind gives.
-        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1),(3,1)] 2:(5,0)[(5,0)] last=1/g1",
+        // answer upstream's own inline copy of the lookbehind gives, less the call's capture of g1
+        // at 3, which the call discards on return since D51 (ledger entry 63). Judged 2026-09-30:
+        // it was "1:(3,1)[(3,1),(3,1)]" before.
+        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] 2:(5,0)[(5,0)] last=1/g1",
     ];
 
     /// <summary>
@@ -3529,8 +3531,90 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _enhanceStaleTotalOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The sixteen rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/call-capture-rows.jsonl</c>: the ruling's
+    /// second witness, a fullmatch, whole-pattern recursion, a call in a repeat and in a lookahead, a
+    /// fuzzy call, a reversed call, a partial match, finditer, and a backreference to a group inside
+    /// the called group; and six partial matches that run out inside a call that has not returned
+    /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row, a
+    /// reversed one, and two nested calls of one group (blind review of D62). The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
+    /// 'ab', is not among them: the oracle does not compare the capture list of a group with no
+    /// value (<c>OracleGroup.Describe</c>), so it agrees there.
+    /// </summary>
+    private const string _callCaptureRows = """
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g1>a)(?1)", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}}
+        {"generator": "rows", "pattern": "\\((?<p>[^()]|(?R))*\\)", "flags": 0, "namedLists": {}, "subject": "(a(b)c)", "operation": "search", "codepointSpan": [0, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 1], [3, 1], [2, 3], [5, 1]]}], "lastIndex": 1, "lastGroup": "p", "partial": false}}
+        {"generator": "rows", "pattern": "(?:(?<c>[ab])(?&c))+", "flags": 0, "namedLists": {}, "subject": "abba", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?=(?<c>a)(?&c))", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?<c>ab)(?:(?&c)){s<=1}", "flags": 0, "namedLists": {}, "subject": "abxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [2, 2]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)b(?&c)(?<c>a)", "flags": 0, "namedLists": {}, "subject": "baa", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)", "flags": 0, "namedLists": {}, "subject": "aaaa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [2, 4]}]}}
+        {"generator": "rows", "pattern": "(?<o>x(?<i>y)?)(?&o)\\2", "flags": 0, "namedLists": {}, "subject": "xyxyy", "operation": "search", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": false}}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)b)(?&o)", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "flags": 0, "namedLists": {}, "subject": "cebcebc", "operation": "search", "partial": true, "codepointSpan": [0, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [3, 2]]}, {"number": 2, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[2, 1], [5, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "a(?<g>b)(?R)?c", "flags": 0, "namedLists": {}, "subject": "abab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "g", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "namedLists": {}, "subject": "ababa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[0, 1], [2, 1], [4, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[2, 1], [0, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
+        // FIRST OF ALL, before entry 42: every other entry's ablation runs with the D51 fix off
+        // too (OracleComparer.Run), so any of them would claim a row D51 alone explains. D51's own
+        // ablation switches nothing else off, so it claims no row another fix explains.
+        new(
+            Id: "group-call-discards-its-captures-on-return",
+            Reason: "A GROUP CALL KEEPS NONE OF THE CAPTURES ITS BODY MADE HERE: when the call returns, "
+                + "each group is left exactly as the caller had it, span and capture list both, as in "
+                + "Perl 5.42 and PCRE2 10.47. Ledger entry 63, known defect D51, owner ruling (a) of "
+                + "2026-09-30, recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM BEHAVIOUR: GROUP_CALL saves only each group's `current` "
+                + "(`push_groups`, upstream/src/_regex.c:2490, called at :13405) and GROUP_RETURN "
+                + "restores only that (:13516), so the callee's captures stay on the list while the "
+                + "span goes back: `regex.search(r'(?(DEFINE)(?<c>a))(?&c)b', 'ab')` reports c "
+                + "unset with captures ['a'], a group with no value and a capture, which .NET's Group "
+                + "contract has no room for; `(?<c>a)(?&c)b` over 'aab' lists c as ['a', 'a'] where "
+                + "PCRE2 and Perl give c = (0, 1).\n"
+                + "THE FIX saves each group's count as well at the call and restores both on return, "
+                + "keeping the callee's spans on the backtracking stack for a re-entry "
+                + "(`Matcher.ReturnToCallerCaptures`). On a complete match, spans, group values, fuzzy counts and every "
+                + "match decision are unchanged, because `current` was already restored.\n"
+                + "AND ON A PARTIAL RESULT (D62, owner ruling 2026-09-30) each group reports what every "
+                + "completion of the path the partial took would report: a call that has not returned "
+                + "returns in any completion, so the groups are restored from the outermost open call's "
+                + "frame (`Matcher.BasicMatch`). `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (0, 1) "
+                + "here, as its written-out form does in both engines, and the unfinished call's (2, 3) "
+                + "upstream. On a partial the shape clause sets the group values aside as well, so a "
+                + "partial answer must also equal `OracleComparer.RunWithTheFrameByFrameRestore`'s, the "
+                + "same restore computed by walking every open call's frame (`PartialIsTheFrameRestore`; "
+                + "a restore from the innermost frame fails it, blind review of D62).\n"
+                + "KEYED ON AN ABLATION, AND ON THE SHAPE OF THE DIFFERENCE. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamCallCaptures`, which sets "
+                + "`PatternObject.KeepCallCaptures` and nothing else, reproduces upstream's recorded "
+                + "answer exactly, this port's live answer is the one being judged, AND the live answer "
+                + "differs from the ablated one only by captures missing from the lists "
+                + "(`OnlyCallCapturesAreMissing`). The last clause is what stops a bug in the discard "
+                + "itself hiding here: a return that failed to restore a span on re-entry changes a "
+                + "match, which the clause refuses "
+                + "(`A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence`). "
+                + "The residual risk is a port bug that drops a capture the caller made, other than "
+                + "its last, and changes nothing else. The control is "
+                + "`A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.CallCaptureTests",
+            Example: _callCaptureRows,
+            Applies: static (row, ours) =>
+                OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } ablated
+                && OnlyTheAblationExplainsIt(row, ours, ablated)
+                && OnlyCallCapturesAreMissing(ours, ablated)
+                && PartialIsTheFrameRestore(
+                    ours,
+                    IsPartial(ours) ? OracleComparer.RunWithTheFrameByFrameRestore(row) : null
+                )
+        ),
         // FIRST, so that a row ledger entry 42 alone explains is classified before an entry keyed
         // on another fix's ablation can see it: those ablations run with entries 42 and 44 off too
         // (OracleComparer.Run), and would otherwise claim it. Entry 44's comes second, for the same
@@ -5069,6 +5153,15 @@ internal static class ExpectedDivergences
                         || (
                             OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row) is { } withTheStrayCapture
                             && UpstreamFoundStrictlyLess(row, withTheStrayCapture)
+                            && IsTheLiveAnswer(row, ours)
+                        )
+                        // And every row whose calls capture now renders upstream's matches
+                        // identically only with the D51 fix (ledger entry 63) off, which keeps the
+                        // calls' captures on the lists as upstream does; the D10 arm above has it
+                        // off too, stacked by OracleComparer.Run.
+                        || (
+                            OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } withTheCallCaptures
+                            && UpstreamFoundStrictlyLess(row, withTheCallCaptures)
                             && IsTheLiveAnswer(row, ours)
                         )
                     )
@@ -8468,6 +8561,103 @@ internal static class ExpectedDivergences
             ours,
             OracleComparer.RunWithoutTheFoldReadings(row, withTheSubjectFoldEdits: false, withoutTheEarlierFoldFixes)
         );
+
+    /// <summary>
+    /// Whether this port's answer differs from the D51 ablation's only by captures missing from the
+    /// groups' lists: the same outcome, spans, group values, partial marker and fuzzy counts, match
+    /// for match, with each of this port's capture lists a subsequence of the ablated one that ends
+    /// in the group's value when it has one.
+    /// </summary>
+    /// <remarks>
+    /// That is all the D51 fix can change. It lowers each group's count back to the caller's on
+    /// return, and <c>current</c> was restored before it, so what goes is a run of the list's
+    /// entries and never a value; and what it restores is .NET's Group contract, under which a
+    /// group's value is its last capture. A discard that dropped the caller's capture and kept the
+    /// callee's breaks the last clause. An outcome without capture lists (no match, an error, a
+    /// substitution, a split) is never this shape: nothing the fix changes reaches it. On a partial
+    /// result the group values may differ as well (D62, see <c>WithoutCaptures</c>).
+    /// </remarks>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="ablated">The answer with the D51 fix off.</param>
+    /// <returns><see langword="true"/> if only captures are missing.</returns>
+    internal static bool OnlyCallCapturesAreMissing(IOracleOutcome ours, IOracleOutcome ablated) =>
+        (ours, ablated) switch
+        {
+            (MatchOutcome one, MatchOutcome other) => OnlyCallCapturesAreMissing(one, other),
+            (MatchesOutcome one, MatchesOutcome other) => one.Matches.Count == other.Matches.Count
+                && one.Matches.Zip(other.Matches)
+                    .All(static pair => OnlyCallCapturesAreMissing(pair.First, pair.Second)),
+            _ => false,
+        };
+
+    /// <summary>Whether an answer is a partial match, or a finditer whose matches include one.</summary>
+    /// <param name="outcome">The answer.</param>
+    /// <returns><see langword="true"/> for a partial.</returns>
+    internal static bool IsPartial(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            MatchOutcome match => match.Partial,
+            MatchesOutcome matches => matches.Matches.Any(static m => m.Partial),
+            _ => false,
+        };
+
+    /// <summary>
+    /// D62's second clause: an answer that is not partial passes; a partial one passes only when it
+    /// is exactly the frame-by-frame restore's answer to the same row (<paramref name="byFrames"/>).
+    /// </summary>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="byFrames">The frame-by-frame restore's answer, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the partial's groups are the outermost frame's.</returns>
+    internal static bool PartialIsTheFrameRestore(IOracleOutcome ours, IOracleOutcome? byFrames) =>
+        !IsPartial(ours)
+        || (byFrames is not null && string.Equals(ours.Describe(), byFrames.Describe(), StringComparison.Ordinal));
+
+    private static bool OnlyCallCapturesAreMissing(MatchOutcome ours, MatchOutcome ablated) =>
+        ours.Groups.Count == ablated.Groups.Count
+        && string.Equals(
+            WithoutCaptures(ours, ours.Partial).Describe(),
+            WithoutCaptures(ablated, ours.Partial).Describe(),
+            StringComparison.Ordinal
+        )
+        && ours.Groups.All(static g =>
+            !g.Success || (g.Captures.Count > 0 && g.Captures[^1] == new OracleSpan(g.Index, g.Length))
+        )
+        && ours.Groups.Zip(ablated.Groups).All(static pair => IsSubsequence(pair.First.Captures, pair.Second.Captures));
+
+    // On a partial result the groups' values are set aside too, and the last group with them: D62
+    // restores the groups a call that has not returned will give back, which can move a value to
+    // the caller's, or unset it. The two clauses on this port's lists still hold there.
+    private static MatchOutcome WithoutCaptures(MatchOutcome outcome, bool partial) =>
+        partial
+            ? outcome with
+            {
+                Groups =
+                [
+                    .. outcome.Groups.Select(static g =>
+                        g.Number == 0 ? g : new OracleGroup(g.Number, false, 0, 0, [])
+                    ),
+                ],
+                LastIndex = -1,
+                LastGroup = null,
+            }
+            : outcome with
+            {
+                Groups = [.. outcome.Groups.Select(static g => g with { Captures = [] })],
+            };
+
+    private static bool IsSubsequence(IReadOnlyList<OracleSpan> part, IReadOnlyList<OracleSpan> whole)
+    {
+        int next = 0;
+        foreach (OracleSpan span in whole)
+        {
+            if (next < part.Count && part[next] == span)
+            {
+                next++;
+            }
+        }
+
+        return next == part.Count;
+    }
 
     /// <summary>
     /// Whether one ablated run is the whole of the difference between the two engines on a row.

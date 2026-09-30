@@ -786,6 +786,30 @@ internal sealed class PatternObject
     internal List<Node>? LookaroundsSavingOnlyForCalls;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a group call's captures stay on the
+    /// group's capture list when the call returns, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the D51 fix (ledger entry 63) is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>GROUP_RETURN</c> restores only each group's <c>current</c>
+    /// (<c>push_groups</c>, <c>upstream/src/_regex.c</c>:2490, pushed at :13405 and popped at :13516), so
+    /// <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' leaves c unset with the capture 'a'
+    /// listed. See <c>Matcher.ReturnToCallerCaptures</c>.
+    /// </remarks>
+    internal bool KeepCallCaptures;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a partial result restores the groups
+    /// by walking every open call's frame, innermost first, instead of from the outermost frame
+    /// alone. Both give the same groups, since each frame saved its caller's; the oracle sets it on
+    /// a pattern it compiled for one call, as a second computation the D62 key compares against, so
+    /// a restore from the wrong frame is not accounted for as the divergence (blind review,
+    /// 2026-09-30). See <c>Matcher.BasicMatch</c>.
+    /// </summary>
+    internal bool PartialRestoresFrameByFrame;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
     /// below its minimum error count fails at once, without trying the trailing insertions that
     /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one
