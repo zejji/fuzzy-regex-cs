@@ -4545,8 +4545,19 @@ internal static class Matcher
     /// <para>
     /// The atomic groups still open inside the body are closed as blocked ends close them, each with
     /// a cut taint: in the continuations where the body goes on, any of them may commit (the run-out
-    /// taint, row N8). When the pattern has a verb, each of their frames and the lookaround's get a
-    /// verb taint too, since one may lie after the edge (row Q3).
+    /// taint, row N8).
+    /// </para>
+    /// <para>
+    /// When the pattern has a verb, one may lie after the edge, and in the continuations where it
+    /// acts it ends its scope: the frame <see cref="FindTheVerbTarget"/> finds from here gets a verb
+    /// taint, which blocks that scope's later decisions (row Q3's shape). The scope is the lookaround
+    /// itself when it is negative or a condition's test; a positive lookaround and an atomic group
+    /// are transparent to verbs (ledger entry 47), so there it is the construct outside them, which
+    /// the design's first version missed: `(?!(?=a.(*PRUNE)b)x|.)a` over 'a' was refused, where
+    /// 'a' + 'xy' completes it (review of chunk 8, round 1). So neither the lookaround's own frame
+    /// nor an atomic group's needs the taint: no verb can have either as its scope. The exception is
+    /// the oracle's ablation <see cref="PatternObject.VerbsAreConfinedToTheInnermostGroup"/>, under
+    /// which every group is a scope, so the atomic groups get it as well.
     /// </para>
     /// <para>
     /// A condition's test is a lookaround here (build chunk 7): a run-out inside it goes on at the
@@ -4610,11 +4621,12 @@ internal static class Matcher
         }
 
         bool verbs = pattern.HasBacktrackingVerb;
+        bool atomicScopes = verbs && pattern.VerbsAreConfinedToTheInnermostGroup;
         for (int i = 0; i < atomics; i++)
         {
             _ = state.Pstack.PopSize(out long atomicMark);
             BlockAtomicCut(state, (int)atomicMark);
-            if (verbs && !HasWMarkAt(state, (int)atomicMark - 1, WMarkKind.VerbTaint))
+            if (atomicScopes && !HasWMarkAt(state, (int)atomicMark - 1, WMarkKind.VerbTaint))
             {
                 state.AddWMark((int)atomicMark - 1, WMarkKind.VerbTaint);
             }
@@ -4622,9 +4634,13 @@ internal static class Matcher
             state.NotePartialEvent(PartialEvent.RunOutTaintSet);
         }
 
-        if (verbs && !HasWMarkAt(state, (int)lookMark - 1, WMarkKind.VerbTaint))
+        if (
+            verbs
+            && FindTheVerbTarget(state, out long scopeMark)
+            && !HasWMarkAt(state, (int)scopeMark - 1, WMarkKind.VerbTaint)
+        )
         {
-            state.AddWMark((int)lookMark - 1, WMarkKind.VerbTaint);
+            state.AddWMark((int)scopeMark - 1, WMarkKind.VerbTaint);
         }
 
         Debug.Assert(

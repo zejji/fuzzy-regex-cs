@@ -242,6 +242,43 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// The run-out taint for a verb after the edge: in 'a' + 'x' the body's first branch reaches the
+    /// verb, <c>b</c> fails, and the verb ends the verb's scope, so the negative lookahead passes and
+    /// <c>a</c> matches. The body's other branch, <c>.</c>, succeeds on the held text, and without the
+    /// taint that success counts as certain and fails the lookahead for every continuation: the
+    /// first rows are refused (the search starts too late, at 1). Row Q3, `(?!a.(*PRUNE)b|a)a`, is
+    /// no witness: the branches share their <c>a</c>, so the run-out is the branch's own test of
+    /// <c>.</c> and the second branch is never reached. In the next rows the verb is inside a
+    /// positive lookahead or a condition's test, which a verb unwinds straight through (ledger entry
+    /// 47): the scope is the negative lookahead or the condition, and a taint on the lookahead's own
+    /// frame left them refused. The last row is the control: no verb, and the held <c>.</c> success
+    /// is certain.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream confines a verb to the innermost group, and
+    // answers None to the rows with a positive lookahead. The expected answers are the port's own
+    // non-partial answers over every continuation of up to three characters.
+    [Test]
+    [Arguments("match", @"(?!a.(*PRUNE)b|.)a", true, 0)]
+    [Arguments("match", @"(?!a.(*SKIP)b|.)a", true, 0)]
+    [Arguments("search", @"(?!a.(*PRUNE)b|.)a", true, 0)]
+    [Arguments("match", @"(?!(?=a.(*PRUNE)b)x|.)a", true, 0)]
+    [Arguments("search", @"(?!(?=a.(*SKIP)b)x|.)a", true, 0)]
+    [Arguments("match", @"(?!(?=(?=a.(*PRUNE)b))x|.)a", true, 0)]
+    [Arguments("match", @"(?(?=(?=a.(*PRUNE)b)x|.)b|a)", true, 0)]
+    [Arguments("match", @"(?!a.b|.)a", false, 0)]
+    public void A_run_out_taints_the_scope_of_a_verb_after_the_edge(
+        string operation,
+        string pattern,
+        bool partial,
+        int start
+    )
+    {
+        Match m = Run(operation, pattern, "a");
+
+        (m.Success, m.PartialMatch, m.Index).Should().Be((partial, partial, start));
+    }
+
+    /// <summary>
     /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
     /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
     /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over
