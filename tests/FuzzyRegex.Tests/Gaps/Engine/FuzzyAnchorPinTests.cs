@@ -84,6 +84,13 @@ public sealed class FuzzyAnchorPinTests
         // still keeps the space out of the second match.
         Spans(@"(?:\ba){i<=1}", "xa xa").Should().Equal((0, 2), (3, 5));
         Spans(@"(?:\ma){i<=1}", "xa xa ya").Should().Equal((0, 2), (3, 5), (6, 8));
+
+        // A search can move to an earlier, shorter match, which then covers less text: upstream
+        // gives (1, 5) and [(1, 5)] here, so 'bcd' is no longer in any match. That is the answer
+        // upstream and this port already give to the written-before form ^(?:a|abcd){i<=1}, and
+        // the ordinary leftmost-first answer of (?:xa|abcd).
+        Spans("(?:^a|abcd){i<=1}", "xabcd").Should().Equal((0, 2));
+        Spans("^(?:a|abcd){i<=1}", "xabcd").Should().Equal((0, 2));
     }
 
     // Upstream's answer in every row, and this port's before and after D61.
@@ -117,6 +124,28 @@ public sealed class FuzzyAnchorPinTests
             .Match("xa")
             .Success.Should()
             .BeFalse();
+    }
+
+    // The planted-bug control for the pin's own bookkeeping. The oracle entry
+    // `fuzzy-insertion-at-an-anchor-pinned-on-the-path` is keyed on switching the pin off, which a
+    // stale pin passes too (switched off, upstream's answer; live, an insertion at the anchor), so
+    // the oracle would classify that bug as the fix. These rows are what catches it: with the clear
+    // on backtracking removed, a pin made on an abandoned path leaks onto the path that matches.
+    [Test]
+    // Only an assertion abandoned by ordinary backtracking reaches the clear: an atomic group or a
+    // lookaround restores the pin with the sub-attempt state instead, so those rows stay (1, 2).
+    [Arguments("(?:^b|)(?:a){i<=1}")]
+    [Arguments("(?:^b|q|)(?:a){i<=1}")]
+    [Arguments("(?:^b)?(?:a){i<=1}")]
+    [Arguments(@"(?:\bb)*(?:a){i<=1}")]
+    public void A_pin_left_standing_on_an_abandoned_path_moves_the_match(string pattern)
+    {
+        var sound = new FuzzyRegex(pattern);
+        var planted = new FuzzyRegex(pattern);
+        planted.PatternObject.PlantStaleAnchorPin = true;
+
+        Span(sound.Match("xa")).Should().Be((1, 2));
+        Span(planted.Match("xa")).Should().Be((0, 2), "the planted bug must be one these rows see");
     }
 
     private static (int Start, int End) Span(Match m) => (m.Index, m.Index + m.Length);

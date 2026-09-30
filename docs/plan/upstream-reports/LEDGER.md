@@ -3282,8 +3282,12 @@ matches, and so does `(?:\bdog){e<=1}`, because `\b` holds one character on at e
 an assertion the path passed at the anchor fails one character on. A lookaround is not counted, as
 in entry 19.
 
-**One effect a reader should know about.** Because the fix only permits insertions, no single
-search loses a match. A finditer can return fewer matches, because an earlier match that now opens
+**Two effects a reader should know about.** Because the fix only permits insertions, a search
+that found a match still finds one, but it can be an earlier, shorter one that covers less text:
+`(?:^a|abcd){i<=1}` over 'xabcd' is (1, 5) upstream and (0, 2) here, and its finditer `[(1, 5)]`
+and `[(0, 2)]`, so 'bcd' is in no match. Both engines already give (0, 2) to the written-before
+form `^(?:a|abcd){i<=1}`, and it is the ordinary leftmost-first answer of `(?:xa|abcd)`. And a
+finditer can return fewer matches, because an earlier match that now opens
 one character sooner may take text a later one used: `(?:^abc|b|c){i<=1}` over 'xabc' is
 `[(1, 3), (3, 4)]` upstream and `[(0, 4)]` here. None of the oracle rows at seeds 7, 4242 and
 20260927 is of that kind.

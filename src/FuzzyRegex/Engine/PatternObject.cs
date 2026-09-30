@@ -620,6 +620,14 @@ internal sealed class PatternObject
     internal bool PinsAnchorOnPath;
 
     /// <summary>
+    /// Test-only, and never set by this library: a planted bug that leaves D61's pin standing when
+    /// backtracking passes back over the assertion that set it, so a pin made on an abandoned path
+    /// leaks onto the next one. <c>FuzzyAnchorPinTests</c> sets it to prove that the abandoned-path
+    /// rows catch that bug, which the oracle entry keyed on the pin-on-the-path ablation cannot.
+    /// </summary>
+    internal bool PlantStaleAnchorPin;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
     /// reference treats a subject folding it loaded but never used as half-matched, which is
     /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the

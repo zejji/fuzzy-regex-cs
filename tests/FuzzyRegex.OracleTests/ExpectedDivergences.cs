@@ -7351,6 +7351,16 @@ internal static class ExpectedDivergences
                 + "reproduce upstream's recorded answer exactly, AND this port's live answer is the "
                 + "one being judged. A row S57c's guards alone move still differs from upstream "
                 + "under this ablation and falls through to that entry, whose ablation clears both. "
+                + "WHAT THE ABLATION CANNOT SEE is a bug inside the pin itself. Plant a stale pin, "
+                + "one that is not cleared when backtracking passes back over its assertion "
+                + "(`PatternObject.PlantStaleAnchorPin`), and `(?:^b|)(?:a){i<=1}` over 'xa' moves "
+                + "from (1, 2) to (0, 2): switched off it gives upstream's answer and live it gives an "
+                + "insertion at the anchor, so this entry would classify that bug as the fix. No key "
+                + "that answers by running this engine can do better. A tighter key would compare "
+                + "the live answer with the reference matcher's rule answer, which the recorder does "
+                + "not store. The stale pin is caught instead by "
+                + "`FuzzyAnchorPinTests.A_pin_left_standing_on_an_abandoned_path_moves_the_match`, "
+                + "which plants it and asserts the move.\n"
                 + "The control is `A_row_the_anchor_pin_on_the_path_does_not_explain_is_not_"
                 + "accounted_for`.",
             PinnedBy: "FuzzyAnchorPinTests",

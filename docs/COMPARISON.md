@@ -1207,8 +1207,10 @@ Match inside = new FuzzyRegex("(?:^a){i<=1}").Match("xa");
 Console.WriteLine(inside.Value);   // xa - upstream: no match
 ```
 
-Only insertions the upstream rule refuses are added, so no single search loses a match. A
-`Matches` call can return fewer, when an earlier match now opens one character sooner and takes
+Only insertions the upstream rule refuses are added, so a search that found a match still finds
+one, but it can be an earlier, shorter one: `(?:^a|abcd){i<=1}` over `"xabcd"` gives `xa` here and
+`abcd` upstream, as `^(?:a|abcd){i<=1}` already gives `xa` in both. A `Matches` call can return
+fewer, when an earlier match now opens one character sooner and takes
 text a later one used: `(?:^abc|b|c){i<=1}` over `"xabc"` gives `xabc` here, where upstream gives
 `ab` and `c`.
 

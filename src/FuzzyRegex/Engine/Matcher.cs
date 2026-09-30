@@ -14073,7 +14073,8 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.AnchorPin: // NOT UPSTREAM (D61): back over the assertion that pinned it.
-                    state.AnchorPinnedOnPath = false;
+                    // PlantStaleAnchorPin is a test's planted bug, never set by the library.
+                    state.AnchorPinnedOnPath = pattern.PlantStaleAnchorPin && state.AnchorPinnedOnPath;
                     break;
                 case Opcode.Keep: // Keep.
                 {

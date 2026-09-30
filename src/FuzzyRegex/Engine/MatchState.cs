@@ -871,6 +871,15 @@ internal sealed class MatchState : IDisposable
     internal bool IsFuzzy;
 
     /// <summary>
+    /// NOT UPSTREAM (D61): <c>PatternObject.PinsAnchorOnPath</c>, copied at reset beside
+    /// <see cref="IsFuzzy"/> so that <see cref="PushSubAttemptFuzzyState"/> and its pop test a field
+    /// of this state rather than reach through <see cref="Pattern"/>. A fuzzy pattern with no
+    /// assertion outside its leading guards leaves it <see langword="false"/> and pays that one test
+    /// per push and pop.
+    /// </summary>
+    internal bool SavesAnchorPin;
+
+    /// <summary>
     /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
     /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
     /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
@@ -1221,6 +1230,7 @@ internal sealed class MatchState : IDisposable
         ScreenClearedHigh = 0;
         FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
+        SavesAnchorPin = pattern.PinsAnchorOnPath;
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);
@@ -1667,7 +1677,7 @@ internal sealed class MatchState : IDisposable
         stack.PushNode(FuzzyNode);
         PushFuzzyCounts(stack, FuzzyCounts);
 
-        if (Pattern.PinsAnchorOnPath)
+        if (SavesAnchorPin)
         {
             stack.PushBool(AnchorPinnedOnPath);
         }
@@ -1705,7 +1715,7 @@ internal sealed class MatchState : IDisposable
         bool anchorPinned = false;
 
         if (
-            (Pattern.PinsAnchorOnPath && !stack.PopBool(out anchorPinned))
+            (SavesAnchorPin && !stack.PopBool(out anchorPinned))
             || !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
             || !stack.PopNode(Pattern, out Node? fuzzyNode)
             || !stack.PopSize(out long totalCost)
