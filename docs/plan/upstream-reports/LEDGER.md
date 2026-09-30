@@ -3280,9 +3280,10 @@ the search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)
 BESTMATCH's candidate walk should keep the caller's search anchor rather than re-set it in
 `init_match` (`:3410`) for each candidate, which is entry 20's mechanism.
 
-**Known effects, not defects.** An extra match can move the next finditer anchor:
-`(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'. An earlier,
-longer match can take text later ones used; the later matches kept are upstream's own.
+**Known effect, not a defect.** The kept match ends at or before upstream's next start, so a single
+search never loses upstream's match, but an extra match can move the next finditer anchor, and so a
+later match:
+`(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'.
 
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
