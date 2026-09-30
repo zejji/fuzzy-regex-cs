@@ -1175,7 +1175,7 @@ the memory has already been spent by then, so a graph that is refused may be sma
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
 
-### A search may open a fuzzy match with an inserted character where it started, when no later match overlaps
+### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
 Upstream refuses to let a fuzzy match begin with an inserted character at the exact position the
 search started from, on the reasoning that starting one character later finds the same match
