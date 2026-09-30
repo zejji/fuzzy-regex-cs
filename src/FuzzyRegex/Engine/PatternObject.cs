@@ -978,6 +978,10 @@ internal sealed class PatternObject
             SetFuzzyRunLengths(self);
         }
 
+        // NOT UPSTREAM'S, D11 chunk 8: the bodies a run-out inside a lookaround or condition test
+        // reads, once the nodes are numbered.
+        SetLookaroundBodies(self);
+
         // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
         if (self.OptionalPassBranches is { } optionalPassBranches)
         {
@@ -1027,6 +1031,58 @@ internal sealed class PatternObject
         }
 
         return ceiling;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
+    /// <remarks>
+    /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
+    /// group call's target is not followed, and a pattern with group calls does not continue a
+    /// run-out (<c>Matcher.RunOutInALookaroundBody</c>), so its bodies are never read.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    private static void SetLookaroundBodies(PatternObject pattern)
+    {
+        foreach (Node test in pattern.NodeList)
+        {
+            if (test.Op is not (Opcode.Lookaround or Opcode.Conditional) || test.LookaroundEnd is null)
+            {
+                continue;
+            }
+
+            var nodes = new HashSet<int>();
+            var groups = new List<(int Private, int Public)>();
+            var todo = new Stack<Node>();
+            todo.Push(test.Next1.Node!);
+            while (todo.Count > 0)
+            {
+                Node n = todo.Pop();
+                if (ReferenceEquals(n, test.LookaroundEnd) || !nodes.Add(n.Index))
+                {
+                    continue;
+                }
+
+                if (n.Op is Opcode.StartGroup or Opcode.EndGroup && n.Values[2] != 0)
+                {
+                    (int, int) g = ((int)n.Values[0], (int)n.Values[1]);
+                    if (!groups.Contains(g))
+                    {
+                        groups.Add(g);
+                    }
+                }
+
+                foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                {
+                    if (next is not null)
+                    {
+                        todo.Push(next);
+                    }
+                }
+            }
+
+            int[] sorted = [.. nodes];
+            Array.Sort(sorted);
+            test.BodyInfo = new Node.Body(sorted, [.. groups]);
+        }
     }
 
     /// <summary>

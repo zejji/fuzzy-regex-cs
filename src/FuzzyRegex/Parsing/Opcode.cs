@@ -376,4 +376,12 @@ internal enum Opcode : uint
     /// the continuations where that success held need. It never appears on a node or in a code list.
     /// </summary>
     NoBranch = 103,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11 chunk 8): the backtracking entry of an unknown capture,
+    /// which a run-out inside a lookaround body gives each group of the body in a pattern that reads
+    /// captures while it matches. Its arm takes the capture back as END_GROUP's arm does. It never
+    /// appears on a node or in a code list.
+    /// </summary>
+    UnknownCapture = 104,
 }

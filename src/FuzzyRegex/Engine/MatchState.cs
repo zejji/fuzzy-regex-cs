@@ -285,6 +285,13 @@ internal sealed class MatchState : IDisposable
     internal bool AttemptTouchedTheTextToCome;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a run-out has given this call an unknown capture, so
+    /// the backreference and group-condition arms must ask (<c>Matcher.MarkTheBodysCapturesUnknown</c>).
+    /// A call without partial never sets it and pays one test per such arm.
+    /// </summary>
+    internal bool HasUnknownCaptures;
+
+    /// <summary>
     /// Whether consumption past the right edge of the text is a run-out (a partial) rather than a
     /// failure: forward partial calls, and the attempt from inside the text to come either way.
     /// </summary>
@@ -1067,6 +1074,7 @@ internal sealed class MatchState : IDisposable
         LookaroundSuccesses.Clear();
         InsideW = false;
         AttemptTouchedTheTextToCome = false;
+        HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
 #endif
@@ -1271,6 +1279,7 @@ internal sealed class MatchState : IDisposable
         LookaroundSuccesses.Clear();
         InsideW = false;
         AttemptTouchedTheTextToCome = false;
+        HasUnknownCaptures = false;
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);

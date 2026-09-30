@@ -245,22 +245,6 @@ public sealed class PartialLookaroundRuleTests
             "the dedup keeps the second pass polynomial"
         );
 
-    /// <summary>
-    /// SHORTCUT until build chunk 8: a pattern that reads a capture while it matches keeps the
-    /// run-out partial, because the body's captures after the edge are unknown. Going on after the
-    /// lookaround with the group unset would refuse rows T3 and Q2 ('a' + 'a' completes both).
-    /// </summary>
-    // Upstream answers P(0, 1) to both too.
-    [Test]
-    [Arguments(@"(?=a(.))\1")]
-    [Arguments(@"(?=a(.))(?(1)a|b)")]
-    public void A_run_out_before_a_capture_is_read_keeps_the_partial(string pattern)
-    {
-        Match m = new FuzzyRegex(pattern).MatchAtStart("a", partial: true);
-
-        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
-    }
-
     private static Match Run(string operation, string pattern, string text) =>
         operation switch
         {

@@ -4426,6 +4426,81 @@ internal static class Matcher
         return delta;
     }
 
+    /// <summary>The span an unknown capture holds (build chunk 8); no real span is negative.</summary>
+    internal static GroupSpan UnknownSpan => new(-2, -2);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a group's current capture is one a run-out made
+    /// unknown. Only asked once a run-out has made one (<see cref="MatchState.HasUnknownCaptures"/>).
+    /// </summary>
+    /// <param name="group">The group, which has captured.</param>
+    /// <returns><see langword="true"/> if its current span is unknown.</returns>
+    private static bool IsUnknown(GroupData group) => group.Captures[group.Current] == UnknownSpan;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: gives every group inside a body that ran out an unknown capture
+    /// (design section 4.2, the run-out row, part 1), through an <see cref="Opcode.UnknownCapture"/>
+    /// entry each, whose backtracking arm takes it back as END_GROUP's arm takes a capture back.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The LOOKAROUND or CONDITIONAL node whose body ran out.</param>
+    private static void MarkTheBodysCapturesUnknown(MatchState state, Node test)
+    {
+        Debug.Assert(test.BodyInfo is not null, "D11 chunk 8: every lookaround and test has its body");
+        foreach ((int privateIndex, int publicIndex) in test.BodyInfo?.Groups ?? [])
+        {
+            GroupData group = state.Groups[privateIndex - 1];
+            PushGroupStateData(
+                state.Bstack,
+                new GroupStateData(0, group.Current, state.CaptureChange, privateIndex, publicIndex)
+            );
+            state.Bstack.PushUInt8((byte)Opcode.UnknownCapture);
+
+            /* bstack: 0 current capture_change private_index public_index UNKNOWN_CAPTURE */
+
+            if (state.Pattern.GroupInfoAt(privateIndex).Referenced && !SameSpanAsGroup(group, UnknownSpan))
+            {
+                ++state.CaptureChange;
+            }
+
+            state.SaveCapture(privateIndex, publicIndex, UnknownSpan);
+            group.Current = group.Count - 1;
+            state.HasUnknownCaptures = true;
+            state.NotePartialEvent(PartialEvent.UnknownCaptureSet);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: an unknown capture is reported unset (design section 4.3). Run
+    /// on a second-pass partial, which ends the call, so the groups need not be restored.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void ReportUnknownCapturesUnset(MatchState state)
+    {
+        foreach (GroupData group in state.Groups)
+        {
+            int kept = 0;
+            int current = -1;
+            for (int i = 0; i < group.Count; i++)
+            {
+                if (group.Captures[i] == UnknownSpan)
+                {
+                    continue;
+                }
+
+                if (i == group.Current)
+                {
+                    current = kept;
+                }
+
+                group.Captures[kept++] = group.Captures[i];
+            }
+
+            group.Count = kept;
+            group.Current = current;
+        }
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="frame">The frame's backtracking-stack position.</param>
@@ -4454,24 +4529,26 @@ internal static class Matcher
     /// test's end, whose blocked end then takes both branches (rows L4 and L5).
     /// </para>
     /// <para>
-    /// SHORTCUT: the captures the body would make after the edge are unknown, which build chunk 8
-    /// models. Until then a pattern that reads captures while it matches, and one with group calls,
-    /// answer the run-out partial, as before D11; so does the oracle's pre-D11 ablation. Ceiling:
-    /// those answer a partial at the attempt's start whatever follows. Upgrade: chunk 8's unknown
-    /// captures.
+    /// Build chunk 8: in a pattern that reads captures while it matches, the groups inside the body
+    /// become unknown (<see cref="MarkTheBodysCapturesUnknown"/>): a condition on one takes both
+    /// branches and a backreference to one runs out.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: a pattern with group calls answers the run-out partial, as before D11, and so does
+    /// the oracle's pre-D11 ablation. A call opened inside the body is still open at the run-out, and
+    /// REOPEN would have to open it again as well (amendment 2). Ceiling: those patterns answer a
+    /// partial at the attempt's start whatever follows (30 run-out phantoms on amendment 2's call
+    /// grid, of which lifting it would remove 6). Upgrade: REOPEN re-opens the calls opened in the
+    /// body.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="item">The item that ran out, for assert A10.</param>
     /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
-    private static Node? RunOutInALookaroundBody(MatchState state)
+    private static Node? RunOutInALookaroundBody(MatchState state, Node? item)
     {
         PatternObject pattern = state.Pattern;
-        if (
-            state.PartialSide == MatchState.PartialNone
-            || pattern.SecondPassAsBeforeD11
-            || pattern.ReadsCapturesWhileMatching
-            || pattern.HasGroupCalls
-        )
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
         {
             return null;
         }
@@ -4524,6 +4601,20 @@ internal static class Matcher
         if (verbs && !HasWMarkAt(state, (int)lookMark - 1, WMarkKind.VerbTaint))
         {
             state.AddWMark((int)lookMark - 1, WMarkKind.VerbTaint);
+        }
+
+        Debug.Assert(
+            item is null || Array.BinarySearch(look.Node.BodyInfo!.Nodes, item.Index) >= 0,
+            "D11 A10: the innermost open lookaround or test is the one whose body holds the item"
+        );
+
+        // Chunk 8, unknown captures: after the edge a group inside the body may hold anything, or
+        // nothing, so a pattern that reads a capture while it matches sees it as unknown until
+        // backtracking undoes the run-out (rows Q2 and T3). Other patterns report the captures the
+        // held text made, as a run-out outside a body does.
+        if (pattern.ReadsCapturesWhileMatching)
+        {
+            MarkTheBodysCapturesUnknown(state, look.Node);
         }
 
         state.AttemptTouchedTheTextToCome = true;
@@ -12043,6 +12134,23 @@ internal static class Matcher
                         // so far in this attempt" and not "exists in the pattern".
                         GroupData groupExistsGroup = state.Groups[groupExistsIndex - 1];
 
+                        // D11 chunk 8: a group a run-out made unknown may hold anything or nothing,
+                        // so the condition takes both branches, each only for some continuations
+                        // (row Q2): the yes-branch now, the no-branch through a NO_BRANCH entry.
+                        if (state.HasUnknownCaptures && groupExistsGroup.Current >= 0 && IsUnknown(groupExistsGroup))
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                            /* bstack: text_pos node NO_BRANCH */
+
+                            PushTouchMark(state);
+                            state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
                         node =
                             groupExistsGroup.Current >= 0
                                 ? node.Next1.Node! // The 'true' branch.
@@ -12450,6 +12558,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -12536,6 +12651,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -12605,6 +12727,13 @@ internal static class Matcher
                     if (refGroup.Current < 0)
                     {
                         goto backtrack;
+                    }
+
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
                     }
 
                     GroupSpan span = refGroup.Captures[refGroup.Current];
@@ -12681,6 +12810,13 @@ internal static class Matcher
                     if (refGroup.Current < 0)
                     {
                         goto backtrack;
+                    }
+
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
                     }
 
                     GroupSpan span = refGroup.Captures[refGroup.Current];
@@ -12919,6 +13055,13 @@ internal static class Matcher
                     if (refGroup.Current < 0)
                     {
                         goto backtrack;
+                    }
+
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
                     }
 
                     GroupSpan span = refGroup.Captures[refGroup.Current];
@@ -13162,6 +13305,13 @@ internal static class Matcher
                     if (refGroup.Current < 0)
                     {
                         goto backtrack;
+                    }
+
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
                     }
 
                     GroupSpan span = refGroup.Captures[refGroup.Current];
@@ -14098,7 +14248,7 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
-        Node? runOutEnd = RunOutInALookaroundBody(state);
+        Node? runOutEnd = RunOutInALookaroundBody(state, node);
         if (runOutEnd is null)
         {
             return MatchStatus.Partial;
@@ -15697,6 +15847,20 @@ internal static class Matcher
                     );
                     state.DropWMarksFrom(state.Bstack.Count);
                     break;
+                case Opcode.UnknownCapture: // NOT UPSTREAM'S, D11 chunk 8: an unknown capture goes.
+                {
+                    /* bstack: 0 current capture_change private_index public_index */
+
+                    if (!PopGroupStateData(state.Bstack, out GroupStateData unknownData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = unknownData.CaptureChange;
+                    state.Groups[unknownData.PrivateIndex - 1].Current = unknownData.Current;
+                    state.UnsaveCapture(unknownData.PrivateIndex, unknownData.PublicIndex);
+                    break;
+                }
                 case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
                 {
                     /* bstack: text_pos node */
@@ -17117,6 +17281,12 @@ internal static class Matcher
                 state.SliceStart = sliceStart;
                 state.SliceEnd = sliceEnd;
                 status = DoMatch2(state, search);
+
+                // D11 chunk 8: an unknown capture is reported unset (design section 4.3).
+                if (status == MatchStatus.Partial && state.HasUnknownCaptures)
+                {
+                    ReportUnknownCapturesUnset(state);
+                }
 
                 // NOT UPSTREAM'S, D11 (design section 1, rule 3): a search whose second pass found
                 // nothing may still find a match that begins inside the text to come, which is

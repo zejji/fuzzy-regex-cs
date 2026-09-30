@@ -77,6 +77,19 @@ internal sealed class Node
     /// </summary>
     internal Node? LookaroundEnd;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, its body, which a
+    /// run-out inside it reads (<c>Matcher.MarkTheBodysCapturesUnknown</c>, assert A10). Set by
+    /// <c>PatternObject.SetLookaroundBodies</c> when the pattern is compiled.
+    /// </summary>
+    internal Body? BodyInfo;
+
+    /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
+    /// <param name="Nodes">The indices of every node from the test's first body node up to its end
+    /// node, sorted.</param>
+    /// <param name="Groups">The capturing groups whose start or end is among them.</param>
+    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups);
+
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
 

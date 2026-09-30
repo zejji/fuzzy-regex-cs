@@ -860,6 +860,9 @@ public sealed class ThreadSafetyTests
             "Node.HasEarlierDeletionTwin",
             // D11: written by NodeCompiler.BuildLookaround while the graph is built.
             "Node.LookaroundEnd",
+            // D11 chunk 8: written by PatternObject.SetLookaroundBodies, which Compile calls once
+            // the nodes are numbered.
+            "Node.BodyInfo",
             "Node.Match",
             "Node.Op",
             "Node.Status",
