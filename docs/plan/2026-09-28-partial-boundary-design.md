@@ -1215,3 +1215,60 @@ same answer as the inlined twin outside the 30 run-out rows named above.
 **Performance.** Only a blocked positive end and its `REOPEN` do more: one move of 32 bytes in the
 usual case, and two sizes, both behind the `state.WMarks.Count != 0` test that already guards the
 second-pass path (`:10425`, `:11212`). A call without partial, and a first pass, pay nothing.
+
+### Amendment 3 (2026-09-30): chunk 8's review, round 1
+
+Four rules changed, each found by a row and each with a witness that fails without it (Release,
+2026-09-30). Rows marked "port" are judged by the port's own non-partial matcher over every
+continuation of up to three characters, where the port's verb or fuzzy rules differ from upstream's
+(ledger entries 45, 47 and 51); the rest by `tools/probes/d11-brute-judge.py`.
+
+1. **Which attempts count as touched (A1, section 4.3).** The two passes run the same code only
+   from the same start. The next start is the ordinary bump-along's unless an attempt can move it:
+   a `(*SKIP)` moves the slice, and a `\K` whose entry a cut discarded leaves the match position
+   set (FAILURE's bump-along starts from it). So in a pattern holding either, an attempt that
+   follows a touched attempt counts as touched too (`PatternObject.AnAttemptCanMoveTheNextStart`).
+   A `(*PRUNE)` ends the attempt with the ordinary bump-along and needs nothing. Before, the flag
+   was cleared at every start, and `(?=ab(*SKIP)c|a)a(*SKIP)x|b` search 'ab' answered the complete
+   match (1, 2), where the port's non-partial search is None and 'ab' + 'c' completes it (port
+   P(1, 2)); `ab\Z(*SKIP)(*F)|b` search 'ab' did the same (judge P(1, 2)). Witness
+   `PartialVerbRuleTests.A_start_a_touched_attempt_chose_is_touched_too`.
+2. **Which captures are unknown (section 4.2, the run-out row, part 1).** Only the groups the
+   innermost body can still reach from the item that ran out: a group open at the edge, one a
+   repeat can enter again, or one not reached yet (`Node.RunOutGroups`, computed at compile time
+   for patterns that read captures). A group the body closed before the item and cannot reach
+   again holds the same span in every continuation. `(?=a(.)b)\1` over 'aa' reported group 1 unset
+   where every completion gives (1, 2). A group whose current capture is unknown is reported with
+   no captures at all, so `Success` and `Captures` agree. Witnesses in `PartialUnknownCaptureTests`.
+3. **Where the verb part of the run-out taint goes (section 4.2, the run-out row, part 2).** The
+   design put a verb taint on the lookaround's own frame and on each atomic group open in the body.
+   But a positive lookaround and an atomic group are transparent to verbs (ledger entry 47): a verb
+   after the edge ends the scope `FindTheVerbTarget` finds from the run-out, which lies outside
+   them. The taint now goes on that frame alone. `(?!(?=a.(*PRUNE)b)x|.)a` over 'a' was refused,
+   where 'a' + 'xy' completes it (port P(0, 1)). No verb can have a positive lookaround or an atomic
+   group as its scope, so their taints are dropped; the oracle's ablation
+   `VerbsAreConfinedToTheInnermostGroup`, under which every group is a scope, keeps the atomic ones.
+   Q3 was no witness for this part: its branches share their `a`, so the run-out is the branch's
+   own test and the second branch is never reached. The witness is `(?!a.(*PRUNE)b|.)a` over 'a'
+   (`PartialLookaroundRuleTests.A_run_out_taints_the_scope_of_a_verb_after_the_edge`). On a
+   1,120-row grid of verbs after the edge (port-judged): 12 misses and 36 late starts fixed, 12 new
+   phantoms of class C3.
+4. **A run-out closes the fuzzy section its body left open.** Amendment 2's residue: the body's
+   unfinished section stayed current for the continuation, with its own limits and without the
+   enclosing section's counts. `(?:a(?=(?:bcd){e<=2})bx){e<=1}` over 'aby' answered P(0, 3) with two
+   errors under a limit of one (judge None). Now the enclosing section (`Node.EnclosingSection`)
+   becomes current, the body's errors are added to its counts, a path already over a limit fails,
+   and a backtracking entry gives the body its section back. SHORTCUT: the counts added are the
+   section's at the lookaround's entry and the innermost open section's own, a lower bound when
+   sections nest in the body. On a 1,080-row fuzzy grid (port-judged): 40 phantoms fixed, 0 misses.
+
+Amendment 2's eight parked fuzzy rows and its review's row, re-judged: four are C3 (fuzzy-free twin
+`a(?=byd)byx` over 'aby', the same P(0, 3) with the same events), the `(*PRUNE)` row is C4 (twin
+`(?:(?=aa$|a)|a)a(*PRUNE)b` over 'aa'), all five now in D18's test; one search is C2 (D19's test);
+one match is fixed by rule 4; the two `(?:bcd|b)` rows are right on the port's own matcher (the
+judge's None is upstream's minimum rule, ledger entry 51).
+
+Left open: a repeat inside a body whose try-match test runs out at the edge still ends the whole
+match as a partial, which chunk 6 changed for every other arm (register row D11-R1:
+`(?=(?:(a))*b)[xy]` over 'aa', P(0, 2) vs None). The group-call exclusion stays, as amendment 2
+decided.
