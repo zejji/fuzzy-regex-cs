@@ -1665,6 +1665,26 @@ Console.WriteLine(m.Groups[1].Index);   // 0 - upstream: 0
 Spans, group values and fuzzy counts are unchanged; only capture lists differ. There is no option
 to restore the upstream answer. Ledger entry 54.
 
+### A group call runs with the direction and fuzziness of its call site, all the way down
+
+A call such as `(?&g)` matches what the group's body would match written out at the call: exactly
+outside a fuzzy section and fuzzily inside one, backwards inside a lookbehind. Upstream applies
+that to the called group but not always to the calls it makes in turn, nor to a call inside a
+lookaround in a fuzzy section (whose own body is exact), nor to a call in a conditional's lookbehind
+test. Here every call follows its call site, so a call and its written-out body agree.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}").Match("aab").Length); // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)").Match("ba").Success); // False - upstream: crashes
+Console.WriteLine(new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success); // False - upstream: True
+Console.WriteLine(new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz").Length); // 3 - upstream: no match
+```
+
+Upstream gives this port's answer for each pattern with its calls written out. There is no option
+to restore the upstream answer. Ledger entries 55, 56 and 57.
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
