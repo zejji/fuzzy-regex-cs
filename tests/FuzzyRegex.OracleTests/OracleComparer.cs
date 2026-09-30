@@ -447,22 +447,21 @@ internal static class OracleComparer
         }
     }
 
-    /// <summary>Puts a row's question to this port with the issue 563/564 anchor pin switched off.</summary>
+    /// <summary>Puts a row's question to this port with rule H' (D61) switched off.</summary>
     /// <remarks>
     /// <para>
-    /// S57c fixed upstream issues 563 and 564: where a position assertion pins a fuzzy match to the
-    /// search anchor, this port permits an insertion there and upstream does not
-    /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>). The fix reads one field,
-    /// <c>PatternObject.AnchorGuards</c>, which the optimiser fills in; emptying it on a compiled
-    /// pattern leaves an engine that applies upstream's rule exactly, because
-    /// <c>Matcher.AnchorIsPinned</c> then returns false at every site without looking at anything
-    /// else.
+    /// Rule H' lifts upstream's ban on a fuzzy insertion at the search anchor
+    /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>) where the banned search finds no match
+    /// starting inside the attempt at the anchor. Clearing <c>PatternObject.LiftsAnchorBan</c> makes
+    /// every search keep the ban, and setting <c>PatternObject.UpstreamBestMatchAnchor</c> lets
+    /// BESTMATCH's walk move the anchor to each candidate as upstream's <c>init_match</c> does, which
+    /// together are upstream's rule exactly.
     /// </para>
     /// <para>
     /// That is what makes the <c>fuzzy-insertion-at-a-pinned-anchor</c> entry a classification
     /// rather than a silencer: a row belongs to the family when taking this one piece away
     /// reproduces upstream's recorded answer exactly. A row this port gets wrong for any other
-    /// reason still diverges without the pin, and is reported.
+    /// reason still diverges without it, and is reported.
     /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>

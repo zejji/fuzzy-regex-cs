@@ -3253,49 +3253,36 @@ position - that is what `(?b)` is for - but it cannot make a position stop match
 found - rather than an expected span list. That is true whatever the right answer set turns out to
 be, so it does not commit S50 to spans this slice has no authority to fix.
 
-### Addendum to 19 and 20, 2026-09-30: the assertion can be anywhere that dominates the item (known defect D61) - DRAFT - NOT FILED
+### Addendum to 19 and 20, 2026-09-30: rule H' replaces the fix (known defect D61) - DRAFT - NOT FILED
 
-**Status:** not filed; fixed here on `maint/d61-anchor-insertion` under the owner's ruling of
-2026-09-30 (option B, `docs/plan/DECISIONS.md`). S57c lifted the ban only for an assertion collected
-before the fuzzy section. The same reason holds for one written inside the section or down one
-branch of an alternation, and there both engines still refused:
+**Status:** not filed; the S57c fix above is replaced on `maint/d61-anchor-insertion` by rule H'
+(DECISIONS 2026-09-30). The S57c exemption lifted the ban where an assertion at the head of the
+pattern held at the anchor and failed one character on. It was unsound: it glued a separator.
 
 ```python
->>> regex.search(r'^(?:a){i<=1}', 'xa')          # S57c's case, upstream's own anchoring
-<regex.Match object; span=(0, 2), match='xa', fuzzy_counts=(0, 1, 0)>
->>> regex.search(r'(?:^a){i<=1}', 'xa')          # the same assertion, inside the section
-None
->>> regex.search(r'(?:(?<!x)ab){i<=1}', 'xab')   # a one-character lookbehind, inside
-None
->>> [m.span() for m in regex.finditer(r'(?:\ba){i<=1}', 'xa xa')]
-[(3, 5)]                                         # the first 'xa' is lost
+>>> [m.span() for m in regex.finditer(r'\b(?:dog){e<=2}', 'dog  dog')]
+[(0, 3), (5, 8)]            # upstream, and the right answer; S57c gave (3, 8) with two insertions
+>>> regex.search(r'(?:^a){i<=1}', 'xa')
+None                        # the same assertion inside the section, which S57c did not cover
 ```
 
-Measured 2026-09-30 on regex 2026.9.10. The mechanism is entry 19's line,
-`permit_insertion = !search || text_pos != search_anchor` (`upstream/src/_regex.c:10214`), which
-does not ask what the pattern passes before the item. The port now works out at compile time which
-assertions dominate each fuzzy item - every path from the start of the pattern to it passes them
-(`Optimiser.FindAnchorPins`) - and lifts the ban where one of them holds at the anchor and fails one
-character on. Dominance matters: with another path to the item, a start one character later need not
-pass the assertion at all, so `(?:^|x)(?:ab){i<=1}` over 'xab' keeps the exact (0, 3) and
-`(?:\M|)(?:dog){e<=1}` finditer over 'dog dog' keeps `[(0, 3), (4, 7)]`. A first version that
-lifted the ban for any assertion the current path had passed got both wrong, and was refuted in
-review. The ban itself stays: `(?:dog){e<=1}` over 'dog dog dog' still gives three exact
-matches, and so does `(?:\bdog){e<=1}`, because `\b` holds one character on at each separator.
+Measured 2026-09-30 on regex 2026.9.10. Two generalisations (an assertion on the current path, then
+an assertion that dominates the item) were refuted by review with witnesses such as
+`(?:\M|)(?:dog){e<=1}` finditer over 'dog dog', `(?:(?!x)stone|abc){e<=2}` over 'stone xstone' and
+`(?:\Ma|a){i<=2}` over 'a-xa.'.
 
-**What a report would ask for.** The same one-line change as entry 19's: permit the insertion where
-an assertion that dominates the item fails one character on. A lookaround whose body is one
-character test counts; others are not counted yet (a SHORTCUT in the port).
+**What a report would ask for.** At anchor A, run the banned search to get u. If u starts at A,
+return it. Otherwise run the attempt at A without the ban to get c, and return c if it exists and u
+is None or starts at or after c's end (under BESTMATCH, only if c has no more errors than u). The
+ban exists so a match never swallows text where a later match could start, and u is that later
+start, so this keeps exactly the matches the ban loses for nothing. Upstream already does this when
+the search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)). Separately,
+BESTMATCH's candidate walk should keep the caller's search anchor rather than re-set it in
+`init_match` (`:3410`) for each candidate, which is entry 20's mechanism.
 
-**Two effects a reader should know about.** Because the fix only permits insertions, a search
-that found a match still finds one, but it can be an earlier, shorter one that covers less text:
-`(?:^a|abcd){i<=1}` over 'xabcd' is (1, 5) upstream and (0, 2) here, and its finditer `[(1, 5)]`
-and `[(0, 2)]`, so 'bcd' is in no match. Both engines already give (0, 2) to the written-before
-form `^(?:a|abcd){i<=1}`, and it is the ordinary leftmost-first answer of `(?:xa|abcd)`. And a
-finditer can return fewer matches, because an earlier match that now opens
-one character sooner may take text a later one used: `(?:^abc|b|c){i<=1}` over 'xabc' is
-`[(1, 3), (3, 4)]` upstream and `[(0, 4)]` here. None of the oracle rows at seeds 7, 4242 and
-20260927 is of that kind.
+**Known effects, not defects.** An extra match can move the next finditer anchor:
+`(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'. An earlier,
+longer match can take text later ones used; the later matches kept are upstream's own.
 
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
@@ -5825,3 +5812,54 @@ it do.
 `negative-condition-keeps-its-alternatives` keys on `OracleComparer.RunWithTheUpstreamTrueBranchSkip`,
 which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
 does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.
+
+## 63. A group call's captures stay on the group's capture list after it returns - DIVERGES HERE BY RULING (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D51, owner ruling (a) of 2026-09-30
+(DECISIONS.md), which reverses the 2026-09-11 entry. Draft report, framed as a question:
+`entry-63-call-captures.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `tools/probes/d51-call-capture-survey.py` over `tools/probes/d51-call-capture-witnesses.tsv` (upstream,
+PCRE2 10.47 through pip `pcre2` 0.7.1, Perl 5.42.3):
+
+```
+search(r'(?(DEFINE)(?<c>a))(?&c)b', 'ab')     c: None, captures ['a']        PCRE2 (-1, -1), Perl unset
+search(r'(?<c>a)(?&c)b', 'aab')               c: (0, 1), captures ['a', 'a']  PCRE2 and Perl (0, 1)
+fullmatch(r'(?P<x>.)*(?&x)', 'abc')           x: 'b', captures ['a', 'b', 'c']
+search(r'\((?<p>[^()]|(?R))*\)', '(a(b)c)')   p: (5, 6), captures ['a', 'b', '(b)', 'c']   PCRE2 and Perl (5, 6)
+```
+
+**Why the port differs.** Upstream's behaviour is deliberate (Hg issue 78; `test_hg_bugs#54`
+asserts every nested run of a recursive group), so this is not claimed as an upstream bug.
+`GROUP_CALL` saves only each group's `current` (`push_groups`, `upstream/src/_regex.c:2490`, called
+at `:13405`) and `GROUP_RETURN` restores only that (`pop_groups`, `:13516`), so `count` stays where
+the callee left it. Copied into .NET that breaks the `Group` contract: Success false with a capture
+listed, and a Value that is not the last capture. PCRE2 and Perl run a call as a subroutine and
+restore the group on return; every span and group value across 29 surveyed witnesses (backreference
+and conditional after a call, recursion, a call in a repeat and in a lookaround, nested groups)
+agrees between them and upstream, so only the lists differ.
+
+**This port.** `Matcher.ReturnToCallerCaptures`: GROUP_CALL saves each group's count and current
+(`PushCaptures`), GROUP_RETURN restores both and puts the spans the call added on the backtracking
+stack, and its backtrack arm writes them back (`PopCalleeCaptures`), because the caller can reuse
+the freed slots before it backtracks into the call. The span restore is load-bearing: planted out,
+`(?(DEFINE)(?<d>(.)(?:.)?\2))(?&d)(?:(?2)x)?ab` over 'aaab' answers None where every engine gives
+(0, 4). Pinned by `Gaps/Engine/CallCaptureTests` (24 tests, 20 red before the fix) and the ported
+rows listed in DIVERGENCES.md, which assert upstream's list through the ablation too. The oracle
+entry `group-call-discards-its-captures-on-return` keys on `OracleComparer.RunWithTheUpstreamCallCaptures`
+(`PatternObject.KeepCallCaptures`, which leaves the count where the callee left it and restores only
+`current` when backtracking past the call, as `pop_groups` does) plus `OnlyCallCapturesAreMissing`;
+every other named ablation has the fix off too. It accounts for 12, 5 and 14 rows of the default
+waves at seeds 7, 4242 and 20260927 (diverge 0 at all three). Complete matrix over its 1,619 call rows: C2 502 to 9 and
+C7 68 to 0, no assert on the Debug build.
+
+**Partial results: known defect D62, fixed here too (owner ruling 2026-09-30).** A partial match
+that runs out of text inside a call that has not returned kept that call's captures, value
+included: `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (2, 3) with ['a', 'a'] upstream, where
+the written-out `(?<o>(?<i>a)b)(?:(?:a)b)` gives i = (0, 1) in both engines. A partial now reports
+what every completion of the path it took would report: the call returns in any completion, so
+`Matcher.BasicMatch` restores the groups from the outermost open call's frame, whose captures
+`GROUP_CALL` now pushes last, directly under the return node. PCRE2 leaves a partial's groups
+undefined and Perl has no partial matching, so no engine contradicts it. Pinned by
+`CallCaptureTests` (six call rows red without the restore, two controls) and five partial rows
+in the same oracle entry.

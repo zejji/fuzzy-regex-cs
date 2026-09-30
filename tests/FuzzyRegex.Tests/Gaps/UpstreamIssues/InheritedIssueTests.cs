@@ -169,24 +169,19 @@ public sealed class InheritedIssueTests
         //   findall(r'\m(?:Y){i}\M', 'XY YX')   -> ['YX']          <- upstream, 'XY' missing
         //   findall(r'\m(?:Y){i}\M', ' XY YX')  -> ['XY', 'YX']    <- upstream, same shape, found
         //
-        // THE RULE THIS PORT APPLIES INSTEAD. "Start searching one character later" is the same
-        // match minus an insertion only while the pattern still fits one character later. So the
-        // prohibition is lifted where a zero-width position assertion at the head of the pattern
-        // holds at the anchor and FAILS one character on, and nowhere else. Both halves are load
-        // bearing: drop the one-character-on test and four of the ported suite's tests go red,
-        // upstream's own test_fuzzy rows 51 and 56 among them, where the assertion holds one
-        // character on too (measured 2026-09-21; S50 found the narrowing the same way, against a
-        // different implementation of the pin).
+        // THE RULE THIS PORT APPLIES INSTEAD, since D61: rule H' (DECISIONS 2026-09-30). At anchor A,
+        // take the banned search's answer u; if it starts at A it stands, and otherwise the attempt
+        // at A without the ban, c, is kept when u is None or starts at or after c's end. The ban
+        // exists so a match never swallows text where a later match could start, and u is the
+        // leftmost later start, so this keeps c exactly when nothing later lies inside it. S57c's
+        // exemption, which this replaced, lifted the ban where an assertion at the head of the
+        // pattern held at A and failed one character on, and glued a separator:
+        // `\b(?:dog){e<=2}` finditer over 'dog  dog' gave (3, 8) with two insertions where upstream
+        // gives (5, 8). See Gaps/Engine/FuzzyAnchorPinTests.
         //
-        // WHERE THE ANSWER LIVES, which is what S50 got wrong twice. It is a property of the
-        // PATTERN - `PatternObject.AnchorGuards`, filled by `Optimiser.FindAnchorGuards` - not a
-        // flag in `MatchState`. S50 used the flag, and because the backtracking engine neither
-        // saves nor restores it, it was wrong in both directions: an assertion that held only on
-        // an abandoned path still pinned the anchor, and the backtrack-arm clears that fixed that
-        // also threw away a pin set outside the construct. The guards are collected by walking the
-        // pattern's leading chain and stopping at the first node that can send matching down more
-        // than one path, so an assertion the engine can abandon is never collected in the first
-        // place. Every shape those two attempts broke is still below, and still green.
+        // WHERE THE ANSWER LIVES: Matcher.DoMatch2LiftingTheAnchorBan, which runs the two searches
+        // and keeps each one's own state, so no flag outlives the path that set it (S50's mistake).
+        // Every shape the two S50 attempts broke is still below, and still green.
 
         // THE ROW THE ISSUE REPORTS. Upstream answers ['YX'].
         Values(@"\m(?:Y){i}\M", "XY YX").Should().Equal("XY", "YX");

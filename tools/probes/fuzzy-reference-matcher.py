@@ -57,23 +57,13 @@ of mrab-regex 2026.9.10):
    the search began (search_anchor, set once in init_match, _regex.c:3410;
    rule at _regex.c:10211-10214). The section-end insertion (rule 4) has no
    such check. match() and fullmatch() have no such restriction. The port's
-   ruled exception (DIVERGENCES.md, "A fuzzy section may open with an inserted
-   character at the search anchor, where a position assertion pins the match
-   there"; ledger entries 19-20): the insertion is allowed once the attempt at
-   the anchor has passed a zero-width escape or anchor (rule 11) that holds
-   there and would fail one character on, because then starting one character
-   later cannot give the same match minus the insertion. Every example the
-   ruling gives has that assertion leading the pattern (\m(?:Y){i}\M,
-   (?m)^(?:abc){i<=1}). The owner's ruling of 2026-09-30 (option B, known
-   defect D61) extends it to such an assertion wherever it is written, and the
-   review that refuted a per-path reading narrowed it to an assertion that
-   DOMINATES the item taking the insertion: every path from the start of the
-   pattern to the item passes it (dominators(), below). With another path to
-   the item, a start one character later need not pass the assertion, so the
-   ban's reasoning stands: (?:^|x)(?:ab){i<=1} over 'xab' is the exact (0, 3).
-   A lookaround whose body is one character test counts as such an assertion;
-   an assertion inside a lookaround's body does not, since the body may have
-   moved on before testing it.
+   ruled exception, rule H' (DECISIONS 2026-09-30, known defect D61; it
+   replaced the ledger 19/20 exemption): at a search's anchor A, let u be the
+   banned search's answer. If u starts at A it stands. Otherwise let c be the
+   attempt at A without the ban; c is the answer if it exists and u is None or
+   starts at or after c's end (search_from, below). The ban exists so a match
+   never swallows text where a later match could start, and u is the leftmost
+   later start, so c is kept exactly when nothing later lies inside it.
    PINNED_ANCHOR = False gives upstream's rule.
 6. Error limits are checked before each error (this_error_permitted,
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
@@ -692,8 +682,7 @@ class Prune(Exception):
 
 
 class Ctx:
-    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False, dom=None):
-        self.dom = dom or {}  # rule 5: id(node) -> the pins that dominate it
+    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False):
         self.text = text
         self.referenced = referenced
         self.start = start  # where this search began, for \G (rule 11)
@@ -798,78 +787,8 @@ def holds(kind, pos, ctx):
 
 
 def insertion_allowed_here(st, node, ctx):
-    """Rule 5 and its ruled exception: an assertion that dominates node holds at the anchor and
-    fails one character on."""
-    if st.pos != st.anchor:
-        return True
-    if not PINNED_ANCHOR:
-        return False
-    a = st.anchor
-    return any(pin_holds(d, a, ctx) and not (a < len(ctx.text) and pin_holds(d, a + 1, ctx))
-               for d in ctx.dom.get(id(node), ()))
-
-
-def pin_holds(node, pos, ctx):
-    """An anchor, or a one-character lookaround, at pos."""
-    if isinstance(node, Anchor):
-        return holds(node.kind, pos, ctx)
-    body, text = one_char_body(node), ctx.text
-    if node.ahead:
-        matched = pos < len(text) and body.test(text[pos])
-    else:
-        matched = pos > 0 and body.test(text[pos - 1])
-    return matched == node.positive
-
-
-def one_char_body(node):
-    """The Item a lookaround's body is, or None."""
-    body = node.body
-    while isinstance(body, (Seq, Group)) and not (isinstance(body, Group) and body.index):
-        if isinstance(body, Seq):
-            if len(body.parts) != 1:
-                return None
-            body = body.parts[0]
-        else:
-            body = body.body
-    return body if isinstance(body, Item) else None
-
-
-def dominator_map(tree):
-    """Rule 5: id(node) -> the pins that dominate it (see dominators)."""
-    dom = {}
-    dominators(tree, frozenset(), dom)
-    return dom
-
-
-def dominators(node, before=frozenset(), dom=None):
-    """Rule 5: map id(node) to the pins (anchors and one-character lookarounds) every path from
-    the start of the pattern to that node passes, and return what every path through node passes."""
-    dom = {} if dom is None else dom
-    dom[id(node)] = before
-    kind = type(node)
-    if kind is Anchor:
-        return before | {node}
-    if kind is Seq:
-        for part in node.parts:
-            before = dominators(part, before, dom)
-        return before
-    if kind is Alt:
-        outs = [dominators(b, before, dom) for b in node.branches]
-        return frozenset.intersection(*outs) if outs else before
-    if kind in (Group, Fuzzy, Atomic):
-        return dominators(node.body, before, dom)
-    if kind is Repeat:
-        after = dominators(node.body, before, dom)
-        return after if node.lo > 0 else before
-    if kind is Look:
-        dominators(node.body, before, dom)
-        return before | {node} if one_char_body(node) is not None else before
-    if kind is CondLook:
-        dominators(node.test, before, dom)
-        return dominators(node.yes, before, dom) & dominators(node.no, before, dom)
-    if kind is Cond:
-        return dominators(node.yes, before, dom) & dominators(node.no, before, dom)
-    return before
+    """Rule 5: no insertion at the search anchor (rule H' lifts it per search, in search_from)."""
+    return st.pos != st.anchor
 
 
 def anchor(node, st, ctx, k):
@@ -1114,14 +1033,13 @@ class Compiled:
     ignorecase: bool
     posix: bool = False
     ascii_classes: bool = False
-    dom: object = None  # rule 5's dominators, id(node) -> pins
 
 
 def attempt(c, text, start, anchor, must_end, search_start, not_empty=False):
     """The first match of an attempt at start. not_empty: rule 18, a match may not end at start."""
     st = State(start, ((-1, -1),) * (c.ngroups + 1), (0, 0, 0), None, None, (), anchor)
     best = None
-    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase, c.dom), lambda s: iter([s])):
+    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase), lambda s: iter([s])):
         if must_end and final.pos != len(text):
             continue
         if not_empty and final.pos == start:
@@ -1151,7 +1069,7 @@ def compile_pattern(pattern, flags=0):
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
     return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
-                    ascii_classes=p.ascii_classes, dom=dominator_map(tree))
+                    ascii_classes=p.ascii_classes)
 
 
 def checked(c, text):
@@ -1163,7 +1081,21 @@ def checked(c, text):
 
 
 def search_from(c, text, pos, not_empty=False):
-    """One search from pos: rule 5's anchor and the \\G position are pos for every attempt."""
+    """One search from pos under rule 5 and rule H'."""
+    u = banned_search_from(c, text, pos, not_empty)
+    if u is not None and u.span[0] == pos or not PINNED_ANCHOR:
+        return u
+    try:
+        cand = attempt(c, text, pos, -1, False, pos, not_empty)
+    except Prune:
+        cand = None
+    if cand is not None and (u is None or u.span[0] >= cand.span[1]):
+        return cand
+    return u
+
+
+def banned_search_from(c, text, pos, not_empty=False):
+    """Upstream's search from pos: rule 5's anchor and the \\G position are pos for every attempt."""
     start = pos
     while start <= len(text):
         try:
