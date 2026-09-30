@@ -678,6 +678,32 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_stale_enhancematch_total_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `enhancematch-stops-on-a-stale-total` (D59), keyed on judged rows: this
+        // port's live answer to each row is the family; upstream's own answer, and no match, are not.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "enhancematch-stops-on-a-stale-total", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences.For(row, Live(row)).Should().BeSameAs(entry, "{0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not", row.Pattern);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("no match over {0} is a defect", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for()
     {
         // The control for `fuzzy-insertion-before-a-failing-lookaround` (ledger entry 50), built as

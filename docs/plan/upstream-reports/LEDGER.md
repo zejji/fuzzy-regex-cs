@@ -4063,6 +4063,16 @@ to the earlier span, as the owner's ranking rule says it should. Row 3752 itself
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
 
+**Known defect D59 (complete matrix, 2026-09-30) is this entry under ENHANCEMATCH, traced
+2026-10-01.** `(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' is (1, 6) with two deletions
+upstream and (1, 5) exact here. A `fprintf` in `do_enhanced_fuzzy_match` shows the improvement
+pass (slice 1 to 6, `max_errors` 1) returning (1, 5) with `total_errors` 2: a second iteration went
+over budget at END_FUZZY (`:12484-12486`) and left its total. Complete-matrix rows 7619 and 11464
+trace the same. Added to the draft as an addendum; classified by
+`ExpectedDivergences.enhancematch-stops-on-a-stale-total`, pinned by
+`FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat`. Ledger number 65,
+reserved for it, is not used.
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found

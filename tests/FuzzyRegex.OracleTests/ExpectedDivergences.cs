@@ -3469,6 +3469,34 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy-overhang", "pattern": "(?fi)(?r)(?:\\A(?:(?:\\1)a){e<=2,s<=1}[^a]){e<=3,1i+1d+2s<=3:[a-f]}(f)", "flags": 0, "namedLists": {}, "subject": "ﬀAf", "operation": "match", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
         """;
 
+    /// <summary>
+    /// The three rows of <c>enhancematch-stops-on-a-stale-total</c> (known defect D59): complete-matrix
+    /// rows 7619 and 11464 of 2026-09-30 and the register's minimal search, recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
+    /// </summary>
+    private const string _enhanceStaleTotalRows = """
+        {"generator": "rows", "pattern": "(?:(?:a+){i<=1,d<=1}){1,2}+", "flags": 32768, "namedLists": {}, "subject": " x aaaa", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}]}
+        {"generator": "rows", "pattern": "(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 49154, "namedLists": {}, "subject": "xaaabaxa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}, "codepointSpan": [1, 6]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}, "codepointSpan": [7, 8]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}}]}
+        {"generator": "rows", "pattern": "(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 0, "namedLists": {}, "subject": "xaaabaxa", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}]}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_enhanceStaleTotalRows"/>, in the same
+    /// order, as the report renders it: the fit with the fewest errors at the plain search's start.
+    /// </summary>
+    private static readonly string[] _enhanceStaleTotalOurs =
+    [
+        "match 0:(0,0)[(0,0)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
+        "matches 3 | match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1 || match 0:(5,1)[(5,1)] 1:(5,1)[(5,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:6] || match 0:(7,1)[(7,1)] 1:(7,1)[(7,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:8]",
+        "match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1",
+    ];
+
+    /// <summary><see cref="_enhanceStaleTotalRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _enhanceStaleTotal = OracleWave
+        .ParseRows(_enhanceStaleTotalRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _enhanceStaleTotalOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
     private static readonly ExpectedDivergence[] _entries =
     [
         // FIRST, so that a row ledger entry 42 alone explains is classified before an entry keyed
@@ -5579,6 +5607,35 @@ internal static class ExpectedDivergences
                 row.Pattern.Contains("(?e", StringComparison.Ordinal)
                 && !row.Pattern.Contains("(?b", StringComparison.Ordinal)
                 && TheDoubledGuardAloneExplainsIt(row, ours)
+        ),
+        new(
+            Id: "enhancematch-stops-on-a-stale-total",
+            Reason: "Port right, KNOWN DEFECT D59, owner ruling 2026-09-30 option (a): LEDGER ENTRY 32's "
+                + "main mechanism reached through a fuzzy section inside a repeat. END_FUZZY writes "
+                + "`total_errors` and then, when it is over `max_errors`, backtracks without putting "
+                + "the old total back (upstream/src/_regex.c:12484-12486); the backtrack arm subtracts "
+                + "the counts and not the total (:15569-15571). ENHANCEMATCH's improvement pass runs "
+                + "with `max_errors` one below the first match's total (:17978-17980), so a later "
+                + "iteration that would spend one error too many is rejected there and leaves its "
+                + "total behind, and the pass's own match then reports it: traced 2026-10-01 with "
+                + "`fprintf` in `do_enhanced_fuzzy_match` on a build of the pinned source, "
+                + "`(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' prints pass 2 over the "
+                + "slice (1, 6) with max_errors 1 returning (1, 5) with total_errors 2, which is above "
+                + "its own budget and so no better than the first match's 2, and the loop keeps (1, 6) "
+                + "with two deletions (:17939). Row 7619 prints the same, total 2 at max 1. The "
+                + "simpler forms upstream does improve have no rejected section after the accepted "
+                + "one: the budget outside the repeat, the repeat lazy, or one iteration. README: "
+                + "ENHANCEMATCH will 'attempt to improve the fit (i.e. reduce the number of errors)'. "
+                + "This port restores the totals (S87) and answers the fewest errors at that start.\n"
+                + "KEYED ON ITS ROWS AND THIS PORT'S JUDGED ANSWER TO EACH, because no recorded control "
+                + "can see `total_errors`, and 'this port found a cheaper fit than upstream' is what a "
+                + "ranking defect here would look like too. Widening means tracing another row and "
+                + "adding it.",
+            PinnedBy: "FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat",
+            Example: _enhanceStaleTotalRows,
+            Applies: static (row, ours) =>
+                _enhanceStaleTotal.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
             Id: "bestmatch-ranks-by-cost",
