@@ -389,6 +389,65 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// The trailing insertion END_FUZZY tries after a section is an insertion too: at the edge it
+    /// needs the character after the text, so it runs out of text rather than failing, both where
+    /// the rest of the pattern needs it (a fullmatch's end, a lookahead's last letter) and where the
+    /// section's own minimum does (D41).
+    /// </summary>
+    /// <remarks>
+    /// Each row is judged by the port's own non-partial call over the continuations (the port keeps
+    /// trailing insertions, ledger entries 12 and 51; upstream refuses them at a minimum, so its
+    /// judge answers None to the minimum rows). The first row was P(0, 3) before build chunk 6 only
+    /// because S57d escalated the lookahead's run-out; chunk 6 made that run-out go on at the body's
+    /// end, and the refused insertion then failed the path (the review of chunk 8). 'abc' + 'd'
+    /// fullmatches the first with one insertion; 'b' + 'x' the second; 'ab' + 'x' the third;
+    /// 'abc' + 'cd' matches the fourth at (0, 3) with one insertion in the lookahead.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the minimum rows, as ledger entry 51 does.
+    [Test]
+    [Arguments("fullmatch", "(?:a(?=bcd)b.){e<=1}", "abc", 3)]
+    [Arguments("fullmatch", "(?:b){1<=e<=1}", "b", 1)]
+    [Arguments("fullmatch", "a(?:b){1<=e<=1}", "ab", 2)]
+    [Arguments("fullmatch", "(?r)(?:b){1<=e<=1}", "b", 1)]
+    [Arguments("match", "(?:a(?=(?:b(?:c){1<=e<=1}d){0<=e<=1})b.){0<=e<=1}", "abc", 3)]
+    public void A_trailing_insertion_at_the_edge_runs_out_of_text(
+        string operation,
+        string pattern,
+        string text,
+        int length
+    )
+    {
+        Match m = Partial(operation, pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, length));
+    }
+
+    /// <summary>
+    /// The controls: a section that permits no insertion still fails at the edge, and a call
+    /// without partial still refuses the insertion.
+    /// </summary>
+    [Test]
+    public void A_trailing_insertion_the_section_forbids_does_not_run_out()
+    {
+        Partial("fullmatch", "(?:a(?=bcd)b.){s<=1}", "abc").Success.Should().BeFalse();
+        new FuzzyRegex("(?:b){1<=e<=1}").FullMatch("b").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// When the continuation after a trailing insertion's run-out in a lookahead fails, backtracking
+    /// goes on into the section's own choices and does not run out at the same entry again: the
+    /// entry comes back marked. Unmarked, the row loops until the timeout. No text completes it (the
+    /// 'b' at 1 is never a 'c'), so the answer is None.
+    /// </summary>
+    [Test]
+    public void A_failed_continuation_after_a_trailing_insertion_run_out_backtracks_into_the_section()
+    {
+        var regex = new FuzzyRegex("a(?=(?:b){1<=e<=1})c", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5));
+
+        regex.MatchAtStart("ab", partial: true).Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// A second-pass success is returned as the partial at once, from BasicMatch, whatever the
     /// search goes on to do after a success (design section 4.3, rows M5 and M6): POSIX keeps no
     /// match to go on comparing, and best match and enhanced match get it back unrefined, as a

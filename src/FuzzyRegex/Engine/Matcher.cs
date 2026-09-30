@@ -14858,7 +14858,12 @@ internal static class Matcher
                     }
 
                     node = endFuzzyNode!;
-                    state.TextPos = (int)endFuzzyTextPos;
+
+                    // NOT UPSTREAM'S, D11 (D41): a complemented position marks an entry whose
+                    // trailing insertion has already run out of text at the edge (below), so the
+                    // section goes straight back to its own choices.
+                    bool trailingInsertionRanOut = endFuzzyTextPos < 0;
+                    state.TextPos = (int)(trailingInsertionRanOut ? ~endFuzzyTextPos : endFuzzyTextPos);
 
                     // Try one more insertion after the section. This is the only place a trailing
                     // insertion can come from: every item inside the section has already been tried.
@@ -14908,19 +14913,19 @@ internal static class Matcher
                     // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
                     // rather than asserting a value.
                     if (
-                        InsertionPermitted(state, innerNode!, innerCounts)
+                        !trailingInsertionRanOut
+                        && InsertionPermitted(state, innerNode!, innerCounts)
                         && TotalErrors(state.FuzzyCounts)
                             + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
                             < state.MaxErrors
                         && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
                             <= state.MaxCost
-                        && FuzzyExtMatch(state, innerNode, state.TextPos)
                     )
                     {
                         bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;
                         int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
 
-                        if (state.TextPos != endFuzzyLimit)
+                        if (state.TextPos != endFuzzyLimit && FuzzyExtMatch(state, innerNode, state.TextPos))
                         {
                             state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
                             ++innerCounts[FuzzyValue.Ins];
@@ -14969,6 +14974,47 @@ internal static class Matcher
 
                             node = node.Next1.Node!;
                             goto advance;
+                        }
+                        else if (
+                            state.TextPos == endFuzzyLimit
+                            && !pattern.SecondPassAsBeforeD11
+                            && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
+                                == MatchStatus.Partial
+                        )
+                        {
+                            // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
+                            // needs the character after the edge, so in a partial call it runs out
+                            // of text as the insertion arm of FuzzyMatchItem does, whether the rest
+                            // of the pattern needs it (a fullmatch's end, a lookahead's last letter)
+                            // or the section's own minimum does. It used to fail the path. Before
+                            // build chunk 6, S57d escalated a lookahead's run-out and hid that;
+                            // after it, `(?:a(?=bcd)b.){e<=1}` fullmatch 'abc' answered None where
+                            // 'abc' + 'd' completes it (the review of chunk 8). The character after
+                            // the edge is unknown, so a section's insertion test (`{i<=1:[a-z]}`) is
+                            // not asked, as the insertion arm does not ask it past the edge either.
+                            // The insertion is not counted: a run-out presumes the rest, and fewer
+                            // errors only let more through.
+                            //
+                            // The entry goes back with its position complemented, so that when the
+                            // run-out's continuation fails, backtracking into it goes on into the
+                            // section's own choices (below) instead of running out again. Outside a
+                            // lookaround's body the attempt answers the partial and the entry is
+                            // never read.
+                            state.Bstack.PushSize(previousTotalErrors);
+                            state.Bstack.PushSize(previousTotalCost);
+                            state.PushFuzzyCounts(state.Bstack, innerCounts);
+                            state.Bstack.PushSize(insertions);
+                            state.Bstack.PushNode(innerNode);
+                            state.Bstack.PushSize(~(long)state.TextPos);
+                            state.Bstack.PushNode(node);
+                            state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                            /* bstack: total_errors total_cost inner_counts insertions inner_node
+                             * ~text_pos end_fuzzy_node END_FUZZY
+                             */
+
+                            state.NotePartialEvent(PartialEvent.TrailingInsertionRunOut);
+                            goto runOut;
                         }
                     }
 

@@ -148,4 +148,7 @@ internal enum PartialEvent
 
     /// <summary>RC5: a fuzzy insertion ran out of text.</summary>
     InsertionRunOut,
+
+    /// <summary>RC5 and D41: END_FUZZY's trailing insertion ran out of text at the edge.</summary>
+    TrailingInsertionRunOut,
 }
