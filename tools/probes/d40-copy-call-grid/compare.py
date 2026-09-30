@@ -9,6 +9,11 @@ rows = [json.loads(l) for l in open(stem + '.jsonl', encoding='utf-8') if l.stri
 up, il, bf, af, pi = ([l.rstrip('\r\n') for l in open(f'{stem}.{k}.txt', encoding='utf-8')]
                       for k in ('up', 'inline', 'before', 'after', 'portinline'))
 assert len(rows) == len(up) == len(il) == len(bf) == len(af) == len(pi)
+# Optional: main's written-out answers (STEM.beforeinline.txt) and the ablated port (STEM.ablate.txt).
+def optional(k):
+    try: return [l.rstrip('\r\n') for l in open(f'{stem}.{k}.txt', encoding='utf-8')]
+    except FileNotFoundError: return None
+bi, ab = optional('beforeinline'), optional('ablate')
 def head(a):  # span and fuzzy counts: the written-out form's captures differ by construction
     return ' '.join(a.split(' ')[:2]) if a.startswith('(') else a
 answers = lambda a: a == 'None' or a.startswith('(')
@@ -28,6 +33,14 @@ for n, (r, u, i, b, a, p) in enumerate(zip(rows, up, il, bf, af, pi)):
     if answers(p) and head(a) != head(p):
         tally['DIFFER FROM THE WRITTEN-OUT FORM'] += 1
         shown['DIFFER FROM THE WRITTEN-OUT FORM'].append(n)
+    if bi is not None and answers(bi[n]) and head(b) == head(bi[n]) and head(a) != head(p):
+        tally['NEW WRONG AGAINST MAIN'] += 1
+        shown['NEW WRONG AGAINST MAIN'].append(n)
+    if bi is not None and head(bi[n]) != head(p):
+        tally['written-out answer moved from main'] += 1
+    if ab is not None and ab[n].startswith('ERR') and ab[n] != 'ERR Timeout' and answers(u):
+        tally['ablation crashes where upstream answers'] += 1
+        shown['ablation crashes where upstream answers'].append(n)
     if answers(u) and head(a) != head(u):
         if not answers(p): c = 'no written-out form (recursion, or it does not compile)'
         elif head(a) != head(p): c = 'UNEXPLAINED'

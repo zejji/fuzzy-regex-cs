@@ -184,6 +184,7 @@ internal static class NodeCompiler
         // the same pattern with the call written out matches.
         Debug.Assert(args.MinWidthAtSuccess >= 0, "The pattern's code ends in SUCCESS.");
         pattern.MinWidth = args.MinWidthAtSuccess;
+        pattern.UpstreamMinWidth = args.MinWidth;
         pattern.IsFuzzy = args.IsFuzzy;
 
         // NOT UPSTREAM (ledger entry 44's addendum): without a fuzzy section no pass spends an

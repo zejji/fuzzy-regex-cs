@@ -114,13 +114,14 @@ public sealed class NestedGroupCallTests
     // and answers (0, 2) with one substitution on both called forms (regex 2026.9.10, 2026-09-30):
     //   search('(?:(?=ab)..){s<=1}', 'xb')    None
     //   search('(?:..(?<=ab)){s<=1}', 'xb')   None
-    //   search('(?:(?!ab)..){s<=1}', 'ab')    None, and the called form agrees
+    //   search('(?:(?!ab)..){s<=1}', 'xb')    (0, 2): the negative lookahead holds, where the
+    //                                         fuzzy call matched 'xb' and upstream answers None
     [Test]
     public void A_call_inside_a_lookaround_in_a_fuzzy_section_runs_exactly()
     {
         new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
         new FuzzyRegex("(?:..(?<=(?&g))){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
-        new FuzzyRegex("(?:(?!(?&g))..){s<=1}(?P<g>ab)?").Match("ab").Success.Should().BeFalse();
+        ShouldMatch(new FuzzyRegex("(?:(?!(?&g))..){s<=1}(?P<g>ab)?").Match("xb"), 0, 2, new FuzzyCounts(0, 0, 0));
     }
 
     // D43. A conditional's lookbehind test runs backwards, so a call in it runs its group backwards,
@@ -135,5 +136,56 @@ public sealed class NestedGroupCallTests
     {
         ShouldMatch(new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz"), 0, 3, new FuzzyCounts(0, 0, 0));
         ShouldMatch(new FuzzyRegex("bc(?(?<!(?&g))x|y)(?P<g>bc)?").Match("bcyzzz"), 0, 3, new FuzzyCounts(0, 0, 0));
+    }
+
+    // D42's regression guard, from its blind review. The call inside the fuzzy section's
+    // lookbehind now runs exactly, which reached D48 below; the written-out form, to depth 2-6,
+    // answers (0, 2) in both engines, as upstream and main answer this row.
+    [Test]
+    public void A_call_inside_a_fuzzy_lookbehind_in_a_lookbehind_finds_no_phantom_insertion()
+    {
+        ShouldMatch(new FuzzyRegex("aa(?<=(?:(?<=aa(?R)a)){i<=1})a|aa").Match("aaab"), 0, 2, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(
+            new FuzzyRegex("aa(?<=(?<=aa(?R)a)(?:q?){i<=1})a|aa").Match("aaab"),
+            0,
+            2,
+            new FuzzyCounts(0, 0, 0)
+        );
+    }
+
+    // D48. `(?R)` in a lookbehind compiles the pattern again backwards, and the required string's
+    // mark went into that compile too: at the prefilter's position the engine then moved the
+    // backwards run to the string's forward end, so the lookbehind's text position jumped forward.
+    // The same in upstream (regex 2026.9.10, 2026-09-30), which answers (0, 3) with one insertion
+    // on both rows. Written out to depth 2 the call gives this port's answers:
+    //   aa(?:(?<=a(?:aa(?:(?<=aaa){i<=1}a|))){i<=1}a|)   'aaaa' (0, 4) i=1 here; 'aaab' (0, 2)
+    // (upstream gives (0, 2) on the first written-out row as well, since it never passes a failing
+    // lookaround by an insertion: ledger entry 50).
+    [Test]
+    public void A_backwards_copy_of_the_whole_pattern_does_not_skip_to_the_required_strings_forward_end()
+    {
+        var regex = new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)");
+
+        ShouldMatch(regex.Match("aaaa"), 0, 4, new FuzzyCounts(0, 1, 0));
+        ShouldMatch(regex.Match("aaab"), 0, 2, new FuzzyCounts(0, 0, 0));
+    }
+
+    // D49. The width of a called copy counts only where a call reaches it, so it is no part of the
+    // pattern's minimum width; upstream adds it, and refuses subjects the pattern matches. The
+    // first row is D40's review regression: its new backwards copy of g4 made the pattern need a
+    // character. Upstream (regex 2026.9.10, 2026-09-30):
+    //   search('(?(DEFINE)(?P<g2>(?&g4))(?P<g4>b))(?<!(?&g2))', '')   (0, 0) - no copy of g4 there
+    //   search('(?P<g1>\w)(?<=(?&g1))\W', 'a ')                       None; written out
+    //                                                                  '(?P<g1>\w)(?<=\w)\W' (0, 2)
+    [Test]
+    public void A_called_copy_adds_nothing_to_the_patterns_minimum_width()
+    {
+        ShouldMatch(
+            new FuzzyRegex("(?(DEFINE)(?P<g2>(?&g4))(?P<g4>b))(?<!(?&g2))").Match(""),
+            0,
+            0,
+            new FuzzyCounts(0, 0, 0)
+        );
+        ShouldMatch(new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a "), 0, 2, new FuzzyCounts(0, 0, 0));
     }
 }

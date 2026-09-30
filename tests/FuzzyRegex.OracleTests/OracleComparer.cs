@@ -999,6 +999,8 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             withoutTheFuzzySearchFixes: true,
+            // D49: upstream's minimum width, which counts the called copies (ledger entry 60).
+            ablate: static compiled => compiled.PatternObject.MinWidth = compiled.PatternObject.UpstreamMinWidth,
             keepMinimumOrderFix: true,
             upstreamCallFeatures: true
         );

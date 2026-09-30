@@ -3385,8 +3385,13 @@ internal static class ParseFunctions
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>
     /// <param name="parsed">The parsed pattern.</param>
     /// <param name="flags">The resolved flags.</param>
+    /// <param name="upstreamCallFeatures">Mark the run for every exact compile, as upstream does (D48); for the oracle alone.</param>
     /// <returns>The required string's offset, characters and case flags.</returns>
-    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(RegexBase parsed, int flags)
+    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(
+        RegexBase parsed,
+        int flags,
+        bool upstreamCallFeatures = false
+    )
     {
         (long reqOffset, RegexBase? required) = parsed.GetRequiredString((flags & RegexFlags.Reverse) != 0);
 
@@ -3403,6 +3408,7 @@ internal static class ParseFunctions
         {
             requiredString.Required = true;
             requiredString.RequiredReverse = (flags & RegexFlags.Reverse) != 0;
+            requiredString.RequiredInEveryDirection = upstreamCallFeatures;
         }
 
         if (reqOffset >= RegexFlags.Unlimited)

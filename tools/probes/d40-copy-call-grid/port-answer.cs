@@ -17,6 +17,16 @@ if (args.Length > 1 && string.Equals(args[1], "--check-assert", StringComparison
 // "--field inline" answers each row's written-out pattern instead; a row without one answers
 // "ERR NoPattern".
 string field = args.Length > 2 && string.Equals(args[1], "--field", StringComparison.Ordinal) ? args[2] : "pattern";
+
+// "--ablate" compiles as the oracle's RunWithTheUpstreamCallFeatures does (upstream's call features
+// and minimum width, D40-D49), through reflection since that switch is internal. It leaves the
+// fuzzy-search fixes on, so it is for finding crashes and gross differences, not for exact answers.
+bool ablate = args.Contains("--ablate", StringComparer.Ordinal);
+#pragma warning disable S3011
+var withDefaultVersion = typeof(FuzzyRegex).GetMethod(
+    "WithDefaultVersion",
+    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static
+)!;
 var timeout = TimeSpan.FromSeconds(2);
 foreach (var line in File.ReadLines(args[0]))
 {
@@ -38,7 +48,9 @@ foreach (var line in File.ReadLines(args[0]))
     string answer;
     try
     {
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, timeout);
+        FuzzyRegex regex = ablate
+            ? Ablated(withDefaultVersion, pattern, timeout)
+            : new FuzzyRegex(pattern, FuzzyRegexOptions.None, timeout);
         Match m = regex.Match(subject);
         if (!m.Success)
         {
@@ -83,6 +95,27 @@ foreach (var line in File.ReadLines(args[0]))
     Console.WriteLine(answer);
 }
 
+// S3011 is disabled on purpose: this probe reaches the oracle's internal switch, which the library never sets.
+#pragma warning disable S3011
+static FuzzyRegex Ablated(System.Reflection.MethodInfo withDefaultVersion, string pattern, TimeSpan timeout)
+{
+    var regex = (FuzzyRegex)
+        withDefaultVersion.Invoke(
+            null,
+            [pattern, FuzzyRegexOptions.None, timeout, null, (int)FuzzyRegexOptions.Version1, false, false, false, true]
+        )!;
+    const System.Reflection.BindingFlags Any =
+        System.Reflection.BindingFlags.NonPublic
+        | System.Reflection.BindingFlags.Public
+        | System.Reflection.BindingFlags.Instance;
+    object patternObject = typeof(FuzzyRegex).GetProperty("PatternObject", Any)!.GetValue(regex)!;
+    Type fields = Type.GetType("Fuzzy.Text.RegularExpressions.Engine.PatternObject, FuzzyRegex", throwOnError: true)!;
+    fields
+        .GetField("MinWidth", Any)!
+        .SetValue(patternObject, fields.GetField("UpstreamMinWidth", Any)!.GetValue(patternObject));
+    return regex;
+}
+
 namespace D40Grid
 {
     internal sealed class AssertThrows : System.Diagnostics.TraceListener
@@ -97,3 +130,4 @@ namespace D40Grid
 
     public sealed class AssertFailedException(string message) : Exception(message);
 }
+#pragma warning restore S3011

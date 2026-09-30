@@ -2555,6 +2555,12 @@ internal class String : RegexBase
     internal bool RequiredReverse { get; set; }
 
     /// <summary>
+    /// Whether the mark goes on every exact compile, as upstream's does. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool RequiredInEveryDirection { get; set; }
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
     /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
     /// </summary>
@@ -2623,7 +2629,7 @@ internal class String : RegexBase
         // `aa(?:(?<=a(?R)){i<=1}a|)` matched 'aaaa' as (0, 3) with one insertion, in upstream too
         // (`upstream/src/_regex.c:14892`). The mark only means something where the run is read in
         // the direction the prefilter found it.
-        if (Required && !fuzzy && reverse == RequiredReverse)
+        if (Required && !fuzzy && (reverse == RequiredReverse || RequiredInEveryDirection))
         {
             flags |= NodeFlags.Required;
         }
