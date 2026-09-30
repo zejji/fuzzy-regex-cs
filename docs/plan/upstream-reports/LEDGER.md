@@ -5822,8 +5822,13 @@ every other named ablation has the fix off too. It accounts for 12, 5 and 14 row
 waves at seeds 7, 4242 and 20260927 (diverge 0 at all three). Complete matrix over its 1,619 call rows: C2 502 to 9 and
 C7 68 to 0, no assert on the Debug build.
 
-**Open edge: known defect D62, not ruled.** A partial match that runs out of text inside a call
-that has not returned keeps that call's captures, value included: `(?<o>(?<i>a)b)(?&o)` over 'aba'
-partial gives i = (2, 3) with captures [(0,1), (2,3)] here and i = (2, 3) with ['a', 'a'] upstream,
-where the written-out `(?<o>(?<i>a)b)(?:ab)` gives i = (0, 1) with [(0,1)]. PCRE2 reports no groups
-for a partial match and Perl has none. Red test: `OpenDefectTests`, `[Explicit]`.
+**Partial results: known defect D62, fixed here too (owner ruling 2026-09-30).** A partial match
+that runs out of text inside a call that has not returned kept that call's captures, value
+included: `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (2, 3) with ['a', 'a'] upstream, where
+the written-out `(?<o>(?<i>a)b)(?:(?:a)b)` gives i = (0, 1) in both engines. A partial now reports
+what every completion of the path it took would report: the call returns in any completion, so
+`Matcher.BasicMatch` restores the groups from the outermost open call's frame, whose captures
+`GROUP_CALL` now pushes last, directly under the return node. PCRE2 leaves a partial's groups
+undefined and Perl has no partial matching, so no engine contradicts it. Pinned by
+`CallCaptureTests` (six call rows red without the restore, two controls) and five partial rows
+in the same oracle entry.

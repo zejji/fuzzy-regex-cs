@@ -3532,11 +3532,13 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The ten rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
+    /// The fifteen rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
     /// <c>python tools/record-oracle.py --rows tools/probes/call-capture-rows.jsonl</c>: the ruling's
     /// second witness, a fullmatch, whole-pattern recursion, a call in a repeat and in a lookahead, a
     /// fuzzy call, a reversed call, a partial match, finditer, and a backreference to a group inside
-    /// the called group. The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
+    /// the called group; and five partial matches that run out inside a call that has not returned
+    /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row and a
+    /// reversed one. The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
     /// 'ab', is not among them: the oracle does not compare the capture list of a group with no
     /// value (<c>OracleGroup.Describe</c>), so it agrees there.
     /// </summary>
@@ -3551,6 +3553,11 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": true}, "searchOnlyPartial": false}
         {"generator": "rows", "pattern": "(?<c>a)(?&c)", "flags": 0, "namedLists": {}, "subject": "aaaa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [2, 4]}]}}
         {"generator": "rows", "pattern": "(?<o>x(?<i>y)?)(?&o)\\2", "flags": 0, "namedLists": {}, "subject": "xyxyy", "operation": "search", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": false}}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)b)(?&o)", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "flags": 0, "namedLists": {}, "subject": "cebcebc", "operation": "search", "partial": true, "codepointSpan": [0, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [3, 2]]}, {"number": 2, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[2, 1], [5, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "a(?<g>b)(?R)?c", "flags": 0, "namedLists": {}, "subject": "abab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "g", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "namedLists": {}, "subject": "ababa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[0, 1], [2, 1], [4, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[2, 1], [0, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
         """;
 
     private static readonly ExpectedDivergence[] _entries =
@@ -3575,6 +3582,12 @@ internal static class ExpectedDivergences
                 + "keeping the callee's spans on the backtracking stack for a re-entry "
                 + "(`Matcher.ReturnToCallerCaptures`). Spans, group values, fuzzy counts and every "
                 + "match decision are unchanged, because `current` was already restored.\n"
+                + "AND ON A PARTIAL RESULT (D62, owner ruling 2026-09-30) each group reports what every "
+                + "completion of the path the partial took would report: a call that has not returned "
+                + "returns in any completion, so the groups are restored from the outermost open call's "
+                + "frame (`Matcher.BasicMatch`). `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (0, 1) "
+                + "here, as its written-out form does in both engines, and the unfinished call's (2, 3) "
+                + "upstream. On a partial the shape clause sets the group values aside as well.\n"
                 + "KEYED ON AN ABLATION, AND ON THE SHAPE OF THE DIFFERENCE. A row belongs here when "
                 + "`OracleComparer.RunWithTheUpstreamCallCaptures`, which sets "
                 + "`PatternObject.KeepCallCaptures` and nothing else, reproduces upstream's recorded "
@@ -8553,7 +8566,8 @@ internal static class ExpectedDivergences
     /// entries and never a value; and what it restores is .NET's Group contract, under which a
     /// group's value is its last capture. A discard that dropped the caller's capture and kept the
     /// callee's breaks the last clause. An outcome without capture lists (no match, an error, a
-    /// substitution, a split) is never this shape: nothing the fix changes reaches it.
+    /// substitution, a split) is never this shape: nothing the fix changes reaches it. On a partial
+    /// result the group values may differ as well (D62, see <c>WithoutCaptures</c>).
     /// </remarks>
     /// <param name="ours">This port's answer.</param>
     /// <param name="ablated">The answer with the D51 fix off.</param>
@@ -8571,8 +8585,8 @@ internal static class ExpectedDivergences
     private static bool OnlyCallCapturesAreMissing(MatchOutcome ours, MatchOutcome ablated) =>
         ours.Groups.Count == ablated.Groups.Count
         && string.Equals(
-            WithoutCaptures(ours).Describe(),
-            WithoutCaptures(ablated).Describe(),
+            WithoutCaptures(ours, ours.Partial).Describe(),
+            WithoutCaptures(ablated, ours.Partial).Describe(),
             StringComparison.Ordinal
         )
         && ours.Groups.All(static g =>
@@ -8580,11 +8594,26 @@ internal static class ExpectedDivergences
         )
         && ours.Groups.Zip(ablated.Groups).All(static pair => IsSubsequence(pair.First.Captures, pair.Second.Captures));
 
-    private static MatchOutcome WithoutCaptures(MatchOutcome outcome) =>
-        outcome with
-        {
-            Groups = [.. outcome.Groups.Select(static g => g with { Captures = [] })],
-        };
+    // On a partial result the groups' values are set aside too, and the last group with them: D62
+    // restores the groups a call that has not returned will give back, which can move a value to
+    // the caller's, or unset it. The two clauses on this port's lists still hold there.
+    private static MatchOutcome WithoutCaptures(MatchOutcome outcome, bool partial) =>
+        partial
+            ? outcome with
+            {
+                Groups =
+                [
+                    .. outcome.Groups.Select(static g =>
+                        g.Number == 0 ? g : new OracleGroup(g.Number, false, 0, 0, [])
+                    ),
+                ],
+                LastIndex = -1,
+                LastGroup = null,
+            }
+            : outcome with
+            {
+                Groups = [.. outcome.Groups.Select(static g => g with { Captures = [] })],
+            };
 
     private static bool IsSubsequence(IReadOnlyList<OracleSpan> part, IReadOnlyList<OracleSpan> whole)
     {

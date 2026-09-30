@@ -1701,7 +1701,12 @@ Console.WriteLine(n.Groups["c"].Captures.Count);   // 1 - upstream: 2
 
 Spans, group values, fuzzy counts and which texts match are unchanged; only capture lists differ.
 A recursive pattern such as `(?<rec>\((?:[^()]++|(?&rec))*\))` therefore lists only its outermost
-run, where upstream lists every nested one. There is no option to restore the upstream answer.
+run, where upstream lists every nested one.
+
+A partial match that runs out of text inside a call reports the groups as the call would leave
+them on returning, since every completion of the match returns from it: `(?<o>(?<i>a)b)(?&o)` over
+'aba' as a partial match reports i at 0, as the same pattern with the call written out does; upstream
+reports the unfinished call's i at 2. There is no option to restore the upstream answer.
 Ledger entry 63.
 
 ### A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller

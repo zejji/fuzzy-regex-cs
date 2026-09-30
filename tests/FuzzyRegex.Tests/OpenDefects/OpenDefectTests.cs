@@ -63,22 +63,4 @@ public sealed class OpenDefectTests
 
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
     }
-
-    // D62 (NOT RULED: the owner has not decided; this is the recommendation). A partial match that
-    // runs out of text inside a call that has not returned reports the unfinished call's capture as
-    // the group's value, and lists it. The same pattern written out with the call as a
-    // non-capturing copy, (?<o>(?<i>a)b)(?:ab), gives i = (0, 1) with one capture, which is what D51
-    // (a call keeps none of its captures) implies once the call would return. Port and upstream
-    // 2026.9.10 both give i = (2, 3); upstream lists ['a', 'a'], the port [(0,1), (2,3)]. PCRE2
-    // reports no groups for a partial match and Perl has none. Recommended fix: at a partial
-    // result, restore the groups from the outermost open call's frame.
-    [Test]
-    public void A_partial_that_ends_inside_an_unreturned_call_keeps_none_of_its_captures()
-    {
-        Match m = new FuzzyRegex("(?<o>(?<i>a)b)(?&o)").Match("aba", partial: true);
-
-        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 3));
-        (m.Groups["i"].Index, m.Groups["i"].Length).Should().Be((0, 1));
-        m.Groups["i"].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1));
-    }
 }

@@ -3038,8 +3038,8 @@ internal static class Matcher
     /// call that captures nothing costs one caller count per group more than upstream.
     /// </para>
     /// <para>
-    /// The caller's copy is on the saved stack, groups last: the caller has already popped its
-    /// repeats and capture change. Each group's entry is
+    /// The caller's copy is on the saved stack, on top of its repeats and capture change and right
+    /// under the return node, so it comes off first (D62 put it there). Each group's entry is
     /// <c>span[callerCount] ... span[calleeCount - 1] callerCount calleeCount calleeCurrent</c>, last
     /// group first, so <see cref="PopCalleeCaptures"/> meets the first group first.
     /// </para>
@@ -9497,12 +9497,66 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Upstream <c>basic_match</c>, and NOT UPSTREAM'S (D62) in what a partial result reports.
+    /// </summary>
+    /// <remarks>
+    /// A partial match reports, for each group, what every completion of the path the partial took
+    /// would report (owner ruling on D62, DECISIONS.md 2026-09-30). A group call that has not
+    /// returned when the text ran out will return in any completion, and its return puts the
+    /// caller's groups back (D51), so the groups are restored from the outermost open call's saved
+    /// frame here: <c>(?&lt;o&gt;(?&lt;i&gt;a)b)(?&amp;o)</c> over 'aba' partial reports i = (0, 1),
+    /// as the written-out <c>(?&lt;o&gt;(?&lt;i&gt;a)b)(?:(?:a)b)</c> does, where upstream and this
+    /// port reported the unfinished call's (2, 3). Only a partial result reaches the restore: every
+    /// arm that answers <see cref="MatchStatus.Partial"/> does so only when a partial side is set,
+    /// which the assertion below checks. Under <see cref="PatternObject.KeepCallCaptures"/> the
+    /// groups are left as upstream leaves them.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>The match status.</returns>
+    internal static int BasicMatch(MatchState state, bool search)
+    {
+        int status = BasicMatchCore(state, search);
+        if (status == MatchStatus.Partial && state.OpenCalls.Count > 0 && !state.Pattern.KeepCallCaptures)
+        {
+            Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial search answers partial");
+            ReturnFromOpenCallsAtAPartial(state);
+        }
+
+        return status;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D62): puts every group back as it was when the outermost open call was made,
+    /// from that call's saved frame, whose captures lie directly under its return node.
+    /// </summary>
+    /// <param name="state">The match state, stopped at a partial result.</param>
+    private static void ReturnFromOpenCallsAtAPartial(MatchState state)
+    {
+        int frameTop = state.OpenCalls[0].SstackDepth;
+        int groups = state.Groups.Length;
+        int captures = frameTop - sizeof(long) - (2 * sizeof(long) * groups);
+        Debug.Assert(
+            captures >= 0 && frameTop <= state.Sstack.Count,
+            "the outermost open call's frame is still on the saved stack"
+        );
+        for (int g = 0; g < groups; g++)
+        {
+            GroupData group = state.Groups[g];
+            int count = (int)state.Sstack.SizeAt(captures + (2 * sizeof(long) * g));
+            Debug.Assert(count <= group.Count, "a call only adds captures to what its caller had");
+            group.Count = count;
+            group.Current = (int)state.Sstack.SizeAt(captures + (2 * sizeof(long) * g) + sizeof(long));
+        }
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to advance the start position until something matches.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int BasicMatch(MatchState state, bool search)
+    private static int BasicMatchCore(MatchState state, bool search)
     {
         PatternObject pattern = state.Pattern;
         Node startNode = pattern.StartNode!;
@@ -11455,10 +11509,12 @@ internal static class Matcher
 
                     // For the caller. Each group's count as well as its current, where upstream's
                     // push_groups saves only current: the return restores both (D51, see
-                    // ReturnToCallerCaptures).
-                    PushCaptures(state, state.Sstack);
+                    // ReturnToCallerCaptures). The captures go last, right under the return node,
+                    // so a partial result can find them at a fixed offset (D62, see
+                    // ReturnFromOpenCallsAtAPartial); upstream's order is groups first.
                     PushRepeats(state, state.Sstack);
                     state.Sstack.PushSize(state.CaptureChange);
+                    PushCaptures(state, state.Sstack);
                     state.Sstack.PushNode(groupCallReturnNode);
                     state.Bstack.PushUInt8((byte)Opcode.GroupCall);
 
@@ -11478,7 +11534,7 @@ internal static class Matcher
                         )
                     );
 
-                    /* sstack: caller_captures caller_repeats capture_change return_node
+                    /* sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: GROUP_CALL
                      */
@@ -11538,7 +11594,7 @@ internal static class Matcher
                 {
                     /* If called:
                      *
-                     * sstack: caller_captures caller_repeats capture_change return_node
+                     * sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      *
@@ -11564,14 +11620,18 @@ internal static class Matcher
                         // so matching resumes exactly where the call left it. Upstream restores only
                         // each group's current here, so the captures the call made stayed on the
                         // list; here they are thrown away, as in Perl and PCRE2 (D51, see
-                        // ReturnToCallerCaptures). The repeats are exchanged first because the
-                        // caller's groups lie under them on the saved stack.
+                        // ReturnToCallerCaptures). The groups are exchanged first because the
+                        // caller's lie on top of its repeats on the saved stack (D62).
+                        if (!ReturnToCallerCaptures(state))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
                         PushRepeats(state, state.Bstack);
                         state.Bstack.PushSize(state.CaptureChange);
                         if (
                             !state.Sstack.PopSize(out long groupReturnCaptureChange)
                             || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                            || !ReturnToCallerCaptures(state)
                         )
                         {
                             return MatchStatus.Illegal;
@@ -11606,7 +11666,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_repeats capture_change callee_captures call_key call_reach
+                     * bstack: callee_captures callee_repeats capture_change call_key call_reach
                      *         return_node GROUP_RETURN
                      *
                      * else:
@@ -14001,7 +14061,7 @@ internal static class Matcher
                 }
                 case Opcode.GroupCall: // Group call (:16354).
                 {
-                    /* sstack: caller_captures caller_repeats capture_change return_node
+                    /* sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      */
@@ -14018,9 +14078,9 @@ internal static class Matcher
                     // means there is nowhere to return to.
                     if (
                         !state.Sstack.DropSize()
+                        || !PopCallerCaptures(state)
                         || !state.Sstack.PopSize(out long groupCallCaptureChange)
                         || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                        || !PopCallerCaptures(state)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -14036,7 +14096,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_repeats capture_change callee_captures call_key call_reach return_node
+                     * bstack: callee_captures callee_repeats capture_change call_key call_reach return_node
                      *
                      * else:
                      *
@@ -14078,17 +14138,27 @@ internal static class Matcher
                         // For the caller. The forward arm's exchange, run the other way round: the
                         // caller's state goes back on the saved stack and the callee's comes off
                         // the backtracking stack, so the callee resumes inside the call with the
-                        // captures it had made (D51, see PopCalleeCaptures). The groups first, as
-                        // they lie on top of the callee's repeats here and under the caller's
-                        // repeats on the saved stack.
+                        // captures it had made (D51, see PopCalleeCaptures). The repeats first:
+                        // they lie on top of the callee's groups here, and under the caller's
+                        // groups on the saved stack (D62).
+                        PushRepeats(state, state.Sstack);
+                        state.Sstack.PushSize(state.CaptureChange);
+                        if (
+                            !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
+                            || !PopRepeats(state, state.Bstack, testJustEnded: false)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = groupReturnBackCaptureChange;
+
                         PushCaptures(state, state.Sstack);
                         if (!PopCalleeCaptures(state))
                         {
                             return MatchStatus.Illegal;
                         }
 
-                        PushRepeats(state, state.Sstack);
-                        state.Sstack.PushSize(state.CaptureChange);
                         state.Sstack.PushNode(groupReturnBackNode);
 
                         // The frame is back, so the call is open again and ends where it now ends.
@@ -14100,21 +14170,10 @@ internal static class Matcher
                         // It has returned, so it is not one the failed-call memo may record.
                         state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
 
-                        /* sstack: caller_captures caller_repeats capture_change return_node
+                        /* sstack: caller_repeats capture_change caller_captures return_node
                          *
-                         * bstack: callee_repeats capture_change
+                         * bstack: -
                          */
-
-                        // For the callee.
-                        if (
-                            !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                            || !PopRepeats(state, state.Bstack, testJustEnded: false)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = groupReturnBackCaptureChange;
                     }
                     else
                     {
@@ -14123,7 +14182,7 @@ internal static class Matcher
 
                     /* If called:
                      *
-                     * sstack: caller_captures caller_repeats capture_change return_node
+                     * sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      *

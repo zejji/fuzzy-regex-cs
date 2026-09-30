@@ -148,6 +148,58 @@ public sealed class CallCaptureTests
         Render(m).Should().Be("(0,2)P (0,1)[(0,1)]");
     }
 
+    /// <summary>
+    /// D62 (owner ruling 2026-09-30): a partial result reports, for each group, what every
+    /// completion of the path the partial took would report. A call that has not returned when the
+    /// text runs out returns in any completion, and its return puts the caller's groups back, so the
+    /// partial reports the groups as the outermost open call's caller had them.
+    /// </summary>
+    /// <remarks>
+    /// Each expected value is the port's answer for the same pattern with the calls written out as
+    /// non-capturing copies, which upstream 2026.9.10 gives too (measured 2026-09-30); upstream's
+    /// answer for the call form, quoted per row, reports the unfinished call's captures. PCRE2 leaves
+    /// the groups of a partial undefined (pcre2partial: "the values in the rest of the ovector are
+    /// undefined") and Perl has no partial matching, so neither contradicts the rule.
+    /// </remarks>
+    [Test]
+    // The witness; written out (?<o>(?<i>a)b)(?:(?:a)b). Upstream: i = (2,3), [(0,1), (2,3)].
+    [Arguments("(?<o>(?<i>a)b)(?&o)", "aba", "(0,3)P (0,2)[(0,2)] (0,1)[(0,1)]")]
+    // Two open calls, i calling j; written out (?<j>ce)(?<i>(?<k>b)(?:ce))(?:(?:b)(?:ce)).
+    // Upstream: j [(0,2), (3,5)], k = (5,6).
+    [Arguments("(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "cebcebc", "(0,7)P (0,2)[(0,2)] (2,5)[(2,5)] (2,3)[(2,3)]")]
+    // Whole-pattern recursion; written out a(?<g>b)(?:a(?:b)(?:a(?:b)c)?c)?c. Upstream: g = (3,4).
+    [Arguments("a(?<g>b)(?R)?c", "abab", "(0,4)P (1,2)[(1,2)]")]
+    // Reversed, running out at the left; written out (?r)(?:b(?:a))(?<o>b(?<i>a)). Upstream: i = (0,1).
+    [Arguments("(?r)(?&o)(?<o>b(?<i>a))", "aba", "(0,3)P (1,3)[(1,3)] (2,3)[(2,3)]")]
+    // A fuzzy call, the substitution made inside it; written out (?<o>(?<i>a)b)(?:(?:a)b){s<=1}.
+    // Upstream: i = (2,3).
+    [Arguments("(?<o>(?<i>a)b)(?:(?&o)){s<=1}", "abx", "(0,3)P (0,2)[(0,2)] (0,1)[(0,1)]")]
+    // Path-dependent. The partial runs out in the third iteration's first alternative, inside the
+    // call (?&o) at 4, so the completion of that path returns from the call, restoring o = (2,4)
+    // and i = (2,3) from the second iteration, and then needs 'c'. Upstream: i = (4,5), the
+    // unfinished call's.
+    [Arguments("^(?:(?&o)c|(?<o>(?<i>a)b))+$", "ababa", "(0,5)P (2,4)[(0,2),(2,4)] (2,3)[(0,1),(2,3)]")]
+    // No call: a group still open at the edge stays unset, and one closed before it keeps its
+    // value, here and upstream. D62 must not change this.
+    [Arguments("(?<a>x)(?<b>y(?<c>z)w)", "xyz", "(0,3)P (0,1)[(0,1)] unset[] (2,3)[(2,3)]")]
+    public void A_partial_that_ends_inside_an_unreturned_call_reports_the_callers_groups(
+        string pattern,
+        string subject,
+        string expected
+    ) => Render(new FuzzyRegex(pattern).Match(subject, partial: true)).Should().Be(expected);
+
+    [Test]
+    public void A_complete_match_through_the_same_call_is_unchanged_by_the_partial_rule()
+    {
+        // Only a partial result reaches the D62 restore (Matcher.BasicMatch asserts it); the same
+        // pattern over a subject it completes on gives the D51 answer. PCRE2 and Perl: o = (0,2),
+        // i = (0,1).
+        Render(new FuzzyRegex("(?<o>(?<i>a)b)(?&o)").Match("abab", partial: true))
+            .Should()
+            .Be("(0,4) (0,2)[(0,2)] (0,1)[(0,1)]");
+        Render(new FuzzyRegex("(?<o>(?<i>a)b)(?&o)").Match("abab")).Should().Be("(0,4) (0,2)[(0,2)] (0,1)[(0,1)]");
+    }
+
     [Test]
     public void Backtracking_into_a_call_that_returned_gets_back_the_captures_it_made()
     {
