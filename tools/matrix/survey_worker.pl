@@ -7,9 +7,11 @@
 # second guard, and it needs PERL_SIGNALS=unsafe, because Perl's default deferred signals are not
 # delivered while the regex engine runs.
 #
-# Operations: survey.py has already written "match" as a search whose answer must start at 0 (for a
-# backtracking engine the first start tried is 0, so the first match found there IS the anchored
-# match), and "fullmatch" as \A(?:...)\z (rows with a whole-pattern call are out of dialect for it).
+# Operations: survey.py has already written "match" as a search of \G(?:...) and "fullmatch" as
+# \G(?:...)\z, both from pos() (rows with a whole-pattern call are out of dialect for fullmatch).
+# A "match" of a pattern that calls itself whole stays a search whose answer must start at pos
+# (the first start a backtracking engine tries is pos, so the first match found there IS the
+# anchored match); survey.py refuses those with \K, which moves the reported start.
 # Spans are codepoints: the subject is decoded text.
 use strict;
 use warnings;
@@ -36,11 +38,16 @@ for my $k ($start .. $#rows) {
         print $json->encode(\%res), "\n";
         next;
     }
+    # A slice (upstream's pos and endpos): the subject is cut at endpos and every search starts at
+    # pos() through a scalar //g, so a lookbehind still sees the text before pos and \G is pos.
     my $subject = $row->{subject};
+    $subject = substr($subject, 0, $row->{endpos}) if defined $row->{endpos};
+    my $first = $row->{pos} // 0;
     my $op = $row->{op};
     my $ok = eval {
         local $SIG{ALRM} = sub { die "timeout\n" };
         alarm 3;
+        pos($subject) = $first;
         if ($op eq 'finditer') {
             my @out;
             while ($subject =~ /$re/g) {
@@ -49,11 +56,13 @@ for my $k ($start .. $#rows) {
             }
             $res{status} = 'matches';
             $res{matches} = \@out;
-        } elsif ($subject =~ $re) {
+        } elsif ($subject =~ /$re/g) {
             my $n = $row->{ngroups};
             my @groups = map { defined $-[$_] ? [$-[$_], $+[$_]] : undef } 1 .. $n;
             my @span = ($-[0], $+[0]);
-            if ($op eq 'match' && $span[0] != 0) {
+            # "match" reaches here only for a pattern that calls itself whole (survey.py wraps
+            # every other one in \G(?:...)): the first match found from pos must start at pos.
+            if ($op eq 'match' && $span[0] != $first) {
                 $res{status} = 'none';
             } else {
                 $res{status} = 'match';

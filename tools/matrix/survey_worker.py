@@ -16,6 +16,7 @@ matching and no ANCHORED/ENDANCHORED options, so it cannot ask this survey's que
 
 import ctypes
 import json
+import os
 import sys
 
 
@@ -37,19 +38,24 @@ def _python_engine(name):
 
     def answer(row):
         flags = row["flags"]
-        pattern = mod.compile(row["pattern"], flags)
+        lists = (row.get("namedLists") or {}) if name == "regex" else {}
+        pattern = mod.compile(row["pattern"], flags, **lists)
         kw = {"timeout": 2.0} if name == "regex" else {}
         if name == "regex" and row.get("partial"):
             kw["partial"] = True
+        # pos and endpos are the row's slice (survey.py passes them to regex and re only).
+        args = [row["subject"], row.get("pos") or 0]
+        if row.get("endpos") is not None:
+            args.append(row["endpos"])
         op = row["op"]
         if op == "finditer":
             out = []
-            for m in pattern.finditer(row["subject"], **kw):
+            for m in pattern.finditer(*args, **kw):
                 out.append({"span": _span(m), "partial": bool(getattr(m, "partial", False))})
                 if len(out) > 50:
                     break
             return {"status": "matches", "matches": out, "unit": "cp"}
-        m = getattr(pattern, op)(row["subject"], **kw)
+        m = getattr(pattern, op)(*args, **kw)
         if m is None:
             return {"status": "none", "unit": "cp"}
         res = {"status": "partial" if getattr(m, "partial", False) else "match", "span": _span(m),
@@ -103,7 +109,7 @@ def _pcre2_engine():
 
     def answer(row):
         pat = row["pattern"].encode()
-        copts = UTF | UCP
+        copts = UTF | UCP | int(os.environ.get("SURVEY_PCRE2_COPTS", "0"), 0)
         for letter, bit in (("i", CASELESS), ("m", MULTILINE), ("s", DOTALL)):
             if letter in row["flags"]:
                 copts |= bit
@@ -112,7 +118,13 @@ def _pcre2_engine():
         if not code:
             return {"status": "error", "error": "compile: " + message(err.value)}
         md = lib.pcre2_match_data_create_from_pattern_8(code, None)
-        subj = row["subject"].encode()
+        # A slice: the subject ends at endpos, and the match starts at pos (a start offset, so a
+        # lookbehind still sees the text before it and ^ does not match there, as in upstream).
+        text = row["subject"]
+        if row.get("endpos") is not None:
+            text = text[:row["endpos"]]
+        subj = text.encode()
+        first = len(text[:row.get("pos") or 0].encode())
         op = row["op"]
         try:
             def run(start, mopts):
@@ -122,7 +134,7 @@ def _pcre2_engine():
 
             ngroups = row["ngroups"]
             if op == "finditer":
-                out, start, mopts = [], 0, 0
+                out, start, mopts = [], first, 0
                 while start <= len(subj) and len(out) <= 50:
                     rc, ov = run(start, mopts)
                     if rc == NOMATCH:
@@ -142,7 +154,7 @@ def _pcre2_engine():
             mopts = {"search": 0, "match": ANCHORED, "fullmatch": ANCHORED | ENDANCHORED}[op]
             if row.get("partial"):
                 mopts |= PARTIAL_SOFT
-            rc, ov = run(0, mopts)
+            rc, ov = run(first, mopts)
             if rc == NOMATCH:
                 return {"status": "none", "unit": "utf8"}
             if rc == PARTIAL:

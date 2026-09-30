@@ -1,4 +1,4 @@
-"""The engine survey for the 2026-09-30 complete matrix: run rows through every engine that can
+r"""The engine survey for the 2026-09-30 complete matrix: run rows through every engine that can
 express them, and record where the engines agree.
 
     python tools/matrix/survey.py <rows.jsonl> --out <dir> [--engines regex,pcre2,perl,...]
@@ -31,6 +31,22 @@ re, which have no regex timeout of their own. TRE runs as one WSL batch under an
 Spans are normalised to codepoints. Output in --out: results.jsonl (one line per row per engine),
 rows.jsonl (each row with its constructs and verdict), summary.json and summary.md (per cell: rows,
 answering engines, agree, disagree, and the disagreeing rows).
+
+Copied from matrix/answer-key 3e255f4e for the harness's check C7 (tools/matrix/c7.py), with these
+changes, each found on the harness's 12,457 rows (2026-09-30):
+  - the leading-flags reader took a call as flags: `(?1)x` gave "inline flag 1", so 155 rows that
+    start with a numbered call were out of every engine's dialect; it now reads flag letters only;
+  - "a scoped flag after the start" matched `(?R)`, so 249 rows with a whole-pattern call after the
+    start were refused; it now matches flag letters only;
+  - rows may carry pos and endpos (upstream's slice). PCRE2 gets the subject cut at endpos and a
+    start offset, Perl the cut subject with pos() set, re its own pos/endpos; node and .NET say n/a
+    (.NET's beginning/length hides the text before the start from lookbehind, which upstream's pos
+    does not);
+  - Perl's "match" was a search whose answer must start at 0, which is wrong when `\K` moves the
+    reported start: `a\Kb` match 'ab' answered None. It is now `\G(?:...)` searched from pos, and
+    "fullmatch" `\G(?:...)\z` (both were `\A`, which cannot anchor at a pos after 0). A pattern that
+    calls itself whole keeps the old reading, and is n/a if it also has `\K`;
+  - constructs.json is read from this directory, else from the matrix/answer-key branch.
 """
 
 import argparse
@@ -80,7 +96,16 @@ def tags_of(row):
     return tags
 
 
-_CONSTRUCTS = json.loads((HERE / "constructs.json").read_text(encoding="utf-8"))
+def _constructs_text():
+    local = HERE / "constructs.json"
+    if local.exists():
+        return local.read_text(encoding="utf-8")
+    return subprocess.run(["git", "show", "matrix/answer-key:tools/matrix/constructs.json"], cwd=HERE,
+                          capture_output=True, text=True, encoding="utf-8", check=True,
+                          stdin=subprocess.DEVNULL).stdout
+
+
+_CONSTRUCTS = json.loads(_constructs_text())
 FAMILY = {c["id"]: c["family"] for c in _CONSTRUCTS["constructs"]}
 RISKY = _CONSTRUCTS["risky_families"]
 
@@ -95,7 +120,9 @@ _REGEX_ONLY_BITS = {4096: "BESTMATCH", 32768: "ENHANCEMATCH", 16384: "FULLCASE",
                     2048: "WORD", 65536: "POSIX", 128: "ASCII", 64: "VERBOSE"}
 _HARMLESS_BITS = {32: "UNICODE", 8192: "VERSION0"}
 REVERSE_BIT = 1024
-_LEADING = re.compile(r"^\(\?([a-zA-Z0-9]+)\)")
+# Flag letters only: `(?1)` and `(?R)` are calls, not flags.
+_FLAG_GROUP = r"(?:[abefiLmprsuwx]|V[01])+"
+_LEADING = re.compile(r"^\(\?(" + _FLAG_GROUP + r")\)")
 
 
 def analyse(row):
@@ -129,7 +156,7 @@ def analyse(row):
                 info["regex_only"].append(f"inline flag {c}")
         pattern = pattern[m.end():]
     info["body"] = pattern
-    compiled = regex.compile(row["pattern"], bits)
+    compiled = regex.compile(row["pattern"], bits, **(row.get("namedLists") or {}))
     names = {v: k for k, v in compiled.groupindex.items()}
     info["ngroups"] = compiled.groups
     info["groupnames"] = [names.get(g) for g in range(1, compiled.groups + 1)]
@@ -142,7 +169,7 @@ _REGEX_ONLY_SYNTAX = (
     ("a named list", r"\\L<"),
     ("\\m or \\M word boundaries", r"(?<!\\)(?:\\\\)*\\[mM]"),
     ("a scoped regex-only flag", r"\(\?[imsx]*[befprwaLV][a-zA-Z0-9-]*[:)]"),
-    ("a scoped flag after the start", r"(?<=.)\(\?[a-zA-Z]+\)"),
+    ("a scoped flag after the start", r"(?<=.)\(\?" + _FLAG_GROUP + r"\)"),
     ("a grapheme or property escape", r"(?<!\\)(?:\\\\)*\\[XpPN]"),
 )
 _CALL = re.compile(r"\(\?(?:R|[+-]?\d+|&\w+|P>\w+)\)|\(\?\(DEFINE\)")
@@ -182,9 +209,16 @@ def translate(row, info, engine):
     p = info["body"]
     op = row["operation"]
     partial = bool(row.get("partial"))
+    pos, endpos = row.get("pos"), row.get("endpos")
+    sliced = pos is not None or endpos is not None
     if engine == "regex":
         return {"pattern": row["pattern"], "flags": int(row.get("flags") or 0), "subject": row["subject"],
-                "op": op, "partial": partial}
+                "op": op, "partial": partial, "pos": pos, "endpos": endpos,
+                "namedLists": row.get("namedLists") or {}}
+    if sliced and engine not in ("pcre2", "perl", "re"):
+        return "a pos/endpos slice"
+    if sliced and (endpos if endpos is not None else len(row["subject"])) < (pos or 0):
+        return "endpos before pos"
     if engine == "tre":
         return "tre is asked through its own gate"
     if engine == "fuzzyref":
@@ -255,11 +289,20 @@ def translate(row, info, engine):
                 flags |= bit
         out.update(pattern=p, flags=flags)
         return out
+    if engine in ("pcre2", "perl", "re"):
+        out["pos"], out["endpos"] = pos, endpos
     if engine in ("perl", "dotnet") and op == "fullmatch":
         if _WHOLE_CALL.search(p):
             return "fullmatch of a pattern that calls itself (the \\A...\\z wrapper would be recursed into)"
-        p = f"\\A(?:{p})\\z"
+        # Perl searches from pos() (survey_worker.pl), so \G is where the slice starts; .NET has no slice.
+        p = f"\\G(?:{p})\\z" if engine == "perl" else f"\\A(?:{p})\\z"
         out["op"] = "search"
+    if engine == "perl" and op == "match":
+        if not _WHOLE_CALL.search(p):
+            p = f"\\G(?:{p})"
+            out["op"] = "search"
+        elif _KEEP.search(p):
+            return "match of a pattern that calls itself and has \\K (no anchor to wrap it in)"
     if engine == "pcre2" and op == "fullmatch" and partial:
         # PCRE2 10.47 refuses PCRE2_ENDANCHORED together with PCRE2_PARTIAL_SOFT at match time
         # ("bad option value", measured 2026-09-30), so a partial fullmatch is an anchored match
