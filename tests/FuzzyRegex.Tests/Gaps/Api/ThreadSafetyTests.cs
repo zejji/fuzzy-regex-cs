@@ -802,6 +802,9 @@ public sealed class ThreadSafetyTests
             // OracleComparer.RunWithTheUpstreamCallCaptures sets it, on a pattern compiled for that
             // one call.
             "PatternObject.KeepCallCaptures",
+            // D62 added PartialRestoresFrameByFrame, likewise set only by
+            // OracleComparer.RunWithTheFrameByFrameRestore.
+            "PatternObject.PartialRestoresFrameByFrame",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

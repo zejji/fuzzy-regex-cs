@@ -3532,13 +3532,13 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The fifteen rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
+    /// The sixteen rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
     /// <c>python tools/record-oracle.py --rows tools/probes/call-capture-rows.jsonl</c>: the ruling's
     /// second witness, a fullmatch, whole-pattern recursion, a call in a repeat and in a lookahead, a
     /// fuzzy call, a reversed call, a partial match, finditer, and a backreference to a group inside
-    /// the called group; and five partial matches that run out inside a call that has not returned
-    /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row and a
-    /// reversed one. The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
+    /// the called group; and six partial matches that run out inside a call that has not returned
+    /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row, a
+    /// reversed one, and two nested calls of one group (blind review of D62). The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
     /// 'ab', is not among them: the oracle does not compare the capture list of a group with no
     /// value (<c>OracleGroup.Describe</c>), so it agrees there.
     /// </summary>
@@ -3558,6 +3558,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "a(?<g>b)(?R)?c", "flags": 0, "namedLists": {}, "subject": "abab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "g", "partial": true}, "searchOnlyPartial": false}
         {"generator": "rows", "pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "namedLists": {}, "subject": "ababa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[0, 1], [2, 1], [4, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
         {"generator": "rows", "pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[2, 1], [0, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
         """;
 
     private static readonly ExpectedDivergence[] _entries =
@@ -3580,14 +3581,17 @@ internal static class ExpectedDivergences
                 + "PCRE2 and Perl give c = (0, 1).\n"
                 + "THE FIX saves each group's count as well at the call and restores both on return, "
                 + "keeping the callee's spans on the backtracking stack for a re-entry "
-                + "(`Matcher.ReturnToCallerCaptures`). Spans, group values, fuzzy counts and every "
+                + "(`Matcher.ReturnToCallerCaptures`). On a complete match, spans, group values, fuzzy counts and every "
                 + "match decision are unchanged, because `current` was already restored.\n"
                 + "AND ON A PARTIAL RESULT (D62, owner ruling 2026-09-30) each group reports what every "
                 + "completion of the path the partial took would report: a call that has not returned "
                 + "returns in any completion, so the groups are restored from the outermost open call's "
                 + "frame (`Matcher.BasicMatch`). `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (0, 1) "
                 + "here, as its written-out form does in both engines, and the unfinished call's (2, 3) "
-                + "upstream. On a partial the shape clause sets the group values aside as well.\n"
+                + "upstream. On a partial the shape clause sets the group values aside as well, so a "
+                + "partial answer must also equal `OracleComparer.RunWithTheFrameByFrameRestore`'s, the "
+                + "same restore computed by walking every open call's frame (`PartialIsTheFrameRestore`; "
+                + "a restore from the innermost frame fails it, blind review of D62).\n"
                 + "KEYED ON AN ABLATION, AND ON THE SHAPE OF THE DIFFERENCE. A row belongs here when "
                 + "`OracleComparer.RunWithTheUpstreamCallCaptures`, which sets "
                 + "`PatternObject.KeepCallCaptures` and nothing else, reproduces upstream's recorded "
@@ -3606,6 +3610,10 @@ internal static class ExpectedDivergences
                 OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } ablated
                 && OnlyTheAblationExplainsIt(row, ours, ablated)
                 && OnlyCallCapturesAreMissing(ours, ablated)
+                && PartialIsTheFrameRestore(
+                    ours,
+                    IsPartial(ours) ? OracleComparer.RunWithTheFrameByFrameRestore(row) : null
+                )
         ),
         // FIRST, so that a row ledger entry 42 alone explains is classified before an entry keyed
         // on another fix's ablation can see it: those ablations run with entries 42 and 44 off too
@@ -8581,6 +8589,28 @@ internal static class ExpectedDivergences
                     .All(static pair => OnlyCallCapturesAreMissing(pair.First, pair.Second)),
             _ => false,
         };
+
+    /// <summary>Whether an answer is a partial match, or a finditer whose matches include one.</summary>
+    /// <param name="outcome">The answer.</param>
+    /// <returns><see langword="true"/> for a partial.</returns>
+    internal static bool IsPartial(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            MatchOutcome match => match.Partial,
+            MatchesOutcome matches => matches.Matches.Any(static m => m.Partial),
+            _ => false,
+        };
+
+    /// <summary>
+    /// D62's second clause: an answer that is not partial passes; a partial one passes only when it
+    /// is exactly the frame-by-frame restore's answer to the same row (<paramref name="byFrames"/>).
+    /// </summary>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="byFrames">The frame-by-frame restore's answer, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the partial's groups are the outermost frame's.</returns>
+    internal static bool PartialIsTheFrameRestore(IOracleOutcome ours, IOracleOutcome? byFrames) =>
+        !IsPartial(ours)
+        || (byFrames is not null && string.Equals(ours.Describe(), byFrames.Describe(), StringComparison.Ordinal));
 
     private static bool OnlyCallCapturesAreMissing(MatchOutcome ours, MatchOutcome ablated) =>
         ours.Groups.Count == ablated.Groups.Count

@@ -800,6 +800,16 @@ internal sealed class PatternObject
     internal bool KeepCallCaptures;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a partial result restores the groups
+    /// by walking every open call's frame, innermost first, instead of from the outermost frame
+    /// alone. Both give the same groups, since each frame saved its caller's; the oracle sets it on
+    /// a pattern it compiled for one call, as a second computation the D62 key compares against, so
+    /// a restore from the wrong frame is not accounted for as the divergence (blind review,
+    /// 2026-09-30). See <c>Matcher.BasicMatch</c>.
+    /// </summary>
+    internal bool PartialRestoresFrameByFrame;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
     /// below its minimum error count fails at once, without trying the trailing insertions that
     /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one

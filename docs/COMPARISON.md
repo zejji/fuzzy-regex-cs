@@ -1699,12 +1699,12 @@ Console.WriteLine(n.Groups["c"].Index);   // 0 - upstream: 0
 Console.WriteLine(n.Groups["c"].Captures.Count);   // 1 - upstream: 2
 ```
 
-Spans, group values, fuzzy counts and which texts match are unchanged; only capture lists differ.
-A recursive pattern such as `(?<rec>\((?:[^()]++|(?&rec))*\))` therefore lists only its outermost
-run, where upstream lists every nested one.
+On a complete match, spans, group values, fuzzy counts and which texts match are unchanged; only
+capture lists differ. A recursive pattern such as `(?<rec>\((?:[^()]++|(?&rec))*\))` therefore
+lists only its outermost run, where upstream lists every nested one.
 
-A partial match that runs out of text inside a call reports the groups as the call would leave
-them on returning, since every completion of the match returns from it: `(?<o>(?<i>a)b)(?&o)` over
+On a partial match a group's value can differ too. One that runs out of text inside a call reports
+the groups as the call would leave them on returning, since every completion of the match returns from it: `(?<o>(?<i>a)b)(?&o)` over
 'aba' as a partial match reports i at 0, as the same pattern with the call written out does; upstream
 reports the unfinished call's i at 2. There is no option to restore the upstream answer.
 Ledger entry 63.

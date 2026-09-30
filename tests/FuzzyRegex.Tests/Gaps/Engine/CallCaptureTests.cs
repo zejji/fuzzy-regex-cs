@@ -167,6 +167,10 @@ public sealed class CallCaptureTests
     // Two open calls, i calling j; written out (?<j>ce)(?<i>(?<k>b)(?:ce))(?:(?:b)(?:ce)).
     // Upstream: j [(0,2), (3,5)], k = (5,6).
     [Arguments("(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "cebcebc", "(0,7)P (0,2)[(0,2)] (2,5)[(2,5)] (2,3)[(2,3)]")]
+    // Two nested open calls of the same group, restored from the OUTER one: written out
+    // (?<o>(?<i>a)(?:(?:a)(?:(?:a)b)?b)?b), i = (0,1) and o unset. Upstream: i = (2,3). A restore
+    // from the innermost frame gives i = (1,2) with [(0,1), (1,2)] (blind review, 2026-09-30).
+    [Arguments("(?<o>(?<i>a)(?&o)?b)", "aaa", "(0,3)P unset[] (0,1)[(0,1)]")]
     // Whole-pattern recursion; written out a(?<g>b)(?:a(?:b)(?:a(?:b)c)?c)?c. Upstream: g = (3,4).
     [Arguments("a(?<g>b)(?R)?c", "abab", "(0,4)P (1,2)[(1,2)]")]
     // Reversed, running out at the left; written out (?r)(?:b(?:a))(?<o>b(?<i>a)). Upstream: i = (0,1).

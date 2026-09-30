@@ -13,3 +13,4 @@
 {"pattern": "a(?<g>b)(?R)?c", "flags": 0, "subject": "abab", "operation": "search", "partial": true}
 {"pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "subject": "ababa", "operation": "search", "partial": true}
 {"pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "subject": "aba", "operation": "search", "partial": true}
+{"pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "subject": "aaa", "operation": "search", "partial": true}

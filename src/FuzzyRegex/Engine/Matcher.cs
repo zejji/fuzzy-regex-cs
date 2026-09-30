@@ -9520,7 +9520,18 @@ internal static class Matcher
         if (status == MatchStatus.Partial && state.OpenCalls.Count > 0 && !state.Pattern.KeepCallCaptures)
         {
             Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial search answers partial");
-            ReturnFromOpenCallsAtAPartial(state);
+            if (state.Pattern.PartialRestoresFrameByFrame)
+            {
+                // The oracle's second computation of the same answer; see the flag.
+                for (int frame = state.OpenCalls.Count - 1; frame >= 0; frame--)
+                {
+                    RestoreGroupsFromOpenCall(state, frame);
+                }
+            }
+            else
+            {
+                ReturnFromOpenCallsAtAPartial(state);
+            }
         }
 
         return status;
@@ -9531,14 +9542,22 @@ internal static class Matcher
     /// from that call's saved frame, whose captures lie directly under its return node.
     /// </summary>
     /// <param name="state">The match state, stopped at a partial result.</param>
-    private static void ReturnFromOpenCallsAtAPartial(MatchState state)
+    private static void ReturnFromOpenCallsAtAPartial(MatchState state) => RestoreGroupsFromOpenCall(state, 0);
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D62): puts every group back as it was when open call <paramref name="frame"/>
+    /// (0 the outermost) was made, from the captures its saved frame holds under its return node.
+    /// </summary>
+    /// <param name="state">The match state, stopped at a partial result.</param>
+    /// <param name="frame">The index into <see cref="MatchState.OpenCalls"/>.</param>
+    private static void RestoreGroupsFromOpenCall(MatchState state, int frame)
     {
-        int frameTop = state.OpenCalls[0].SstackDepth;
+        int frameTop = state.OpenCalls[frame].SstackDepth;
         int groups = state.Groups.Length;
         int captures = frameTop - sizeof(long) - (2 * sizeof(long) * groups);
         Debug.Assert(
             captures >= 0 && frameTop <= state.Sstack.Count,
-            "the outermost open call's frame is still on the saved stack"
+            "an open call's frame is still on the saved stack"
         );
         for (int g = 0; g < groups; g++)
         {

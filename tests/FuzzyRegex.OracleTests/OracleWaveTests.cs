@@ -756,9 +756,9 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            // Not `?.Id.Should()`: a null (no entry at all) must fail here, not skip the assertion.
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -780,6 +780,47 @@ public sealed class OracleWaveTests
         """;
 
     [Test]
+    public void A_partial_restored_from_the_wrong_frame_is_not_accounted_for()
+    {
+        // The blind review of D62 planted a restore from the innermost open call (OpenCalls[^1])
+        // instead of the outermost: the D51/D62 entry, which sets group values aside on a partial,
+        // still claimed its rows. Measured with that plant, 2026-09-30: over 'cebcebc' partial,
+        // group k is (5,6) with [(2,3), (5,6)], where the outermost frame gives (2,3) with [(2,3)].
+        // Both the entry's clause and the stacked ablations' must refuse it.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", StringComparison.Ordinal));
+        var live = (MatchOutcome)OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+        IOracleOutcome byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row)!;
+        MatchOutcome planted = live with
+        {
+            Groups =
+            [
+                .. live.Groups.Take(3),
+                live.Groups[3] with
+                {
+                    Index = 5,
+                    Length = 1,
+                    Captures = [new OracleSpan(2, 1), new OracleSpan(5, 1)],
+                },
+            ],
+        };
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        ExpectedDivergences.PartialIsTheFrameRestore(live, byFrames).Should().BeTrue();
+        ExpectedDivergences.PartialIsTheFrameRestore(planted, byFrames).Should().BeFalse();
+        (ExpectedDivergences.For(row, live)?.Id).Should().Be("group-call-discards-its-captures-on-return");
+        OracleComparer.StackedCallCaptureAnswer(planted, withoutTheFix, byFrames).Should().BeSameAs(planted);
+        OracleComparer.StackedCallCaptureAnswer(live, withoutTheFix, byFrames).Should().BeSameAs(withoutTheFix);
+    }
+
+    [Test]
     public void A_port_bug_in_the_discard_is_not_hidden_by_another_entrys_ablation()
     {
         // Every other named ablation has the D51 fix off too, so an entry keyed on one of them
@@ -794,13 +835,13 @@ public sealed class OracleWaveTests
 
         OracleComparer.Compare(row, withoutTheFix).Should().Be(OracleVerdict.Agree);
         OracleComparer
-            .Compare(row, OracleComparer.StackedCallCaptureAnswer(new NoMatchOutcome(), withoutTheFix))
+            .Compare(row, OracleComparer.StackedCallCaptureAnswer(new NoMatchOutcome(), withoutTheFix, null))
             .Should()
             .NotBe(OracleVerdict.Agree, "a discard that changes a match must not be hidden by the ablation");
 
         // And a fix-on answer that differs only by the calls' captures leaves the ablation as it was.
         OracleComparer
-            .StackedCallCaptureAnswer(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, withoutTheFix)
+            .StackedCallCaptureAnswer(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, withoutTheFix, null)
             .Should()
             .BeSameAs(withoutTheFix);
     }

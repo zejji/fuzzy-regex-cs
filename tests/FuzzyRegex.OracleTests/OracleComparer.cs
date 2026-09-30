@@ -381,7 +381,20 @@ internal static class OracleComparer
         // captures back on the lists; if it changes anything else, the fix itself is misbehaving on
         // this row, and the ablation must not be allowed to reproduce upstream by hiding that.
         compiled.PatternObject.KeepCallCaptures = false;
-        return StackedCallCaptureAnswer(Ask(), withoutTheCallCaptureFix);
+        IOracleOutcome withTheCallCaptureFix = Ask();
+
+        // And on a partial result, the same answer computed a second way (D62): the fix-on answer
+        // must be the one the frame-by-frame restore gives, or a restore from the wrong frame
+        // would be hidden too.
+        IOracleOutcome? byFrames = null;
+        if (ExpectedDivergences.IsPartial(withTheCallCaptureFix))
+        {
+            compiled.PatternObject.PartialRestoresFrameByFrame = true;
+            byFrames = Ask();
+            compiled.PatternObject.PartialRestoresFrameByFrame = false;
+        }
+
+        return StackedCallCaptureAnswer(withTheCallCaptureFix, withoutTheCallCaptureFix, byFrames);
 
         IOracleOutcome Ask()
         {
@@ -497,15 +510,52 @@ internal static class OracleComparer
     /// the discard itself - one that changes a match, not just a list - would reproduce upstream
     /// under the ablation and be claimed. Falling back to the fix-on answer keeps that bug visible.
     /// Found by the blind review of <c>maint/d51-call-captures</c>, 2026-09-30.
+    /// <para>
+    /// On a partial result the shape clause sets group values aside, because D62 moves them, so
+    /// the fix-on answer must also be the frame-by-frame restore's (<paramref name="byFrames"/>):
+    /// a restore from the innermost open call instead of the outermost changes only values there.
+    /// Found by the blind review of D62, 2026-09-30.
+    /// </para>
     /// </remarks>
     /// <param name="withTheFix">The ablation's answer with the D51 fix on.</param>
     /// <param name="withoutTheFix">The same ablation's answer with it off.</param>
+    /// <param name="byFrames">
+    /// On a partial result, the fix-on answer with <c>PatternObject.PartialRestoresFrameByFrame</c>
+    /// set; otherwise <see langword="null"/>.
+    /// </param>
     /// <returns>The answer the ablation reports.</returns>
-    internal static IOracleOutcome StackedCallCaptureAnswer(IOracleOutcome withTheFix, IOracleOutcome withoutTheFix) =>
-        string.Equals(withTheFix.Describe(), withoutTheFix.Describe(), StringComparison.Ordinal)
-        || ExpectedDivergences.OnlyCallCapturesAreMissing(withTheFix, withoutTheFix)
+    internal static IOracleOutcome StackedCallCaptureAnswer(
+        IOracleOutcome withTheFix,
+        IOracleOutcome withoutTheFix,
+        IOracleOutcome? byFrames
+    ) =>
+        ExpectedDivergences.PartialIsTheFrameRestore(withTheFix, byFrames)
+        && (
+            string.Equals(withTheFix.Describe(), withoutTheFix.Describe(), StringComparison.Ordinal)
+            || ExpectedDivergences.OnlyCallCapturesAreMissing(withTheFix, withoutTheFix)
+        )
             ? withoutTheFix
             : withTheFix;
+
+    /// <summary>
+    /// Puts a row's question to this port with a partial result's groups restored by walking every
+    /// open call's frame, innermost first (<c>PatternObject.PartialRestoresFrameByFrame</c>), and
+    /// nothing else changed: a second computation of D62's answer, which the D51 entry compares
+    /// this port's partial answers against.
+    /// </summary>
+    /// <param name="row">The row to run.</param>
+    /// <returns>The answer, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheFrameByFrameRestore(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true
+        );
+    }
 
     /// <summary>Puts a row's question to this port with the issue 563/564 anchor pin switched off.</summary>
     /// <remarks>
