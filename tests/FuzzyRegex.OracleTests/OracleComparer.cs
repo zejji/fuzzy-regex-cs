@@ -405,9 +405,11 @@ internal static class OracleComparer
                 // `The_lazy_walks_answer_exactly_what_the_eager_ones_do` in OracleWaveTests, which
                 // runs each row both ways - but routing both through this one method is what makes
                 // the two answers comparable at all.
+                // The slice and `partial` since 2026-10-01, when the recorder learned to ask upstream's
+                // `finditer` both; a row without them asks the whole subject, as before.
                 IEnumerable<Match> found = lazy
-                    ? compiled.EnumerateMatches(row.Subject, overlapped: overlapped, timeout: timeout)
-                    : compiled.Matches(row.Subject, overlapped: overlapped, timeout: timeout);
+                    ? compiled.EnumerateMatches(row.Subject, beginning, length, overlapped, row.Partial, timeout)
+                    : compiled.Matches(row.Subject, beginning, length, overlapped, row.Partial, timeout);
 
                 return new MatchesOutcome([
                     .. found.Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),

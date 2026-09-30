@@ -110,6 +110,8 @@ SUB_OPERATIONS = ("sub", "subf")
 # on every individual match. `split` carries a limit in the same field and the same convention as a
 # substitution's `count`, where 0 means "no limit"; the consumer translates it.
 ITER_OPERATIONS = ("finditer", "finditer-overlapped", "split")
+# The two scan shapes that take a slice and `partial` (2026-10-01); `split` takes neither.
+FINDITER_OPERATIONS = ("finditer", "finditer-overlapped")
 LIMIT_OPERATIONS = SUB_OPERATIONS + ("split",)
 ALL_OPERATIONS = OPERATIONS + SUB_OPERATIONS + ITER_OPERATIONS
 
@@ -1023,15 +1025,20 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
         recorded["count"] = int(row.get("count", 0))
 
     # Part of the QUESTION, not of the answer: the same pattern and subject give different results
-    # with it and without it, so it is recorded on the row and the consumer reads it back. Only the
-    # three single-match operations take it - upstream's findall refuses it outright ("unused keyword
-    # argument 'partial'", measured 2026-09-12) and this recorder has no finditer-partial row shape.
+    # with it and without it, so it is recorded on the row and the consumer reads it back. The
+    # three single-match operations take it, and so do the two `finditer` shapes since 2026-10-01:
+    # upstream's `finditer` accepts `partial` (its docstring does not list it, but
+    # `compile(r'aa(*SKIP)x').finditer('axaa', partial=True)` answers (4, 4) partial, measured
+    # 2026-10-01), and the complete matrix had to judge such rows outside the oracle (check C1x).
+    # Upstream's findall refuses it outright ("unused keyword argument 'partial'", measured
+    # 2026-09-12), and split has no partial.
+    _PARTIAL_OPERATIONS = OPERATIONS + FINDITER_OPERATIONS
     partial = bool(row.get("partial", False))
     if partial:
-        if operation not in OPERATIONS:
+        if operation not in _PARTIAL_OPERATIONS:
             raise SystemExit(
                 f"operation {operation!r} cannot be asked with partial=True (pattern {pattern!r}); "
-                f"only {OPERATIONS} take it."
+                f"only {_PARTIAL_OPERATIONS} take it."
             )
         recorded["partial"] = True
 
@@ -1077,9 +1084,9 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
     # `sub` and `subf` joined the three single-match operations in S53b, when `Replace` and
     # `ReplaceFormat` gained a `beginning`/`length` pair. `split` still cannot take one, because
     # upstream's `pattern_split` has no pos/endpos at all - its kwlist is string, maxsplit,
-    # concurrent, timeout - and neither do the `finditer` shapes, which this recorder asks through
-    # `findall`-shaped calls.
-    _SLICEABLE = OPERATIONS + SUB_OPERATIONS
+    # concurrent, timeout. The two `finditer` shapes joined on 2026-10-01: upstream's `finditer`
+    # takes (string, pos, endpos, overlapped, ...) and the port's `Matches` a `beginning`/`length`.
+    _SLICEABLE = OPERATIONS + SUB_OPERATIONS + FINDITER_OPERATIONS
     if pos is not None or endpos is not None:
         if operation not in _SLICEABLE:
             raise SystemExit(
@@ -1277,7 +1284,14 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
                 parts = compiled.split(subject, maxsplit=recorded["count"], timeout=deadline)
             else:
                 overlapped = operation == "finditer-overlapped"
-                found = list(compiled.finditer(subject, overlapped=overlapped, timeout=deadline))
+                # In CODEPOINTS, as for `sub` above; absent means the whole subject.
+                scan_slice = () if pos is None else (pos, endpos)
+                scan_partial = {"partial": True} if partial else {}
+                found = list(
+                    compiled.finditer(
+                        subject, *scan_slice, overlapped=overlapped, timeout=deadline, **scan_partial
+                    )
+                )
         except TimeoutError:
             return timed_out()
         except Exception as e:  # noqa: BLE001
@@ -1317,8 +1331,12 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
             # question the scanner asks, so a recorded answer would be a third opinion rather than a
             # second one. See its docstring.
             reverse = (compiled.flags & _REVERSE_FLAG) != 0
+            # Not on a sliced or partial scan either: the walk asks whole-subject, non-partial
+            # questions, so it would answer a different scan from the one recorded.
             if (
                 overlapped
+                and pos is None
+                and not partial
                 and "(*SKIP)" in pattern
                 and not (reverse and _reads_the_end_of_the_subject(pattern))
             ):

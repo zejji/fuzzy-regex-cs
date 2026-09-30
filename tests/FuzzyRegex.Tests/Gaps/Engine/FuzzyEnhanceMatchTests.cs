@@ -41,6 +41,51 @@ public sealed class FuzzyEnhanceMatchTests
     }
 
     [Test]
+    public void Enhancematch_improves_a_fuzzy_section_inside_a_repeat()
+    {
+        // PORT RIGHT, KNOWN DEFECT D59 (owner ruling 2026-09-30, option (a)): ledger entry 32's stale
+        // total, reached when a later fuzzy section is rejected over budget (here a repeat's second
+        // iteration). Upstream's improvement pass finds (1, 5)
+        // but reports the total of the section it rejected as over budget (2, above the pass's
+        // max_errors of 1: _regex.c:12484-12486, traced 2026-10-01), so the loop keeps its first
+        // match. Measured 2026-10-01 on regex 2026.9.10:
+        //
+        //   (?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}   'xaaabaxa'   (1, 6) two deletions   <- upstream
+        //   the same without (?e) ....................................  (1, 6) two deletions   <- both
+        //   (?e), the repeat lazy ....................................  (1, 5) no errors
+        //   (?e), the budget outside the repeat ......................  (1, 5) no errors
+        //
+        // Classified as `enhancematch-stops-on-a-stale-total`.
+        Match improved = new FuzzyRegex(@"(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}").Match("xaaabaxa");
+        (improved.Index, improved.Index + improved.Length).Should().Be((1, 5));
+        improved.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // Near variants: without the flag there is nothing to improve and both engines agree; the
+        // lazy repeat and the outer budget, which upstream improves too, give the same exact fit.
+        Match plain = new FuzzyRegex(@"(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}").Match("xaaabaxa");
+        (plain.Index, plain.Index + plain.Length).Should().Be((1, 6));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        foreach (
+            string variant in new[]
+            {
+                @"(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}?",
+                @"(?e)(?:(?P<g1>a+(?:ab|a)){1,2}){d<=1}",
+            }
+        )
+        {
+            Match m = new FuzzyRegex(variant).Match("xaaabaxa");
+            (m.Index, m.Index + m.Length).Should().Be((1, 5), variant);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0), variant);
+        }
+
+        // Complete-matrix row 7619, the same trace (pass 2 total 2 at max 1): a possessive repeat of
+        // an i/d section over ' x aaaa' is one deletion at 0 here and two upstream.
+        Match possessive = new FuzzyRegex(@"(?e)(?:(?:a+){i<=1,d<=1}){1,2}+").Match(" x aaaa");
+        (possessive.Index, possessive.Length).Should().Be((0, 0));
+        possessive.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+    }
+
+    [Test]
     public void Enhancematch_keeps_the_match_it_cannot_improve()
     {
         // B cannot match('(?e)(?:[ab][cd][ef]){e<=1}', 'acx'): span=(0, 3) counts=(1, 0, 0)

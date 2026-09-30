@@ -1305,6 +1305,19 @@ Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two s
 upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
 inner `{s<=1}` removed. There is no option to restore the upstream answer.
 
+The same stale total stops `(?e)` improving a match when a later fuzzy section went over budget
+and was given up. A repeat is one way to get there; two sections written out in a row are another:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var repeated = new FuzzyRegex(@"(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}");
+Console.WriteLine(repeated.Match("xaaabaxa").Value);   // aaab - upstream: aaaba, with two deletions
+
+var unrolled = new FuzzyRegex(@"(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?");
+Console.WriteLine(unrolled.Match("xaaabaxa").Value);   // aaab - upstream: aaaba, with two deletions
+```
+
 ### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
 Inside a repeat, a fuzzy pattern can match nothing at all by leaving out every character of the

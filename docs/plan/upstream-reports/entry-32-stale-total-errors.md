@@ -73,3 +73,27 @@ matched fuzzily, because those constructs restore the fuzzy counts and not `tota
 BESTMATCH keeps a match with one deletion although an exact match exists at 1. Saving
 `total_errors` with the counts at `RE_OP_ATOMIC`, `RE_OP_CONDITIONAL` and `RE_OP_LOOKAROUND`, and
 restoring it with them, fixes it.
+
+### Addendum: ENHANCEMATCH keeps two errors where its own improvement pass found none
+
+The same stale total stops ENHANCEMATCH from improving a match when a later fuzzy section is
+rejected over budget, for instance a repeat's second iteration:
+
+```python
+>>> regex.search(r'(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}', 'xaaabaxa')
+<regex.Match object; span=(1, 6), match='aaaba', fuzzy_counts=(0, 0, 2)>
+>>> regex.search(r'(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}?', 'xaaabaxa')
+<regex.Match object; span=(1, 5), match='aaab'>
+>>> regex.search(r'(?e)(?:(?P<g1>a+(?:ab|a)){1,2}){d<=1}', 'xaaabaxa')
+<regex.Match object; span=(1, 5), match='aaab'>
+```
+
+With a `fprintf` either side of `basic_match` in `do_enhanced_fuzzy_match`, the second pass (over
+the slice 1 to 6, `max_errors` 1) returns the match (1, 5) with `total_errors` 2, which is above its
+own budget. The second iteration of the repeat spent the error that took the total to 2, END_FUZZY
+rejected it and backtracked, and the match that succeeded with one iteration carried the rejected
+total. The loop reads 2 as no better than the first match's 2 and keeps (1, 6). The fix above
+covers it.
+
+No repeat is needed: `(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?` over 'xaaabaxa' is also
+(1, 6) with two deletions, where (1, 5) fits exactly.

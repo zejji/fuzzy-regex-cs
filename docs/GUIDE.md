@@ -283,6 +283,26 @@ A `Match` is a `Group` is a `Capture`, each adding fields the one before it does
   produced it passed `partial: true`), `NextMatch()` (find the next match after this one, without
   restarting the scan), and `FuzzyCounts`/`FuzzyChanges` (below).
 
+A partial search reports the leftmost position from which some continuation of the subject
+would match, even under `BestMatch` or `EnhanceMatch`. Those flags choose among complete matches
+by their errors, and a partial match has no final error count yet, so the partial start can differ
+from where the flagged search lands once the text is complete. Upstream answers the same way:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var dog = new FuzzyRegex(@"(?e)(dog){e<=1}");
+Match partial = dog.Match("cat and d", partial: true);
+Console.WriteLine($"{partial.Index} {partial.Length} {partial.FuzzyCounts.Insertions}");
+Match complete = dog.Match("cat and dog");
+Console.WriteLine($"{complete.Index} {complete.Length} {complete.FuzzyCounts.Total}");
+// 7 2 1
+// 8 3 0
+```
+
+The partial starts at the space before `d`, spending one insertion on it, because 'cat and dog'
+matches from there with one error. The completed search finds the exact `dog` one character later.
+
 `Match.Groups` (a `GroupCollection`) is both an ordered list and an `IReadOnlyDictionary<string, Group>`: index it by
 number (`match.Groups[1]`) or by name (`match.Groups["year"]`), and use `ContainsKey`,
 `TryGetValue`, `Keys` and `Values` exactly as on any dictionary. Before matching,

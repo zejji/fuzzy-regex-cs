@@ -515,6 +515,198 @@ public sealed class OracleWaveTests
         }
     }
 
+    /// <summary>The example row of an entry whose pattern is the one given.</summary>
+    /// <param name="id">The entry.</param>
+    /// <param name="pattern">The row's pattern.</param>
+    /// <returns>The entry and the row.</returns>
+    private static (ExpectedDivergence Entry, OracleRow Row) ExampleRow(string id, string pattern)
+    {
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+            .Subject;
+        OracleRow row = OracleWave
+            .ParseRows(entry.Example)
+            .Should()
+            .ContainSingle(r => string.Equals(r.Pattern, pattern, StringComparison.Ordinal))
+            .Subject;
+        return (entry, row);
+    }
+
+    /// <summary>This port's live answer to a row, which must be one.</summary>
+    /// <param name="row">The row.</param>
+    /// <returns>The answer.</returns>
+    private static IOracleOutcome Live(OracleRow row) =>
+        OracleComparer
+            .Run(row, TimeSpan.FromSeconds(5))
+            .Should()
+            .NotBeNull()
+            .And.Subject.Should()
+            .BeAssignableTo<IOracleOutcome>()
+            .Subject;
+
+    /// <summary>A match's fuzzy half with other change positions of the same kinds and counts.</summary>
+    /// <param name="match">The match.</param>
+    /// <param name="deletions">The deletion positions to report instead.</param>
+    /// <returns>The match, changed.</returns>
+    private static MatchOutcome WithDeletionsAt(MatchOutcome match, params int[] deletions) =>
+        match with
+        {
+            Fuzzy = match.Fuzzy! with { DeletionPositions = deletions },
+        };
+
+    [Test]
+    public void A_row_an_ablation_explains_only_bar_an_unproven_leak_is_not_accounted_for()
+    {
+        // The witnesses (VERIFICATION rule 12) for TheAblationExplainsItBarAPinnedLeak, one per arm,
+        // each on the complete-matrix row that arm was added for: the row as recorded is classified,
+        // and the same row with upstream's proof of the leak taken away is not.
+
+        // Arm 1, mechanism A's strong arm: row 1365 under entry 51 (a lookahead, so arm 2 cannot
+        // read it). Upstream's anchored re-ask gives the ablated deletion at 6; refused, or moved to
+        // 5, it proves nothing.
+        (ExpectedDivergence minimum, OracleRow strong) = ExampleRow(
+            "fuzzy-minimum-met-by-a-trailing-insertion",
+            @"(?:(?>.\w)(?!a+)){1<=e<=2}"
+        );
+        IOracleOutcome ours = Live(strong);
+        ExpectedDivergences.For(strong, ours).Should().BeSameAs(minimum, "row 1365 as recorded is the family");
+        ExpectedDivergences
+            .For(strong with { LeakFreeFuzzy = [null] }, ours)
+            .Should()
+            .BeNull("with no anchored answer the weak arm would accept anything, so it is refused here");
+        ExpectedDivergences
+            .For(strong with { LeakFreeFuzzy = [new OracleFuzzy(0, 0, 1, [], [], [5])] }, ours)
+            .Should()
+            .BeNull("an anchored answer that is not the ablated one does not prove a leak");
+
+        // Arm 2, impossible positions: row 1408 under entry 44. Upstream's deletions before a
+        // match's start cannot describe it; replaced by possible positions that still differ from
+        // the ablated ones (at most end + deletions), they prove nothing.
+        (ExpectedDivergence needed, OracleRow impossible) = ExampleRow(
+            "fuzzy-empty-iteration-needed-rule",
+            "(?:(?:a*)*+){1<=d<=2}"
+        );
+        ours = Live(impossible);
+        ExpectedDivergences.For(impossible, ours).Should().BeSameAs(needed, "row 1408 as recorded is the family");
+        MatchesOutcome scan = impossible.Expected.Should().BeOfType<MatchesOutcome>().Subject;
+        MatchesOutcome possible = new([
+            scan.Matches[0],
+            WithDeletionsAt(scan.Matches[1], 1, 3),
+            WithDeletionsAt(scan.Matches[2], 2, 6),
+            scan.Matches[3],
+            WithDeletionsAt(scan.Matches[4], 7),
+        ]);
+        ExpectedDivergences
+            .For(impossible with { Expected = possible }, ours)
+            .Should()
+            .BeNull("possible positions that differ are a disagreement, not a leak");
+
+        // Arm 3, the atomic door on a judged row: row 2310 under entry 44. Upstream's cut-free answer
+        // is the ablated one; without it, or equal to upstream's own answer, it proves nothing.
+        (_, OracleRow atomic) = ExampleRow(
+            "fuzzy-empty-iteration-needed-rule",
+            "(?|(b?)(?>(?:a*){e<=2,1i+2d<=2})[ab]|(x))"
+        );
+        ours = Live(atomic);
+        ExpectedDivergences.For(atomic, ours).Should().BeSameAs(needed, "row 2310 as recorded is the family");
+        ExpectedDivergences
+            .For(atomic with { AtomicFree = null }, ours)
+            .Should()
+            .BeNull("without upstream's cut-free answer the moved deletion is unexplained");
+        ExpectedDivergences
+            .For(atomic with { AtomicFree = atomic.Expected }, ours)
+            .Should()
+            .BeNull("a cut-free answer equal to upstream's own shows no leak");
+    }
+
+    [Test]
+    public void A_posix_row_whose_cost_upstream_does_not_contradict_is_not_accounted_for()
+    {
+        // The witness for PosixChargesMoreForTheSameMatch, on D58's two complete-matrix rows: upstream
+        // charges one deletion under (?p) and none without it, over the same match.
+        foreach (string pattern in new[] { "(?:b?){e<=2}", "(?:b?){d<=1}" })
+        {
+            (ExpectedDivergence posix, OracleRow row) = ExampleRow(
+                "posix-fuzzy-contradicts-its-own-flagless-answer",
+                pattern
+            );
+            IOracleOutcome ours = Live(row);
+            ExpectedDivergences.For(row, ours).Should().BeSameAs(posix, "{0} as recorded is the family", pattern);
+            ExpectedDivergences
+                .For(row with { PosixFree = row.Expected }, ours)
+                .Should()
+                .BeNull("a POSIX-free answer that costs the same contradicts nothing ({0})", pattern);
+            ExpectedDivergences
+                .For(row with { PosixFree = null }, ours)
+                .Should()
+                .BeNull("with no POSIX-free answer there is no evidence ({0})", pattern);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("an answer that is not the POSIX-free one is a defect ({0})", pattern);
+        }
+    }
+
+    [Test]
+    public void A_bestmatch_row_the_doubled_guard_does_not_explain_is_not_accounted_for()
+    {
+        // The witness for bestmatch-loses-a-candidate's predicate arm, on the two complete-matrix rows
+        // that set BESTMATCH by the flag bit: upstream refuses a fit that ends in two trailing
+        // insertions, its flagless engine keeps it, and the doubled guard reproduces the refusal. An
+        // upstream answer the guard cannot reproduce is outside the arm.
+        foreach (string pattern in new[] { @"(?:\w){e<=2,1i+2d<=2}", @"(?:\m\w.){e<=2}" })
+        {
+            (ExpectedDivergence best, OracleRow row) = ExampleRow("bestmatch-loses-a-candidate", pattern);
+            IOracleOutcome ours = Live(row);
+            ExpectedDivergences.For(row, ours).Should().BeSameAs(best, "{0} as recorded is the family", pattern);
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new MatchOutcome(
+                            [new OracleGroup(0, Success: true, 0, 1, [new OracleSpan(0, 1)])],
+                            -1,
+                            null
+                        ),
+                    },
+                    ours
+                )
+                .Should()
+                .BeNull("an upstream answer the doubled guard does not reproduce is not this family ({0})", pattern);
+            ExpectedDivergences
+                .For(row with { BestmatchFree = null }, ours)
+                .Should()
+                .BeNull("without upstream's flagless answer the arm has half its evidence ({0})", pattern);
+        }
+    }
+
+    [Test]
+    public void A_row_the_stale_enhancematch_total_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `enhancematch-stops-on-a-stale-total` (D59), keyed on judged rows: this
+        // port's live answer to each row is the family; upstream's own answer, and no match, are not.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "enhancematch-stops-on-a-stale-total", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences.For(row, Live(row)).Should().BeSameAs(entry, "{0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not", row.Pattern);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("no match over {0} is a defect", row.Subject);
+        }
+    }
+
     [Test]
     public void A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for()
     {

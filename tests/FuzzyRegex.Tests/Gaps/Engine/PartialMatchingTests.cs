@@ -1105,6 +1105,77 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
+    [Arguments("(?e)")]
+    [Arguments("(?b)")]
+    public void A_ranking_flag_leaves_a_partial_search_at_the_leftmost_live_start(string flag)
+    {
+        // Owner ruling 2026-09-30, option A (DECISIONS): BESTMATCH and ENHANCEMATCH rank complete
+        // matches only, so a partial search still answers the least start from which some
+        // continuation matches, with the first fit found there. Measured 2026-09-30 on upstream
+        // regex 2026.9.10 and this port, both flags:
+        //
+        //   (dog){e<=1}   'cat and d'   partial   P(7, 9), one insertion
+        //   (dog){e<=1}   'cat and dog'           (8, 11), no errors
+        //
+        // 'cat and dog' matches from 7 with one insertion, so 7 is live; nothing earlier is. The
+        // completed search moves to 8 because the flag prefers the exact fit, which a partial match,
+        // with only a lower bound on its errors, cannot be ranked against.
+        var dog = new FuzzyRegex(flag + "(dog){e<=1}");
+
+        Match partial = dog.Match("cat and d", partial: true);
+        (partial.Index, partial.Index + partial.Length, partial.PartialMatch).Should().Be((7, 9, true));
+        partial.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+        Match complete = dog.Match("cat and dog");
+        (complete.Index, complete.Index + complete.Length, complete.PartialMatch).Should().Be((8, 11, false));
+        complete.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one()
+    {
+        // PORT RIGHT, KNOWN DEFECT D57, the smallest row of the door below (complete-matrix row
+        // 12240's shape, 2026-09-30). The complete pass tries 2, runs the verb at 4 and fails at the
+        // end of the text; the verb has set `slice_start` to 4 (upstream/src/_regex.c:14555), and
+        // the partial pass restores only `text_pos` (do_match, :18159-18170), so upstream's partial
+        // search can start no earlier than 4. The least start from which some continuation matches
+        // is 2 ('axaax' matches at 2), which is the partial rule (answer key A2).
+        //
+        // Measured 2026-10-01 on regex 2026.9.10:
+        //
+        //   aa(*SKIP)x   search 'axaa' partial      (4, 4) partial   <- upstream
+        //   aa(*PRUNE)x  search 'axaa' partial      (2, 4) partial   <- this port
+        //   aax          search 'axaa' partial      (2, 4) partial
+        //   aa(*SKIP)x   match('axaa', 2, partial)  (2, 4) partial
+        //   aa(*SKIP)x   search 'axaa'              None             <- both engines
+        //
+        // Classified as `partial-retry-carried-slice-forward`.
+        var regex = new FuzzyRegex("aa(*SKIP)x");
+
+        Match partial = regex.Match("axaa", partial: true);
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((2, 2), "upstream reports the zero-width partial at 4");
+
+        // Near variants: the verb that moves no bound, the verb-free pattern, the anchored door, the
+        // completed subject, and no partial asked for.
+        Match pruned = new FuzzyRegex("aa(*PRUNE)x").Match("axaa", partial: true);
+        (pruned.Index, pruned.Length, pruned.PartialMatch).Should().Be((2, 2, true));
+        Match plain = new FuzzyRegex("aax").Match("axaa", partial: true);
+        (plain.Index, plain.Length, plain.PartialMatch).Should().Be((2, 2, true));
+        Match anchored = regex.MatchAtStart("axaa", beginning: 2, partial: true);
+        (anchored.Index, anchored.Length, anchored.PartialMatch).Should().Be((2, 2, true));
+        Match completed = regex.Match("axaax");
+        (completed.Index, completed.Length, completed.PartialMatch).Should().Be((2, 3, false));
+        regex.Match("axaa").Success.Should().BeFalse();
+
+        // Row 12240 itself, the scan form: upstream's finditer gives one partial at (4, 4), and its
+        // `(*PRUNE)` spelling (2, 4), measured 2026-10-01.
+        MatchCollection scan = new FuzzyRegex(@"aa(*SKIP)x(?:.\w){s<=1}").Matches("axaa", partial: true);
+        scan.Should().ContainSingle();
+        (scan[0].Index, scan[0].Length, scan[0].PartialMatch).Should().Be((2, 2, true));
+    }
+
+    [Test]
     public void A_forward_skip_does_not_cost_the_partial_its_start()
     {
         // THE SAME MECHANISM WITH A SYMPTOM THE TEST ABOVE DOES NOT COVER, and the test above says

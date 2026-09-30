@@ -719,6 +719,68 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
+    [Arguments(@"x(*SKIP)(?:ba+){e<=1}", FuzzyRegexOptions.BestMatch, "xbaabbbx", false, 0, 4)]
+    [Arguments(
+        @"a(*SKIP)a+(?<=b?)(?:a+){i<=1,d<=1}",
+        FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Word,
+        "aaaax",
+        false,
+        0,
+        4
+    )]
+    [Arguments(@"\w(*SKIP)(?:[ab]a+){s<=1}", FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Word, "aaax", true, 0, 3)]
+    public void Bestmatch_finds_the_exact_fit_at_the_start_a_skip_already_passed(
+        string pattern,
+        FuzzyRegexOptions options,
+        string subject,
+        bool search,
+        int start,
+        int end
+    )
+    {
+        // PORT RIGHT, KNOWN DEFECT D56: the fix above on three complete-matrix rows (5849, 8589 and
+        // 8595, 2026-09-30) where the candidate the walk loses starts at the SAME position as the
+        // one it found, with the flag set by the option bit rather than inline. The first candidate
+        // runs the verb and leaves `slice_start` past its own start, so the walk guard
+        // (upstream/src/_regex.c:17625) ends the walk and upstream keeps the first, costlier fit.
+        //
+        // Measured 2026-10-01 on regex 2026.9.10, `x(*SKIP)(?:ba+){e<=1}` matched over 'xbaabbbx':
+        //
+        //   (?b)                    (0, 5) one substitution at 4   <- upstream
+        //   (?b), (*PRUNE)          (0, 4) no errors               <- this port
+        //   (?b), verb deleted      (0, 4) no errors
+        //   no (?b), either verb    (0, 5) one substitution        <- both engines
+        //
+        // Without `(?b)` the two verbs agree, so the pruning is not what moves the answer; with it,
+        // only `(*SKIP)` (which moves the bound) loses the exact fit. The other two rows measure the
+        // same way. Classified as `bestmatch-walk-truncated-by-a-skip`.
+        var regex = new FuzzyRegex(pattern, options);
+        Match best = search ? regex.Match(subject) : regex.MatchAtStart(subject);
+
+        best.Success.Should().BeTrue();
+        (best.Index, best.Index + best.Length).Should().Be((start, end));
+        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // The near variant: the same verb with no bound to move gives the same exact fit.
+        var pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options);
+        Match prunedBest = search ? pruned.Match(subject) : pruned.MatchAtStart(subject);
+        (prunedBest.Index, prunedBest.Index + prunedBest.Length).Should().Be((start, end));
+        prunedBest.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void Without_bestmatch_a_skip_before_a_fuzzy_repeat_keeps_the_first_fit()
+    {
+        // The control for the test above: with no `(?b)` there is no walk, and this port answers
+        // the plain first match upstream answers, (0, 5) with a substitution at 4 (measured
+        // 2026-10-01 on regex 2026.9.10). So the exact fit above is BESTMATCH's doing.
+        Match plain = new FuzzyRegex(@"x(*SKIP)(?:ba+){e<=1}").MatchAtStart("xbaabbbx");
+
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 5));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
     public void Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives()
     {
         // THE NEGATIVE CONTROL for the fix above. The restore is once PER CANDIDATE and it restores
