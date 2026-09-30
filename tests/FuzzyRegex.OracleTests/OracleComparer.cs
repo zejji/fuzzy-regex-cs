@@ -248,6 +248,12 @@ internal static class OracleComparer
     /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
     /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// Decide whether the pattern as a whole is a fuzzy section before optimising, as upstream does
+    /// (known defect D37, ledger entry 55). Acts on the compile, like
+    /// <paramref name="upstreamReverseGrapheme"/>. Used by
+    /// <see cref="RunWithTheUpstreamWholePatternCall"/> and by nothing else.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
@@ -258,7 +264,8 @@ internal static class OracleComparer
         bool withoutTheFuzzySearchFixes = false,
         bool keepEmptyIterationRule = false,
         bool keepMinimumOrderFix = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -293,7 +300,8 @@ internal static class OracleComparer
                 // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion,
                 upstreamReverseGrapheme: upstreamReverseGrapheme,
-                upstreamFoldedRuns: upstreamFoldedRuns
+                upstreamFoldedRuns: upstreamFoldedRuns,
+                upstreamWholePatternCall: upstreamWholePatternCall
             );
         }
         catch (NotImplementedException)
@@ -905,6 +913,36 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             upstreamReverseGrapheme: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a call to the whole pattern compiled as upstream
+    /// compiles it where the pattern is one fuzzy section: with no <c>CALL_REF</c> around the
+    /// pattern (the D37 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream decides "the pattern is a fuzzy section" before optimising, when
+    /// <c>(?:z(?R)|){e&lt;=1}</c> is still a one-item sequence, and the group-call check decides it
+    /// after, so the call gets neither a copy of the pattern nor a return. <c>upstreamWholePatternCall</c>
+    /// restores that at compile time, which is the whole of the fix. Ledger entry 51's minimum order
+    /// stays on, as it does for entries 50 and 54, so that this entry, which sits before entry 51's,
+    /// does not claim a row entry 51 alone explains. The
+    /// <c>fuzzy-whole-pattern-call-returns-to-its-caller</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's compile, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamWholePatternCall(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            withoutTheFuzzySearchFixes: true,
+            lazy: false,
+            keepMinimumOrderFix: true,
+            upstreamWholePatternCall: true
         );
     }
 
