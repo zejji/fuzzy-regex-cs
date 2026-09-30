@@ -602,7 +602,7 @@ internal static class OracleComparer
     /// <para>
     /// S46 made END_FUZZY's backtrack arm count a section's errors once when it asks whether a
     /// trailing insertion fits (<c>_regex.c:15516</c>, ledger entry 12). Upstream counts them twice,
-    /// which only bites under BESTMATCH, where the budget is the best match's own cost. Setting
+    /// which only bites under BESTMATCH and ENHANCEMATCH, where the budget is the match's own cost. Setting
     /// <c>PatternObject.DoubleCountTrailingInsertions</c> restores that.
     /// </para>
     /// <para>
