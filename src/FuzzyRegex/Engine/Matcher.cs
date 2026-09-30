@@ -5076,11 +5076,16 @@ internal static class Matcher
     [Conditional("DEBUG")]
     private static void AssertMatchIsClosed(MatchState state)
     {
-        Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
-
-        // The oracle's two ablations reproduce upstream's D44 and D45 on purpose.
+        // The oracle's ablations reproduce upstream's D37, D44 and D45 on purpose.
         Debug.Assert(
-            state.FuzzyNode is null || state.Pattern.KeepSectionOpenAfterAVerb,
+            state.OpenCalls.Count == 0 || state.Pattern.MatchMayEndInsideTheWholePatternCall,
+            "a match never ends inside a group call"
+        );
+
+        Debug.Assert(
+            state.FuzzyNode is null
+                || state.Pattern.KeepSectionOpenAfterAVerb
+                || state.Pattern.MatchMayEndInsideTheWholePatternCall,
             "a match never ends inside a fuzzy section"
         );
 
@@ -5090,10 +5095,15 @@ internal static class Matcher
             ++kinds[change.Type];
         }
 
+        // Under D37's ablation the recursive instance's changes stay listed after its counts are
+        // lost, and the match reports the first count of each list, as upstream does (:20522).
         Debug.Assert(
-            kinds[FuzzyValue.Sub] == state.FuzzyCounts[FuzzyValue.Sub]
-                && kinds[FuzzyValue.Ins] == state.FuzzyCounts[FuzzyValue.Ins]
-                && kinds[FuzzyValue.Del] == state.FuzzyCounts[FuzzyValue.Del],
+            state.Pattern.MatchMayEndInsideTheWholePatternCall
+                || (
+                    kinds[FuzzyValue.Sub] == state.FuzzyCounts[FuzzyValue.Sub]
+                    && kinds[FuzzyValue.Ins] == state.FuzzyCounts[FuzzyValue.Ins]
+                    && kinds[FuzzyValue.Del] == state.FuzzyCounts[FuzzyValue.Del]
+                ),
             "the counts are the lengths of the change lists, kind by kind"
         );
 

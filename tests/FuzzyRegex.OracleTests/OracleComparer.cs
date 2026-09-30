@@ -933,8 +933,10 @@ internal static class OracleComparer
     /// after, so the call gets neither a copy of the pattern nor a return. <c>upstreamWholePatternCall</c>
     /// restores that at compile time, which is the whole of the fix. Ledger entry 51's minimum order
     /// stays on, as it does for entries 50 and 54, so that this entry, which sits before entry 51's,
-    /// does not claim a row entry 51 alone explains. The
-    /// <c>fuzzy-whole-pattern-call-returns-to-its-caller</c> entry keys on this.
+    /// does not claim a row entry 51 alone explains. Such a match ends with the call still open, so
+    /// <c>PatternObject.MatchMayEndInsideTheWholePatternCall</c> keeps the Debug build's closing assert from
+    /// failing the ablation itself. The <c>fuzzy-whole-pattern-call-returns-to-its-caller</c> entry
+    /// keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers with upstream's compile, on the row's own deadline.</returns>
@@ -945,6 +947,7 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            ablate: static compiled => compiled.PatternObject.MatchMayEndInsideTheWholePatternCall = true,
             withoutTheFuzzySearchFixes: true,
             lazy: false,
             keepMinimumOrderFix: true,

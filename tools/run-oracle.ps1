@@ -248,9 +248,10 @@
 
     So a Debug default makes the row timeout measure the build instead of the engine, and a slice
     triages the result as a correctness bug - which is exactly what S52's sitting 4 did, and what
-    sitting 5 spent 45 minutes undoing. Nothing in src/ is conditioned on DEBUG (no Debug.Assert, no
-    #if DEBUG), so the two configurations differ in speed alone and a Release wave answers the same
-    questions.
+    sitting 5 spent 45 minutes undoing. A Release wave answers the same questions; what it does not
+    do is check the engine's Debug.Assert invariants (Matcher.AssertMatchIsClosed and others, added
+    from D34 on), so a wave in Release cannot see an assert failure. check-ratchet.ps1 runs this
+    project's tests in Debug for that reason.
 
     Pass -Configuration Debug to get a debugger-friendly consumer when minimising one row; do not
     read a timeout it produces as a divergence.

@@ -685,6 +685,15 @@ internal sealed class PatternObject
     internal bool KeepSectionOpenAfterAVerb;
 
     /// <summary>
+    /// Oracle-only: a match may reach SUCCESS with a group call and its fuzzy section still open,
+    /// and with more changes listed than counted, as upstream's does when a call to the whole
+    /// pattern jumps to its start with no return (D37, ledger entry 55). It
+    /// changes no answer; it only lets <c>Matcher.AssertMatchIsClosed</c> accept the ablation that
+    /// reproduces that on purpose. Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool MatchMayEndInsideTheWholePatternCall;
+
+    /// <summary>
     /// Oracle-only: the running error total and cost keep the errors of a fuzzy section an atomic
     /// group, lookaround, condition or verb threw away, as upstream's <c>total_errors</c> does (D45,
     /// ledger entry 32). Set only by <c>OracleComparer</c>'s ablation; never by the library. See

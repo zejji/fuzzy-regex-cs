@@ -778,6 +778,9 @@ public sealed class ThreadSafetyTests
             // only by the oracle's ablations on a pattern it compiled for one call.
             "PatternObject.KeepSectionOpenAfterAVerb",
             "PatternObject.KeepDiscardedTotals",
+            // D37 added MatchMayEndInsideTheWholePatternCall, likewise set only by
+            // OracleComparer.RunWithTheUpstreamWholePatternCall.
+            "PatternObject.MatchMayEndInsideTheWholePatternCall",
             // Ledger entry 50 added SkipLookaroundInsertion, likewise set only by
             // OracleComparer.RunWithoutTheLookaroundInsertion.
             "PatternObject.SkipLookaroundInsertion",
