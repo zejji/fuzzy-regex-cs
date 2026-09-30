@@ -187,6 +187,22 @@ def translate(row, info, engine):
                 "op": op, "partial": partial}
     if engine == "tre":
         return "tre is asked through its own gate"
+    if engine == "fuzzyref":
+        if not re.search(_REGEX_ONLY_SYNTAX[0][1], p):
+            return "not a fuzzy row"
+        if int(row.get("flags") or 0) or info["body"] != row["pattern"]:
+            return "flags, which the reference matcher does not have"
+        if partial or op == "finditer":
+            return "partial or finditer, which the reference matcher does not have"
+        return {"pattern": row["pattern"], "subject": row["subject"], "op": op}
+    if engine == "brute":
+        if not partial or op == "finditer":
+            return "not a partial match/search/fullmatch row"
+        bits = int(row.get("flags") or 0)
+        if bits & ~REVERSE_BIT:
+            return "flags other than REVERSE"
+        pattern = ("(?r)" if bits & REVERSE_BIT else "") + row["pattern"]
+        return {"pattern": pattern, "subject": row["subject"], "op": op}
     if info["regex_only"]:
         return "; ".join(info["regex_only"])
     for reason, rx in _REGEX_ONLY_SYNTAX:
@@ -240,6 +256,14 @@ def translate(row, info, engine):
             return "fullmatch of a pattern that calls itself (the \\A...\\z wrapper would be recursed into)"
         p = f"\\A(?:{p})\\z"
         out["op"] = "search"
+    if engine == "pcre2" and op == "fullmatch" and partial:
+        # PCRE2 10.47 refuses PCRE2_ENDANCHORED together with PCRE2_PARTIAL_SOFT at match time
+        # ("bad option value", measured 2026-09-30), so a partial fullmatch is an anchored match
+        # of (?:...)\z instead.
+        if _WHOLE_CALL.search(p):
+            return "partial fullmatch of a pattern that calls itself (the \\z wrapper would be recursed into)"
+        p = f"(?:{p})\\z"
+        out["op"] = "match"
     if engine == "node" and op == "fullmatch":
         p = f"(?:{p})$"
         out["op"] = "match"
@@ -259,7 +283,7 @@ def translate(row, info, engine):
 # ---------------------------------------------------------------- running the workers
 def _commands(engine, rows_path, start):
     py = sys.executable
-    if engine in ("regex", "re", "pcre2"):
+    if engine in ("regex", "re", "pcre2", "fuzzyref", "brute"):
         return [py, str(HERE / "survey_worker.py"), engine, rows_path, str(start)], None
     if engine == "perl":
         return ["perl", str(HERE / "survey_worker.pl"), rows_path, str(start)], {"PERL_SIGNALS": "unsafe"}
@@ -357,6 +381,11 @@ def run_tre(rows, infos, timeout=300):
     jobs, out = [], {}
     for k, row in enumerate(rows):
         verdict = tre._dialect(dict(row, flags=int(row.get("flags") or 0)))
+        # The probe's gate lets a backtracking verb through: `(*PRUNE)` is not a `(?` group, and
+        # its characters are all in the ERE core, so TRE parsed `(?:a+(*PRUNE)b){i<=1}` as a
+        # different pattern and "disagreed" on 4 of 30 fuzzy+verb rows (measured 2026-09-30).
+        if not isinstance(verdict, str) and "(*" in row["pattern"]:
+            verdict = "a backtracking verb, which TRE does not have"
         if isinstance(verdict, str):
             out[k] = {"i": k, "status": "n/a", "reason": verdict}
             continue
@@ -434,12 +463,41 @@ def span_key(k):
     return k[:2] if k[0] == "match" else k
 
 
+JUDGES = ("fuzzyref", "brute")
+
+
+def judged(row_results):
+    """The key judges' verdicts against upstream and the surveyed engines: for each judge that
+    answered, which engines give its span (and, for the fuzzy reference, its fuzzy counts)."""
+    out = {}
+    for j in JUDGES:
+        jr = row_results.get(j)
+        if not jr or jr["status"] not in ANSWERS:
+            continue
+        jk = key(jr, j)
+        agree, differ = [], []
+        for e, r in row_results.items():
+            if e in JUDGES or e == "tre" or r["status"] not in ANSWERS:
+                continue
+            ek = key(r, e)
+            same = span_key(ek) == span_key(jk) if j == "brute" or jk[0] != "match" else ek == jk
+            if same and j == "fuzzyref" and e == "regex" and jr.get("fuzzy_counts") != r.get("fuzzy_counts"):
+                same = False
+            (agree if same else differ).append(e)
+        out[j] = {"agree": sorted(agree), "differ": sorted(differ)}
+    return out
+
+
 def verdict(row_results):
+    judges = judged(row_results)
+    row_results = {e: r for e, r in row_results.items() if e not in JUDGES}
     answered = {e: r for e, r in row_results.items() if r["status"] in ANSWERS}
     full = {e: key(r, e) for e, r in answered.items()}
     exist = {e: ("none",) if k == ("none",) else ("exists",) for e, k in full.items()}
     precise = {e: k for e, k in full.items() if e != "tre"}
     out = {"answered": sorted(answered)}
+    if judges:
+        out["judges"] = judges
     if len(answered) < 2:
         out["verdict"] = "single" if answered else "none-answered"
         return out
@@ -462,7 +520,8 @@ def verdict(row_results):
     return out
 
 
-ENGINES = ["regex", "pcre2", "perl", "node", "dotnet", "re", "tre"]
+ENGINES = ["regex", "pcre2", "perl", "node", "dotnet", "re", "tre", "fuzzyref", "brute"]
+ROW_TIMEOUT = {"brute": 30.0, "fuzzyref": 20.0}
 
 
 def survey(rows, out_dir, engines, row_timeout=3.0, max_rss_mb=1500):
@@ -491,7 +550,8 @@ def survey(rows, out_dir, engines, row_timeout=3.0, max_rss_mb=1500):
                 results[k]["tre"] = res
             continue
         t0 = time.monotonic()
-        answers = run_engine(engine, per_engine_jobs[engine], out_dir, row_timeout, max_rss_mb)
+        answers = run_engine(engine, per_engine_jobs[engine], out_dir,
+                             max(row_timeout, ROW_TIMEOUT.get(engine, 0)), max_rss_mb)
         for k, res in answers.items():
             results[k][engine] = normalise(res, rows[k]["subject"])
         print(f"  {engine:7} {len(per_engine_jobs[engine]):>6} rows in {time.monotonic() - t0:6.1f} s",
@@ -513,6 +573,10 @@ def survey(rows, out_dir, engines, row_timeout=3.0, max_rss_mb=1500):
             c[v["verdict"]] += 1
             for e in v["answered"]:
                 c["answered:" + e] += 1
+            for j, jv in v.get("judges", {}).items():
+                c[f"judged:{j}"] += 1
+                for e in jv["differ"]:
+                    c[f"judge-differs:{j}:{e}"] += 1
             if v.get("captures_differ"):
                 c["captures_differ"] += 1
     summary = {cell: dict(c) for cell, c in sorted(cells.items())}

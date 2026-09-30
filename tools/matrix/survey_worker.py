@@ -165,9 +165,83 @@ def _pcre2_engine():
     return answer
 
 
+# ---------------------------------------------------------------- the two KEY judges
+def _load(name, path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fuzzyref_engine():
+    """tools/probes/fuzzy-reference-matcher.py: a complete, ordered first-match search."""
+    from pathlib import Path
+    ref = _load("fuzzy_reference_matcher", Path(__file__).resolve().parents[1] / "probes" / "fuzzy-reference-matcher.py")
+    # The ruled rule for an iteration that matches empty text only by deleting (ledger 44, F17/F18,
+    # DIVERGENCES "A fuzzy repeat takes an iteration that matches no text by deleting only when
+    # something needs it"). The matcher's default, "perl", is the literal reading the ruling rejected.
+    ref.EMPTY_DELETION_ITERATIONS = "needed"
+
+    def fuzzy_in_lookaround(p):
+        # The matcher runs a lookaround body with no fuzzy state (look_groups: counts=None), so a
+        # fuzzy section INSIDE a lookaround is outside what it models.
+        stack, k = [], 0
+        while k < len(p):
+            c = p[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c == "(":
+                stack.append(p.startswith(("(?=", "(?!", "(?<=", "(?<!"), k))
+            elif c == ")" and stack:
+                stack.pop()
+            elif c == "{" and any(stack) and "<" in p[k:p.find("}", k)]:
+                return True
+            k += 1
+        return False
+
+    def answer(row):
+        if fuzzy_in_lookaround(row["pattern"]):
+            return {"status": "n/a", "reason": "a fuzzy section inside a lookaround, which the matcher does not model"}
+        try:
+            ref.compile_pattern(row["pattern"])
+        except Exception as e:  # noqa: BLE001 - outside the matcher's subset
+            return {"status": "n/a", "reason": f"outside the reference matcher's subset: {e}"[:200]}
+        m = getattr(ref, row["op"])(row["pattern"], row["subject"])
+        if m is None:
+            return {"status": "none", "unit": "cp"}
+        groups = [None if g[0] < 0 else list(g) for g in m.groups]
+        return {"status": "match", "span": list(m.span), "groups": groups,
+                "fuzzy_counts": list(m.fuzzy_counts), "unit": "cp"}
+
+    return answer
+
+
+def _brute_engine():
+    """The D11 brute-force partial judge (maint/d11-partial-boundary:tools/probes/d11-brute-judge.py),
+    copied beside this file: could a longer text make this match? Continuations up to 4 characters."""
+    from pathlib import Path
+    judge = _load("d11_brute_judge", Path(__file__).resolve().parent / "d11_brute_judge.py")
+    judge.ALPHABET = judge.ALPHABET + "c"
+
+    def answer(row):
+        v, w = judge.judge(row["op"], row["pattern"], row["subject"], max_len=4)
+        if v is None:
+            return {"status": "none", "unit": "cp"}
+        kind = "partial" if v[0] == "P" else "match"
+        res = {"status": kind, "span": [v[1], v[2]], "unit": "cp", "witness": w}
+        if kind == "match":
+            res["groups"] = None  # the judge reports spans only; survey.py compares spans for it
+        return res
+
+    return answer
+
+
 def main(argv):
     engine, path, start = argv[0], argv[1], int(argv[2])
-    answer = _pcre2_engine() if engine == "pcre2" else _python_engine(engine)
+    answer = {"pcre2": _pcre2_engine, "fuzzyref": _fuzzyref_engine, "brute": _brute_engine}.get(
+        engine, lambda: _python_engine(engine))()
     with open(path, encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
     sys.stdout.reconfigure(encoding="utf-8")
