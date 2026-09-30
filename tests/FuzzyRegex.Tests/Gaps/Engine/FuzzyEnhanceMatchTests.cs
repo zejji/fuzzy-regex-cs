@@ -44,8 +44,9 @@ public sealed class FuzzyEnhanceMatchTests
     public void Enhancematch_improves_a_fuzzy_section_inside_a_repeat()
     {
         // PORT RIGHT, KNOWN DEFECT D59 (owner ruling 2026-09-30, option (a)): ledger entry 32's stale
-        // total, through a fuzzy section inside a repeat. Upstream's improvement pass finds (1, 5)
-        // but reports the total of an iteration it rejected as over budget (2, above the pass's
+        // total, reached when a later fuzzy section is rejected over budget (here a repeat's second
+        // iteration). Upstream's improvement pass finds (1, 5)
+        // but reports the total of the section it rejected as over budget (2, above the pass's
         // max_errors of 1: _regex.c:12484-12486, traced 2026-10-01), so the loop keeps its first
         // match. Measured 2026-10-01 on regex 2026.9.10:
         //

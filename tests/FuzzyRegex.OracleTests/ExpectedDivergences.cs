@@ -1450,6 +1450,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "A(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "QQA", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "aa(*SKIP)x", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "search", "partial": true, "codepointSpan": [4, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "aa(*SKIP)x(?:.\\w){s<=1}", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "finditer", "partial": true, "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [4, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [2, 4]}]}}
+        {"generator": "rows", "pattern": "aa(*SKIP)x", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "finditer", "partial": true, "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [4, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [2, 4]}]}}
         """;
 
     /// <summary>
@@ -1548,6 +1549,9 @@ internal static class ExpectedDivergences
         // Complete-matrix row 12240 itself (C1x on 2026-09-30, recordable since the recorder asks
         // `finditer` with `partial`, 2026-10-01): the row above's door as a scan. Upstream's scan
         // reports the zero-width partial at 4; its `(*PRUNE)` spelling reports (2, 4).
+        "matches 1 | match 0:(2,2)[(2,2)] last=-1/- partial",
+        // D57's plain `aa(*SKIP)x` as a partial scan (blind review, 2026-10-01): upstream's
+        // finditer gives (4, 4) partial, its `(*PRUNE)` spelling (2, 4).
         "matches 1 | match 0:(2,2)[(2,2)] last=-1/- partial",
     ];
 
@@ -2312,6 +2316,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "a(*SKIP)a+(?<=b?)(?:a+){i<=1,d<=1}", "flags": 6144, "namedLists": {}, "subject": "aaaax", "operation": "match", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": [5]}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "\\w(*SKIP)(?:[ab]a+){s<=1}", "flags": 6144, "namedLists": {}, "subject": "aaax", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "x(*SKIP)(?:ba+){e<=1}", "flags": 4096, "namedLists": {}, "subject": "xbaabbbx", "operation": "match", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?b)x(*SKIP)(?:ba+){e<=1}", "flags": 0, "namedLists": {}, "subject": "xbaabbbx", "operation": "match", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         """;
 
     /// <summary>
@@ -2365,6 +2370,10 @@ internal static class ExpectedDivergences
         // Recorded and measured 2026-10-01 on regex 2026.9.10.
         "match 0:(0,4)[(0,4)] last=-1/-",
         "match 0:(0,3)[(0,3)] last=-1/-",
+        "match 0:(0,4)[(0,4)] last=-1/-",
+        // D56 with `(?b)` written inline rather than as the flag bit (blind review, 2026-10-01):
+        // a different question to the key, the same answer. Upstream (0, 5) with a substitution
+        // at 4; its `(*PRUNE)` spelling (0, 4) exact.
         "match 0:(0,4)[(0,4)] last=-1/-",
     ];
 
@@ -3475,14 +3484,15 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The three rows of <c>enhancematch-stops-on-a-stale-total</c> (known defect D59): complete-matrix
-    /// rows 7619 and 11464 of 2026-09-30 and the register's minimal search, recorded by
+    /// The four rows of <c>enhancematch-stops-on-a-stale-total</c> (known defect D59): complete-matrix
+    /// rows 7619 and 11464 of 2026-09-30, the register's minimal search and its unrolled form, recorded by
     /// <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
     /// </summary>
     private const string _enhanceStaleTotalRows = """
         {"generator": "rows", "pattern": "(?:(?:a+){i<=1,d<=1}){1,2}+", "flags": 32768, "namedLists": {}, "subject": " x aaaa", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}]}
         {"generator": "rows", "pattern": "(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 49154, "namedLists": {}, "subject": "xaaabaxa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}, "codepointSpan": [1, 6]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}, "codepointSpan": [7, 8]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}}]}
         {"generator": "rows", "pattern": "(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 0, "namedLists": {}, "subject": "xaaabaxa", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?", "flags": 0, "namedLists": {}, "subject": "xaaabaxa", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}]}
         """;
 
     /// <summary>
@@ -3494,6 +3504,7 @@ internal static class ExpectedDivergences
         "match 0:(0,0)[(0,0)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
         "matches 3 | match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1 || match 0:(5,1)[(5,1)] 1:(5,1)[(5,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:6] || match 0:(7,1)[(7,1)] 1:(7,1)[(7,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:8]",
         "match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1",
+        "match 0:(1,4)[(1,4)] last=-1/-",
     ];
 
     /// <summary><see cref="_enhanceStaleTotalRows"/> by its question, mapped to this port's judged answer.</summary>
@@ -5616,18 +5627,21 @@ internal static class ExpectedDivergences
         new(
             Id: "enhancematch-stops-on-a-stale-total",
             Reason: "Port right, KNOWN DEFECT D59, owner ruling 2026-09-30 option (a): LEDGER ENTRY 32's "
-                + "main mechanism reached through a fuzzy section inside a repeat. END_FUZZY writes "
+                + "main mechanism, reached where a LATER fuzzy section is rejected over budget. END_FUZZY writes "
                 + "`total_errors` and then, when it is over `max_errors`, backtracks without putting "
                 + "the old total back (upstream/src/_regex.c:12484-12486); the backtrack arm subtracts "
                 + "the counts and not the total (:15569-15571). ENHANCEMATCH's improvement pass runs "
                 + "with `max_errors` one below the first match's total (:17978-17980), so a later "
-                + "iteration that would spend one error too many is rejected there and leaves its "
+                + "section that would spend one error too many is rejected there and leaves its "
                 + "total behind, and the pass's own match then reports it: traced 2026-10-01 with "
                 + "`fprintf` in `do_enhanced_fuzzy_match` on a build of the pinned source, "
                 + "`(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' prints pass 2 over the "
                 + "slice (1, 6) with max_errors 1 returning (1, 5) with total_errors 2, which is above "
                 + "its own budget and so no better than the first match's 2, and the loop keeps (1, 6) "
-                + "with two deletions (:17939). Row 7619 prints the same, total 2 at max 1. The "
+                + "with two deletions (:17939). Row 7619 prints the same, total 2 at max 1. A repeat "
+                + "is not needed: the unrolled `(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?` over "
+                + "'xaaabaxa' diverges the same way ((1, 6) two deletions upstream, (1, 5) exact here), "
+                + "and is row 4. The "
                 + "simpler forms upstream does improve have no rejected section after the accepted "
                 + "one: the budget outside the repeat, the repeat lazy, or one iteration. README: "
                 + "ENHANCEMATCH will 'attempt to improve the fit (i.e. reduce the number of errors)'. "
@@ -8499,7 +8513,8 @@ internal static class ExpectedDivergences
 
     /// <summary>
     /// Whether the two answers agree in everything but the change positions, and upstream's positions
-    /// on every match where they differ include one that match's own span rules out.
+    /// on every match where they differ include one that match's own span rules out, while the
+    /// answer held against it has none.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -8557,6 +8572,7 @@ internal static class ExpectedDivergences
                 || theirFuzzy.Insertions != ourFuzzy.Insertions
                 || theirFuzzy.Deletions != ourFuzzy.Deletions
                 || !HasAnImpossiblePosition(theirs[m], theirFuzzy)
+                || HasAnImpossiblePosition(mine[m], ourFuzzy)
             )
             {
                 return false;
