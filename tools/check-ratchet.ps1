@@ -83,8 +83,10 @@ if (-not $SkipTestRun) {
     # And its tests are RUN, in this configuration, because building alone let a Debug-only red
     # land on main: Every_expected_divergence_still_diverges failed on D37's entry from 65740147
     # to 28ab0c3f, since the ablation tripped Matcher.AssertMatchIsClosed and run-oracle.ps1 runs
-    # Release. About 25 s. The waves themselves still run through tools/run-oracle.ps1.
-    dotnet run --project (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') --configuration $Configuration --no-build | Out-Null
+    # Release. About 25 s. The waves themselves still run through tools/run-oracle.ps1, so the tests
+    # that read a recorded wave are left out here (OracleWave.NeedsARecordedWave): CI records none, and
+    # a local run would judge a stale git-ignored wave instead.
+    dotnet run --project (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') --configuration $Configuration --no-build -- --treenode-filter '/*/*/*/*[Category!=NeedsARecordedWave]' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Ratchet: RED - a tests/FuzzyRegex.OracleTests test failed. Run that project to see which.' -ForegroundColor Red
         exit 1

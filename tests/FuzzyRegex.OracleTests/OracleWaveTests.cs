@@ -85,6 +85,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void The_wave_agrees_with_upstream()
     {
         OracleWaveFile wave = OracleWave.Load();
@@ -142,6 +143,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void Our_own_answers_never_contradict_themselves()
     {
         // S47 for the fuzzy limb (ledger entry 11), WIDENED BY S52c to every metamorphic invariant
@@ -228,6 +230,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void The_lazy_walks_answer_exactly_what_the_eager_ones_do()
     {
         // S53b's `EnumerateMatches` and `EnumerateSplits` promise the same answer as `Matches` and
@@ -299,6 +302,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does()
     {
         // S61 made a pattern keep its engine state between calls (`MatchStateCache`), so every
