@@ -25,6 +25,7 @@ owns only Part B's skeleton, below; the two parts meet when both branches merge.
 | C4 | Is a partial answer consistent with the port's non-partial answers over every continuation up to 3 characters? | `port-runner.cs` judge and `d11-brute-judge.py` |
 | C5 | Do the answers stay the same with the failure memos forced off and on? | `port-runner.cs` |
 | C6 | Does the port agree with the reference matcher? | `tools/probes/fuzzy-reference-matcher.py` |
+| C7 | Where PCRE2 10.47 and Perl 5.42.3 can both express a row and agree, does the port give their span, groups and last captures? (single-engine, engines-disagree and OPEN rows are counted apart, not as failures) | `c7.py` through the answer key's `survey.py`; `summary.md` lists its translation and exclusion rules |
 
 A check that does not apply to a row is counted as n/a, never as a pass. `controls.py` holds one
 row per check that must fire and one that must stay quiet.
@@ -42,6 +43,7 @@ Filled from `summary.md` and `cells.csv` of the run (`.scratch/matrix/results/<r
 | C4 | | | | | | |
 | C5 | | | | | | |
 | C6 | | | | | | |
+| C7 | | | | | | |
 
 ### Failures by root cause
 

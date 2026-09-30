@@ -58,8 +58,11 @@ CONTROLS = [
     # capture the call made, (0,1), in c's history although c is unset; PCRE2 and Perl leave c unset
     # with nothing captured, which the owner's ruling (a) adopts.
     ({"pattern": "(?(DEFINE)(?<c>a))(?&c)b", "subject": "ab", "operation": "search"}, "C7", "fail"),
-    # A call and a backreference that every engine answers alike: (0,3), group 1 (0,1).
-    ({"pattern": "(a|b)(?1)\\1", "subject": "aba", "operation": "search"}, "C7", "pass"),
+    # Not a call: `(a|b)(?1)\1` over 'aba' fails C7 too, because the port's history for group 1 ends
+    # with (1,2), the capture its call made, where the value and both engines say (0,1) (D51 again,
+    # measured 2026-09-30). The quiet control is a lookahead's capture read by a backreference
+    # (answer key A2): (0,2), group 1 (0,1), in PCRE2, Perl and the port.
+    ({"pattern": "(?=(a))a\\1?", "subject": "aa", "operation": "search"}, "C7", "pass"),
 ]
 
 
