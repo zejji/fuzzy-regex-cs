@@ -4081,6 +4081,7 @@ internal static class Matcher
         /* bstack: call_base pstack_mark REOPEN */
 
         state.NotePartialEvent(PartialEvent.CutBlockedAtomic);
+        CountFork(state);
     }
 
     /// <summary>
@@ -4194,6 +4195,7 @@ internal static class Matcher
         }
 
         state.NotePartialEvent(PartialEvent.VerbSkipped);
+        CountFork(state);
         return true;
     }
 
@@ -4298,6 +4300,7 @@ internal static class Matcher
 
             TaintTheFrame(state, frame);
             state.NotePartialEvent(blockedEvent);
+            CountFork(state);
             return LookaroundEnd.Backtrack;
         }
 
@@ -4374,6 +4377,7 @@ internal static class Matcher
         state.SliceEnd = look.SliceEnd;
         node = node.Next1.Node!;
         state.NotePartialEvent(blockedEvent);
+        CountFork(state);
         return LookaroundEnd.Continue;
     }
 
@@ -5715,6 +5719,53 @@ internal static class Matcher
                 or Opcode.SetSymDiffIgnRev
                 or Opcode.SetUnionRev
                 or Opcode.SetUnionIgnRev;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4 (design section 4.4): counts one fork of the current attempt, a
+    /// blocked construct that keeps more than one outcome (a blocked cut, a skipped verb, a negative
+    /// lookaround or test that passes undetermined, a condition that takes both branches). Past
+    /// 256 (|t| + 1) forks the budget is spent, and the matcher's next cancellation check, which
+    /// this brings forward, answers the partial at the attempt's start (<see cref="ForkBudgetPartial"/>).
+    /// </summary>
+    /// <remarks>
+    /// The count is per attempt, because a search makes one attempt per start and a per-call count
+    /// grows with the starts: `a*(?=.*z)b` over 'a' * n + 'c' crosses a per-call budget from about
+    /// n = 256 (review round 3). The check rides on the cancellation gate, so a matching step pays
+    /// nothing for it; only the second pass forks (assert A6).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void CountFork(MatchState state)
+    {
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass forks");
+        if (++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1) && !state.ForkBudgetSpent)
+        {
+            state.ForkBudgetSpent = true;
+
+            // The next step wraps the counter to zero, which opens the cancellation gate.
+            state.Iterations = 0xFF00;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the attempt whose fork budget is spent stops, and the call answers
+    /// the partial at the attempt's start, which for a search is the leftmost start not yet ruled
+    /// out.
+    /// </summary>
+    /// <remarks>
+    /// A partial is never a refusal, so the budget cannot lose a match (design section 1); each
+    /// firing is a phantom of class C5 (section 6). No path completed, so no capture is attested
+    /// and the groups are cleared, as S57d's escalation clears them.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Partial"/>.</returns>
+    private static int ForkBudgetPartial(MatchState state)
+    {
+        state.MatchPos = state.ForkAttemptStart;
+        state.ClearGroups();
+        state.NotePartialEvent(PartialEvent.BudgetFired);
+
+        return MatchStatus.Partial;
+    }
 
     /// <summary>
     /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266). Upstream's two
@@ -10192,6 +10243,11 @@ internal static class Matcher
         }
 
         Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
+        Debug.Assert(
+            state.PartialSide != MatchState.PartialNone || state.Forks == 0,
+            "D11 A6: a first pass forks nowhere"
+        );
+        state.Forks = 0;
 
         // D11 M3: the passes run the same code from the same start, and they try the same starts
         // unless an attempt can move the next one. A (*SKIP) moves it, and so does a \K whose entry a
@@ -10385,6 +10441,7 @@ internal static class Matcher
             }
 
             state.MatchPos = state.TextPos;
+            state.ForkAttemptStart = state.TextPos;
 
             if (node.Op == Opcode.Success)
             {
@@ -10414,6 +10471,7 @@ internal static class Matcher
             }
 
             node = startNode;
+            state.ForkAttemptStart = state.TextPos;
         }
 
         advance:
@@ -10425,9 +10483,17 @@ internal static class Matcher
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
-            if (state.Iterations == 0 && SafeCheckCancel(state))
+            if (state.Iterations == 0)
             {
-                return MatchStatus.Cancelled;
+                if (SafeCheckCancel(state))
+                {
+                    return MatchStatus.Cancelled;
+                }
+
+                if (state.ForkBudgetSpent)
+                {
+                    return ForkBudgetPartial(state);
+                }
             }
 
             switch (node.Op)
@@ -12302,6 +12368,7 @@ internal static class Matcher
 
                             PushTouchMark(state);
                             state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                            CountFork(state);
                             node = node.Next1.Node!;
                             break;
                         }
@@ -14437,9 +14504,17 @@ internal static class Matcher
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
-            if (state.Iterations == 0 && SafeCheckCancel(state))
+            if (state.Iterations == 0)
             {
-                return MatchStatus.Cancelled;
+                if (SafeCheckCancel(state))
+                {
+                    return MatchStatus.Cancelled;
+                }
+
+                if (state.ForkBudgetSpent)
+                {
+                    return ForkBudgetPartial(state);
+                }
             }
 
             if (!state.Bstack.PopUInt8(out byte op))
@@ -14797,6 +14872,7 @@ internal static class Matcher
 
                         PushTouchMark(state);
                         state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                        CountFork(state);
                     }
 
                     goto advance;
@@ -15902,6 +15978,7 @@ internal static class Matcher
                         {
                             PushTouchMark(state);
                             state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                            CountFork(state);
                         }
 
                         node = lookNode.Next2.Node!;

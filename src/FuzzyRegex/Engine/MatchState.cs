@@ -285,6 +285,23 @@ internal sealed class MatchState : IDisposable
     internal bool AttemptTouchedTheTextToCome;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 M4 (design section 4.4): the forks of the current attempt of a partial
+    /// call's second pass, a fork being a blocked construct that keeps more than one outcome.
+    /// Cleared at each attempt's start; always 0 in a first pass (assert A6).
+    /// </summary>
+    internal long Forks;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: set when <see cref="Forks"/> passes the budget. The matcher reads it
+    /// at its next cancellation check (which the firing brings forward) and answers the partial at
+    /// the attempt's start (<see cref="ForkAttemptStart"/>).
+    /// </summary>
+    internal bool ForkBudgetSpent;
+
+    /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
+    internal int ForkAttemptStart;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: whether a run-out has given this call an unknown capture, so
     /// the backreference and group-condition arms must ask (<c>Matcher.MarkTheBodysCapturesUnknown</c>).
     /// A call without partial never sets it and pays one test per such arm.
@@ -1136,6 +1153,9 @@ internal sealed class MatchState : IDisposable
         LastIndex = 0;
         LastGroup = 0;
         Iterations = 0;
+        ForkBudgetSpent = false;
+        Forks = 0;
+        ForkAttemptStart = 0;
         TooFewErrors = false;
         FoundMatch = false;
         Array.Clear(FuzzyCounts);
@@ -1577,6 +1597,9 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;
+        ForkBudgetSpent = false;
+        Forks = 0;
+        ForkAttemptStart = 0;
 
         // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
         // the memo never leaves the threshold or the set other than Reset leaves them, so it pays
