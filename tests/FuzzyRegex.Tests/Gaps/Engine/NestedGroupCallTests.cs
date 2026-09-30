@@ -122,4 +122,18 @@ public sealed class NestedGroupCallTests
         new FuzzyRegex("(?:..(?<=(?&g))){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
         new FuzzyRegex("(?:(?!(?&g))..){s<=1}(?P<g>ab)?").Match("ab").Success.Should().BeFalse();
     }
+
+    // D43. A conditional's lookbehind test runs backwards, so a call in it runs its group backwards,
+    // as the test written out does. DIVERGES FROM UPSTREAM, which runs the call forwards and
+    // answers None on both called forms (regex 2026.9.10, 2026-09-30):
+    //   search('bc(?(?<=bc)x|y)', 'bcxzzz')   (0, 3)
+    //   search('bc(?(?<!bc)x|y)', 'bcyzzz')   (0, 3)
+    // The 'zzz' keeps the subject longer than the call's inflated minimum width (GroupCallTests),
+    // which would refuse 'bcx' before matching starts, in both engines.
+    [Test]
+    public void A_call_in_a_conditional_lookbehind_test_runs_backwards()
+    {
+        ShouldMatch(new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz"), 0, 3, new FuzzyCounts(0, 0, 0));
+        ShouldMatch(new FuzzyRegex("bc(?(?<!(?&g))x|y)(?P<g>bc)?").Match("bcyzzz"), 0, 3, new FuzzyCounts(0, 0, 0));
+    }
 }

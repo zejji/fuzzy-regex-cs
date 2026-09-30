@@ -4263,9 +4263,16 @@ internal sealed class LookAroundConditional : RegexBase
     internal RegexBase NoItem { get; set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM (D43): the test is fixed under <see cref="Behind"/>, the direction
+    /// <see cref="CompileCore"/> compiles it in (<c>upstream/regex/_regex_core.py</c>:3267).
+    /// Upstream fixes it under the caller's direction (:3230), so a call in a lookbehind test ran
+    /// its group forwards: <c>bc(?(?&lt;=(?&amp;g))x|y)(?P&lt;g&gt;bc)?</c> refused 'bcxzzz', which
+    /// <c>bc(?(?&lt;=bc)x|y)</c> matches.
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, reverse, fuzzy);
+        Subpattern.FixGroups(pattern, Behind, fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
