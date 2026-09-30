@@ -94,6 +94,14 @@ internal sealed class Node
     /// </summary>
     internal (int Private, int Public)[]? RunOutGroups;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, the fuzzy section it
+    /// lies in, or <see langword="null"/> for none; the section a run-out in its body closes back to
+    /// (<c>Matcher.CloseTheBodysSection</c>). Set by <c>PatternObject.SetEnclosingSections</c>, only
+    /// for a pattern with a fuzzy section inside a body (<c>PatternObject.HasFuzzyInABody</c>).
+    /// </summary>
+    internal Node? EnclosingSection;
+
     /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end
     /// node, sorted.</param>

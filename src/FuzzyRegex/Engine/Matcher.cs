@@ -4525,6 +4525,97 @@ internal static class Matcher
         }
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: a run-out inside a lookaround body left a fuzzy section open that
+    /// the body opened. The continuation after the lookaround belongs to the section around the
+    /// lookaround, so that section becomes current again, with the body's errors added to its
+    /// counts, as the section's END_FUZZY adds them on a normal end, and the totals checked as
+    /// END_FUZZY checks them. A <see cref="Opcode.RunOutClosedSection"/> entry puts the body's section
+    /// back when backtracking undoes the run-out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Left open, the body's section went on governing the continuation: its limits instead of the
+    /// enclosing ones, and counts without the enclosing section's. `(?:a(?=(?:bcd){e&lt;=2})bx){e&lt;=1}`
+    /// over 'aby' answered P(0, 3) with two errors, where no continuation completes it: the body
+    /// needs one error before the edge, and <c>x</c> another (D11 amendment 2's residue).
+    /// </para>
+    /// <para>
+    /// The continuations where the body goes on make at least these errors, so a path whose count
+    /// is already over a limit fails for all of them, and a minimum is not asked: errors after the
+    /// edge may still meet it, and the enclosing section asks its own at its END_FUZZY.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the counts added are the section's at the lookaround's entry, which its entry
+    /// holds, and the innermost open section's own; errors the body made in the enclosing section
+    /// before it opened a section, and those of sections open between the two, are not counted,
+    /// because a pattern without a minimum keeps no link to the frames that hold them
+    /// (<see cref="MatchState.SectionFrame"/>). Ceiling: a lower bound, so the continuation may take
+    /// errors the enclosing limits refuse, which answers a phantom partial and never refuses a
+    /// completion. Upgrade: keep the section links for a pattern with a section in a body, and add
+    /// each open frame's counts.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The lookaround or condition whose body ran out.</param>
+    /// <param name="lookMark">The backtracking-stack position just above its entry.</param>
+    /// <returns><see langword="false"/> if the errors are over a limit, and the path fails.</returns>
+    private static bool CloseTheBodysSection(MatchState state, Node test, int lookMark)
+    {
+        Node? outer = test.EnclosingSection;
+
+        /* bstack: ... fuzzy_counts change_count capture_change sstack LOOKAROUND | CONDITIONAL */
+
+        int countsAt = lookMark - 1 - (3 * sizeof(long)) - (FuzzyValue.Count * sizeof(long));
+        Span<long> merged = stackalloc long[FuzzyValue.Count];
+        for (int kind = 0; kind < FuzzyValue.Count; kind++)
+        {
+            merged[kind] = state.Bstack.SizeAt(countsAt + (kind * sizeof(long))) + state.FuzzyCounts[kind];
+        }
+
+        long errors = TotalErrors(merged);
+        if (errors > state.MaxErrors || (outer is not null && !WithinTheLimits(merged, outer)))
+        {
+            return false;
+        }
+
+        state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+        state.Bstack.PushNode(state.FuzzyNode);
+        state.Bstack.PushSize(state.TotalErrors);
+        state.Bstack.PushSize(state.TotalCost);
+        state.Bstack.PushUInt8((byte)Opcode.RunOutClosedSection);
+
+        /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost RUN_OUT_CLOSED_SECTION */
+
+        merged.CopyTo(state.FuzzyCounts);
+        state.FuzzyNode = outer;
+        state.TotalErrors = errors;
+        if (outer is not null)
+        {
+            state.TotalCost = TotalCost(merged, outer);
+        }
+
+        state.NotePartialEvent(PartialEvent.RunOutClosedSection);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: <see cref="FuzzyWithinConstraints"/> without the minimums, for
+    /// counts that may still grow (<see cref="CloseTheBodysSection"/>).
+    /// </summary>
+    /// <param name="counts">The counts.</param>
+    /// <param name="section">The FUZZY node whose limits apply.</param>
+    /// <returns><see langword="true"/> if no maximum is exceeded.</returns>
+    private static bool WithinTheLimits(ReadOnlySpan<long> counts, Node section)
+    {
+        List<uint> values = section.Values;
+        return counts[FuzzyValue.Del] <= values[FuzzyValue.MaxDel]
+            && counts[FuzzyValue.Ins] <= values[FuzzyValue.MaxIns]
+            && counts[FuzzyValue.Sub] <= values[FuzzyValue.MaxSub]
+            && TotalErrors(counts) <= values[FuzzyValue.MaxErr]
+            && TotalCost(counts, section) <= values[FuzzyValue.MaxCost];
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="frame">The frame's backtracking-stack position.</param>
@@ -4579,9 +4670,12 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="item">The item that ran out, for assert A10.</param>
+    /// <param name="fails">Receives whether the path fails instead: the body's errors so far are
+    /// already more than the section around the lookaround allows (<see cref="CloseTheBodysSection"/>).</param>
     /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
-    private static Node? RunOutInALookaroundBody(MatchState state, Node? item)
+    private static Node? RunOutInALookaroundBody(MatchState state, Node? item, out bool fails)
     {
+        fails = false;
         PatternObject pattern = state.Pattern;
         if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
         {
@@ -4618,6 +4712,18 @@ internal static class Matcher
 
             atomics++;
             offset -= sizeof(long);
+        }
+
+        // A fuzzy section the body opened and left open: the continuation runs in the section
+        // around the lookaround, with the body's errors counted there, as END_FUZZY would count them.
+        if (
+            pattern.HasFuzzyInABody
+            && state.FuzzyNode != look.Node.EnclosingSection
+            && !CloseTheBodysSection(state, look.Node, (int)lookMark)
+        )
+        {
+            fails = true;
+            return null;
         }
 
         bool verbs = pattern.HasBacktrackingVerb;
@@ -14297,7 +14403,13 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
-        Node? runOutEnd = RunOutInALookaroundBody(state, node);
+        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        if (runOutFails)
+        {
+            stringPos = -1;
+            goto backtrack;
+        }
+
         if (runOutEnd is null)
         {
             return MatchStatus.Partial;
@@ -15896,6 +16008,25 @@ internal static class Matcher
                     );
                     state.DropWMarksFrom(state.Bstack.Count);
                     break;
+                case Opcode.RunOutClosedSection: // NOT UPSTREAM'S, D11 chunk 8: the body's section again.
+                {
+                    /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost */
+
+                    if (
+                        !state.Bstack.PopSize(out long closedCost)
+                        || !state.Bstack.PopSize(out long closedErrors)
+                        || !state.Bstack.PopNode(pattern, out Node? closedNode)
+                        || !state.PopFuzzyCountsMerging(state.Bstack, state.FuzzyCounts, out _)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.FuzzyNode = closedNode;
+                    state.TotalErrors = closedErrors;
+                    state.TotalCost = closedCost;
+                    break;
+                }
                 case Opcode.UnknownCapture: // NOT UPSTREAM'S, D11 chunk 8: an unknown capture goes.
                 {
                     /* bstack: 0 current capture_change private_index public_index */

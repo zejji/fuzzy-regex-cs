@@ -329,6 +329,13 @@ internal sealed class PatternObject
     internal bool AnAttemptCanMoveTheNextStart;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a fuzzy section lies inside a lookaround body or a
+    /// condition's test, in a pattern without group calls, so that a run-out there may leave the
+    /// section open (<c>Matcher.CloseTheBodysSection</c>). Set with <see cref="Node.EnclosingSection"/>.
+    /// </summary>
+    internal bool HasFuzzyInABody;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern reads a group's capture while it matches, through a
     /// backreference or a group condition. A run-out in a lookaround body leaves the body's later
     /// captures unknown, which build chunk 8 models; until then such a pattern keeps the run-out
@@ -1100,6 +1107,76 @@ internal sealed class PatternObject
         if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
         {
             SetRunOutGroups(pattern);
+        }
+
+        if (pattern.IsFuzzy && !pattern.HasGroupCalls)
+        {
+            SetEnclosingSections(pattern);
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.EnclosingSection"/>.</summary>
+    /// <remarks>
+    /// A walk from the start node that carries the section open at each node: FUZZY opens its own
+    /// for its body, and END_FUZZY goes back to the one FUZZY was reached in. Sections nest, so each
+    /// node is reached in one section whichever path reaches it; a repeat's end leads back to its
+    /// body in the same section.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its bodies set.</param>
+    private static void SetEnclosingSections(PatternObject pattern)
+    {
+        var fuzzyInABody = false;
+        foreach (Node test in pattern.NodeList)
+        {
+            if (test.BodyInfo is { } body)
+            {
+                foreach (int i in body.Nodes)
+                {
+                    fuzzyInABody |= pattern.NodeList[i].Op == Opcode.Fuzzy;
+                }
+            }
+        }
+
+        if (!fuzzyInABody || pattern.StartNode is not { } start)
+        {
+            return;
+        }
+
+        pattern.HasFuzzyInABody = true;
+        var outerOf = new Dictionary<int, Node?>();
+        var seen = new HashSet<int>();
+        var todo = new Stack<(Node Node, Node? Section)>();
+        todo.Push((start, null));
+        while (todo.Count > 0)
+        {
+            (Node n, Node? section) = todo.Pop();
+            if (!seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            Node? after = section;
+            if (n.Op is Opcode.Lookaround or Opcode.Conditional)
+            {
+                n.EnclosingSection = section;
+            }
+            else if (n.Op == Opcode.Fuzzy)
+            {
+                outerOf[n.Index] = section;
+                after = n;
+            }
+            else if (n.Op == Opcode.EndFuzzy && section is not null)
+            {
+                after = outerOf.GetValueOrDefault(section.Index);
+            }
+
+            foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+            {
+                if (next is not null)
+                {
+                    todo.Push((next, after));
+                }
+            }
         }
     }
 

@@ -206,53 +206,47 @@ public sealed class OpenDefectTests
     [Arguments("match", @"(?=a\b(?:|()))(?(1)|(?<=b))", "a")]
     [Arguments("match", @"(?:(?=a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)", "a")]
     [Arguments("match", @"(?:(?=(.*)z|())a)*b\1\2", "aaaaaaaaaaaaaaaaaaaac")]
+    // D11 amendment 2's fuzzy rows and its review's row, re-attributed by build chunk 8 (review
+    // round 1). The first six are C3: the lookahead's run-out needs 'd' (or 'c') next and the tail's
+    // x needs 'x' there, and each read is judged alone. The fuzzy-free twin `a(?=byd)byx` over 'aby'
+    // answers the same P(0, 3) with the same second-pass events (a run-out in the body, then one
+    // outside it). The last is C4: every path reaches the (*PRUNE) and acts there, but the path
+    // through the test's first branch read the edge, so the verb is skipped and the section's
+    // trailing insertion goes on; its fuzzy-free twin `(?:(?=aa$|a)|a)a(*PRUNE)b` over 'aa' answers
+    // the same P(0, 2) with the same skipped verbs. Upstream answers None to all of them.
+    [Arguments("match", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
+    [Arguments("search", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
+    [Arguments("match", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
+    [Arguments("search", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
+    [Arguments("match", @"(?:(?(?=a$|a)|b)){e<=1}a(*PRUNE)b", "aa")]
     public void A_blocked_cut_keeps_the_alternatives_made_after_the_read(string operation, string pattern, string text)
     {
-        Partial(operation, pattern, text).Success.Should().BeFalse();
-    }
+        Match m = Partial(operation, pattern, text);
 
-    // D11 amendment 2, left to build chunk 8 (run-outs inside bodies). The lookahead's body runs
-    // out inside a fuzzy section with a minimum error count. Before amendment 2 the unfinished
-    // section stayed open and its minimum went on constraining what follows, which by chance gave
-    // the judge's answers; a blocked end now steps out of the section as a normal end does, and
-    // what follows is judged without it. No continuation of 'aby' completes a match at 0, so the
-    // match rows are None and the searches start at the edge (tools/probes/d11-brute-judge.py,
-    // 2026-09-29); the port answers P(0, 3) to all eight.
-    [Test]
-    [Arguments("match", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
-    [Arguments("search", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
-    [Arguments("match", @"a(?=(?:(?:bcd|b){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
-    [Arguments("search", @"a(?=(?:(?:bcd|b){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
-    [Arguments("match", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", -1)]
-    [Arguments("search", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", 3)]
-    [Arguments("match", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", -1)]
-    [Arguments("search", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", -1)]
-    public void A_run_out_in_a_fuzzy_section_of_a_lookaround_leaves_no_residue(
-        string operation,
-        string pattern,
-        int start
-    )
-    {
-        Match m = Partial(operation, pattern, "aby");
-
-        if (start < 0)
+        // A search has a completion that starts inside the text to come; the partial must say so.
+        if (string.Equals(operation, "search", StringComparison.Ordinal))
         {
-            m.Success.Should().BeFalse();
+            (m.PartialMatch, m.Index).Should().Be((true, text.Length));
         }
         else
         {
-            (m.PartialMatch, m.Index, m.Length).Should().Be((true, start, 3 - start));
+            m.Success.Should().BeFalse();
         }
     }
 
-    // D11 amendment 2's review, left to build chunk 8 with the rows above: a fuzzy section around a
-    // condition whose test is blocked. No continuation of 'aa' completes the match ('aa' + 'b' fails
-    // at the (*PRUNE), tools/probes/d11-brute-judge.py, 2026-09-29; upstream None); the port
-    // answers P(0, 2). The review counted 8 such rows and gave this one.
+    // D19 (the design's limit C2): a run-out presumes that the rest of the pattern can match. At
+    // start 2 the outer section spends its one error on 'y', and the lookahead's body and the
+    // tail's (b|c) then run out, each presumed to match, though each needs another error. No start
+    // completes the match (tools/probes/d11-brute-judge.py, 2026-09-29; the port's own non-partial
+    // matcher agrees over every continuation of up to three characters, 2026-09-30). The match
+    // row of the same pattern is right since build chunk 8 counts the body's errors in the outer
+    // section (PartialLookaroundRuleTests); this one answers P(2, 3). Upstream answers None.
     [Test]
-    public void A_fuzzy_section_around_a_blocked_condition_decides_as_the_judge_does()
+    public void A_run_out_presumes_the_rest_of_the_pattern_can_match()
     {
-        Partial("match", @"(?:(?(?=a$|a)|b)){e<=1}a(*PRUNE)b", "aa").Success.Should().BeFalse();
+        Partial("search", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", "aby")
+            .Success.Should()
+            .BeFalse();
     }
 
     private static Match Partial(string operation, string pattern, string text)

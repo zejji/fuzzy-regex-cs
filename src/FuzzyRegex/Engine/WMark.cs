@@ -113,6 +113,9 @@ internal enum PartialEvent
     /// <summary>M2: a group inside a body was given the unknown capture.</summary>
     UnknownCaptureSet,
 
+    /// <summary>M2: a run-out closed the fuzzy section its body left open.</summary>
+    RunOutClosedSection,
+
     /// <summary>M2: a lookaround success was not continued again, as a repeat of an earlier one.</summary>
     Dedup,
 

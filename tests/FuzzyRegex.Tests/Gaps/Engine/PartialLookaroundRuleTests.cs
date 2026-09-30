@@ -279,6 +279,44 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// A run-out inside a fuzzy section the body opened closes that section for the continuation,
+    /// as its END_FUZZY would: the section around the lookahead is current again, with the body's
+    /// errors counted in it. In the first two rows the body spends one error before the edge
+    /// ('y' for 'c'), so the outer section has none left for the tail, and no continuation
+    /// completes the match. Left open, the body's section governed the tail with its own limits,
+    /// and the port answered P(0, 3) with two errors under a limit of one. In the third row the
+    /// reported counts stay within the outer limit of two, where the open section let three
+    /// through. The fourth row guards the backtracking entry that gives the body its section back:
+    /// the negative lookahead's body runs out, is backtracked into, and its <c>b</c> then succeeds
+    /// on the held text within the body's own limit, so the lookahead fails for every
+    /// continuation; left in the outer section, the body could not afford that path and the port
+    /// answered P(0, 3). The last two rows are controls: 'aby' + 'd' completes each within the
+    /// limits.
+    /// </summary>
+    // Upstream answers None to the first two and the fourth, and P(0, 3) to the others.
+    [Test]
+    [Arguments(@"(?:a(?=(?:bcd){e<=2})bx){0<=e<=1}", false, 0)]
+    [Arguments(@"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", false, 0)]
+    [Arguments(@"(?:a(?=(?:(?:bcd){1<=e<=1}))(?:b){1<=e<=1}){1<=e<=2}", true, 2)]
+    [Arguments(@"(?:a(?!(?:bcd){e<=2})b.){e<=1}", false, 0)]
+    [Arguments(@"(?:a(?=(?:bcd){e<=2})b.){0<=e<=1}", true, 1)]
+    [Arguments(@"(?:a(?=(?:bcd){e<=1})bzz){e<=3}", true, 2)]
+    public void A_run_out_in_a_fuzzy_section_of_a_body_counts_its_errors_outside_it(
+        string pattern,
+        bool partial,
+        int errors
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("aby", partial: true);
+
+        m.Success.Should().Be(partial);
+        if (partial)
+        {
+            (m.PartialMatch, m.Index, m.Length, m.FuzzyCounts.Total).Should().Be((true, 0, 3, errors));
+        }
+    }
+
+    /// <summary>
     /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
     /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
     /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over

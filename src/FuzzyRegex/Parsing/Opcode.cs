@@ -384,4 +384,11 @@ internal enum Opcode : uint
     /// appears on a node or in a code list.
     /// </summary>
     UnknownCapture = 104,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11 chunk 8): the backtracking entry of a run-out inside a
+    /// lookaround body that closed the fuzzy section the body left open. Its arm puts the section's
+    /// counts, node and totals back. It never appears on a node or in a code list.
+    /// </summary>
+    RunOutClosedSection = 105,
 }

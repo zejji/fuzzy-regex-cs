@@ -803,6 +803,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasBacktrackingVerb",
             // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
             "PatternObject.AnAttemptCanMoveTheNextStart",
+            // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through
+            // SetLookaroundBodies.
+            "PatternObject.HasFuzzyInABody",
             "PatternObject.ReadsCapturesWhileMatching",
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
@@ -868,6 +871,8 @@ public sealed class ThreadSafetyTests
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
             "Node.RunOutGroups",
+            // D11 chunk 8: written by PatternObject.SetEnclosingSections.
+            "Node.EnclosingSection",
             "Node.Match",
             "Node.Op",
             "Node.Status",
