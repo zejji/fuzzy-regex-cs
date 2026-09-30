@@ -226,6 +226,22 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// Row N8, the run-out taint on an atomic group open at the edge: 'b' + 'a' makes the atomic
+    /// group's <c>\wa</c> match, so it commits and <c>(?&lt;!a)</c> then fails, which the group's
+    /// empty branch would otherwise have rescued; ' b' + 'a' completes the match. Without the taint
+    /// the run-out closes the group as if its first path were certain, and the second pass finds
+    /// nothing (build chunk 8's witness for chunk 6's rule, shown in a Release build).
+    /// </summary>
+    // Upstream answers P(0, 2) too.
+    [Test]
+    public void A_run_out_taints_the_atomic_groups_open_in_the_body()
+    {
+        Match m = new FuzzyRegex(@".(?!(?>\wa|(?<!b))(?<!a))").MatchAtStart(" b", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
+
+    /// <summary>
     /// The dedup itself: each iteration's lookahead succeeds twice, once reading the text to come
     /// (<c>.*$</c>) and once not, with the same captures and counts, so the second success is not
     /// continued. Without the dedup every iteration doubles the paths: 'a' * 24 + 'c' took over
