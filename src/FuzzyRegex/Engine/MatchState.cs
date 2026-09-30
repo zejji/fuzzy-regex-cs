@@ -1621,9 +1621,10 @@ internal sealed class MatchState : IDisposable
     /// What <c>ATOMIC</c>, <c>CONDITIONAL</c> and <c>LOOKAROUND</c> save so that their eight
     /// <b>restoring</b> arms can put the fuzzy state back as if the body had never run: upstream
     /// <c>push_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 2480), the change-list length
-    /// beside it (see <see cref="PushFuzzyCounts"/>), and the open section.
+    /// beside it (see <see cref="PushFuzzyCounts"/>), the open section and the running totals.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>The open section is this port's (D44), and upstream does not save it.</b> The body always
     /// ends in the section it started in, except where a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cuts the
     /// backtracking straight to the construct: that throws away the <c>FUZZY</c> entry of a section
@@ -1632,6 +1633,14 @@ internal sealed class MatchState : IDisposable
     /// enclosing section: <c>(?:(?!(?:a(*PRUNE)b){d&lt;=0})cd){e&lt;=2}</c> over 'ad' moved to (1, 2),
     /// in upstream too, where the same pattern without the verb matches at (0, 2) with one
     /// substitution.
+    /// </para>
+    /// <para>
+    /// <b>The running totals are this port's too (D45).</b> <see cref="TotalErrors"/> and
+    /// <see cref="TotalCost"/> are written by every <c>END_FUZZY</c> the body passes, so a body
+    /// thrown away with a closed section in it left its errors in the totals while the counts went
+    /// back: <c>(?:(?=(?:q){e&lt;=1})z)?a</c> over 'a' reached SUCCESS with no errors counted and a
+    /// total of one. Upstream never restores <c>total_errors</c> at all (ledger entry 32).
+    /// </para>
     /// </remarks>
     /// <param name="stack">The stack to push onto.</param>
     internal void PushSubAttemptFuzzyState(ByteStack stack)
@@ -1641,13 +1650,15 @@ internal sealed class MatchState : IDisposable
             return;
         }
 
+        stack.PushSize(TotalErrors);
+        stack.PushSize(TotalCost);
         stack.PushNode(FuzzyNode);
         PushFuzzyCounts(stack, FuzzyCounts);
     }
 
     /// <summary>
     /// Upstream <c>pop_fuzzy_counts</c> (line 2652) at the eight <b>restoring</b> sites: the counts,
-    /// the change list and the open section all go back to what they were at the matching
+    /// the change list, the open section and the running totals all go back to what they were at the matching
     /// <see cref="PushSubAttemptFuzzyState"/>.
     /// </summary>
     /// <remarks>
@@ -1674,7 +1685,12 @@ internal sealed class MatchState : IDisposable
             return true;
         }
 
-        if (!PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount) || !stack.PopNode(Pattern, out FuzzyNode))
+        if (
+            !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
+            || !stack.PopNode(Pattern, out FuzzyNode)
+            || !stack.PopSize(out TotalCost)
+            || !stack.PopSize(out TotalErrors)
+        )
         {
             return false;
         }

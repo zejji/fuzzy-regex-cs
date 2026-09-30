@@ -5076,20 +5076,6 @@ internal static class Matcher
     [Conditional("DEBUG")]
     private static void AssertMatchIsClosed(MatchState state)
     {
-        bool discardsSubAttempts = false;
-        for (int i = 0; i < state.Pattern.NodeList.Count; i++)
-        {
-            Opcode op = state.Pattern.NodeList[i].Op;
-            discardsSubAttempts |=
-                op
-                    is Opcode.Atomic
-                        or Opcode.Lookaround
-                        or Opcode.Conditional
-                        or Opcode.FuzzyLookaround
-                        or Opcode.Prune
-                        or Opcode.Skip;
-        }
-
         Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
 
         Debug.Assert(state.FuzzyNode is null, "a match never ends inside a fuzzy section");
@@ -5107,13 +5093,8 @@ internal static class Matcher
             "the counts are the lengths of the change lists, kind by kind"
         );
 
-        // SHORTCUT: not asserted where an atomic group, lookaround, conditional or verb can throw a
-        // sub-attempt away, known defect D45 - the counts are put back and the running total keeps
-        // the thrown-away section's errors, and BESTMATCH ranks by that total
-        // (Gaps.Engine.LookaroundTests.A_group_call_inside_a_lookaround_whose_body_is_thrown_away_leaves_no_capture).
-        // Upgrade: assert it everywhere once D45 is settled.
         Debug.Assert(
-            !state.Pattern.IsFuzzy || discardsSubAttempts || state.TotalErrors == TotalErrors(state.FuzzyCounts),
+            !state.Pattern.IsFuzzy || state.TotalErrors == TotalErrors(state.FuzzyCounts),
             "the running total is the sum of the kinds"
         );
     }
@@ -9544,11 +9525,18 @@ internal static class Matcher
         // NOT UPSTREAM EITHER (D44): no section is open either. The same verb throws away the FUZZY
         // entry whose backtrack arm would have closed the section, which stayed the open one into
         // the next attempt; upstream does the same.
+        //
+        // NOR THE RUNNING TOTALS (D45), which the verb leaves at the abandoned attempt's last
+        // END_FUZZY: an attempt that then succeeds without passing an END_FUZZY reported them.
         if (state.IsFuzzy)
         {
             Array.Clear(state.FuzzyCounts);
             state.FuzzyChanges.Clear();
             state.FuzzyNode = null;
+            state.TotalErrors = 0;
+            state.TotalCost = 0;
+            state.TotalErrors = 0;
+            state.TotalCost = 0;
         }
 
         // NOT UPSTREAM (empty-iteration rule): no section entered in this attempt is open yet.
