@@ -215,6 +215,29 @@ def reference_form(answer: str) -> str:
     return f"{parts[0].rstrip('P')} {parts[1]} {parts[3]}"
 
 
+def only_changes_leaked(base: str, up: str, leak_free: str | None) -> bool:
+    """ExpectedDivergences.OnlyTheChangePositionsLeaked for a finditer answer: every differing match
+    agrees apart from the change positions, with equal counts, the port's positions agree with its
+    counts, and upstream's leak-free answer, where it could be asked ("?" where not), is the port's."""
+    if leak_free is None:
+        return False
+    mine, theirs, free = (a[1:-1].split(" ; ") if a != "[]" else [] for a in (base, up, leak_free))
+    if not len(mine) == len(theirs) == len(free):
+        return False
+    for m, t, f in zip(mine, theirs, free):
+        if m == t:
+            continue
+        pm, pt = m.split(" "), t.split(" ")
+        if len(pm) != len(pt) or pm[:2] != pt[:2] or pm[3:] != pt[3:]:
+            return False
+        changes = [x.split(",") if x else [] for x in pm[2][1:-1].split("|")]
+        if [len(c) for c in changes] != [int(n) for n in pm[1].split(",")]:
+            return False
+        if f != "?" and f != m:
+            return False
+    return True
+
+
 def c2_verdict(base: str, written: str, depth: str) -> tuple:
     """A call means its body written out (D40), and a capture made inside a call is discarded on
     return (owner ruling D51 (a), 2026-09-30), which is what the non-capturing copy does. So the
@@ -241,8 +264,26 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C1x"] = ("n/a", "", None, None)
     elif not answered(up) or not answered(base):
         out["C1x"] = ("n/a", "unanswered", base, up)
+    elif up == base:
+        out["C1x"] = ("pass", "", base, up)
     else:
-        out["C1x"] = ("pass", "", base, up) if up == base else ("fail", "differs from upstream", base, up)
+        # As C1 does through ExpectedDivergences: a difference that one of the oracle's fuzzy
+        # ablations takes away (port-runner's `pinned` variants), or that is only upstream's leaked
+        # fuzzy_changes (pyworker's anchored re-ask), is accounted for. C1x compared the raw strings
+        # and so counted pinned divergences as failures (matrix triage 2026-09-30).
+        pinned = [v for v, a in (port.get("pinned") or {}).items() if a == up]
+        if pinned:
+            out["C1x"] = ("expected", "pinned divergence, taken away by " + pinned[0], base, up)
+        elif only_changes_leaked(base, up, extra.get("c1xLeakFree")):
+            out["C1x"] = ("expected", "fuzzy-changes-leaked-from-an-abandoned-attempt", base, up)
+        elif (row.get("partial") and (row["flags"] & 1024 or row["pattern"].startswith("(?r)"))
+              and (row.get("pos") or 0) > 0 and up == "[]"
+              and re.fullmatch(rf"\[\({row['pos']},\d+\)P [^;]*\]", base)):
+            # ExpectedDivergences' reversed-partial-runs-out-at-the-slice-start (ledger 24): upstream
+            # finds nothing, the port a partial that starts where the reversed text runs out.
+            out["C1x"] = ("expected", "reversed-partial-runs-out-at-the-slice-start", base, up)
+        else:
+            out["C1x"] = ("fail", "differs from upstream", base, up)
     # C2: written-out equivalence.
     wo = port.get("wo")
     if not wo:
@@ -363,6 +404,8 @@ def judge(out: Path, constructs: dict) -> None:
         for task in ("c1x", "c4up", "c6"):
             for rid, d in read_by_id(stem.with_name(stem.name + f".{task}.jsonl")).items():
                 extra[rid][task] = d[task]
+                if "c1xLeakFree" in d:
+                    extra[rid]["c1xLeakFree"] = d["c1xLeakFree"]
         if stem.with_name(stem.name + ".report.txt").exists():
             c1.update(oracle_verdicts(chunk))
     table = collections.defaultdict(lambda: collections.Counter())

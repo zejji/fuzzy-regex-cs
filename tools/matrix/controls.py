@@ -54,6 +54,11 @@ CONTROLS = [
     # match, so it answers (0,1) with one deletion where the ablated port answers None.
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match", "ablate": "exactdeletion"}, "C6", "fail"),
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match"}, "C6", "pass"),
+    # C6 judge defects found by the triage (2026-09-30), each once a false failure: an escape the
+    # reference cannot model must leave the row unjudged (it read \G\A as the text "GA"), and a verb
+    # inside a negative lookahead makes the assertion true rather than ending the attempt.
+    ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "n/a"),
+    ({"pattern": "(?:(?!(?:a(*PRUNE)(*F)|xb))aba){1<=d<=2}", "subject": "aba", "operation": "search"}, "C6", "pass"),
 ]
 
 
