@@ -72,7 +72,7 @@ ANCHORED or ENDANCHORED options, so the survey drives the library directly
 Each engine runs as one worker process per batch. A watchdog in `survey.py` kills a worker whose
 current row passes its time limit (3 s; 20 s for the fuzzy reference, 30 s for the brute judge) or
 whose process tree passes 1.5 GB, records the row as `timeout` or `memory`, and restarts after it.
-No row timed out in the final run; 14 rows raised `MemoryError` inside upstream itself. Spans are
+In the final run one row hit upstream's own 2 s `timeout=` (`call+verb+reverse#9`) and 14 rows raised `MemoryError` inside upstream itself; no worker had to be killed. Spans are
 normalised to codepoints. A construct an engine does not have is `n/a`, never a disagreement.
 
 ### A2. The governing rule for each construct
@@ -87,7 +87,7 @@ surveyed row of the cell named, across every engine that could answer.
 | branch-reset | Each alternative numbers its groups from the same start. | `(?\|(a)\|(b))` over 'b' gives group 1 = (0,1) | pcre2pattern "Duplicate group numbers"; perlre "(?\|pattern)" |
 | lookahead, lookbehind | A lookaround is atomic: once true, it is never re-entered. A successful positive lookaround keeps its captures; a negative one that succeeds keeps none. | `(?=(a))a\1?` over 'aa' is (0,2), group 1 (0,1) | pcre2pattern "Assertions" ("no captured substrings are ever retained after a successful negative assertion"; "Perl lookaround assertions are atomic"); survey: lookaround 30/30, five engines |
 | atomic, possessive | Once the group has matched, its choice points are discarded. `X*+` is `(?>X*)`. | `(?>a+)b` over 'aab' is (0,3); `a*+a` over 'aa' is None | pcre2pattern "Atomic grouping and possessive quantifiers" |
-| conditional | A group test asks whether the group has captured; a lookaround test runs the assertion. Captures made by a test that succeeds are kept. | `(a)?(?(1)b\|c)` over 'c' is (0,1) | pcre2pattern "Conditional groups"; survey: conditional 29/30 (the one split is the finditer rule below) |
+| conditional | A group test asks whether the group has captured; a lookaround test runs the assertion. Captures made by a test that succeeds are kept (upstream, PCRE2, Perl; .NET drops them). | `(a)?(?(1)b\|c)` over 'c' is (0,1) | pcre2pattern "Conditional groups"; survey: conditional 29/30 (the one split is the finditer rule below) |
 | call | A call runs the group's pattern at the call site, with the call site's flags and fuzziness, and answers as the group written out there. Calls can be backtracked into. The caller's captures are visible inside; captures made inside revert when the call returns. | `(a\|b)(?1)\1` over 'aba' is (0,3), group 1 = (0,1) | pcre2pattern "Groups as subroutines" ("any capturing parentheses that are set during the subroutine call revert to their previous values afterwards") and "Differences in recursion processing between PCRE2 and Perl"; perlre on `(DEFINE)` ("capture groups matched inside of recursion are not accessible after the recursion returns"); D40 and D51 rulings; survey: call 30/30, capture+call 30/30 |
 | verb | `(*FAIL)` fails now. `(*PRUNE)` and `(*SKIP)` do nothing until backtracking reaches them; then the attempt at this start fails, and `(*SKIP)` also moves the next start to where it was passed. Scope rules are in A3. | `a+(*SKIP)b\|a` over 'aac' is None | upstream README (`(*PRUNE)`, `(*SKIP)`, `(*FAIL)`); pcre2pattern "Verbs that act after backtracking"; survey: verb 30/30 |
 | search-anchor `\G` | Matches where this search began (or where the previous match ended, in finditer). | `\Ga` over 'aa' at pos 1 is (1,2) | upstream README "Search anchor" |
@@ -338,18 +338,18 @@ agrees with upstream on whether a match exists on all 40 fuzzy-core rows.
   passes `(*PRUNE)`, and fails on 'b'. PCRE2 10.47: the call fails, the outer alternative `ac` is
   tried, and the answer is (0,2). Perl 5.42.3 and upstream: the attempt at 0 is over, and the answer
   is None. The same pattern with the group written out in place, `(?:(?:a(*PRUNE)b)c|ac)`, is None in
-  all three. Measured on four such rows (`tools/matrix/survey-open-rows.jsonl`, Q1).
+  all three. Measured on three such rows (a PRUNE, a SKIP and a recursive form) (`tools/matrix/survey-open-rows.jsonl`, Q1).
 - *Options.*
   - (a) The verb acts on the whole attempt (Perl, upstream, and the written-out pattern). Pros: a call
     means exactly what writing the group there means, which is the rule the owner already adopted
     for D40 ("a call runs with its call site's features and answers as the group written out");
-    likely no change to shipped behaviour. Cons: PCRE2 documents the opposite.
+    it is upstream's answer, which the port inherits unless Part B finds otherwise. Cons: PCRE2 documents the opposite.
   - (b) The verb ends only the call (PCRE2, documented in pcre2pattern "Backtracking verbs in
     subroutines": "(*COMMIT), (*SKIP), and (*PRUNE) cause the subroutine match to fail"). Pros: a
     call becomes a sealed unit, like PCRE2's. Cons: breaks the written-out rule, so C2 would need an
     exception; PCRE2 itself notes "Perl's treatment of the other verbs in subroutines is different".
-- *Recommendation:* (a). Two engines agree, including the one PCRE2 names as the reference for
-  subroutine semantics, and it keeps the written-out equivalence that the matrix's check C2 rests on.
+- *Recommendation:* (a). Perl and upstream agree, and it
+  keeps the written-out equivalence that the matrix's check C2 rests on.
 
 **OPEN-2. The captures of a condition's negative test when the test fails.**
 
@@ -369,8 +369,8 @@ agrees with upstream on whether a match exists on all 40 fuzzy-core rows.
   - (b) Drop them in both the positive and negative forms (.NET). Pros: simple ("a test never
     captures"). Cons: changes upstream's positive form too, which upstream, PCRE2 and Perl all
     agree on.
-  - (c) Keep upstream's mix (keep after a positive test, drop after a negative one). Pros: no
-    change. Cons: the two equivalent spellings above give different answers, which is a
+  - (c) Keep upstream's mix (keep after a positive test, drop after a negative one). Pros:
+    upstream parity. Cons: the two equivalent spellings above give different answers, which is a
     self-contradiction by the matrix's own standard.
 - *Recommendation:* (a).
 
