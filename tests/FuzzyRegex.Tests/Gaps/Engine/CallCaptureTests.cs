@@ -20,7 +20,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// Every expected value is the answer of the same pattern with each call replaced by a
 /// non-capturing copy of the called body (the matrix's check C2). The comment beside each row
 /// quotes PCRE2 10.47 (pip <c>pcre2</c> 0.7.1) and Perl 5.42.3 as (start, end) per group, and
-/// upstream's capture list, all measured 2026-09-30 with <c>.scratch/d51/survey.py</c>. PCRE2 and
+/// upstream's capture list, all measured 2026-09-30 with <c>tools/probes/d51-call-capture-survey.py</c>. PCRE2 and
 /// Perl report only the last capture of a group, so they settle Success and Value; the capture
 /// list follows from the rule. Where a row uses fuzziness, reversal or a partial match, which
 /// neither engine has, the written-out form is the authority.

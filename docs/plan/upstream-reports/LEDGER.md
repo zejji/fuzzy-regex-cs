@@ -5788,7 +5788,7 @@ does. No other pass reads `TrueNode`: its only other reader is the matcher's CON
 (DECISIONS.md), which reverses the 2026-09-11 entry. Draft report, framed as a question:
 `entry-63-call-captures.md`.
 
-**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `.scratch/d51/survey.py` (upstream,
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `tools/probes/d51-call-capture-survey.py` over `tools/probes/d51-call-capture-witnesses.tsv` (upstream,
 PCRE2 10.47 through pip `pcre2` 0.7.1, Perl 5.42.3):
 
 ```
@@ -5822,7 +5822,8 @@ every other named ablation has the fix off too. It accounts for 12, 5 and 14 row
 waves at seeds 7, 4242 and 20260927 (diverge 0 at all three). Complete matrix over its 1,619 call rows: C2 502 to 9 and
 C7 68 to 0, no assert on the Debug build.
 
-**Open edge.** A partial match that runs out of text inside a call that has not returned keeps that
-call's captures: `(?<o>(?<i>a)b)(?&o)` over 'aba' partial lists i as [(0,1), (2,3)], where the
-written-out `(?<o>(?<i>a)b)(?:ab)` gives [(0,1)]. PCRE2 reports no groups for a partial match and
-Perl has none, so no engine settles it.
+**Open edge: known defect D62, not ruled.** A partial match that runs out of text inside a call
+that has not returned keeps that call's captures, value included: `(?<o>(?<i>a)b)(?&o)` over 'aba'
+partial gives i = (2, 3) with captures [(0,1), (2,3)] here and i = (2, 3) with ['a', 'a'] upstream,
+where the written-out `(?<o>(?<i>a)b)(?:ab)` gives i = (0, 1) with [(0,1)]. PCRE2 reports no groups
+for a partial match and Perl has none. Red test: `OpenDefectTests`, `[Explicit]`.

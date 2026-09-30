@@ -771,6 +771,40 @@ public sealed class OracleWaveTests
         }
     }
 
+    /// <summary>
+    /// The D51 backtracking witness, recorded 2026-09-30 by <c>python tools/record-oracle.py --rows</c>:
+    /// a call whose freed capture slots the caller writes over before it backtracks into the call.
+    /// </summary>
+    private const string _callReentryRow = """
+        {"generator":"rows","pattern":"(?(DEFINE)(?<d>(.)(?:.)?\\2))(?&d)(?:(?2)x)?ab","flags":0,"namedLists":{},"subject":"aaab","operation":"search","codepointSpan":[0,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]},{"number":1,"success":false,"index":0,"length":0,"captures":[[0,2]]},{"number":2,"success":false,"index":0,"length":0,"captures":[[0,1]]}],"lastIndex":-1,"lastGroup":null,"partial":false}}
+        """;
+
+    [Test]
+    public void A_port_bug_in_the_discard_is_not_hidden_by_another_entrys_ablation()
+    {
+        // Every other named ablation has the D51 fix off too, so an entry keyed on one of them
+        // would accept a call row whose live answer carries a bug in the discard itself: with the
+        // fix off the bug is gone and upstream comes back. The planted bug is the one measured for
+        // A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence: the
+        // discard without the span restore answers None over this row. With the fix on, the same
+        // ablation would answer None too, so the ablation must report that, not upstream's (0, 4).
+        // Found by the blind review of maint/d51-call-captures, 2026-09-30.
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        OracleComparer.Compare(row, withoutTheFix).Should().Be(OracleVerdict.Agree);
+        OracleComparer
+            .Compare(row, OracleComparer.StackedCallCaptureAnswer(new NoMatchOutcome(), withoutTheFix))
+            .Should()
+            .NotBe(OracleVerdict.Agree, "a discard that changes a match must not be hidden by the ablation");
+
+        // And a fix-on answer that differs only by the calls' captures leaves the ablation as it was.
+        OracleComparer
+            .StackedCallCaptureAnswer(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, withoutTheFix)
+            .Should()
+            .BeSameAs(withoutTheFix);
+    }
+
     [Test]
     public void A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence()
     {
@@ -781,15 +815,7 @@ public sealed class OracleWaveTests
         // 2026-09-30, it answers None over this row, where upstream, PCRE2 10.47, Perl 5.42 and
         // the fixed port all give (0, 4). The ablation still reproduces upstream there, because it
         // never lowers a count, so the ablation clause alone would have accepted the bug.
-        OracleRow row = OracleWave
-            .ParseRows(
-                """
-                {"generator":"rows","pattern":"(?(DEFINE)(?<d>(.)(?:.)?\\2))(?&d)(?:(?2)x)?ab","flags":0,"namedLists":{},"subject":"aaab","operation":"search","codepointSpan":[0,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]},{"number":1,"success":false,"index":0,"length":0,"captures":[[0,2]]},{"number":2,"success":false,"index":0,"length":0,"captures":[[0,1]]}],"lastIndex":-1,"lastGroup":null,"partial":false}}
-                """
-            )
-            .Should()
-            .ContainSingle()
-            .Subject;
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
         IOracleOutcome ablated = OracleComparer.RunWithTheUpstreamCallCaptures(row)!;
 
         OracleComparer.Compare(row, ablated).Should().Be(OracleVerdict.Agree);
