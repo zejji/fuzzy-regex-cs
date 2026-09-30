@@ -1617,3 +1617,10 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   full-over-partial preference already requires. (4) The gate: a search with partial on is gated in (removing
   leading insertions can leave a partial match that starts later, `(?:a){i<=1}` partial over 'x' gives u = (1,1) and
   c = (0,1), so H' gives c); a pattern whose fuzzy sections permit no insertion is gated out.
+  Scope cut 2026-10-01 after the re-review (review-d61-fixes-2026-10-01.md): BESTMATCH keeps main's code path unchanged
+  for now, including the shipped ledger 19/20 exemption and main's fix for upstream issue 564. H' applies to plain
+  and ENHANCEMATCH searches. The reason: BESTMATCH's walk re-searches from each candidate's start, and applying H' there
+  lifted the ban at every re-search, giving answers that are neither u nor c (`(?b)(?:\mdog){1<=e<=2}` finditer over
+  'do; xdog-dog' gave [(0,3),(4,8),(9,11)], where main and upstream give [(0,3),(8,12)]; 15 (?b) grid rows lost or
+  changed a main match). What H' means inside a best-match walk is a separate semantic question, to be researched and
+  refutation-reviewed before it is built; the gate marks it with a SHORTCUT.
