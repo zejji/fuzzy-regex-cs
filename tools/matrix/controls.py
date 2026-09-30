@@ -81,10 +81,11 @@ CONTROLS = [
     # makes the assertion true rather than ending the attempt.
     ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?:(?!(?:a(*PRUNE)(*F)|xb))aba){1<=d<=2}", "subject": "aba", "operation": "search"}, "C6", "pass"),
-    # C6 over the constructs added on 2026-09-30 (reference rules 11-18). D55, inherited and still on
-    # main: a negative conditional drops the alternatives of a branch that starts its yes-branch;
-    # the reference, PCRE2 and Perl give (0,1), the port None (matrix triage NEW-1).
-    ({"pattern": "(?(?!a)(?:x|))x", "subject": "x", "operation": "search"}, "C6", "fail"),
+    # C6 over the constructs added on 2026-09-30 (reference rules 11-18). D55: a negative conditional
+    # dropped the alternatives of a branch that starts its yes-branch (matrix triage NEW-1). Fixed by
+    # 5ca277e5, so the port now gives the reference's (0,1), as PCRE2 and Perl do; it was a firing
+    # control until then.
+    ({"pattern": "(?(?!a)(?:x|))x", "subject": "x", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?>(?:ab){e<=1})\\Kb", "subject": "xbb", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?=a)|a", "subject": "aa", "operation": "finditer"}, "C6", "pass"),
     # Rules 19-20 and rule 5's pinned-anchor exception: README's POSIX example, and DIVERGENCES'
@@ -108,10 +109,15 @@ CONTROLS = [
     # `(?x:...)` lost its opening "(" to the whole-budget regex and went to TRE as literal text.
     ({"pattern": "(?:ab|cd){e<=1}", "subject": "xxxcd", "operation": "match"}, "C8", "n/a"),
     ({"pattern": "(?x:a b c){e<=1}", "subject": "?x:a b c", "operation": "search"}, "C8", "n/a"),
-    # ... and for C6: the pinned-anchor ruling says nothing of an assertion inside an atomic group;
-    # \b and \d read non-ASCII text by rules the reference does not model (combining marks, '²');
-    # a leading `]` in a class is a literal, not the end of an empty class.
-    ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "n/a"),
+    # ... and for C6: \b and \d read non-ASCII text by rules the reference does not model
+    # (combining marks, '²'); a leading `]` in a class is a literal, not the end of an empty class.
+    # The pinned-anchor ruling covers an assertion wherever the path passes it (owner ruling
+    # 2026-09-30, option B, D61): in an atomic group, inside the section, in an alternation.
+    # Upstream gives None to the three searches and [(3, 5)] to the finditer.
+    ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:^a){i<=1}", "subject": "xa", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:^|q)(?:a){i<=1}", "subject": "xa", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?:\\ba){i<=1}", "subject": "xa xa", "operation": "finditer"}, "C6", "pass"),
     ({"pattern": "a\\b", "subject": "á", "operation": "search"}, "C6", "n/a"),
     ({"pattern": "[]a]", "subject": "x]", "operation": "search"}, "C6", "pass"),
     # A POSIX class is not modelled: read as "[[:alph]" plus a literal "]" it failed falsely.
