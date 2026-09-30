@@ -13,7 +13,9 @@ first unfinished stage (a half-written port or Python stage resumes at its next 
          (Release), for every row the recorder can ask;
   c1x    upstream's own finditer for the rows it cannot (partial or pos/endpos);
   c4up   tools/matrix/d11-brute-judge.py, upstream-based, for partial rows;
-  c6     tools/probes/fuzzy-reference-matcher.py, for rows inside its subset.
+  c6     tools/probes/fuzzy-reference-matcher.py, for rows inside its subset;
+  c7     tools/matrix/c7.py: PCRE2 and Perl (and node, .NET, re) through the answer key's survey
+         translations, for check C7 (c7.py's docstring gives the verdicts, RULES the exclusions).
 
 A run stops launching stages after --max-minutes (default 40), so no chunk of wall time passes 45
 minutes; launch it again to continue. It also waits while the machine has under 4 GB free and
@@ -43,13 +45,17 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 RESULTS = REPO / ".scratch" / "matrix" / "results"
 sys.path.insert(0, str(HERE))
+import c7  # noqa: E402
 import gen  # noqa: E402
 
-STAGES = ("port", "c1", "c1x", "c4up", "c6")
+STAGES = ("port", "c1", "c1x", "c4up", "c6", "c7")
 STAGE_CAP_SECONDS = 30 * 60
 MIN_FREE_BYTES = 4 * 1024**3
 ORACLE_KEYS = ("pattern", "flags", "namedLists", "subject", "operation", "partial", "pos", "endpos")
-CHECKS = ("C1", "C1x", "C2", "C3", "C4", "C5", "C6")
+CHECKS = ("C1", "C1x", "C2", "C3", "C4", "C5", "C6", "C7")
+# Statuses a check can give besides pass / fail / expected / phantom / n/a (C7 only): answers that
+# are neither a pass nor a failure, counted in their own columns.
+OTHER = ("single-agree", "single-disagree", "engines-disagree", "open")
 UNANSWERED = ("ERR Timeout", "ERR StepLimit", "ERR RowBudget", "ERR Hang", "ERR Crash")
 
 
@@ -126,6 +132,9 @@ def stage(name: str, chunk: Path, out: Path, ablate: str) -> tuple[int, float, i
     if name in ("c1x", "c4up", "c6"):
         target = stem.with_name(stem.name + f".{name}.jsonl")
         return run_stage([sys.executable, str(HERE / "pyworker.py"), name, str(chunk), str(target)], env, REPO, logfile)
+    if name == "c7":
+        target = stem.with_name(stem.name + ".c7.jsonl")
+        return run_stage([sys.executable, str(HERE / "c7.py"), str(chunk), str(target)], env, REPO, logfile)
     # c1: the oracle's own recorder and comparer.
     rows = [json.loads(line) for line in open(chunk, encoding="utf-8") if line.strip()]
     asked = [r for r in rows if oracle_row(r)]
@@ -176,7 +185,7 @@ def drive(out: Path, chunks: list[Path], max_minutes: float, ablate: str) -> boo
             complete = code == 0
             if name == "port":
                 complete = lines(chunk.with_name(chunk.stem + ".port.jsonl")) >= lines(chunk)
-            if name in ("c1x", "c4up", "c6"):
+            if name in ("c1x", "c4up", "c6", "c7"):
                 complete = lines(chunk.with_name(chunk.stem + f".{name}.jsonl")) >= lines(chunk)
             if not complete:
                 log(f"  {chunk.name} {name} incomplete; stopping so it can resume")
@@ -307,6 +316,8 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
     else:
         mine = reference_form(base)
         out["C6"] = ("pass", "", mine, ref) if mine == ref else ("fail", "differs from the reference matcher", mine, ref)
+    # C7: PCRE2 and Perl, where both can express the row and agree.
+    out["C7"] = c7.verdict(row, base, extra.get("c7"))
     return out
 
 
@@ -360,7 +371,7 @@ def judge(out: Path, constructs: dict) -> None:
     for chunk in sorted(out.glob("chunk-[0-9][0-9][0-9].jsonl")):
         stem = chunk.with_suffix("")
         port.update(read_by_id(stem.with_name(stem.name + ".port.jsonl")))
-        for task in ("c1x", "c4up", "c6"):
+        for task in ("c1x", "c4up", "c6", "c7"):
             for rid, d in read_by_id(stem.with_name(stem.name + f".{task}.jsonl")).items():
                 extra[rid][task] = d[task]
         if stem.with_name(stem.name + ".report.txt").exists():
@@ -369,7 +380,10 @@ def judge(out: Path, constructs: dict) -> None:
     totals = {c: collections.Counter() for c in CHECKS}
     witness = {}
     controls = []
-    with open(out / "failures.jsonl", "w", encoding="utf-8", newline="\n") as f:
+    c7_kinds = collections.Counter()
+    c7_file = open(out / "c7-failures.jsonl", "w", encoding="utf-8", newline="\n")
+    c7_others = open(out / "c7-others.jsonl", "w", encoding="utf-8", newline="\n")
+    with c7_file, c7_others, open(out / "failures.jsonl", "w", encoding="utf-8", newline="\n") as f:
         for row in rows:
             rid = row["id"]
             if rid not in port:
@@ -386,6 +400,17 @@ def judge(out: Path, constructs: dict) -> None:
                 totals[check][status] += 1
                 for c in covered:
                     table[(gen.cell_name(c), check)][status] += 1
+                if check == "C7":
+                    bucket = kind.split(";")[0].split(" (")[0] if status not in ("pass", "single-agree") else ""
+                    c7_kinds[(status, bucket)] += 1
+                    if status in ("fail",) + OTHER[1:]:
+                        question = {k: row[k] for k in ORACLE_KEYS if k in row}
+                        c1v = verdicts["C1"]
+                        rec = {"id": rid, "check": check, "status": status, "kind": kind, **question,
+                               "cell": row["cell"], "port": mine, "engines": other,
+                               "C1": f"{c1v[0]} {c1v[1]}".strip(),
+                               "survey": extra.get(rid, {}).get("c7", {}).get("results")}
+                        (c7_file if status == "fail" else c7_others).write(json.dumps(rec, ensure_ascii=True) + "\n")
                 if status in ("fail", "expected", "phantom"):
                     question = {k: row[k] for k in ORACLE_KEYS if k in row}
                     f.write(json.dumps({"id": rid, "check": check, "status": status, "kind": kind, **question,
@@ -396,14 +421,16 @@ def judge(out: Path, constructs: dict) -> None:
                         if key not in witness or size < witness[key][0]:
                             witness[key] = (size, row, mine, other)
     with open(out / "cells.csv", "w", encoding="utf-8", newline="\n") as f:
-        f.write("cell,kind,check,rows,applicable,na,fail,expected,phantom\n")
+        f.write("cell,kind,check,rows,applicable,na,fail,expected,phantom," + ",".join(OTHER) + "\n")
         for c in cells:
             name = gen.cell_name(c)
             kind = "triple" if c[0] in ("family", "ids") else "pair"
             for check in CHECKS:
                 t = table[(name, check)]
                 rows_ = sum(t.values())
-                f.write(f"{name},{kind},{check},{rows_},{rows_ - t['n/a']},{t['n/a']},{t['fail']},{t['expected']},{t['phantom']}\n")
+                applicable = rows_ - t["n/a"] - sum(t[s] for s in OTHER)
+                f.write(f"{name},{kind},{check},{rows_},{applicable},{t['n/a']},{t['fail']},{t['expected']},"
+                        f"{t['phantom']}," + ",".join(str(t[s]) for s in OTHER) + "\n")
     judged = sum(1 for r in rows if r["id"] in port)
     lines_ = [f"Rows judged: {judged} of {len(rows)}.", "",
               "| Check | Applicable rows | n/a | Failures | Accounted (EXPECTED) | Phantoms | Cells with a failure |",
@@ -411,11 +438,25 @@ def judge(out: Path, constructs: dict) -> None:
     for check in CHECKS:
         t = totals[check]
         failing_cells = sum(1 for c in cells if table[(gen.cell_name(c), check)]["fail"])
-        lines_.append(f"| {check} | {sum(t.values()) - t['n/a']} | {t['n/a']} | {t['fail']} | {t['expected']} | {t['phantom']} | {failing_cells} |")
+        applicable = sum(t.values()) - t["n/a"] - sum(t[s] for s in OTHER)
+        lines_.append(f"| {check} | {applicable} | {t['n/a']} | {t['fail']} | {t['expected']} | {t['phantom']} | {failing_cells} |")
     lines_ += ["", "Smallest failing row per check and kind (raw, not triaged):", ""]
     for (check, kind), (_, row, mine, other) in sorted(witness.items()):
         q = {k: row[k] for k in ORACLE_KEYS if k in row and k != "namedLists"}
         lines_.append(f"- {check} {kind}: `{json.dumps(q, ensure_ascii=True)}` port `{mine}` other `{other}`")
+    t7 = totals["C7"]
+    lines_ += ["", "## C7: PCRE2 10.47 and Perl 5.42.3", "",
+               f"Applicable (both answer and agree): {t7['pass'] + t7['fail']} (pass {t7['pass']}, fail {t7['fail']}); "
+               f"engines disagree {t7['engines-disagree']}; single engine {t7['single-agree'] + t7['single-disagree']} "
+               f"(disagree {t7['single-disagree']}); open (owner's OPEN questions) {t7['open']}; n/a {t7['n/a']}.",
+               "Raw: c7-failures.jsonl (fail), c7-others.jsonl (single-disagree, engines-disagree, open).", "",
+               "| Status | Kind | Rows |", "|---|---|---|"]
+    for (status, bucket), n in sorted(c7_kinds.items(), key=lambda kv: (kv[0][0], -kv[1])):
+        if status != "pass":
+            lines_.append(f"| {status} | {bucket or '-'} | {n} |")
+    lines_ += ["", "Translation and exclusion rules (tools/matrix/c7.py RULES):", "",
+               "| Construct | Treatment | Why |", "|---|---|---|"]
+    lines_ += [f"| {a} | {b} | {c} |" for a, b, c in c7.RULES]
     if controls:
         (out / "controls.txt").write_text("\n".join(controls) + "\n", encoding="utf-8")
         print("\n".join(controls))

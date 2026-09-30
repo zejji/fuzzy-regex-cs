@@ -54,6 +54,12 @@ CONTROLS = [
     # match, so it answers (0,1) with one deletion where the ablated port answers None.
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match", "ablate": "exactdeletion"}, "C6", "fail"),
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match"}, "C6", "pass"),
+    # C7: D51, inherited from upstream and still on main (docs/KNOWN-DEFECTS.md): the port keeps the
+    # capture the call made, (0,1), in c's history although c is unset; PCRE2 and Perl leave c unset
+    # with nothing captured, which the owner's ruling (a) adopts.
+    ({"pattern": "(?(DEFINE)(?<c>a))(?&c)b", "subject": "ab", "operation": "search"}, "C7", "fail"),
+    # A call and a backreference that every engine answers alike: (0,3), group 1 (0,1).
+    ({"pattern": "(a|b)(?1)\\1", "subject": "aba", "operation": "search"}, "C7", "pass"),
 ]
 
 
