@@ -648,6 +648,32 @@ classified by `ExpectedDivergences.bestmatch-walk-truncated-by-a-skip`. Re-runna
 `python tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py` and
 `pwsh -File tools/probes/port-bestmatch-walk-cases.ps1`.
 
+### Two more rows from the complete matrix, 2026-09-30 (known defects D56 and D57), no new door
+
+Both are this entry. The trace is the same line each time: `RE_OP_SKIP` assigns `slice_start`
+(`:14555`) and nothing restores it. The rows are shorter than any above, so they belong at the top
+of the report when it is filed. Measured 2026-10-01 on regex 2026.9.10:
+
+```python
+>>> regex.match(r'(?b)x(*SKIP)(?:ba+){e<=1}', 'xbaabbbx')     # sixth door, :17625
+<regex.Match object; span=(0, 5), match='xbaab', fuzzy_counts=(1, 0, 0)>
+>>> regex.match(r'(?b)x(*PRUNE)(?:ba+){e<=1}', 'xbaabbbx')    # no bound moved
+<regex.Match object; span=(0, 4), match='xbaa'>
+>>> regex.search('aa(*SKIP)x', 'axaa', partial=True)          # fifth door, :18159-18170
+<regex.Match object; span=(4, 4), match='', partial=True>
+>>> regex.search('aa(*PRUNE)x', 'axaa', partial=True)
+<regex.Match object; span=(2, 4), match='aa', partial=True>
+```
+
+In the first, the candidate the `(?b)` walk loses starts at the same position as the one it found,
+so no later start is involved. Without `(?b)` both verbs give (0, 5). In the second, the complete
+pass runs the verb at 4, and the partial pass can then start no earlier. The rows are complete-matrix
+rows 5849, 8589 and 8595 (first) and 12240 (second). They are classified by the row lists of
+`bestmatch-walk-truncated-by-a-skip` and `partial-retry-carried-slice-forward`, and pinned by
+`FuzzyBestMatchTests.Bestmatch_finds_the_exact_fit_at_the_start_a_skip_already_passed` and
+`PartialMatchingTests.A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one`.
+The ledger numbers 63 and 64, reserved for them, are not used.
+
 ### What S52's third sitting added, 2026-09-15, and the one line to put at the top of this report
 
 Six more rows, no new door, and **one fact that says the whole thing more plainly than any of the

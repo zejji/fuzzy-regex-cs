@@ -1105,6 +1105,44 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
+    public void A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one()
+    {
+        // PORT RIGHT, KNOWN DEFECT D57, the smallest row of the door below (complete-matrix row
+        // 12240's shape, 2026-09-30). The complete pass tries 2, runs the verb at 4 and fails at the
+        // end of the text; the verb has set `slice_start` to 4 (upstream/src/_regex.c:14555), and
+        // the partial pass restores only `text_pos` (do_match, :18159-18170), so upstream's partial
+        // search can start no earlier than 4. The least start from which some continuation matches
+        // is 2 ('axaax' matches at 2), which is the partial rule (answer key A2).
+        //
+        // Measured 2026-10-01 on regex 2026.9.10:
+        //
+        //   aa(*SKIP)x   search 'axaa' partial      (4, 4) partial   <- upstream
+        //   aa(*PRUNE)x  search 'axaa' partial      (2, 4) partial   <- this port
+        //   aax          search 'axaa' partial      (2, 4) partial
+        //   aa(*SKIP)x   match('axaa', 2, partial)  (2, 4) partial
+        //   aa(*SKIP)x   search 'axaa'              None             <- both engines
+        //
+        // Classified as `partial-retry-carried-slice-forward`.
+        var regex = new FuzzyRegex("aa(*SKIP)x");
+
+        Match partial = regex.Match("axaa", partial: true);
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((2, 2), "upstream reports the zero-width partial at 4");
+
+        // Near variants: the verb that moves no bound, the verb-free pattern, the anchored door, the
+        // completed subject, and no partial asked for.
+        Match pruned = new FuzzyRegex("aa(*PRUNE)x").Match("axaa", partial: true);
+        (pruned.Index, pruned.Length, pruned.PartialMatch).Should().Be((2, 2, true));
+        Match plain = new FuzzyRegex("aax").Match("axaa", partial: true);
+        (plain.Index, plain.Length, plain.PartialMatch).Should().Be((2, 2, true));
+        Match anchored = regex.MatchAtStart("axaa", beginning: 2, partial: true);
+        (anchored.Index, anchored.Length, anchored.PartialMatch).Should().Be((2, 2, true));
+        Match completed = regex.Match("axaax");
+        (completed.Index, completed.Length, completed.PartialMatch).Should().Be((2, 3, false));
+        regex.Match("axaa").Success.Should().BeFalse();
+    }
+
+    [Test]
     public void A_forward_skip_does_not_cost_the_partial_its_start()
     {
         // THE SAME MECHANISM WITH A SYMPTOM THE TEST ABOVE DOES NOT COVER, and the test above says
