@@ -257,7 +257,8 @@ The plain search stops at ' dog', counting the space as an inserted character. W
 second pass searches ' dog' for a match with no errors and finds 'dog'.
 
 Its limit is that it never looks outside the first match. **`BestMatch`, `(?b)`, searches the
-whole text** for the match with the fewest errors:
+whole text** for the match with the fewest errors, or with the lowest cost when the pattern has a
+cost equation such as `{3i+1s<=3}`:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -275,23 +276,35 @@ Console.WriteLine($"{lowest.Index} {lowest.Value} {lowest.FuzzyCounts.Total}");
 `(?e)` keeps 'abx' with one substitution, because the exact 'abc' at index 3 lies outside the
 first match. `(?b)` finds it.
 
-Neither flag costs much on a simple pattern. For `(?:haystack){e<=3}` over a sentence ending in
-'haystakc', `EnhanceMatch` took about 1% longer than the plain search and `BestMatch` about 2.5%
-longer (`WorkloadBenchmarks` `FuzzyBudgetThree`, `EnhanceMatch` and `BestMatch` in
-`bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/net10.0.json`). That is one pattern
-on one machine; a large budget or a pattern that backtracks heavily may cost more.
+With a cost equation, `(?b)` ranks by cost rather than by error count: `(?b)(?:abcd){3i+1s<=3}`
+over 'axyd abXcd' returns 'axyd', two substitutions costing 2, rather than 'abXcd', one insertion
+costing 3. Upstream mrab-regex returns 'abXcd' here; `docs/COMPARISON.md`'s "`(?e)` and `(?b)`
+rank candidates by fuzzy COST" gives the conditions and the reasoning.
+
+The two flags cost very different amounts. `(?e)` costs little, because its extra searches look
+only inside the first match. `(?b)` keeps scanning the rest of the text after it finds a match,
+in case a better one follows, so a match near the start costs about as much as a search of the
+whole text. For `(?:haystack){e<=3}` over 'haystakc ' followed by 11 KB of other text, the plain
+search took about 2 microseconds, `(?e)` about 6 and `(?b)` about 440, some 200 times the plain
+search (Release build, best of five runs, one machine, 2026-09-30). Upstream mrab-regex shows the
+same shape on the same text: 0.5, 1.3 and 350 microseconds. The committed benchmarks show far
+smaller differences, about 1% for `EnhanceMatch` and 2.5% for `BestMatch` (`WorkloadBenchmarks`
+`FuzzyBudgetThree`, `EnhanceMatch` and `BestMatch` in
+`bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/net10.0.json`), because their subject
+is one sentence whose only match is at its end, which leaves `(?b)` nothing more to scan.
 
 Which to use:
 
-- `(?e)` when you want the best fit for the match you find, such as looking up a word. This is
-  a sensible default for most fuzzy searches.
-- `(?b)` when you want the lowest-error match anywhere in the text.
+- `(?e)` when you want the closest fit around the match found and do not need the leftmost start.
+- `(?b)` when you want the lowest-error, or lowest-cost, match anywhere in the text, and can pay
+  for a scan of all of it.
 - Neither when you need the leftmost match, because both can move its start (from index 3 to 4
   in the first example), or when you use partial matching, where a partial result keeps the
   leftmost start that could still match whatever the flags say (see the partial example under
   [Reading a result](#reading-a-result)).
 
-**A match never begins with an insertion at the position a search starts from.** An insertion
+**Normally, a search's match never begins with an insertion at the position the search starts
+from.** An insertion
 is a character in the text that the pattern does not have, such as the space in ' dog'. The rule
 matters most when walking matches with `EnumerateMatches` or `Matches`, because each search
 after the first starts where the previous match ended, usually on a separator:
@@ -316,6 +329,16 @@ The second search starts on the space at index 3, so it cannot spend an insertio
 finds the exact 'dog' at 4 instead of ' dog'. A single search over 'the dog' starts at index 0,
 so the rule does not reach index 3, and it returns ' dog' with one insertion, as the last line
 shows, unless `(?e)` is set.
+
+The rule has two exceptions. First, it applies only to searches such as `Match`, `Matches` and
+`EnumerateMatches`: `MatchAtStart` and `FullMatch` may open with an insertion, so
+`(?:dog){e<=1}` with `MatchAtStart` over ' dog' returns ' dog' with one insertion. Second, a
+search may open with one when an assertion at the head of the pattern pins the match to the
+start position. `^(?:dog){e<=1}` over ' dog' returns ' dog' with one insertion, as upstream does.
+This port also allows it after an assertion such as `\m` or a multiline `^` that holds at the
+start position but not one character later, so `\m(?:Y){i}\M` finds both 'XY' and 'YX' in
+'XY YX', where upstream finds only 'YX'. The row "A fuzzy section may open with an inserted
+character at the search anchor" in `docs/DIVERGENCES.md` explains why.
 
 ## Timeouts and cancellation
 
