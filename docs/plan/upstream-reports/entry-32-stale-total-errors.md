@@ -57,3 +57,19 @@ With this change a C# port of the module answers (0, 1) with no errors on every 
 and the whole of its ported copy of `test_regex.py` still passes.
 `tools/probes/s87-stale-total-errors.py` in the reporter's repository prints every case above,
 running each in a child process with a time limit.
+
+### Addendum: a thrown-away lookaround or condition leaves its errors in the total too
+
+The same total is left behind when a negative lookaround or a condition discards a body that
+matched fuzzily, because those constructs restore the fuzzy counts and not `total_errors`:
+
+```python
+>>> regex.search(r'(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'cdcx')
+<regex.Match object; span=(0, 1), match='c', fuzzy_counts=(0, 0, 1)>
+>>> regex.search(r'(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'dcx')
+<regex.Match object; span=(0, 2), match='dc'>
+```
+
+BESTMATCH keeps a match with one deletion although an exact match exists at 1. Saving
+`total_errors` with the counts at `RE_OP_ATOMIC`, `RE_OP_CONDITIONAL` and `RE_OP_LOOKAROUND`, and
+restoring it with them, fixes it.

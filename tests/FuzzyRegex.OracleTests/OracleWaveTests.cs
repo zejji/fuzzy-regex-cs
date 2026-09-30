@@ -578,7 +578,7 @@ public sealed class OracleWaveTests
     [Test]
     public void A_row_the_verb_section_close_does_not_explain_is_not_accounted_for()
     {
-        // The control for `fuzzy-section-cut-by-a-verb-is-closed` (ledger entry 59, D44), built as entry 55's: upstream's own answer is what this
+        // The control for `fuzzy-section-cut-by-a-verb-is-closed` (ledger entry 61, D44), built as entry 55's: upstream's own answer is what this
         // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
         // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
         // this port's live answer must be accepted, or the entry classifies nothing.

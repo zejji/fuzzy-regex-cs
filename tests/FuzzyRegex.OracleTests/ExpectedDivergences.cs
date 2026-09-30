@@ -3536,7 +3536,7 @@ internal static class ExpectedDivergences
         new(
             Id: "fuzzy-section-cut-by-a-verb-is-closed",
             Reason: "A FUZZY SECTION THAT A (*PRUNE) OR (*SKIP) CUT THROUGH IS CLOSED HERE, so its limits "
-                + "stop applying where it ends. Ledger entry 59, known defect D44, fixed 2026-09-30 "
+                + "stop applying where it ends. Ledger entry 61, known defect D44, fixed 2026-09-30 "
                 + "under the owner's no-known-bugs rule and recorded as a deliberate divergence in "
                 + "`docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM DEFECT: backtracking onto a verb cuts the backtracking stack straight "

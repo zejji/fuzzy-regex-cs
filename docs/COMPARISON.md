@@ -1684,6 +1684,38 @@ Console.WriteLine(new FuzzyRegex("(?:|z?(?R)?a){e<=3}").FullMatch("aaba").FuzzyC
 
 There is no option to restore the upstream answer. Ledger entry 55.
 
+### A verb that cuts through a fuzzy section closes it
+
+A `(*PRUNE)` or `(*SKIP)` inside a negative lookaround or a condition's test can end that construct
+with a fuzzy section opened inside it still unfinished. Here the section closes with the construct,
+so the enclosing section's limits apply to what follows. Upstream keeps the inner section's limits in
+force, so the match below moves one character on.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex("(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}").Match("ad");
+Console.WriteLine(m.Index);   // 0 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 61.
+
+### BESTMATCH counts only the errors a match contains
+
+A negative lookaround or condition whose body matched fuzzily is thrown away, and so are its errors.
+Upstream keeps them in the total that BESTMATCH and ENHANCEMATCH rank by, so an exact match can lose
+to one with an error.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})").Match("cdcx");
+Console.WriteLine(m.Index);   // 1 - upstream: 0, with a deletion
+Console.WriteLine(m.FuzzyCounts.Total);   // 0
+```
+
+There is no option to restore the upstream answer. Ledger entry 32.
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

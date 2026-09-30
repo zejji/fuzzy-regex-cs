@@ -671,7 +671,7 @@ internal sealed class PatternObject
 
     /// <summary>
     /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
-    /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 59). Set only by
+    /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 61). Set only by
     /// <c>OracleComparer</c>'s ablation; never by the library. See
     /// <c>MatchState.PushSubAttemptFuzzyState</c>.
     /// </summary>
