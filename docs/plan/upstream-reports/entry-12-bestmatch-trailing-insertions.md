@@ -66,6 +66,11 @@ if (insertion_permitted(state, inner_node, inner_counts) &&
 two insertions for every row above, leaves the flagless answers unchanged, and still refuses
 `regex.fullmatch(r'(?b)(?:b){e<=1}', 'bba')`, which the budget cannot afford.
 
+Addendum (DRAFT - NOT FILED): the guard also bites under `(?e)` alone, because the enhance loop
+tightens `max_errors` to the total minus one (`_regex.c:17978`). On 2026.9.10,
+`regex.fullmatch(r'(?e)(?:ob+?a){e<=3}', 'bab').fuzzy_counts` is `(3, 0, 0)`, while the same
+pattern with `{e<=2}` gives `(0, 1, 1)`, which is this port's answer to both, without the doubled term.
+
 ---
 
 Evidence for the owner, not for the report: `tools/probes/bestmatch-fullmatch-trailing-insertions.py`

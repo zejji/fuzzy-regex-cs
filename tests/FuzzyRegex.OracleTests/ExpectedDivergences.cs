@@ -3194,6 +3194,17 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The two rows of <c>enhancematch-trailing-insertion-double-count</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: <c>(?e)(?:ob+?a){e&lt;=3}</c>
+    /// fullmatched against 'bab', and its reversed form against 'aob'. Upstream answers three
+    /// substitutions to both; this port answers one insertion and one deletion.
+    /// </summary>
+    private const string _enhanceDoubledGuardRows = """
+        {"generator": "rows", "pattern": "(?e)(?:ob+?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "bab", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?e)(?r)(?:ob+?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "aob", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 2, 1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        """;
+
+    /// <summary>
     /// The six rows of <c>fuzzy-total-drops-a-discarded-section</c>, recorded 2026-09-30 by
     /// <c>python tools/record-oracle.py --rows</c>: five rows of the D45 grid, every row the fix
     /// changed where the unfixed port gave upstream's answer exactly but one, whose live answer is
@@ -5442,7 +5453,7 @@ internal static class ExpectedDivergences
                 + "returns what it started with. What is not established is which of the two limits "
                 + "the re-run applies differs from the section's own - `state->max_errors` at :17978 "
                 + "and `values[RE_FUZZY_VAL_MAX_ERR]` are read side by side in `this_error_permitted` "
-                + "(:9675) and look equivalent - and no part of this entry rests on the answer.\n"
+                + "(:9675) and look equivalent - and no part of this entry rests on the answer. Known defect D46 (2026-09-30) settled it: it is ledger entry 12's doubled trailing-insertion guard, reached through the loop's `max_errors` (`:17978`), and `enhancematch-trailing-insertion-double-count` below keys on that.\n"
                 + "THIS PORT'S PLAIN ANSWER IS UPSTREAM'S, which is what says the divergence is the "
                 + "loop and not the fuzzy matcher underneath it. Without `(?e)` both engines answer "
                 + "three substitutions on the minimised row and on the wave row; with it, this port "
@@ -5464,6 +5475,32 @@ internal static class ExpectedDivergences
             Applies: static (row, ours) =>
                 _enhancematchLostCandidate.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "enhancematch-trailing-insertion-double-count",
+            Reason: "UPSTREAM'S DOUBLED TRAILING-INSERTION GUARD (LEDGER ENTRY 12) SHOWS UNDER "
+                + "ENHANCEMATCH ALONE, and upstream keeps a three-error fit where a two-error one "
+                + "exists. Known defect D46, triaged 2026-09-30: this port is right and upstream is "
+                + "wrong, so the divergence is pinned and not fixed away.\n"
+                + "THE UPSTREAM DEFECT: the enhance loop tightens `max_errors` to the total minus one "
+                + "(`_regex.c:17978`), so END_FUZZY's trailing-insertion guard (`:15516`) meets a "
+                + "bounded budget and counts the section's errors twice, the same mechanism that "
+                + "`bestmatch-loses-a-candidate` records for `(?b)`. Measured 2026-09-30 on regex "
+                + "2026.9.10: `(?e)(?:ob+?a){e<=3}` fullmatched against 'bab' is (0, 3) at three "
+                + "substitutions upstream, and (0, 3) at one insertion and one deletion with "
+                + "`{e<=2}`, which is this port's answer to both.\n"
+                + "ENTRY 25 (`enhancematch-loses-a-candidate`, above) IS THE SAME DEFECT, FOUND EARLIER: its row `(?e)(?:a\\d+Z){e<=3}` over 'a6ZZ_' is explained by the same ablation, and this entry sits below it so that entry keeps its own row.\n"
+                + "KEYED ON THE ABLATION, for a pattern with `(?e)` and without `(?b)`: a row belongs "
+                + "here when `OracleComparer.RunWithTheDoubledInsertionGuard`, which sets "
+                + "`PatternObject.DoubleCountTrailingInsertions`, reproduces upstream's recorded "
+                + "answer exactly, AND this port's live answer is the one being judged. The control "
+                + "is `A_row_the_enhancematch_double_count_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FuzzyBestMatchTests.Enhancematch_keeps_the_two_error_fit_upstream_trades_for_three_substitutions",
+            Example: _enhanceDoubledGuardRows,
+            Applies: static (row, ours) =>
+                row.Pattern.Contains("(?e", StringComparison.Ordinal)
+                && !row.Pattern.Contains("(?b", StringComparison.Ordinal)
+                && TheDoubledGuardAloneExplainsIt(row, ours)
         ),
         new(
             Id: "bestmatch-ranks-by-cost",

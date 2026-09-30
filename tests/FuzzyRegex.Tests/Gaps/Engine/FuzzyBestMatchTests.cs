@@ -1058,6 +1058,46 @@ public sealed class FuzzyBestMatchTests
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     //
+    // Known defect D46: ENHANCEMATCH alone shows ledger entry 12's doubled count of trailing
+    // insertions, with no `(?b)` in the pattern. The enhance loop tightens `max_errors` to the
+    // total minus one (_regex.c:17978), so END_FUZZY's guard (:15516) meets a bounded budget and
+    // counts the section's errors twice. Upstream, measured on regex 2026.9.10 on 2026-09-30:
+    //
+    //   regex.fullmatch(r'(?e)(?:ob+?a){e<=3}', 'bab')      ->  (0, 3) counts=(3, 0, 0), substitutions [0, 1, 2]
+    //   regex.fullmatch(r'(?e)(?r)(?:ob+?a){e<=3}', 'aob')  ->  (0, 3) counts=(3, 0, 0), substitutions [3, 2, 1]
+    //   regex.fullmatch(r'(?e)(?:ob+?a){e<=2}', 'bab')      ->  (0, 3) counts=(0, 1, 1)
+    //
+    // The port answers (0, 1, 1) for both {e<=3} rows, which is upstream's own answer under {e<=2}
+    // and costs two errors, not three. The control puts the doubled term back and gets (3, 0, 0).
+    [Test]
+    public void Enhancematch_keeps_the_two_error_fit_upstream_trades_for_three_substitutions()
+    {
+        foreach (
+            (string pattern, string subject) in new[]
+            {
+                ("(?e)(?:ob+?a){e<=3}", "bab"),
+                ("(?e)(?r)(?:ob+?a){e<=3}", "aob"),
+            }
+        )
+        {
+            Match m = new FuzzyRegex(pattern).FullMatch(subject);
+
+            m.Success.Should().BeTrue(pattern);
+            (m.Index, m.Index + m.Length).Should().Be((0, 3), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 1), $"{pattern} - upstream answers (3, 0, 0)");
+
+            FuzzyRegex doubled = new(pattern);
+            doubled.PatternObject.DoubleCountTrailingInsertions = true;
+
+            doubled
+                .FullMatch(subject)
+                .FuzzyCounts.Should()
+                .Be(new FuzzyCounts(3, 0, 0), $"{pattern} - upstream's doubled guard");
+        }
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
     // STATE finding 4, seed 20260923 row 3821 of a 2000-row `fuzzy-literal,fuzzy-anchored` wave.
     // Upstream's `subf` gives '<><>😀': its first match is (0, 2) at a substitution and a deletion,
     // because the doubled term refuses the trailing insertion the (0, 3) fit needs. That fit costs

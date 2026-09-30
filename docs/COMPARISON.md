@@ -1791,7 +1791,7 @@ Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); //
 
 There is no option to restore the upstream answer. Ledger entry 60.
 
-### `BestMatch` keeps a fit that ends in trailing insertions
+### `BestMatch` and `EnhanceMatch` keep a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
 Upstream can lose a match whose best fit ends in inserted characters, because the check that
@@ -1806,6 +1806,18 @@ using Fuzzy.Text.RegularExpressions;
 Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}").FullMatch("bba").Length);      // 3 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}$").MatchAtStart("bba").Length);  // 3 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?:b){e<=2}").FullMatch("bba").Length);          // 3 - upstream: 3
+```
+
+`(?e)` reaches the same check without `(?b)`, because each improving run narrows the error budget
+to one below its own total. Upstream can then settle for a costlier fit than the one it would find
+with the tighter limit written out. This port answers the cheaper one.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// One insertion and one deletion fit in two errors. Upstream settles for three substitutions.
+Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=3}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=2}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 2
 ```
 
 ### Inherited upstream bugs are fixed here

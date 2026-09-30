@@ -13736,7 +13736,9 @@ internal static class Matcher
                     // whose second pass climbs 'max_errors' only to 'fewest_errors' - so the budget
                     // the guard is tested against is the match's own cost, the caller cannot raise
                     // it, and '(?b)' loses a match the same engine finds the moment the flag is
-                    // deleted. On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
+                    // deleted. It bites in 'DoEnhancedFuzzyMatch' too, which tightens 'max_errors'
+                    // to the total minus one after each run (upstream ':17978'): '(?e)' then keeps a
+                    // costlier fit where a cheaper one exists (D46). On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
                     // every budget, WHICH IS THAT PATTERN'S BOUNDARY AND NOT THE DEFECT'S: a fit
                     // needing ONE insertion beside one other error is lost too, and a width-2
                     // section body survives counts a width-1 body does not (S52 sitting 16, blocks

@@ -1965,6 +1965,26 @@ Restoring the doubled term in this port (`PatternObject.DoubleCountTrailingInser
 oracle-only switch) gives this port upstream's None, and it moves the other three rows S89 added to
 `bestmatch-loses-a-candidate` the same way.
 
+**ENHANCEMATCH ADDENDUM (D46, 2026-09-30): the same guard bites without `(?b)`.** The enhance loop
+sets `max_errors` to the total minus one after each run (`upstream/src/_regex.c:17978`), so
+END_FUZZY's trailing-insertion guard (`:15516`) meets a bounded budget and counts the section's
+errors twice, exactly as under BESTMATCH. Measured on `regex` 2026.9.10, 2026-09-30:
+
+```python
+>>> regex.fullmatch(r'(?e)(?:ob+?a){e<=3}', 'bab').fuzzy_counts
+(3, 0, 0)
+>>> regex.fullmatch(r'(?e)(?:ob+?a){e<=2}', 'bab').fuzzy_counts
+(0, 1, 1)
+>>> regex.fullmatch(r'(?e)(?r)(?:ob+?a){e<=3}', 'aob').fuzzy_counts
+(3, 0, 0)
+```
+
+`(?e)` is a search for fewer errors, yet a section allowed three errors answers a three-error fit
+while the same pattern allowed two answers a two-error one. This port answers (0, 1, 1) to all three
+rows; setting `PatternObject.DoubleCountTrailingInsertions` gives upstream's (3, 0, 0). Pinned by
+`FuzzyBestMatchTests.Enhancematch_keeps_the_two_error_fit_upstream_trades_for_three_substitutions`
+and the oracle entry `enhancematch-trailing-insertion-double-count`.
+
 **THE HEADLINE SAID "TWO TRAILING INSERTIONS" UNTIL 2026-09-15 AND THAT IS NOT THE BOUNDARY (S52
 sitting 16).** One is enough when the fit spends another error as well, and the five sweep rows this
 entry gained that day include none that needs two. Measured on `regex` 2026.9.10, blocks 6 and 7 of
