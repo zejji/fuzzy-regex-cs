@@ -39,3 +39,8 @@
 {"id": "D23 bounded (?m) search", "cell": "open", "pattern": "(?m)(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "search"}
 {"id": "D23 bounded search", "cell": "open", "pattern": "(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "search"}
 {"id": "D23 bounded match", "cell": "open", "pattern": "(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "match"}
+{"id": "A8 fuzzy-cond-lookahead s", "cell": "open", "pattern": "(?:(?(?=a)ab|b)){s<=1}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead exact", "cell": "open", "pattern": "(?(?=a)ab|b)", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead e0", "cell": "open", "pattern": "(?:(?(?=a)ab|b)){e<=0}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-neg-lookahead s", "cell": "open", "pattern": "(?:(?(?!a)b|ab)){s<=1}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead prefix", "cell": "open", "pattern": "(?:c(?(?=a)ab|b)){s<=1}", "subject": "cb", "operation": "search"}
