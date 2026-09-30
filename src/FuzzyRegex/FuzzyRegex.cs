@@ -1096,6 +1096,15 @@ public sealed class FuzzyRegex
     /// shapes there instead. Nothing else about <paramref name="beginning"/> moves: an anchor
     /// or a lookbehind still sees it as the edge of the text.
     /// </para>
+    /// <para>
+    /// <b>BestMatch and EnhanceMatch rank complete matches only.</b> With either flag and
+    /// <paramref name="partial"/>: <see langword="true"/>, a partial match starts at the leftmost
+    /// position from which some continuation of the subject would match, with the first fit found
+    /// there, as upstream answers. It is not the start the flagged search would report once the
+    /// subject is complete: <c>(?e)(dog){e&lt;=1}</c> over <c>"cat and d"</c> is a partial at
+    /// (7, 9) with one insertion, while over <c>"cat and dog"</c> it is (8, 11) with no errors. A
+    /// partial match has no final error count to rank by, only a lower bound.
+    /// </para>
     /// </remarks>
     public Match Match(
         string input,
@@ -1173,7 +1182,9 @@ public sealed class FuzzyRegex
     /// <param name="partial">
     /// Whether the scan may end with a partial match. Upstream's <c>finditer(partial=True)</c>
     /// (<c>_main.py:351</c>, <c>pattern_scanner</c>'s <c>kwlist</c> at <c>:21089</c>): the partial
-    /// is yielded like any other match and is always the last one.
+    /// is yielded like any other match and is always the last one. Under BestMatch or
+    /// EnhanceMatch it starts at the leftmost position some continuation could match from; see
+    /// <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks.
     /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
@@ -1233,7 +1244,9 @@ public sealed class FuzzyRegex
     /// <param name="overlapped">Whether matches may overlap. Upstream's <c>overlapped=True</c>.</param>
     /// <param name="partial">
     /// Whether the walk may end with a partial match. Upstream's <c>finditer(partial=True)</c>:
-    /// the partial is yielded like any other match and is always the last one.
+    /// the partial is yielded like any other match and is always the last one. Under BestMatch or
+    /// EnhanceMatch it starts at the leftmost position some continuation could match from; see
+    /// <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks.
     /// </param>
     /// <param name="timeout">
     /// How long ONE step may run, or <see langword="null"/> for the pattern's budget. See the

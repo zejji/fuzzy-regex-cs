@@ -317,6 +317,8 @@ string Judge(string pattern, string t, string op)
             .Union(pattern.Where(static c => c < 128 && char.IsLetterOrDigit(c)))
             .Distinct()
             .ToArray();
+        if (op == "search" && (regex.Options & (FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.EnhanceMatch)) != 0)
+            return LeftmostLive(regex, t, reverse, alpha);
         int best = op == "search" ? (reverse ? -1 : int.MaxValue) : -1;
         bool found = false;
         foreach (string w in Words(alpha))
@@ -344,6 +346,50 @@ string Judge(string pattern, string t, string op)
     {
         return Failure(e is TargetInvocationException { InnerException: { } i } ? i : e, compiling: false);
     }
+}
+
+// The partial start under BESTMATCH or ENHANCEMATCH (owner ruling 2026-09-30, option A): the least
+// start (greatest end, reversed) from which some continuation matches, asked as an anchored match at
+// each start, as d11-brute-judge.py's leftmost_live asks upstream. Those flags make `search` rank
+// matches rather than return the leftmost, so the least start of `search(t + w)` is not the rule.
+// SHORTCUT: reversed, the end is fixed by the slice, which hides a lookahead's view past it; see the
+// Python judge for the ceiling and the upgrade.
+string LeftmostLive(FuzzyRegex regex, string t, bool reverse, char[] alpha)
+{
+    string[] words = [.. Words(alpha)];
+    if (!reverse)
+    {
+        for (int s = 0; s <= t.Length; s++)
+            foreach (string w in words)
+            {
+                if (clock.Elapsed.TotalSeconds > RowBudgetSeconds)
+                    return "ERR RowBudget";
+                Capped();
+                string text = t + w;
+                Match m =
+                    s == t.Length
+                        ? regex.Match(text, s, text.Length - s, timeout: timeout)
+                        : regex.MatchAtStart(text, s, text.Length - s, timeout: timeout);
+                if (m.Success)
+                    return $"P({s},{t.Length})";
+            }
+        return "None";
+    }
+    for (int e = t.Length; e >= 0; e--)
+        foreach (string w in words)
+        {
+            if (clock.Elapsed.TotalSeconds > RowBudgetSeconds)
+                return "ERR RowBudget";
+            Capped();
+            string text = w + t;
+            Match m =
+                e == 0
+                    ? regex.Match(text, 0, w.Length, timeout: timeout)
+                    : regex.MatchAtStart(text, 0, w.Length + e, timeout: timeout);
+            if (m.Success)
+                return $"P(0,{e})";
+        }
+    return "None";
 }
 
 static IEnumerable<string> Words(char[] alpha)

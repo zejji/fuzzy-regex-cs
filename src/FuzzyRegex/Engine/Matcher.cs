@@ -15986,6 +15986,18 @@ internal static class Matcher
             // state. S57d.
             state.HitEnd = false;
 
+            // UNDER BESTMATCH AND ENHANCEMATCH A PARTIAL IS STILL THE LEFTMOST LIVE START (owner
+            // ruling 2026-09-30, option A, DECISIONS). The flags rank complete matches only: the
+            // partial pass below runs DoBestFuzzyMatch or DoEnhancedFuzzyMatch, and the first
+            // partial either walk meets ends it, so the answer is the least start from which some
+            // continuation matches, with the first fit found there. `(?e)(dog){e<=1}` over
+            // 'cat and d' is P(7, 9) with one insertion, as upstream answers, although the completed
+            // 'cat and dog' is (8, 11) exact.
+            // SHORTCUT: the ideal is option (B), the start the flagged search would report for some
+            // continuation. That needs reasoning over every continuation and is not computable in
+            // general (the same class as D19), so it is not attempted; a bounded version could rank
+            // the continuations a judge enumerates, for a caller that asks for it.
+
             // Try a normal match first.
             state.PartialSide = MatchState.PartialNone;
 

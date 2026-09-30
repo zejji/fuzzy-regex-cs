@@ -41,6 +41,39 @@ def continuations(pattern, max_len=MAX_LEN):
             yield "".join(w)
 
 
+def leftmost_live(compiled, subject, max_len, reverse):
+    """The partial start under BESTMATCH or ENHANCEMATCH: the least start (greatest end, reversed)
+    from which some continuation matches, asked as an anchored match at each start.
+
+    Owner ruling 2026-09-30 (DECISIONS, option A). Under those flags `search` does not return the
+    leftmost match, so "the least start of `search(t + w)`" is not the partial rule there. The flags
+    only rank matches, so whether some match starts at `s` is the question, and an anchored `match`
+    at `s` asks it. A start inside `w` is reported as `|t|`, as above.
+    """
+    n = len(subject)
+    words = list(continuations(compiled.pattern, max_len))
+    if not reverse:
+        for s in range(n + 1):
+            for w in words:
+                text = subject + w
+                # At |t|, any start in w counts; a lookbehind still sees the text before `pos`.
+                found = compiled.search(text, s) if s == n else compiled.match(text, s)
+                if found is not None:
+                    return ("P", s, n), w
+        return None, None
+    # SHORTCUT: reversed, the end is fixed with `endpos`, which hides a lookahead's view past it, so
+    # a completion that needs one is missed (a None stays a lower bound). Upgrade: anchor the end
+    # with a pattern rewrite rather than the slice. No reversed (?b)/(?e) partial row needed it on
+    # 2026-10-01.
+    for e in range(n, -1, -1):
+        for w in words:
+            text = w + subject
+            found = compiled.search(text, 0, len(w)) if e == 0 else compiled.match(text, 0, len(w) + e)
+            if found is not None:
+                return ("P", 0, e), w
+    return None, None
+
+
 def judge(op, pattern, subject, max_len=MAX_LEN):
     """Returns (verdict, witness): verdict is ('F', s, e), ('P', s, e) or None; witness is a w."""
     compiled = regex.compile(pattern)
@@ -49,6 +82,8 @@ def judge(op, pattern, subject, max_len=MAX_LEN):
     complete = getattr(compiled, op)(subject)
     if complete is not None:
         return ("F",) + complete.span(), None
+    if op == "search" and compiled.flags & (regex.BESTMATCH | regex.ENHANCEMATCH):
+        return leftmost_live(compiled, subject, max_len, reverse)
     if op == "search":
         best, witness = None, None
         for w in continuations(pattern, max_len):

@@ -1105,6 +1105,33 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
+    [Arguments("(?e)")]
+    [Arguments("(?b)")]
+    public void A_ranking_flag_leaves_a_partial_search_at_the_leftmost_live_start(string flag)
+    {
+        // Owner ruling 2026-09-30, option A (DECISIONS): BESTMATCH and ENHANCEMATCH rank complete
+        // matches only, so a partial search still answers the least start from which some
+        // continuation matches, with the first fit found there. Measured 2026-09-30 on upstream
+        // regex 2026.9.10 and this port, both flags:
+        //
+        //   (dog){e<=1}   'cat and d'   partial   P(7, 9), one insertion
+        //   (dog){e<=1}   'cat and dog'           (8, 11), no errors
+        //
+        // 'cat and dog' matches from 7 with one insertion, so 7 is live; nothing earlier is. The
+        // completed search moves to 8 because the flag prefers the exact fit, which a partial match,
+        // with only a lower bound on its errors, cannot be ranked against.
+        var dog = new FuzzyRegex(flag + "(dog){e<=1}");
+
+        Match partial = dog.Match("cat and d", partial: true);
+        (partial.Index, partial.Index + partial.Length, partial.PartialMatch).Should().Be((7, 9, true));
+        partial.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+        Match complete = dog.Match("cat and dog");
+        (complete.Index, complete.Index + complete.Length, complete.PartialMatch).Should().Be((8, 11, false));
+        complete.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
     public void A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one()
     {
         // PORT RIGHT, KNOWN DEFECT D57, the smallest row of the door below (complete-matrix row

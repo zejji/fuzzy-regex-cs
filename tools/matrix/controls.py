@@ -30,6 +30,12 @@ CONTROLS = [
     # attempt's start, so this is a judge convention and passes (upstream gives P(3,4) too).
     ({"pattern": "(?:ba)*+.\\K\\w.", "subject": "baab", "operation": "match", "partial": True}, "C4", "pass"),
     ({"pattern": "a", "subject": "xaa", "operation": "finditer", "pos": 1, "endpos": 3}, "C1", "pass"),
+    # C4 under BESTMATCH and ENHANCEMATCH judges the leftmost live start (owner ruling 2026-09-30,
+    # option A): the ruling's own witness passes, and a real phantom (D18/D19, shared with upstream:
+    # nothing can follow a failed (?!a) then match `a`) still fails.
+    ({"pattern": "(?e)(dog){e<=1}", "subject": "cat and d", "operation": "search", "partial": True}, "C4", "pass"),
+    ({"pattern": "(?b)(dog){e<=1}", "subject": "cat and d", "operation": "search", "partial": True}, "C4", "pass"),
+    ({"pattern": "(?e)(?!a)a(?:ab|a)", "subject": "xb", "operation": "search", "partial": True}, "C4", "phantom"),
     # C2: D40, upstream's call features (tools/probes/call-site-features-rows.jsonl row 1).
     ({"pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "subject": "aab", "operation": "search",
       "writtenOut": {"8": "(?P<g3>a)(?P<g4>(?:a))(?:(?:(?:a))){s<=1}"}, "ablate": "callfeatures"}, "C2", "fail"),
