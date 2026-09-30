@@ -3087,12 +3087,14 @@ internal static class ExpectedDivergences
     /// </summary>
     /// <remarks>
     /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. They are
-    /// known defect D61's own rows: an assertion inside the section, one in an alternation before
-    /// it, a finditer whose first match upstream loses, and the reversed form.
+    /// known defect D61's own rows: an assertion inside the section, a one-character lookbehind
+    /// inside it, a finditer whose first match upstream loses, and the reversed form. Row 2 was
+    /// <c>(?:^|q)(?:a){i&lt;=1}</c> until the review of 2026-09-30 showed that an assertion on one branch
+    /// does not pin (it does not dominate the item), and that row now agrees with upstream.
     /// </remarks>
     private const string _anchorPinOnThePathRows = """
         {"generator": "rows", "pattern": "(?:^a){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?:^|q)(?:a){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?<!x)ab){i<=1}", "flags": 0, "namedLists": {}, "subject": "xab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?:\\ba){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa xa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}, "codepointSpan": [3, 5]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}]}
         {"generator": "rows", "pattern": "(?r)(?:a$){i<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
@@ -7333,33 +7335,36 @@ internal static class ExpectedDivergences
         new(
             Id: "fuzzy-insertion-at-an-anchor-pinned-on-the-path",
             Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
-                + "assertion passed on the path pins the match there, wherever the assertion is "
-                + "written: inside the fuzzy section or down one branch of an alternation. Known "
-                + "defect D61, the extension of ledger entries 19 and 20; owner ruling 2026-09-30, "
-                + "option B, and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "assertion that dominates the fuzzy item - every path from the start of the "
+                + "pattern to it passes the assertion - holds at the anchor and fails one character "
+                + "on, wherever the assertion is written, and where a lookaround whose body is one "
+                + "character test does the same. Known defect D61, the extension of ledger entries "
+                + "19 and 20; owner ruling 2026-09-30, option B, narrowed to dominance by the review "
+                + "that refuted a per-path reading, and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
                 + "UPSTREAM'S RULE IS THE SAME LINE as `fuzzy-insertion-at-a-pinned-anchor`'s: "
                 + "`permit_insertion = !search || text_pos != search_anchor` "
                 + "(upstream/src/_regex.c:10214). S57c lifted it for an assertion before the "
-                + "section; D61 lifts it for one the path passed at the anchor anywhere, because "
-                + "the same path started one character later passes that assertion where it fails. "
+                + "section; D61 lifts it for one that dominates the item, because any start one "
+                + "character later has to pass that assertion where it fails. "
                 + "`(?:^a){i<=1}` over 'xa' is None upstream, where `^(?:a){i<=1}` is (0, 2); here "
                 + "both are (0, 2). Measured 2026-09-30 on regex 2026.9.10.\n"
                 + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`, and ahead of it. "
                 + "A row belongs here when clearing `PatternObject.PinsAnchorOnPath` "
                 + "(`OracleComparer.RunWithoutTheAnchorPinOnThePath`), which stops "
-                + "`Matcher.NotePinningAssertion` and leaves S57c's guards alone, makes this port "
+                + "`Matcher.AnchorIsPinned` reading `Node.AnchorPins` and leaves S57c's guards alone, makes this port "
                 + "reproduce upstream's recorded answer exactly, AND this port's live answer is the "
                 + "one being judged. A row S57c's guards alone move still differs from upstream "
                 + "under this ablation and falls through to that entry, whose ablation clears both. "
-                + "WHAT THE ABLATION CANNOT SEE is a bug inside the pin itself. Plant a stale pin, "
-                + "one that is not cleared when backtracking passes back over its assertion "
-                + "(`PatternObject.PlantStaleAnchorPin`), and `(?:^b|)(?:a){i<=1}` over 'xa' moves "
-                + "from (1, 2) to (0, 2): switched off it gives upstream's answer and live it gives an "
+                + "WHAT THE ABLATION CANNOT SEE is a bug in the dominance analysis itself. Plant one "
+                + "(`Optimiser.FindAnchorPins` with `unionAtMerges`, which pins an assertion that "
+                + "only one path to the item passes) and `(?:^b|)(?:a){i<=1}` over 'xa' moves from "
+                + "(1, 2) to (0, 2): switched off it gives upstream's answer and live it gives an "
                 + "insertion at the anchor, so this entry would classify that bug as the fix. No key "
                 + "that answers by running this engine can do better. A tighter key would compare "
                 + "the live answer with the reference matcher's rule answer, which the recorder does "
-                + "not store. The stale pin is caught instead by "
-                + "`FuzzyAnchorPinTests.A_pin_left_standing_on_an_abandoned_path_moves_the_match`, "
+                + "not store. The planted bug is caught instead by "
+                + "`FuzzyAnchorPinTests.An_assertion_on_one_path_only_is_caught_if_the_analysis_pins_it`, "
                 + "which plants it and asserts the move.\n"
                 + "The control is `A_row_the_anchor_pin_on_the_path_does_not_explain_is_not_"
                 + "accounted_for`.",

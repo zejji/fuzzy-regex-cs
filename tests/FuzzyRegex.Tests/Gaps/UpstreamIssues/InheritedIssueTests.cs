@@ -246,10 +246,13 @@ public sealed class InheritedIssueTests
         Values(@"\b(?:abc){i<=2}", "ab abc").Should().Equal(" abc");
         Values(@"\B(?:abc){i<=2}", "xy abc").Should().Equal("y abc");
 
-        // A LOOKAROUND IS NOT A POSITION ASSERTION, deliberately: it runs a subpattern, and
-        // `(?=x)` before a fuzzy section is a character test wearing an assertion's clothes.
-        // Upstream loses the leading insertion here and this port agrees with it.
-        Values("(?=x)(?:abc){i<=1}", "xabc").Should().BeEmpty();
+        // A LOOKAROUND WHOSE BODY IS ONE CHARACTER TEST PINS TOO, since D61 (2026-09-30). S57c left
+        // every lookaround out, calling `(?=x)` a character test wearing an assertion's clothes, and
+        // this row was [] as upstream's is. But the reason the rule rests on holds for it: `(?=x)`
+        // holds at 0 and fails at 1, so no later start can match, and 'x' inserted before 'abc' is
+        // the only match there is. See FuzzyAnchorPinTests; a lookaround with a longer body still
+        // does not pin (a SHORTCUT in Optimiser.FindAnchorPins).
+        Values("(?=x)(?:abc){i<=1}", "xabc").Should().Equal("xabc");
 
         // An assertion that holds at position 0 but only on a path the engine abandons: an
         // alternative it gives up on, the body of a NEGATIVE lookaround, or a repeat that matches

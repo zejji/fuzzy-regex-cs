@@ -871,15 +871,6 @@ internal sealed class MatchState : IDisposable
     internal bool IsFuzzy;
 
     /// <summary>
-    /// NOT UPSTREAM (D61): <c>PatternObject.PinsAnchorOnPath</c>, copied at reset beside
-    /// <see cref="IsFuzzy"/> so that <see cref="PushSubAttemptFuzzyState"/> and its pop test a field
-    /// of this state rather than reach through <see cref="Pattern"/>. A fuzzy pattern with no
-    /// assertion outside its leading guards leaves it <see langword="false"/> and pays that one test
-    /// per push and pop.
-    /// </summary>
-    internal bool SavesAnchorPin;
-
-    /// <summary>
     /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
     /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
     /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
@@ -910,16 +901,6 @@ internal sealed class MatchState : IDisposable
     /// every successful retry, which is the one way into the arm's re-entry.
     /// </remarks>
     internal bool RetriedAWholeFoldEdit;
-
-    /// <summary>
-    /// NOT UPSTREAM (known defect D61): whether the path the matcher is on passed, at the search
-    /// anchor, a position assertion that fails one character later, so that a fuzzy section may
-    /// open there with an insertion. Set by <c>Matcher.NotePinningAssertion</c>, which pushes an
-    /// <see cref="Opcode.AnchorPin"/> frame that clears it again when backtracking passes back over
-    /// the assertion; saved with <see cref="PushSubAttemptFuzzyState"/>, because the constructs that
-    /// throw a sub-attempt's frames away would otherwise throw that clear away with them.
-    /// </summary>
-    internal bool AnchorPinnedOnPath;
 
     /// <summary>
     /// Upstream <c>fuzzy_changes</c> (<c>RE_FuzzyChangesList</c>, <c>:397</c>): every error used so
@@ -1215,7 +1196,6 @@ internal sealed class MatchState : IDisposable
         Array.Clear(FuzzyCounts);
         FuzzyNode = null;
         RetriedAWholeFoldEdit = false;
-        AnchorPinnedOnPath = false;
         FuzzyChanges.Clear();
 
         VisibleCaptures = visibleCaptures;
@@ -1230,7 +1210,6 @@ internal sealed class MatchState : IDisposable
         ScreenClearedHigh = 0;
         FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
-        SavesAnchorPin = pattern.PinsAnchorOnPath;
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);
@@ -1527,7 +1506,6 @@ internal sealed class MatchState : IDisposable
             Array.Clear(FuzzyCounts);
             FuzzyNode = null;
             RetriedAWholeFoldEdit = false;
-            AnchorPinnedOnPath = false;
             FuzzyChanges.Clear();
         }
 
@@ -1676,11 +1654,6 @@ internal sealed class MatchState : IDisposable
         stack.PushSize(TotalCost);
         stack.PushNode(FuzzyNode);
         PushFuzzyCounts(stack, FuzzyCounts);
-
-        if (SavesAnchorPin)
-        {
-            stack.PushBool(AnchorPinnedOnPath);
-        }
     }
 
     /// <summary>
@@ -1712,11 +1685,8 @@ internal sealed class MatchState : IDisposable
             return true;
         }
 
-        bool anchorPinned = false;
-
         if (
-            (SavesAnchorPin && !stack.PopBool(out anchorPinned))
-            || !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
+            !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
             || !stack.PopNode(Pattern, out Node? fuzzyNode)
             || !stack.PopSize(out long totalCost)
             || !stack.PopSize(out long totalErrors)
@@ -1737,7 +1707,6 @@ internal sealed class MatchState : IDisposable
         }
 
         TruncateFuzzyChanges(changeCount);
-        AnchorPinnedOnPath = anchorPinned;
 
         return true;
     }

@@ -784,12 +784,13 @@ public sealed class ThreadSafetyTests
             // Ledger entry 50 added SkipLookaroundInsertion, likewise set only by
             // OracleComparer.RunWithoutTheLookaroundInsertion.
             "PatternObject.SkipLookaroundInsertion",
-            // D61 added PinsAnchorOnPath, written by Optimiser.FindAnchorGuards inside Compile and
+            // D61 added PinsAnchorOnPath, written by Optimiser.FindAnchorPins inside Compile and
             // cleared only by OracleComparer's two anchor-pin ablations, on a pattern compiled for
             // that one call.
             "PatternObject.PinsAnchorOnPath",
-            // And PlantStaleAnchorPin, set only by FuzzyAnchorPinTests on a pattern it compiled.
-            "PatternObject.PlantStaleAnchorPin",
+            // And Node.AnchorPins, written by Optimiser.FindAnchorPins inside Compile (and by
+            // FuzzyAnchorPinTests' planted bug, on a pattern it compiled for that test).
+            "Node.AnchorPins",
             // Ledger entry 51 added CheckMinimumBeforeTrailingInsertions, likewise set only by
             // OracleComparer.RunWithTheUpstreamMinimumOrder.
             "PatternObject.CheckMinimumBeforeTrailingInsertions",

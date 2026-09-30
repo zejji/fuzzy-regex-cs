@@ -606,26 +606,16 @@ internal sealed class PatternObject
     internal IReadOnlyList<Node>? AnchorGuards;
 
     /// <summary>
-    /// Whether the matcher watches for a position assertion that pins the search anchor on the path
-    /// it is on (<c>Matcher.NotePinningAssertion</c>): a fuzzy pattern with a position assertion that
-    /// is not one of the <see cref="AnchorGuards"/>. <b>This port's own field (known defect D61).</b>
+    /// Whether any fuzzy item has <c>Node.AnchorPins</c>: assertions other than the
+    /// <see cref="AnchorGuards"/> that dominate it (<c>Optimiser.FindAnchorPins</c>). <b>This port's
+    /// own field (known defect D61).</b>
     /// </summary>
     /// <remarks>
-    /// The guards cover an assertion passed on every path; this covers one inside a fuzzy section or
-    /// down one branch of an alternation, which only the path the engine is on can answer for. A
-    /// pattern without one leaves this <see langword="false"/> and pays one test per assertion
-    /// passed. Cleared by <c>OracleComparer</c>'s ablations and by nothing in the library.
-    /// <see cref="Optimiser"/> fills this in, with <see cref="AnchorGuards"/>.
+    /// Read by <c>Matcher.AnchorIsPinned</c> only when the insertion ban would otherwise apply, at the
+    /// search anchor. Cleared by <c>OracleComparer</c>'s two anchor-pin ablations and by nothing in
+    /// the library.
     /// </remarks>
     internal bool PinsAnchorOnPath;
-
-    /// <summary>
-    /// Test-only, and never set by this library: a planted bug that leaves D61's pin standing when
-    /// backtracking passes back over the assertion that set it, so a pin made on an abandoned path
-    /// leaks onto the next one. <c>FuzzyAnchorPinTests</c> sets it to prove that the abandoned-path
-    /// rows catch that bug, which the oracle entry keyed on the pin-on-the-path ablation cannot.
-    /// </summary>
-    internal bool PlantStaleAnchorPin;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
