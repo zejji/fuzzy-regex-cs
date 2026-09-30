@@ -47,4 +47,20 @@ public sealed class OpenDefectTests
 
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
     }
+
+    // D38. Over 'aba' this pattern matches (0, 3) with one insertion, here and upstream, so 'ab' is
+    // a partial match at start 0, and MatchAtStart there says so. Search reports start 1 instead: the
+    // attempt at 0 fails with only the end-of-text flag set (the `\b` in the condition's test is
+    // decided at the end), and DoMatch reads that flag only when every start has failed, so a real
+    // partial at start 1 wins. The leftmost start wins in a search. Upstream 2026.9.10 answers
+    // (1, 2) for the search and None for match(partial=True).
+    [Test]
+    public void A_partial_search_reports_the_leftmost_start_that_the_anchored_matcher_finds()
+    {
+        var regex = new FuzzyRegex(@"(?:(?(?=a\b|a)a|b)){i<=1}a");
+
+        Match m = regex.Match("ab", 0, 2, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+    }
 }
