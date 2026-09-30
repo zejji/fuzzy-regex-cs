@@ -16,8 +16,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// is that it loses real matches when nothing can start later: <c>(?:^a){i&lt;=1}</c> over 'xa' is
 /// None. Rule H' (DECISIONS 2026-09-30): at search anchor A, let u be upstream's answer from A, with
 /// the ban. If u starts at A, the answer is u. Otherwise let c be the attempt at A without the ban;
-/// the answer is c if it exists and u is None or starts at or after c's end, and u otherwise. Under
-/// BESTMATCH c must also cost no more than u.
+/// the answer is c if it exists and u is None or starts at or after c's end, and u otherwise.
+/// BESTMATCH is out of scope for now (DECISIONS 2026-10-01, scope cut): it keeps main's path, the
+/// ledger 19/20 exemption and main's fix for upstream issue 564, and the BESTMATCH tests below pin
+/// main's answers.
 /// </para>
 /// <para>
 /// Every expected answer below comes from that rule, computed from upstream's own
@@ -125,51 +127,39 @@ public sealed class FuzzyAnchorPinTests
         Spans(@"(?:\ma){i<=2}", "ba  aba").Should().Equal((0, 2), (3, 5));
     }
 
-    // BESTMATCH: c (1, 4) with one insertion costs more than u (6, 8) exact, so u stands, as
-    // upstream answers.
+    // BESTMATCH KEEPS MAIN'S PATH (D61 scope cut): H' is gated out, and these rows pin main's answers,
+    // measured on main 747e0d6d on 2026-10-01 (with every (?b) row of the 2,500-row grid: 0 differ).
+    // They also agree with what H' would give by BESTMATCH's own ranking, which is why they were
+    // written; the rule inside a best-match walk is a separate question (Optimiser.FindAnchorBanLift).
     [Test]
-    public void Under_bestmatch_the_candidate_must_cost_no_more_than_upstreams_match()
-    {
-        Match m = new FuzzyRegex(@"(?b)(?<=x)(?:ab){i<=1}").Match("xyab xab", 1);
-
-        (m.Index, m.Length, m.FuzzyCounts.Total).Should().Be((6, 2, 0));
-    }
-
-    // "Cost" is BESTMATCH's own ranking, the weighted cost where the section has weights: two
-    // insertions at cost 1 beat one substitution at cost 3, and one insertion at cost 2 loses to
-    // one substitution at cost 1. A tie goes to the earlier match, c. Upstream: (6, 9), (5, 8) and
-    // (5, 8).
-    [Test]
-    [Arguments(@"(?b)\b(?:dog){1i+3s<=3}", "xxdog dug", 0, 5, 0, 2)]
-    [Arguments(@"(?b)\b(?:dog){2i+1s<=2}", "xdog dug", 5, 8, 1, 0)]
-    [Arguments(@"(?b)\b(?:dog){e<=1}", "xdog dug", 0, 4, 0, 1)]
-    public void Under_bestmatch_cost_is_the_weighted_ranking_and_a_tie_goes_to_the_earlier_match(
+    [Arguments(@"(?b)(?<=x)(?:ab){i<=1}", "xyab xab", 1, 6, 8, 0, 0)]
+    [Arguments(@"(?b)\b(?:dog){1i+3s<=3}", "xxdog dug", 0, 0, 5, 0, 2)]
+    [Arguments(@"(?b)\b(?:dog){2i+1s<=2}", "xdog dug", 0, 5, 8, 1, 0)]
+    [Arguments(@"(?b)\b(?:dog){e<=1}", "xdog dug", 0, 0, 4, 0, 1)]
+    [Arguments(@"(?b)(?:dog){1<=e<=2}(?=\s|$)", "\ndog\n\nzdog\n", 5, 7, 11, 0, 1)]
+    public void Bestmatch_keeps_mains_answers(
         string pattern,
         string text,
+        int pos,
         int start,
         int end,
         int substitutions,
         int insertions
     )
     {
-        Match m = new FuzzyRegex(pattern).Match(text);
+        Match m = new FuzzyRegex(pattern).Match(text, pos);
 
         (m.Index, m.Index + m.Length).Should().Be((start, end));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, 0));
     }
 
-    // The answer is always u or c, with u this port's banned answer. Two rows a build broke by
-    // changing how BESTMATCH computes u (keeping the caller's anchor through its candidate walk),
-    // and the issue 564 row the walk's own searches keep under the rule.
+    // The same, over finditer: the re-review's witness, which H' inside the walk turned into
+    // [(0, 3), (4, 8), (9, 11)], and upstream issue 564, which main's exemption fixes.
     [Test]
-    public void Under_bestmatch_the_answer_is_upstreams_match_or_the_attempt_at_the_anchor()
+    public void Bestmatch_finditer_keeps_mains_answers()
     {
-        Match m = new FuzzyRegex(@"(?b)(?:dog){1<=e<=2}(?=\s|$)").Match("\ndog\n\nzdog\n", 5);
-        (m.Index, m.Index + m.Length).Should().Be((7, 11));
-
+        Spans(@"(?b)(?:\mdog){1<=e<=2}", "do; xdog-dog").Should().Equal((0, 3), (8, 12));
         Spans(@"(?b)(?:(?!x)abc){1<=e<=2}", "xxabc  abc  .abc\n").Should().Equal((1, 5), (7, 11), (13, 17));
-
-        // Upstream issue 564: the looser budget keeps 'XY', which upstream loses.
         Spans(@"(?b)\m(?:Y){1i+1d+1s<=2}\M", " XY Z").Should().Equal((1, 3), (4, 5));
     }
 

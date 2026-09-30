@@ -563,8 +563,9 @@ internal static class OracleComparer
     /// Rule H' lifts upstream's ban on a fuzzy insertion at the search anchor
     /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>) where the banned search finds no match
     /// starting inside the attempt at the anchor. Clearing <c>PatternObject.LiftsAnchorBan</c> and
-    /// <c>LiftsAnchorBanWhenPartial</c> makes every search, and every search of BESTMATCH's walk, keep
-    /// the ban, which is upstream's rule exactly.
+    /// <c>LiftsAnchorBanWhenPartial</c> makes every plain and ENHANCEMATCH search keep the ban, and
+    /// emptying <c>PatternObject.AnchorGuards</c> removes the ledger 19/20 exemption BESTMATCH keeps
+    /// (D61's scope cut), which together are upstream's rule exactly.
     /// </para>
     /// <para>
     /// That is what makes the <c>fuzzy-insertion-at-a-pinned-anchor</c> entry a classification
@@ -588,6 +589,7 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.LiftsAnchorBan = false;
                 compiled.PatternObject.LiftsAnchorBanWhenPartial = false;
+                compiled.PatternObject.AnchorGuards = null;
             }
         );
     }

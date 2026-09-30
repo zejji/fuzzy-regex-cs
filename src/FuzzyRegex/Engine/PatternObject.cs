@@ -581,6 +581,32 @@ internal sealed class PatternObject
     internal int OptionalPassCount;
 
     /// <summary>
+    /// The zero-width position assertions the pattern must pass before it can match anything, or
+    /// <see langword="null"/> where it has none. <b>This port's own field: upstream has no
+    /// equivalent.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read by <c>Matcher.AnchorIsPinned</c>, which fixes upstream issues 563 and 564
+    /// (<c>docs/DIVERGENCES.md</c>). Upstream forbids a fuzzy section from opening with an inserted
+    /// character at the search anchor, on the reasoning in its own comment at
+    /// <c>upstream/src/_regex.c</c>:10213 - "it's better just to start searching one character
+    /// later". That reasoning holds only while starting one character later can still find the same
+    /// match. An assertion that holds at the anchor and fails one character on takes that away, and
+    /// upstream then loses a match it finds at every other position.
+    /// </para>
+    /// <para>
+    /// Only the assertions the pattern passes <em>before anything else happens</em> are collected,
+    /// so every one of them is passed on every path to every item in the pattern. An assertion
+    /// reachable only down one branch - <c>(?:\bq|)</c>, <c>(?:\bq)*</c>, the body of a negative
+    /// lookaround - is not here, which is what stops the rule firing on a path the engine abandons.
+    /// <see cref="Optimiser"/> fills this in, for BESTMATCH fuzzy patterns only since D61: every other
+    /// search follows rule H' (<see cref="LiftsAnchorBan"/>).
+    /// </para>
+    /// </remarks>
+    internal IReadOnlyList<Node>? AnchorGuards;
+
+    /// <summary>
     /// Whether rule H' can change a search's answer, so that <c>Matcher.DoMatch2LiftingTheAnchorBan</c>
     /// runs the attempt at the anchor without the ban. <b>This port's own field (known defect D61).</b>
     /// Filled by <c>Optimiser.FindAnchorBanLift</c>; cleared by <c>OracleComparer.RunWithoutTheAnchorPin</c>,

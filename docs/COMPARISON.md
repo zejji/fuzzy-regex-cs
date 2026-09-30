@@ -1195,7 +1195,8 @@ Console.WriteLine(m.Success ? m.Value : "no match");   // xa - upstream: no matc
 This port keeps the match at the starting position whenever the search with upstream's rule finds
 nothing that starts inside it, and otherwise returns upstream's match. So the separators stay out:
 `\b(?:dog){e<=2}` over `"dog  dog"` gives `dog` and `dog` in both engines, not `  dog` for the
-second. Upstream contradicts itself here, which is why this is a fix rather than a preference:
+second. BESTMATCH keeps this port's earlier rule for now, a leading assertion that holds where the
+search started and fails one character on. Upstream contradicts itself here, which is why this is a fix rather than a preference:
 `^(?:a){i<=1}` over `"xa"` already gives `xa` upstream, and `\m(?:Y){i}\M` over `" XY"` answers
 two ways according to where the caller started. Upstream issues 563 and 564 have tracked it since
 17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to

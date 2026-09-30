@@ -7422,21 +7422,23 @@ internal static class ExpectedDivergences
                 + "THE RULE THIS PORT APPLIES INSTEAD, once per pass: at anchor A, let u be the banned "
                 + "search's answer. If u starts at A it stands. Otherwise let c be the attempt at A "
                 + "without the ban; c is the answer if it exists and u is None or starts at or after "
-                + "c's end, and under BESTMATCH c may not rank worse than u by BESTMATCH's own cost (a "
-                + "tie goes to c, the earlier). `Matcher.DoMatch2LiftingTheAnchorBan` applies it to "
-                + "each search, and `Matcher.BasicMatchLiftingTheAnchorBan` to each search of "
-                + "BESTMATCH's candidate walk, which restarts at the candidate's own start: that is how "
-                + "issue 564 loses 'XY' from `(?b)\\m(?:Y){1i+1d+1s<=2}\\M` over ' XY Z'. It replaces "
-                + "S57c's exemption (an assertion at the head of the pattern that holds at A and fails "
-                + "one character on), which glued a separator: `\\b(?:dog){e<=2}` finditer over "
-                + "'dog  dog' gave (3, 8) with two insertions where upstream gives (5, 8).\n"
+                + "c's end. `Matcher.DoMatch2LiftingTheAnchorBan` applies it to plain and "
+                + "ENHANCEMATCH searches. For them it replaces S57c's exemption (an assertion at the "
+                + "head of the pattern that holds at A and fails one character on), which glued a "
+                + "separator: `\\b(?:dog){e<=2}` finditer over 'dog  dog' gave (3, 8) with two "
+                + "insertions where upstream gives (5, 8).\n"
+                + "BESTMATCH IS UNCHANGED FOR NOW (DECISIONS 2026-10-01, scope cut): it keeps S57c's "
+                + "exemption (`PatternObject.AnchorGuards`, `Matcher.AnchorIsPinned`) and with it the "
+                + "fix for issue 564, `(?b)\\m(?:Y){1i+1d+1s<=2}\\M` over ' XY Z', until what H' means "
+                + "inside a best-match walk is researched.\n"
                 + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE. A row belongs here when "
                 + "`OracleComparer.RunWithoutTheAnchorPin`, which clears `PatternObject.LiftsAnchorBan` "
-                + "and `PatternObject.LiftsAnchorBanWhenPartial`, makes this port reproduce upstream's "
+                + "and `PatternObject.LiftsAnchorBanWhenPartial` and empties `PatternObject.AnchorGuards`, "
+                + "makes this port reproduce upstream's "
                 + "recorded answer exactly, AND this port's live answer is the one being judged. The "
                 + "control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
                 + "WHAT THE ABLATION CANNOT SEE: a bug inside rule H' itself (dropping the overlap test, "
-                + "or the cost test, or breaking the tie the other way) still gives upstream's answer "
+                + "say) still gives upstream's answer "
                 + "when switched off and an insertion at the anchor live, so it would be classified "
                 + "here. The rule's shape is held by tests that carry the expected answers instead: "
                 + "FuzzyAnchorPinTests, which goes red on each of those plants, and the three "
@@ -8404,9 +8406,9 @@ internal static class ExpectedDivergences
     /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
     /// </para>
     /// <para>
-    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c> on a compiled
-    /// pattern makes every search keep upstream's ban, and the pattern they are cleared on was
-    /// compiled for that one call.
+    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c>, and emptying
+    /// <c>AnchorGuards</c> (BESTMATCH's S57c exemption), on a compiled pattern makes every search keep
+    /// upstream's ban, and the pattern they are changed on was compiled for that one call.
     /// </para>
     /// </remarks>
     /// <param name="row">The row, carrying upstream's answer.</param>
