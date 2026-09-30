@@ -1863,12 +1863,22 @@ internal sealed class MatchState : IDisposable
     /// <see cref="RepeatInfo.FailureMemo"/>.
     /// </summary>
     /// <remarks>
-    /// A partial match is excluded here rather than in the pattern because it is a property of the
-    /// call: a path that reaches the end of the text is neither a success nor a failure.
+    /// A partial call's second pass keeps the memo too (D11 build chunk 9, design amendment 1). The
+    /// exclusion came from the memo's design ("a partial result is neither success nor failure")
+    /// with no witness, and it made the second pass exponential wherever the memo had made the
+    /// first pass linear: `(?:a|a)+c` over 24 'a's and "bc" took 2.1 s. The memo needs one fact,
+    /// that entering the body of the repeat at a position has one outcome whatever path arrived
+    /// there, and nothing a second-pass path carries beyond the position breaks it for a memo
+    /// repeat: a w-mark blocks only constructs older than itself, and a memo repeat's continuation
+    /// holds no cut, lookaround or verb older than the repeat; the touch flag decides only what
+    /// <c>Success</c> does, the same for every arrival; a run-out outside a body ends the attempt,
+    /// and a memo repeat is never inside a body; unknown captures matter only to backreferences and
+    /// group conditions, which switch the memo off. A 42,240-row differential grid gave identical
+    /// answers with and without the exclusion (amendment 1).
     /// </remarks>
     /// <param name="index">The repeat index.</param>
     /// <returns><see langword="true"/> if a matched body leaves no mark.</returns>
-    internal bool KeepsFailureMemo(int index) => PartialSide == PartialNone && Pattern.RepeatInfoAt(index).FailureMemo;
+    internal bool KeepsFailureMemo(int index) => Pattern.RepeatInfoAt(index).FailureMemo;
 
     /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
     /// <remarks>
@@ -1887,7 +1897,24 @@ internal sealed class MatchState : IDisposable
             return false;
         }
 
-        return ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        NoteSecondPassGuard(guarded);
+
+        return guarded;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 build chunk 9 (rule 11): counts a guard that held in a partial call's
+    /// second pass, which the failure memo there makes possible for memo repeats.
+    /// </summary>
+    /// <param name="guarded">Whether the guard held.</param>
+    [Conditional("DEBUG")]
+    private void NoteSecondPassGuard(bool guarded)
+    {
+        if (guarded && PartialSide != PartialNone)
+        {
+            NotePartialEvent(PartialEvent.SecondPassGuardHeld);
+        }
     }
 
     /// <summary>

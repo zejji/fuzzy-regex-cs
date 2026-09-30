@@ -151,4 +151,7 @@ internal enum PartialEvent
 
     /// <summary>RC5 and D41: END_FUZZY's trailing insertion ran out of text at the edge.</summary>
     TrailingInsertionRunOut,
+
+    /// <summary>Chunk 9, amendment 1: a repeat guard held in the second pass.</summary>
+    SecondPassGuardHeld,
 }

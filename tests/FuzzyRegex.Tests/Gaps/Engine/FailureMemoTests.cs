@@ -53,6 +53,42 @@ public sealed class FailureMemoTests
         );
     }
 
+    /// <summary>
+    /// The same patterns in a partial call, whose second pass keeps the memo too (D11 build chunk
+    /// 9, design amendment 1). Before, <c>KeepsFailureMemo</c> answered false whenever the call was
+    /// partial, so the second pass tried every split of the run again: at 24 <c>a</c>s the first
+    /// row took 2.1 s (Release, 2026-09-30) and doubled with each extra one. The memo needs only
+    /// that entering the body at a position has one outcome whatever path arrived there, and
+    /// amendment 1 shows the second pass's marks, touch flag and run-outs never break that for a
+    /// memo repeat. The answers are the judge's: no continuation gets past the 'b', so an anchored
+    /// call is None, and a search's partial is the edge attempt, where the repeat runs out.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(?:a|a)+c", true)]
+    [Arguments("(a|aa)+c", true)]
+    [Arguments("(?:a|aa)+?c", true)]
+    [Arguments("^(?:a|a)*c", false)]
+    public void A_partial_call_keeps_the_memo_in_its_second_pass(string pattern, bool searchIsPartialAtTheEdge)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new string('a', 40) + "bc";
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match searched = regex.Match(subject, partial: true);
+                (searched.Success, searched.PartialMatch, searched.Index)
+                    .Should()
+                    .Be(searchIsPartialAtTheEdge ? (true, true, 42) : (false, false, 0));
+                regex.MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+                regex.FullMatch(subject, partial: true).Success.Should().BeFalse();
+            },
+            400_000,
+            "with the memo, the body fails once per position in the second pass as well"
+        );
+    }
+
     [Test]
     public void A_group_exists_conditional_anywhere_keeps_the_memo_off()
     {

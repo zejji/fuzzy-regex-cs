@@ -69,8 +69,8 @@ internal sealed class RepeatInfo
     /// the pattern has anything that reads more than the position: a backreference, a group-exists
     /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
     /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
-    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial match does not use it
-    /// either (<c>MatchState.KeepsFailureMemo</c>).
+    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial call's second pass uses
+    /// it as well, since D11 build chunk 9 (<c>MatchState.KeepsFailureMemo</c> gives the argument).
     /// </para>
     /// <para>
     /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
@@ -84,9 +84,8 @@ internal sealed class RepeatInfo
     /// only ever means "cannot reach the end of the construct from here", a fact about the
     /// position; and a group call clears the guard lists on the way in and restores them on the
     /// way out. A repeat inside a bounded
-    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body). A
-    /// partial match returns at the first path that reaches the end of the text, POSIX matching
-    /// replaces its best match only with a longer one, and the guards are not consulted under
+    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body).
+    /// POSIX matching replaces its best match only with a longer one, and the guards are not consulted under
     /// fuzzy matching. They stay as exclusions anyway: each is a place where the rest of the match
     /// can read more than the position, and none of those arguments has been proved in general.
     /// <c>docs/plan/2026-09-26-backtrack-memoisation-design.md</c> gives the full reasoning.
