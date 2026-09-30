@@ -52,7 +52,7 @@ _INLINE_FLAG_LETTERS = {"b": "flag-b", "e": "flag-e", "r": "flag-r", "i": "flag-
 # Constructs found in the pattern text once escapes and set contents are masked. Each is a
 # (name, regex) pair over the masked text.
 _PATTERN_CONSTRUCTS = (
-    ("fuzzy", r"\{[^{}]*(?:[eids]\s*<|<\s*[eids]|\d[ids]\s*\+)"),
+    ("fuzzy", r"\{[^{}]*(?:[eids]\s*<|<\s*[eids]|\d[ids]\s*\+)|\{\s*[eids]\s*\}"),
     ("fuzzy-min", r"\{\s*\d+\s*<=?\s*[eids]"),
     ("fuzzy-cost", r"\{[^{}]*\d[ids]\s*\+"),
     ("call", r"\(\?(?:R|[+-]?\d+|&\w+|P>\w+)\)"),
@@ -61,20 +61,29 @@ _PATTERN_CONSTRUCTS = (
     ("lookbehind", r"\(\?<="),
     ("neg-lookbehind", r"\(\?<!"),
     ("atomic", r"\(\?>"),
-    ("possessive", r"(?:[*+?]|\})\+"),
-    ("lazy", r"(?:[*+?]|\})\?"),
-    ("repeat", r"[*+?]|\{\d+(?:,\d*)?\}"),
+    # `(?` opens a group and `(*` a verb, so a `?` or `*` straight after `(` is no quantifier. Until
+    # 2026-09-30 every `(?:` counted as a repeat: 994 of 2,836 generator rows were tagged `repeat`
+    # with no repeat in their parse tree (tools/matrix/tagger.py, which checks this tagger).
+    # `{1}` and `{1,1}` are no repeat at all: the parser drops them.
+    ("possessive", r"(?:(?<!\()[*+?]|(?<!\{1)(?<!\{1,1)\})\+"),
+    ("lazy", r"(?:(?<!\()[*+?]|(?<!\{1)(?<!\{1,1)\})\?"),
+    # Greedy only: a quantifier followed by `?` is lazy and by `+` possessive.
+    ("repeat", r"(?<![(*+?}])[*+?](?![?+])|\{(?!1\}|1,1\})\d+(?:,\d*)?\}(?![?+])"),
     ("verb", r"\(\*[A-Z]"),
-    ("conditional", r"\(\?\("),
-    ("capture", r"\((?!\?)|\(\?P?<(?![=!])\w+>"),
+    # (?(DEFINE)...) is a definition, not a test.
+    ("conditional", r"\(\?\((?!DEFINE\))"),
+    ("capture", r"\((?![?*])|\(\?P?<(?![=!])\w+>"),
     ("branch-reset", r"\(\?\|"),
     ("alternation", r"\|"),
-    ("anchor", r"[\^$]|\\[AZ]"),
+    ("anchor", r"[\^$]"),
     ("set", r"\["),
 )
 # Constructs that are escapes, matched before masking.
 _ESCAPE_CONSTRUCTS = (
     ("search-anchor", r"\\G"),
+    ("keep", r"\\K"),
+    # Escapes, so masking hid them from the pattern constructs until 2026-09-30.
+    ("anchor", r"\\[AZ]"),
     ("backref", r"\\[1-9]|\\g<|\(\?P=\w+\)"),
     ("word-boundary", r"\\[bBmM]"),
     ("named-list", r"\\L<"),
@@ -99,6 +108,12 @@ def _masked(pattern: str) -> str:
             if not depth:
                 out.append("x")
             i += 2
+            # The argument of \p{..}, \N{..}, \x{..}, \g<..> and \L<..> belongs to the escape, so a
+            # `^` or `+` inside it is not syntax: `\p{^Nd}` is no anchor, `\p{Ll}+` no possessive.
+            if i < len(pattern) and pattern[i] in "{<" and pattern[i - 1] in "pPNxgLu":
+                close = pattern.find("}" if pattern[i] == "{" else ">", i)
+                if close > 0:
+                    i = close + 1
             continue
         if depth:
             if c == "[":
@@ -124,17 +139,48 @@ def _masked(pattern: str) -> str:
     return "".join(out)
 
 
+def _has_alternation(masked: str) -> bool:
+    """Whether a `|` separates alternatives, rather than a conditional's yes and no branches.
+
+    A conditional `(?(test)yes|no)` holds one `|` of its own; a second one at the same level is an
+    alternation in the no branch.
+    """
+    conditional, bars = [], []
+    for i, c in enumerate(masked):
+        if c == "(":
+            conditional.append(masked.startswith("(?(", i))
+            bars.append(0)
+        elif c == ")" and conditional:
+            conditional.pop()
+            bars.pop()
+        elif c == "|":
+            if conditional and conditional[-1] and bars[-1] == 0:
+                bars[-1] = 1
+                continue
+            return True
+    return False
+
+
 def constructs(row: dict) -> set[str]:
     pattern = row["pattern"]
     tags = {name for name, rx in _ESCAPE_CONSTRUCTS if re.search(rx, pattern)}
     masked = _masked(pattern)
-    tags |= {name for name, rx in _PATTERN_CONSTRUCTS if re.search(rx, masked)}
+    # A fuzzy constraint's own text ({e<=3,1i+1d<=2}) holds `+` and `<`, which are no quantifier.
+    unfuzzed = re.sub(r"\{[^{}]*<[^{}]*\}", "{}", masked)
+    tags |= {name for name, rx in _PATTERN_CONSTRUCTS
+             if re.search(rx, masked if name.startswith("fuzzy") or name == "set" else unfuzzed)}
+    if "alternation" in tags and not _has_alternation(masked):
+        tags.discard("alternation")
     flags = row.get("flags") or 0
     tags |= {name for name, bit in _FLAG_CONSTRUCTS.items() if flags & bit}
     for scoped in re.findall(r"\(\?([a-zA-Z0-9-]+)[:)]", masked):
         if scoped.startswith("V1"):
             tags.add("flag-V1")
         tags |= {_INLINE_FLAG_LETTERS[c] for c in scoped.split("-")[0] if c in _INLINE_FLAG_LETTERS}
+    # Version 1 folds case fully whenever it ignores case (regex README, "Case-insensitive
+    # matching"); the compiled pattern carries FULLCASE.
+    if {"flag-V1", "flag-i"} <= tags:
+        tags.add("flag-f")
     tags.add("op-" + row["operation"])
     if row.get("partial"):
         tags.add("partial")
@@ -168,7 +214,7 @@ def main(argv=None) -> int:
         pairs.update(frozenset(p) for p in itertools.combinations(sorted(tags), 2))
 
     names = sorted({n for n, _ in _PATTERN_CONSTRUCTS} | {n for n, _ in _ESCAPE_CONSTRUCTS}
-                   | set(_FLAG_CONSTRUCTS) | {"op-search", "op-match", "op-fullmatch", "partial", "slice"})
+                   | set(_FLAG_CONSTRUCTS) | {"op-search", "op-match", "op-fullmatch", "op-finditer", "partial", "slice"})
     zeros = [p for p in map(frozenset, itertools.combinations(names, 2))
              if pairs[p] == 0 and p not in IMPOSSIBLE]
     print(f"{total} rows, {len(names)} constructs, {len(names) * (len(names) - 1) // 2} pairs, "
