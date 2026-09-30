@@ -5537,7 +5537,9 @@ outer section's substitution at 0.
 Debug assert at `SUCCESS` checks that no section is open. Pinned by
 `Gaps/Engine/FuzzyMatchingTests.A_verb_that_ends_a_lookaround_or_a_condition_closes_the_section_it_cut_through`
 (four rows with their verb-free controls). A grid of 6,000 generated rows (verbs, atomic groups,
-lookarounds and conditions around fuzzy sections, BESTMATCH, ENHANCEMATCH, calls) changed 5 rows,
-each to its verb-free control's answer. The oracle entry `fuzzy-section-cut-by-a-verb-is-closed`
+lookarounds and conditions around fuzzy sections, BESTMATCH, ENHANCEMATCH, calls) changed 5 rows.
+The rule is that a lookaround or condition gives back the section it was entered in; that equals the
+verb-free answer on the pinned row but is not a general rule, since a verb in a negative lookaround can
+change an answer (`(?!a(*PRUNE)b|ac)ac` over 'ac': (0, 2) in PCRE2, Perl and upstream, None without it). The oracle entry `fuzzy-section-cut-by-a-verb-is-closed`
 keys on `PatternObject.KeepSectionOpenAfterAVerb`. The default oracle waves at seeds 7, 4242 and
 20260927 draw no such row.
