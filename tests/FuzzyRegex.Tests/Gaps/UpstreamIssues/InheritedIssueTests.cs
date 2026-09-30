@@ -196,13 +196,13 @@ public sealed class InheritedIssueTests
         Values(@"\m(?:X){i}\M", "XY YX").Should().Equal("XY", "YX");
         Values(@"\m(?:Y){i}\M", " XY YX").Should().Equal("XY", "YX");
 
-        // Upstream already allows a RUNAWAY leading insertion at every position except the anchor,
-        // so these two subjects, one leading space apart, get different answers from it at the same
-        // relative position: findall(r'\m(?:Y){i}\M', 'q XY YX') -> ['XY', 'YX'] and over
-        // ' q XY YX' -> ['q XY', 'YX']. Here they agree. The runaway itself is upstream's own
-        // reading of an unbounded `{i}` and this port keeps it; what the fix removes is the
-        // position that answered differently from all the others.
-        Values(@"\m(?:Y){i}\M", "q XY YX").Should().Equal("q XY", "YX");
+        // Upstream allows a RUNAWAY leading insertion at every position except the anchor, so these
+        // two subjects, one leading space apart, get different answers from it at the same relative
+        // position: findall(r'\m(?:Y){i}\M', 'q XY YX') -> ['XY', 'YX'] and over ' q XY YX' ->
+        // ['q XY', 'YX']. Since D61 (rule H') this port gives upstream's answer to both: over
+        // 'q XY YX' the banned search's 'XY' starts inside the attempt at the anchor, 'q XY', so the
+        // runaway is not taken there; over ' q XY YX' the runaway starts at 1, not at the anchor.
+        Values(@"\m(?:Y){i}\M", "q XY YX").Should().Equal("XY", "YX");
         Values(@"\m(?:Y){i}\M", " q XY YX").Should().Equal("q XY", "YX");
 
         // A MATCH UPSTREAM LOSES ALTOGETHER rather than shortens, which is the clearest form of the
@@ -246,12 +246,9 @@ public sealed class InheritedIssueTests
         Values(@"\b(?:abc){i<=2}", "ab abc").Should().Equal(" abc");
         Values(@"\B(?:abc){i<=2}", "xy abc").Should().Equal("y abc");
 
-        // A LOOKAROUND WHOSE BODY IS ONE CHARACTER TEST PINS TOO, since D61 (2026-09-30). S57c left
-        // every lookaround out, calling `(?=x)` a character test wearing an assertion's clothes, and
-        // this row was [] as upstream's is. But the reason the rule rests on holds for it: `(?=x)`
-        // holds at 0 and fails at 1, so no later start can match, and 'x' inserted before 'abc' is
-        // the only match there is. See FuzzyAnchorPinTests; a lookaround with a longer body still
-        // does not pin (a SHORTCUT in Optimiser.FindAnchorPins).
+        // A lookaround needs no special case under rule H' (D61): `(?=x)` holds only at 0, so the
+        // banned search finds nothing later and the attempt at the anchor stands. S57c's exemption
+        // left lookarounds out and this row was [], upstream's answer.
         Values("(?=x)(?:abc){i<=1}", "xabc").Should().Equal("xabc");
 
         // An assertion that holds at position 0 but only on a path the engine abandons: an

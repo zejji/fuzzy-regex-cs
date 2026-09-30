@@ -212,8 +212,7 @@ internal static class OracleComparer
     /// <param name="ablate">
     /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
-    /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheAnchorPinOnThePath"/>,
-    /// <see cref="RunWithoutTheFoldFix"/>,
+    /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
@@ -455,10 +454,9 @@ internal static class OracleComparer
     /// search anchor, this port permits an insertion there and upstream does not
     /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>). The fix reads one field,
     /// <c>PatternObject.AnchorGuards</c>, which the optimiser fills in; emptying it on a compiled
-    /// pattern, and clearing <c>PatternObject.PinsAnchorOnPath</c> with it (D61's pin on the path,
-    /// see <see cref="RunWithoutTheAnchorPinOnThePath"/>), leaves an engine that applies upstream's
-    /// rule exactly, because <c>Matcher.AnchorIsPinned</c> then returns false at every site without
-    /// looking at anything else.
+    /// pattern leaves an engine that applies upstream's rule exactly, because
+    /// <c>Matcher.AnchorIsPinned</c> then returns false at every site without looking at anything
+    /// else.
     /// </para>
     /// <para>
     /// That is what makes the <c>fuzzy-insertion-at-a-pinned-anchor</c> entry a classification
@@ -480,38 +478,9 @@ internal static class OracleComparer
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled =>
             {
-                compiled.PatternObject.AnchorGuards = null;
-                compiled.PatternObject.PinsAnchorOnPath = false;
+                compiled.PatternObject.LiftsAnchorBan = false;
+                compiled.PatternObject.UpstreamBestMatchAnchor = true;
             }
-        );
-    }
-
-    /// <summary>
-    /// Puts a row's question to this port with D61's pin on the path switched off, leaving S57c's
-    /// leading guards in place.
-    /// </summary>
-    /// <remarks>
-    /// D61 lifts upstream's search-anchor insertion ban where a position assertion that pins the
-    /// anchor is passed inside a fuzzy section or down one branch of an alternation
-    /// (<c>docs/DIVERGENCES.md</c>, ledger entries 19 and 20, <c>_regex.c:10214</c>). Clearing
-    /// <c>PatternObject.PinsAnchorOnPath</c> means <c>Matcher.NotePinningAssertion</c> is never
-    /// called, which is the whole of that fix. The
-    /// <c>fuzzy-insertion-at-an-anchor-pinned-on-the-path</c> entry keys on this; a row S57c's guards
-    /// alone move still differs from upstream here, and falls through to
-    /// <see cref="RunWithoutTheAnchorPin"/>, which switches both off.
-    /// </remarks>
-    /// <param name="row">The row to run.</param>
-    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
-    internal static IOracleOutcome? RunWithoutTheAnchorPinOnThePath(OracleRow row)
-    {
-        ArgumentNullException.ThrowIfNull(row);
-
-        return Run(
-            row,
-            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
-            lazy: false,
-            withoutTheFuzzySearchFixes: true,
-            ablate: static compiled => compiled.PatternObject.PinsAnchorOnPath = false
         );
     }
 

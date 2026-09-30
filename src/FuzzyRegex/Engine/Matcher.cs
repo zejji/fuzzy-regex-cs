@@ -2481,8 +2481,7 @@ internal static class Matcher
     /// <summary>
     /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
     /// switch into the sixteen matcher cases that share it (<c>:12060</c> and the fifteen lines
-    /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
-    /// same question about a position the matcher is not standing on.
+    /// listed beside them); here it is one method.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
@@ -2508,142 +2507,6 @@ internal static class Matcher
             Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
             _ => TryMatchStartOfString(state, textPos),
         };
-
-    /// <summary>
-    /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
-    /// fuzzy section there may open with an inserted character.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>THIS PORT'S OWN RULE. It is the fix to upstream issues 563 and 564</b>, and
-    /// <c>docs/DIVERGENCES.md</c> carries it with the rows it changes. There is no option that
-    /// restores upstream's answer. Upstream's rule is <c>permit_insertion = !search || text_pos != search_anchor</c>
-    /// (<c>upstream/src/_regex.c</c>:10214), under its own comment "Permit insertion except
-    /// initially when searching (it's better just to start searching one character later)".
-    /// <c>search_anchor</c> is set once per matching operation (<c>init_match</c>, <c>:3410</c>)
-    /// and never per candidate start position, so the rule fires at exactly one of the positions a
-    /// scan visits, and <c>\m(?:Y){i}\M</c> loses 'XY' in 'XY YX' while finding it in ' XY YX'.
-    /// </para>
-    /// <para>
-    /// Starting one character later is the same match minus an insertion only while the pattern
-    /// still fits one character later. An assertion that holds here and fails there says it does
-    /// not, and that is the whole condition. Both halves are needed: with the one-character-on
-    /// test dropped, four of the ported suite's tests go red, upstream's own <c>test_fuzzy</c>
-    /// rows 51 and 56 among them (measured 2026-09-21; S50 first found the narrowing the same way,
-    /// against a different implementation of the pin).
-    /// </para>
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <param name="step">Which way the fuzzy item travels, so that "one character on" follows it.</param>
-    /// <param name="item">The fuzzy item about to take the insertion, whose dominating assertions are read.</param>
-    /// <returns><see langword="true"/> if an insertion may open the match after all.</returns>
-    private static bool AnchorIsPinned(MatchState state, long step, Node? item)
-    {
-        if (state.Pattern.AnchorGuards is { Count: > 0 } guards)
-        {
-            for (int i = 0; i < guards.Count; i++)
-            {
-                if (PinsTheAnchor(state, guards[i], step))
-                {
-                    return true;
-                }
-            }
-        }
-
-        // D61: an assertion that dominates this item pins it too (Optimiser.FindAnchorPins).
-        if (state.Pattern.PinsAnchorOnPath && item?.AnchorPins is { } pins)
-        {
-            for (int i = 0; i < pins.Count; i++)
-            {
-                if (PinsTheAnchor(state, pins[i], step))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Whether a position assertion holds at the search anchor and fails one character on, which is
-    /// what makes "start searching one character later" lose the match (see <see cref="AnchorIsPinned"/>).
-    /// </summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="assertion">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
-    /// <param name="step">Which way "one character on" is.</param>
-    /// <returns><see langword="true"/> if the assertion pins the anchor.</returns>
-    private static bool PinsTheAnchor(MatchState state, Node assertion, long step)
-    {
-        int onePastAnchor = Step(state, state.SearchAnchor, step);
-
-        if (onePastAnchor == state.SearchAnchor || onePastAnchor < state.SliceStart || onePastAnchor > state.SliceEnd)
-        {
-            return false;
-        }
-
-        if (assertion.Op == Opcode.Lookaround)
-        {
-            return LookaroundHoldsAt(state, assertion, state.SearchAnchor)
-                && !LookaroundHoldsAt(state, assertion, onePastAnchor);
-        }
-
-        return TryMatchZeroWidth(state, assertion, state.SearchAnchor) == MatchStatus.Success
-            && TryMatchZeroWidth(state, assertion, onePastAnchor) == MatchStatus.Failure;
-    }
-
-    /// <summary>
-    /// NOT UPSTREAM (known defect D61): whether a lookaround whose body is one character test holds
-    /// at a position, asked outside the match, with the lookaround's own bounds (the whole text).
-    /// </summary>
-    /// <remarks>
-    /// <c>Optimiser.IsOneCharacterLookaround</c> admits only that shape, so the answer reads no
-    /// capture, repeat or fuzzy state and cannot disturb the match that asks. A body that runs out of
-    /// text under partial matching counts as holding: the text that would decide it is not there, so
-    /// it has not failed. (Otherwise <c>(?=x|ab)(?:ab){i&lt;=1}</c> over 'xa', partial, would report
-    /// a start before the leftmost one from which a continuation can match.)
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <param name="lookaround">The lookaround node.</param>
-    /// <param name="textPos">The position to ask about.</param>
-    /// <returns><see langword="true"/> if it holds there or cannot yet be decided.</returns>
-    private static bool LookaroundHoldsAt(MatchState state, Node lookaround, int textPos)
-    {
-        Node body = lookaround.Next1.Node!;
-        bool matched;
-
-        if (body.Step < 0)
-        {
-            if (textPos <= state.TextStart)
-            {
-                if (state.PartialSide == MatchState.PartialLeft)
-                {
-                    return true;
-                }
-
-                matched = false;
-            }
-            else
-            {
-                matched = MatchesOne(body.Encoding, body, state.CharBefore(textPos)) == body.Match;
-            }
-        }
-        else if (textPos >= state.TextEnd)
-        {
-            if (state.PartialSide == MatchState.PartialRight)
-            {
-                return true;
-            }
-
-            matched = false;
-        }
-        else
-        {
-            matched = MatchesOne(body.Encoding, body, state.CharAt(textPos)) == body.Match;
-        }
-
-        return matched == lookaround.Match;
-    }
 
     /// <summary>
     /// Upstream <c>try_match_CHARACTER</c> (<c>upstream/src/_regex.c</c> line 7026),
@@ -6651,7 +6514,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step, node);
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
 
         int status = MatchStatus.Failure;
 
@@ -6819,8 +6682,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion =
-            !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step, currNode);
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
 
         step = advance ? data.Step : (sbyte)0;
 
@@ -6992,7 +6854,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step, node);
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
 
         int status = MatchStatus.Failure;
 
@@ -7092,8 +6954,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion =
-            !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step, newNode);
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
 
         int status = MatchStatus.Failure;
 
@@ -7628,28 +7489,13 @@ internal static class Matcher
     /// already been left behind even though <c>text_pos</c> has not moved, so the "no insertion at
     /// the anchor" rule stops applying.
     /// </remarks>
-    /// <param name="state">The match state.</param>
     /// <param name="data">The attempt being set up.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
     /// <param name="atAnchor">Whether <c>text_pos</c> is still at the search anchor.</param>
-    /// <param name="item">The fuzzy item, for <see cref="AnchorIsPinned"/>.</param>
     /// <returns>Whether an insertion may be tried.</returns>
-    private static bool PermitInsertionInFold(
-        MatchState state,
-        in FuzzyData data,
-        bool search,
-        bool atAnchor,
-        Node? item
-    )
+    private static bool PermitInsertionInFold(in FuzzyData data, bool search, bool atAnchor)
     {
         if (!search || !atAnchor)
-        {
-            return true;
-        }
-
-        // NOT UPSTREAM: the issue 563 and 564 fix, which lifts the rule the other three lines of
-        // this method implement. See AnchorIsPinned.
-        if (AnchorIsPinned(state, data.Step, item))
         {
             return true;
         }
@@ -7780,7 +7626,7 @@ internal static class Matcher
         data.Step = step;
         data.ValuesRanOut = step > 0 ? stringPos >= node.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
-        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor, node);
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -7912,13 +7758,7 @@ internal static class Matcher
         data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
-        data.PermitInsertion = PermitInsertionInFold(
-            state,
-            in data,
-            search,
-            state.TextPos == state.SearchAnchor,
-            newNode
-        );
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -8045,7 +7885,7 @@ internal static class Matcher
         bool ins =
             ThisErrorPermitted(state, FuzzyValue.Ins)
             && AtStartOfAnExpandingFolding(state, in at)
-            && PermitInsertionInFold(state, in at, search, state.TextPos == state.SearchAnchor, node);
+            && PermitInsertionInFold(in at, search, state.TextPos == state.SearchAnchor);
         bool del = ThisErrorPermitted(state, FuzzyValue.Del) && AtStartOfAnExpandingGroupCharacter(state, in at);
 
         if (!sub && !ins && !del)
@@ -8366,7 +8206,7 @@ internal static class Matcher
         data.Step = step;
         data.FoldChangesStart = foldChangesStart;
         data.FoldEncoding = node.Encoding;
-        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor, node);
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -8523,13 +8363,7 @@ internal static class Matcher
         // '(?i)(?=.*?(xtj))(?:\1){e<=1}' over 'axtj' retried the substitution at 0 as an
         // insertion and gave (0, 4), where upstream and the literal give (1, 4). Reversed, the two
         // rules are the same test. D22's whole insertion shares the rule.
-        data.PermitInsertion = PermitInsertionInFold(
-            state,
-            in data,
-            search,
-            state.TextPos == state.SearchAnchor,
-            newNode
-        );
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -15587,6 +15421,16 @@ internal static class Matcher
                 // Initialise the state.
                 state.InitMatch();
 
+                // NOT UPSTREAM (ledger entry 20, known defect D61): the search anchor is where the
+                // caller's search began, not where this walk resumes. Upstream's init_match moves it
+                // to each candidate start (`:3410`), so its insertion ban (`:10214`) bites at a
+                // candidate the caller never searched from: `(?b)\m(?:Y){1i+1d+1s<=2}\M` finditer
+                // over ' XY Z' loses 'XY' where the tighter budget finds it (upstream issue 564).
+                if (search && !state.Pattern.UpstreamBestMatchAnchor)
+                {
+                    state.SearchAnchor = firstStartPos;
+                }
+
                 status = MatchStatus.Success;
                 if (
                     // Upstream tests 'max_errors == 0' because that is what it bounds the pass by;
@@ -15977,6 +15821,152 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// <see cref="DoMatch2"/> under rule H' (known defect D61): the search-anchor insertion ban is
+    /// lifted exactly when upstream's search would return no match that starts inside the candidate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>THIS PORT'S OWN RULE</b>, replacing the ledger 19/20 exemption (DECISIONS 2026-09-30, rule
+    /// H'). Upstream refuses a fuzzy insertion at the position a search began
+    /// (<c>permit_insertion = !search || text_pos != search_anchor</c>, <c>upstream/src/_regex.c</c>:10214)
+    /// so that a match never swallows text where a later match could start. At anchor A, let u be
+    /// that banned search's answer. If u starts at A it is the answer. Otherwise let c be the
+    /// attempt at A without the ban, which is an anchored match at A (<c>search</c> false, the one
+    /// case upstream's own line permits the insertion). The answer is c if it exists and u is None
+    /// or starts at or after c's end, and u otherwise; under BESTMATCH c must also have no more
+    /// errors than u, a tie going to c, the earlier. u is by definition the leftmost later start,
+    /// so c is kept exactly when no later start lies inside it: <c>(?:^a){i&lt;=1}</c> over 'xa' is
+    /// (0, 2), and <c>\b(?:dog){e&lt;=2}</c> finditer over 'dog  dog' keeps upstream's (5, 8).
+    /// Reversed, "starts" and "ends" are in the direction of the search.
+    /// </para>
+    /// <para>
+    /// The caller runs this once per pass, so under partial matching the full pass decides first
+    /// and a full c beats a later partial u, which is upstream's own preference. A pattern with no
+    /// construct that depends on position (<see cref="PatternObject.LiftsAnchorBan"/>) keeps the
+    /// plain ban and pays one field test: removing a match's leading insertions then leaves a valid
+    /// match from a later start, so upstream's ban already gives H''s answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoMatch2LiftingTheAnchorBan(MatchState state, bool search)
+    {
+        if (!search || !state.Pattern.LiftsAnchorBan)
+        {
+            return DoMatch2(state, search);
+        }
+
+        int anchor = state.TextPos;
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+        int banned = DoMatch2(state, search);
+
+        bool bannedMatched = banned is MatchStatus.Success or MatchStatus.Partial;
+        if ((bannedMatched && state.MatchPos == anchor) || !(bannedMatched || banned == MatchStatus.Failure))
+        {
+            return banned;
+        }
+
+        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state, banned) : null;
+
+        state.TextPos = anchor;
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+        int attempt = DoMatch2(state, search: false);
+
+        if (attempt is MatchStatus.Success or MatchStatus.Partial)
+        {
+            bool nothingInside =
+                upstream is not { } u || (state.Reverse ? u.MatchPos <= state.TextPos : u.MatchPos >= state.TextPos);
+            bool costsNoMore =
+                upstream is not { } v
+                || (state.Pattern.Flags & RegexFlags.BestMatch) == 0
+                || TotalCount(state.FuzzyCounts) <= TotalCount(v.Counts);
+
+            if (nothingInside && costsNoMore)
+            {
+                return attempt;
+            }
+        }
+        else if (attempt is < 0 and not MatchStatus.Partial)
+        {
+            return attempt;
+        }
+
+        if (upstream is null)
+        {
+            return MatchStatus.Failure;
+        }
+
+        upstream.Restore(state);
+        return banned;
+    }
+
+    /// <summary>The sum of a set of fuzzy counts.</summary>
+    /// <param name="counts">The counts.</param>
+    /// <returns>Their total.</returns>
+    private static long TotalCount(long[] counts)
+    {
+        long total = 0;
+        foreach (long c in counts)
+        {
+            total += c;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// The parts of a match <see cref="DoMatch"/> and its callers read, kept while
+    /// <see cref="DoMatch2LiftingTheAnchorBan"/> runs the attempt at the anchor, so that upstream's
+    /// match can be put back.
+    /// </summary>
+    private sealed class AnchorBanSnapshot
+    {
+        internal int MatchPos;
+        internal int TextPos;
+        internal bool HitEnd;
+        internal int HitEndMatchPos;
+        internal long Errors;
+        internal long Cost;
+        internal long[] Counts = [];
+        internal List<FuzzyChange> Changes = [];
+        internal GroupData[] Groups = [];
+
+        internal static AnchorBanSnapshot Take(MatchState state, int status)
+        {
+            _ = status;
+            return new AnchorBanSnapshot
+            {
+                MatchPos = state.MatchPos,
+                TextPos = state.TextPos,
+                HitEnd = state.HitEnd,
+                HitEndMatchPos = state.HitEndMatchPos,
+                Errors = state.TotalErrors,
+                Cost = state.TotalCost,
+                Counts = (long[])state.FuzzyCounts.Clone(),
+                Changes = [.. state.FuzzyChanges],
+                Groups = GroupData.CopyGroups(state.Groups, state.Groups.Length),
+            };
+        }
+
+        internal void Restore(MatchState state)
+        {
+            state.MatchPos = MatchPos;
+            state.TextPos = TextPos;
+            state.HitEnd = HitEnd;
+            state.HitEndMatchPos = HitEndMatchPos;
+            state.TotalErrors = Errors;
+            state.TotalCost = Cost;
+            Counts.CopyTo(state.FuzzyCounts, 0);
+            state.FuzzyChanges.Clear();
+            state.FuzzyChanges.AddRange(Changes);
+            RestoreGroups(state, Groups);
+        }
+    }
+
+    /// <summary>
     /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): which of the four match
     /// strategies a pattern gets.
     /// </summary>
@@ -16075,7 +16065,7 @@ internal static class Matcher
         if (state.PartialSide == MatchState.PartialNone)
         {
             // Normal match.
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
         }
         else
         {
@@ -16103,7 +16093,7 @@ internal static class Matcher
             // Try a normal match first.
             state.PartialSide = MatchState.PartialNone;
 
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
 
             state.PartialSide = partialSide;
 
@@ -16162,7 +16152,7 @@ internal static class Matcher
                 state.TextPos = textPos;
                 state.SliceStart = sliceStart;
                 state.SliceEnd = sliceEnd;
-                status = DoMatch2(state, search);
+                status = DoMatch2LiftingTheAnchorBan(state, search);
 
                 // PCRE2's model, and the point of the whole of S57d: a boundary decided at the
                 // truncation point only reports a partial once EVERYTHING else has failed. A

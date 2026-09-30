@@ -70,14 +70,6 @@ internal sealed class Node
     /// <summary>Upstream <c>nonstring.true_node</c>: used by a <c>CONDITIONAL</c> node.</summary>
     internal Node? TrueNode;
 
-    /// <summary>
-    /// NOT UPSTREAM (known defect D61): the assertions that dominate this fuzzy item - every path from
-    /// the start of the pattern to it passes them, before anything is consumed if the item is reached
-    /// at the search anchor - other than <c>PatternObject.AnchorGuards</c>. Filled by
-    /// <c>Optimiser.FindAnchorPins</c>; <see langword="null"/> where there are none.
-    /// </summary>
-    internal IReadOnlyList<Node>? AnchorPins;
-
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
 

@@ -53,349 +53,51 @@ internal static class Optimiser
         // NOT UPSTREAM (D17). List the groups an empty iteration's state is keyed by.
         CollectTestedGroups(pattern);
         FindFuzzyLimit(pattern);
-
-        // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
-        // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
-        FindAnchorGuards(pattern);
-
-        // NOT UPSTREAM (D61): the assertions that dominate each fuzzy item; see FindAnchorPins.
-        FindAnchorPins(pattern, unionAtMerges: false);
     }
 
     /// <summary>
-    /// Fills in <see cref="PatternObject.AnchorGuards"/>: the zero-width position assertions the
-    /// pattern must pass before it does anything else. <b>Not an upstream pass</b> - it exists for
-    /// the fix to upstream issues 563 and 564, described in <c>docs/DIVERGENCES.md</c>.
+    /// Fills in <see cref="PatternObject.LiftsAnchorBan"/>: whether rule H' can give a different
+    /// answer from upstream's ban. <b>Not an upstream pass</b> (known defect D61).
     /// </summary>
     /// <remarks>
+    /// Only a fuzzy pattern ever inserts. In one with no construct that depends on position or on
+    /// the path - an assertion, a lookaround, <c>\G</c>, a backreference, a conditional, a group
+    /// call, a verb or <c>\K</c>, an atomic group or possessive quantifier - and no fuzzy lower bound,
+    /// deleting a match's leading insertions leaves a match from a later start with fewer errors, so
+    /// the banned search already finds one starting inside any candidate and H' returns upstream's
+    /// answer (DECISIONS 2026-09-30). The atomic group is in the list because it commits to its
+    /// first match, which a later start need not reproduce (<c>(?>a?)(?:a){i&lt;=1}</c> over ' a').
     /// <para>
-    /// The walk follows <see cref="Node.Next1"/> from the start node and stops at the first node
-    /// that could send matching down more than one path, so everything it collects is passed on
-    /// every path through the pattern. That is the whole point: S50 held the same answer in a
-    /// <c>MatchState</c> field that the backtracking engine neither saved nor restored, and it was
-    /// wrong in both directions - an assertion that held only on an abandoned path still pinned the
-    /// anchor, and the clears that fixed that also threw away a pin set outside the construct.
-    /// A property of the pattern cannot be wrong about which path the engine is on.
-    /// </para>
-    /// <para>
-    /// It walks through two kinds of node. Group markers carry no test of their own. And a
-    /// one-character node with a step of 0 is the test the compiler hoists in front of a leading
-    /// anchor - <c>'^a'</c> compiles to <c>CHARACTER(step 0) - START_OF_STRING - CHARACTER(step
-    /// 1)</c>, see the remarks on <c>Matcher.Step</c> - so stopping there would miss the anchor it
-    /// was hoisted past.
-    /// </para>
-    /// <para>
-    /// An assertion inside a fuzzy section is not collected, and stops the walk: an error can get
-    /// past it, so it does not pin every path. The path that passes it without an error is pinned
-    /// all the same, and so is a path down one branch of an alternation; for those this sets
-    /// <see cref="PatternObject.PinsAnchorOnPath"/> and the matcher decides as it goes (D61).
+    /// Called by <c>PatternObject.Compile</c> once the node list is final and
+    /// <see cref="PatternObject.HasFuzzyMinimum"/> is known.
     /// </para>
     /// </remarks>
     /// <param name="pattern">The pattern.</param>
-    private static void FindAnchorGuards(PatternObject pattern)
+    internal static void FindAnchorBanLift(PatternObject pattern)
     {
+        pattern.LiftsAnchorBan = false;
+
         if (!pattern.IsFuzzy)
         {
             return;
         }
 
-        List<Node>? guards = null;
-        Node? node = pattern.StartNode;
-
-        // The chain this walk follows cannot loop - it stops at every node that branches or repeats
-        // - but it reads a graph four other passes have just rewritten, so it is bounded anyway.
-        for (int steps = pattern.NodeList.Count; node is not null && steps > 0; steps--)
+        if (pattern.HasFuzzyMinimum || pattern.HasGroupCalls)
         {
-            if ((node.Status & NodeStatus.Fuzzy) != 0)
-            {
-                break;
-            }
-
-            if (IsPositionAssertion(node.Op))
-            {
-                (guards ??= []).Add(node);
-            }
-            else if (
-                node.Op is not (Opcode.StartGroup or Opcode.EndGroup)
-                && !(node.Step == 0 && NodeQueries.MatchesOneCharacter(node))
-            )
-            {
-                break;
-            }
-
-            node = node.Next1.Node;
-        }
-
-        pattern.AnchorGuards = guards;
-    }
-
-    /// <summary>
-    /// Fills in <see cref="Node.AnchorPins"/> and <see cref="PatternObject.PinsAnchorOnPath"/>: for
-    /// each fuzzy item, the assertions other than the <see cref="PatternObject.AnchorGuards"/> that
-    /// DOMINATE it, meaning every path from the start of the pattern to the item passes them. <b>Not
-    /// an upstream pass</b> - it is known defect D61's fix, described in <c>docs/DIVERGENCES.md</c>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Why dominance, and not "an assertion the path passed". The ban on an insertion at the search
-    /// anchor (<c>upstream/src/_regex.c</c>:10214) is sound when starting one character later finds
-    /// the same match minus the insertion. An assertion that held at the anchor and fails one
-    /// character on rules that out only if the later start has to pass it too. With another route to
-    /// the item it need not: <c>(?:^|x)(?:ab){i&lt;=1}</c> over 'xab' has the exact (0, 3) through
-    /// <c>x</c>, and <c>(?:\M|)(?:dog){e&lt;=1}</c> finditer over 'dog dog' must not glue the space to
-    /// the second 'dog'. A per-path flag answered both wrongly (refuted in review, 2026-09-30).
-    /// </para>
-    /// <para>
-    /// A forward "must" data-flow over the node graph: what reaches a node is what every predecessor
-    /// passes on, and an assertion adds itself. Nothing is lost by ignoring what a path consumes: an
-    /// item reached at the anchor was reached by a path that consumed nothing, so every assertion on
-    /// it was tested at the anchor. The exceptions are the constructs that put the text position back:
-    /// a lookaround's body and a conditional's test. Their end nodes pass nothing on, and the
-    /// lookaround's second exit, and the conditional's <see cref="Node.TrueNode"/>, carry what held
-    /// before them instead. A group call jumps along an edge the graph does not hold, so a pattern
-    /// with one gets no pins at all. SHORTCUT: that is the ceiling for calls; the upgrade is to follow
-    /// each call into its group and back.
-    /// </para>
-    /// <para>
-    /// A lookaround pins too when its body is one character test
-    /// (<see cref="IsOneCharacterLookaround"/>), which <c>Matcher.LookaroundHoldsAt</c> can answer
-    /// one character on without touching the match's state. SHORTCUT: any lookaround whose body reads
-    /// no path state (no capture read or backreference, conditional, call, verb, <c>\K</c> or fuzzy
-    /// section) could pin the same way, answered in an isolated state; that is the upgrade path.
-    /// </para>
-    /// </remarks>
-    /// <param name="pattern">The pattern.</param>
-    /// <param name="unionAtMerges">
-    /// Test-only: a planted bug that joins paths by union instead of intersection, so an assertion
-    /// on any one path pins. <c>FuzzyAnchorPinTests</c> uses it to prove the rows catch that bug,
-    /// which the oracle entry keyed on switching the pins off cannot. The library passes
-    /// <see langword="false"/>.
-    /// </param>
-    internal static void FindAnchorPins(PatternObject pattern, bool unionAtMerges)
-    {
-        pattern.PinsAnchorOnPath = false;
-
-        if (!pattern.IsFuzzy || pattern.HasGroupCalls || pattern.StartNode is not { } start)
-        {
+            pattern.LiftsAnchorBan = true;
             return;
         }
 
-        // Number the nodes by their place in the list, which PatternObject.Compile does again, in
-        // the same order, once the optimiser is done; the data-flow indexes arrays by it.
-        List<Node> nodes = pattern.NodeList;
-        for (int i = 0; i < nodes.Count; i++)
-        {
-            nodes[i].Index = i;
-        }
-
-        // The candidates, one bit each. SHORTCUT: past 64 the rest are ignored, which only pins
-        // less; the upgrade is a wider set.
-        int[] bit = new int[nodes.Count];
-        List<Node> candidates = [];
-
-        for (int i = 0; i < nodes.Count; i++)
-        {
-            Node node = nodes[i];
-            bit[i] = -1;
-
-            // The constructs whose end hands back to a node the data-flow must reach another way.
-            if (
-                (node.Op == Opcode.Lookaround && node.Next2.Node is null)
-                || (node.Op == Opcode.Conditional && node.TrueNode is null)
-            )
-            {
-                return;
-            }
-
-            if (
-                candidates.Count < 64
-                && (IsPositionAssertion(node.Op) || IsOneCharacterLookaround(node))
-                && pattern.AnchorGuards?.Any(g => ReferenceEquals(g, node)) != true
-            )
-            {
-                bit[i] = candidates.Count;
-                candidates.Add(node);
-            }
-        }
-
-        if (candidates.Count == 0)
-        {
-            return;
-        }
-
-        // What every path to the node has passed; a node not yet reached (reached[i] false) stands
-        // for every bit.
-        ulong[] reaching = new ulong[nodes.Count];
-        bool[] reached = new bool[nodes.Count];
-        var work = new Stack<Node>();
-
-        if (!InList(nodes, start))
-        {
-            return;
-        }
-
-        reached[start.Index] = true;
-        work.Push(start);
-
-        while (work.Count > 0)
-        {
-            Node node = work.Pop();
-            ulong passed = reaching[node.Index];
-
-            if (bit[node.Index] >= 0)
-            {
-                passed |= 1UL << bit[node.Index];
-            }
-
-            // A lookaround's body and a conditional's test put the position back at their end: the
-            // node after them is reached through the construct's own bypass edge instead.
-            if (node.Op is Opcode.EndLookaround or Opcode.EndConditional)
-            {
-                continue;
-            }
-
-            foreach (Node next in Successors(node))
-            {
-                // An edge to a node the list does not hold would be a path this pass cannot see.
-                if (!InList(nodes, next))
-                {
-                    ClearPins(nodes);
-                    return;
-                }
-
-                int n = next.Index;
-                ulong merged = passed;
-                if (reached[n])
-                {
-                    merged = unionAtMerges ? reaching[n] | passed : reaching[n] & passed;
-                }
-
-                if (!reached[n] || merged != reaching[n])
-                {
-                    reached[n] = true;
-                    reaching[n] = merged;
-                    work.Push(next);
-                }
-            }
-        }
-
-        for (int i = 0; i < nodes.Count; i++)
-        {
-            Node node = nodes[i];
-            node.AnchorPins = null;
-
-            if (!reached[i] || reaching[i] == 0 || (node.Status & NodeStatus.Fuzzy) == 0)
-            {
-                continue;
-            }
-
-            List<Node> pins = [];
-            for (int c = 0; c < candidates.Count; c++)
-            {
-                if ((reaching[i] & (1UL << c)) != 0)
-                {
-                    pins.Add(candidates[c]);
-                }
-            }
-
-            node.AnchorPins = pins;
-            pattern.PinsAnchorOnPath = true;
-        }
-    }
-
-    /// <summary>Whether a node is the one at its <see cref="Node.Index"/> in the list.</summary>
-    /// <param name="nodes">The pattern's node list.</param>
-    /// <param name="node">The node.</param>
-    /// <returns><see langword="true"/> if the list holds it there.</returns>
-    private static bool InList(List<Node> nodes, Node node) =>
-        node.Index >= 0 && node.Index < nodes.Count && ReferenceEquals(nodes[node.Index], node);
-
-    /// <summary>Removes every pin, for a pattern <see cref="FindAnchorPins"/> cannot analyse.</summary>
-    /// <param name="nodes">The pattern's node list.</param>
-    private static void ClearPins(List<Node> nodes)
-    {
-        foreach (Node node in nodes)
-        {
-            node.AnchorPins = null;
-        }
+        pattern.LiftsAnchorBan = pattern.NodeList.Any(static n => DependsOnThePosition(n.Op));
     }
 
     /// <summary>
-    /// The nodes matching can go to next from a node, for <see cref="FindAnchorPins"/>. Every
-    /// <see cref="Node.Next1"/>, and <see cref="Node.Next2"/> and <see cref="Node.TrueNode"/> except
-    /// where the second exit is not control flow: a set's out-of-line members, a single-item
-    /// repeat's item, and a fuzzy section's insertion charset. Taking an exit that is not control
-    /// flow only adds a path, which can only pin less.
+    /// Whether an opcode is one of the constructs that gate rule H' in (see
+    /// <see cref="FindAnchorBanLift"/>).
     /// </summary>
-    /// <param name="node">The node.</param>
-    /// <returns>Its successors.</returns>
-    private static IEnumerable<Node> Successors(Node node)
-    {
-        if (node.Next1.Node is { } next1)
-        {
-            yield return next1;
-        }
-
-        bool secondIsData =
-            node.Op
-            is Opcode.Fuzzy
-                or Opcode.EndFuzzy
-                or Opcode.GreedyRepeatOne
-                or Opcode.LazyRepeatOne
-                or Opcode.SetDiff
-                or Opcode.SetDiffIgn
-                or Opcode.SetDiffIgnRev
-                or Opcode.SetDiffRev
-                or Opcode.SetInter
-                or Opcode.SetInterIgn
-                or Opcode.SetInterIgnRev
-                or Opcode.SetInterRev
-                or Opcode.SetSymDiff
-                or Opcode.SetSymDiffIgn
-                or Opcode.SetSymDiffIgnRev
-                or Opcode.SetSymDiffRev
-                or Opcode.SetUnion
-                or Opcode.SetUnionIgn
-                or Opcode.SetUnionIgnRev
-                or Opcode.SetUnionRev;
-
-        if (!secondIsData && node.Next2.Node is { } next2)
-        {
-            yield return next2;
-        }
-
-        if (node.TrueNode is { } trueNode)
-        {
-            yield return trueNode;
-        }
-    }
-
-    /// <summary>
-    /// Whether a node is a lookaround whose body is one character test and nothing else, which
-    /// <c>Matcher.LookaroundHoldsAt</c> can answer at any position (D61).
-    /// </summary>
-    /// <param name="node">The node.</param>
-    /// <returns><see langword="true"/> for such a lookaround.</returns>
-    private static bool IsOneCharacterLookaround(Node node) =>
-        node.Op == Opcode.Lookaround
-        && node.Next1.Node is { } body
-        && body.Step != 0
-        && NodeQueries.MatchesOneCharacter(body)
-        && body.Next1.Node?.Op == Opcode.EndLookaround;
-
-    /// <summary>
-    /// Whether an opcode asks only where the text position is, so that <c>Matcher</c> can answer it
-    /// at any position without matching anything.
-    /// </summary>
-    /// <remarks>
-    /// Exactly the opcodes <c>Matcher.TryMatchZeroWidth</c> answers. A lookaround is deliberately
-    /// not one of them: it runs a subpattern, and <c>(?=x)</c> before a fuzzy section is a
-    /// character test wearing an assertion's clothes - upstream loses the leading insertion there
-    /// and this port agrees with it.
-    /// </remarks>
     /// <param name="op">The opcode.</param>
-    /// <returns><see langword="true"/> if it is a position assertion.</returns>
-    private static bool IsPositionAssertion(Opcode op) =>
+    /// <returns><see langword="true"/> if it depends on the position or the path.</returns>
+    private static bool DependsOnThePosition(Opcode op) =>
         op switch
         {
             Opcode.Boundary
@@ -413,7 +115,23 @@ internal static class Optimiser
             or Opcode.StartOfLine
             or Opcode.StartOfLineU
             or Opcode.StartOfString
-            or Opcode.StartOfWord => true,
+            or Opcode.StartOfWord
+            or Opcode.Lookaround
+            or Opcode.RefGroup
+            or Opcode.RefGroupFld
+            or Opcode.RefGroupFldRev
+            or Opcode.RefGroupIgn
+            or Opcode.RefGroupIgnRev
+            or Opcode.RefGroupRev
+            or Opcode.Conditional
+            or Opcode.GroupExists
+            or Opcode.GroupCall
+            or Opcode.CallRef
+            or Opcode.Prune
+            or Opcode.Skip
+            or Opcode.Failure
+            or Opcode.Keep
+            or Opcode.Atomic => true,
             _ => false,
         };
 

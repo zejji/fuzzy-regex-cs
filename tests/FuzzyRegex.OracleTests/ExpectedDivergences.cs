@@ -2459,7 +2459,6 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?e)(?r)(?p)(?:[^\\d][a\\d]\\p{L}){s<=1,i<=1,d<=1}(\\p{Lu})+\\b", "flags": 8, "namedLists": {}, "subject": " ﬀS", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}]}}
         {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?:\\p{Ll}+.([a]+)){s<=1:\\W}(?:[a](?P<g2>[\\w\\s]*)){e<=1}$", "flags": 65536, "namedLists": {}, "subject": "ıı\rAAﬁ\r\n", "operation": "subf", "template": "{g2}{g2}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "AAﬁ\rAAﬁ\r\r\n", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b(?P<g1>[[:alpha:]]+?)\\L<w1>{s<=1,i<=1,d<=1:\\d}(?<!(?:[a\\d](?P<g2>[\\p{L}\\p{N}]+?)😀){e<=2,i<=1})", "flags": 65544, "namedLists": {"w1": ["😀A", "😀𝔘", "😀𝔘A"]}, "subject": "a😀𐐨😀𝔘\r\nAa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 2]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [0, 2]}]}}
-        {"generator": "interactions", "pattern": "(?b)(?:([a]*)[a]*){s<=1}\\g<1>\\K$", "flags": 81930, "namedLists": {}, "subject": "\rA\n", "operation": "sub", "template": "\\1", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "posixFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)^(?:(?P<g1>[a]??)[a-f]*){e<=1}\\L<w1>{s<=1,i<=1,d<=1:[^a-z]}", "flags": 82058, "namedLists": {"w1": ["AA", "A_", "ß𐐀ß", "ﬃßß"]}, "subject": "AAaA_A", "operation": "subf", "template": "[{{", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "[{", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "[{A", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?r)(?p)(\\p{L})(?:[abz]*(?P<g2>[^\\d])A){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "𐐨𐐨AAaa", "operation": "sub", "template": "\\1-", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "𐐨𐐨-", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?p)^(?:[A-Z][^a-f](\\p{ASCII}{0,})){e<=2}(?>(?:[a\\d]*?(\\s)(\\p{ASCII})){s<=1,i<=1,d<=1})$", "flags": 0, "namedLists": {}, "subject": "aa𝔘𝔘😀", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [4, 1], "deletions": []}}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}}
@@ -2510,7 +2509,9 @@ internal static class ExpectedDivergences
         "matches 2 | match 0:(3,6)[(3,6)] 1:(3,2)[(3,2)] 2:unset last=1/g1 "
             + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:unset last=1/g1 "
             + "fuzzy=(0,0,1)[changes unavailable upstream]",
-        "sub 1 '\\u000dA\\u000a'",
+        // Row 5 (seed 7 row 24916, the POSIX-invented match) left this entry on 2026-09-30 with
+        // D61: BESTMATCH's walk now keeps the caller's search anchor, so the POSIX-free engine
+        // replaces twice as well, which is upstream's POSIX answer and its (?b)-free one.
         // S52 sitting 17's four, sweep rows 10, 12, 18 and 35 in that order.
         "sub 1 '[{A'",
         "sub 1 '\\ud801\\udc28\\ud801\\udc28-'",
@@ -3079,25 +3080,6 @@ internal static class ExpectedDivergences
         .ParseRows(_reversedAnchorFullFoldRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _reversedAnchorFullFoldOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
-
-    /// <summary>
-    /// The four rows of <c>fuzzy-insertion-at-an-anchor-pinned-on-the-path</c>, recorded by
-    /// <c>python tools/record-oracle.py --rows tools/probes/d61-anchor-pin-rows.jsonl</c> on
-    /// 2026-09-30.
-    /// </summary>
-    /// <remarks>
-    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. They are
-    /// known defect D61's own rows: an assertion inside the section, a one-character lookbehind
-    /// inside it, a finditer whose first match upstream loses, and the reversed form. Row 2 was
-    /// <c>(?:^|q)(?:a){i&lt;=1}</c> until the review of 2026-09-30 showed that an assertion on one branch
-    /// does not pin (it does not dominate the item), and that row now agrees with upstream.
-    /// </remarks>
-    private const string _anchorPinOnThePathRows = """
-        {"generator": "rows", "pattern": "(?:^a){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?:(?<!x)ab){i<=1}", "flags": 0, "namedLists": {}, "subject": "xab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?:\\ba){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa xa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}, "codepointSpan": [3, 5]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}]}
-        {"generator": "rows", "pattern": "(?r)(?:a$){i<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        """;
 
     /// <summary>
     /// The four rows of <c>fuzzy-insertion-at-a-pinned-anchor</c>, recorded by
@@ -7333,46 +7315,6 @@ internal static class ExpectedDivergences
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
-            Id: "fuzzy-insertion-at-an-anchor-pinned-on-the-path",
-            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
-                + "assertion that dominates the fuzzy item - every path from the start of the "
-                + "pattern to it passes the assertion - holds at the anchor and fails one character "
-                + "on, wherever the assertion is written, and where a lookaround whose body is one "
-                + "character test does the same. Known defect D61, the extension of ledger entries "
-                + "19 and 20; owner ruling 2026-09-30, option B, narrowed to dominance by the review "
-                + "that refuted a per-path reading, and recorded as a deliberate divergence in "
-                + "`docs/DIVERGENCES.md`.\n"
-                + "UPSTREAM'S RULE IS THE SAME LINE as `fuzzy-insertion-at-a-pinned-anchor`'s: "
-                + "`permit_insertion = !search || text_pos != search_anchor` "
-                + "(upstream/src/_regex.c:10214). S57c lifted it for an assertion before the "
-                + "section; D61 lifts it for one that dominates the item, because any start one "
-                + "character later has to pass that assertion where it fails. "
-                + "`(?:^a){i<=1}` over 'xa' is None upstream, where `^(?:a){i<=1}` is (0, 2); here "
-                + "both are (0, 2). Measured 2026-09-30 on regex 2026.9.10.\n"
-                + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`, and ahead of it. "
-                + "A row belongs here when clearing `PatternObject.PinsAnchorOnPath` "
-                + "(`OracleComparer.RunWithoutTheAnchorPinOnThePath`), which stops "
-                + "`Matcher.AnchorIsPinned` reading `Node.AnchorPins` and leaves S57c's guards alone, makes this port "
-                + "reproduce upstream's recorded answer exactly, AND this port's live answer is the "
-                + "one being judged. A row S57c's guards alone move still differs from upstream "
-                + "under this ablation and falls through to that entry, whose ablation clears both. "
-                + "WHAT THE ABLATION CANNOT SEE is a bug in the dominance analysis itself. Plant one "
-                + "(`Optimiser.FindAnchorPins` with `unionAtMerges`, which pins an assertion that "
-                + "only one path to the item passes) and `(?:^b|)(?:a){i<=1}` over 'xa' moves from "
-                + "(1, 2) to (0, 2): switched off it gives upstream's answer and live it gives an "
-                + "insertion at the anchor, so this entry would classify that bug as the fix. No key "
-                + "that answers by running this engine can do better. A tighter key would compare "
-                + "the live answer with the reference matcher's rule answer, which the recorder does "
-                + "not store. The planted bug is caught instead by "
-                + "`FuzzyAnchorPinTests.An_assertion_on_one_path_only_is_caught_if_the_analysis_pins_it`, "
-                + "which plants it and asserts the move.\n"
-                + "The control is `A_row_the_anchor_pin_on_the_path_does_not_explain_is_not_"
-                + "accounted_for`.",
-            PinnedBy: "FuzzyAnchorPinTests",
-            Example: _anchorPinOnThePathRows,
-            Applies: static (row, ours) => OnlyTheAnchorPinOnThePathExplainsIt(row, ours)
-        ),
-        new(
             Id: "fuzzy-insertion-at-a-pinned-anchor",
             Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
                 + "assertion pins the match to it, and upstream does not. Upstream issues 563 and "
@@ -8381,27 +8323,6 @@ internal static class ExpectedDivergences
         )
         && OracleComparer.Run(row) is { } live
         && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
-
-    /// <summary>
-    /// Whether D61's pin on the path, and nothing else, is what separates this port's answer from
-    /// upstream's: <see cref="OnlyTheAnchorPinExplainsIt"/> for the ablation that leaves S57c's
-    /// guards in place.
-    /// </summary>
-    /// <param name="row">The row, carrying upstream's answer.</param>
-    /// <param name="ours">This port's answer, as the wave measured it.</param>
-    /// <returns><see langword="true"/> if the pin on the path explains the divergence and nothing else does.</returns>
-    private static bool OnlyTheAnchorPinOnThePathExplainsIt(OracleRow row, IOracleOutcome ours)
-    {
-        if (
-            OracleComparer.RunWithoutTheAnchorPinOnThePath(row) is not { } unpinned
-            || OracleComparer.Compare(row, unpinned) != OracleVerdict.Agree
-        )
-        {
-            return false;
-        }
-
-        return IsTheLiveAnswer(row, ours);
-    }
 
     /// <summary>
     /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.

@@ -581,41 +581,20 @@ internal sealed class PatternObject
     internal int OptionalPassCount;
 
     /// <summary>
-    /// The zero-width position assertions the pattern must pass before it can match anything, or
-    /// <see langword="null"/> where it has none. <b>This port's own field: upstream has no
-    /// equivalent.</b>
+    /// Whether rule H' can change a search's answer, so that <c>Matcher.DoMatch2LiftingTheAnchorBan</c>
+    /// runs the attempt at the anchor without the ban. <b>This port's own field (known defect D61).</b>
+    /// Filled by <c>Optimiser.FindAnchorBanLift</c>; cleared by <c>OracleComparer.RunWithoutTheAnchorPin</c>,
+    /// the oracle's ablation, and by nothing in the library.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Read by <c>Matcher.AnchorIsPinned</c>, which fixes upstream issues 563 and 564
-    /// (<c>docs/DIVERGENCES.md</c>). Upstream forbids a fuzzy section from opening with an inserted
-    /// character at the search anchor, on the reasoning in its own comment at
-    /// <c>upstream/src/_regex.c</c>:10213 - "it's better just to start searching one character
-    /// later". That reasoning holds only while starting one character later can still find the same
-    /// match. An assertion that holds at the anchor and fails one character on takes that away, and
-    /// upstream then loses a match it finds at every other position.
-    /// </para>
-    /// <para>
-    /// Only the assertions the pattern passes <em>before anything else happens</em> are collected,
-    /// so every one of them is passed on every path to every item in the pattern. An assertion
-    /// reachable only down one branch - <c>(?:\bq|)</c>, <c>(?:\bq)*</c>, the body of a negative
-    /// lookaround - is not here, which is what stops the rule firing on a path the engine abandons.
-    /// <see cref="Optimiser"/> fills this in, for fuzzy patterns only.
-    /// </para>
-    /// </remarks>
-    internal IReadOnlyList<Node>? AnchorGuards;
+    internal bool LiftsAnchorBan;
 
     /// <summary>
-    /// Whether any fuzzy item has <c>Node.AnchorPins</c>: assertions other than the
-    /// <see cref="AnchorGuards"/> that dominate it (<c>Optimiser.FindAnchorPins</c>). <b>This port's
-    /// own field (known defect D61).</b>
+    /// Oracle-only: BESTMATCH's candidate walk moves the search anchor to each candidate start, as
+    /// upstream's <c>init_match</c> does (<c>upstream/src/_regex.c</c>:3410), instead of keeping the
+    /// caller's (ledger entry 20, known defect D61). Set only by
+    /// <c>OracleComparer.RunWithoutTheAnchorPin</c>; never by the library.
     /// </summary>
-    /// <remarks>
-    /// Read by <c>Matcher.AnchorIsPinned</c> only when the insertion ban would otherwise apply, at the
-    /// search anchor. Cleared by <c>OracleComparer</c>'s two anchor-pin ablations and by nothing in
-    /// the library.
-    /// </remarks>
-    internal bool PinsAnchorOnPath;
+    internal bool UpstreamBestMatchAnchor;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
@@ -1004,6 +983,9 @@ internal sealed class PatternObject
                 ++self.GroupCallSites;
             }
         }
+
+        // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
+        Optimiser.FindAnchorBanLift(self);
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
         if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)

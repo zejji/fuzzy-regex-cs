@@ -168,10 +168,9 @@ public sealed class FuzzyMatchingTests
         boundary.FuzzyChanges.Insertions.Should().Equal(0);
 
         // zw search(r'(?:\b[fg][op]){e<=1}', 'xfo'): None upstream, and the same match as above
-        // here (DIVERGES, known defect D61, FuzzyAnchorPinTests). Upstream refuses the insertion at
-        // the search anchor - fuzzy_match_item's 'permit_insertion' is false there (:10214),
-        // because starting one character later is cheaper - but the '\b' this path passed at 0
-        // fails at 1, so no later start gives the same match.
+        // here (DIVERGES, rule H' (known defect D61, FuzzyAnchorPinTests)). Upstream refuses the insertion at the search
+        // anchor - fuzzy_match_item's 'permit_insertion' is false there (:10214) - and every later
+        // start fails the '\b', so no later match exists and the attempt at the anchor is kept.
         Match searched = new FuzzyRegex(@"(?:\b[fg][op]){e<=1}").Match("xfo");
         (searched.Index, searched.Length).Should().Be((0, 3));
         searched.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
