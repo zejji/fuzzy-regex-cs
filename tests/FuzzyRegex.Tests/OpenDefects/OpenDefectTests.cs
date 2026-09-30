@@ -47,4 +47,27 @@ public sealed class OpenDefectTests
 
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
     }
+
+    // D41. A lookaround's body is compiled exact inside a fuzzy section, as the literal form shows,
+    // but a call in it is registered as fuzzy and so runs the group's fuzzy copy. A call means its
+    // body written out. Upstream 2026.9.10 (2026-09-30): search('(?:(?=ab)..){s<=1}', 'xb') is None,
+    // and the called form below is (0, 2) with one substitution, as here.
+    [Test]
+    public void A_call_inside_a_lookaround_in_a_fuzzy_section_runs_exactly()
+    {
+        new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
+    }
+
+    // D42. A conditional's lookbehind test is compiled backwards, but a call in it is registered with
+    // the caller's direction and so runs the group's forward compile. Upstream 2026.9.10
+    // (2026-09-30): search('bc(?(?<=bc)x|y)', 'bcxzzz') is (0, 3), and the called form below is
+    // None, as here. The 'zzz' keeps the subject longer than the call's inflated minimum width
+    // (GroupCallTests), which would refuse 'bcx' before matching starts.
+    [Test]
+    public void A_call_in_a_conditional_lookbehind_test_runs_backwards()
+    {
+        Match m = new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+    }
 }
