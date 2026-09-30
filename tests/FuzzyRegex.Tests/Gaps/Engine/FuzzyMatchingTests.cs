@@ -530,6 +530,33 @@ public sealed class FuzzyMatchingTests
         unpruned.FuzzyChanges.Deletions.Should().Equal(3);
     }
 
+    // Known defect D44. Backtracking onto a verb inside a negative lookaround or a condition's test
+    // cuts straight to that construct, past the FUZZY entry of a section opened inside it, so the
+    // arm that closes the section never runs. The inner section then stayed the open one, and its
+    // limits governed the rest of the enclosing section: {d<=0} forbade the substitution at 0 and
+    // the match moved to 1. The verb cannot change the answer here, because the body fails at 'b'
+    // with or without it - PCRE2 10.47 and Perl 5.42 both match (?!a(*PRUNE)b)ad over 'ad' at (0, 2),
+    // as they do (?!ab)ad. Upstream regex 2026.9.10 has the same defect: it answers (1, 2) with one
+    // substitution and one deletion on the first four rows, and the control on each second row.
+    [Test]
+    [Arguments("(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}")]
+    [Arguments("(?:(?!(?:ab){d<=0})cd){e<=2}")]
+    [Arguments("(?:(?!(?:a(*SKIP)b){d<=0})cd){e<=2}")]
+    [Arguments("(?:(?!a(*SKIP)b)cd){e<=2}")]
+    [Arguments("(?:(?(?!(?:a(*PRUNE)b){d<=0})cd|x)){e<=2}")]
+    [Arguments("(?:(?(?!(?:ab){d<=0})cd|x)){e<=2}")]
+    [Arguments("(?:(?(?=(?:a(*PRUNE)b){d<=0})x|cd)){e<=2}")]
+    [Arguments("(?:(?(?=(?:ab){d<=0})x|cd)){e<=2}")]
+    public void A_verb_that_ends_a_lookaround_or_a_condition_closes_the_section_it_cut_through(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).Match("ad");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(0);
+    }
+
     [Test]
     public void A_POSIX_search_of_a_fuzzy_pattern_answers_where_upstream_crashes()
     {
