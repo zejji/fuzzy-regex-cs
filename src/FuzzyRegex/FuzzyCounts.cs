@@ -13,7 +13,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// substitution.
 /// </para>
 /// <para>
-/// The three kinds are edits to the PATTERN that turn it into the matched text, as upstream
+/// The three kinds are edits to the pattern that turn it into the matched text, as upstream
 /// counts them. Against <c>(?:foobar){e&lt;2}</c>, 'foxbar' is a substitution (the 'x' stands in for
 /// an 'o'), 'fooxbar' an insertion (the 'x' is extra text) and 'fobar' a deletion (an 'o' of the
 /// pattern has no character in the text). A constraint's test, as in <c>{e&lt;=1:[a-z]}</c>, applies

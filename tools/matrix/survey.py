@@ -211,13 +211,25 @@ def _boost_dollar(p):
     r"""Every `$` outside a set as Perl's single-line `$`, (?=\n?\z). Boost compiles `$` under
     (?-m) to the end of the buffer only (basic_regex_parser.hpp:357, no_mod_m), where Perl, PCRE2
     and upstream also match before a final newline: 'a$' over 'a\n' is (0, 1) in all three and no
-    match in Boost (measured 2026-09-30)."""
+    match in Boost (measured 2026-09-30). A POSIX class inside a set, `[:alpha:]`, does not end
+    the set, and a comment, `(?#...)`, is copied through unchanged."""
     out, k, in_set = [], 0, False
     while k < len(p):
         c = p[k]
         if c == "\\":
             out.append(p[k:k + 2])
             k += 2
+            continue
+        if in_set and p.startswith("[:", k) and p.find(":]", k + 2) != -1:
+            end = p.find(":]", k + 2) + 2
+            out.append(p[k:end])
+            k = end
+            continue
+        if not in_set and p.startswith("(?#", k):
+            end = p.find(")", k)
+            end = len(p) if end == -1 else end + 1
+            out.append(p[k:end])
+            k = end
             continue
         if in_set:
             if c == "]":
@@ -239,6 +251,35 @@ def _boost_dollar(p):
             continue
         out.append(c)
         k += 1
+    return "".join(out)
+
+
+def _upstream_escapes(p, engine):
+    r"""Upstream's \v, \uXXXX and \UXXXXXXXX in the engine's spelling, or None when the engine cannot
+    say them. Upstream's \v is U+000B alone, where Perl, PCRE2 and Boost read it as any vertical
+    whitespace; Perl reads \u as "uppercase the next character", Boost as an uppercase class, and
+    PCRE2 refuses it (measured through this survey, 2026-09-30). \x{...} means the codepoint in
+    Perl and PCRE2; Boost has no ICU here, so its \u and \U rows are refused."""
+    out, k = [], 0
+    while k < len(p):
+        c = p[k]
+        if c != "\\":
+            out.append(c)
+            k += 1
+            continue
+        e = p[k + 1:k + 2]
+        if e == "v":
+            out.append("\\x{0B}")
+            k += 2
+        elif e in ("u", "U"):
+            if engine == "boost":
+                return None
+            width = 4 if e == "u" else 8
+            out.append("\\x{" + p[k + 2:k + 2 + width] + "}")
+            k += 2 + width
+        else:
+            out.append(p[k:k + 2])
+            k += 2
     return "".join(out)
 
 
@@ -316,6 +357,11 @@ def translate(row, info, engine):
         # folding and the dot see a UTF-8 subject byte by byte. Upgrade: build against ICU and use
         # boost::u32regex, which reads codepoints.
         return "non-ASCII text (Boost is built without ICU)"
+    if engine in ("pcre2", "perl", "boost"):
+        # .NET, node and re read \v, \u and \U as upstream does.
+        p = _upstream_escapes(p, engine)
+        if p is None:
+            return "\\u or \\U (Boost is built without ICU)"
     style = {"pcre2": "pcre", "perl": "perl", "dotnet": "dotnet", "node": "node", "re": "re", "boost": "pcre"}[engine]
     p = _backrefs(p, style)
     if engine in ("pcre2", "perl", "dotnet", "boost"):
@@ -724,7 +770,35 @@ def survey(rows, out_dir, engines, row_timeout=3.0, max_rss_mb=1500):
     return summary
 
 
+def _translation_checks():
+    r"""Translations that need no engine to check, each a case a blind review found wrong
+    (2026-09-30): a POSIX class or a comment holding `$`, and upstream's \v, \u and \U, which Perl,
+    PCRE2 and Boost read differently (measured through this survey that day: `a\v` over 'a\n' is
+    None upstream and (0, 2) in all three; Perl reads `a` as 'u0061'; PCRE2 refuses \u)."""
+    assert _boost_dollar("a$") == "a(?=\\n?\\z)"
+    assert _boost_dollar("[[:alpha:]$]") == "[[:alpha:]$]"
+    assert _boost_dollar("[a[:digit:]$]$") == "[a[:digit:]$](?=\\n?\\z)"
+    assert _boost_dollar("(?#x$y)a$") == "(?#x$y)a(?=\\n?\\z)"
+
+    def pattern(p, engine):
+        row = {"pattern": p, "subject": "a", "operation": "search"}
+        t = translate(row, analyse(row), engine)
+        return t if isinstance(t, str) else t["pattern"]
+
+    for engine in ("pcre2", "perl", "boost"):
+        assert pattern("a\\v", engine) == "a\\x{0B}", engine
+        assert pattern("[\\v]", engine) == "[\\x{0B}]", engine
+        assert pattern("\\\\v", engine) == "\\\\v", engine
+    for engine in ("pcre2", "perl"):
+        assert pattern("\\u0061[\\u0062]", engine) == "\\x{0061}[\\x{0062}]", engine
+        assert pattern("\\U00000061", engine) == "\\x{00000061}", engine
+    assert pattern("\\u0061", "boost").startswith("\\u or \\U"), pattern("\\u0061", "boost")
+    assert pattern("\\U00000061", "boost").startswith("\\u or \\U")
+
+
 def _self_test():
+    _translation_checks()
+    print("translation checks: ok")
     rows = [
         {"id": "t1", "pattern": r"(a)(?1)b", "subject": "aab", "operation": "search"},
         {"id": "t2", "pattern": r"(?(DEFINE)(?<c>a))(?&c)b", "subject": "ab", "operation": "match"},
