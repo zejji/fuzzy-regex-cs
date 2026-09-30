@@ -1,0 +1,46 @@
+{"id": "Q1a call-verb prune", "cell": "open", "pattern": "(?:(?&g)c|ac)(?(DEFINE)(?<g>a(*PRUNE)b))", "subject": "ac", "operation": "search"}
+{"id": "Q1a written-out", "cell": "open", "pattern": "(?:(?:a(*PRUNE)b)c|ac)", "subject": "ac", "operation": "search"}
+{"id": "Q1b call-verb skip", "cell": "open", "pattern": "(?:(?&g)c|a)(?(DEFINE)(?<g>aa(*SKIP)b))", "subject": "aac", "operation": "search"}
+{"id": "Q1b written-out", "cell": "open", "pattern": "(?:(?:aa(*SKIP)b)c|a)", "subject": "aac", "operation": "search"}
+{"id": "Q1c recursion-verb", "cell": "open", "pattern": "(?<g>a(*PRUNE)b|x(?&g)?)c|xac", "subject": "xac", "operation": "search"}
+{"id": "Q1d call-verb numbered", "cell": "open", "pattern": "(a(*PRUNE)b)?(?:(?1)c|ac)", "subject": "ac", "operation": "search"}
+{"id": "Q2a atomic-prune-optional", "cell": "open", "pattern": "(?>a(*PRUNE)b)?a", "subject": "ac", "operation": "search"}
+{"id": "Q2b atomic-skip-alt", "cell": "open", "pattern": "(?:(?>a(*SKIP)x)|a)c", "subject": "ac", "operation": "search"}
+{"id": "Q2c atomic-prune-alt", "cell": "open", "pattern": "(?:(?>a(*PRUNE)x)|a)c", "subject": "ac", "operation": "search"}
+{"id": "Q2d atomic-skip-optional", "cell": "open", "pattern": "(?>a(*SKIP)b)?a", "subject": "ac", "operation": "search"}
+{"id": "Q2e atomic-prune-star", "cell": "open", "pattern": "(?>a(*PRUNE)b)*a", "subject": "ac", "operation": "search"}
+{"id": "Q2f atomic-prune-lazy", "cell": "open", "pattern": "(?>a(*PRUNE)b)??a", "subject": "ac", "operation": "search"}
+{"id": "Q2g atomic-prune-alt-group", "cell": "open", "pattern": "(?:(?>a(*PRUNE)b)|a)", "subject": "ac", "operation": "search"}
+{"id": "Q2h possessive-prune", "cell": "open", "pattern": "(?:a(*PRUNE)b)?+a", "subject": "ac", "operation": "search"}
+{"id": "Q3a neg-cond-capture", "cell": "open", "pattern": "(?(?!(aa))ab|b*)", "subject": "aacabb", "operation": "match"}
+{"id": "Q3a positive-swap", "cell": "open", "pattern": "(?(?=(aa))b*|ab)", "subject": "aacabb", "operation": "match"}
+{"id": "Q3b neg-cond-capture-used", "cell": "open", "pattern": "(?(?!(a))x|\\1b)", "subject": "ab", "operation": "search"}
+{"id": "Q3b positive-swap", "cell": "open", "pattern": "(?(?=(a))\\1b|x)", "subject": "ab", "operation": "search"}
+{"id": "Q3c neg-lookbehind-cond", "cell": "open", "pattern": "a(?(?<!(a))x|b)", "subject": "ab", "operation": "search"}
+{"id": "Q3d standalone-neg-look", "cell": "open", "pattern": "(?!(a)b)a(\\1)?", "subject": "aa", "operation": "search"}
+{"id": "Q3e standalone-pos-look", "cell": "open", "pattern": "(?=(a))a\\1?", "subject": "aa", "operation": "search"}
+{"id": "Q4 left-recursion", "cell": "open", "pattern": "(?P<g1>(?:ab)?(?&g1)?)", "subject": "abab", "operation": "search"}
+{"id": "Q5 branch-reset-names", "cell": "open", "pattern": "(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))", "subject": "BUG!", "operation": "search"}
+{"id": "Q5 branch-reset-unnamed-first", "cell": "open", "pattern": "(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))", "subject": "!BUG", "operation": "search"}
+{"id": "Q6 skip-then-prune", "cell": "open", "pattern": "aa(*SKIP)x(*PRUNE)y|a", "subject": "aaxz", "operation": "search"}
+{"id": "Q7 pos-look-skip", "cell": "open", "pattern": "(?=aa(*SKIP)x)|a", "subject": "aab", "operation": "search"}
+{"id": "Q7 neg-look-skip", "cell": "open", "pattern": "(?!aa(*SKIP)x)a", "subject": "aab", "operation": "search"}
+{"id": "Q7 cond-pos-skip", "cell": "open", "pattern": "(?(?=a(*SKIP)x)a|b)", "subject": "ab", "operation": "search"}
+{"id": "Q8 cond-in-call-reads-caller", "cell": "open", "pattern": "(?<g>(a)?(?(2)b|c))(?&g)", "subject": "abc", "operation": "search"}
+{"id": "Q8 written-out", "cell": "open", "pattern": "(?<g>(a)?(?(2)b|c))(?:(a)?(?(2)b|c))", "subject": "abc", "operation": "search"}
+{"id": "Q9 call-sets-group-then-backref", "cell": "open", "pattern": "(?<x>a|b)(?&x)\\k<x>", "subject": "aba", "operation": "search"}
+{"id": "Q9 call-sets-group-then-backref2", "cell": "open", "pattern": "(?<x>a|b)(?&x)\\k<x>", "subject": "abb", "operation": "search"}
+{"id": "Q10 reverse-capture-order", "cell": "open", "pattern": "(?r)(a)(b)?", "subject": "ab", "operation": "search"}
+{"id": "Q10 reverse-lookahead", "cell": "open", "pattern": "(?r)a(?=b)", "subject": "abab", "operation": "search"}
+{"id": "Q10 reverse-backref", "cell": "open", "pattern": "(?r)(a)\\1", "subject": "aa", "operation": "search"}
+{"id": "Q11 partial-skip-start", "cell": "open", "pattern": "(?:(?=b)b*(*SKIP)(*F)|a)", "subject": "bbb", "operation": "search", "partial": true}
+{"id": "Q11 partial-skip-start-plain", "cell": "open", "pattern": "b+(*SKIP)(*F)|a", "subject": "bbb", "operation": "search", "partial": true}
+{"id": "D23 bounded (?m) match", "cell": "open", "pattern": "(?m)(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "match"}
+{"id": "D23 bounded (?m) search", "cell": "open", "pattern": "(?m)(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "search"}
+{"id": "D23 bounded search", "cell": "open", "pattern": "(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "search"}
+{"id": "D23 bounded match", "cell": "open", "pattern": "(?<=$(*SKIP)|a{0,3})", "subject": "ab", "operation": "match"}
+{"id": "A8 fuzzy-cond-lookahead s", "cell": "open", "pattern": "(?:(?(?=a)ab|b)){s<=1}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead exact", "cell": "open", "pattern": "(?(?=a)ab|b)", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead e0", "cell": "open", "pattern": "(?:(?(?=a)ab|b)){e<=0}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-neg-lookahead s", "cell": "open", "pattern": "(?:(?(?!a)b|ab)){s<=1}", "subject": "b", "operation": "search"}
+{"id": "A8 fuzzy-cond-lookahead prefix", "cell": "open", "pattern": "(?:c(?(?=a)ab|b)){s<=1}", "subject": "cb", "operation": "search"}
