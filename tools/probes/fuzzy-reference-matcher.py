@@ -354,6 +354,9 @@ class Parser:
     def __init__(self, pattern, ignorecase=False, version1=False):
         self.p, self.i, self.groups = pattern, 0, 0
         self.version1 = version1
+        # Uses \b \B \m \M \w or \d, whose Unicode definitions (combining marks, connector
+        # punctuation, digits such as '\u00b2') are not modelled: such a pattern is ASCII-text only.
+        self.ascii_classes = False
         self.referenced = set()  # groups a backreference or conditional tests
         self.ignorecase = ignorecase
         if ignorecase and not pattern.isascii():
@@ -566,10 +569,13 @@ class Parser:
                 self.referenced.add(int(ch))
                 return Backref(int(ch))
             if ch == "d":
+                self.ascii_classes = True
                 return Item(lambda x: x.isdigit(), "\\d")
             if ch == "w":
+                self.ascii_classes = True
                 return Item(is_word, "\\w")
             if ch in "AZGbBmM":  # rule 11
+                self.ascii_classes |= ch in "bBmM"
                 return Anchor(ch)
             if ch == "K":  # rule 12
                 return Keep()
@@ -582,7 +588,9 @@ class Parser:
         return Item(lambda x, s=fold({c}, self.ignorecase): x in s, c)
 
     def char_class(self):
-        end = self.p.index("]", self.i + 1)
+        first = self.i + 1 + (self.p[self.i + 1 : self.i + 2] == "^")
+        # A "]" first in a class (after any "^") is a literal: "[]a]" is "]" or "a".
+        end = self.p.index("]", first + (self.p[first : first + 1] == "]"))
         body = self.p[self.i + 1 : end]
         if "\\" in body:
             raise ValueError(f"unsupported escape in a class at {self.i} in {self.p!r}")
@@ -1038,14 +1046,16 @@ class Compiled:
     ignorecase: bool
     posix: bool = False
     leading: frozenset = frozenset()
+    ascii_classes: bool = False
 
 
 def leading_anchors(node):
     """Rule 5's exception: the anchors every match passes first, outside any fuzzy section or
-    alternation (a run of them at the head of the pattern, through plain and atomic groups)."""
+    alternation (a run of them at the head of the pattern, through plain groups). An atomic group
+    stops the walk: the ruling's examples have none, so an anchor in one only rejects the row."""
     found = set()
     while True:
-        if isinstance(node, (Group, Atomic)):
+        if isinstance(node, Group):
             node = node.body
             continue
         if isinstance(node, Seq):
@@ -1053,7 +1063,7 @@ def leading_anchors(node):
                 if isinstance(part, Anchor):
                     found.add(id(part))
                     continue
-                if isinstance(part, (Group, Atomic, Seq)):
+                if isinstance(part, (Group, Seq)):
                     found |= leading_anchors(part)
                 break
         elif isinstance(node, Anchor):
@@ -1095,12 +1105,14 @@ def compile_pattern(pattern, flags=0):
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
     return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
-                    leading_anchors(tree))
+                    leading_anchors(tree), p.ascii_classes)
 
 
 def checked(c, text):
     if c.ignorecase and not text.isascii():
         raise ValueError("unsupported: IGNORECASE over non-ASCII text (rule 17)")
+    if c.ascii_classes and not text.isascii():
+        raise ValueError("unsupported: \\b \\B \\m \\M \\w or \\d over non-ASCII text")
     return c
 
 

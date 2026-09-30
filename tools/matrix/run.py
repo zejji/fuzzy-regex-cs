@@ -453,7 +453,7 @@ def judge(out: Path, constructs: dict) -> None:
                 check, want = row["expect"]
                 got = verdicts[check]
                 controls.append(f"{'OK  ' if got[0] == want else 'BAD '} {check} want {want} got {got[0]} "
-                                f"({got[1]}) {row['pattern']!r} {row['subject']!r} port {got[2]} other {got[3]}")
+                                f"({got[1]}) {row['pattern']!a} {row['subject']!a} port {got[2]!s} other {got[3]!s}")
             tags = set(row["tags"])
             covered = [c for c in cells if gen.covers(tags, c, fam)]
             for check, (status, kind, mine, other) in verdicts.items():

@@ -175,7 +175,9 @@ def dialect(row: dict) -> dict | str:
         return {"body": body, "subject": subject, "fuzzyness": {"maxerr": 0}, "icase": bool(flags & IGNORECASE),
                 "weights": [1, 1, 1], "best": bool(flags & BESTMATCH) and op != "finditer"}
     body = whole.group("body")
-    if (not _CORE.match(body) or re.search(r"\(\?(?!:)", body) or re.search(r"[*+?}][?+]", body)
+    # Tested on the whole pattern: the budget regex has already taken the opening "(" off the body,
+    # so `(?x:a b c){e<=1}` would leave "?x:a b c" (blind review, 2026-09-30).
+    if (not _CORE.match(body) or re.search(r"\(\?(?!:)", pattern) or re.search(r"[*+?}][?+]", body)
             or "(*" in body):
         return "the body leaves the POSIX ERE core"
     if re.search(r"\{(?![0-9]+(?:,[0-9]*)?\})", body):
@@ -199,7 +201,8 @@ def dialect(row: dict) -> dict | str:
           "maxerr": cap(limits.maxs[3]), "subcost": limits.costs[0] or 1, "inscost": limits.costs[1] or 1,
           "delcost": limits.costs[2] or 1, "maxcost": cap(limits.max_cost)}
     body = body.replace("(?:", "(")
-    return {"body": ("^" if op == "match" else "") + body, "subject": subject, "fuzzyness": fz,
+    # A `match` anchors the whole body: `^ab|cd` would anchor only the first alternative.
+    return {"body": ("^(" + body + ")" if op == "match" else body), "subject": subject, "fuzzyness": fz,
             "icase": bool(flags & IGNORECASE), "weights": list(limits.costs),
             "best": bool(flags & BESTMATCH) and op != "finditer"}
 

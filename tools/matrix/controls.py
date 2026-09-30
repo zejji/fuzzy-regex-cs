@@ -99,6 +99,17 @@ CONTROLS = [
       "c8Base": "(0,3) 1,0,0 [2||] g c"}, "C8", "fail"),
     ({"pattern": "(?:abc){e<=1}", "subject": "abx abc", "operation": "search", "flags": 4096}, "C8", "pass"),
     ({"pattern": "a(?:bc){s<=1}d", "subject": "xaxcd", "operation": "search"}, "C8", "pass"),
+    # Blind review of matrix/reference-c8, 2026-09-30: each row once got a false verdict. A `match`
+    # asked of TRE as `^ab|cd` anchored only the first alternative (TRE found (3,5), the port None);
+    # `(?x:...)` lost its opening "(" to the whole-budget regex and went to TRE as literal text.
+    ({"pattern": "(?:ab|cd){e<=1}", "subject": "xxxcd", "operation": "match"}, "C8", "n/a"),
+    ({"pattern": "(?x:a b c){e<=1}", "subject": "?x:a b c", "operation": "search"}, "C8", "n/a"),
+    # ... and for C6: the pinned-anchor ruling says nothing of an assertion inside an atomic group;
+    # \b and \d read non-ASCII text by rules the reference does not model (combining marks, '²');
+    # a leading `]` in a class is a literal, not the end of an empty class.
+    ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "n/a"),
+    ({"pattern": "a\\b", "subject": "á", "operation": "search"}, "C6", "n/a"),
+    ({"pattern": "[]a]", "subject": "x]", "operation": "search"}, "C6", "pass"),
     # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
     ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
 ]
