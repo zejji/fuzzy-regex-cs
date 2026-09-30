@@ -3273,16 +3273,17 @@ an assertion that dominates the item) were refuted by review with witnesses such
 
 **What a report would ask for.** At anchor A, run the banned search to get u. If u starts at A,
 return it. Otherwise run the attempt at A without the ban to get c, and return c if it exists and u
-is None or starts at or after c's end (under BESTMATCH, only if c has no more errors than u). The
-ban exists so a match never swallows text where a later match could start, and u is that later
-start, so this keeps exactly the matches the ban loses for nothing. Upstream already does this when
-the search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)). Separately,
-BESTMATCH's candidate walk should keep the caller's search anchor rather than re-set it in
-`init_match` (`:3410`) for each candidate, which is entry 20's mechanism.
+is None or starts at or after c's end; under BESTMATCH, only if c costs no more than u by
+BESTMATCH's own ranking, a tie going to c, the earlier. Do this once per pass, so under partial
+matching a full c beats a later partial u. The answer is always u or c. The ban exists so a match
+never swallows text where a later match could start, and u is that later start. Upstream already
+does this when the search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)).
+BESTMATCH's candidate walk searches again from each candidate's own start (`init_match`, `:3410`),
+where the ban bites at a position the caller never searched from, which is entry 20's mechanism; the
+walk should apply the same rule to each of its searches.
 
-**Known effect, not a defect.** The kept match ends at or before upstream's next start, so a single
-search never loses upstream's match, but an extra match can move the next finditer anchor, and so a
-later match:
+**Known effect, not a defect.** An extra match can move the next finditer anchor, and so a later
+match:
 `(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'.
 
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
