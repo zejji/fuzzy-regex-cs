@@ -428,7 +428,7 @@ public sealed class GroupCallTests
     // DIVERGES FROM UPSTREAM SINCE D49 (ledger entry 60). The history below is S40c's, when this
     // port reproduced upstream's minimum width; the assertions are now the other way round. What
     // upstream counts is not the call at all but the backwards COPY of the called group that the
-    // call needs, compiled after the pattern's SUCCESS (`build_CALL_REF`, `_regex.c:24460`). The
+    // call needs, compiled after the pattern's SUCCESS (`build_CALL_REF`, `_regex.c:24560`). The
     // width counts only where a call reaches the copy, and a lookbehind consumes nothing, so the
     // copy's width is no part of what the pattern needs. Every called row below now answers what
     // the same row with the call written out answers, in both engines.

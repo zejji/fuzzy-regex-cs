@@ -2627,7 +2627,7 @@ internal class String : RegexBase
         // lookbehind compiles the pattern again backwards, and at the prefilter's position the
         // engine then moved a backwards run to the string's forward end (`ReqEnd`), so
         // `aa(?:(?<=a(?R)){i<=1}a|)` matched 'aaaa' as (0, 3) with one insertion, in upstream too
-        // (`upstream/src/_regex.c:14892`). The mark only means something where the run is read in
+        // (`upstream/src/_regex.c:15109`). The mark only means something where the run is read in
         // the direction the prefilter found it.
         if (Required && !fuzzy && (reverse == RequiredReverse || RequiredInEveryDirection))
         {

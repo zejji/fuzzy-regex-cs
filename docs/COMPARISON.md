@@ -1729,6 +1729,36 @@ Console.WriteLine(new FuzzyRegex("bc(?(?<=bc)x|y)").Match("bcxzzz").Length); // 
 
 There is no option to restore the upstream answer. Ledger entry 58.
 
+### A backwards copy of the whole pattern does not skip to the required string's forward end
+
+A `(?R)` inside a lookbehind runs the whole pattern backwards. Upstream's backwards copy still
+carries the mark of the pattern's required string, and at the place the prefilter found that string
+it jumps to the string's forward end, so the lookbehind leaves the text position in the wrong place.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaaa").Length); // 4 - upstream: 3
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaab").Length); // 2 - upstream: 3
+```
+
+There is no option to restore the upstream answer. Ledger entry 59.
+
+### A called copy adds nothing to the pattern's minimum width
+
+A group called from a lookbehind needs a backwards copy of the group. Upstream counts that copy's
+width in the pattern's minimum width, although a lookbehind consumes nothing, and refuses subjects
+the pattern matches.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a ").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); // 2 - upstream: 2
+```
+
+There is no option to restore the upstream answer. Ledger entry 60.
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

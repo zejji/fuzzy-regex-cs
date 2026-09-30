@@ -178,7 +178,7 @@ internal static class NodeCompiler
         }
 
         // NOT UPSTREAM (D49): the width the pattern needs is what its own code needs, up to its
-        // SUCCESS. Upstream adds the called copies after it too (`build_CALL_REF`, :24460), whose
+        // SUCCESS. Upstream adds the called copies after it too (`build_CALL_REF`, :24560), whose
         // width counts only where a call reaches them - and a call inside a lookaround consumes
         // nothing - so `(?P<g1>\w)(?<=(?&g1))\W` needed three characters and refused 'a ', which
         // the same pattern with the call written out matches.

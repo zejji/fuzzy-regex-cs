@@ -5590,3 +5590,64 @@ lookbehind test runs the group's forward compile from the current position.
 **This port.** `LookAroundConditional.FixGroups` walks the test under `Behind`. Pinned by
 `Gaps/Engine/NestedGroupCallTests` (`A_call_in_a_conditional_lookbehind_test_runs_backwards`) and
 the oracle entry above. D40's grid rows 343, 388, 569, 629, 1655 and 1796 carry it.
+
+## 59. A backwards copy of the whole pattern carries the required string's mark, so its run jumps to the string's forward end - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D48. Draft report:
+`entry-59-backwards-copy-required-string.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaaa')   -> (0, 3), (0, 1, 0)   expected (0, 4), (0, 1, 0)
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaab')   -> (0, 3), (0, 1, 0)   expected (0, 2), (0, 0, 0)
+```
+
+**Why upstream is wrong.** The (0, 3) spans a match whose last `a` was read at 2, after an
+insertion at 2: the text position went back by one. `_get_required_string` marks the pattern's
+required run (`upstream/regex/_regex_core.py:4464`), and the engine skips comparing a marked run
+where the prefilter found it, moving to `req_end` (`STRING_REV`, `upstream/src/_regex.c:15109`).
+The `(?R)` inside the lookbehind compiles the whole pattern again backwards, marked run included,
+so a backwards `aa` that starts at the prefilter's position lands on the run's forward end. With
+the call written out to depth 2 the port answers (0, 4) with one insertion and (0, 2); upstream
+answers (0, 2) on both written-out rows, because it never passes a failing lookaround with an
+insertion (entry 50), and D40's review row `aa(?<=(?<=aa(?R)a)(?:q?){i<=1})a|aa` over 'aaab' is
+(0, 3) in upstream and (0, 2) written out in both engines.
+
+**Proposed fix upstream:** mark the run only in the compile whose direction the prefilter
+searched: compile the additional copies with `required` cleared, or check the node's direction
+in the skip.
+
+**This port.** `String.CompileCore` marks the run only when `reverse` equals the direction it was
+found in (`String.RequiredReverse`); D34 already left it off the fuzzy copies. Pinned by
+`Gaps/Engine/NestedGroupCallTests` and the oracle entry `group-call-runs-with-its-call-sites-features`.
+
+## 60. The called copies after SUCCESS count towards the pattern's minimum width - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D49. Draft report:
+`entry-60-copy-min-width.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?P<g1>\w)(?<=(?&g1))\W', 'a ')   -> None       expected (0, 2)
+search(r'(?P<g1>\w)(?<=\w)\W', 'a ')       -> (0, 2)     (the control: the call written out)
+search(r'(a)b(?<=(?1)b)', 'ab')            -> None       expected (0, 2)
+search(r'(a)b(?<=ab)', 'ab')               -> (0, 2)     (the control)
+```
+
+**Why upstream is wrong.** The copies of called groups (`additional_groups`) are compiled after
+the pattern's `SUCCESS`, and `build_CALL_REF` adds each copy's width to `min_width`
+(`upstream/src/_regex.c:24560`) as if it were matched in sequence. A copy is only reached through a
+call, and a call inside a lookbehind consumes nothing, so the pattern above needs two characters,
+not three; `do_exact_match`'s width early-out (`:18064`) then refuses a subject the pattern matches.
+With a partial request the same early-out skips the non-partial pass, so a complete match is
+reported as partial (`GroupCallTests`, `PartialMatchingTests`).
+
+**Proposed fix upstream:** take `min_width` where `SUCCESS` is built, before the additional copies.
+
+**This port.** `NodeCompiler` takes the width at `SUCCESS` (`CompileArgs.MinWidthAtSuccess`);
+`PatternObject.UpstreamMinWidth` keeps upstream's for the oracle's ablation. The tests that pinned
+the inflation (S40c) now assert the written-out answers. Pinned by `Gaps/Engine/NestedGroupCallTests`
+and the oracle entry above.
