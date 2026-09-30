@@ -220,6 +220,16 @@ class Fuzzy:
 # ---------------------------------------------------------------- the parser
 
 
+def contains(node, kind, pred=lambda n: True):
+    """True if node or a node inside it is a `kind` for which pred holds."""
+    if isinstance(node, kind) and pred(node):
+        return True
+    children = {Seq: lambda n: n.parts, Alt: lambda n: n.branches, Group: lambda n: (n.body,),
+                Repeat: lambda n: (n.body,), Cond: lambda n: (n.yes, n.no), Look: lambda n: (n.body,),
+                Fuzzy: lambda n: (n.body,)}.get(type(node), lambda n: ())(node)
+    return any(contains(c, kind, pred) for c in children)
+
+
 class Parser:
     def __init__(self, pattern):
         self.p, self.i, self.groups = pattern, 0, 0
@@ -269,6 +279,10 @@ class Parser:
             greedy = self.peek() != "?"
             if not greedy:
                 self.take("?")
+            elif self.peek() == "+":
+                # A possessive quantifier is atomic, which the matcher does not model; read as a
+                # second repeat it silently answered a different pattern (matrix triage, 2026-09-30).
+                raise ValueError(f"unsupported possessive quantifier at {self.i} in {self.p!r}")
             node = Repeat(node, lo, hi, greedy)
 
     @staticmethod
@@ -349,6 +363,13 @@ class Parser:
                 positive = self.p[self.i - 1] == "="
                 body = self.alternation()
                 self.take(")")
+                # Outside the subset (rule 10): the body runs with no fuzzy state, so a section's
+                # errors inside it would be dropped; and a lookbehind is tried start by start, left
+                # to right, so a verb or a capture in it would act in an order no engine uses.
+                if contains(body, Fuzzy):
+                    raise ValueError(f"unsupported fuzzy section inside a lookaround in {self.p!r}")
+                if not ahead and (contains(body, Verb) or contains(body, Group, lambda g: g.index)):
+                    raise ValueError(f"unsupported verb or capture inside a lookbehind in {self.p!r}")
                 return Look(ahead, positive, body)
             elif self.peek(2) == "(?":  # flags, named groups, atomic groups ...
                 raise ValueError(f"unsupported construct {self.p[self.i:self.i + 4]!r} at {self.i} in {self.p!r}")
@@ -372,6 +393,12 @@ class Parser:
                 return Backref(int(ch))
             if ch == "d":
                 return Item(lambda x: x.isdigit(), "\\d")
+            if ch == "w":
+                return Item(lambda x: x.isalnum() or x == "_", "\\w")
+            if ch.isalnum():
+                # \A, \b, \G, \K, \Z, \g<name> ... are not literals; read as one they silently
+                # answered another pattern ("\G\Ab" matched the text "GAb"; matrix triage, 2026-09-30).
+                raise ValueError(f"unsupported escape \\{ch} at {self.i - 2} in {self.p!r}")
             return Item(lambda x, ch=ch: x == ch, ch)
         self.i += 1
         return Item(lambda x, c=c: x == c, c)
@@ -379,6 +406,8 @@ class Parser:
     def char_class(self):
         end = self.p.index("]", self.i + 1)
         body = self.p[self.i + 1 : end]
+        if "\\" in body:
+            raise ValueError(f"unsupported escape in a class at {self.i} in {self.p!r}")
         self.i = end + 1
         negate = body.startswith("^")
         body = body[1:] if negate else body
@@ -501,8 +530,16 @@ def look_groups(node, st, ctx):
     """Rule 10: the groups after the body's first match, or None if it has none."""
     inner = replace(st, counts=None, limits=None, outer=())
     if node.ahead:
-        for s in run(node.body, inner, ctx, lambda s: iter([s])):
-            return s.groups
+        try:
+            for s in run(node.body, inner, ctx, lambda s: iter([s])):
+                return s.groups
+        except Prune:
+            # Backtracking onto a verb inside a negative assertion makes the assertion true
+            # (pcre2pattern "Backtracking verbs in assertions"). Measured 2026-09-30: search
+            # "(?!a(*PRUNE)(*F))a" "a" is (0, 1) in upstream, PCRE2 10.47 and Perl 5.42.3. Inside
+            # a positive one it acts on the whole match, so it goes on up.
+            if node.positive:
+                raise
         return None
     for start in range(st.pos, -1, -1):
         for s in run(node.body, replace(inner, pos=start), ctx, lambda s: iter([s]) if s.pos == st.pos else iter(())):
@@ -526,7 +563,14 @@ def anchor(node, st, ctx, k):
         ok = st.pos == 0
     else:  # $: the end, or before a final newline
         ok = st.pos == n or (st.pos == n - 1 and ctx.text[-1] == "\n")
-    return k(st) if ok else iter(())
+    if ok:
+        yield from k(st)
+        return
+    # A failing anchor in a fuzzy section may be passed by inserting a text character in front of
+    # it (upstream _regex.c:12060-12075, the rule 10 cites; rule 5 applies). Measured 2026-09-30:
+    # fullmatch "(?:a$){i<=1}" "ab" is (0, 2) with one insertion in upstream and the port.
+    if st.counts is not None and st.pos < n and st.pos != st.anchor and permitted(st, 1):
+        yield from anchor(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
 def backref(node, st, ctx, k):

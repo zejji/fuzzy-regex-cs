@@ -50,7 +50,7 @@ def describe(m, groups: int) -> str:
     return out
 
 
-def c1x(row, regex) -> str:
+def c1x(row, regex) -> str | tuple:
     if row["operation"] != "finditer" or not (row.get("partial") or row.get("pos") is not None):
         return "n/a"
     compiled = regex.compile(row["pattern"], row["flags"], **(row.get("namedLists") or {}))
@@ -60,8 +60,22 @@ def c1x(row, regex) -> str:
     try:
         found = list(compiled.finditer(*args, partial=bool(row.get("partial")), timeout=5))
     except TimeoutError:
-        return "ERR Timeout"
-    return "[" + " ; ".join(describe(m, compiled.groups) for m in found) + "]"
+        return "ERR Timeout", None
+    answer = "[" + " ; ".join(describe(m, compiled.groups) for m in found) + "]"
+    # Ledger entry 11 mechanism A: upstream's fuzzy_changes can hold an abandoned attempt's entries
+    # (start_match clears the counts, not the changes, _regex.c:11790-11792). As the recorder's
+    # _leak_free_fuzzy does, ask each match again anchored at its span, where it is the first attempt,
+    # and take those changes when the span and counts agree. Check C1 accounts for the leak through
+    # ExpectedDivergences' fuzzy-changes-leaked-from-an-abandoned-attempt; C1x did not (triage 2026-09-30).
+    parts = []
+    for m in found:
+        try:
+            again = compiled.match(row["subject"], m.start(), m.end(), partial=m.partial, timeout=5)
+        except TimeoutError:
+            again = None
+        same = again is not None and again.span() == m.span() and again.fuzzy_counts == m.fuzzy_counts
+        parts.append(describe(again, compiled.groups) if same else "?")  # "?": not askable, as the recorder's None
+    return answer, "[" + " ; ".join(parts) + "]"
 
 
 def inline_prefix(flags: int) -> str:
@@ -118,20 +132,28 @@ def child(task: str, rows_path: str, start: int) -> int:
     import regex
     judge_mod = _load(HERE / "d11-brute-judge.py", "d11_brute_judge") if task == "c4up" else None
     ref = _load(HERE.parent / "probes" / "fuzzy-reference-matcher.py", "fuzzy_reference") if task == "c6" else None
+    if ref:
+        # The ruled rule for an iteration that matches empty text only by deleting (ledger 44;
+        # DIVERGENCES "...only when something needs it"; the port's FuzzyNeededEmptyIterationTests).
+        # The matcher's default, "perl", is the reading that ruling rejected (matrix triage 2026-09-30).
+        ref.EMPTY_DELETION_ITERATIONS = "needed"
     sys.setrecursionlimit(20000)
     rows = [json.loads(line) for line in open(rows_path, encoding="utf-8") if line.strip()]
     for k in range(start, len(rows)):
         row = rows[k]
+        more = {}
         try:
             if task == "c1x":
                 a = c1x(row, regex)
+                if isinstance(a, tuple):
+                    a, more["c1xLeakFree"] = a
             elif task == "c4up":
                 a = c4up(row, judge_mod)
             else:
                 a = c6(row, ref, regex)
         except Exception as e:  # noqa: BLE001
             a = "ERR " + type(e).__name__
-        sys.stdout.write(f"{k}\t{json.dumps({'id': row.get('id', k), task: a})}\n")
+        sys.stdout.write(f"{k}\t{json.dumps({'id': row.get('id', k), task: a, **more})}\n")
         sys.stdout.flush()
     return 0
 

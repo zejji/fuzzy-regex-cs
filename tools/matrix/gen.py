@@ -289,6 +289,11 @@ def render(node, t: Tree, inline=None, depth=0, capture=True, number=None) -> st
             return (f"(?&{target})", f"(?P>{target})", f"(?{n})" if n else f"(?&{target})")[hash_choice(target, 3)]
         if depth >= inline:
             return "(?!)"
+        # SHORTCUT: the copy takes the call site's flags, which is right only because every flag
+        # here is a whole-pattern flag (the generator writes no scoped `(?i:...)`). A called group
+        # keeps its DEFINITION's flags (`(abc)(?i:(?-1))` over 'abcABC' is None in upstream, PCRE2
+        # and Perl), so once scoped flags are generated the copy must be wrapped in the definition's
+        # flags, e.g. `(?-i:abc)` (matrix triage 2026-09-30; 0 of the 1,509 C2 rows are affected).
         body = t.root if target == "R" else t.bodies[target]
         return "(?:" + render(body, t, inline, depth + 1, False, number) + ")"
     raise KeyError(k)

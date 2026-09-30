@@ -63,6 +63,29 @@ FieldInfo skipExactDeletion = F("SkipExactDeletionRetry"),
 FieldInfo minimumOrder = F("CheckMinimumBeforeTrailingInsertions");
 FieldInfo minWidth = F("MinWidth"),
     upstreamMinWidth = F("UpstreamMinWidth");
+FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
+    anchorGuards = F("AnchorGuards"),
+    upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
+    skipTiming = F("SkipMovesTheSliceWhenItRuns"),
+    verbScope = F("VerbsAreConfinedToTheInnermostGroup"),
+    doubledInsertions = F("DoubleCountTrailingInsertions");
+
+// Check C1x's pinned divergences: the fuzzy ablations OracleComparer's RunWith.../RunWithout...
+// helpers apply for ExpectedDivergences, one variant each. A C1x row whose difference from upstream
+// one of these takes away is accounted for, as check C1 accounts for it (matrix triage 2026-09-30).
+string[] pinned =
+[
+    "x42",
+    "x44",
+    "x51",
+    "x50",
+    "xanchor",
+    "xboundary",
+    "xskip",
+    "xverbscope",
+    "xcallfeatures",
+    "xdoubled",
+];
 Type repeatInfo = asm.GetType("Fuzzy.Text.RegularExpressions.Engine.RepeatInfo", throwOnError: true)!;
 FieldInfo failureMemo = repeatInfo.GetField("FailureMemo", Any)!;
 Type workCounter = asm.GetType("Fuzzy.Text.RegularExpressions.Engine.WorkCounter", throwOnError: true)!;
@@ -142,6 +165,17 @@ foreach (string line in File.ReadLines(input))
                 : Answer(form.Value.GetString()!, subject, op, partial, pos, endpos, "wo");
         result["wo"] = forms;
     }
+    // A row may also ask for them itself (`askPinned`), for triaging a C1 row by hand.
+    if (
+        (op == "finditer" && (partial || pos is not null || endpos is not null))
+        || (row.TryGetProperty("askPinned", out JsonElement ap) && ap.GetBoolean())
+    )
+    {
+        var forms = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string v in pinned)
+            forms[v] = Spent() ? "ERR RowBudget" : Answer(pattern, subject, op, partial, pos, endpos, v);
+        result["pinned"] = forms;
+    }
     if (partial && op != "finditer" && pos is null && endpos is null)
         result["judge"] = Spent() ? "ERR RowBudget" : Judge(pattern, subject, op);
     result["ms"] = (int)clock.ElapsedMilliseconds;
@@ -151,7 +185,7 @@ foreach (string line in File.ReadLines(input))
 FuzzyRegex Compile(string pattern, string variant)
 {
     bool d37 = ablate == "d37" && variant != "wo";
-    bool callFeatures = ablate == "callfeatures" && variant == "base";
+    bool callFeatures = (ablate == "callfeatures" && variant == "base") || variant == "xcallfeatures";
     var regex = (FuzzyRegex)
         withDefaultVersion.Invoke(
             null,
@@ -177,6 +211,26 @@ FuzzyRegex Compile(string pattern, string variant)
     }
     if (callFeatures)
         minWidth.SetValue(pobj, upstreamMinWidth.GetValue(pobj));
+    if (Array.IndexOf(pinned, variant) >= 0)
+    {
+        // OracleComparer.Run's withoutTheFuzzySearchFixes: entry 42 off always; entry 44 off except
+        // for RunWithoutTheExactDeletion; entry 51 off except for it and RunWithUpstreamEmptyIterations.
+        skipExactDeletion.SetValue(pobj, true);
+        upstreamEmpty.SetValue(pobj, variant != "x42");
+        minimumOrder.SetValue(pobj, variant is not ("x42" or "x44"));
+        if (variant is "x51" or "x50")
+            skipLookaroundInsertion.SetValue(pobj, true); // RunWithTheUpstreamMinimumOrder sets both
+        if (variant == "xanchor")
+            anchorGuards.SetValue(pobj, null);
+        if (variant == "xboundary")
+            upstreamDefaultBoundary.SetValue(pobj, true);
+        if (variant == "xskip")
+            skipTiming.SetValue(pobj, true); // RunWithTheUpstreamSkipTiming
+        if (variant == "xverbscope")
+            verbScope.SetValue(pobj, true); // RunWithTheUpstreamVerbScope
+        if (variant == "xdoubled")
+            doubledInsertions.SetValue(pobj, true); // RunWithTheDoubledInsertionGuard
+    }
     if (variant == "off")
     {
         skipCallMemo.SetValue(pobj, true);
