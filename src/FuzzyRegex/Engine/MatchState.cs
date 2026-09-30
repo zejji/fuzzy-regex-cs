@@ -1687,12 +1687,23 @@ internal sealed class MatchState : IDisposable
 
         if (
             !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
-            || !stack.PopNode(Pattern, out FuzzyNode)
-            || !stack.PopSize(out TotalCost)
-            || !stack.PopSize(out TotalErrors)
+            || !stack.PopNode(Pattern, out Node? fuzzyNode)
+            || !stack.PopSize(out long totalCost)
+            || !stack.PopSize(out long totalErrors)
         )
         {
             return false;
+        }
+
+        if (!Pattern.KeepSectionOpenAfterAVerb)
+        {
+            FuzzyNode = fuzzyNode;
+        }
+
+        if (!Pattern.KeepDiscardedTotals)
+        {
+            TotalErrors = totalErrors;
+            TotalCost = totalCost;
         }
 
         TruncateFuzzyChanges(changeCount);

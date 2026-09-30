@@ -217,8 +217,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
-    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/> and by
-    /// nothing else; the wave always passes
+    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>
+    /// and <see cref="RunWithTheDiscardedTotals"/> and by nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -943,6 +943,61 @@ internal static class OracleComparer
             lazy: false,
             keepMinimumOrderFix: true,
             upstreamWholePatternCall: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a fuzzy section a verb cut through left open, as
+    /// upstream leaves it (the D44 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// A <c>(*PRUNE)</c> or <c>(*SKIP)</c> backtracked onto cuts straight to the innermost negative
+    /// lookaround, condition or attempt, past the <c>FUZZY</c> entry of any section opened since,
+    /// and upstream never puts <c>fuzzy_node</c> back, so that section's limits govern what follows.
+    /// <c>PatternObject.KeepSectionOpenAfterAVerb</c> restores that. Ledger entry 51's minimum
+    /// order stays on, as for entry 55. The <c>fuzzy-section-cut-by-a-verb-is-closed</c> entry keys
+    /// on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheSectionLeftOpenByAVerb(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepSectionOpenAfterAVerb = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the running error total keeping the errors of a
+    /// fuzzy section that was thrown away, as upstream's does (the D45 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream writes <c>total_errors</c> at every <c>END_FUZZY</c> and never restores it (ledger
+    /// entry 32), so when an atomic group, lookaround, condition or verb throws a body away, the
+    /// counts go back and the total does not, and <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> rank by
+    /// the total. <c>PatternObject.KeepDiscardedTotals</c> restores that. The
+    /// <c>fuzzy-total-drops-a-discarded-section</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheDiscardedTotals(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepDiscardedTotals = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
         );
     }
 

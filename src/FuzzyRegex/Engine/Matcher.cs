@@ -5078,7 +5078,11 @@ internal static class Matcher
     {
         Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
 
-        Debug.Assert(state.FuzzyNode is null, "a match never ends inside a fuzzy section");
+        // The oracle's two ablations reproduce upstream's D44 and D45 on purpose.
+        Debug.Assert(
+            state.FuzzyNode is null || state.Pattern.KeepSectionOpenAfterAVerb,
+            "a match never ends inside a fuzzy section"
+        );
 
         Span<long> kinds = stackalloc long[3];
         foreach (FuzzyChange change in state.FuzzyChanges)
@@ -5094,7 +5098,9 @@ internal static class Matcher
         );
 
         Debug.Assert(
-            !state.Pattern.IsFuzzy || state.TotalErrors == TotalErrors(state.FuzzyCounts),
+            !state.Pattern.IsFuzzy
+                || state.Pattern.KeepDiscardedTotals
+                || state.TotalErrors == TotalErrors(state.FuzzyCounts),
             "the running total is the sum of the kinds"
         );
     }
@@ -9532,11 +9538,16 @@ internal static class Matcher
         {
             Array.Clear(state.FuzzyCounts);
             state.FuzzyChanges.Clear();
-            state.FuzzyNode = null;
-            state.TotalErrors = 0;
-            state.TotalCost = 0;
-            state.TotalErrors = 0;
-            state.TotalCost = 0;
+            if (!pattern.KeepSectionOpenAfterAVerb)
+            {
+                state.FuzzyNode = null;
+            }
+
+            if (!pattern.KeepDiscardedTotals)
+            {
+                state.TotalErrors = 0;
+                state.TotalCost = 0;
+            }
         }
 
         // NOT UPSTREAM (empty-iteration rule): no section entered in this attempt is open yet.

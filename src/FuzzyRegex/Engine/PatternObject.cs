@@ -670,6 +670,22 @@ internal sealed class PatternObject
     internal bool VerbsAreConfinedToTheInnermostGroup;
 
     /// <summary>
+    /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
+    /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 59). Set only by
+    /// <c>OracleComparer</c>'s ablation; never by the library. See
+    /// <c>MatchState.PushSubAttemptFuzzyState</c>.
+    /// </summary>
+    internal bool KeepSectionOpenAfterAVerb;
+
+    /// <summary>
+    /// Oracle-only: the running error total and cost keep the errors of a fuzzy section an atomic
+    /// group, lookaround, condition or verb threw away, as upstream's <c>total_errors</c> does (D45,
+    /// ledger entry 32). Set only by <c>OracleComparer</c>'s ablation; never by the library. See
+    /// <c>MatchState.PushSubAttemptFuzzyState</c>.
+    /// </summary>
+    internal bool KeepDiscardedTotals;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
     /// group reference re-enters the comparison without first stepping past a folding the edit
     /// finished, which is upstream's rule. The oracle sets it on a pattern it compiled for one call,
