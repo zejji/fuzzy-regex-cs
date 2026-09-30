@@ -305,6 +305,44 @@ Console.WriteLine(match.FuzzyChanges.Substitutions.Count);
 
 An exact match has empty change lists and every count at zero, as here.
 
+The three kinds are edits to the pattern that turn it into the matched text, as upstream counts
+them. A substitution is a text character matched in place of a different pattern character, an
+insertion is a text character the pattern has no character for, and a deletion is a pattern
+character with no character in the text:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var word = new FuzzyRegex("(?:foobar){e<2}");
+Console.WriteLine(word.FullMatch("foxbar").FuzzyChanges.Substitutions[0]); // 2 - the 'x' stands in for an 'o'
+Console.WriteLine(word.FullMatch("fooxbar").FuzzyChanges.Insertions[0]); // 3 - the 'x' is extra
+Console.WriteLine(word.FullMatch("fobar").FuzzyChanges.Deletions[0]); // 2 - an 'o' is missing
+```
+
+A deletion's position is its subject position plus the number of deletions before it, the
+convention upstream's README shows with 'anaconda f~~oo bar'. So it can lie past the end of the
+match. Here each 'b' is missing, after the 'a' at 0 and after the 'a' at 1:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match gaps = new FuzzyRegex("(?:ab){d<=1}(?:ab){d<=1}").Match("aa");
+Console.WriteLine(gaps.Length); // 2
+Console.WriteLine(string.Join(", ", gaps.FuzzyChanges.Deletions)); // 1, 3
+```
+
+A constraint's test, such as the `[a-z]` in `{e<=1:[a-z]}`, is checked only against the text
+characters that substitutions and insertions bring in. A deletion brings in none, so the test
+never sees it. Below, the first pattern finds 'a' by deleting the 'b', although 'b' fails the test
+`x`; the second cannot insert or substitute the 'z', which fails it too:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?:ab){s<=1,d<=1:x}").Match("a").Success); // True
+Console.WriteLine(new FuzzyRegex("(?:ab){s<=1,i<=1:x}").Match("azb").Success); // False
+```
+
 ## Limits and failure
 
 **`MaxCompiledNodes`** bounds how large a compiled pattern's internal graph is allowed to grow,
