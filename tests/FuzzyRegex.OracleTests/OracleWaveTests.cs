@@ -1068,6 +1068,33 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_anchor_pin_on_the_path_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-insertion-at-an-anchor-pinned-on-the-path` (D61), on the pattern of
+        // the one below: upstream's own answer, which is what this port gave before D61, and no
+        // match at all, which is the shape of an unrelated defect, are both reported. A revert of
+        // the fix would otherwise be classified as the fix.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-insertion-at-an-anchor-pinned-on-the-path", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
     public void A_row_the_anchor_pin_does_not_explain_is_not_accounted_for()
     {
         // The control for `fuzzy-insertion-at-a-pinned-anchor`, written before the entry was

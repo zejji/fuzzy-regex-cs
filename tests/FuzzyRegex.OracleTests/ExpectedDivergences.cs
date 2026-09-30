@@ -3081,6 +3081,23 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
+    /// The four rows of <c>fuzzy-insertion-at-an-anchor-pinned-on-the-path</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/d61-anchor-pin-rows.jsonl</c> on
+    /// 2026-09-30.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. They are
+    /// known defect D61's own rows: an assertion inside the section, one in an alternation before
+    /// it, a finditer whose first match upstream loses, and the reversed form.
+    /// </remarks>
+    private const string _anchorPinOnThePathRows = """
+        {"generator": "rows", "pattern": "(?:^a){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:^|q)(?:a){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:\\ba){i<=1}", "flags": 0, "namedLists": {}, "subject": "xa xa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}, "codepointSpan": [3, 5]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:a$){i<=1}", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The four rows of <c>fuzzy-insertion-at-a-pinned-anchor</c>, recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s57c-anchor-pin-rows.jsonl</c> on
     /// 2026-09-21.
@@ -7314,6 +7331,33 @@ internal static class ExpectedDivergences
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
+            Id: "fuzzy-insertion-at-an-anchor-pinned-on-the-path",
+            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
+                + "assertion passed on the path pins the match there, wherever the assertion is "
+                + "written: inside the fuzzy section or down one branch of an alternation. Known "
+                + "defect D61, the extension of ledger entries 19 and 20; owner ruling 2026-09-30, "
+                + "option B, and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "UPSTREAM'S RULE IS THE SAME LINE as `fuzzy-insertion-at-a-pinned-anchor`'s: "
+                + "`permit_insertion = !search || text_pos != search_anchor` "
+                + "(upstream/src/_regex.c:10214). S57c lifted it for an assertion before the "
+                + "section; D61 lifts it for one the path passed at the anchor anywhere, because "
+                + "the same path started one character later passes that assertion where it fails. "
+                + "`(?:^a){i<=1}` over 'xa' is None upstream, where `^(?:a){i<=1}` is (0, 2); here "
+                + "both are (0, 2). Measured 2026-09-30 on regex 2026.9.10.\n"
+                + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`, and ahead of it. "
+                + "A row belongs here when clearing `PatternObject.PinsAnchorOnPath` "
+                + "(`OracleComparer.RunWithoutTheAnchorPinOnThePath`), which stops "
+                + "`Matcher.NotePinningAssertion` and leaves S57c's guards alone, makes this port "
+                + "reproduce upstream's recorded answer exactly, AND this port's live answer is the "
+                + "one being judged. A row S57c's guards alone move still differs from upstream "
+                + "under this ablation and falls through to that entry, whose ablation clears both. "
+                + "The control is `A_row_the_anchor_pin_on_the_path_does_not_explain_is_not_"
+                + "accounted_for`.",
+            PinnedBy: "FuzzyAnchorPinTests",
+            Example: _anchorPinOnThePathRows,
+            Applies: static (row, ours) => OnlyTheAnchorPinOnThePathExplainsIt(row, ours)
+        ),
+        new(
             Id: "fuzzy-insertion-at-a-pinned-anchor",
             Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
                 + "assertion pins the match to it, and upstream does not. Upstream issues 563 and "
@@ -8322,6 +8366,27 @@ internal static class ExpectedDivergences
         )
         && OracleComparer.Run(row) is { } live
         && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether D61's pin on the path, and nothing else, is what separates this port's answer from
+    /// upstream's: <see cref="OnlyTheAnchorPinExplainsIt"/> for the ablation that leaves S57c's
+    /// guards in place.
+    /// </summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the pin on the path explains the divergence and nothing else does.</returns>
+    private static bool OnlyTheAnchorPinOnThePathExplainsIt(OracleRow row, IOracleOutcome ours)
+    {
+        if (
+            OracleComparer.RunWithoutTheAnchorPinOnThePath(row) is not { } unpinned
+            || OracleComparer.Compare(row, unpinned) != OracleVerdict.Agree
+        )
+        {
+            return false;
+        }
+
+        return IsTheLiveAnswer(row, ours);
+    }
 
     /// <summary>
     /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
