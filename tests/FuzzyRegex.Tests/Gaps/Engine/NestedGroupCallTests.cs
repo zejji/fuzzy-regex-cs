@@ -188,4 +188,18 @@ public sealed class NestedGroupCallTests
         );
         ShouldMatch(new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a "), 0, 2, new FuzzyCounts(0, 0, 0));
     }
+
+    // D40's rule that a reference first found inside a copy gets a copy of its own only where the
+    // group as written has other features. Here the backwards copy of g1 calls g2 backwards, and
+    // g2 is written inside a lookbehind, so the group as written already has those features and
+    // carries the reference. A second copy of g2, compiled from the group before PackCharacters,
+    // would read 'SS' unpacked and miss the 'ß' (the same limit the review registered as D50).
+    // Written out, (?fi)(?<=(?<=SS)) over 'ß' is (1, 1) here, as below.
+    [Test]
+    public void A_reference_found_in_a_copy_uses_the_group_as_written_when_its_features_match()
+    {
+        Match m = new FuzzyRegex("(?fi)(?(DEFINE)(?P<g1>(?&g2))(?<=(?P<g2>SS)))(?<=(?&g1))").Match("ß");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 0));
+    }
 }
