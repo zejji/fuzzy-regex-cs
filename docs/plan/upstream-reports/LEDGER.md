@@ -5818,7 +5818,8 @@ rows listed in DIVERGENCES.md, which assert upstream's list through the ablation
 entry `group-call-discards-its-captures-on-return` keys on `OracleComparer.RunWithTheUpstreamCallCaptures`
 (`PatternObject.KeepCallCaptures`, which leaves the count where the callee left it and restores only
 `current` when backtracking past the call, as `pop_groups` does) plus `OnlyCallCapturesAreMissing`;
-every other ablation has the fix off too. Complete matrix over its 1,619 call rows: C2 502 to 9 and
+every other named ablation has the fix off too. It accounts for 12, 5 and 14 rows of the default
+waves at seeds 7, 4242 and 20260927 (diverge 0 at all three). Complete matrix over its 1,619 call rows: C2 502 to 9 and
 C7 68 to 0, no assert on the Debug build.
 
 **Open edge.** A partial match that runs out of text inside a call that has not returned keeps that

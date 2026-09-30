@@ -349,10 +349,12 @@ internal static class OracleComparer
         // captures on the list on every row, so with the fix on, taking another fix away cannot
         // bring back upstream's answer on a row with a call. It changes nothing on a row without
         // one. D51's own entry sits first and its ablation is this alone, so it claims only the
-        // rows D51 alone explains. See `group-call-discards-its-captures-on-return`.
+        // rows D51 alone explains. See `group-call-discards-its-captures-on-return`. Keyed on the
+        // named ablations' switches, not on `ablate`, which the pattern-reuse test also uses to
+        // dirty a pattern; the two named ablations that pass `ablate` alone (skip timing and verb
+        // scope) set the flag themselves.
         if (
-            ablate is not null
-            || withoutTheFuzzySearchFixes
+            withoutTheFuzzySearchFixes
             || upstreamReverseGrapheme
             || upstreamFoldedRuns
             || upstreamWholePatternCall
@@ -911,7 +913,11 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true;
+                compiled.PatternObject.KeepCallCaptures = true;
+            }
         );
     }
 
@@ -942,6 +948,7 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
                 compiled.PatternObject.SkipMovesTheSliceWhenItRuns = withUpstreamSkipTiming;
+                compiled.PatternObject.KeepCallCaptures = true;
             }
         );
     }
