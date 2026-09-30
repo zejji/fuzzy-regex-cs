@@ -1153,7 +1153,7 @@ internal static class ParseFunctions
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
-        return new LookAround(behind, positive, subpattern);
+        return new LookAround(behind, positive, subpattern) { UpstreamCallFeatures = info.UpstreamCallFeatures };
     }
 
     /// <summary>Upstream <c>parse_conditional</c> (lines 1007-1048).</summary>
@@ -1250,7 +1250,10 @@ internal static class ParseFunctions
 
         source.Expect(")");
 
-        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch);
+        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
+        {
+            UpstreamCallFeatures = info.UpstreamCallFeatures,
+        };
     }
 
     /// <summary>Upstream <c>parse_atomic</c> (lines 1070-1080).</summary>

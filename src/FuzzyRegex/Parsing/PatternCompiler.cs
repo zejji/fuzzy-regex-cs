@@ -68,6 +68,9 @@ internal static class PatternCompiler
     /// <param name="upstreamFoldedRuns">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFoldedRuns"/>.
     /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
@@ -75,7 +78,8 @@ internal static class PatternCompiler
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
         int defaultVersion = DefaultVersion,
         bool upstreamReverseGrapheme = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamCallFeatures = false
     )
     {
         try
@@ -86,7 +90,8 @@ internal static class PatternCompiler
                 namedLists,
                 defaultVersion,
                 upstreamReverseGrapheme,
-                upstreamFoldedRuns
+                upstreamFoldedRuns,
+                upstreamCallFeatures
             );
         }
         catch (FuzzyRegexParseException unterminated)
@@ -172,7 +177,8 @@ internal static class PatternCompiler
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
         int defaultVersion,
         bool upstreamReverseGrapheme = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamCallFeatures = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -198,6 +204,7 @@ internal static class PatternCompiler
                     GuessEncoding = guessEncoding,
                     UpstreamReverseGrapheme = upstreamReverseGrapheme,
                     UpstreamFoldedRuns = upstreamFoldedRuns,
+                    UpstreamCallFeatures = upstreamCallFeatures,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -321,7 +328,11 @@ internal static class PatternCompiler
         for (int i = 0; i < info.AdditionalGroups.Count; i++)
         {
             (RegexBase group, bool rev, bool fuz) = info.AdditionalGroups[i];
-            ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
+            if (!info.UpstreamCallFeatures)
+            {
+                ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
+            }
+
             code.AddRange(group.Compile(rev, fuz));
         }
 

@@ -7,6 +7,7 @@ or null where a call recurses. The whole run, from this directory, for a stem su
     python upstream-answer.py STEM.jsonl pattern > STEM.up.txt     # survives upstream's segfaults
     python upstream-answer.py STEM.jsonl inline > STEM.inline.txt
     dotnet run -c Debug port-answer.cs -- STEM.jsonl > STEM.after.txt   # STEM.before.txt: main's port
+    dotnet run -c Debug port-answer.cs -- STEM.jsonl --field inline > STEM.portinline.txt
     python compare.py STEM
 """
 import json, random, sys

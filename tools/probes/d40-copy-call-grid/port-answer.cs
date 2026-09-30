@@ -14,6 +14,9 @@ if (args.Length > 1 && string.Equals(args[1], "--check-assert", StringComparison
     System.Diagnostics.Debug.Assert(false, "the listener works");
 }
 
+// "--field inline" answers each row's written-out pattern instead; a row without one answers
+// "ERR NoPattern".
+string field = args.Length > 2 && string.Equals(args[1], "--field", StringComparison.Ordinal) ? args[2] : "pattern";
 var timeout = TimeSpan.FromSeconds(2);
 foreach (var line in File.ReadLines(args[0]))
 {
@@ -24,7 +27,13 @@ foreach (var line in File.ReadLines(args[0]))
 
     using var doc = JsonDocument.Parse(line);
     var row = doc.RootElement;
-    string pattern = row.GetProperty("pattern").GetString()!;
+    string? pattern = row.GetProperty(field).GetString();
+    if (pattern is null)
+    {
+        Console.WriteLine("ERR NoPattern");
+        continue;
+    }
+
     string subject = row.GetProperty("subject").GetString()!;
     string answer;
     try

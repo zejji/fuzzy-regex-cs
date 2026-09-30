@@ -242,6 +242,11 @@ public sealed class FuzzyRegex
     /// folding alone, as upstream does. The oracle sets it to show that ledger entry 49 is the whole
     /// of a divergence; see <see cref="Parsing.Info.UpstreamFoldedRuns"/>.
     /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// NOT UPSTREAM, and never set by this library: give each group call the direction and
+    /// fuzziness upstream gives it. The oracle sets it to show that D40, D42 and D43 are the whole
+    /// of a divergence; see <see cref="Parsing.Info.UpstreamCallFeatures"/>.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(
         string pattern,
@@ -250,7 +255,8 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
         int defaultVersion,
         bool upstreamReverseGrapheme = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamCallFeatures = false
     ) =>
         new(
             pattern,
@@ -260,7 +266,8 @@ public sealed class FuzzyRegex
             defaultVersion,
             DefaultMaxCompiledNodes,
             upstreamReverseGrapheme,
-            upstreamFoldedRuns
+            upstreamFoldedRuns,
+            upstreamCallFeatures
         );
 
     /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
@@ -275,6 +282,7 @@ public sealed class FuzzyRegex
     /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
     /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
@@ -283,7 +291,8 @@ public sealed class FuzzyRegex
         int defaultVersion,
         int maxCompiledNodes,
         bool upstreamReverseGrapheme = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamCallFeatures = false
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
@@ -301,7 +310,8 @@ public sealed class FuzzyRegex
             ToCompilerNamedLists(namedLists),
             defaultVersion,
             upstreamReverseGrapheme,
-            upstreamFoldedRuns
+            upstreamFoldedRuns,
+            upstreamCallFeatures
         );
 
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is

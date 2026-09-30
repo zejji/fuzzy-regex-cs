@@ -248,6 +248,10 @@ internal static class OracleComparer
     /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
     /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// Give every group call the direction and fuzziness upstream gives it (D40, D42, D43). Acts on
+    /// the compile. Used by <see cref="RunWithTheUpstreamCallFeatures"/> and by nothing else.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
@@ -258,7 +262,8 @@ internal static class OracleComparer
         bool withoutTheFuzzySearchFixes = false,
         bool keepEmptyIterationRule = false,
         bool keepMinimumOrderFix = false,
-        bool upstreamFoldedRuns = false
+        bool upstreamFoldedRuns = false,
+        bool upstreamCallFeatures = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -293,7 +298,8 @@ internal static class OracleComparer
                 // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion,
                 upstreamReverseGrapheme: upstreamReverseGrapheme,
-                upstreamFoldedRuns: upstreamFoldedRuns
+                upstreamFoldedRuns: upstreamFoldedRuns,
+                upstreamCallFeatures: upstreamCallFeatures
             );
         }
         catch (NotImplementedException)
@@ -930,6 +936,33 @@ internal static class OracleComparer
             withoutTheFuzzySearchFixes: true,
             lazy: false,
             upstreamFoldedRuns: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with every group call given the direction and fuzziness
+    /// upstream gives it (the D40, D42 and D43 fixes switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream resolves each call once, for where it is written, and compiles a called group's
+    /// copy with those references; it registers a lookaround's calls with the caller's fuzziness
+    /// and a conditional test's calls with the caller's direction, though it compiles both bodies
+    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. The
+    /// <c>group-call-runs-with-its-call-sites-features</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's call features, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallFeatures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true,
+            upstreamCallFeatures: true
         );
     }
 

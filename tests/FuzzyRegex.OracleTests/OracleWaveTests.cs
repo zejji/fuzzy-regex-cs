@@ -576,6 +576,40 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_call_site_features_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-runs-with-its-call-sites-features` (ledger entries 55-57; D40,
+        // D42, D43), built as entry 54's: upstream's own answer is what this port gave before the
+        // fixes, so accepting it would classify a revert as the fix; a match at 1 of length 1, which
+        // no engine gives on any example, stands in for an unrelated defect this entry must refuse; and this port's live
+        // answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-runs-with-its-call-sites-features", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                ?.Id.Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            // Not BeNull: on the D43 rows upstream finds nothing, so `group-call-loses-the-match`
+            // rightly claims any match there. What matters is that this entry does not.
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                ?.Id.Should()
+                .NotBe(entry.Id, "a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_minimum_order_does_not_explain_is_not_accounted_for()
     {
         // The control for `fuzzy-minimum-met-by-a-trailing-insertion` (ledger entry 51), built as

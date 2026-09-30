@@ -4121,7 +4121,13 @@ internal sealed class LookAround : RegexBase
     /// pass what the compile will.
     /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
-        Subpattern.FixGroups(pattern, Behind, false);
+        Subpattern.FixGroups(pattern, Behind, UpstreamCallFeatures && fuzzy);
+
+    /// <summary>
+    /// Whether the body's calls take the caller's fuzziness, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse)
@@ -4132,7 +4138,7 @@ internal sealed class LookAround : RegexBase
             return subpattern;
         }
 
-        return new LookAround(Behind, Positive, subpattern);
+        return new LookAround(Behind, Positive, subpattern) { UpstreamCallFeatures = UpstreamCallFeatures };
     }
 
     /// <inheritdoc />
@@ -4272,10 +4278,16 @@ internal sealed class LookAroundConditional : RegexBase
     /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, Behind, fuzzy);
+        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
+
+    /// <summary>
+    /// Whether the test's calls take the caller's direction, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse) =>
@@ -4285,7 +4297,10 @@ internal sealed class LookAroundConditional : RegexBase
             Subpattern.Optimise(info, Behind),
             YesItem.Optimise(info, Behind),
             NoItem.Optimise(info, Behind)
-        );
+        )
+        {
+            UpstreamCallFeatures = UpstreamCallFeatures,
+        };
 
     /// <inheritdoc />
     internal override RegexBase PackCharacters(Info info)
