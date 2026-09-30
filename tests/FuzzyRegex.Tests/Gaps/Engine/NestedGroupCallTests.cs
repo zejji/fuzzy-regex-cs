@@ -108,4 +108,18 @@ public sealed class NestedGroupCallTests
             new FuzzyCounts(1, 0, 0)
         );
     }
+
+    // D42. A lookaround's body is exact inside a fuzzy section, so a call in it runs its group
+    // exactly, as the body written out does. DIVERGES FROM UPSTREAM, which runs the call fuzzily
+    // and answers (0, 2) with one substitution on both called forms (regex 2026.9.10, 2026-09-30):
+    //   search('(?:(?=ab)..){s<=1}', 'xb')    None
+    //   search('(?:..(?<=ab)){s<=1}', 'xb')   None
+    //   search('(?:(?!ab)..){s<=1}', 'ab')    None, and the called form agrees
+    [Test]
+    public void A_call_inside_a_lookaround_in_a_fuzzy_section_runs_exactly()
+    {
+        new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
+        new FuzzyRegex("(?:..(?<=(?&g))){s<=1}(?P<g>ab)?").Match("xb").Success.Should().BeFalse();
+        new FuzzyRegex("(?:(?!(?&g))..){s<=1}(?P<g>ab)?").Match("ab").Success.Should().BeFalse();
+    }
 }

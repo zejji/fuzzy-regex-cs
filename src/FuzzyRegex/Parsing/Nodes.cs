@@ -4111,9 +4111,17 @@ internal sealed class LookAround : RegexBase
     internal RegexBase Subpattern { get; set; }
 
     /// <inheritdoc />
-    /// <remarks>The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction.</remarks>
+    /// <remarks>
+    /// The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction, and as
+    /// exact whatever the caller's fuzziness. NOT UPSTREAM (D42), which passes the caller's
+    /// <c>fuzzy</c> (<c>upstream/regex/_regex_core.py</c>:3160) while compiling the body exact
+    /// (:3201, and <see cref="CompileCore"/> here): a call in the body then ran its group fuzzily,
+    /// so <c>(?:(?=(?&amp;g))..){s&lt;=1}(?P&lt;g&gt;ab)?</c> matched 'xb', which
+    /// <c>(?:(?=ab)..){s&lt;=1}</c> does not. The walk registers each call's features, so it must
+    /// pass what the compile will.
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
-        Subpattern.FixGroups(pattern, Behind, fuzzy);
+        Subpattern.FixGroups(pattern, Behind, false);
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse)
