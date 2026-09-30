@@ -110,6 +110,8 @@ CONTROLS = [
     ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "n/a"),
     ({"pattern": "a\\b", "subject": "á", "operation": "search"}, "C6", "n/a"),
     ({"pattern": "[]a]", "subject": "x]", "operation": "search"}, "C6", "pass"),
+    # A POSIX class is not modelled: read as "[[:alph]" plus a literal "]" it failed falsely.
+    ({"pattern": "[[:alpha:]]", "subject": "a", "operation": "search"}, "C6", "n/a"),
     # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
     ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
 ]

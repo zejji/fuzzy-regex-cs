@@ -594,6 +594,8 @@ class Parser:
         body = self.p[self.i + 1 : end]
         if "\\" in body:
             raise ValueError(f"unsupported escape in a class at {self.i} in {self.p!r}")
+        if "[:" in body:  # a POSIX class ([[:alpha:]]) is not modelled; read literally it misparses
+            raise ValueError(f"unsupported POSIX class in {self.p!r}")
         if self.version1 and ("[" in body or any(op in body for op in ("--", "&&", "||", "~~"))):
             raise ValueError(f"unsupported VERSION1 set operation in {self.p!r}")  # rule 19
         self.i = end + 1
