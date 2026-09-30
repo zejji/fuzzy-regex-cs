@@ -3014,37 +3014,154 @@ internal static class Matcher
         int PublicIndex
     );
 
-    /// <summary>Upstream <c>push_groups</c> (<c>upstream/src/_regex.c</c> line 2490).</summary>
+    /// <summary>
+    /// NOT UPSTREAM'S (D51, ledger entry 63): what <c>GROUP_RETURN</c> puts on the backtracking
+    /// stack for the callee's groups, while it puts each group back as the caller left it.
+    /// </summary>
     /// <remarks>
-    /// Only each group's <c>current</c>, where <see cref="PushCaptures"/> also saves its
-    /// <c>count</c>. A group call leaves the callee's captures in place on purpose - a
-    /// <c>(?&amp;name)</c> call that matches records a capture the caller can read afterwards - and
-    /// restores only where each group's span currently is.
+    /// <para>
+    /// A call runs like a subroutine, as in Perl and PCRE2, so the captures its body made are
+    /// thrown away on return: each group gets back its <c>count</c> and its <c>current</c> from the
+    /// caller's saved copy, which <c>GROUP_CALL</c> pushed with <see cref="PushCaptures"/>. Upstream's
+    /// <c>push_groups</c> (<c>upstream/src/_regex.c:2490</c>), called by <c>GROUP_CALL</c> at
+    /// :13405, saves only <c>current</c>, and <c>GROUP_RETURN</c>'s <c>pop_groups</c> (:13516) restores
+    /// only that, so the callee's captures
+    /// stayed on the list: <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' reported c unset with a
+    /// capture listed. <see cref="PatternObject.KeepCallCaptures"/> restores upstream's rule for the
+    /// oracle.
+    /// </para>
+    /// <para>
+    /// Lowering the count frees the callee's slots, and the caller may write over them before it
+    /// backtracks into the call, so the spans themselves go on the stack too:
+    /// <c>(?(DEFINE)(?&lt;d&gt;(.)(?:.)?\2))(?&amp;d)(?:(?2)x)?ab</c> over 'aaab' writes 'b'@3 over
+    /// the call's 'a'@0 and then backtracks into it. Only the spans the call added are pushed, so a
+    /// call that captures nothing costs one caller count per group more than upstream.
+    /// </para>
+    /// <para>
+    /// The caller's copy is on the saved stack, groups last: the caller has already popped its
+    /// repeats and capture change. Each group's entry is
+    /// <c>span[callerCount] ... span[calleeCount - 1] callerCount calleeCount calleeCurrent</c>, last
+    /// group first, so <see cref="PopCalleeCaptures"/> meets the first group first.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="stack">The stack to push onto.</param>
-    private static void PushGroups(MatchState state, ByteStack stack)
+    /// <returns><see langword="false"/> if the saved stack holds too few bytes.</returns>
+    private static bool ReturnToCallerCaptures(MatchState state)
     {
-        foreach (GroupData group in state.Groups)
-        {
-            stack.PushSize(group.Current);
-        }
-    }
-
-    /// <summary>Upstream <c>pop_groups</c> (line 2662).</summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="stack">The stack to pop from.</param>
-    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopGroups(MatchState state, ByteStack stack)
-    {
+        bool keepCallCaptures = state.Pattern.KeepCallCaptures;
         for (int g = state.Groups.Length - 1; g >= 0; g--)
         {
-            if (!stack.PopSize(out long current))
+            if (!state.Sstack.PopSize(out long callerCurrent) || !state.Sstack.PopSize(out long callerCount))
             {
                 return false;
             }
 
+            GroupData group = state.Groups[g];
+
+            // Under upstream's rule the saved count is not the caller's: a re-entered call's frame
+            // is pushed with the count the return left, which was never lowered. It is then read
+            // only for the span range, which may be empty; upstream itself never saves a count.
+            Debug.Assert(
+                keepCallCaptures || group.Count >= callerCount,
+                "a call only adds captures: its own are unsaved only by backtracking past the call"
+            );
+            for (int i = (int)callerCount; i < group.Count; i++)
+            {
+                GroupSpan span = group.Captures[i];
+                state.Bstack.PushSize(((long)(uint)span.Start << 32) | (uint)span.End);
+            }
+
+            state.Bstack.PushSize(callerCount);
+            state.Bstack.PushSize(group.Count);
+            state.Bstack.PushSize(group.Current);
+
+            if (!keepCallCaptures)
+            {
+                group.Count = (int)callerCount;
+            }
+
+            group.Current = (int)callerCurrent;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D51): <c>GROUP_CALL</c>'s backtrack arm putting back the caller's groups as
+    /// <see cref="PushCaptures"/> saved them at the call.
+    /// </summary>
+    /// <remarks>
+    /// Everything inside the call has been undone by then, so each count is already the caller's;
+    /// only <c>current</c> needs the saved copy, and the count is asserted rather than written.
+    /// Under <see cref="PatternObject.KeepCallCaptures"/> the count is not even read, which is
+    /// upstream's <c>pop_groups</c> (<c>upstream/src/_regex.c:2662</c>) exactly: the frame a
+    /// re-entered call pushed carries the count its return left, which upstream never lowers.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the saved stack holds too few bytes.</returns>
+    private static bool PopCallerCaptures(MatchState state)
+    {
+        bool keepCallCaptures = state.Pattern.KeepCallCaptures;
+        for (int g = state.Groups.Length - 1; g >= 0; g--)
+        {
+            if (!state.Sstack.PopSize(out long current) || !state.Sstack.PopSize(out long count))
+            {
+                return false;
+            }
+
+            Debug.Assert(
+                keepCallCaptures || state.Groups[g].Count == count,
+                "backtracking past a call finds each group's count back at the caller's"
+            );
             state.Groups[g].Current = (int)current;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D51): <c>GROUP_RETURN</c>'s backtrack arm undoing
+    /// <see cref="ReturnToCallerCaptures"/>, so the callee resumes inside the call with the captures
+    /// it had made, written back into their slots.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the backtracking stack holds too few bytes.</returns>
+    private static bool PopCalleeCaptures(MatchState state)
+    {
+        for (int g = 0; g < state.Groups.Length; g++)
+        {
+            if (
+                !state.Bstack.PopSize(out long current)
+                || !state.Bstack.PopSize(out long count)
+                || !state.Bstack.PopSize(out long callerCount)
+            )
+            {
+                return false;
+            }
+
+            GroupData group = state.Groups[g];
+
+            // Everything done since the return has been undone, so the group is as the return left
+            // it: back at the caller's count, or at the callee's under upstream's rule.
+            Debug.Assert(
+                group.Count == (state.Pattern.KeepCallCaptures ? count : callerCount),
+                "backtracking into a call finds each group as the return left it"
+            );
+
+            // The slots were written before the return, and a captures array only ever grows.
+            Debug.Assert(count <= group.Captures.Length, "the callee's slots are still in the array");
+            for (int i = (int)count - 1; i >= callerCount; i--)
+            {
+                if (!state.Bstack.PopSize(out long packed))
+                {
+                    return false;
+                }
+
+                group.Captures[i] = new GroupSpan((int)(packed >> 32), (int)(uint)packed);
+            }
+
+            group.Count = (int)count;
+            group.Current = (int)current;
         }
 
         return true;
@@ -11336,8 +11453,10 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    // For the caller.
-                    PushGroups(state, state.Sstack);
+                    // For the caller. Each group's count as well as its current, where upstream's
+                    // push_groups saves only current: the return restores both (D51, see
+                    // ReturnToCallerCaptures).
+                    PushCaptures(state, state.Sstack);
                     PushRepeats(state, state.Sstack);
                     state.Sstack.PushSize(state.CaptureChange);
                     state.Sstack.PushNode(groupCallReturnNode);
@@ -11359,7 +11478,7 @@ internal static class Matcher
                         )
                     );
 
-                    /* sstack: caller_groups caller_repeats capture_change return_node
+                    /* sstack: caller_captures caller_repeats capture_change return_node
                      *
                      * bstack: GROUP_CALL
                      */
@@ -11419,7 +11538,7 @@ internal static class Matcher
                 {
                     /* If called:
                      *
-                     * sstack: caller_groups caller_repeats capture_change return_node
+                     * sstack: caller_captures caller_repeats capture_change return_node
                      *
                      * bstack: -
                      *
@@ -11440,13 +11559,29 @@ internal static class Matcher
                         // The group was called.
                         node = groupReturnNode;
 
+                        // For the callee and the caller in turn. The callee's repeats and groups go
+                        // on the backtracking stack and the caller's come back off the saved stack,
+                        // so matching resumes exactly where the call left it. Upstream restores only
+                        // each group's current here, so the captures the call made stayed on the
+                        // list; here they are thrown away, as in Perl and PCRE2 (D51, see
+                        // ReturnToCallerCaptures). The repeats are exchanged first because the
+                        // caller's groups lie under them on the saved stack.
+                        PushRepeats(state, state.Bstack);
+                        state.Bstack.PushSize(state.CaptureChange);
+                        if (
+                            !state.Sstack.PopSize(out long groupReturnCaptureChange)
+                            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+                            || !ReturnToCallerCaptures(state)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = groupReturnCaptureChange;
+
                         // The call is closed, so it is no longer one this position may not re-enter.
                         // It is the innermost open one - calls nest - and its key goes on the
                         // backtracking stack so the arm below can re-open it.
-                        // For the callee.
-                        PushGroups(state, state.Bstack);
-                        PushRepeats(state, state.Bstack);
-                        state.Bstack.PushSize(state.CaptureChange);
                         state.Bstack.PushSize(state.OpenCalls[^1].Key);
                         state.Bstack.PushSize(state.OpenCalls[^1].Reach);
                         foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
@@ -11457,21 +11592,6 @@ internal static class Matcher
                         _ = PopOpenCall(state);
                         state.Bstack.PushNode(groupReturnNode);
                         state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
-
-                        // For the caller. The callee's group spans and repeats go on the
-                        // backtracking stack and the caller's come back off the saved stack, so
-                        // matching resumes exactly where the call left it. The captures themselves
-                        // are untouched, which is how a called group's capture survives the return.
-                        if (
-                            !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                            || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                            || !PopGroups(state, state.Sstack)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = groupReturnCaptureChange;
                     }
                     else
                     {
@@ -11486,8 +11606,8 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
-                     *         GROUP_RETURN
+                     * bstack: callee_repeats capture_change callee_captures call_key call_reach
+                     *         return_node GROUP_RETURN
                      *
                      * else:
                      *
@@ -13881,7 +14001,7 @@ internal static class Matcher
                 }
                 case Opcode.GroupCall: // Group call (:16354).
                 {
-                    /* sstack: caller_groups caller_repeats capture_change return_node
+                    /* sstack: caller_captures caller_repeats capture_change return_node
                      *
                      * bstack: -
                      */
@@ -13900,7 +14020,7 @@ internal static class Matcher
                         !state.Sstack.DropSize()
                         || !state.Sstack.PopSize(out long groupCallCaptureChange)
                         || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                        || !PopGroups(state, state.Sstack)
+                        || !PopCallerCaptures(state)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -13916,7 +14036,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key call_reach return_node
+                     * bstack: callee_repeats capture_change callee_captures call_key call_reach return_node
                      *
                      * else:
                      *
@@ -13957,8 +14077,16 @@ internal static class Matcher
 
                         // For the caller. The forward arm's exchange, run the other way round: the
                         // caller's state goes back on the saved stack and the callee's comes off
-                        // the backtracking stack, so the callee resumes inside the call.
-                        PushGroups(state, state.Sstack);
+                        // the backtracking stack, so the callee resumes inside the call with the
+                        // captures it had made (D51, see PopCalleeCaptures). The groups first, as
+                        // they lie on top of the callee's repeats here and under the caller's
+                        // repeats on the saved stack.
+                        PushCaptures(state, state.Sstack);
+                        if (!PopCalleeCaptures(state))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
                         PushRepeats(state, state.Sstack);
                         state.Sstack.PushSize(state.CaptureChange);
                         state.Sstack.PushNode(groupReturnBackNode);
@@ -13972,16 +14100,15 @@ internal static class Matcher
                         // It has returned, so it is not one the failed-call memo may record.
                         state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
 
-                        /* sstack: caller_groups caller_repeats capture_change return_node
+                        /* sstack: caller_captures caller_repeats capture_change return_node
                          *
-                         * bstack: callee_groups callee_repeats capture_change
+                         * bstack: callee_repeats capture_change
                          */
 
                         // For the callee.
                         if (
                             !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
                             || !PopRepeats(state, state.Bstack, testJustEnded: false)
-                            || !PopGroups(state, state.Bstack)
                         )
                         {
                             return MatchStatus.Illegal;
@@ -13996,7 +14123,7 @@ internal static class Matcher
 
                     /* If called:
                      *
-                     * sstack: caller_groups caller_repeats capture_change return_node
+                     * sstack: caller_captures caller_repeats capture_change return_node
                      *
                      * bstack: -
                      *

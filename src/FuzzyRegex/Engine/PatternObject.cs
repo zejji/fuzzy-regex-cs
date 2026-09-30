@@ -786,6 +786,20 @@ internal sealed class PatternObject
     internal List<Node>? LookaroundsSavingOnlyForCalls;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a group call's captures stay on the
+    /// group's capture list when the call returns, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the D51 fix (ledger entry 63) is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>GROUP_RETURN</c> restores only each group's <c>current</c>
+    /// (<c>push_groups</c>, <c>upstream/src/_regex.c</c>:2490, pushed at :13405 and popped at :13516), so
+    /// <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' leaves c unset with the capture 'a'
+    /// listed. See <c>Matcher.ReturnToCallerCaptures</c>.
+    /// </remarks>
+    internal bool KeepCallCaptures;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
     /// below its minimum error count fails at once, without trying the trailing insertions that
     /// could meet it, which is upstream's order. The oracle sets it on a pattern it compiled for one

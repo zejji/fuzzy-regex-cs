@@ -798,6 +798,10 @@ public sealed class ThreadSafetyTests
             // OracleComparer.RunWithTheUpstreamLookaroundCallCaptures reads it, to clear its nodes'
             // flag on a pattern compiled for that one call.
             "PatternObject.LookaroundsSavingOnlyForCalls",
+            // D51 (ledger entry 63) added KeepCallCaptures, never set by the library. Only
+            // OracleComparer.RunWithTheUpstreamCallCaptures sets it, on a pattern compiled for that
+            // one call.
+            "PatternObject.KeepCallCaptures",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

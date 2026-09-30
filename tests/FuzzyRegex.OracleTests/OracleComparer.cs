@@ -345,6 +345,23 @@ internal static class OracleComparer
             compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = !keepMinimumOrderFix;
         }
 
+        // Every named ablation also has the D51 fix off (ledger entry 63): upstream keeps a call's
+        // captures on the list on every row, so with the fix on, taking another fix away cannot
+        // bring back upstream's answer on a row with a call. It changes nothing on a row without
+        // one. D51's own entry sits first and its ablation is this alone, so it claims only the
+        // rows D51 alone explains. See `group-call-discards-its-captures-on-return`.
+        if (
+            ablate is not null
+            || withoutTheFuzzySearchFixes
+            || upstreamReverseGrapheme
+            || upstreamFoldedRuns
+            || upstreamWholePatternCall
+            || upstreamCallFeatures
+        )
+        {
+            compiled.PatternObject.KeepCallCaptures = true;
+        }
+
         ablate?.Invoke(compiled);
 
         try
@@ -753,6 +770,33 @@ internal static class OracleComparer
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.SkipLookaroundInsertion = true,
             keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a group call's captures left on the list when the
+    /// call returns, as upstream leaves them (the D51 fix switched off), and nothing else changed.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>GROUP_CALL</c> saves only each group's <c>current</c> (<c>push_groups</c>,
+    /// <c>upstream/src/_regex.c:2490</c>, called at :13405) and <c>GROUP_RETURN</c> restores only
+    /// that (:13516), so <c>(?&lt;c&gt;a)(?&amp;c)b</c> over 'aab' lists c as ['a', 'a'].
+    /// <c>PatternObject.KeepCallCaptures</c> leaves the count where the callee left it, which is
+    /// that line exactly; the spans the port also saves are written back unchanged. No fuzzy fix is
+    /// switched off, so the <c>group-call-discards-its-captures-on-return</c> entry, which keys on
+    /// this and sits first, claims only the rows D51 alone explains.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallCaptures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepCallCaptures = true
         );
     }
 

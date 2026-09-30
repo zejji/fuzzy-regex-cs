@@ -1,0 +1,10 @@
+{"pattern":"(?<c>a)(?&c)b","flags":0,"subject":"aab","operation":"search"}
+{"pattern":"(?P<g1>a)(?1)","flags":0,"subject":"aa","operation":"fullmatch"}
+{"pattern":"\\((?<p>[^()]|(?R))*\\)","flags":0,"subject":"(a(b)c)","operation":"search"}
+{"pattern":"(?:(?<c>[ab])(?&c))+","flags":0,"subject":"abba","operation":"search"}
+{"pattern":"(?=(?<c>a)(?&c))","flags":0,"subject":"aa","operation":"search"}
+{"pattern":"(?<c>ab)(?:(?&c)){s<=1}","flags":0,"subject":"abxb","operation":"search"}
+{"pattern":"(?r)b(?&c)(?<c>a)","flags":0,"subject":"baa","operation":"search"}
+{"pattern":"(?<c>a)(?&c)b","flags":0,"subject":"aa","operation":"search","partial":true}
+{"pattern":"(?<c>a)(?&c)","flags":0,"subject":"aaaa","operation":"finditer"}
+{"pattern":"(?<o>x(?<i>y)?)(?&o)\\2","flags":0,"subject":"xyxyy","operation":"search"}
