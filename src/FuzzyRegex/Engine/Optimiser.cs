@@ -191,9 +191,13 @@ internal static class Optimiser
                     modified = true;
                 }
 
-                // Check the true branch for CONDITIONAL.
+                // Check the true branch for CONDITIONAL. NOT UPSTREAM (known defect D55, ledger
+                // entry 62): upstream tests the branch's own true_node here (_regex.c:23206), which
+                // no BRANCH sets, so every alternation at the start of a negative condition's yes
+                // branch lost all but its first alternative. A branch is 1-way when it has no
+                // second exit, as the two checks above test.
                 next = node.TrueNode;
-                if (next is not null && next.Op == Opcode.Branch && next.TrueNode is null)
+                if (next is not null && next.Op == Opcode.Branch && next.Next2.Node is null)
                 {
                     node.TrueNode = next.Next1.Node;
                     modified = true;

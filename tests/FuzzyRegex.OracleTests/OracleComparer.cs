@@ -1,4 +1,5 @@
 using Fuzzy.Text.RegularExpressions.Engine;
+using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
 
@@ -217,10 +218,10 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
-    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>
-    /// and <see cref="RunWithTheDiscardedTotals"/> and by nothing else; the wave always passes
-    /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
-    /// caller shares is mutated.
+    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
+    /// <see cref="RunWithTheDiscardedTotals"/> and <see cref="RunWithTheUpstreamTrueBranchSkip"/> and by
+    /// nothing else; the wave always passes <see langword="null"/>. It runs on a pattern this method
+    /// compiled and drops, so nothing the caller shares is mutated.
     /// </param>
     /// <param name="upstreamReverseGrapheme">
     /// Compile a backwards <c>\X</c> in upstream's order. Unlike <paramref name="ablate"/> this acts
@@ -1005,6 +1006,44 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.KeepDiscardedTotals = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with each negative condition's yes branch skipped past
+    /// every branch at its start, as upstream's optimiser skips it (the D55 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>skip_one_way_branches</c> tests the branch's own <c>true_node</c>, which no
+    /// BRANCH sets, where it means <c>next_2</c> (<c>_regex.c:23203-23208</c>), so a CONDITIONAL's
+    /// <c>true_node</c> is moved along the first exit of every BRANCH it meets, 2-way or not, until
+    /// it reaches a node that is not one. No later pass reads <c>TrueNode</c> (the matcher is its
+    /// only reader, <c>Matcher.cs</c> at <c>condNode.TrueNode</c>), so doing the same walk on the
+    /// finished graph gives upstream's graph. The <c>negative-condition-keeps-its-alternatives</c>
+    /// entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamTrueBranchSkip(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                foreach (Node node in compiled.PatternObject.NodeList)
+                {
+                    while (node.TrueNode is { Op: Opcode.Branch } branch)
+                    {
+                        node.TrueNode = branch.Next1.Node;
+                    }
+                }
+            },
             withoutTheFuzzySearchFixes: true,
             keepMinimumOrderFix: true
         );

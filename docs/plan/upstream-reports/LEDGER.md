@@ -5708,3 +5708,40 @@ verb-free answer on the pinned row but is not a general rule, since a verb in a 
 change an answer (`(?!a(*PRUNE)b|ac)ac` over 'ac': (0, 2) in PCRE2, Perl and upstream, None without it). The oracle entry `fuzzy-section-cut-by-a-verb-is-closed`
 keys on `PatternObject.KeepSectionOpenAfterAVerb`. The default oracle waves at seeds 7, 4242 and
 20260927 draw no such row.
+
+## 62. An alternation at the start of a negative condition's yes branch keeps only its first alternative - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D55. Draft report:
+`entry-62-negative-condition-drops-alternatives.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `tools/matrix/survey.py`:
+
+```
+search(r'(?(?!a)(?:x|))x', 'x')        -> None   expected (0, 1)
+search(r'(?(?<!q)(?:xz|x))c', 'xc')    -> None   expected (0, 2)
+search(r'(?(?<!x)(?:ab|a))c', 'ac')    -> None   expected (0, 2)
+search(r'(?(?=x)(?:x|))x', 'x')        -> (0, 1)            (the control: a positive test)
+search(r'(?(?!a)(?:x|y))x', 'x')       -> None              (the control: no alternative can match)
+```
+
+**Why upstream is wrong.** At 'x' the test `(?!a)` holds, so the yes branch `(?:x|)` runs and its
+empty alternative leaves the 'x' for the final `x`. PCRE2 10.47 and Perl 5.42.3 answer (0, 1),
+(0, 2) and (0, 2) on the three rows. The cause is in `skip_one_way_branches`
+(`_regex.c:23203-23208`). A negative test that fails goes to the yes branch through CONDITIONAL's
+`nonstring.true_node` (`:15444`), and the skip decides that a BRANCH there is 1-way by testing the
+BRANCH's own `nonstring.true_node`, which no BRANCH sets. The two checks above it test
+`nonstring.next_2.node`. `true_node` and `next_2` are separate members of the `nonstring` struct
+(`:294-297`), so this is not a read through a union: every BRANCH at the start of such a yes branch
+is skipped to its first exit. A positive test reaches its yes branch through END_CONDITIONAL's
+`next_1`, whose check is right, so it is unaffected. Complete-matrix rows 8301, 11941 and 11948
+(2026-09-30) are this defect with a verb, a group call and a whole-pattern call in the pattern.
+
+**Proposed fix upstream:** test `!next->nonstring.next_2.node` at `:23206`, as the two checks above
+it do.
+
+**This port.** `Optimiser.SkipOneWayBranches` tests `Next2` there. Pinned by
+`Gaps/Engine/BackrefAndConditionalTests.A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch`
+(the three rows and the three matrix rows) and its two controls. The oracle entry
+`negative-condition-keeps-its-alternatives` keys on `OracleComparer.RunWithTheUpstreamTrueBranchSkip`,
+which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
+does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.

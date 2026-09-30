@@ -3194,6 +3194,22 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The six rows of <c>negative-condition-keeps-its-alternatives</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the three D55 witnesses (a
+    /// negative lookahead test and two negative lookbehind tests) and matrix rows 8301, 11941 and
+    /// 11948 (a verb, a group call and a whole-pattern call in the yes branch). Upstream answers no
+    /// match to all six; PCRE2 10.47 and Perl 5.42.3 match every one.
+    /// </summary>
+    private const string _negativeConditionAlternativeRows = """
+        {"generator": "rows", "pattern": "(?(?!a)(?:x|))x", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!q)(?:xz|x))c", "flags": 0, "namedLists": {}, "subject": "xc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab|a))c", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab|a)(?<!(?:(?:ab|a)(*FAIL)|ba[ab]))|(?:ab|a))", "flags": 0, "namedLists": {}, "subject": "  bab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)", "flags": 0, "namedLists": {}, "subject": "aax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)", "flags": 0, "namedLists": {}, "subject": "b", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        """;
+
+    /// <summary>
     /// The two rows of <c>enhancematch-trailing-insertion-double-count</c>, recorded 2026-09-30 by
     /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: <c>(?e)(?:ob+?a){e&lt;=3}</c>
     /// fullmatched against 'bab', and its reversed form against 'aob'. Upstream answers three
@@ -3676,6 +3692,33 @@ internal static class ExpectedDivergences
             Example: _discardedTotalRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheDiscardedTotals(row))
+        ),
+        new(
+            Id: "negative-condition-keeps-its-alternatives",
+            Reason: "A NEGATIVE CONDITION'S YES BRANCH KEEPS EVERY ALTERNATIVE OF AN ALTERNATION AT ITS "
+                + "START. Known defect D55, ledger entry 62, fixed 2026-09-30 under the owner's "
+                + "no-known-bugs rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a negative test that fails goes to the yes branch through "
+                + "CONDITIONAL's `true_node` (`_regex.c:15444`), and `skip_one_way_branches` decides a "
+                + "BRANCH there is 1-way by testing the BRANCH's own `true_node` (`:23206`), which no "
+                + "BRANCH sets, where the two checks above it test `next_2`. The two are separate "
+                + "members of the node's `nonstring` struct (`:294-297`), not a union. So every branch "
+                + "is skipped to its first exit and the other alternatives are lost: "
+                + "`regex.search(r'(?(?!a)(?:x|))x', 'x')` is None and `(?(?<!q)(?:xz|x))c` over 'xc' "
+                + "is None, where PCRE2 10.47 and Perl 5.42.3 answer (0, 1) and (0, 2). A positive "
+                + "test reaches its yes branch through END_CONDITIONAL's first exit, whose check is "
+                + "right, so `(?(?=x)(?:x|))x` over 'x' is (0, 1) in every engine.\n"
+                + "THE FIX tests `next_2` there too (`Optimiser.SkipOneWayBranches`).\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamTrueBranchSkip`, which moves each TrueNode along "
+                + "the first exit of every BRANCH it meets, as upstream's optimiser does, with entries "
+                + "42 and 44 off, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. The control is "
+                + "`A_row_the_true_branch_skip_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _negativeConditionAlternativeRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamTrueBranchSkip(row))
         ),
         new(
             Id: "fuzzy-minimum-met-by-a-trailing-insertion",

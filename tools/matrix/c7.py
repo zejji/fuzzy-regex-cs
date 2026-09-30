@@ -4,8 +4,8 @@
 
 C1 judges a row against upstream only. C7 asks two independent engines, PCRE2 10.47 and Perl
 5.42.3, through tools/matrix/survey.py's translations (copied from matrix/answer-key; its header
-lists the changes), and records node, .NET and python `re` too where they can express the row. It
-writes one line per row: the engines' normalised answers, the n/a reasons, and the flags dropped
+lists the changes), and records node, .NET, python `re` and Boost.Regex too where they can express
+the row. It writes one line per row: the engines' normalised answers, the n/a reasons, and the flags dropped
 as inert. run.py's judge turns that into C7's verdict with `verdict()` below, so a judging change
 needs no engine rerun. Never reads stdin.
 
@@ -36,7 +36,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import survey  # noqa: E402
 
-ENGINES = ("regex", "pcre2", "perl", "node", "dotnet", "re")
+ENGINES = ("regex", "pcre2", "perl", "node", "dotnet", "re", "boost")
 JUDGES = ("pcre2", "perl")
 
 BESTMATCH, ENHANCEMATCH, FULLCASE, WORD, VERSION1, IGNORECASE = 4096, 32768, 16384, 2048, 256, 2
@@ -105,6 +105,10 @@ RULES = [
      "an optimisation must not change an answer, and pcre2pattern says it can with verbs and "
      "partial matching; over the 3,318 rows PCRE2 can ask with their flags as written, turning it off changed 3, all partial "
      "(single-engine) rows (measured 2026-09-30). Perl's optimisations cannot be turned off"),
+    ("Boost.Regex", "recorded, not a judge",
+     "a third backtracking Perl-syntax engine, asked on ASCII rows with no slice and no partial matching "
+     "(no ICU, so non-ASCII text is n/a); it refuses variable-length lookbehind, which counts as not "
+     "answering. It shows in a failure's 'port agrees with' list, beside node, .NET and re"),
     ("an engine refuses, errors or times out", "that engine does not answer",
      "counted in the n/a or single-engine reasons, never as a disagreement"),
     ("the port times out, hits its step cap, asserts or throws", "n/a",
@@ -336,7 +340,7 @@ def verdict(row: dict, base: str | None, rec: dict | None) -> tuple:
             return ("n/a", "a dropped flag changed upstream's answer: " + "+".join(rec["dropped"]), base, None)
     keys = {e: _engine_key(res.get(e)) for e in JUDGES}
     answered = [e for e in JUDGES if keys[e] is not None]
-    others = ",".join(e for e in ("node", "dotnet", "re") if _engine_key(res.get(e)) is not None
+    others = ",".join(e for e in ("node", "dotnet", "re", "boost") if _engine_key(res.get(e)) is not None
                       and _engine_key(res.get(e)) == mine)
     tail = f" (port agrees with: {others})" if others else ""
     shown = {e: keys[e] for e in answered}
