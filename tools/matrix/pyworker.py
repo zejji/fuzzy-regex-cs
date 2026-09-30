@@ -107,25 +107,36 @@ def unnamed(pattern: str, regex) -> str | None:
     return out
 
 
+def c6_form(result) -> str:
+    """port-runner.cs's Describe without the change positions and capture histories."""
+    if result is None:
+        return "None"
+    if isinstance(result, list):
+        return "[" + " ; ".join(c6_form(r) for r in result) + "]"
+    s, i, d = result.fuzzy_counts
+    groups = "".join(f"({a},{b})" if a >= 0 else "(-)" for a, b in result.groups)
+    return f"({result.span[0]},{result.span[1]}) {s},{i},{d} g{groups}"
+
+
 def c6(row, ref, regex) -> str:
-    if row["flags"] or row.get("namedLists") or row.get("partial") or row.get("pos") is not None:
+    # IGNORECASE (2), FULLCASE (16384), VERSION1 (256) and POSIX (65536) are the flags the reference
+    # models (its rules 17, 19 and 20).
+    if row["flags"] & ~(2 | 16384 | 256 | 65536) or row.get("namedLists") or row.get("partial") or row.get("pos") is not None:
         return "n/a"
-    if row["operation"] not in ("search", "match", "fullmatch"):
+    if row["operation"] not in ("search", "match", "fullmatch", "finditer"):
         return "n/a"
+    if "(?|" in row["pattern"] and "(?P<" in row["pattern"]:
+        return "n/a"  # reference rule 14: names are turned into numbers first, which a branch reset breaks
     pattern = unnamed(row["pattern"], regex)
     if pattern is None:
         return "n/a"
     try:
-        result = getattr(ref, row["operation"])(pattern, row["subject"])
+        result = getattr(ref, row["operation"])(pattern, row["subject"], flags=row["flags"])
     except RecursionError:
         return "n/a"
     except Exception:  # noqa: BLE001 - outside the reference's subset
         return "n/a"
-    if result is None:
-        return "None"
-    s, i, d = result.fuzzy_counts
-    groups = "".join(f"({a},{b})" if a >= 0 else "(-)" for a, b in result.groups)
-    return f"({result.span[0]},{result.span[1]}) {s},{i},{d} g{groups}"
+    return c6_form(result)
 
 
 def child(task: str, rows_path: str, start: int) -> int:

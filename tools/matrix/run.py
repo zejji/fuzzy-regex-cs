@@ -15,7 +15,9 @@ first unfinished stage (a half-written port or Python stage resumes at its next 
   c4up   tools/matrix/d11-brute-judge.py, upstream-based, for partial rows;
   c6     tools/probes/fuzzy-reference-matcher.py, for rows inside its subset;
   c7     tools/matrix/c7.py: PCRE2 and Perl (and node, .NET, re) through the answer key's survey
-         translations, for check C7 (c7.py's docstring gives the verdicts, RULES the exclusions).
+         translations, for check C7 (c7.py's docstring gives the verdicts, RULES the exclusions);
+  c8     tools/matrix/c8.py: TRE in WSL, the second fuzzy engine, for check C8 on the rows whose
+         existence and cost it can judge (c8.py's docstring says which, with the measurements).
 
 A run stops launching stages after --max-minutes (default 40), so no chunk of wall time passes 45
 minutes; launch it again to continue. It also waits while the machine has under 4 GB free and
@@ -46,13 +48,14 @@ REPO = HERE.parent.parent
 RESULTS = REPO / ".scratch" / "matrix" / "results"
 sys.path.insert(0, str(HERE))
 import c7  # noqa: E402
+import c8  # noqa: E402
 import gen  # noqa: E402
 
-STAGES = ("port", "c1", "c1x", "c4up", "c6", "c7")
+STAGES = ("port", "c1", "c1x", "c4up", "c6", "c7", "c8")
 STAGE_CAP_SECONDS = 30 * 60
 MIN_FREE_BYTES = 4 * 1024**3
 ORACLE_KEYS = ("pattern", "flags", "namedLists", "subject", "operation", "partial", "pos", "endpos")
-CHECKS = ("C1", "C1x", "C2", "C3", "C4", "C5", "C6", "C7")
+CHECKS = ("C1", "C1x", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
 # Statuses a check can give besides pass / fail / expected / phantom / n/a (C7 only): answers that
 # are neither a pass nor a failure, counted in their own columns.
 OTHER = ("single-agree", "single-disagree", "engines-disagree", "open")
@@ -132,9 +135,9 @@ def stage(name: str, chunk: Path, out: Path, ablate: str) -> tuple[int, float, i
     if name in ("c1x", "c4up", "c6"):
         target = stem.with_name(stem.name + f".{name}.jsonl")
         return run_stage([sys.executable, str(HERE / "pyworker.py"), name, str(chunk), str(target)], env, REPO, logfile)
-    if name == "c7":
-        target = stem.with_name(stem.name + ".c7.jsonl")
-        return run_stage([sys.executable, str(HERE / "c7.py"), str(chunk), str(target)], env, REPO, logfile)
+    if name in ("c7", "c8"):
+        target = stem.with_name(stem.name + f".{name}.jsonl")
+        return run_stage([sys.executable, str(HERE / f"{name}.py"), str(chunk), str(target)], env, REPO, logfile)
     # c1: the oracle's own recorder and comparer.
     rows = [json.loads(line) for line in open(chunk, encoding="utf-8") if line.strip()]
     asked = [r for r in rows if oracle_row(r)]
@@ -185,7 +188,7 @@ def drive(out: Path, chunks: list[Path], max_minutes: float, ablate: str) -> boo
             complete = code == 0
             if name == "port":
                 complete = lines(chunk.with_name(chunk.stem + ".port.jsonl")) >= lines(chunk)
-            if name in ("c1x", "c4up", "c6", "c7"):
+            if name in ("c1x", "c4up", "c6", "c7", "c8"):
                 complete = lines(chunk.with_name(chunk.stem + f".{name}.jsonl")) >= lines(chunk)
             if not complete:
                 log(f"  {chunk.name} {name} incomplete; stopping so it can resume")
@@ -218,8 +221,11 @@ def verdict(answer: str) -> str:
 
 
 def reference_form(answer: str) -> str:
+    """The parts of a port answer the reference matcher gives: span, counts and groups."""
     if answer == "None":
         return "None"
+    if answer.startswith("["):  # finditer
+        return "[" + " ; ".join(reference_form(m) for m in answer[1:-1].split(" ; ") if m) + "]"
     parts = answer.split(" ")
     return f"{parts[0].rstrip('P')} {parts[1]} {parts[3]}"
 
@@ -367,6 +373,9 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C6"] = ("pass", "", mine, ref) if mine == ref else ("fail", "differs from the reference matcher", mine, ref)
     # C7: PCRE2 and Perl, where both can express the row and agree.
     out["C7"] = c7.verdict(row, base, extra.get("c7"))
+    # C8: TRE's existence and cheapest cost. A control may carry `c8Base`, a deliberately wrong port
+    # answer, to prove the check fires; no other row has one.
+    out["C8"] = c8.verdict(row, row.get("c8Base", base), extra.get("c8"))
     return out
 
 
@@ -420,7 +429,7 @@ def judge(out: Path, constructs: dict) -> None:
     for chunk in sorted(out.glob("chunk-[0-9][0-9][0-9].jsonl")):
         stem = chunk.with_suffix("")
         port.update(read_by_id(stem.with_name(stem.name + ".port.jsonl")))
-        for task in ("c1x", "c4up", "c6", "c7"):
+        for task in ("c1x", "c4up", "c6", "c7", "c8"):
             for rid, d in read_by_id(stem.with_name(stem.name + f".{task}.jsonl")).items():
                 extra[rid][task] = d[task]
                 if "c1xLeakFree" in d:
@@ -444,7 +453,7 @@ def judge(out: Path, constructs: dict) -> None:
                 check, want = row["expect"]
                 got = verdicts[check]
                 controls.append(f"{'OK  ' if got[0] == want else 'BAD '} {check} want {want} got {got[0]} "
-                                f"({got[1]}) {row['pattern']!r} {row['subject']!r} port {got[2]} other {got[3]}")
+                                f"({got[1]}) {row['pattern']!a} {row['subject']!a} port {got[2]!s} other {got[3]!s}")
             tags = set(row["tags"])
             covered = [c for c in cells if gen.covers(tags, c, fam)]
             for check, (status, kind, mine, other) in verdicts.items():

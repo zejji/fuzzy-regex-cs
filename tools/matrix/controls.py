@@ -71,11 +71,49 @@ CONTROLS = [
     # measured 2026-09-30). The quiet control is a lookahead's capture read by a backreference
     # (answer key A2): (0,2), group 1 (0,1), in PCRE2, Perl and the port.
     ({"pattern": "(?=(a))a\\1?", "subject": "aa", "operation": "search"}, "C7", "pass"),
-    # C6 judge defects found by the triage (2026-09-30), each once a false failure: an escape the
-    # reference cannot model must leave the row unjudged (it read \G\A as the text "GA"), and a verb
-    # inside a negative lookahead makes the assertion true rather than ending the attempt.
-    ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "n/a"),
+    # C6 judge defects found by the triage (2026-09-30), each once a false failure: the reference
+    # read \G\A as the text "GA" and answered None (it models both escapes since its rule 11, so the
+    # row now passes; the literal reading would fail it), and a verb inside a negative lookahead
+    # makes the assertion true rather than ending the attempt.
+    ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?:(?!(?:a(*PRUNE)(*F)|xb))aba){1<=d<=2}", "subject": "aba", "operation": "search"}, "C6", "pass"),
+    # C6 over the constructs added on 2026-09-30 (reference rules 11-18). D55, inherited and still on
+    # main: a negative conditional drops the alternatives of a branch that starts its yes-branch;
+    # the reference, PCRE2 and Perl give (0,1), the port None (matrix triage NEW-1).
+    ({"pattern": "(?(?!a)(?:x|))x", "subject": "x", "operation": "search"}, "C6", "fail"),
+    ({"pattern": "(?>(?:ab){e<=1})\\Kb", "subject": "xbb", "operation": "search"}, "C6", "pass"),
+    ({"pattern": "(?=a)|a", "subject": "aa", "operation": "finditer"}, "C6", "pass"),
+    # Rules 19-20 and rule 5's pinned-anchor exception: README's POSIX example, and DIVERGENCES'
+    # witness for an insertion at the search anchor where \m pins the match (the port and the
+    # reference give 'XY' and 'YX'; upstream only 'YX').
+    ({"pattern": "Mr|Mrs", "subject": "Mrs", "operation": "search", "flags": 65536}, "C6", "pass"),
+    ({"pattern": "\\m(?:Y){i}\\M", "subject": "XY YX", "operation": "finditer"}, "C6", "pass"),
+    # \K inside a lookaround has no written rule (perlre: "not well defined"), so it stays unjudged.
+    ({"pattern": "(?=a\\Kb)ab", "subject": "ab", "operation": "search"}, "C6", "n/a"),
+    # C8: TRE. No bug on main is known that C8 can see (it checks only that a match TRE found is
+    # found, and that BESTMATCH costs no more than it), so the firing controls carry a deliberately
+    # wrong port answer in `c8Base`, which only C8 reads: no match where TRE finds (1,4) with one
+    # substitution, and a BESTMATCH costing 1 where TRE finds (4,7) with none.
+    ({"pattern": "(?:abc){e<=1}", "subject": "xabdy", "operation": "search", "c8Base": "None"}, "C8", "fail"),
+    ({"pattern": "(?:abc){e<=1}", "subject": "abx abc", "operation": "search", "flags": 4096,
+      "c8Base": "(0,3) 1,0,0 [2||] g c"}, "C8", "fail"),
+    ({"pattern": "(?:abc){e<=1}", "subject": "abx abc", "operation": "search", "flags": 4096}, "C8", "pass"),
+    ({"pattern": "a(?:bc){s<=1}d", "subject": "xaxcd", "operation": "search"}, "C8", "pass"),
+    # Blind review of matrix/reference-c8, 2026-09-30: each row once got a false verdict. A `match`
+    # asked of TRE as `^ab|cd` anchored only the first alternative (TRE found (3,5), the port None);
+    # `(?x:...)` lost its opening "(" to the whole-budget regex and went to TRE as literal text.
+    ({"pattern": "(?:ab|cd){e<=1}", "subject": "xxxcd", "operation": "match"}, "C8", "n/a"),
+    ({"pattern": "(?x:a b c){e<=1}", "subject": "?x:a b c", "operation": "search"}, "C8", "n/a"),
+    # ... and for C6: the pinned-anchor ruling says nothing of an assertion inside an atomic group;
+    # \b and \d read non-ASCII text by rules the reference does not model (combining marks, '²');
+    # a leading `]` in a class is a literal, not the end of an empty class.
+    ({"pattern": "(?>\\m)(?:Y){i}", "subject": "XY", "operation": "search"}, "C6", "n/a"),
+    ({"pattern": "a\\b", "subject": "á", "operation": "search"}, "C6", "n/a"),
+    ({"pattern": "[]a]", "subject": "x]", "operation": "search"}, "C6", "pass"),
+    # A POSIX class is not modelled: read as "[[:alph]" plus a literal "]" it failed falsely.
+    ({"pattern": "[[:alpha:]]", "subject": "a", "operation": "search"}, "C6", "n/a"),
+    # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
+    ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
 ]
 
 
