@@ -740,6 +740,172 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-discards-its-captures-on-return` (ledger entry 63, D51),
+        // built as entry 54's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live
+        // answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            // Not `?.Id.Should()`: a null (no entry at all) must fail here, not skip the assertion.
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    /// <summary>
+    /// The D51 backtracking witness, recorded 2026-09-30 by <c>python tools/record-oracle.py --rows</c>:
+    /// a call whose freed capture slots the caller writes over before it backtracks into the call.
+    /// </summary>
+    private const string _callReentryRow = """
+        {"generator":"rows","pattern":"(?(DEFINE)(?<d>(.)(?:.)?\\2))(?&d)(?:(?2)x)?ab","flags":0,"namedLists":{},"subject":"aaab","operation":"search","codepointSpan":[0,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]},{"number":1,"success":false,"index":0,"length":0,"captures":[[0,2]]},{"number":2,"success":false,"index":0,"length":0,"captures":[[0,1]]}],"lastIndex":-1,"lastGroup":null,"partial":false}}
+        """;
+
+    [Test]
+    public void A_partial_restored_from_the_wrong_frame_is_not_accounted_for()
+    {
+        // The blind review of D62 planted a restore from the innermost open call (OpenCalls[^1])
+        // instead of the outermost: the D51/D62 entry, which sets group values aside on a partial,
+        // still claimed its rows. Measured with that plant, 2026-09-30: over 'cebcebc' partial,
+        // group k is (5,6) with [(2,3), (5,6)], where the outermost frame gives (2,3) with [(2,3)].
+        // Both the entry's clause and the stacked ablations' must refuse it.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", StringComparison.Ordinal));
+        var live = (MatchOutcome)OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+        IOracleOutcome byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row)!;
+        MatchOutcome planted = live with
+        {
+            Groups =
+            [
+                .. live.Groups.Take(3),
+                live.Groups[3] with
+                {
+                    Index = 5,
+                    Length = 1,
+                    Captures = [new OracleSpan(2, 1), new OracleSpan(5, 1)],
+                },
+            ],
+        };
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        ExpectedDivergences.PartialIsTheFrameRestore(live, byFrames).Should().BeTrue();
+        ExpectedDivergences.PartialIsTheFrameRestore(planted, byFrames).Should().BeFalse();
+        (ExpectedDivergences.For(row, live)?.Id).Should().Be("group-call-discards-its-captures-on-return");
+        OracleComparer.StackedCallCaptureAnswer(planted, withoutTheFix, byFrames).Should().BeSameAs(planted);
+        OracleComparer.StackedCallCaptureAnswer(live, withoutTheFix, byFrames).Should().BeSameAs(withoutTheFix);
+    }
+
+    [Test]
+    public void A_port_bug_in_the_discard_is_not_hidden_by_another_entrys_ablation()
+    {
+        // Every other named ablation has the D51 fix off too, so an entry keyed on one of them
+        // would accept a call row whose live answer carries a bug in the discard itself: with the
+        // fix off the bug is gone and upstream comes back. The planted bug is the one measured for
+        // A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence: the
+        // discard without the span restore answers None over this row. With the fix on, the same
+        // ablation would answer None too, so the ablation must report that, not upstream's (0, 4).
+        // Found by the blind review of maint/d51-call-captures, 2026-09-30.
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        OracleComparer.Compare(row, withoutTheFix).Should().Be(OracleVerdict.Agree);
+        OracleComparer
+            .Compare(row, OracleComparer.StackedCallCaptureAnswer(new NoMatchOutcome(), withoutTheFix, null))
+            .Should()
+            .NotBe(OracleVerdict.Agree, "a discard that changes a match must not be hidden by the ablation");
+
+        // And a fix-on answer that differs only by the calls' captures leaves the ablation as it was.
+        OracleComparer
+            .StackedCallCaptureAnswer(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, withoutTheFix, null)
+            .Should()
+            .BeSameAs(withoutTheFix);
+    }
+
+    [Test]
+    public void A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence()
+    {
+        // The planted-bug test the owner's 2026-09-30 ruling asks of an entry keyed on a rule. The
+        // bug planted is the likeliest one of the fix's own shape: a return that lowers each
+        // group's count but does not save the callee's spans, so the caller writes over them and a
+        // re-entry reads the caller's. Planted in Matcher.PopCalleeCaptures and measured on
+        // 2026-09-30, it answers None over this row, where upstream, PCRE2 10.47, Perl 5.42 and
+        // the fixed port all give (0, 4). The ablation still reproduces upstream there, because it
+        // never lowers a count, so the ablation clause alone would have accepted the bug.
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
+        IOracleOutcome ablated = OracleComparer.RunWithTheUpstreamCallCaptures(row)!;
+
+        OracleComparer.Compare(row, ablated).Should().Be(OracleVerdict.Agree);
+        ExpectedDivergences.OnlyCallCapturesAreMissing(new NoMatchOutcome(), ablated).Should().BeFalse();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, ablated)
+            .Should()
+            .BeTrue();
+
+        // Two more bugs of the same shape, on the ruling's second witness, where the ablation
+        // lists c as [0,1][1,1]: a return that kept the callee's capture and dropped the caller's
+        // (a list that is not a subsequence), and one that restored the wrong span as the value.
+        OracleRow witness = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, "(?<c>a)(?&c)b", StringComparison.Ordinal) && !r.Partial);
+        var kept = (MatchOutcome)OracleComparer.RunWithTheUpstreamCallCaptures(witness)!;
+        var live = (MatchOutcome)OracleComparer.Run(witness, TimeSpan.FromSeconds(5))!;
+        OracleGroup c = live.Groups[1];
+
+        ExpectedDivergences.OnlyCallCapturesAreMissing(live, kept).Should().BeTrue();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(
+                live with
+                {
+                    Groups = [live.Groups[0], c with { Captures = [new OracleSpan(1, 1)] }],
+                },
+                kept
+            )
+            .Should()
+            .BeFalse();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(
+                live with
+                {
+                    Groups = [live.Groups[0], c with { Index = 1, Captures = [new OracleSpan(1, 1)] }],
+                },
+                kept
+            )
+            .Should()
+            .BeFalse();
+    }
+
+    [Test]
     public void A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for()
     {
         // The control for `group-call-in-a-discarded-lookaround-leaves-no-capture` (ledger entry 54,

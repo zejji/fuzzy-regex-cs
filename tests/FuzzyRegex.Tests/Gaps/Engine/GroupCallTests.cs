@@ -10,7 +10,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </summary>
 /// <remarks>
 /// Every expected value below was probed against <c>regex</c> 2026.7.19 on 2026-09-11 and is quoted
-/// beside the assertion as Python spells it.
+/// beside the assertion as Python spells it. Since D51 (2026-09-30, ledger entry 63) a call keeps
+/// none of its captures, where upstream keeps them all on the list; a test whose claim was read
+/// through the call's captures reads them through <see cref="WithUpstreamCallCaptures"/>, the
+/// oracle's ablation, and asserts this port's own list beside it.
 /// </remarks>
 public sealed class GroupCallTests
 {
@@ -20,13 +23,26 @@ public sealed class GroupCallTests
     /// </summary>
     private static readonly TimeSpan _budget = TimeSpan.FromSeconds(30);
 
-    [Test]
-    public void A_call_leaves_its_capture_behind_but_restores_the_callers_current_span()
+    /// <summary>
+    /// The pattern compiled with <c>PatternObject.KeepCallCaptures</c> set, so a
+    /// call's captures stay on the list as upstream leaves them. A fresh compile, never the cache.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The compiled pattern.</returns>
+    internal static FuzzyRegex WithUpstreamCallCaptures(string pattern)
     {
-        // This is the split GROUP_RETURN creates and nothing else in the engine does: 'pop_groups'
-        // (upstream/src/_regex.c:2662) restores each group's 'current' from the caller's saved copy
-        // and never touches its 'count', so a called group's capture stays on the list while the
-        // span the group reports goes back to whatever the caller had.
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget);
+        regex.PatternObject.KeepCallCaptures = true;
+        return regex;
+    }
+
+    [Test]
+    public void A_call_restores_the_callers_span_and_capture_list()
+    {
+        // DIVERGES FROM UPSTREAM since D51. Upstream's 'pop_groups' (upstream/src/_regex.c:2662)
+        // restores each group's 'current' from the caller's saved copy and never touches its
+        // 'count', so a called group's capture stays on the list while the span the group reports
+        // goes back to whatever the caller had. Here the list goes back too, as in Perl and PCRE2.
         //
         // Measured: for m = regex.search(r'(?<x>a)(?&x)*', 'aaa'),
         // m.span() == (0, 3), m.group('x') == 'a', m.captures('x') == ['a', 'a', 'a'].
@@ -34,17 +50,23 @@ public sealed class GroupCallTests
 
         (m.Index, m.Length).Should().Be((0, 3));
         m.Groups["x"].Value.Should().Be("a");
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "a", "a");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a");
+
+        // The oracle's ablation gives upstream's list, and it is the only thing it changes.
+        Match kept = WithUpstreamCallCaptures("(?<x>a)(?&x)*").Match("aaa");
+        (kept.Index, kept.Length, kept.Groups["x"].Value).Should().Be((0, 3, "a"));
+        kept.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "a", "a");
     }
 
     [Test]
-    public void A_group_that_only_ever_ran_inside_a_call_reports_no_span_but_keeps_its_captures()
+    public void A_group_that_only_ever_ran_inside_a_call_reports_no_span_and_no_captures()
     {
-        // The same split seen from the other side, and without a '(?(DEFINE)...)' wrapper: the
+        // The same rule seen from the other side, and without a '(?(DEFINE)...)' wrapper: the
         // group is called before it is reached, the call captures, and then the optional group
-        // itself never runs - so 'current' is back to -1 while the capture list holds one entry.
-        // Upstream reports the two separately, because 'match_get_group_by_index' (:18847) consults
-        // 'current' where 'match_get_captures_by_index' (:19137) walks 'count'.
+        // itself never runs. DIVERGES FROM UPSTREAM since D51: upstream reports 'current' back at
+        // -1 while the list holds the call's capture, because 'match_get_group_by_index' (:18847)
+        // consults 'current' where 'match_get_captures_by_index' (:19137) walks 'count' - a group
+        // with no value and one capture, which .NET's Group contract has no room for.
         //
         // Measured: for m = regex.search(r'(?&x)(?<x>a)?', 'a'),
         // m.group('x') is None and m.captures('x') == ['a'].
@@ -52,7 +74,13 @@ public sealed class GroupCallTests
 
         m.Success.Should().BeTrue();
         m.Groups["x"].Success.Should().BeFalse();
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a");
+        m.Groups["x"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures("(?&x)(?<x>a)?")
+            .Match("a")
+            .Groups["x"]
+            .Captures.Select(static c => c.Value)
+            .Should()
+            .Equal("a");
     }
 
     [Test]
@@ -67,7 +95,15 @@ public sealed class GroupCallTests
         Match m = FuzzyRegex.Match("aaa", "(?<x>a*)(?&x)");
 
         (m.Index, m.Length).Should().Be((0, 3));
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("aaa", "");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("aaa");
+
+        // The call's own capture shows where it ran only under the ablation (D51).
+        WithUpstreamCallCaptures("(?<x>a*)(?&x)")
+            .Match("aaa")
+            .Groups["x"]
+            .Captures.Select(static c => (c.Index, c.Length))
+            .Should()
+            .Equal((0, 3), (3, 0));
     }
 
     [Test]
@@ -103,9 +139,15 @@ public sealed class GroupCallTests
         (named.Success, named.Index, named.Length).Should().Be((true, 0, 2));
 
         // And where the lookbehind is the whole pattern, both engines match:
-        // regex.match(r'(?(DEFINE)(?<func>.)).(?<=(?&func))', 'abc').captures('func') == ['a'].
+        // regex.match(r'(?(DEFINE)(?<func>.)).(?<=(?&func))', 'abc').captures('func') == ['a'],
+        // which is this port's list under the ablation; its own is empty (D51).
         FuzzyRegex
             .MatchAtStart("abc", "(?(DEFINE)(?<func>.)).(?<=(?&func))")
+            .Groups["func"]
+            .Captures.Should()
+            .BeEmpty();
+        WithUpstreamCallCaptures("(?(DEFINE)(?<func>.)).(?<=(?&func))")
+            .MatchAtStart("abc")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
             .Should()
@@ -193,7 +235,10 @@ public sealed class GroupCallTests
         // answers below have not moved since S34 - upstream's came to meet them. The test stays,
         // because a test that pins the right answer is worth having whoever else agrees with it;
         // the version numbers quoted above are history now, not a live divergence.
-        Match reversed = new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
+        //
+        // Since D51 a call keeps none of its captures, so the call's span is read through the
+        // oracle's ablation, which keeps them as upstream does; the port's own list is g's alone.
+        Match reversed = WithUpstreamCallCaptures("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
 
         (reversed.Index, reversed.Index + reversed.Length).Should().Be((0, 3));
         reversed
@@ -202,6 +247,12 @@ public sealed class GroupCallTests
             .Should()
             // The call's capture is the forward '[ab]+' upstream's own inline copy also finds.
             .Equal((2, 5), (0, 2));
+        new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b")
+            .Match("abbaa")
+            .Groups["g"]
+            .Captures.Select(static c => (c.Index, c.Index + c.Length))
+            .Should()
+            .Equal((0, 2));
 
         // The same pattern with the call written out, which upstream and this port agree on. Without
         // it the assertion above would be this port marking its own homework.
@@ -212,13 +263,13 @@ public sealed class GroupCallTests
 
         // And the shapes upstream gets right through the call, so this is a statement about the
         // variable repeat and not about group calls under '(?r)' in general.
-        new FuzzyRegex("(?r)(?<g>[ab]{2})(?=(?&g))b")
+        WithUpstreamCallCaptures("(?r)(?<g>[ab]{2})(?=(?&g))b")
             .Match("abbaa")
             .Groups["g"]
             .Captures.Select(static c => (c.Index, c.Index + c.Length))
             .Should()
             .Equal((2, 4), (0, 2));
-        new FuzzyRegex("(?r)(?<g>[ab])(?=(?&g))b")
+        WithUpstreamCallCaptures("(?r)(?<g>[ab])(?=(?&g))b")
             .Match("abb")
             .Groups["g"]
             .Captures.Select(static c => (c.Index, c.Index + c.Length))
@@ -250,7 +301,10 @@ public sealed class GroupCallTests
         // codepoint table with 2 and raised IndexError, so one upstream bug failed a whole 2000-row
         // wave; it now extends the index instead, and tools/record-oracle.py's `_utf16_index` says
         // why.
-        MatchCollection matches = new FuzzyRegex("(?P<g1>A*)(?<=(?&g1))").Matches("A");
+        //
+        // Since D51 the call's captures are read through the oracle's ablation, which keeps them as
+        // upstream does; this port's own lists hold only g1's captures.
+        MatchCollection matches = WithUpstreamCallCaptures("(?P<g1>A*)(?<=(?&g1))").Matches("A");
 
         matches.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1), (1, 0));
         matches
@@ -258,6 +312,11 @@ public sealed class GroupCallTests
             .Should()
             // Every capture inside the one-character subject, which is the whole claim.
             .Equal((0, 1), (0, 1), (1, 0), (0, 1));
+        new FuzzyRegex("(?P<g1>A*)(?<=(?&g1))")
+            .Matches("A")
+            .SelectMany(static m => m.Groups["g1"].Captures.Select(static c => (c.Index, c.Length)))
+            .Should()
+            .Equal((0, 1), (1, 0));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
@@ -773,17 +832,24 @@ public sealed class GroupCallTests
     // changed a span, so two calls that see g with the same empty text at different spans can run
     // differently. Keyed on its text, the guard refused a call that upstream makes, and group 1
     // gained two captures more than upstream 2026.9.10's [0, 0][1, 0] (30 s run, 2026-09-29).
+    //
+    // Since D51 the calls' captures, which are what showed the extra calls, are read through the
+    // oracle's ablation; this port's own list is the top level's (0, 0) alone.
     [Test]
     public void A_group_captured_inside_a_repeat_is_keyed_on_its_span()
     {
-        Match m = new FuzzyRegex(
-            @"(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?<g>)|a)*)))|(?<g>)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))",
-            FuzzyRegexOptions.None,
-            _budget
-        ).FullMatch("aax");
+        const string pattern =
+            @"(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?<g>)|a)*)))|(?<g>)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))";
+        Match m = WithUpstreamCallCaptures(pattern).FullMatch("aax");
 
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
         m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 0), (1, 0));
+        new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget)
+            .FullMatch("aax")
+            .Groups[1]
+            .Captures.Select(static c => (c.Index, c.Length))
+            .Should()
+            .Equal((0, 0));
     }
 
     // The design's shapes where keying on the captured spans walks a new call chain for every order

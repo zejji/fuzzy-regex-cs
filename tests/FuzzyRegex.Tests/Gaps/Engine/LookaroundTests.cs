@@ -175,18 +175,26 @@ public sealed class LookaroundTests
     }
 
     [Test]
-    public void A_group_call_inside_a_lookaround_that_holds_keeps_its_capture()
+    public void A_group_call_inside_a_lookaround_that_holds_keeps_its_capture_until_it_returns()
     {
         // The control. Upstream: regex.search(r'(a)(?=(?1))', 'aa').spans(1) == [(0, 1), (1, 2)],
         // and regex.search(r'(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b', 'aaab') gives group 1 [(0, 1),
-        // (1, 2)] from the call outside the lookaround. A call's capture stays wherever the path
-        // that made it survives.
-        Match kept = new FuzzyRegex("(a)(?=(?1))").Match("aa");
-        Match nested = new FuzzyRegex(@"(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b").Match("aaab");
+        // (1, 2)] from the call outside the lookaround. Under upstream's rule a call's capture
+        // stays wherever the path that made it survives, and the D10 fix must not take away one a
+        // holding lookaround keeps: the oracle's ablation of D51 shows that it does not.
+        Match kept = GroupCallTests.WithUpstreamCallCaptures("(a)(?=(?1))").Match("aa");
+        Match nested = GroupCallTests.WithUpstreamCallCaptures(@"(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b").Match("aaab");
 
         (kept.Index, kept.Length).Should().Be((0, 1));
         Captures(kept, 1).Should().Equal((0, 1), (1, 2));
         Captures(nested, 1).Should().Equal((0, 1), (1, 2));
         Captures(nested, 2).Should().Equal((1, 2));
+
+        // Since D51 every call discards its captures when it returns, so this port keeps only what
+        // the top level captured; PCRE2 10.47 and Perl 5.42 give g1 = (0, 1) for both.
+        Captures(new FuzzyRegex("(a)(?=(?1))").Match("aa"), 1).Should().Equal((0, 1));
+        Match own = new FuzzyRegex(@"(a)(?<t>(?1))?(?:(?!.(?&t))|.)+?b").Match("aaab");
+        Captures(own, 1).Should().Equal((0, 1));
+        Captures(own, 2).Should().Equal((1, 2));
     }
 }
