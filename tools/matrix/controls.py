@@ -71,10 +71,11 @@ CONTROLS = [
     # measured 2026-09-30). The quiet control is a lookahead's capture read by a backreference
     # (answer key A2): (0,2), group 1 (0,1), in PCRE2, Perl and the port.
     ({"pattern": "(?=(a))a\\1?", "subject": "aa", "operation": "search"}, "C7", "pass"),
-    # C6 judge defects found by the triage (2026-09-30), each once a false failure: an escape the
-    # reference cannot model must leave the row unjudged (it read \G\A as the text "GA"), and a verb
-    # inside a negative lookahead makes the assertion true rather than ending the attempt.
-    ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "n/a"),
+    # C6 judge defects found by the triage (2026-09-30), each once a false failure: the reference
+    # read \G\A as the text "GA" and answered None (it models both escapes since its rule 11, so the
+    # row now passes; the literal reading would fail it), and a verb inside a negative lookahead
+    # makes the assertion true rather than ending the attempt.
+    ({"pattern": "\\G\\Ab", "subject": "b", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?:(?!(?:a(*PRUNE)(*F)|xb))aba){1<=d<=2}", "subject": "aba", "operation": "search"}, "C6", "pass"),
     # C6 over the constructs added on 2026-09-30 (reference rules 11-18). D55, inherited and still on
     # main: a negative conditional drops the alternatives of a branch that starts its yes-branch;
@@ -84,6 +85,17 @@ CONTROLS = [
     ({"pattern": "(?=a)|a", "subject": "aa", "operation": "finditer"}, "C6", "pass"),
     # \K inside a lookaround has no written rule (perlre: "not well defined"), so it stays unjudged.
     ({"pattern": "(?=a\\Kb)ab", "subject": "ab", "operation": "search"}, "C6", "n/a"),
+    # C8: TRE. No bug on main is known that C8 can see (it checks only that a match TRE found is
+    # found, and that BESTMATCH costs no more than it), so the firing controls carry a deliberately
+    # wrong port answer in `c8Base`, which only C8 reads: no match where TRE finds (1,4) with one
+    # substitution, and a BESTMATCH costing 1 where TRE finds (4,7) with none.
+    ({"pattern": "(?:abc){e<=1}", "subject": "xabdy", "operation": "search", "c8Base": "None"}, "C8", "fail"),
+    ({"pattern": "(?:abc){e<=1}", "subject": "abx abc", "operation": "search", "flags": 4096,
+      "c8Base": "(0,3) 1,0,0 [2||] g c"}, "C8", "fail"),
+    ({"pattern": "(?:abc){e<=1}", "subject": "abx abc", "operation": "search", "flags": 4096}, "C8", "pass"),
+    ({"pattern": "a(?:bc){s<=1}d", "subject": "xaxcd", "operation": "search"}, "C8", "pass"),
+    # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
+    ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
 ]
 
 
