@@ -68,6 +68,9 @@ internal static class PatternCompiler
     /// <param name="upstreamFoldedRuns">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFoldedRuns"/>.
     /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamWholePatternCall"/>.
+    /// </param>
     /// <param name="upstreamCallFeatures">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
     /// </param>
@@ -79,6 +82,7 @@ internal static class PatternCompiler
         int defaultVersion = DefaultVersion,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false
     )
     {
@@ -91,6 +95,7 @@ internal static class PatternCompiler
                 defaultVersion,
                 upstreamReverseGrapheme,
                 upstreamFoldedRuns,
+                upstreamWholePatternCall,
                 upstreamCallFeatures
             );
         }
@@ -178,6 +183,7 @@ internal static class PatternCompiler
         int defaultVersion,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false
     )
     {
@@ -204,6 +210,7 @@ internal static class PatternCompiler
                     GuessEncoding = guessEncoding,
                     UpstreamReverseGrapheme = upstreamReverseGrapheme,
                     UpstreamFoldedRuns = upstreamFoldedRuns,
+                    UpstreamWholePatternCall = upstreamWholePatternCall,
                     UpstreamCallFeatures = upstreamCallFeatures,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
@@ -269,7 +276,9 @@ internal static class PatternCompiler
 
         bool reverse = (info.Flags & RegexFlags.Reverse) != 0;
 
-        bool fuzzy = parsed is Fuzzy;
+        // Upstream's own reading of "the pattern is a fuzzy section" (upstream/regex/_main.py:577),
+        // kept only for the oracle's ablation: see the note where 'fuzzy' is read below.
+        bool fuzzyBeforeOptimising = parsed is Fuzzy;
 
         // Fix the group references. Upstream wraps and re-raises the error; see the loop above.
         parsed.FixGroups(pattern, reverse, false);
@@ -304,6 +313,17 @@ internal static class PatternCompiler
 
         // Check the features of the groups.
         ParseFunctions.CheckGroupFeatures(info, pattern, parsed);
+
+        // NOT UPSTREAM (known defect D37): whether the pattern as a whole is a fuzzy section is read
+        // HERE, from the same optimised 'parsed' that 'CheckGroupFeatures' has just read it from.
+        // Upstream reads it before optimising (upstream/regex/_main.py:577), when
+        // '(?:z(?R)|){e<=1}' is still a one-item Sequence, and '_check_group_features' reads it
+        // after (':4436'), when the Sequence has been unwrapped to the Fuzzy. The two disagree, so a
+        // '(?R)' inside that section gets neither a copy of the pattern nor a CALL_REF around it: the
+        // call jumps to the start node and runs to SUCCESS with the call and the section still open,
+        // and the errors of the outer instance are never merged. A Fuzzy compiles the same code
+        // whatever its 'fuzzy' argument, so the optimised shape is the one that decides.
+        bool fuzzy = info.UpstreamWholePatternCall ? fuzzyBeforeOptimising : parsed is Fuzzy;
 
         // Compile the parsed pattern. The result is a list of tuples.
         List<uint[]> code = parsed.Compile(reverse);

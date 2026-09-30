@@ -96,6 +96,14 @@ internal sealed class Info
     internal bool UpstreamFoldedRuns { get; init; }
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the compiler decides that the pattern
+    /// as a whole is a fuzzy section before optimising, as upstream does, so that a <c>(?R)</c> in
+    /// <c>(?:z(?R)|){e&lt;=1}</c> gets no <c>CALL_REF</c> (known defect D37, ledger entry 55). The
+    /// oracle sets it to show that the fix is the whole of a divergence.
+    /// </summary>
+    internal bool UpstreamWholePatternCall { get; init; }
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether each group call gets the direction and
     /// fuzziness upstream gives it. A copy's calls keep the references resolved for where they are
     /// written (D40), a lookaround's calls take the caller's fuzziness (D42), and a conditional's

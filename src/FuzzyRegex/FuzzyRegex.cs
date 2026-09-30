@@ -242,6 +242,12 @@ public sealed class FuzzyRegex
     /// folding alone, as upstream does. The oracle sets it to show that ledger entry 49 is the whole
     /// of a divergence; see <see cref="Parsing.Info.UpstreamFoldedRuns"/>.
     /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// NOT UPSTREAM, and never set by this library: decide whether the pattern as a whole is a fuzzy
+    /// section before optimising, as upstream does. The oracle sets it to show that known defect
+    /// D37 (ledger entry 55) is the whole of a divergence; see
+    /// <see cref="Parsing.Info.UpstreamWholePatternCall"/>.
+    /// </param>
     /// <param name="upstreamCallFeatures">
     /// NOT UPSTREAM, and never set by this library: give each group call the direction and
     /// fuzziness upstream gives it. The oracle sets it to show that D40, D42 and D43 are the whole
@@ -256,6 +262,7 @@ public sealed class FuzzyRegex
         int defaultVersion,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false
     ) =>
         new(
@@ -267,6 +274,7 @@ public sealed class FuzzyRegex
             DefaultMaxCompiledNodes,
             upstreamReverseGrapheme,
             upstreamFoldedRuns,
+            upstreamWholePatternCall,
             upstreamCallFeatures
         );
 
@@ -282,6 +290,7 @@ public sealed class FuzzyRegex
     /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
     /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamWholePatternCall">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
@@ -292,6 +301,7 @@ public sealed class FuzzyRegex
         int maxCompiledNodes,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false
     )
     {
@@ -311,6 +321,7 @@ public sealed class FuzzyRegex
             defaultVersion,
             upstreamReverseGrapheme,
             upstreamFoldedRuns,
+            upstreamWholePatternCall,
             upstreamCallFeatures
         );
 

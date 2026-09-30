@@ -5060,6 +5060,67 @@ internal static class Matcher
         return pos;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D37), Debug only: what a match must satisfy when it reaches SUCCESS.
+    /// </summary>
+    /// <remarks>
+    /// Every call has returned and every fuzzy section has closed, so each section's END_FUZZY has
+    /// checked its limits against counts that include every section nested in it, a recursive
+    /// instance of itself included (the merge at the END_FUZZY arm). That is what makes the third
+    /// invariant - each section within its limits at a match - hold without being asserted here:
+    /// a section that never closed was never checked, which is how D37's '(?:z(?R)?){e&lt;=1}' over
+    /// 'b' reported two errors. The counts and the change list describe the same errors, and the
+    /// running total is their sum.
+    /// </remarks>
+    /// <param name="state">The state at SUCCESS.</param>
+    [Conditional("DEBUG")]
+    private static void AssertMatchIsClosed(MatchState state)
+    {
+        bool cutsBacktracking = false;
+        bool discardsSubAttempts = false;
+        for (int i = 0; i < state.Pattern.NodeList.Count; i++)
+        {
+            Opcode op = state.Pattern.NodeList[i].Op;
+            cutsBacktracking |= op is Opcode.Prune or Opcode.Skip;
+            discardsSubAttempts |=
+                op is Opcode.Atomic or Opcode.Lookaround or Opcode.Conditional or Opcode.FuzzyLookaround;
+        }
+
+        Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
+
+        // SHORTCUT: not asserted where a (*PRUNE) or (*SKIP) can cut the backtracking, known defect
+        // D44 - a verb inside a fuzzy section reaches SUCCESS with the section's node still set
+        // (Gaps.Engine.FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one
+        // and five more). Upgrade: assert it everywhere once D44 is settled.
+        Debug.Assert(cutsBacktracking || state.FuzzyNode is null, "a match never ends inside a fuzzy section");
+
+        Span<long> kinds = stackalloc long[3];
+        foreach (FuzzyChange change in state.FuzzyChanges)
+        {
+            ++kinds[change.Type];
+        }
+
+        Debug.Assert(
+            kinds[FuzzyValue.Sub] == state.FuzzyCounts[FuzzyValue.Sub]
+                && kinds[FuzzyValue.Ins] == state.FuzzyCounts[FuzzyValue.Ins]
+                && kinds[FuzzyValue.Del] == state.FuzzyCounts[FuzzyValue.Del],
+            "the counts are the lengths of the change lists, kind by kind"
+        );
+
+        // SHORTCUT: not asserted where an atomic group, lookaround, conditional or verb can throw a
+        // sub-attempt away, known defect D45 - the counts are put back and the running total keeps
+        // the thrown-away section's errors, and BESTMATCH ranks by that total
+        // (Gaps.Engine.LookaroundTests.A_group_call_inside_a_lookaround_whose_body_is_thrown_away_leaves_no_capture).
+        // Upgrade: assert it everywhere once D45 is settled.
+        Debug.Assert(
+            !state.Pattern.IsFuzzy
+                || cutsBacktracking
+                || discardsSubAttempts
+                || state.TotalErrors == TotalErrors(state.FuzzyCounts),
+            "the running total is the sum of the kinds"
+        );
+    }
+
     /// <summary>Upstream <c>total_errors</c> (<c>upstream/src/_regex.c</c> line 9643).</summary>
     /// <param name="fuzzyCounts">The counts.</param>
     /// <returns>Their sum.</returns>
@@ -13250,6 +13311,8 @@ internal static class Matcher
 
                     if ((pattern.Flags & RegexFlags.Posix) != 0)
                     {
+                        AssertMatchIsClosed(state);
+
                         // If we're looking for a POSIX match, check whether this one is better and
                         // then keep looking.
                         CheckPosixMatch(state);
@@ -13257,6 +13320,7 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    AssertMatchIsClosed(state);
                     return MatchStatus.Success;
                 default:
                     throw Seam.For(node.Op);

@@ -5440,10 +5440,61 @@ the oracle entry `group-call-in-a-discarded-lookaround-leaves-no-capture` keys o
 `PatternObject.LookaroundsSavingOnlyForCalls`. The failed-call memo's capture-list witnesses (design
 C1) answer the same with the memo forced on; the memo's exclusion stays for its other reasons.
 
-## 55. The calls inside a called group's copy keep the features of where they are written, so an exact copy segfaults and a fuzzy one loses matches - FIXED HERE (2026-09-30)
+## 55. A call to the whole pattern inside a pattern that is one fuzzy section never returns - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D37. Draft report:
+`entry-55-whole-pattern-fuzzy-call.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+fullmatch(r'(?b)(?:b||b(?0)*){e<=2}', 'azx')  -> (0, 3) counts (1, 0, 0)   expected None
+fullmatch(r'(?:b||b(?0)*){e<=2}', 'azx')      -> (0, 3) counts (2, 1, 0)   expected None
+fullmatch(r'(?:|z?(?R)?a){e<=3}', 'aaba')     -> (0, 4) counts (1, 3, 0)   expected (0, 4) counts (1, 2, 0)
+search(r'(?:z(?R)|){e<=1}', 'bz')             -> MemoryError                expected (0, 2) counts (1, 0, 0)
+fullmatch(r'(?:|z?(?R)?a){e<=3}x', 'aabax')   -> (0, 5) counts (2, 1, 0)   (the control: the section is not the whole pattern)
+```
+
+**Why upstream is wrong.** `_main.py:577` sets `fuzzy = isinstance(parsed, Fuzzy)` before the
+pattern is optimised, when `(?:b||b(?0)*){e<=2}` is still a one-item `Sequence`, so the
+whole-pattern key `(0, reverse, fuzzy)` looked up at `:627` is `(0, False, False)`.
+`_check_group_features` (`_regex_core.py:4436`) runs after optimising, when the pattern is the
+`Fuzzy`, so for the call's key `(0, False, True)` it sees matching features and adds no copy. The
+call therefore has neither a copy nor the `CALL_REF` wrapper: its `call_ref_info` node is NULL and
+`RE_OP_GROUP_CALL` jumps to `start_node` (`_regex.c:13394`), whose code ends in `SUCCESS` rather
+than `GROUP_RETURN`. A match can then end inside the call, with the outer instance of the section
+never closed, so its errors are not merged and its limits are not checked: the first two rows need
+three errors (only `b` can match any of 'a', 'z', 'x'), and the third reports four errors under a
+limit of three. Where nothing lets the recursion end early, it recurses until `MemoryError`.
+Adding a character after the section (the control) makes the pattern a `Sequence` after optimising
+as well, and then the call gets its copy and the answer is right. No other engine has both fuzzy
+matching and recursion, so the right answer follows from upstream's own design for nested sections:
+the FUZZY arm saves the outer counts and END_FUZZY adds the inner ones back and checks the limits
+(`:13132`, `:12448`), and a group call does not touch the counts (`:13394`).
+
+**Proposed fix upstream:** decide `fuzzy` after `parsed = parsed.optimise(info, reverse)` in
+`_main._compile`, as `_check_group_features` does. Tried on a copy of 2026.9.10 (2026-09-30): the
+third row then gives this port's (0, 4) with counts (1, 2, 0), and the control is unchanged; the
+first, second and fourth recurse without end (timeout or MemoryError), which is upstream's separate
+unbounded-recursion family (issues 551 and 554) that ledger entry 14's guard ends here.
+
+**This port.** `PatternCompiler.CompileUnderVersion` reads `parsed is Fuzzy` after optimising.
+Pinned by `Gaps/Engine/FuzzyRecursionCountsTests` (the witnesses, nested and `(?0)` spellings,
+numbered-call controls, BESTMATCH, ENHANCEMATCH and a minimum) and by the code pin in
+`Gaps/Parsing/FuzzySectionTests`. A grid of 2,400 random fuzzy recursion rows (`(?R)`, `(?0)`,
+`(?1)`, nested sections, BESTMATCH, ENHANCEMATCH, reverse, minimums; Debug build with a SUCCESS
+assert that no call is open) changed 127 rows. 116 are rows upstream cannot answer (timeout or
+MemoryError). On the 11 upstream answers, 10 are upstream's own answer reproduced by the unfixed
+port, each a match with more errors than the section allows, errors it does not count, or (one row)
+another first success; the eleventh differed from upstream before the fix as well. The oracle entry
+`fuzzy-whole-pattern-call-returns-to-its-caller` keys on `Info.UpstreamWholePatternCall`. The default
+oracle waves at seeds 7, 4242 and 20260927 draw no such row.
+
+## 56. The calls inside a called group's copy keep the features of where they are written, so an exact copy segfaults and a fuzzy one loses matches - FIXED HERE (2026-09-30)
 
 **Status:** not filed, per the owner's rule. Known defect D40. Draft report:
-`entry-55-copy-call-features.md`.
+`entry-56-copy-call-features.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
 below):
@@ -5478,15 +5529,15 @@ copy compiles. `Matcher.AnyErrorPermitted` asserts that a fuzzy section is in fo
 `Gaps/Engine/NestedGroupCallTests` and the oracle entry
 `group-call-runs-with-its-call-sites-features`, keyed on `Info.UpstreamCallFeatures`. The grid in
 `tools/probes/d40-copy-call-grid/` (2,000 rows, seed 20260930, Debug) had 138
-NullReferenceExceptions before and none after; with entries 56 and 57, the port's answer equals its
+NullReferenceExceptions before and none after; with entries 57 and 58, the port's answer equals its
 own answer for the pattern with the calls written out on all 1,932 rows that have one. No other
 engine surveyed has fuzzy sections; PCRE2 runs a subroutine with the options of its definition, so
 it has no copies to get wrong.
 
-## 56. A call inside a lookaround in a fuzzy section runs its group fuzzily, while the lookaround's own body is exact - FIXED HERE (2026-09-30)
+## 57. A call inside a lookaround in a fuzzy section runs its group fuzzily, while the lookaround's own body is exact - FIXED HERE (2026-09-30)
 
 **Status:** not filed, per the owner's rule. Known defect D42. Draft report:
-`entry-56-lookaround-call-fuzziness.md`.
+`entry-57-lookaround-call-fuzziness.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
 
@@ -5511,10 +5562,10 @@ behave as its body written out, and the written-out controls answer None.
 grid row 1914 needs this fix: with entry 55 alone, the fuzzy copy of a group holding such a
 lookaround ran its call fuzzily there too.
 
-## 57. A call in a conditional's lookbehind test runs its group forwards - FIXED HERE (2026-09-30)
+## 58. A call in a conditional's lookbehind test runs its group forwards - FIXED HERE (2026-09-30)
 
 **Status:** not filed, per the owner's rule. Known defect D43. Draft report:
-`entry-57-conditional-lookbehind-call-direction.md`.
+`entry-58-conditional-lookbehind-call-direction.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
 

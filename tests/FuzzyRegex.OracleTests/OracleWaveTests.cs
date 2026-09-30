@@ -576,9 +576,41 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_whole_pattern_call_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-whole-pattern-call-returns-to-its-caller` (ledger entry 55, D37),
+        // built as entry 50's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no engine
+        // gives on any example, stands in for an unrelated defect; and this port's live answer must
+        // be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-whole-pattern-call-returns-to-its-caller", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                ?.Id.Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_call_site_features_do_not_explain_is_not_accounted_for()
     {
-        // The control for `group-call-runs-with-its-call-sites-features` (ledger entries 55-57; D40,
+        // The control for `group-call-runs-with-its-call-sites-features` (ledger entries 56-58; D40,
         // D42, D43), built as entry 54's: upstream's own answer is what this port gave before the
         // fixes, so accepting it would classify a revert as the fix; a match at 1 of length 1, which
         // no engine gives on any example, stands in for an unrelated defect this entry must refuse; and this port's live

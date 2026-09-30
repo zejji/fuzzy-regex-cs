@@ -3176,6 +3176,25 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The ten rows of <c>fuzzy-whole-pattern-call-returns-to-its-caller</c>, recorded 2026-09-30
+    /// by <c>python tools/record-oracle.py --rows</c> over rows of the D37 grid: every row the fix
+    /// changes where upstream answers, but one (see the entry). Plain, BESTMATCH, ENHANCEMATCH and
+    /// reversed patterns, a nested section and a numbered spelling, <c>(?0)</c>.
+    /// </summary>
+    private const string _wholePatternFuzzyCallRows = """
+        {"generator": "rows", "pattern": "(?b)(?:b||b(?0)*){e<=2}", "flags": 0, "namedLists": {}, "subject": "azx", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 0], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": []}}}
+        {"generator": "rows", "pattern": "(?:|b*(?R)(?:(?R)a*?(?R)?)*){s<=1}", "flags": 0, "namedLists": {}, "subject": "zx", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:||(?:[ab](?R))*){e<=1}){d<=1}", "flags": 0, "namedLists": {}, "subject": "zabx", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?b)(?:(?:azb*(?R)|){s<=1}a){e<=1}", "flags": 0, "namedLists": {}, "subject": "bzb", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [3]}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [3]}}}
+        {"generator": "rows", "pattern": "(?:|z?(?R)?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "aaba", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 3, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [1, 2, 3], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:(?R)?|[ab]){s<=1}a){s<=1}", "flags": 0, "namedLists": {}, "subject": "azxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?r)(?:(?:b(?R)|baz?|){s<=1}b){1<=s<=1}", "flags": 0, "namedLists": {}, "subject": "zza", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:x[ab]|(?R)?){d<=1}a){e<=3}", "flags": 0, "namedLists": {}, "subject": "xza", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:(?:[ab](?R))*|){e<=1,s<=0}a){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "azxz", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:b(?R)(?R)|[ab])*.|){s<=1}", "flags": 0, "namedLists": {}, "subject": "abzz", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>fuzzy-minimum-met-by-a-trailing-insertion</c>, recorded 2026-09-28 by
     /// <c>python tools/record-oracle.py --rows tools/probes/fuzzy-minimum-rows.jsonl</c>: an e and an
     /// i minimum, a search that now starts earlier, a full match, nested sections, a group
@@ -3444,7 +3463,7 @@ internal static class ExpectedDivergences
             Id: "group-call-runs-with-its-call-sites-features",
             Reason: "A GROUP CALL RUNS HERE WITH THE DIRECTION AND FUZZINESS OF ITS CALL SITE, as the called "
                 + "body written out there would; upstream disagrees with its own written-out form. Ledger "
-                + "entries 55, 56 and 57, known defects D40, D42 and D43, fixed 2026-09-30 and recorded as "
+                + "entries 56, 57 and 58, known defects D40, D42 and D43, fixed 2026-09-30 and recorded as "
                 + "deliberate divergences in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM DEFECTS: (D40) a group called with other features than where it is written "
                 + "is compiled again as a copy (upstream/regex/_regex_core.py:4420), but the calls inside "
@@ -3505,6 +3524,37 @@ internal static class ExpectedDivergences
             Example: _lookaroundCallCaptureRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row))
+        ),
+        new(
+            Id: "fuzzy-whole-pattern-call-returns-to-its-caller",
+            Reason: "A CALL TO THE WHOLE PATTERN FROM INSIDE A PATTERN THAT IS ONE FUZZY SECTION RETURNS TO "
+                + "ITS CALLER HERE, so the errors spent before and after the call are counted and the "
+                + "section's limits are checked on the whole match. Ledger entry 55, known defect D37, "
+                + "fixed 2026-09-30 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: `_main.py:577` decides `fuzzy = isinstance(parsed, Fuzzy)` "
+                + "BEFORE optimising, when `(?:z(?R)|){e<=1}` is still a one-item Sequence, and "
+                + "`_check_group_features` (`_regex_core.py:4436`) decides it AFTER, when it is the "
+                + "Fuzzy. The two disagree, so the call gets neither an extra copy of the pattern nor "
+                + "the CALL_REF wrapper, and GROUP_CALL (`_regex.c:13394`) jumps to the start node, "
+                + "whose end is SUCCESS rather than GROUP_RETURN. A match then ends inside the call "
+                + "with the outer section open: `regex.fullmatch(r'(?b)(?:b||b(?0)*){e<=2}', 'azx')` "
+                + "is (0, 3) with one error, where every reading of the pattern needs three, and "
+                + "`(?:|z?(?R)?a){e<=3}` over 'aaba' reports four errors under a limit of three. Most "
+                + "such rows raise MemoryError upstream instead, the recursion never returning.\n"
+                + "THE FIX reads both from the optimised pattern (`PatternCompiler`), which adds the "
+                + "same whole-pattern wrapper a pattern with no fuzzy section gets. A recursive "
+                + "instance is then a nested instance of the same section, and its errors count "
+                + "against every instance that encloses it.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamWholePatternCall`, which compiles with "
+                + "`Info.UpstreamWholePatternCall` and entries 42 and 44 off, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_whole_pattern_call_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyRecursionCountsTests",
+            Example: _wholePatternFuzzyCallRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamWholePatternCall(row))
         ),
         new(
             Id: "fuzzy-minimum-met-by-a-trailing-insertion",
