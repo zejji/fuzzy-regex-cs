@@ -83,6 +83,11 @@ CONTROLS = [
     ({"pattern": "(?(?!a)(?:x|))x", "subject": "x", "operation": "search"}, "C6", "fail"),
     ({"pattern": "(?>(?:ab){e<=1})\\Kb", "subject": "xbb", "operation": "search"}, "C6", "pass"),
     ({"pattern": "(?=a)|a", "subject": "aa", "operation": "finditer"}, "C6", "pass"),
+    # Rules 19-20 and rule 5's pinned-anchor exception: README's POSIX example, and DIVERGENCES'
+    # witness for an insertion at the search anchor where \m pins the match (the port and the
+    # reference give 'XY' and 'YX'; upstream only 'YX').
+    ({"pattern": "Mr|Mrs", "subject": "Mrs", "operation": "search", "flags": 65536}, "C6", "pass"),
+    ({"pattern": "\\m(?:Y){i}\\M", "subject": "XY YX", "operation": "finditer"}, "C6", "pass"),
     # \K inside a lookaround has no written rule (perlre: "not well defined"), so it stays unjudged.
     ({"pattern": "(?=a\\Kb)ab", "subject": "ab", "operation": "search"}, "C6", "n/a"),
     # C8: TRE. No bug on main is known that C8 can see (it checks only that a match TRE found is

@@ -26,8 +26,9 @@ lookarounds (?=...), (?!...), (?<=...) and (?<!...) (rule 10). Added
 2026-09-30 (rules 11-18): the zero-width escapes \A \Z \G \b \B \m \M, \K,
 atomic groups (?>...) and possessive repeats, branch reset (?|...),
 conditionals with a lookaround test, a fuzzy section inside a lookahead,
-IGNORECASE (with or without FULLCASE) over ASCII text, and finditer. No other
-flags, no calls and no fuzzy tests ({s<=1:[a-z]}).
+IGNORECASE (with or without FULLCASE) over ASCII text, and finditer; and
+VERSION1 and POSIX (rules 19-20). No other flags, no calls and no fuzzy tests
+({s<=1:[a-z]}).
 
 Order rules (citations are to upstream/src/_regex.c and upstream/README.rst
 of mrab-regex 2026.9.10):
@@ -55,7 +56,20 @@ of mrab-regex 2026.9.10):
 5. When searching, an item may not take an insertion at the position where
    the search began (search_anchor, set once in init_match, _regex.c:3410;
    rule at _regex.c:10211-10214). The section-end insertion (rule 4) has no
-   such check. match() and fullmatch() have no such restriction.
+   such check. match() and fullmatch() have no such restriction. The port's
+   ruled exception (DIVERGENCES.md, "A fuzzy section may open with an inserted
+   character at the search anchor, where a position assertion pins the match
+   there"; ledger entries 19-20): the insertion is allowed once the attempt at
+   the anchor has passed a zero-width escape or anchor (rule 11) that holds
+   there and would fail one character on, because then starting one character
+   later cannot give the same match minus the insertion. Every example the
+   ruling gives has that assertion leading the pattern, outside any fuzzy
+   section and any alternation (\m(?:Y){i}\M, (?m)^(?:abc){i<=1}); the port
+   pins no other (measured 2026-09-30: (?:^a.){i<=2} over " xabb" is None in
+   the port and upstream, ^(?:a.){i<=2} is (0, 4)), and the ruling's text does
+   not say whether it should. So an insertion at the anchor after any other
+   such assertion is rejected (the row goes unjudged). A lookaround never
+   pins. PINNED_ANCHOR = False gives upstream's rule.
 6. Error limits are checked before each error (this_error_permitted,
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
    _regex.c:9709-9745). Here minimums are checked after the trailing
@@ -140,6 +154,18 @@ guessed; each rule says what it rejects.
    an empty match the next one may not be empty at that same position, but a
    non-empty match may start there (A2 "op-finditer", Python re docs for
    finditer). Rules 5 and 11 take the new search start as their anchor.
+19. VERSION1 changes only what README.rst's "Old vs new behaviour" lists:
+   split and sub after a zero-width match, inline flags' scope, nested sets and
+   set operations, and full case folding by default. None of these is in the
+   subset once a class holding "[", "--", "&&", "||" or "~~" is rejected, so
+   V1 answers as V0 here.
+20. POSIX: at the leftmost start that has a match, the longest match there,
+   the first found of that length (README.rst "Added POSIX matching":
+   "It looks for the longest overall match"; when it finds a match at a
+   position "it won't return that immediately, but will keep looking to see if
+   there's another longer match there", so it replaces a match only by a longer
+   one). Rejected with a verb, which would end the search for a longer match in
+   a way no rule states.
 """
 
 import re
@@ -182,6 +208,8 @@ LOOKAROUND_INSERTION = True
 # Rule 6 switch: False gives upstream's order (a section below its minimum at
 # its end fails before any trailing insertion is tried).
 MINIMUM_AFTER_TRAILING_INSERTIONS = True
+# Rule 5's ruled exception: False gives upstream's rule (never an insertion at the search anchor).
+PINNED_ANCHOR = True
 # "unrestricted" only: the most empty iterations in a row at one position, for
 # patterns whose budget does not bound them (a fuzzy section inside the
 # repeat body restarts its counts each iteration). None = no cap.
@@ -323,8 +351,9 @@ def is_word(ch):
 
 
 class Parser:
-    def __init__(self, pattern, ignorecase=False):
+    def __init__(self, pattern, ignorecase=False, version1=False):
         self.p, self.i, self.groups = pattern, 0, 0
+        self.version1 = version1
         self.referenced = set()  # groups a backreference or conditional tests
         self.ignorecase = ignorecase
         if ignorecase and not pattern.isascii():
@@ -557,6 +586,8 @@ class Parser:
         body = self.p[self.i + 1 : end]
         if "\\" in body:
             raise ValueError(f"unsupported escape in a class at {self.i} in {self.p!r}")
+        if self.version1 and ("[" in body or any(op in body for op in ("--", "&&", "||", "~~"))):
+            raise ValueError(f"unsupported VERSION1 set operation in {self.p!r}")  # rule 19
         self.i = end + 1
         negate = body.startswith("^")
         body = body[1:] if negate else body
@@ -636,6 +667,8 @@ class State:
     anchor: int  # search start (rule 5), or -1 for match/fullmatch
     path: tuple = ()  # the errors taken: (kind, text position, item)
     keep: int = -1  # where \K was last passed (rule 12), or -1
+    pinned: bool = False  # rule 5's exception: an assertion pinned the attempt at the anchor
+    pin_unsettled: bool = False  # an assertion held there that only the ruling's reasoning pins
 
 
 class Prune(Exception):
@@ -646,7 +679,8 @@ class Prune(Exception):
 
 
 class Ctx:
-    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False):
+    def __init__(self, text, referenced=frozenset(), start=0, ignorecase=False, leading=frozenset()):
+        self.leading = leading  # ids of the anchors that lead the pattern (rule 5's exception)
         self.text = text
         self.referenced = referenced
         self.start = start  # where this search began, for \G (rule 11)
@@ -719,7 +753,7 @@ def lookaround(node, st, ctx, k):
         yield from k(carried(st, body) if node.positive else st)
         return
     if LOOKAROUND_INSERTION and st.counts is not None:
-        if st.pos < len(ctx.text) and st.pos != st.anchor and permitted(st, 1):  # rule 5
+        if st.pos < len(ctx.text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
             yield from lookaround(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -738,22 +772,39 @@ def atomic(node, st, ctx, k):
     return iter(())
 
 
-def anchor(node, st, ctx, k):
-    n, pos, text = len(ctx.text), st.pos, ctx.text
+def holds(kind, pos, ctx):
+    n, text = len(ctx.text), ctx.text
     before = pos > 0 and is_word(text[pos - 1])
     after = pos < n and is_word(text[pos])
-    ok = {"^": pos == 0,
-          "$": pos == n or (pos == n - 1 and text[-1] == "\n"),  # the end, or before a final newline
-          "A": pos == 0, "Z": pos == n, "G": pos == ctx.start,  # rule 11
-          "b": before != after, "B": before == after,
-          "m": not before and after, "M": before and not after}[node.kind]
-    if ok:
+    return {"^": pos == 0,
+            "$": pos == n or (pos == n - 1 and text[-1] == "\n"),  # the end, or before a final newline
+            "A": pos == 0, "Z": pos == n, "G": pos == ctx.start,  # rule 11
+            "b": before != after, "B": before == after,
+            "m": not before and after, "M": before and not after}[kind]
+
+
+def insertion_allowed_here(st):
+    """Rule 5 and its ruled exception (call it last: it can reject the row)."""
+    if st.pos != st.anchor or st.pinned:
+        return True
+    if st.pin_unsettled:
+        raise ValueError("unsupported: an insertion at the search anchor after an assertion the "
+                         "pinned-anchor ruling does not cover (rule 5)")
+    return False
+
+
+def anchor(node, st, ctx, k):
+    n = len(ctx.text)
+    if holds(node.kind, st.pos, ctx):
+        if PINNED_ANCHOR and st.pos == st.anchor and not (st.pos < n and holds(node.kind, st.pos + 1, ctx)):
+            # rule 5's exception
+            st = replace(st, pinned=True) if id(node) in ctx.leading else replace(st, pin_unsettled=True)
         yield from k(st)
         return
     # A failing anchor in a fuzzy section may be passed by inserting a text character in front of
     # it (upstream _regex.c:12060-12075, the rule 10 cites; rule 5 applies). Measured 2026-09-30:
     # fullmatch "(?:a$){i<=1}" "ab" is (0, 2) with one insertion in upstream and the port.
-    if st.counts is not None and st.pos < n and st.pos != st.anchor and permitted(st, 1):
+    if st.counts is not None and st.pos < n and permitted(st, 1) and insertion_allowed_here(st):
         yield from anchor(node, add_error(st, 1, st.pos + 1), ctx, k)
 
 
@@ -870,7 +921,7 @@ def item(node, st, ctx, k):
     if not exact:  # rule 1: substitution and insertion only on a mismatch
         if pos < len(text) and permitted(st, 0):
             yield from k(add_error(st, 0, pos + 1, node))
-        if pos < len(text) and pos != st.anchor and permitted(st, 1):  # rule 5
+        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st):  # rule 5
             yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
     if (DELETE_AFTER_EXACT or not exact) and permitted(st, 2):  # rule 3
         yield from k(add_error(st, 2, pos, node))
@@ -985,33 +1036,66 @@ class Compiled:
     ngroups: int
     referenced: frozenset
     ignorecase: bool
+    posix: bool = False
+    leading: frozenset = frozenset()
+
+
+def leading_anchors(node):
+    """Rule 5's exception: the anchors every match passes first, outside any fuzzy section or
+    alternation (a run of them at the head of the pattern, through plain and atomic groups)."""
+    found = set()
+    while True:
+        if isinstance(node, (Group, Atomic)):
+            node = node.body
+            continue
+        if isinstance(node, Seq):
+            for part in node.parts:
+                if isinstance(part, Anchor):
+                    found.add(id(part))
+                    continue
+                if isinstance(part, (Group, Atomic, Seq)):
+                    found |= leading_anchors(part)
+                break
+        elif isinstance(node, Anchor):
+            found.add(id(node))
+        return frozenset(found)
 
 
 def attempt(c, text, start, anchor, must_end, search_start, not_empty=False):
     """The first match of an attempt at start. not_empty: rule 18, a match may not end at start."""
     st = State(start, ((-1, -1),) * (c.ngroups + 1), (0, 0, 0), None, None, (), anchor)
-    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase), lambda s: iter([s])):
+    best = None
+    for final in run(c.tree, st, Ctx(text, c.referenced, search_start, c.ignorecase, c.leading), lambda s: iter([s])):
         if must_end and final.pos != len(text):
             continue
         if not_empty and final.pos == start:
             continue
-        begin = start if final.keep < 0 else final.keep  # rule 12
-        return Result((begin, final.pos), final.groups[1:], final.totals, final.path)
-    return None
+        if not c.posix:
+            best = final
+            break
+        if best is None or final.pos > best.pos:  # rule 20: only a longer match replaces one
+            best = final
+    if best is None:
+        return None
+    begin = start if best.keep < 0 else best.keep  # rule 12
+    return Result((begin, best.pos), best.groups[1:], best.totals, best.path)
 
 
-IGNORECASE, FULLCASE = 2, 16384
+IGNORECASE, FULLCASE, VERSION1, POSIX = 2, 16384, 256, 65536
 
 
 def compile_pattern(pattern, flags=0):
-    if flags & ~(IGNORECASE | FULLCASE) or flags == FULLCASE:
+    if flags & ~(IGNORECASE | FULLCASE | VERSION1 | POSIX) or flags & FULLCASE and not flags & IGNORECASE:
         raise ValueError(f"unsupported flags {flags}")
-    p = Parser(pattern, bool(flags & IGNORECASE))
+    p = Parser(pattern, bool(flags & IGNORECASE), bool(flags & VERSION1))
     tree = p.parse()
+    if flags & POSIX and contains(tree, Verb):
+        raise ValueError(f"unsupported verb under POSIX in {pattern!r}")  # rule 20
     check_fuzzy_lookaheads(tree)
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
-    return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE))
+    return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
+                    leading_anchors(tree))
 
 
 def checked(c, text):

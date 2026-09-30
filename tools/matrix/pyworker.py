@@ -119,8 +119,9 @@ def c6_form(result) -> str:
 
 
 def c6(row, ref, regex) -> str:
-    # IGNORECASE (2) and FULLCASE (16384) are the only flags the reference models (its rule 17).
-    if row["flags"] & ~(2 | 16384) or row.get("namedLists") or row.get("partial") or row.get("pos") is not None:
+    # IGNORECASE (2), FULLCASE (16384), VERSION1 (256) and POSIX (65536) are the flags the reference
+    # models (its rules 17, 19 and 20).
+    if row["flags"] & ~(2 | 16384 | 256 | 65536) or row.get("namedLists") or row.get("partial") or row.get("pos") is not None:
         return "n/a"
     if row["operation"] not in ("search", "match", "fullmatch", "finditer"):
         return "n/a"
