@@ -5089,9 +5089,9 @@ internal static class Matcher
         Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
 
         // SHORTCUT: not asserted where a (*PRUNE) or (*SKIP) can cut the backtracking, known defect
-        // D41 - a verb inside a fuzzy section reaches SUCCESS with the section's node still set
+        // D44 - a verb inside a fuzzy section reaches SUCCESS with the section's node still set
         // (Gaps.Engine.FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one
-        // and five more). Upgrade: assert it everywhere once D41 is settled.
+        // and five more). Upgrade: assert it everywhere once D44 is settled.
         Debug.Assert(cutsBacktracking || state.FuzzyNode is null, "a match never ends inside a fuzzy section");
 
         Span<long> kinds = stackalloc long[3];
@@ -5108,10 +5108,10 @@ internal static class Matcher
         );
 
         // SHORTCUT: not asserted where an atomic group, lookaround, conditional or verb can throw a
-        // sub-attempt away, known defect D42 - the counts are put back and the running total keeps
+        // sub-attempt away, known defect D45 - the counts are put back and the running total keeps
         // the thrown-away section's errors, and BESTMATCH ranks by that total
         // (Gaps.Engine.LookaroundTests.A_group_call_inside_a_lookaround_whose_body_is_thrown_away_leaves_no_capture).
-        // Upgrade: assert it everywhere once D42 is settled.
+        // Upgrade: assert it everywhere once D45 is settled.
         Debug.Assert(
             !state.Pattern.IsFuzzy
                 || cutsBacktracking
