@@ -194,7 +194,11 @@ def translate(row, info, engine):
             return "flags, which the reference matcher does not have"
         if partial or op == "finditer":
             return "partial or finditer, which the reference matcher does not have"
-        return {"pattern": row["pattern"], "subject": row["subject"], "op": op}
+        # The matcher has numbered groups only: name -> number, which keeps every group's number.
+        number = {n: k + 1 for k, n in enumerate(info["groupnames"]) if n}
+        q = re.sub(r"\(\?P?<(?![=!])(\w+)>", "(", row["pattern"])
+        q = re.sub(r"\(\?\((\w+)\)", lambda m: f"(?({number.get(m.group(1), m.group(1))})", q)
+        return {"pattern": q, "subject": row["subject"], "op": op}
     if engine == "brute":
         if not partial or op == "finditer":
             return "not a partial match/search/fullmatch row"

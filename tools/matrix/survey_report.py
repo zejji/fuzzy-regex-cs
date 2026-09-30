@@ -16,6 +16,7 @@ def main(argv=None):
     ap.add_argument("--reasons", action="store_true")
     ap.add_argument("--cell")
     ap.add_argument("--disagreements", type=int, default=0)
+    ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--verdict", default="disagree,disagree-existence,disagree-groups")
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
@@ -35,6 +36,18 @@ def main(argv=None):
                     why[(e, res["status"], text[:90])] += 1
         for (e, s, t), n in why.most_common(60):
             print(f"{n:>5} {e:7} {s:8} {t}")
+    if a.markdown:
+        summary = json.loads((a.dir / "summary.json").read_text(encoding="utf-8"))
+        print("| Cell | Rows | Engines answering (rows) | Agree | Disagree | Groups only | One engine | Judged: fuzzy ref / brute | Judge differs from upstream |")
+        print("|---|---|---|---|---|---|---|---|---|")
+        for cell, c in summary.items():
+            eng = ", ".join(f"{k.split(':')[1]} {v}" for k, v in sorted(c.items()) if k.startswith("answered:")
+                            and k.split(":")[1] not in ("regex", "fuzzyref", "brute"))
+            dis = c.get("disagree", 0) + c.get("disagree-existence", 0)
+            jd = sum(v for k, v in c.items() if k.startswith("judge-differs:") and k.endswith(":regex"))
+            print(f"| {cell} | {c['rows']} | {eng or '-'} | {c.get('agree', 0)} | {dis} | {c.get('disagree-groups', 0)} "
+                  f"| {c.get('single', 0)} | {c.get('judged:fuzzyref', 0)} / {c.get('judged:brute', 0)} | {jd} |")
+        return 0
     verdicts = set(a.verdict.split(","))
     shown = 0
     for r in rows:
