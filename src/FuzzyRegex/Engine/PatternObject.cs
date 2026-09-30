@@ -211,6 +211,13 @@ internal sealed class PatternObject
     /// </summary>
     internal long MinWidth;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never read by this library: <see cref="MinWidth"/> as upstream computes it,
+    /// with the called copies after the pattern's SUCCESS counted too (D49). The oracle's
+    /// <c>RunWithTheUpstreamCallFeatures</c> puts it back.
+    /// </summary>
+    internal long UpstreamMinWidth;
+
     /// <summary>Upstream <c>fuzzy_count</c>: how many fuzzy sections the pattern has.</summary>
     internal int FuzzyCount;
 

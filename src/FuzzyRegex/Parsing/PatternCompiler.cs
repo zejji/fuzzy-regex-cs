@@ -71,6 +71,9 @@ internal static class PatternCompiler
     /// <param name="upstreamWholePatternCall">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamWholePatternCall"/>.
     /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
@@ -79,7 +82,8 @@ internal static class PatternCompiler
         int defaultVersion = DefaultVersion,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
-        bool upstreamWholePatternCall = false
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false
     )
     {
         try
@@ -91,7 +95,8 @@ internal static class PatternCompiler
                 defaultVersion,
                 upstreamReverseGrapheme,
                 upstreamFoldedRuns,
-                upstreamWholePatternCall
+                upstreamWholePatternCall,
+                upstreamCallFeatures
             );
         }
         catch (FuzzyRegexParseException unterminated)
@@ -178,7 +183,8 @@ internal static class PatternCompiler
         int defaultVersion,
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
-        bool upstreamWholePatternCall = false
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -205,6 +211,7 @@ internal static class PatternCompiler
                     UpstreamReverseGrapheme = upstreamReverseGrapheme,
                     UpstreamFoldedRuns = upstreamFoldedRuns,
                     UpstreamWholePatternCall = upstreamWholePatternCall,
+                    UpstreamCallFeatures = upstreamCallFeatures,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -283,7 +290,11 @@ internal static class PatternCompiler
         parsed = parsed.PackCharacters(info);
 
         // Get the required string.
-        (long reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(parsed, info.Flags);
+        (long reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(
+            parsed,
+            info.Flags,
+            info.UpstreamCallFeatures
+        );
 
         // Build the named lists.
         Dictionary<string, IReadOnlySet<string>> namedListsBuilt = new(StringComparer.Ordinal);
@@ -305,7 +316,7 @@ internal static class PatternCompiler
         ComplainUnusedArgs(kwargs, info);
 
         // Check the features of the groups.
-        ParseFunctions.CheckGroupFeatures(info, parsed);
+        ParseFunctions.CheckGroupFeatures(info, pattern, parsed);
 
         // NOT UPSTREAM (known defect D37): whether the pattern as a whole is a fuzzy section is read
         // HERE, from the same optimised 'parsed' that 'CheckGroupFeatures' has just read it from.
@@ -335,9 +346,25 @@ internal static class PatternCompiler
         // Add the final 'success' opcode.
         code.Add([(uint)Opcode.Success]);
 
-        // Compile the additional copies of the groups that we need.
-        foreach ((RegexBase group, bool rev, bool fuz) in info.AdditionalGroups)
+        // Compile the additional copies of the groups that we need. NOT UPSTREAM (D40): each copy's
+        // calls are first resolved for the copy's own features, which can append more copies, so
+        // the loop reads the list's count afresh.
+        for (int i = 0; i < info.AdditionalGroups.Count; i++)
         {
+            (RegexBase group, bool rev, bool fuz) = info.AdditionalGroups[i];
+            if (!info.UpstreamCallFeatures)
+            {
+                int references = info.CallRefs.Count;
+                ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
+
+                // CheckGroupFeatures found every reference before the pattern compiled, so that
+                // the groups as written carry theirs; one found now would have no definition.
+                Debug.Assert(
+                    info.CallRefs.Count == references,
+                    "A copy needed a reference found after the pattern compiled."
+                );
+            }
+
             code.AddRange(group.Compile(rev, fuz));
         }
 

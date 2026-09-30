@@ -739,87 +739,45 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
-    public void The_width_early_out_that_skips_the_non_partial_pass_counts_characters_not_code_units()
+    public void A_call_in_a_lookbehind_no_longer_makes_a_narrow_subject_a_partial()
     {
-        // S40c. A partial request is answered in TWO passes: `do_match` runs a NON-PARTIAL pass
-        // first and only falls back to a partial one if that FAILS (`upstream/src/_regex.c:18142`,
-        // and `Matcher.DoMatch`). `do_exact_match` (`:18064`) opens with a width early-out - fewer
-        // characters available than `min_width`, fail without matching at all - and that early-out
-        // is guarded by `partial_side == RE_PARTIAL_NONE`, so it fires on the FIRST pass only.
+        // S40c pinned two things here. A partial request is answered in two passes, non-partial
+        // first (`upstream/src/_regex.c:18142`, `Matcher.DoMatch`), and `do_exact_match`'s width
+        // early-out (`:18064`), guarded by `partial_side == RE_PARTIAL_NONE`, fires on the first
+        // pass only, so a subject narrower than `min_width` skips straight to the partial pass.
+        // S40c made that early-out count characters rather than UTF-16 code units, and the rows
+        // below showed it, because upstream's `min_width` counted a call inside a lookbehind at the
+        // width of the group it calls.
         //
-        // So on a subject too narrow for `min_width` the non-partial pass never runs, the partial
-        // pass does, and the answer is a PARTIAL of a span the first pass would have called
-        // complete. That is upstream's design, not an accident: the early-out is the ONLY thing
-        // standing between the two passes.
-        //
-        // THE DEFECT THIS PINS. `available` was a UTF-16 code-unit subtraction, and `min_width` is a
-        // CHARACTER count. One astral character is two code units, so `available` read 2 where
-        // upstream reads 1, the early-out did not fire, the non-partial pass ran and SUCCEEDED, and
-        // the partial retry upstream performs never happened. The comment that stood here claimed
-        // the mismatch was safe because "the engine simply does the work and fails in the dispatch
-        // loop instead - the same answer". It is not the same answer: a pass that SUCCEEDS is not a
-        // pass that fails, and the fallback is what it suppresses.
-        //
-        // WHAT MAKES A ONE-CHARACTER SUBJECT TOO NARROW AT ALL is a separate upstream oddity, and it
-        // is what the family that found this is made of: `min_width` counts a group CALL at the
-        // width of the group it calls even inside a LOOKAROUND, which is zero-width. So
-        // `(?P<g1>A)(?:(?<=(?P>g1))\w)?` has min_width 2 where the same lookbehind written out has
-        // 1. Not fixed here - upstream's answer is reproduced, and the divergence was ours.
+        // D49 (ledger entry 60) removed that inflation: the width was the called group's backwards
+        // copy, compiled after the pattern's SUCCESS, and a call reached from a lookbehind consumes
+        // nothing. `min_width` is now a true lower bound, so the early-out can no longer change an
+        // answer, and the character count S40c fixed is no longer visible from outside. The rows
+        // now answer what upstream gives with the call written out: a complete match (regex
+        // 2026.9.10, 2026-09-30, `\w*(?P<g1>A)(?:(?<=A)\w)?` over 'A' and `\w*(?P<g1>ABC)(?:(?<=ABC)\w)?`
+        // over 'ABC', both partial False).
         string astral = char.ConvertFromUtf32(0x10400);
 
-        // regex.search(r'(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?', '\U00010400', partial=True)
-        //   -> span (0, 1) codepoints, g1 (0, 1), partial True. Two code units here.
         Match forward = new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?").Match(astral, partial: true);
 
-        forward.Success.Should().BeTrue();
-        (forward.Index, forward.Length).Should().Be((0, 2));
-        forward.PartialMatch.Should().BeTrue("one character is available and min_width is 2");
-        (forward.Groups["g1"].Index, forward.Groups["g1"].Length).Should().Be((0, 2));
+        (forward.Success, forward.Index, forward.Length, forward.PartialMatch).Should().Be((true, 0, 2, false));
 
-        // regex.fullmatch(r'(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?', '\U00010400', partial=True)
-        //   -> span (0, 1) codepoints, g1 UNSET, partial True.
-        Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
-
-        reversed.Success.Should().BeTrue();
-        (reversed.Index, reversed.Length).Should().Be((0, 2));
-        reversed.PartialMatch.Should().BeTrue("the same early-out, through a lookahead under (?r)");
-        reversed.Groups["g1"].Success.Should().BeFalse("upstream drops g1 when the partial pass answers");
-
-        // THE THRESHOLD MOVES WITH THE CALLEE'S WIDTH, which is what says the early-out is the
-        // mechanism rather than the call. Every row below keeps the tail past the end of the subject
-        // - a `\w*` prefix soaks up the spare characters - so the ONLY thing that varies is how many
-        // characters the early-out counts. All measured on regex 2026.7.19 and re-run unchanged on
-        // 2026.9.10: `python tools/probes/upstream-min-width-partial-retry.py`.
-        //
-        //   \w*(?P<g1>A)(?:(?<=(?P>g1))\w)?     'A'       partial   min_width 2, 1 available
-        //   \w*(?P<g1>A)(?:(?<=(?P>g1))\w)?     'BA'      complete  min_width 2, 2 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'ABC'     partial   min_width 6, 3 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'XXABC'   partial   min_width 6, 5 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'XXXABC'  complete  min_width 6, 6 available
-        //   \w*(?P<g1>A)(?:(?<=A)\w)?           'A'       complete  min_width 1, never fires
-        //   \w*(?P<g1>ABC)(?:(?<=ABC)\w)?       'ABC'     complete  min_width 3, never fires
         var narrow = new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=(?P>g1))\w)?");
-        narrow.Match("A", partial: true).PartialMatch.Should().BeTrue();
+        narrow.Match("A", partial: true).PartialMatch.Should().BeFalse();
         narrow.Match("BA", partial: true).PartialMatch.Should().BeFalse();
 
         var wide = new FuzzyRegex(@"\w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?");
-        wide.Match("ABC", partial: true).PartialMatch.Should().BeTrue();
-        wide.Match("XXABC", partial: true).PartialMatch.Should().BeTrue();
-        wide.Match("XXXABC", partial: true).PartialMatch.Should().BeFalse();
+        wide.Match("ABC", partial: true).PartialMatch.Should().BeFalse();
+        wide.Match("XXABC", partial: true).PartialMatch.Should().BeFalse();
 
-        // The same lookarounds written out, where min_width is the body's own width and the
-        // early-out never fires. Both engines answer a complete match.
-        new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=A)\w)?")
-            .Match("A", partial: true)
+        new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=A)\w)?").Match("A", partial: true).PartialMatch.Should().BeFalse();
+
+        // A REQUIRED tail is still a partial, in both engines: the tail itself asks for a character
+        // past the end.
+        new FuzzyRegex(@"\w*(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)")
+            .Match(astral, partial: true)
             .PartialMatch.Should()
-            .BeFalse();
-        new FuzzyRegex(@"\w*(?P<g1>ABC)(?:(?<=ABC)\w)?").Match("ABC", partial: true).PartialMatch.Should().BeFalse();
-
-        // And the astral pair from the probe, which is the row that used to answer by character
-        // width: one astral character is too narrow, one astral character behind a spare one is not.
-        var astralNarrow = new FuzzyRegex(@"\w*(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?");
-        astralNarrow.Match(astral, partial: true).PartialMatch.Should().BeTrue();
-        astralNarrow.Match("B" + astral, partial: true).PartialMatch.Should().BeFalse();
+            .BeTrue();
     }
 
     [Test]

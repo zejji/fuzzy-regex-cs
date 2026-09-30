@@ -2153,6 +2153,14 @@ internal sealed class CallRef : RegexBase
 
     /// <inheritdoc />
     /// <remarks>
+    /// Not in upstream, which never walks a copy (D40): <see cref="ParseFunctions.ResolveCallsInCopy"/>
+    /// walks this one to point its calls at the references for its own features.
+    /// </remarks>
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        _parsed.FixGroups(pattern, reverse, fuzzy);
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Upstream calls <c>self.parsed._compile(...)</c>, not <c>compile</c>. The two are the same
     /// call for every node - <c>RegexBase.compile</c> only forwards - so this uses the public one.
     /// </remarks>
@@ -2541,6 +2549,18 @@ internal class String : RegexBase
     internal bool Required { get; set; }
 
     /// <summary>
+    /// The direction the prefilter scans for this run, the pattern's own. Not in upstream (D47):
+    /// see <see cref="CompileCore"/>.
+    /// </summary>
+    internal bool RequiredReverse { get; set; }
+
+    /// <summary>
+    /// Whether the mark goes on every exact compile, as upstream's does. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool RequiredInEveryDirection { get; set; }
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
     /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
     /// </summary>
@@ -2602,7 +2622,14 @@ internal class String : RegexBase
         // and upstream marks that copy too (:4045). The engine skips comparing a marked run where
         // the prefilter found it, which in a fuzzy run would also skip the choices of deleting its
         // matched characters (ledger entry 42). Upstream loses nothing: it pushes no such choices.
-        if (Required && !fuzzy)
+        //
+        // NOT UPSTREAM (D47): nor does a compile in the other direction. `(?R)` inside a
+        // lookbehind compiles the pattern again backwards, and at the prefilter's position the
+        // engine then moved a backwards run to the string's forward end (`ReqEnd`), so
+        // `aa(?:(?<=a(?R)){i<=1}a|)` matched 'aaaa' as (0, 3) with one insertion, in upstream too
+        // (`upstream/src/_regex.c:15109`). The mark only means something where the run is read in
+        // the direction the prefilter found it.
+        if (Required && !fuzzy && (reverse == RequiredReverse || RequiredInEveryDirection))
         {
             flags |= NodeFlags.Required;
         }
@@ -4103,9 +4130,23 @@ internal sealed class LookAround : RegexBase
     internal RegexBase Subpattern { get; set; }
 
     /// <inheritdoc />
-    /// <remarks>The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction.</remarks>
+    /// <remarks>
+    /// The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction, and as
+    /// exact whatever the caller's fuzziness. NOT UPSTREAM (D42), which passes the caller's
+    /// <c>fuzzy</c> (<c>upstream/regex/_regex_core.py</c>:3160) while compiling the body exact
+    /// (:3201, and <see cref="CompileCore"/> here): a call in the body then ran its group fuzzily,
+    /// so <c>(?:(?=(?&amp;g))..){s&lt;=1}(?P&lt;g&gt;ab)?</c> matched 'xb', which
+    /// <c>(?:(?=ab)..){s&lt;=1}</c> does not. The walk registers each call's features, so it must
+    /// pass what the compile will.
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
-        Subpattern.FixGroups(pattern, Behind, fuzzy);
+        Subpattern.FixGroups(pattern, Behind, UpstreamCallFeatures && fuzzy);
+
+    /// <summary>
+    /// Whether the body's calls take the caller's fuzziness, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse)
@@ -4116,7 +4157,7 @@ internal sealed class LookAround : RegexBase
             return subpattern;
         }
 
-        return new LookAround(Behind, Positive, subpattern);
+        return new LookAround(Behind, Positive, subpattern) { UpstreamCallFeatures = UpstreamCallFeatures };
     }
 
     /// <inheritdoc />
@@ -4247,12 +4288,25 @@ internal sealed class LookAroundConditional : RegexBase
     internal RegexBase NoItem { get; set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM (D43): the test is fixed under <see cref="Behind"/>, the direction
+    /// <see cref="CompileCore"/> compiles it in (<c>upstream/regex/_regex_core.py</c>:3267).
+    /// Upstream fixes it under the caller's direction (:3230), so a call in a lookbehind test ran
+    /// its group forwards: <c>bc(?(?&lt;=(?&amp;g))x|y)(?P&lt;g&gt;bc)?</c> refused 'bcxzzz', which
+    /// <c>bc(?(?&lt;=bc)x|y)</c> matches.
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, reverse, fuzzy);
+        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
+
+    /// <summary>
+    /// Whether the test's calls take the caller's direction, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse) =>
@@ -4262,7 +4316,10 @@ internal sealed class LookAroundConditional : RegexBase
             Subpattern.Optimise(info, Behind),
             YesItem.Optimise(info, Behind),
             NoItem.Optimise(info, Behind)
-        );
+        )
+        {
+            UpstreamCallFeatures = UpstreamCallFeatures,
+        };
 
     /// <inheritdoc />
     internal override RegexBase PackCharacters(Info info)

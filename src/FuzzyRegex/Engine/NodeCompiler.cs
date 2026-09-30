@@ -29,6 +29,12 @@ internal struct CompileArgs
     /// <summary>Upstream <c>min_width</c>.</summary>
     internal long MinWidth;
 
+    /// <summary>
+    /// <see cref="MinWidth"/> where the pattern's <c>SUCCESS</c> was built, or -1 before. Not in
+    /// upstream (D49): the pattern's width, without the called copies compiled after it.
+    /// </summary>
+    internal long MinWidthAtSuccess;
+
     /// <summary>Upstream <c>start</c>.</summary>
     internal Node? Start;
 
@@ -159,6 +165,7 @@ internal static class NodeCompiler
             WithinFuzzy = false,
             VisibleCaptureCount = 0,
             InDefine = false,
+            MinWidthAtSuccess = -1,
         };
 
         // Upstream calls set_error(RE_ERROR_ILLEGAL) here and returns FALSE; a status of
@@ -170,7 +177,14 @@ internal static class NodeCompiler
             return false;
         }
 
-        pattern.MinWidth = args.MinWidth;
+        // NOT UPSTREAM (D49): the width the pattern needs is what its own code needs, up to its
+        // SUCCESS. Upstream adds the called copies after it too (`build_CALL_REF`, :24560), whose
+        // width counts only where a call reaches them - and a call inside a lookaround consumes
+        // nothing - so `(?P<g1>\w)(?<=(?&g1))\W` needed three characters and refused 'a ', which
+        // the same pattern with the call written out matches.
+        Debug.Assert(args.MinWidthAtSuccess >= 0, "The pattern's code ends in SUCCESS.");
+        pattern.MinWidth = args.MinWidthAtSuccess;
+        pattern.UpstreamMinWidth = args.MinWidth;
         pattern.IsFuzzy = args.IsFuzzy;
 
         // NOT UPSTREAM (ledger entry 44's addendum): without a fuzzy section no pass spends an
@@ -2171,6 +2185,11 @@ internal static class NodeCompiler
                 case Opcode.Failure:
                 case Opcode.Prune:
                 case Opcode.Success:
+                    if (args.Op == Opcode.Success)
+                    {
+                        args.MinWidthAtSuccess = args.MinWidth;
+                    }
+
                     status = BuildSuccess(ref args);
                     if (status != _success)
                     {

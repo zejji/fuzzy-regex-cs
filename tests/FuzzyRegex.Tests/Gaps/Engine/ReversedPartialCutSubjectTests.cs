@@ -90,7 +90,7 @@ public sealed class ReversedPartialCutSubjectTests
     }
 
     [Test]
-    public void A_reversed_fullmatch_that_fills_its_slice_is_still_a_partial()
+    public void A_reversed_fullmatch_that_fills_its_slice_is_complete_as_over_the_slice()
     {
         // Gate seed 4242 row 102408, generator `partial-sliced`, flags 0x100.
         // Both sides find the same two-character match. They disagree only about whether it is
@@ -98,12 +98,16 @@ public sealed class ReversedPartialCutSubjectTests
         // subject upstream calls it partial too.
         // UPSTREAM OVER THE SLICE:       0:(2,2) 1:(3,1)            (complete)
         // UPSTREAM OVER THE CUT SUBJECT: 0:(2,2) 1:(3,1) partial
+        // Since D49 (ledger entry 60) this port answers complete, as upstream does over the slice:
+        // the cut subject's partial came from upstream's minimum width counting the lookahead's
+        // call, and with the call written out, `(?!(?&g1))` as `(?![^a-f])`, upstream answers the
+        // cut subject 'sS' complete as well (regex 2026.9.10, 2026-09-30).
         FuzzyRegex re = new(
             @"(?r)[\p{L}||\p{N}]{1,}(?P<g1>[^a-f])(?:(?(1)(?!(?&g1))[^a-f]))$",
             FuzzyRegexOptions.Version1
         );
 
-        Describe(re.FullMatch("ısSıﬁ", 2, 2, partial: true)).Should().Be("0:(2,2) 1:(3,1) partial");
+        Describe(re.FullMatch("ısSıﬁ", 2, 2, partial: true)).Should().Be("0:(2,2) 1:(3,1)");
     }
 
     [Test]

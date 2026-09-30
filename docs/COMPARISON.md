@@ -1716,6 +1716,81 @@ Console.WriteLine(m.FuzzyCounts.Total);   // 0
 
 There is no option to restore the upstream answer. Ledger entry 32.
 
+### The calls inside a called group run with the call's direction and fuzziness too
+
+A call such as `(?&g)` matches what the group's body would match written out at the call: exactly
+outside a fuzzy section, fuzzily inside one. Upstream compiles the called group that way, but the
+calls that group makes in turn keep the features of where they are written, so a fuzzy call can
+reach an exact group, and an exact call a fuzzy one, which crashes upstream.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}").Match("aab").Length); // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)").Match("ba").Success); // False - upstream: crashes
+```
+
+Upstream gives this port's answers with the calls written out. There is no option to restore the
+upstream answer. Ledger entry 56.
+
+### A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does
+
+A lookaround's body is exact even inside a fuzzy section, in both engines. Upstream nevertheless
+runs a call in that body fuzzily; here it runs exactly, as its body written out would.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success); // False - upstream: True
+Console.WriteLine(new FuzzyRegex("(?:(?=ab)..){s<=1}").Match("xb").Success); // False - upstream: False
+```
+
+There is no option to restore the upstream answer. Ledger entry 57.
+
+### A call in a conditional's lookbehind test runs its group backwards
+
+A conditional's lookbehind test reads backwards from the current position. Upstream runs a call in
+that test forwards; here it runs backwards, as its body written out would.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz").Length); // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex("bc(?(?<=bc)x|y)").Match("bcxzzz").Length); // 3 - upstream: 3
+```
+
+There is no option to restore the upstream answer. Ledger entry 58.
+
+### A backwards copy of the whole pattern does not skip to the required string's forward end
+
+A `(?R)` inside a lookbehind runs the whole pattern backwards. Upstream's backwards copy still
+carries the mark of the pattern's required string, and at the place the prefilter found that string
+it jumps to the string's forward end, so the lookbehind leaves the text position in the wrong place.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaaa").Length); // 4 - upstream: 3
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaab").Length); // 2 - upstream: 3
+```
+
+There is no option to restore the upstream answer. Ledger entry 59.
+
+### A called copy adds nothing to the pattern's minimum width
+
+A group called from a lookbehind needs a backwards copy of the group. Upstream counts that copy's
+width in the pattern's minimum width, although a lookbehind consumes nothing, and refuses subjects
+the pattern matches.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a ").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); // 2 - upstream: 2
+```
+
+There is no option to restore the upstream answer. Ledger entry 60.
+
 ### `BestMatch` keeps a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

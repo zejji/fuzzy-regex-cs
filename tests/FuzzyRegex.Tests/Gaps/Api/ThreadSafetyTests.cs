@@ -838,6 +838,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
+            // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never
+            // read by the library. Only OracleComparer.RunWithTheUpstreamCallFeatures reads it, to
+            // put upstream's width back on a pattern compiled for that one call.
+            "PatternObject.UpstreamMinWidth",
             "PatternObject.NamedListIndexes",
             "PatternObject.NamedLists",
             "PatternObject.PatternCallRef",

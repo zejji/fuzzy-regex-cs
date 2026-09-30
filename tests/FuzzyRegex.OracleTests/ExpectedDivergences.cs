@@ -3136,6 +3136,29 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The twelve rows of <c>group-call-runs-with-its-call-sites-features</c>, recorded 2026-09-30
+    /// by <c>python tools/record-oracle.py --rows tools/probes/call-site-features-rows.jsonl</c>: two
+    /// rows each for D40's fuzzy copy, D42 and D43 (the NestedGroupCallTests rows), and six rows of
+    /// the D40 grid (tools/probes/d40-copy-call-grid, seed 20260930) where upstream disagrees with
+    /// its own answer for the pattern with the calls written out. Grid rows whose lookarounds also
+    /// carry D10's capture (ledger entry 54) are left out: this entry's ablation does not undo that.
+    /// </summary>
+    private const string _callSiteFeaturesRows = """
+        {"generator": "rows", "pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g>a)(?:b(?:(?R)){s<=1}|c(?&g))", "flags": 0, "namedLists": {}, "subject": "abacb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?=(?&g))..){s<=1}(?P<g>ab)?", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?:..(?<=(?&g))){s<=1}(?P<g>ab)?", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "bc(?(?<=(?&g))x|y)(?P<g>bc)?", "flags": 0, "namedLists": {}, "subject": "bcxzzz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "bc(?(?<!(?&g))x|y)(?P<g>bc)?", "flags": 0, "namedLists": {}, "subject": "bcyzzz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?<=(?P>g2))a|(?&g2)))(?:(?P<g2>b)){d<=1}", "flags": 0, "namedLists": {}, "subject": "aaaababb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?P<g2>(?(?<!(?P>g3))bb|b)b))(?:(?P<g3>b)){e<=1}", "flags": 0, "namedLists": {}, "subject": "abbba", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 3, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?<=(?P>g2))(?P>g2)|b))(?:(?P<g2>bb)){s<=1}", "flags": 0, "namedLists": {}, "subject": "aabbaabaa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?P>g2)(?(?<=(?&g2))b|.*))){e<=1}(?P<g2>a)", "flags": 0, "namedLists": {}, "subject": "ababaaaab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?&g2)b)){d<=1}(?P<g2>(?:(?P<g3>a)){s<=1}(?P>g3))", "flags": 0, "namedLists": {}, "subject": "ababaaa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?&g2))){e<=1}(?P<g2>(?:(?<=(?P>g3)a)){d<=1}(?:(?P<g3>.*)){s<=1})", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0], [1, 0]]}, {"number": 3, "success": true, "index": 1, "length": 0, "captures": [[0, 0], [1, 0], [0, 0], [1, 0]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}]}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c>, recorded
     /// 2026-09-29 by <c>python tools/record-oracle.py --rows tools/probes/lookaround-call-capture-rows.jsonl</c>:
     /// the four lookaround kinds, a call by name, a partial match, a fuzzy call and a conditional
@@ -3469,6 +3492,61 @@ internal static class ExpectedDivergences
             Example: _lookaroundInsertionRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
+        ),
+        new(
+            Id: "group-call-runs-with-its-call-sites-features",
+            Reason: "A GROUP CALL RUNS HERE WITH THE DIRECTION AND FUZZINESS OF ITS CALL SITE, as the called "
+                + "body written out there would; upstream disagrees with its own written-out form. Ledger "
+                + "entries 56-60, known defects D40, D42, D43, D48 and D49, fixed 2026-09-30 and recorded as "
+                + "deliberate divergences in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECTS: (D40) a group called with other features than where it is written "
+                + "is compiled again as a copy (upstream/regex/_regex_core.py:4420), but the calls inside "
+                + "the copy keep the references resolved for where they are written, so a fuzzy copy calls "
+                + "the exact compile of the next group, and an exact copy calls the fuzzy one and segfaults "
+                + "(`regex.search(r'(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)', 'ba')`); "
+                + "`regex.search(r'(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}', 'aab')` is None while "
+                + "`(?P<g3>a)(?P<g4>a)(?:(?&g4)){s<=1}` is (0, 3). (D42) a lookaround's calls are "
+                + "registered with the caller's fuzziness (:3160) while its body is compiled exact (:3201): "
+                + "`(?:(?=(?&g))..){s<=1}(?P<g>ab)?` matches 'xb', `(?:(?=ab)..){s<=1}` does not. (D43) a "
+                + "conditional's lookbehind test's calls are registered with the caller's direction "
+                + "(:3230) while the test is compiled backwards (:3267): `bc(?(?<=(?&g))x|y)(?P<g>bc)?` "
+                + "refuses 'bcxzzz', `bc(?(?<=bc)x|y)` matches it. (D48) a backwards copy of the whole "
+                + "pattern carries the required string's mark, and at the prefilter's position the run jumps "
+                + "to the string's forward end (`_regex.c:15109`): `aa(?:(?<=a(?R)){i<=1}a|)` over 'aaaa' is "
+                + "(0, 3). (D49) the copies compiled after SUCCESS count towards min_width (:24560), so "
+                + "`(?P<g1>\\w)(?<=(?&g1))\\W` refuses 'a ', which `(?P<g1>\\w)(?<=\\w)\\W` matches.\n"
+                + "THE FIX resolves each copy's calls for the copy's own features "
+                + "(`ParseFunctions.ResolveCallsInCopy`) and registers each lookaround body's calls as "
+                + "compiled, marks the required string only in its own direction, and takes min_width at "
+                + "SUCCESS. Over the D40 grids (2,000 rows each at seeds 20260930 and 7, and the first padded) "
+                + "the port's answer equals its own written-out answer on every row that has one. PCRE2 "
+                + "10.47 and Perl give the written-out answer on the rows without fuzziness (blind review, "
+                + "2026-09-30); the rule for fuzziness is upstream's own (`_check_group_features`), applied "
+                + "consistently.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamCallFeatures`, which restores upstream's call features "
+                + "and min_width at compile time with entries 42 and 44 off, reproduces upstream's recorded "
+                + "answer exactly, AND this port's live answer is the one being judged. Also here: a row "
+                + "where that ablated run reaches a fuzzy item with no fuzzy section in force, which is "
+                + "D40's crash; upstream segfaults there or, when the pointer happens to hold an old "
+                + "section, answers from it, which no ablation can reproduce. Rows that also carry another "
+                + "entry's divergence are not accounted for here (D40 grid row 1655 is one). The control is "
+                + "`A_row_the_call_site_features_do_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.NestedGroupCallTests",
+            Example: _callSiteFeaturesRows,
+            Applies: static (row, ours) =>
+                OracleComparer.RunWithTheUpstreamCallFeatures(row) is { } ablated
+                && (
+                    OnlyTheAblationExplainsIt(row, ours, ablated)
+                    || (
+                        ablated is ErrorOutcome { WhileMatching: true } crash
+                        && (
+                            string.Equals(crash.Exception, nameof(NullReferenceException), StringComparison.Ordinal)
+                            || crash.Message.Contains("no fuzzy section in force", StringComparison.Ordinal)
+                        )
+                        && IsTheLiveAnswer(row, ours)
+                    )
+                )
         ),
         new(
             Id: "group-call-in-a-discarded-lookaround-leaves-no-capture",

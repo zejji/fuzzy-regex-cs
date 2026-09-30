@@ -103,6 +103,15 @@ internal sealed class Info
     /// </summary>
     internal bool UpstreamWholePatternCall { get; init; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether each group call gets the direction and
+    /// fuzziness upstream gives it. A copy's calls keep the references resolved for where they are
+    /// written (D40), a lookaround's calls take the caller's fuzziness (D42), and a conditional's
+    /// test takes the caller's direction (D43). The oracle sets it to show that those fixes are the
+    /// whole of a divergence; see <see cref="ParseFunctions.ResolveCallsInCopy"/>.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
+
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
 

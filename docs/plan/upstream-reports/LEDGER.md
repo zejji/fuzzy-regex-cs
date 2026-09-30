@@ -4017,22 +4017,6 @@ to the earlier span, as the owner's ranking rule says it should. Row 3752 itself
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
 
-**Addendum, 2026-09-30 (known defect D45).** The same stale total has a second door: an atomic
-group, lookaround or condition that throws its body away puts the counts back (`_regex.c:15277`,
-`:15421`, `:17160`) and leaves the total its sections wrote. Measured on 2026.9.10:
-
-```
-search(r'(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'cdcx')  -> (0, 1) counts (0, 0, 1)   expected (1, 3) counts (0, 0, 0)
-search(r'(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'dcx')      -> (0, 2) counts (0, 0, 0)   (the control: the exact match exists)
-search(r'(?b)(?:(?!(?:q){e<=1})|c)', 'c')                      -> (0, 0)                    expected (0, 1)
-search(r'(?:(?!(?:q){e<=1})|c)', 'c')                          -> (0, 1)                    (the control: the first match is perfect)
-```
-
-This port saves both totals with the counts at those constructs and restores them in their eight
-restoring arms (`MatchState.PushSubAttemptFuzzyState`), and `start_match` zeroes them for an attempt a
-verb ended. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs` and oracle entry
-`fuzzy-total-drops-a-discarded-section`.
-
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -5506,6 +5490,167 @@ port, each a match with more errors than the section allows, errors it does not 
 another first success; the eleventh differed from upstream before the fix as well. The oracle entry
 `fuzzy-whole-pattern-call-returns-to-its-caller` keys on `Info.UpstreamWholePatternCall`. The default
 oracle waves at seeds 7, 4242 and 20260927 draw no such row.
+
+## 56. The calls inside a called group's copy keep the features of where they are written, so an exact copy segfaults and a fuzzy one loses matches - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D40. Draft report:
+`entry-56-copy-call-features.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)', 'ba')   -> access violation     expected None
+search(r'a(?:(?P<g4>a)){s<=1}(?P<g3>a)', 'ba')             -> None                 (the control: the calls written out)
+search(r'(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}', 'aab')  -> None                 expected (0, 3), one substitution
+search(r'(?P<g3>a)(?P<g4>a)(?:(?&g4)){s<=1}', 'aab')       -> (0, 3), (1, 0, 0)    (the control)
+search(r'(?P<g>a)(?:b(?:(?R)){s<=1}|c(?&g))', 'abacb')     -> None                 expected (0, 5), one substitution
+search(r'(?P<g>a)(?:b(?:(?R)){s<=1}|ca)', 'abacb')         -> (0, 5), (1, 0, 0)    (the control)
+```
+
+**Why upstream is wrong.** Upstream's own rule is that a call runs the called group with the call
+site's direction and fuzziness: `_check_group_features` (`upstream/regex/_regex_core.py:4420-4457`)
+compiles a copy of the group with the caller's features whenever they differ from where the group
+is written. But each call is resolved once, for where it is written (`call.call_ref`, `:4454`;
+`CallGroup._compile`, `:2557`), and a copy compiles the same call nodes. So the calls inside an
+exact copy of a group written in a fuzzy section still reach the fuzzy compile of the next group,
+whose first failing item runs with no fuzzy section in force: `any_error_permitted` reads
+`state->fuzzy_node->values` (`upstream/src/_regex.c:9667`) with `fuzzy_node` NULL, the access
+violation above. The other way round, a fuzzy copy's calls reach the exact compile, and the error
+the section allows is refused. The written-out controls, which upstream answers without a call,
+give the answers expected here.
+
+**Proposed fix upstream:** resolve the calls inside each additional copy for the copy's own
+features, as `_check_group_features` does for the pattern: walk the copy with `fix_groups` from its
+features and look each call up again, adding copies for any new key, before compiling it.
+
+**This port.** `ParseFunctions.ResolveCallsInCopy`, called from `PatternCompiler` just before each
+copy compiles. `Matcher.AnyErrorPermitted` asserts that a fuzzy section is in force. Pinned by
+`Gaps/Engine/NestedGroupCallTests` and the oracle entry
+`group-call-runs-with-its-call-sites-features`, keyed on `Info.UpstreamCallFeatures`. The grid in
+`tools/probes/d40-copy-call-grid/` (2,000 rows, seed 20260930, Debug) had 138
+NullReferenceExceptions before and none after; with entries 57 and 58, the port's answer equals its
+own answer for the pattern with the calls written out on all 1,932 rows that have one. No other
+engine surveyed has fuzzy sections; PCRE2 runs a subroutine with the options of its definition, so
+it has no copies to get wrong.
+
+## 57. A call inside a lookaround in a fuzzy section runs its group fuzzily, while the lookaround's own body is exact - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D42. Draft report:
+`entry-57-lookaround-call-fuzziness.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?:(?=(?&g))..){s<=1}(?P<g>ab)?', 'xb')    -> (0, 2), (1, 0, 0)   expected None
+search(r'(?:(?=ab)..){s<=1}', 'xb')                 -> None                (the control: the call written out)
+search(r'(?:..(?<=(?&g))){s<=1}(?P<g>ab)?', 'xb')   -> (0, 2), (1, 0, 0)   expected None
+search(r'(?:..(?<=ab)){s<=1}', 'xb')                -> None                (the control)
+```
+
+**Why upstream is wrong.** `LookAround._compile` compiles the body exact whatever the caller's
+fuzziness (`upstream/regex/_regex_core.py:3201`, `self.subpattern.compile(self.behind)`), so a
+literal in the body must match exactly. `LookAround.fix_groups` registers the body's calls with the
+caller's fuzziness (`:3160`), so a call there runs the group's fuzzy copy instead. A call must
+behave as its body written out, and the written-out controls answer None.
+
+**Proposed fix upstream:** `self.subpattern.fix_groups(pattern, self.behind, False)` in
+`LookAround.fix_groups`.
+
+**This port.** `LookAround.FixGroups` passes `false`. Pinned by `Gaps/Engine/NestedGroupCallTests`
+(`A_call_inside_a_lookaround_in_a_fuzzy_section_runs_exactly`) and the oracle entry above. D40's
+grid row 1914 needs this fix: with entry 55 alone, the fuzzy copy of a group holding such a
+lookaround ran its call fuzzily there too.
+
+## 58. A call in a conditional's lookbehind test runs its group forwards - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D43. Draft report:
+`entry-58-conditional-lookbehind-call-direction.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'bc(?(?<=(?&g))x|y)(?P<g>bc)?', 'bcxzzz')   -> None                expected (0, 3)
+search(r'bc(?(?<=bc)x|y)', 'bcxzzz')                -> (0, 3), (0, 0, 0)   (the control: the call written out)
+search(r'bc(?(?<!(?&g))x|y)(?P<g>bc)?', 'bcyzzz')   -> None                expected (0, 3)
+search(r'bc(?(?<!bc)x|y)', 'bcyzzz')                -> (0, 3), (0, 0, 0)   (the control)
+```
+
+The subjects end in 'zzz' only to stay longer than the call's inflated minimum width, which
+refuses 'bcx' before matching starts in both engines (see `Gaps/Engine/GroupCallTests`).
+
+**Why upstream is wrong.** `LookAroundConditional._compile` compiles the test in its own direction
+(`upstream/regex/_regex_core.py:3267`, `self.subpattern.compile(self.behind, fuzzy)`), but
+`fix_groups` registers the test's calls with the caller's direction (`:3230`), so a call in a
+lookbehind test runs the group's forward compile from the current position.
+
+**Proposed fix upstream:** `self.subpattern.fix_groups(pattern, self.behind, fuzzy)` in
+`LookAroundConditional.fix_groups`.
+
+**This port.** `LookAroundConditional.FixGroups` walks the test under `Behind`. Pinned by
+`Gaps/Engine/NestedGroupCallTests` (`A_call_in_a_conditional_lookbehind_test_runs_backwards`) and
+the oracle entry above. D40's grid rows 343, 388, 569, 629, 1655 and 1796 carry it.
+
+## 59. A backwards copy of the whole pattern carries the required string's mark, so its run jumps to the string's forward end - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D48. Draft report:
+`entry-59-backwards-copy-required-string.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaaa')   -> (0, 3), (0, 1, 0)   expected (0, 4), (0, 1, 0)
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaab')   -> (0, 3), (0, 1, 0)   expected (0, 2), (0, 0, 0)
+```
+
+**Why upstream is wrong.** The (0, 3) spans a match whose last `a` was read at 2, after an
+insertion at 2: the text position went back by one. `_get_required_string` marks the pattern's
+required run (`upstream/regex/_regex_core.py:4464`), and the engine skips comparing a marked run
+where the prefilter found it, moving to `req_end` (`STRING_REV`, `upstream/src/_regex.c:15109`).
+The `(?R)` inside the lookbehind compiles the whole pattern again backwards, marked run included,
+so a backwards `aa` that starts at the prefilter's position lands on the run's forward end. With
+the call written out to depth 2 the port answers (0, 4) with one insertion and (0, 2); upstream
+answers (0, 2) on both written-out rows, because it never passes a failing lookaround with an
+insertion (entry 50), and D40's review row `aa(?<=(?<=aa(?R)a)(?:q?){i<=1})a|aa` over 'aaab' is
+(0, 3) in upstream and (0, 2) written out in both engines.
+
+**Proposed fix upstream:** mark the run only in the compile whose direction the prefilter
+searched: compile the additional copies with `required` cleared, or check the node's direction
+in the skip.
+
+**This port.** `String.CompileCore` marks the run only when `reverse` equals the direction it was
+found in (`String.RequiredReverse`); D34 already left it off the fuzzy copies. Pinned by
+`Gaps/Engine/NestedGroupCallTests` and the oracle entry `group-call-runs-with-its-call-sites-features`.
+
+## 60. The called copies after SUCCESS count towards the pattern's minimum width - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D49. Draft report:
+`entry-60-copy-min-width.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?P<g1>\w)(?<=(?&g1))\W', 'a ')   -> None       expected (0, 2)
+search(r'(?P<g1>\w)(?<=\w)\W', 'a ')       -> (0, 2)     (the control: the call written out)
+search(r'(a)b(?<=(?1)b)', 'ab')            -> None       expected (0, 2)
+search(r'(a)b(?<=ab)', 'ab')               -> (0, 2)     (the control)
+```
+
+**Why upstream is wrong.** The copies of called groups (`additional_groups`) are compiled after
+the pattern's `SUCCESS`, and `build_CALL_REF` adds each copy's width to `min_width`
+(`upstream/src/_regex.c:24560`) as if it were matched in sequence. A copy is only reached through a
+call, and a call inside a lookbehind consumes nothing, so the pattern above needs two characters,
+not three; `do_exact_match`'s width early-out (`:18064`) then refuses a subject the pattern matches.
+With a partial request the same early-out skips the non-partial pass, so a complete match is
+reported as partial (`GroupCallTests`, `PartialMatchingTests`).
+
+**Proposed fix upstream:** take `min_width` where `SUCCESS` is built, before the additional copies.
+
+**This port.** `NodeCompiler` takes the width at `SUCCESS` (`CompileArgs.MinWidthAtSuccess`);
+`PatternObject.UpstreamMinWidth` keeps upstream's for the oracle's ablation. The tests that pinned
+the inflation (S40c) now assert the written-out answers. Pinned by `Gaps/Engine/NestedGroupCallTests`
+and the oracle entry above.
 
 ## 61. A fuzzy section a verb cut through stays open, and its limits govern what follows - FIXED HERE (2026-09-30)
 
