@@ -3253,6 +3253,41 @@ position - that is what `(?b)` is for - but it cannot make a position stop match
 found - rather than an expected span list. That is true whatever the right answer set turns out to
 be, so it does not commit S50 to spans this slice has no authority to fix.
 
+### Addendum to 19 and 20, 2026-09-30: the assertion can be anywhere on the path (known defect D61) - DRAFT - NOT FILED
+
+**Status:** not filed; fixed here on `maint/d61-anchor-insertion` under the owner's ruling of
+2026-09-30 (option B, `docs/plan/DECISIONS.md`). S57c lifted the ban only for an assertion collected
+before the fuzzy section. The same reason holds for one written inside the section or down one
+branch of an alternation, and there both engines still refused:
+
+```python
+>>> regex.search(r'^(?:a){i<=1}', 'xa')          # S57c's case, upstream's own anchoring
+<regex.Match object; span=(0, 2), match='xa', fuzzy_counts=(0, 1, 0)>
+>>> regex.search(r'(?:^a){i<=1}', 'xa')          # the same assertion, inside the section
+None
+>>> regex.search(r'(?:^|q)(?:a){i<=1}', 'xa')    # in an alternation
+None
+>>> [m.span() for m in regex.finditer(r'(?:\ba){i<=1}', 'xa xa')]
+[(3, 5)]                                         # the first 'xa' is lost
+```
+
+Measured 2026-09-30 on regex 2026.9.10. The mechanism is entry 19's line,
+`permit_insertion = !search || text_pos != search_anchor` (`upstream/src/_regex.c:10214`), which
+does not ask what the path has passed. The port now notes, per path, a position assertion that
+holds at the anchor and fails one character on (`Matcher.NotePinningAssertion`), and lifts the ban
+for that path only. The ban itself stays: `(?:dog){e<=1}` over 'dog dog dog' still gives three exact
+matches, and so does `(?:\bdog){e<=1}`, because `\b` holds one character on at each separator.
+
+**What a report would ask for.** The same one-line change as entry 19's: permit the insertion where
+an assertion the path passed at the anchor fails one character on. A lookaround is not counted, as
+in entry 19.
+
+**One effect a reader should know about.** Because the fix only permits insertions, no single
+search loses a match. A finditer can return fewer matches, because an earlier match that now opens
+one character sooner may take text a later one used: `(?:^abc|b|c){i<=1}` over 'xabc' is
+`[(1, 3), (3, 4)]` upstream and `[(0, 4)]` here. None of the oracle rows at seeds 7, 4242 and
+20260927 is of that kind.
+
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
 **Status:** not filed; inherited here. **S50 FIXED IT AND THEN REVERTED THE FIX** - see the end of

@@ -1197,6 +1197,21 @@ anchor and fails one character on, which is exactly the case upstream's own reas
 cover. Everywhere else the upstream rule stands, so `(?:abc){i<=1}` over `"xabc"` still matches
 `abc` rather than `xabc` in both engines.
 
+The assertion does not have to come first. Written inside the fuzzy section, or in one branch of an
+alternation in front of it, it pins the match on the path that passes it, for the same reason:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match inside = new FuzzyRegex("(?:^a){i<=1}").Match("xa");
+Console.WriteLine(inside.Value);   // xa - upstream: no match
+```
+
+Only insertions the upstream rule refuses are added, so no single search loses a match. A
+`Matches` call can return fewer, when an earlier match now opens one character sooner and takes
+text a later one used: `(?:^abc|b|c){i<=1}` over `"xabc"` gives `xabc` here, where upstream gives
+`ab` and `c`.
+
 Upstream contradicts itself here, which is why this is a fix rather than a preference: the same
 pattern over the same span answers two ways according to where the caller started. With
 `\m(?:Y){i}\M`, upstream's `search(" XY", 0)` finds (1, 3) and `search(" XY", 1)` finds nothing.
