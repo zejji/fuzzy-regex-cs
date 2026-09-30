@@ -279,11 +279,7 @@ public sealed class FuzzyPosixTests
 
         string replaced = pattern.Replace("\rA\n", "\\1", 2, out int replacements);
 
-        // Two since D61: the second is the empty match at the end, which upstream's search without
-        // BESTMATCH also finds. Under BESTMATCH upstream loses it, because its candidate walk moves the
-        // search anchor to each candidate (ledger entry 20) and the must-advance test then refuses an
-        // empty match there. POSIX still adds nothing: without it the count is 2 as well.
-        replacements.Should().Be(2);
+        replacements.Should().Be(1);
         replaced.Should().Be("\rA\n");
     }
 

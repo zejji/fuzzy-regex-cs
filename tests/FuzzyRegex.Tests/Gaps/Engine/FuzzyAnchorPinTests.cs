@@ -135,6 +135,62 @@ public sealed class FuzzyAnchorPinTests
         (m.Index, m.Length, m.FuzzyCounts.Total).Should().Be((6, 2, 0));
     }
 
+    // "Cost" is BESTMATCH's own ranking, the weighted cost where the section has weights: two
+    // insertions at cost 1 beat one substitution at cost 3, and one insertion at cost 2 loses to
+    // one substitution at cost 1. A tie goes to the earlier match, c. Upstream: (6, 9), (5, 8) and
+    // (5, 8).
+    [Test]
+    [Arguments(@"(?b)\b(?:dog){1i+3s<=3}", "xxdog dug", 0, 5, 0, 2)]
+    [Arguments(@"(?b)\b(?:dog){2i+1s<=2}", "xdog dug", 5, 8, 1, 0)]
+    [Arguments(@"(?b)\b(?:dog){e<=1}", "xdog dug", 0, 4, 0, 1)]
+    public void Under_bestmatch_cost_is_the_weighted_ranking_and_a_tie_goes_to_the_earlier_match(
+        string pattern,
+        string text,
+        int start,
+        int end,
+        int substitutions,
+        int insertions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, 0));
+    }
+
+    // The answer is always u or c, with u this port's banned answer. Two rows a build broke by
+    // changing how BESTMATCH computes u (keeping the caller's anchor through its candidate walk),
+    // and the issue 564 row the walk's own searches keep under the rule.
+    [Test]
+    public void Under_bestmatch_the_answer_is_upstreams_match_or_the_attempt_at_the_anchor()
+    {
+        Match m = new FuzzyRegex(@"(?b)(?:dog){1<=e<=2}(?=\s|$)").Match("\ndog\n\nzdog\n", 5);
+        (m.Index, m.Index + m.Length).Should().Be((7, 11));
+
+        Spans(@"(?b)(?:(?!x)abc){1<=e<=2}", "xxabc  abc  .abc\n").Should().Equal((1, 5), (7, 11), (13, 17));
+
+        // Upstream issue 564: the looser budget keeps 'XY', which upstream loses.
+        Spans(@"(?b)\m(?:Y){1i+1d+1s<=2}\M", " XY Z").Should().Equal((1, 3), (4, 5));
+    }
+
+    // The gate. A search with partial matching on is gated in, whatever the pattern: dropping the
+    // leading insertion leaves the partial (1, 1), which starts later. A pattern whose fuzzy sections
+    // permit no insertion is gated out. DIVERGES FROM UPSTREAM on the partial row (upstream P(1, 1)).
+    [Test]
+    public void Partial_matching_is_gated_in_and_a_section_without_insertions_is_gated_out()
+    {
+        Match partial = new FuzzyRegex("(?:a){i<=1}").Match("x", partial: true);
+        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Insertions)
+            .Should()
+            .Be((true, 0, 1, 1));
+
+        new FuzzyRegex("(?:a){i<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
+        new FuzzyRegex(@"\b(?:dog){i<=1}").PatternObject.LiftsAnchorBan.Should().BeTrue();
+        new FuzzyRegex(@"\b(?:dog){s<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
+        new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
+        new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBanWhenPartial.Should().BeFalse();
+    }
+
     // Partial matching: a full match is preferred to a partial one, so H' runs on the full pass
     // first. From pos=1 upstream answers P(2, 4); the full attempt at 1, (1, 4) with 'y' inserted,
     // has no full match after it, so it is the answer. DIVERGES FROM UPSTREAM.

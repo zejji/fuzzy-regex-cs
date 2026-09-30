@@ -589,12 +589,12 @@ internal sealed class PatternObject
     internal bool LiftsAnchorBan;
 
     /// <summary>
-    /// Oracle-only: BESTMATCH's candidate walk moves the search anchor to each candidate start, as
-    /// upstream's <c>init_match</c> does (<c>upstream/src/_regex.c</c>:3410), instead of keeping the
-    /// caller's (ledger entry 20, known defect D61). Set only by
-    /// <c>OracleComparer.RunWithoutTheAnchorPin</c>; never by the library.
+    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
+    /// section that permits an insertion, since removing leading insertions can leave a partial match
+    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
+    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
     /// </summary>
-    internal bool UpstreamBestMatchAnchor;
+    internal bool LiftsAnchorBanWhenPartial;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group

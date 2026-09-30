@@ -2461,6 +2461,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?e)(?r)(?p)(?:[^\\d][a\\d]\\p{L}){s<=1,i<=1,d<=1}(\\p{Lu})+\\b", "flags": 8, "namedLists": {}, "subject": " ﬀS", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}]}}
         {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?:\\p{Ll}+.([a]+)){s<=1:\\W}(?:[a](?P<g2>[\\w\\s]*)){e<=1}$", "flags": 65536, "namedLists": {}, "subject": "ıı\rAAﬁ\r\n", "operation": "subf", "template": "{g2}{g2}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "AAﬁ\rAAﬁ\r\r\n", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b(?P<g1>[[:alpha:]]+?)\\L<w1>{s<=1,i<=1,d<=1:\\d}(?<!(?:[a\\d](?P<g2>[\\p{L}\\p{N}]+?)😀){e<=2,i<=1})", "flags": 65544, "namedLists": {"w1": ["😀A", "😀𝔘", "😀𝔘A"]}, "subject": "a😀𐐨😀𝔘\r\nAa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 2]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [0, 2]}]}}
+        {"generator": "interactions", "pattern": "(?b)(?:([a]*)[a]*){s<=1}\\g<1>\\K$", "flags": 81930, "namedLists": {}, "subject": "\rA\n", "operation": "sub", "template": "\\1", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "posixFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)^(?:(?P<g1>[a]??)[a-f]*){e<=1}\\L<w1>{s<=1,i<=1,d<=1:[^a-z]}", "flags": 82058, "namedLists": {"w1": ["AA", "A_", "ß𐐀ß", "ﬃßß"]}, "subject": "AAaA_A", "operation": "subf", "template": "[{{", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "[{", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "[{A", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?r)(?p)(\\p{L})(?:[abz]*(?P<g2>[^\\d])A){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "𐐨𐐨AAaa", "operation": "sub", "template": "\\1-", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "𐐨𐐨-", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?p)^(?:[A-Z][^a-f](\\p{ASCII}{0,})){e<=2}(?>(?:[a\\d]*?(\\s)(\\p{ASCII})){s<=1,i<=1,d<=1})$", "flags": 0, "namedLists": {}, "subject": "aa𝔘𝔘😀", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [4, 1], "deletions": []}}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}}
@@ -2511,9 +2512,7 @@ internal static class ExpectedDivergences
         "matches 2 | match 0:(3,6)[(3,6)] 1:(3,2)[(3,2)] 2:unset last=1/g1 "
             + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:unset last=1/g1 "
             + "fuzzy=(0,0,1)[changes unavailable upstream]",
-        // Row 5 (seed 7 row 24916, the POSIX-invented match) left this entry on 2026-09-30 with
-        // D61: BESTMATCH's walk now keeps the caller's search anchor, so the POSIX-free engine
-        // replaces twice as well, which is upstream's POSIX answer and its (?b)-free one.
+        "sub 1 '\\u000dA\\u000a'",
         // S52 sitting 17's four, sweep rows 10, 12, 18 and 35 in that order.
         "sub 1 '[{A'",
         "sub 1 '\\ud801\\udc28\\ud801\\udc28-'",
@@ -7411,35 +7410,37 @@ internal static class ExpectedDivergences
             Id: "fuzzy-insertion-at-a-pinned-anchor",
             Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where upstream's search "
                 + "finds no match that starts inside the attempt at the anchor (rule H', DECISIONS "
-                + "2026-09-30, known defect D61). Upstream issues 563 and 564, which are one bug; "
-                + "ledger entries 19 and 20 and their D61 addendum; recorded as a deliberate "
-                + "divergence in `docs/DIVERGENCES.md`.\n"
+                + "2026-09-30 and its 2026-10-01 clarification, known defect D61). Upstream issues 563 "
+                + "and 564, which are one bug; ledger entries 19 and 20 and their D61 addendum; "
+                + "recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM RULE IS ONE LINE: `permit_insertion = !search || text_pos != "
                 + "search_anchor` (upstream/src/_regex.c:10214), under its own comment \"Permit "
                 + "insertion except initially when searching (it's better just to start searching "
                 + "one character later)\". It keeps a match from swallowing text where a later match "
                 + "could start, and it loses real matches where none can: `(?:^a){i<=1}` over 'xa' "
                 + "is None upstream and (0, 2) here, as `^(?:a){i<=1}` is in both.\n"
-                + "THE RULE THIS PORT APPLIES INSTEAD: at anchor A, let u be the banned search's "
-                + "answer. If u starts at A it stands. Otherwise let c be the attempt at A without the "
-                + "ban; c is the answer if it exists and u is None or starts at or after c's end, and "
-                + "under BESTMATCH c may not have more errors than u. `Matcher."
-                + "DoMatch2LiftingTheAnchorBan` does exactly that, once per pass. It replaces S57c's "
-                + "exemption (an assertion at the head of the pattern that holds at A and fails one "
-                + "character on), which glued a separator: `\\b(?:dog){e<=2}` finditer over 'dog  dog' "
-                + "gave (3, 8) with two insertions where upstream gives (5, 8). BESTMATCH's candidate "
-                + "walk also keeps the caller's anchor now, where upstream's `init_match` (:3410) "
-                + "moves it to each candidate, which is how issue 564 loses a match.\n"
+                + "THE RULE THIS PORT APPLIES INSTEAD, once per pass: at anchor A, let u be the banned "
+                + "search's answer. If u starts at A it stands. Otherwise let c be the attempt at A "
+                + "without the ban; c is the answer if it exists and u is None or starts at or after "
+                + "c's end, and under BESTMATCH c may not rank worse than u by BESTMATCH's own cost (a "
+                + "tie goes to c, the earlier). `Matcher.DoMatch2LiftingTheAnchorBan` applies it to "
+                + "each search, and `Matcher.BasicMatchLiftingTheAnchorBan` to each search of "
+                + "BESTMATCH's candidate walk, which restarts at the candidate's own start: that is how "
+                + "issue 564 loses 'XY' from `(?b)\\m(?:Y){1i+1d+1s<=2}\\M` over ' XY Z'. It replaces "
+                + "S57c's exemption (an assertion at the head of the pattern that holds at A and fails "
+                + "one character on), which glued a separator: `\\b(?:dog){e<=2}` finditer over "
+                + "'dog  dog' gave (3, 8) with two insertions where upstream gives (5, 8).\n"
                 + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE. A row belongs here when "
                 + "`OracleComparer.RunWithoutTheAnchorPin`, which clears `PatternObject.LiftsAnchorBan` "
-                + "and sets `PatternObject.UpstreamBestMatchAnchor`, makes this port reproduce "
-                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
-                + "judged. The control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
+                + "and `PatternObject.LiftsAnchorBanWhenPartial`, makes this port reproduce upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
                 + "WHAT THE ABLATION CANNOT SEE: a bug inside rule H' itself (dropping the overlap test, "
-                + "say, so that c always wins) still gives upstream's answer when switched off and an "
-                + "insertion at the anchor live, so it would be classified here. The rule's shape is "
-                + "held by tests that carry the expected answers instead: FuzzyAnchorPinTests, whose "
-                + "finditer rows go red on exactly that bug, and the three InheritedIssueTests below.",
+                + "or the cost test, or breaking the tie the other way) still gives upstream's answer "
+                + "when switched off and an insertion at the anchor live, so it would be classified "
+                + "here. The rule's shape is held by tests that carry the expected answers instead: "
+                + "FuzzyAnchorPinTests, which goes red on each of those plants, and the three "
+                + "InheritedIssueTests below.",
             PinnedBy: "FuzzyAnchorPinTests, InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_"
                 + "matches_at_position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_"
                 + "subject and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
@@ -8403,9 +8404,9 @@ internal static class ExpectedDivergences
     /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
     /// </para>
     /// <para>
-    /// Clearing <c>PatternObject.LiftsAnchorBan</c> on a compiled pattern makes every search keep
-    /// upstream's ban, and setting <c>PatternObject.UpstreamBestMatchAnchor</c> moves BESTMATCH's anchor
-    /// as upstream does; the pattern they are set on was compiled for that one call.
+    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c> on a compiled
+    /// pattern makes every search keep upstream's ban, and the pattern they are cleared on was
+    /// compiled for that one call.
     /// </para>
     /// </remarks>
     /// <param name="row">The row, carrying upstream's answer.</param>

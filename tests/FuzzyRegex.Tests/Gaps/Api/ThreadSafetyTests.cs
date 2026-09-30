@@ -741,8 +741,8 @@ public sealed class ThreadSafetyTests
             // Optimiser.FindAnchorBanLift, the last pass OptimisePattern runs, and cleared only by
             // OracleComparer.RunWithoutTheAnchorPin on a pattern compiled for that one call.
             "PatternObject.LiftsAnchorBan",
-            // And UpstreamBestMatchAnchor, likewise set only by that ablation.
-            "PatternObject.UpstreamBestMatchAnchor",
+            // And LiftsAnchorBanWhenPartial, written beside it.
+            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",

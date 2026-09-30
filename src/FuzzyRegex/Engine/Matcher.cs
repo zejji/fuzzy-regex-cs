@@ -15626,16 +15626,6 @@ internal static class Matcher
                 // Initialise the state.
                 state.InitMatch();
 
-                // NOT UPSTREAM (ledger entry 20, known defect D61): the search anchor is where the
-                // caller's search began, not where this walk resumes. Upstream's init_match moves it
-                // to each candidate start (`:3410`), so its insertion ban (`:10214`) bites at a
-                // candidate the caller never searched from: `(?b)\m(?:Y){1i+1d+1s<=2}\M` finditer
-                // over ' XY Z' loses 'XY' where the tighter budget finds it (upstream issue 564).
-                if (search && !state.Pattern.UpstreamBestMatchAnchor)
-                {
-                    state.SearchAnchor = firstStartPos;
-                }
-
                 status = MatchStatus.Success;
                 if (
                     // Upstream tests 'max_errors == 0' because that is what it bounds the pass by;
@@ -15654,7 +15644,12 @@ internal static class Matcher
 
                 if (status == MatchStatus.Success)
                 {
-                    status = BasicMatch(state, search);
+                    // NOT UPSTREAM (D61): rule H' for each search of the walk. The walk searches
+                    // again from the candidate's own start (`startPos = state.MatchPos` below), and
+                    // there upstream's ban refuses the insertion that would open a cheaper fit: that
+                    // is how `(?b)\m(?:Y){1i+1d+1s<=2}\M` over ' XY Z' loses 'XY' (upstream issue 564,
+                    // ledger entry 20). The walk's own ranking then decides between the candidates.
+                    status = BasicMatchLiftingTheAnchorBan(state, search);
                 }
 
                 // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a
@@ -16057,7 +16052,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int DoMatch2LiftingTheAnchorBan(MatchState state, bool search)
     {
-        if (!search || !state.Pattern.LiftsAnchorBan)
+        if (!search || !LiftsTheBan(state))
         {
             return DoMatch2(state, search);
         }
@@ -16080,19 +16075,9 @@ internal static class Matcher
         state.SliceEnd = sliceEnd;
         int attempt = DoMatch2(state, search: false);
 
-        if (attempt is MatchStatus.Success or MatchStatus.Partial)
+        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream))
         {
-            bool nothingInside =
-                upstream is not { } u || (state.Reverse ? u.MatchPos <= state.TextPos : u.MatchPos >= state.TextPos);
-            bool costsNoMore =
-                upstream is not { } v
-                || (state.Pattern.Flags & RegexFlags.BestMatch) == 0
-                || TotalCount(state.FuzzyCounts) <= TotalCount(v.Counts);
-
-            if (nothingInside && costsNoMore)
-            {
-                return attempt;
-            }
+            return attempt;
         }
         else if (attempt is < 0 and not MatchStatus.Partial)
         {
@@ -16108,19 +16093,110 @@ internal static class Matcher
         return banned;
     }
 
-    /// <summary>The sum of a set of fuzzy counts.</summary>
-    /// <param name="counts">The counts.</param>
-    /// <returns>Their total.</returns>
-    private static long TotalCount(long[] counts)
+    /// <summary>
+    /// <see cref="BasicMatch"/> under rule H' (D61), for one search of BESTMATCH's candidate walk:
+    /// the banned search, and when its match does not start where the search began, the anchored
+    /// attempt there without the ban, kept when the banned match does not start inside it.
+    /// </summary>
+    /// <remarks>
+    /// The caller has just called <c>MatchState.InitMatch</c>, so the anchor is the text position.
+    /// No cost test is made here, because the walk ranks what this returns against its own best so
+    /// far, and holds the next search to strictly better. See <see cref="DoMatch2LiftingTheAnchorBan"/>.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int BasicMatchLiftingTheAnchorBan(MatchState state, bool search)
     {
-        long total = 0;
-        foreach (long c in counts)
+        if (!search || !LiftsTheBan(state))
         {
-            total += c;
+            return BasicMatch(state, search);
         }
 
-        return total;
+        int anchor = state.TextPos;
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+        int banned = BasicMatch(state, search);
+
+        if (
+            (banned == MatchStatus.Success && state.MatchPos == anchor)
+            || (banned != MatchStatus.Success && banned != MatchStatus.Failure)
+        )
+        {
+            return banned;
+        }
+
+        AnchorBanSnapshot? upstream = banned == MatchStatus.Success ? AnchorBanSnapshot.Take(state, banned) : null;
+
+        state.TextPos = anchor;
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+        state.InitMatch();
+        int attempt = BasicMatch(state, false);
+
+        if (attempt == MatchStatus.Success && TheAttemptWins(state, upstream))
+        {
+            return attempt;
+        }
+
+        if (attempt is not (MatchStatus.Success or MatchStatus.Failure))
+        {
+            return attempt;
+        }
+
+        if (upstream is null)
+        {
+            return MatchStatus.Failure;
+        }
+
+        upstream.Restore(state);
+        return banned;
     }
+
+    /// <summary>
+    /// Rule H''s test, with the attempt at the anchor in <paramref name="state"/>: the banned match
+    /// is absent or starts at or after the attempt's end, and under BESTMATCH the attempt ranks no
+    /// worse (a tie goes to the attempt, the earlier match).
+    /// </summary>
+    /// <param name="state">The match state, holding the attempt at the anchor.</param>
+    /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
+    /// <returns><see langword="true"/> if the attempt is the answer.</returns>
+    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
+    {
+        if (upstream is null)
+        {
+            return true;
+        }
+
+        bool nothingInside = state.Reverse ? upstream.MatchPos <= state.TextPos : upstream.MatchPos >= state.TextPos;
+
+        return nothingInside
+            && (
+                (state.Pattern.Flags & RegexFlags.BestMatch) == 0
+                || BestMatchRank(state.Pattern, state.FuzzyCounts) <= BestMatchRank(state.Pattern, upstream.Counts)
+            );
+    }
+
+    /// <summary>Whether rule H' can change this search's answer (the compile-time gate).</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the anchored attempt must be considered.</returns>
+    private static bool LiftsTheBan(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+            ? state.Pattern.LiftsAnchorBan
+            : state.Pattern.LiftsAnchorBanWhenPartial;
+
+    /// <summary>
+    /// A match's BESTMATCH rank, which <see cref="DoBestFuzzyMatch"/>'s first walk uses: the weighted
+    /// cost where the pattern has one fuzzy section with weighted costs, and the error count
+    /// otherwise. Lower is better; rule H' keeps the earlier match on a tie.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="counts">The match's fuzzy counts.</param>
+    /// <returns>The rank.</returns>
+    private static long BestMatchRank(PatternObject pattern, long[] counts) =>
+        pattern.FuzzyCount == 1 && pattern.HasWeightedFuzzyCosts
+            ? TotalCost(counts, pattern.SingleFuzzyNode!)
+            : TotalErrors(counts);
 
     /// <summary>
     /// The parts of a match <see cref="DoMatch"/> and its callers read, kept while

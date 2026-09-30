@@ -65,7 +65,7 @@ FieldInfo minWidth = F("MinWidth"),
     upstreamMinWidth = F("UpstreamMinWidth");
 FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
     liftsAnchorBan = F("LiftsAnchorBan"),
-    upstreamBestMatchAnchor = F("UpstreamBestMatchAnchor"),
+    liftsAnchorBanWhenPartial = F("LiftsAnchorBanWhenPartial"),
     upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
     skipTiming = F("SkipMovesTheSliceWhenItRuns"),
     verbScope = F("VerbsAreConfinedToTheInnermostGroup"),
@@ -223,9 +223,9 @@ FuzzyRegex Compile(string pattern, string variant)
             skipLookaroundInsertion.SetValue(pobj, true); // RunWithTheUpstreamMinimumOrder sets both
         if (variant == "xanchor")
         {
-            // RunWithoutTheAnchorPin: rule H' off (D61) and BESTMATCH's walk re-anchored.
+            // RunWithoutTheAnchorPin: rule H' off (D61).
             liftsAnchorBan.SetValue(pobj, false);
-            upstreamBestMatchAnchor.SetValue(pobj, true);
+            liftsAnchorBanWhenPartial.SetValue(pobj, false);
         }
         if (variant == "xboundary")
             upstreamDefaultBoundary.SetValue(pobj, true);

@@ -75,21 +75,28 @@ internal static class Optimiser
     /// <param name="pattern">The pattern.</param>
     internal static void FindAnchorBanLift(PatternObject pattern)
     {
-        pattern.LiftsAnchorBan = false;
-
-        if (!pattern.IsFuzzy)
-        {
-            return;
-        }
-
-        if (pattern.HasFuzzyMinimum || pattern.HasGroupCalls)
-        {
-            pattern.LiftsAnchorBan = true;
-            return;
-        }
-
-        pattern.LiftsAnchorBan = pattern.NodeList.Any(static n => DependsOnThePosition(n.Op));
+        // A pattern whose fuzzy sections permit no insertion never meets the ban.
+        pattern.LiftsAnchorBanWhenPartial = pattern.IsFuzzy && pattern.NodeList.Any(static n => PermitsAnInsertion(n));
+        pattern.LiftsAnchorBan =
+            pattern.LiftsAnchorBanWhenPartial
+            && (
+                pattern.HasFuzzyMinimum
+                || pattern.HasGroupCalls
+                || pattern.NodeList.Any(static n => DependsOnThePosition(n.Op))
+            );
     }
+
+    /// <summary>
+    /// Whether a node is a fuzzy section that permits at least one insertion: its insertion and
+    /// error limits are above zero, and one insertion is within its cost limit.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> for such a section.</returns>
+    private static bool PermitsAnInsertion(Node node) =>
+        node.Op == Opcode.Fuzzy
+        && node.Values[FuzzyValue.MaxIns] > 0
+        && node.Values[FuzzyValue.MaxErr] > 0
+        && node.Values[FuzzyValue.InsCost] <= node.Values[FuzzyValue.MaxCost];
 
     /// <summary>
     /// Whether an opcode is one of the constructs that gate rule H' in (see
