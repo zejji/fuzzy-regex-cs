@@ -16068,7 +16068,7 @@ internal static class Matcher
             return banned;
         }
 
-        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state, banned) : null;
+        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state) : null;
 
         state.TextPos = anchor;
         state.SliceStart = sliceStart;
@@ -16126,7 +16126,7 @@ internal static class Matcher
             return banned;
         }
 
-        AnchorBanSnapshot? upstream = banned == MatchStatus.Success ? AnchorBanSnapshot.Take(state, banned) : null;
+        AnchorBanSnapshot? upstream = banned == MatchStatus.Success ? AnchorBanSnapshot.Take(state) : null;
 
         state.TextPos = anchor;
         state.SliceStart = sliceStart;
@@ -16203,7 +16203,7 @@ internal static class Matcher
     /// <see cref="DoMatch2LiftingTheAnchorBan"/> runs the attempt at the anchor, so that upstream's
     /// match can be put back.
     /// </summary>
-    private sealed class AnchorBanSnapshot
+    internal sealed class AnchorBanSnapshot
     {
         internal int MatchPos;
         internal int TextPos;
@@ -16215,21 +16215,32 @@ internal static class Matcher
         internal List<FuzzyChange> Changes = [];
         internal GroupData[] Groups = [];
 
-        internal static AnchorBanSnapshot Take(MatchState state, int status)
+        /// <summary>
+        /// Saves the match into the state's one snapshot, reusing its storage: at most one is live at
+        /// a time, because the walk's snapshots are done with before the search's is taken.
+        /// </summary>
+        /// <param name="state">The match state.</param>
+        /// <returns>The snapshot.</returns>
+        internal static AnchorBanSnapshot Take(MatchState state)
         {
-            _ = status;
-            return new AnchorBanSnapshot
+            AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
+            snapshot.MatchPos = state.MatchPos;
+            snapshot.TextPos = state.TextPos;
+            snapshot.HitEnd = state.HitEnd;
+            snapshot.HitEndMatchPos = state.HitEndMatchPos;
+            snapshot.Errors = state.TotalErrors;
+            snapshot.Cost = state.TotalCost;
+
+            if (snapshot.Counts.Length != state.FuzzyCounts.Length)
             {
-                MatchPos = state.MatchPos,
-                TextPos = state.TextPos,
-                HitEnd = state.HitEnd,
-                HitEndMatchPos = state.HitEndMatchPos,
-                Errors = state.TotalErrors,
-                Cost = state.TotalCost,
-                Counts = (long[])state.FuzzyCounts.Clone(),
-                Changes = [.. state.FuzzyChanges],
-                Groups = GroupData.CopyGroups(state.Groups, state.Groups.Length),
-            };
+                snapshot.Counts = new long[state.FuzzyCounts.Length];
+            }
+
+            state.FuzzyCounts.CopyTo(snapshot.Counts, 0);
+            snapshot.Changes.Clear();
+            snapshot.Changes.AddRange(state.FuzzyChanges);
+            snapshot.Groups = state.Groups.Length == 0 ? [] : GroupData.CopyGroups(state.Groups, state.Groups.Length);
+            return snapshot;
         }
 
         internal void Restore(MatchState state)
