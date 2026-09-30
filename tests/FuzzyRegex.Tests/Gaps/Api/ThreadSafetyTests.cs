@@ -774,6 +774,10 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // D44 and D45 added KeepSectionOpenAfterAVerb and KeepDiscardedTotals, likewise set
+            // only by the oracle's ablations on a pattern it compiled for one call.
+            "PatternObject.KeepSectionOpenAfterAVerb",
+            "PatternObject.KeepDiscardedTotals",
             // Ledger entry 50 added SkipLookaroundInsertion, likewise set only by
             // OracleComparer.RunWithoutTheLookaroundInsertion.
             "PatternObject.SkipLookaroundInsertion",

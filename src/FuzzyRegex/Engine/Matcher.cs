@@ -5076,23 +5076,13 @@ internal static class Matcher
     [Conditional("DEBUG")]
     private static void AssertMatchIsClosed(MatchState state)
     {
-        bool cutsBacktracking = false;
-        bool discardsSubAttempts = false;
-        for (int i = 0; i < state.Pattern.NodeList.Count; i++)
-        {
-            Opcode op = state.Pattern.NodeList[i].Op;
-            cutsBacktracking |= op is Opcode.Prune or Opcode.Skip;
-            discardsSubAttempts |=
-                op is Opcode.Atomic or Opcode.Lookaround or Opcode.Conditional or Opcode.FuzzyLookaround;
-        }
-
         Debug.Assert(state.OpenCalls.Count == 0, "a match never ends inside a group call");
 
-        // SHORTCUT: not asserted where a (*PRUNE) or (*SKIP) can cut the backtracking, known defect
-        // D44 - a verb inside a fuzzy section reaches SUCCESS with the section's node still set
-        // (Gaps.Engine.FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one
-        // and five more). Upgrade: assert it everywhere once D44 is settled.
-        Debug.Assert(cutsBacktracking || state.FuzzyNode is null, "a match never ends inside a fuzzy section");
+        // The oracle's two ablations reproduce upstream's D44 and D45 on purpose.
+        Debug.Assert(
+            state.FuzzyNode is null || state.Pattern.KeepSectionOpenAfterAVerb,
+            "a match never ends inside a fuzzy section"
+        );
 
         Span<long> kinds = stackalloc long[3];
         foreach (FuzzyChange change in state.FuzzyChanges)
@@ -5107,15 +5097,9 @@ internal static class Matcher
             "the counts are the lengths of the change lists, kind by kind"
         );
 
-        // SHORTCUT: not asserted where an atomic group, lookaround, conditional or verb can throw a
-        // sub-attempt away, known defect D45 - the counts are put back and the running total keeps
-        // the thrown-away section's errors, and BESTMATCH ranks by that total
-        // (Gaps.Engine.LookaroundTests.A_group_call_inside_a_lookaround_whose_body_is_thrown_away_leaves_no_capture).
-        // Upgrade: assert it everywhere once D45 is settled.
         Debug.Assert(
             !state.Pattern.IsFuzzy
-                || cutsBacktracking
-                || discardsSubAttempts
+                || state.Pattern.KeepDiscardedTotals
                 || state.TotalErrors == TotalErrors(state.FuzzyCounts),
             "the running total is the sum of the kinds"
         );
@@ -9543,10 +9527,27 @@ internal static class Matcher
         // upstream, because `$` has a `search_start_*` twin, and FOUR here, because the prefilter
         // is Phase 7's - so this port leaked where upstream did not and now agrees with it. Pinned
         // by FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one.
+        //
+        // NOT UPSTREAM EITHER (D44): no section is open either. The same verb throws away the FUZZY
+        // entry whose backtrack arm would have closed the section, which stayed the open one into
+        // the next attempt; upstream does the same.
+        //
+        // NOR THE RUNNING TOTALS (D45), which the verb leaves at the abandoned attempt's last
+        // END_FUZZY: an attempt that then succeeds without passing an END_FUZZY reported them.
         if (state.IsFuzzy)
         {
             Array.Clear(state.FuzzyCounts);
             state.FuzzyChanges.Clear();
+            if (!pattern.KeepSectionOpenAfterAVerb)
+            {
+                state.FuzzyNode = null;
+            }
+
+            if (!pattern.KeepDiscardedTotals)
+            {
+                state.TotalErrors = 0;
+                state.TotalCost = 0;
+            }
         }
 
         // NOT UPSTREAM (empty-iteration rule): no section entered in this attempt is open yet.
@@ -9896,7 +9897,7 @@ internal static class Matcher
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
                     PushCaptures(state, state.Bstack);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Atomic);
@@ -9956,7 +9957,7 @@ internal static class Matcher
                     // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
                     PushCaptures(state, state.Bstack);
                     PushRepeats(state, state.Bstack);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Conditional);
@@ -10045,7 +10046,7 @@ internal static class Matcher
                         state.CaptureChange = endCondCaptureChange;
 
                         if (
-                            !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                            !state.PopSubAttemptFuzzyState(state.Bstack)
                             || !PopRepeats(state, state.Bstack, testJustEnded: true)
                             || !PopCaptures(state, state.Bstack)
                         )
@@ -10793,7 +10794,7 @@ internal static class Matcher
 
                         state.CaptureChange = endLookCaptureChange;
 
-                        if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                        if (!state.PopSubAttemptFuzzyState(state.Bstack))
                         {
                             return MatchStatus.Illegal;
                         }
@@ -11724,7 +11725,7 @@ internal static class Matcher
                     }
 
                     state.Bstack.PushBool(lookHasGroups);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Lookaround);
@@ -13559,7 +13560,7 @@ internal static class Matcher
 
                     state.CaptureChange = atomicCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -13577,7 +13578,7 @@ internal static class Matcher
 
                     state.CaptureChange = endAtomicCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -13641,7 +13642,7 @@ internal static class Matcher
                     state.CaptureChange = condCaptureChange;
 
                     if (
-                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                        !state.PopSubAttemptFuzzyState(state.Bstack)
                         || !PopRepeats(state, state.Bstack, testJustEnded: true)
                         || !PopCaptures(state, state.Bstack)
                     )
@@ -13668,7 +13669,7 @@ internal static class Matcher
                     state.CaptureChange = endCondCaptureChange;
 
                     if (
-                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                        !state.PopSubAttemptFuzzyState(state.Bstack)
                         || !PopRepeats(state, state.Bstack, testJustEnded: false)
                         || !PopCaptures(state, state.Bstack)
                     )
@@ -14130,7 +14131,7 @@ internal static class Matcher
 
                     state.CaptureChange = endLookCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -14671,7 +14672,7 @@ internal static class Matcher
 
                     state.CaptureChange = lookCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }

@@ -381,7 +381,7 @@ public sealed class Match : Group
     /// <c>Matcher</c>'s <c>start_match</c>, which is the rest of the same fix. The third and fourth -
     /// the change list desynchronising across <c>POSIX</c> and <c>BESTMATCH</c> candidates, and a
     /// lookaround under <c>(?e)</c> - were ledger entry 11's remaining half and <b>are fixed by S48b</b>
-    /// (<c>MatchState.PopFuzzyCounts</c> truncates the change list to the length its matching push
+    /// (<c>MatchState.PopSubAttemptFuzzyState</c> truncates the change list to the length its matching push
     /// recorded, and <c>Matcher.RestoreBestMatch</c> restores the running totals beside the counts).
     /// <b>This tally nevertheless stays confined to the partial exit</b>, because that is not what it
     /// was working around: on a partial match the state's counter provably is not the whole match's,

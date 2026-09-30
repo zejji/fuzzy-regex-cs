@@ -4017,6 +4017,22 @@ to the earlier span, as the owner's ranking rule says it should. Row 3752 itself
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
 
+**Addendum, 2026-09-30 (known defect D45).** The same stale total has a second door: an atomic
+group, lookaround or condition that throws its body away puts the counts back (`_regex.c:15277`,
+`:15421`, `:17160`) and leaves the total its sections wrote. Measured on 2026.9.10:
+
+```
+search(r'(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'cdcx')  -> (0, 1) counts (0, 0, 1)   expected (1, 3) counts (0, 0, 0)
+search(r'(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})', 'dcx')      -> (0, 2) counts (0, 0, 0)   (the control: the exact match exists)
+search(r'(?b)(?:(?!(?:q){e<=1})|c)', 'c')                      -> (0, 0)                    expected (0, 1)
+search(r'(?:(?!(?:q){e<=1})|c)', 'c')                          -> (0, 1)                    (the control: the first match is perfect)
+```
+
+This port saves both totals with the counts at those constructs and restores them in their eight
+restoring arms (`MatchState.PushSubAttemptFuzzyState`), and `start_match` zeroes them for an attempt a
+verb ended. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs` and oracle entry
+`fuzzy-total-drops-a-discarded-section`.
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -5490,3 +5506,40 @@ port, each a match with more errors than the section allows, errors it does not 
 another first success; the eleventh differed from upstream before the fix as well. The oracle entry
 `fuzzy-whole-pattern-call-returns-to-its-caller` keys on `Info.UpstreamWholePatternCall`. The default
 oracle waves at seeds 7, 4242 and 20260927 draw no such row.
+
+## 61. A fuzzy section a verb cut through stays open, and its limits govern what follows - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D44. Draft report:
+`entry-61-verb-leaves-fuzzy-section-open.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}', 'ad')    -> (1, 2) counts (1, 0, 1)   expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?!(?:a(*SKIP)b){d<=0})cd){e<=2}', 'ad')     -> (1, 2) counts (1, 0, 1)   expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?(?!(?:a(*PRUNE)b){d<=0})cd|x)){e<=2}', 'ad') -> (1, 2) counts (1, 0, 1)  expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?!(?:ab){d<=0})cd){e<=2}', 'ad')            -> (0, 2) counts (1, 0, 0)   (the control: no verb)
+```
+
+**Why upstream is wrong.** The lookahead body fails at 'b' whether or not the verb is there, so
+the verb cannot change the answer: PCRE2 10.47 and Perl 5.42 both match `(?!a(*PRUNE)b)ad` over 'ad'
+at (0, 2), as they do `(?!ab)ad`. Upstream's answer changes because backtracking onto the verb cuts
+the backtracking stack to the lookaround's mark (`top_bstack`, `_regex.c:2811`), discarding the
+inner section's `FUZZY` entry, whose backtrack arm (`:15763`) is the only place `fuzzy_node` goes
+back. `LOOKAROUND` and `CONDITIONAL` do not save it (`:13779`, `:12230`), and `start_match` clears
+only the counts (`:11790`). The inner `{d<=0}` then stays the open section, so `cd` cannot use the
+outer section's substitution at 0.
+
+**Proposed fix upstream:** push `fuzzy_node` beside `fuzzy_counts` at `ATOMIC`, `CONDITIONAL` and
+`LOOKAROUND` and restore it wherever those counts are restored, and clear it in `start_match`.
+
+**This port.** `MatchState.PushSubAttemptFuzzyState` and `PopSubAttemptFuzzyState` do that, and a
+Debug assert at `SUCCESS` checks that no section is open. Pinned by
+`Gaps/Engine/FuzzyMatchingTests.A_verb_that_ends_a_lookaround_or_a_condition_closes_the_section_it_cut_through`
+(four rows with their verb-free controls). A grid of 6,000 generated rows (verbs, atomic groups,
+lookarounds and conditions around fuzzy sections, BESTMATCH, ENHANCEMATCH, calls) changed 5 rows.
+The rule is that a lookaround or condition gives back the section it was entered in; that equals the
+verb-free answer on the pinned row but is not a general rule, since a verb in a negative lookaround can
+change an answer (`(?!a(*PRUNE)b|ac)ac` over 'ac': (0, 2) in PCRE2, Perl and upstream, None without it). The oracle entry `fuzzy-section-cut-by-a-verb-is-closed`
+keys on `PatternObject.KeepSectionOpenAfterAVerb`. The default oracle waves at seeds 7, 4242 and
+20260927 draw no such row.

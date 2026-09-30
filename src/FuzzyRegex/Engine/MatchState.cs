@@ -1618,8 +1618,48 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
-    /// Upstream <c>pop_fuzzy_counts</c> (line 2652), <b>restoring</b>: the counts and the change list
-    /// both go back to what they were at the matching push.
+    /// What <c>ATOMIC</c>, <c>CONDITIONAL</c> and <c>LOOKAROUND</c> save so that their eight
+    /// <b>restoring</b> arms can put the fuzzy state back as if the body had never run: upstream
+    /// <c>push_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 2480), the change-list length
+    /// beside it (see <see cref="PushFuzzyCounts"/>), the open section and the running totals.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The open section is this port's (D44), and upstream does not save it.</b> The body always
+    /// ends in the section it started in, except where a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cuts the
+    /// backtracking straight to the construct: that throws away the <c>FUZZY</c> entry of a section
+    /// opened inside the body, whose backtrack arm is what would have put <see cref="FuzzyNode"/>
+    /// back. The inner section then stayed the open one and its limits governed the rest of the
+    /// enclosing section: <c>(?:(?!(?:a(*PRUNE)b){d&lt;=0})cd){e&lt;=2}</c> over 'ad' moved to (1, 2),
+    /// in upstream too, where the same pattern without the verb matches at (0, 2) with one
+    /// substitution.
+    /// </para>
+    /// <para>
+    /// <b>The running totals are this port's too (D45).</b> <see cref="TotalErrors"/> and
+    /// <see cref="TotalCost"/> are written by every <c>END_FUZZY</c> the body passes, so a body
+    /// thrown away with a closed section in it left its errors in the totals while the counts went
+    /// back: <c>(?:(?=(?:q){e&lt;=1})z)?a</c> over 'a' reached SUCCESS with no errors counted and a
+    /// total of one. Upstream never restores <c>total_errors</c> at all (ledger entry 32).
+    /// </para>
+    /// </remarks>
+    /// <param name="stack">The stack to push onto.</param>
+    internal void PushSubAttemptFuzzyState(ByteStack stack)
+    {
+        if (!IsFuzzy)
+        {
+            return;
+        }
+
+        stack.PushSize(TotalErrors);
+        stack.PushSize(TotalCost);
+        stack.PushNode(FuzzyNode);
+        PushFuzzyCounts(stack, FuzzyCounts);
+    }
+
+    /// <summary>
+    /// Upstream <c>pop_fuzzy_counts</c> (line 2652) at the eight <b>restoring</b> sites: the counts,
+    /// the change list, the open section and the running totals all go back to what they were at the matching
+    /// <see cref="PushSubAttemptFuzzyState"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1633,20 +1673,37 @@ internal sealed class MatchState : IDisposable
     /// <para>
     /// <b>The eight restoring sites are the constructs that abandon a sub-attempt without
     /// backtracking through it</b> - <c>ATOMIC</c>/<c>END_ATOMIC</c>,
-    /// <c>CONDITIONAL</c>/<c>END_CONDITIONAL</c> and <c>LOOKAROUND</c>/<c>END_LOOKAROUND</c>. A rough
-    /// rule is that a pop into a scratch span is a merge and a pop into <see cref="FuzzyCounts"/> is
-    /// a restore, <b>and the <c>FUZZY</c> backtrack arm is the exception that breaks it</b>: it
-    /// merges into <see cref="FuzzyCounts"/>. Read the site, not the buffer.
+    /// <c>CONDITIONAL</c>/<c>END_CONDITIONAL</c> and <c>LOOKAROUND</c>/<c>END_LOOKAROUND</c>.
     /// </para>
     /// </remarks>
     /// <param name="stack">The stack to pop from.</param>
-    /// <param name="fuzzyCounts">Receives the counts, and is left alone for a non-fuzzy pattern.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    internal bool PopFuzzyCounts(ByteStack stack, Span<long> fuzzyCounts)
+    internal bool PopSubAttemptFuzzyState(ByteStack stack)
     {
-        if (!PopFuzzyCountsMerging(stack, fuzzyCounts, out long changeCount))
+        if (!IsFuzzy)
+        {
+            return true;
+        }
+
+        if (
+            !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
+            || !stack.PopNode(Pattern, out Node? fuzzyNode)
+            || !stack.PopSize(out long totalCost)
+            || !stack.PopSize(out long totalErrors)
+        )
         {
             return false;
+        }
+
+        if (!Pattern.KeepSectionOpenAfterAVerb)
+        {
+            FuzzyNode = fuzzyNode;
+        }
+
+        if (!Pattern.KeepDiscardedTotals)
+        {
+            TotalErrors = totalErrors;
+            TotalCost = totalCost;
         }
 
         TruncateFuzzyChanges(changeCount);

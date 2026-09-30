@@ -1220,4 +1220,69 @@ public sealed class FuzzyBestMatchTests
         (m.Index, m.Index + m.Length).Should().Be((1, 3));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
+
+    // Known defect D45, the rest of ledger entry 32. A negative condition or lookaround whose body
+    // matched is thrown away, and its fuzzy section with it: the counts went back, but the running
+    // total the section's END_FUZZY wrote stayed, and BESTMATCH and ENHANCEMATCH rank by that total.
+    // At 0 the condition (?!(?:a){e<=1}) fails with one error spent, the 'c' branch matches with a
+    // deletion, and the zero-error 'dc' at 1 was then scored as no better than a match whose counts
+    // were (0, 0, 1) and total two. Upstream regex 2026.9.10 answers the one-deletion (0, 1) on all
+    // three rows: it never restores total_errors. The control is the zero-error match, found at 1
+    // without the flag.
+    [Test]
+    [Arguments("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})")]
+    [Arguments("(?b)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
+    [Arguments("(?be)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
+    public void Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).Match("cdcx");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        Match plain = new FuzzyRegex(pattern[(pattern.IndexOf(')', StringComparison.Ordinal) + 1)..]).Match(
+            "cdcx",
+            1,
+            3
+        );
+        (plain.Index, plain.Index + plain.Length).Should().Be((1, 3));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // D45 through an atomic group: a (*SKIP) inside it throws the group's body away wholesale, and
+    // the section's one error stayed in the total, so the exact 'b' at 1 lost to a one-error match at
+    // (0, 4). Upstream answers (1, 2) here, as it does the control without the verb.
+    [Test]
+    [Arguments("(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)")]
+    [Arguments("(?b)(?:(?>(?:ab){e<=1}|c)(?:cd){e<=1}|b)")]
+    public void Bestmatch_does_not_count_the_errors_of_an_atomic_group_a_verb_threw_away(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).Match("abcxx");
+
+        (m.Index, m.Index + m.Length).Should().Be((1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // D45's other side: a first match with no errors is perfect, and BESTMATCH and ENHANCEMATCH
+    // stop at it. The discarded lookahead body's errors made it look imperfect, the walk went on
+    // under a tighter budget, the lookahead body could no longer match, and the empty branch took
+    // over at (0, 0). Upstream answers (0, 0) on both rows; without a flag both engines answer
+    // (0, 1), which is the control.
+    [Test]
+    [Arguments("(?e)(?:(?!(?:bc){e<=2})|c)", "cbdbc")]
+    [Arguments("(?b)(?:(?!(?:q){e<=1})|c)", "c")]
+    public void A_first_match_with_no_errors_is_kept_although_a_discarded_lookaround_spent_some(
+        string pattern,
+        string subject
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        Match plain = new FuzzyRegex(pattern[4..]).Match(subject);
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 1));
+    }
 }
