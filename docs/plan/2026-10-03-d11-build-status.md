@@ -26,3 +26,23 @@ Merge notes (9177e4ba): `PartialBlockedEndTests` now reads group 1 under
 `PatternObject.KeepCallCaptures`, because D51 discards a call's captures on return and 16 of its rows
 set group 1 only inside a call. D11's named oracle ablation now also has the D51 fix off, as main
 asks of every named ablation.
+
+## Chunk 9 review fix round (2026-10-03, f74e096e)
+
+Done, test first (each new test red without its fix, by plant): F1 (D35's assert premise restated:
+only a positive test whose end was blocked lets the yes-branch record guards; X2 runs in Debug),
+F2 (a fork-budget partial is not restored from an open call's frame), F3 (one fork per construct),
+F4 (`PartialForkBudgetTests.Each_fork_is_counted_once`, a row per `CountFork` site, each red when
+its site is dropped), F5 (blocked-end rows under both capture rules), D64 review F1 (the attempt
+from inside the text to come no longer inherits must-advance), D38 (a test that held unblocked
+after a blocked success fails the conditional: `WMarkKind.Held`), D26's four rows as tests.
+Ratchet GREEN (8118). Item-0 and memo grids re-run, Debug and Release: 0 answers changed, 0 new
+phantoms; the 106 Debug assert rows of the memo grid now answer the judge's value.
+
+Not done yet (next steps): oracle at seeds 7, 4242, 20260927; perf check; then the final report.
+Open, not fixed here: D38's anchored `\b` rows answer P(0, 2) through S57d's escalation, as main
+(red in `OpenDefectTests`, None with the escalation planted out; part 2 deletes it). Finditer
+`(?<=b)(?=\X)` over 'abb' answers P(2, 3) where the judge and upstream say P(3, 3): `\X`'s
+`ANY_ALL` runs out at the edge and the partial is answered at once at the anchor (likely D67's
+shape, not must-advance). `(?:(?=a)c){i<=1}` match 'b' answers P(0, 1) where the judge says None
+(a body run-out in a fuzzy section; predates this round). Scratch: `.scratch/fr/` (grids, probes).
