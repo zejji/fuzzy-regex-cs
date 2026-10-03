@@ -89,14 +89,14 @@ public sealed class PartialConditionRuleTests
     /// <c>ab$</c> success is blocked and its yes-branch fails at the 'b'; the <c>a</c> success holds
     /// whatever follows and goes on to the same yes-branch, so the conditional fails at 0 for every
     /// continuation. The no-branch's <c>abc</c> ran out of text and answered a phantom P(0, 2).
-    /// The <c>{e&lt;=1}</c> rows are the same fault in a fuzzy test (the deletion ledger entry 42
-    /// allows succeeds whatever follows), and the <c>{i&lt;=1}</c> rows, the defect as first filed,
-    /// are the controls where the test can fail: 'ab' + 'a' matches at 0 with one insertion.
+    /// The <c>{i&lt;=1}</c> rows, the defect as first filed, are the controls where the test can
+    /// fail: 'ab' + 'a' matches at 0 with one insertion. The <c>{e&lt;=1}</c> form is
+    /// <see cref="A_fuzzy_conditional_with_an_exact_test_deletes_its_branch_item"/>.
     /// </summary>
     /// <remarks>
     /// The expected answers are the port's own non-partial judge over every continuation of up to
     /// three characters (<c>tools/probes/d11-port-judge-grid.cs</c>, 2026-10-03), which agrees with
-    /// the brute-force judge on the exact rows; a fuzzy row follows the port's ledger entry 42.
+    /// the brute-force judge on every row here.
     /// The last control, <c>(?(?=ab$)ac|abc)</c>, can fail its test: 'ab' + 'c' matches. The
     /// anchored calls on the <c>\b</c> forms answered P(0, 2) (or P(1, 2) from 1) through S57d's
     /// escalation, as main does, until build chunk 9 deleted it; they now answer the judge's None.
@@ -110,9 +110,6 @@ public sealed class PartialConditionRuleTests
     [Arguments("search", @"(?(?=ab$|a)ac|abc)", 0, 2)]
     [Arguments("search", @"(?(?=ab\b|a)ac|abc)", 0, 2)]
     [Arguments("match", @"(?(?=ab\b|a)ac|abc)", 0, -1)]
-    [Arguments("match", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 0, -1)]
-    [Arguments("match", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 1, -1)]
-    [Arguments("search", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 0, 2)]
     [Arguments("match", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]
     [Arguments("search", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]
     [Arguments("match", @"(?(?=ab$)ac|abc)", 0, 0)]
@@ -138,6 +135,51 @@ public sealed class PartialConditionRuleTests
         }
 
         (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, 2));
+    }
+
+    /// <summary>
+    /// D38's <c>{e&lt;=1}</c> form, re-judged after D52 (ledger entry 64: a conditional's test is
+    /// matched exactly, not with the section's fuzziness). At 0 the test <c>(?=a\b|a)</c> holds
+    /// through its <c>a</c> alternative whatever follows, the yes-branch's <c>a</c> matches and the
+    /// trailing <c>a</c> fails on the 'b'; deleting the yes-branch's exactly matched <c>a</c> (ledger
+    /// entry 42) lets the trailing <c>a</c> match, a complete match (0, 1) with one deletion, so no
+    /// partial is needed. From 1 the test fails on the 'b', the no-branch's <c>b</c> matches and the
+    /// trailing <c>a</c> runs out of text: 'ab' + 'a' matches (1, 3) without an error.
+    /// </summary>
+    /// <remarks>
+    /// The expected answers are the port's own non-partial judge over every continuation of up to
+    /// three characters (probe, 2026-10-03). With ledger entry 42 off (<c>SkipExactDeletionRetry</c>)
+    /// the anchored call from 0 answers P(0, 2), the brute-force judge's answer. Before D52 the
+    /// branch pinned None to the anchored calls, which held only because the fuzzy test spent the
+    /// budget on a deletion inside the test.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to the anchored calls and P(2, 2) to the
+    // searches. It matches the test fuzzily (entry 64) and never deletes an exactly matched item
+    // (entry 42); its own non-partial match over 'aba' from 1 is None.
+    [Test]
+    [Arguments("match", 0, "F(0,1)")]
+    [Arguments("search", 0, "F(0,1)")]
+    [Arguments("fullmatch", 0, "P(0,2)")]
+    [Arguments("match", 1, "P(1,2)")]
+    [Arguments("search", 1, "P(1,2)")]
+    [Arguments("fullmatch", 1, "P(1,2)")]
+    public void A_fuzzy_conditional_with_an_exact_test_deletes_its_branch_item(
+        string operation,
+        int beginning,
+        string expected
+    )
+    {
+        var regex = new FuzzyRegex(@"(?:(?(?=a\b|a)a|b)){e<=1}a");
+        Match m = operation switch
+        {
+            "search" => regex.Match("ab", beginning, 2 - beginning, partial: true),
+            "fullmatch" => regex.FullMatch("ab", beginning, 2 - beginning, partial: true),
+            _ => regex.MatchAtStart("ab", beginning, 2 - beginning, partial: true),
+        };
+
+        string kind = m.PartialMatch ? "P" : "F";
+        string answer = m.Success ? $"{kind}({m.Index},{m.Index + m.Length})" : "None";
+        answer.Should().Be(expected);
     }
 
     /// <summary>

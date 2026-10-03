@@ -156,3 +156,21 @@ judge, 0 away, 0 new phantoms. Ratchet GREEN (8131).
   moves to Completed with its C4 forms registered under D18, D69 to Completed; the `(?w)` rows W1-W3,
   W5, W6 are misses until chunk 10); the new ledger entry and draft report for upstream's lookaround
   phantom (design section 5), left to the merge so its number does not collide with main's.
+
+## Fix round 2 and the lookaround memo (2026-10-03, brief `brief-d11-fixround2-memo-2026-10-03.md`)
+
+Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
+
+- **Step 0, merge main** (dce1bdbd, 359cf248): D52/D54, D50, D63, D65, D66. `OracleComparer` keeps
+  `composeWithD11` and forwards main's three new switches in the composed runs; D11's second-pass
+  ablation counts as a named ablation (D52/D54 off with it), as main's rule asks. Ratchet after
+  the merge: 3 red, all the review's F2 rows.
+- **Step 1, F2**: the `{e<=1}` rows of D38's test re-judged on the merged head, from 0 and from 1,
+  against the port's non-partial judge (continuations up to 3) and the brute judge. Port answer =
+  port judge on all six calls: match and search from 0 F(0, 1) (one deletion of the yes-branch's
+  exactly matched `a`, ledger 42, now that D52 matches the test exactly), fullmatch from 0
+  P(0, 2), every call from 1 P(1, 2). The brute judge differs only through ledger 42 (with
+  `SkipExactDeletionRetry` the anchored call from 0 answers P(0, 2), the reviewer's value) and
+  ledger 64 (upstream's fuzzy test refuses 'ba' from 1). Pins moved to their own test,
+  `PartialConditionRuleTests.A_fuzzy_conditional_with_an_exact_test_deletes_its_branch_item`; the
+  wrong "ledger 42" reasoning in the D38 summary is gone. No other `{e<=k}` conditional row in the file.
