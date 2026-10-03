@@ -6391,6 +6391,9 @@ internal static class Matcher
         state.MatchPos = state.ForkAttemptStart;
         state.ClearGroups();
         state.NotePartialEvent(PartialEvent.BudgetFired);
+#if DEBUG
+        state.ForkBudgetAnswered = true;
+#endif
 
         return MatchStatus.Partial;
     }
@@ -10837,7 +10840,7 @@ internal static class Matcher
     /// reports it unset (D11 chunk 9 review, finding 2). <see cref="MatchState.ForkBudgetSpent"/>
     /// marks that partial: once it is set, the next step's cancellation gate answers it, and no arm
     /// that counts a fork answers a partial in the same step (each goes on, breaks or backtracks:
-    /// <see cref="CountFork"/>'s callers).
+    /// <see cref="CountFork"/>'s callers). A Debug assertion checks that premise on every call.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -10845,7 +10848,18 @@ internal static class Matcher
     /// <returns>The match status.</returns>
     internal static int BasicMatch(MatchState state, bool search)
     {
+#if DEBUG
+        state.ForkBudgetAnswered = false;
+#endif
         int status = BasicMatchCore(state, search);
+#if DEBUG
+        // The premise of skipping the restore below: a partial returned with the budget spent is
+        // the budget's own, never one an arm answered in the step that spent it.
+        Debug.Assert(
+            status != MatchStatus.Partial || state.ForkBudgetSpent == state.ForkBudgetAnswered,
+            "D11 M4: a partial with the fork budget spent comes from ForkBudgetPartial"
+        );
+#endif
         if (
             status == MatchStatus.Partial
             && state.OpenCalls.Count > 0
@@ -15692,6 +15706,7 @@ internal static class Matcher
                             condWasBlocked && condNode.Match,
                             "D11: only a positive test that went on from a blocked end can be held"
                         );
+                        state.NotePartialEvent(PartialEvent.HeldFailedTheCondition);
                         break;
                     }
 
@@ -18442,6 +18457,10 @@ internal static class Matcher
         // design review, finding 1).
         bool mustAdvance = state.MustAdvance;
         state.MustAdvance = false;
+        if (mustAdvance)
+        {
+            state.NotePartialEvent(PartialEvent.MustAdvanceLifted);
+        }
 
         int status;
         try

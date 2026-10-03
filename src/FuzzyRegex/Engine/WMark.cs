@@ -162,4 +162,16 @@ internal enum PartialEvent
 
     /// <summary>Chunk 9, amendment 1: a repeat guard held in the second pass.</summary>
     SecondPassGuardHeld,
+
+    /// <summary>
+    /// D38: a condition's test held for every continuation after its yes-branch failed (a
+    /// <see cref="WMarkKind.Held"/> mark), so the conditional failed instead of taking its no-branch.
+    /// </summary>
+    HeldFailedTheCondition,
+
+    /// <summary>
+    /// D64 review, finding 1: the attempt from inside the text to come ran with the scan's
+    /// must-advance flag lifted.
+    /// </summary>
+    MustAdvanceLifted,
 }

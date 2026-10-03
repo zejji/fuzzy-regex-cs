@@ -103,6 +103,36 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// The witness of <c>UndeterminedFuzzyRetry</c>, the entry an undetermined fuzzy test leaves
+    /// below its touch. The rows above are green without it: the trailing insertion after the
+    /// section, or the insertion in front of a failed lookaround, runs out at the same place. Here
+    /// the path through the <c>\B</c> fails on the held text inside the section, at a condition
+    /// whose test (<c>(?&lt;=^)</c>, <c>(?&lt;=a)</c>) holds there and whose yes-branch is
+    /// <c>(*FAIL)</c>, so only the insertion in front of the <c>\B</c> is left. Over '' + 'aa' the
+    /// <c>\B</c> fails at 0, the 'a' is inserted, and at 1 both <c>\B</c> and the no-branch hold:
+    /// a match of (0, 1). Over 'a' + 'a  ' the search's match starts at 0. Each row answers None, or
+    /// the later start P(1, 1), without the retry.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: regex 2026.9.10 answers None to the match and P(1, 1) to
+    // the search; without partial it matches 'aa' at (0, 1) and 'a  ' at (0, 2).
+    [Test]
+    [Arguments("match", @"(?:\B(?(?<=^)(*FAIL))){i<=1}", "")]
+    [Arguments("search", @"a(?:\B(?(?<=a)(*FAIL))){i<=1}", "a")]
+    public void Only_the_failing_side_of_an_undetermined_fuzzy_test_reaches_the_insertion(
+        string operation,
+        string pattern,
+        string text
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "match", StringComparison.Ordinal)
+            ? regex.MatchAtStart(text, partial: true)
+            : regex.Match(text, partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, text.Length));
+    }
+
+    /// <summary>
     /// Row C2 with <c>$</c> for the read, and the double negative from chunk 5's review: a negative
     /// lookaround whose body succeeded after a read of the text to come holds for the other
     /// continuations ('True' + ' ' fails the <c>$</c>; ' ' fails the inner lookaround's <c>$</c>,

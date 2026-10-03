@@ -393,8 +393,11 @@ public sealed class PartialEdgeReadTests
     /// in front of what follows, so the path through it is not the only one. Over 'a', the
     /// <c>$</c> after the <c>a</c> passes undetermined, and the lookbehind <c>(?&lt;=:)</c> then
     /// fails on the held 'a'; the insertion of ':' that the continuation 'a:' gives is the match
-    /// ((0, 2) with one insertion, here and upstream, without partial; ':a' for the reversed row). Fixed by build chunk 6's
-    /// <c>UndeterminedFuzzyRetry</c> (b734b23a); the rows come from the sizing of 2026-10-03.
+    /// ((0, 2) with one insertion, here and upstream, without partial; ':a' for the reversed row).
+    /// The insertion in front of the failed lookbehind (<c>InsertBeforeAFailedLookaround</c>) needs
+    /// the character after the text, so it runs out; fixed by RC5 (build chunk 3, 494b35b8), which
+    /// passes the position after the insertion to the run-out check. Each row is red with RC5's
+    /// argument put back. The rows come from the sizing of 2026-10-03.
     /// </summary>
     // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to the matches and P(0, 0) to the search.
     [Test]

@@ -5,7 +5,16 @@
 #:property EnforceCodeStyleInBuild=false
 // D11 chunk 9. Run: dotnet run -c Debug tools/probes/d11-port-judge-grid.cs -- rows.jsonl
 // Per row: the port's partial answer, the port's own non-partial judge over continuations of up to 3
-// characters, and (Debug) the partial-event counts of the partial call.
+// characters, and (Debug) the partial-event counts of the partial call. The standard error ends with
+// the number of rows on which each event fired, every event listed, so a grid that never reaches a
+// mechanism shows 0 for it (VERIFICATION.md rule 11).
+//
+// Operation "finditer" (a forward, non-overlapped scan): the answer is the scan's list; the judge is
+// the non-partial scan of the held text, then a partial at the edge when some continuation gives
+// the scan a further match from where the held text's scan ended (an empty match repeated at that
+// position excluded, as the scan's must-advance rule does), starting at the earliest such start or
+// the edge, whichever is first. Meant for patterns whose matches are empty, where a match of the
+// held text cannot be a partial itself.
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
@@ -21,6 +30,7 @@ var evType = asm.GetType("Fuzzy.Text.RegularExpressions.Engine.PartialEvent")!;
 var create = msType.GetMethod("Create", Any)!;
 var doMatch = matcher.GetMethod("DoMatch", Any)!;
 var count = msType.GetMethod("PartialEventCount", Any)!;
+var advance = msType.GetMethod("AdvancePastMatch", Any)!;
 var names = Enum.GetNames(evType);
 var totals = new Dictionary<string, long>();
 var timeout = TimeSpan.FromSeconds(2);
@@ -35,7 +45,7 @@ foreach (var line in File.ReadLines(args[0]))
         t = r.GetProperty("subject").GetString()!,
         op = r.GetProperty("operation").GetString()!;
     string answer,
-        judge,
+        judge = "",
         events = "";
     try
     {
@@ -47,11 +57,48 @@ foreach (var line in File.ReadLines(args[0]))
                 "fullmatch" => regex.FullMatch(s, partial: partial),
                 _ => regex.Match(s, partial: partial),
             };
-        Match m = Run(t, true);
-        answer = m.Success ? $"{(m.PartialMatch ? "P" : "F")}({m.Index},{m.Index + m.Length})" : "None";
+        static string Show(Match x) => $"{(x.PartialMatch ? "P" : "F")}({x.Index},{x.Index + x.Length})";
         bool reverse = pattern.StartsWith("(?r)");
-        Match full = Run(t, false);
-        if (full.Success)
+        Match? full = op == "finditer" ? null : Run(t, false);
+        if (op == "finditer")
+        {
+            answer = "[" + string.Join(" ", regex.Matches(t, partial: true).Select(Show)) + "]";
+            var held = regex.Matches(t).ToList();
+            int pos = held.Count == 0 ? 0 : held[^1].Index + held[^1].Length;
+            bool lastEmpty = held.Count != 0 && held[^1].Length == 0;
+            int best = int.MaxValue;
+            var alpha = Alphabet.Union(pattern.Where(c => c < 128 && char.IsLetterOrDigit(c))).Distinct().ToArray();
+            foreach (
+                var w in alpha
+                    .Select(a => a.ToString())
+                    .Concat(alpha.SelectMany(a => alpha.Select(b => $"{a}{b}")))
+                    .Concat(alpha.SelectMany(a => alpha.SelectMany(b => alpha.Select(c => $"{a}{b}{c}"))))
+            )
+            {
+                foreach (Match c in regex.Matches(t + w))
+                {
+                    if (
+                        c.Index < pos
+                        || (c.Index == pos && c.Length == 0 && lastEmpty)
+                        || held.Exists(h => h.Index == c.Index && h.Length == c.Length)
+                    )
+                        continue;
+                    best = Math.Min(best, Math.Min(c.Index, t.Length));
+                    break;
+                }
+            }
+            var parts0 = held.Select(Show).ToList();
+            if (best != int.MaxValue)
+                parts0.Add($"P({best},{t.Length})");
+            judge = "[" + string.Join(" ", parts0) + "]";
+        }
+        else
+        {
+            Match m = Run(t, true);
+            answer = m.Success ? Show(m) : "None";
+        }
+        if (full is null) { }
+        else if (full.Success)
             judge = $"F({full.Index},{full.Index + full.Length})";
         else
         {
@@ -107,7 +154,19 @@ foreach (var line in File.ReadLines(args[0]))
         for (int i = 9; i < a2.Length; i++)
             a2[i] = Type.Missing;
         var state = create.Invoke(null, BindingFlags.OptionalParamBinding, null, a2, null)!;
-        _ = doMatch.Invoke(null, [state, op == "search"]);
+        if (op == "finditer")
+        {
+            // Iteration.Count's loop: the counts add up over the scan's calls on one state.
+            for (int turn = 0; turn <= t.Length + 2; turn++)
+            {
+                int st = (int)doMatch.Invoke(null, [state, true])!;
+                if (st != 1)
+                    break;
+                advance.Invoke(state, null);
+            }
+        }
+        else
+            _ = doMatch.Invoke(null, [state, op != "match" && op != "fullmatch"]);
         var parts = new List<string>();
         foreach (var n in names)
         {
@@ -131,8 +190,8 @@ foreach (var line in File.ReadLines(args[0]))
         $"{op}\t{JsonSerializer.Serialize(pattern, Opt.J)}\t{JsonSerializer.Serialize(t, Opt.J)}\t{answer}\t{judge}\t{events}"
     );
 }
-foreach (var kv in totals.OrderBy(k => k.Key))
-    Console.Error.WriteLine($"rows with {kv.Key}: {kv.Value}");
+foreach (var n in names)
+    Console.Error.WriteLine($"rows with {n}: {totals.GetValueOrDefault(n)}");
 
 sealed class ThrowListener : TraceListener
 {

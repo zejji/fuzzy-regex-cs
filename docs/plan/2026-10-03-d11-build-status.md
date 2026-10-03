@@ -61,3 +61,22 @@ batches, median across runs. Machine idle (CPU load 1-2%, nothing else running).
 0 rows. Total 16.3 ms old, 16.0 ms new (ratio 0.981); by operation 0.972 to 0.985, nothing above 1.0.
 Of 204 rows over 10 us, 4 read 10-13% slower (rows 588, 613, 623, 1262 of rows.jsonl, 11-40 us each);
 run-to-run spread on the same row was 10-15%, so this is timing noise, not a path regression.
+
+## Re-review findings F1-F4 (2026-10-03, `.claude/driver/review-d11-fixround-2026-10-03.md`)
+
+- F1: D26's test comment now credits RC5 (chunk 3, 494b35b8). `UndeterminedFuzzyRetry` has its own
+  witness, `PartialLookaroundRuleTests.Only_the_failing_side_of_an_undetermined_fuzzy_test_reaches_the_insertion`:
+  match `(?:\B(?(?<=^)(*FAIL))){i<=1}` over '' P(0, 0) and search `a(?:\B(?(?<=a)(*FAIL))){i<=1}` over
+  'a' P(0, 1); with the retry planted out they answer None and P(1, 1) (both rows red). Upstream: None
+  and P(1, 1). The register's D26 row still names chunk 6 (not edited here).
+- F2: D38's C4 rows pinned red in `OpenDefectTests.A_blocked_cut_keeps_the_alternatives_made_after_the_read`
+  (7 rows, all red). Not fixed: the design's C4 rule (section 6) keeps every outcome of a blocked
+  construct, and extending `Held` to a blocked success is unsound when the blocking construct's
+  committed path can still fail later; D18's upgrade.
+- F3: `MatchState.ForkBudgetAnswered` (Debug only) is set by `ForkBudgetPartial`; `BasicMatch` asserts
+  that a partial returned with the budget spent is the budget's own. Planted (flag never set), 3 of
+  `PartialForkBudgetTests` go red.
+- F4: events `HeldFailedTheCondition` and `MustAdvanceLifted`; `d11-port-judge-grid.cs` takes a
+  `finditer` operation and lists every event's row count; `d11-held-advance-grid.py` (8,584 rows)
+  reaches them: 581 rows with `HeldFailedTheCondition`, 432 with `MustAdvanceLifted`.
+- Grids (Debug): item 0 and memo, 0 answers changed against the fix round, 0 asserts. Ratchet GREEN (8120).

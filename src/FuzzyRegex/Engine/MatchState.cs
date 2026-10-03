@@ -402,6 +402,15 @@ internal sealed class MatchState : IDisposable
     /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
     internal int ForkAttemptStart;
 
+#if DEBUG
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4, Debug only: set by <c>Matcher.ForkBudgetPartial</c>, so that
+    /// <c>Matcher.BasicMatch</c> can assert that a partial returned with <see cref="ForkBudgetSpent"/>
+    /// set is the budget's own (rule 10; chunk 9 fix round's re-review, finding 3).
+    /// </summary>
+    internal bool ForkBudgetAnswered;
+#endif
+
     /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: whether a run-out has given this call an unknown capture, so
     /// the backreference and group-condition arms must ask (<c>Matcher.MarkTheBodysCapturesUnknown</c>).
@@ -1299,6 +1308,9 @@ internal sealed class MatchState : IDisposable
         ForkBudgetSpent = false;
         Forks = 0;
         ForkAttemptStart = 0;
+#if DEBUG
+        ForkBudgetAnswered = false;
+#endif
         TooFewErrors = false;
         FoundMatch = false;
         Array.Clear(FuzzyCounts);

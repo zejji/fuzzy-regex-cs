@@ -239,6 +239,21 @@ public sealed class OpenDefectTests
     [Arguments("match", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
     [Arguments("search", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby")]
     [Arguments("match", @"(?:(?(?=a$|a)|b)){e<=1}a(*PRUNE)b", "aa")]
+    // D38's C4 rows (re-review of D11 chunk 9's fix round, F2). The test holds for every
+    // continuation: `ab$` needs a '\n' to come, and the `a` alternative holds whatever follows, so
+    // the yes-branch's `ac` fails on the held 'b' and no continuation reaches the no-branch. The
+    // `a` success repeats the first one's continuation (the dedup), but the atomic group's, the inner
+    // lookahead's or the skipped verb's taint lies above the test's frame, so that success counts as
+    // blocked and the test's failure keeps the no-branch, where `abc` runs out: P(0, 2). The search
+    // answers P(0, 2) where the edge is the leftmost completable start. Judges (the port's own and
+    // tools/probes/d11-brute-judge.py) and upstream 2026.9.10: None, None, P(2, 2) (2026-10-03).
+    [Arguments("match", @"(?(?=(?>ab$|a))ac|abc)", "ab")]
+    [Arguments("fullmatch", @"(?(?=(?>ab$|a))ac|abc)", "ab")]
+    [Arguments("search", @"(?(?=(?>ab$|a))ac|abc)", "ab")]
+    [Arguments("match", @"(?(?=(?=ab$|a))ac|abc)", "ab")]
+    [Arguments("fullmatch", @"(?(?=(?=ab$|a))ac|abc)", "ab")]
+    [Arguments("match", @"(?(?=ab$(*PRUNE)|a)ac|abc)", "ab")]
+    [Arguments("fullmatch", @"(?(?=ab$(*PRUNE)|a)ac|abc)", "ab")]
     public void A_blocked_cut_keeps_the_alternatives_made_after_the_read(string operation, string pattern, string text)
     {
         Match m = Partial(operation, pattern, text);
