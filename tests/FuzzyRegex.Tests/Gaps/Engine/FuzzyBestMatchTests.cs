@@ -1329,12 +1329,19 @@ public sealed class FuzzyBestMatchTests
     // `(?!(?:q){e<=1})` fails with one error spent and the empty branch's (0, 0) was ranked by that
     // stale total; over 'abcxx' a (*SKIP) throws the atomic group's body away and the exact 'b' at 1
     // lost to a one-error (0, 4). With PatternObject.KeepDiscardedTotals set, the two rows answer
-    // (0, 0) and (0, 4) (measured 2026-10-03). A negative CONDITION's test is not thrown away: it
-    // chose the branch, so its errors count (D54, see
+    // (0, 0) and (0, 4) (measured 2026-10-03). A CONDITION's test is thrown away when its branch
+    // fails and the match backtracks out of the whole conditional: `(?(?!(?:q){e<=1})|y)` and its
+    // positive twin `(?(?=(?:q){e<=1})y|)` over 'c' spend one error in the test, the branch fails,
+    // and the exact 'c' alternative must not be ranked by that error. Upstream 2026.9.10 answers
+    // (0, 0) on both, the live answer is (0, 1) (checked with python, 2026-10-03). These two rows
+    // are the only witnesses of END_CONDITIONAL's backtrack arm restoring the totals. A failed
+    // negative test whose conditional goes on to match keeps its block (D54, see
     // Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made).
     [Test]
     [Arguments("(?b)(?:(?!(?:q){e<=1})|c)", "c", 0, 1)]
     [Arguments("(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)", "abcxx", 1, 2)]
+    [Arguments("(?b)(?:(?(?!(?:q){e<=1})|y)|c)", "c", 0, 1)]
+    [Arguments("(?b)(?:(?(?=(?:q){e<=1})y|)|c)", "c", 0, 1)]
     public void Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away(
         string pattern,
         string subject,

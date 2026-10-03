@@ -1747,8 +1747,10 @@ There is no option to restore the upstream answer. Ledger entry 61.
 
 A negative lookaround whose body matched fuzzily is thrown away, and so are its errors; so is the
 body of an atomic group a verb cuts through. Upstream keeps them in the total that BESTMATCH and
-ENHANCEMATCH rank by, so a match can lose to one that is no better. A negative condition's test is
-different: it chose the branch, so its errors stay (see the section on conditions below).
+ENHANCEMATCH rank by, so a match can lose to one that is no better. A conditional's test is thrown away the
+same way when its branch fails and the match backtracks out of the whole conditional. A failed
+negative test whose conditional goes on to match is different: it chose the branch, so its errors
+stay (see the section on conditions below).
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;

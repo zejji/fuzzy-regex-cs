@@ -4113,9 +4113,12 @@ no error. That body is not thrown away: the test's result chose the no branch, a
 entry 65 its captures stay, so its errors stay too, as a positive test's do. The row now answers
 (0, 1) with one deletion, upstream's answer and its positive twin's; the "exact" (1, 3) was never
 exact (`(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'). D45 stands for lookarounds, atomic
-groups and verbs, pinned by `(?b)(?:(?!(?:q){e<=1})|c)` over 'c' and
-`(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx'
-(`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, both
+groups and verbs, and for a conditional, positive or negative, whose branch fails so that the match
+backtracks out of the whole conditional (`(?b)(?:(?(?!(?:q){e<=1})|y)|c)` over 'c' is (0, 0)
+upstream and (0, 1) here); D54 covers only a failed negative test whose conditional goes on to
+match. Pinned by `(?b)(?:(?!(?:q){e<=1})|c)` over 'c', the conditional row just given and its
+positive twin, and `(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx'
+(`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, all
 red with `PatternObject.KeepDiscardedTotals` set).
 
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
