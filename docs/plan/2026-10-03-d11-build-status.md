@@ -15,7 +15,7 @@ Branch `maint/d11-partial-boundary`. Design: `docs/plan/2026-09-28-partial-bound
 | 7 | conditions and `NoBranch`; amendment 2 (blocked end) | 62c3fe16, 992543e5, 9ee671b6, a3f609c1, 1f0aff78, 5e9faed4, 8f4fefe5, tidy e7733fe3 | clean |
 | 8 | run-outs in bodies, unknown captures, run-out taint | 82f657cf..50475244, repair 509991e0 | clean (re-review CLEAR, 13,570 rows) |
 | 9, part 1 | item 0 (D41 and chunk 6's trailing-insertion regression), second-pass failure memo, fork budget M4, grid scripts | 0356a561, d633272d, 125c1bfd, f7da26d4 | **not reviewed**; brief `.claude/driver/review-d11-chunk9-brief.md` |
-| 9, part 2 | lookaround memo (A11-A13), delete HitEnd and S57d's escalation, the pin moves of design section 5 (11 tests go red when S57d goes), X2's witness now that D35 is merged, Z1/Z2 green without HitEnd | - | not built |
+| 9, part 2 | S57d and HitEnd deleted, the pin moves of design section 5, X2's witness on the merged head, Z1/Z2 green without HitEnd; D69; the lookaround memo (A11-A13) left to a design step (see below) | a2603d76 (re-review F1-F4), 597b6081 (D69), 10300f80, 54b9ea0c | not reviewed |
 | 10 | exact `(?w)` and grapheme M1 through property cores (W1-W6) | - | not built |
 | 11 | port grid (8.1), oracle at three seeds and the wave generators, benchmarks (section 9) | - | not built |
 
