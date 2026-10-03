@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -60,6 +61,73 @@ public sealed class PartialForkBudgetTests
         Match m = regex.Match(subject, partial: true);
 
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 601, 0));
+    }
+
+    /// <summary>
+    /// A budget partial reports no capture even with a group call open, as the written-out pattern
+    /// does (<c>(x)(?:(a)|a){12}(?!\b)(*FAIL)\2</c> answers the same span with every group unset).
+    /// The budget stands for no path, so D62's rule, which reports what every completion of the
+    /// partial's path would report, has no path to read: putting back the caller's groups from the
+    /// open call's frame reported group 1 as (0, 1) under the default capture rule, and tripped
+    /// the assert that a call only adds captures (chunk 9 review, finding 2).
+    /// </summary>
+    // Upstream 2026.9.10 answers P(0, 13) with group 1 set, its escalation's answer; the judge says
+    // None, since (*FAIL) fails every continuation.
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public void A_budget_partial_inside_an_open_call_reports_no_capture(bool keepCallCaptures)
+    {
+        var regex = new FuzzyRegex(
+            @"(x)(?&c)(?(DEFINE)(?<c>(?:(a)|a){12}(?!\b)(*FAIL)\3))",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+        regex.PatternObject.KeepCallCaptures = keepCallCaptures;
+
+        Match m = regex.MatchAtStart("x" + new string('a', 12), partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 13));
+        m.Groups[1].Captures.Should().BeEmpty();
+        m.Groups[2].Captures.Should().BeEmpty();
+        m.Groups[3].Captures.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Each kind of fork is counted once per construct that keeps more than one outcome (design
+    /// section 4.4), at one site each; every row is the witness of the site it names (rule 12). A
+    /// negative lookaround or test is one fork however many of its body's successes were blocked,
+    /// counted when it passes undetermined; a positive one forks at each blocked end that goes on,
+    /// and its no-branch adds none. Before the chunk 9 review's repair, the negative lookaround and
+    /// both conditions counted 2 (finding 3), so the budget fired at half the designed count.
+    /// </summary>
+    [Test]
+    [Arguments(@"a(?>\b|)(*FAIL)", "atomic group's blocked cut (BlockAtomicCut)", 1)]
+    [Arguments(@"a(?:\b|)++(*FAIL)", "possessive repeat's blocked cuts (BlockAtomicCut)", 2)]
+    [Arguments(@"a\b(*PRUNE)(*FAIL)", "skipped verb (SkipABlockedVerb)", 1)]
+    [Arguments(@"a(?=\b)(*FAIL)", "positive lookaround's blocked end (EndALookaroundInTheSecondPass)", 1)]
+    [Arguments(@"a(?<=a\b)(*FAIL)", "lookbehind's blocked end (EndALookaroundInTheSecondPass)", 1)]
+    [Arguments(@"a(?!\b)(*FAIL)", "negative lookaround passed undetermined (the LOOKAROUND arm)", 1)]
+    [Arguments(@"a(?(?=\b)(*FAIL)|(*FAIL))", "positive test's blocked end (EndALookaroundInTheSecondPass)", 1)]
+    [Arguments(@"a(?(?!\b)(*FAIL)|(*FAIL))", "negative test, both branches (the CONDITIONAL arm)", 1)]
+    [Arguments(@"(?=a(.))(?(1)(*FAIL)|(*FAIL))", "lookahead's end, then group-exists on an unknown capture", 2)]
+    public void Each_fork_is_counted_once(string pattern, string site, long forks)
+    {
+        var regex = new FuzzyRegex(pattern);
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            "a".AsMemory(),
+            0,
+            1,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: false);
+
+        state.Forks.Should().Be(forks, site);
     }
 
     /// <summary>

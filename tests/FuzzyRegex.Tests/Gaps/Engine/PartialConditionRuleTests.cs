@@ -84,6 +84,59 @@ public sealed class PartialConditionRuleTests
     }
 
     /// <summary>
+    /// D38: a test whose success was blocked but which then succeeds unblocked holds for every
+    /// continuation, so its no-branch is never taken. In <c>(?(?=ab$|a)ac|abc)</c> over 'ab' the
+    /// <c>ab$</c> success is blocked and its yes-branch fails at the 'b'; the <c>a</c> success holds
+    /// whatever follows and goes on to the same yes-branch, so the conditional fails at 0 for every
+    /// continuation. The no-branch's <c>abc</c> ran out of text and answered a phantom P(0, 2).
+    /// The <c>{e&lt;=1}</c> rows are the same fault in a fuzzy test (the deletion ledger entry 42
+    /// allows succeeds whatever follows), and the <c>{i&lt;=1}</c> rows, the defect as first filed,
+    /// are the controls where the test can fail: 'ab' + 'a' matches at 0 with one insertion.
+    /// </summary>
+    /// <remarks>
+    /// The expected answers are the port's own non-partial judge over every continuation of up to
+    /// three characters (<c>tools/probes/d11-port-judge-grid.cs</c>, 2026-10-03), which agrees with
+    /// the brute-force judge on the exact rows; a fuzzy row follows the port's ledger entry 42.
+    /// The last control, <c>(?(?=ab$)ac|abc)</c>, can fail its test: 'ab' + 'c' matches. The
+    /// anchored calls on the <c>\b</c> forms still answer P(0, 2) through S57d's escalation, as
+    /// main does, until build chunk 9 part 2 deletes it (<c>OpenDefectTests</c>, D38's last rows).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the {i<=1} rows: regex 2026.9.10 answers P(1, 2) to the search
+    // and None to the match. It agrees on the rest, except the last control, where it answers None.
+    [Test]
+    [Arguments("match", @"(?(?=ab$|a)ac|abc)", 0, -1)]
+    [Arguments("fullmatch", @"(?(?=ab$|a)ac|abc)", 0, -1)]
+    [Arguments("search", @"(?(?=ab$|a)ac|abc)", 0, 2)]
+    [Arguments("search", @"(?(?=ab\b|a)ac|abc)", 0, 2)]
+    [Arguments("search", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 0, 2)]
+    [Arguments("match", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]
+    [Arguments("search", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]
+    [Arguments("match", @"(?(?=ab$)ac|abc)", 0, 0)]
+    public void A_test_that_succeeds_unblocked_after_a_blocked_success_never_takes_its_no_branch(
+        string operation,
+        string pattern,
+        int beginning,
+        int start
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = operation switch
+        {
+            "search" => regex.Match("ab", beginning, 2 - beginning, partial: true),
+            "fullmatch" => regex.FullMatch("ab", beginning, 2 - beginning, partial: true),
+            _ => regex.MatchAtStart("ab", beginning, 2 - beginning, partial: true),
+        };
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+            return;
+        }
+
+        (m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, start, 2));
+    }
+
+    /// <summary>
     /// The design rows whose read is a word test, which S57d answers with the same span: T4 and T5
     /// take both branches, T6 skips the <c>(*PRUNE)</c> in its test, and L4 is a second-pass success.
     /// </summary>

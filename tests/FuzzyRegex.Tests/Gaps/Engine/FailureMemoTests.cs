@@ -89,6 +89,47 @@ public sealed class FailureMemoTests
         );
     }
 
+    /// <summary>
+    /// Row X2 of the D11 design (amendment 1), now that D35 keeps the guards across a condition's
+    /// restore: the lookahead runs out at every 'a', so the test's end is blocked, the yes-branch
+    /// goes on and records guards for the outer repeat, and only then does the test fail and take
+    /// the no-branch. Those records were made after the test, so they hold for the no-branch too,
+    /// and the second pass stays linear. Before the chunk 9 review's repair, D35's assert that a
+    /// failed test leaves the memo repeat's lists untouched fired here in a Debug build.
+    /// </summary>
+    /// <remarks>
+    /// The answers are the judge's: no 'z' can come before the 'c', so an anchored call is None,
+    /// and a search's partial is the edge attempt (upstream 2026.9.10 answers P(0, 41) to all
+    /// three). The second row's search starts at the edge too: no continuation puts a 'c' after
+    /// the 'b's. The calls took 656 / 13,777 / 656 steps at n = 40 (Debug, chunk 9 review).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, as design section 1 does: upstream 2026.9.10 answers P(0, 41) and,
+    // for the second row, P(0, 5) to all three calls.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:(?(?=.*z)a|a))*b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac", 41)]
+    [Arguments(@"(?:(?(?=.*c)a|a))*?(?=c)", "abbab", 5)]
+    public void A_partial_call_keeps_the_guards_a_blocked_condition_test_let_through(
+        string pattern,
+        string subject,
+        int searchStart
+    )
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match searched = regex.Match(subject, partial: true);
+                (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, searchStart, 0));
+                regex.MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+                regex.FullMatch(subject, partial: true).Success.Should().BeFalse();
+            },
+            100_000,
+            "the guards recorded after a blocked test survive the test's failure"
+        );
+    }
+
     [Test]
     [Category(EngineWork.Category)]
     [Arguments("(?:(?(?=a)a|a)|a)*b")]

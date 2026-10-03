@@ -389,6 +389,27 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// D26: a fuzzy zero-width test that passes undetermined at the edge still offers the insertion
+    /// in front of what follows, so the path through it is not the only one. Over 'a', the
+    /// <c>$</c> after the <c>a</c> passes undetermined, and the lookbehind <c>(?&lt;=:)</c> then
+    /// fails on the held 'a'; the insertion of ':' that the continuation 'a:' gives is the match
+    /// ((0, 2) with one insertion, here and upstream, without partial; ':a' for the reversed row). Fixed by build chunk 6's
+    /// <c>UndeterminedFuzzyRetry</c> (b734b23a); the rows come from the sizing of 2026-10-03.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to the matches and P(0, 0) to the search.
+    [Test]
+    [Arguments("match", @"(?:a$(?<=:)){i<=1}")]
+    [Arguments("match", @"(?:a(?m:$)(?<=:)){i<=1}")]
+    [Arguments("match", @"(?:a$(?<=:)){e<=1}")]
+    [Arguments("search", @"(?r)(?:(?=:)(?m:^)a){i<=1}")]
+    public void An_undetermined_fuzzy_test_at_the_edge_still_offers_the_insertion(string operation, string pattern)
+    {
+        Match m = Partial(operation, pattern, "a");
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+    }
+
+    /// <summary>
     /// The trailing insertion END_FUZZY tries after a section is an insertion too: at the edge it
     /// needs the character after the text, so it runs out of text rather than failing, both where
     /// the rest of the pattern needs it (a fullmatch's end, a lookahead's last letter) and where the
@@ -474,6 +495,40 @@ public sealed class PartialEdgeReadTests
 #endif
         (state.FoundMatch, state.PartialEventCount(PartialEvent.SuccessTurnedPartial)).Should().Be((false, one));
         Partial("match", pattern, "a").PartialMatch.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A scan after an empty complete match keeps its trailing partial. The scan goes on from the
+    /// empty match with "must advance" set, which forbids a second empty match at that position
+    /// only. The attempt from inside the text to come stands for starts past the edge, never that
+    /// position, so the flag must not reach it: carried in, it refused the attempt's empty success
+    /// at the edge and the scan ended with no partial (D64 design review, finding 1).
+    /// </summary>
+    /// <remarks>
+    /// Each expected list is the brute-force judge's (2026-10-03): the complete matches of the held
+    /// text, then a partial at the edge exactly when some continuation of up to four characters
+    /// gives the scan a further match, a repeat of the last empty match excluded. For example
+    /// 'abb' + 'aa' matches <c>(?&lt;=a)(?=\X)</c> at 4, and 'a' + 'a' matches <c>(?&lt;=a)</c> at 2.
+    /// The first two rows held before only because the pattern's first set ran out at the edge;
+    /// <c>^</c> is the control, where no continuation gives a further match.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 has no trailing partial on rows 3-6 (it agrees on the
+    // first two rows and the control).
+    [Test]
+    [Arguments(@"(?<=a)(?=a)", "aab", "F(1,1) P(3,3)")]
+    [Arguments(@"(?<!b)(?=[ac])", "ab", "F(0,0) P(2,2)")]
+    [Arguments(@"(?<=a)(?=\X)", "abb", "F(1,1) P(3,3)")]
+    [Arguments(@"(?<=a)", "ab", "F(1,1) P(2,2)")]
+    [Arguments(@"(?<=a)", "a", "F(1,1) P(1,1)")]
+    [Arguments(@"\b", "a", "F(0,0) F(1,1) P(1,1)")]
+    [Arguments(@"^", "ab", "F(0,0)")]
+    public void A_scan_after_an_empty_match_keeps_its_trailing_partial(string pattern, string text, string expected)
+    {
+        IEnumerable<string> matches = new FuzzyRegex(pattern)
+            .Matches(text, partial: true)
+            .Select(static m => $"{(m.PartialMatch ? 'P' : 'F')}({m.Index},{m.Index + m.Length})");
+
+        string.Join(' ', matches).Should().Be(expected);
     }
 
     private static MatchState RunPartial(string pattern, string text)

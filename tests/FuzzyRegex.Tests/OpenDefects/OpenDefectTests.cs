@@ -48,20 +48,27 @@ public sealed class OpenDefectTests
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
     }
 
-    // D38. Over 'aba' this pattern matches (0, 3) with one insertion, here and upstream, so 'ab' is
-    // a partial match at start 0, and MatchAtStart there says so. Search reports start 1 instead: the
-    // attempt at 0 fails with only the end-of-text flag set (the `\b` in the condition's test is
-    // decided at the end), and DoMatch reads that flag only when every start has failed, so a real
-    // partial at start 1 wins. The leftmost start wins in a search. Upstream 2026.9.10 answers
-    // (1, 2) for the search and None for match(partial=True).
+    // D38's last rows. The {i<=1} miss and the `$` phantom are fixed by D11 and pinned in
+    // PartialConditionRuleTests. In these the condition's test reads `\b` at the end of the text and
+    // holds for every continuation (its `a` alternative, or under {e<=1} the deletion ledger entry
+    // 42 allows, succeeds whatever follows), so no continuation matches at the start (the port's own
+    // judge, up to three characters, 2026-10-03). The second pass fails, and S57d's escalation turns
+    // the `\b`'s HitEnd into P(0, 2) (or P(1, 2)), as on main; with the escalation planted out each
+    // answers None. D11 build chunk 9 part 2 deletes the escalation. Upstream 2026.9.10 answers None
+    // to all three (probed 2026-10-03; the sizing note's P(0, 2) for the first row does not
+    // reproduce).
     [Test]
-    public void A_partial_search_reports_the_leftmost_start_that_the_anchored_matcher_finds()
+    [Arguments(@"(?(?=ab\b|a)ac|abc)", 0)]
+    [Arguments(@"(?:(?(?=a\b|a)a|b)){e<=1}a", 0)]
+    [Arguments(@"(?:(?(?=a\b|a)a|b)){e<=1}a", 1)]
+    public void A_condition_test_that_holds_whatever_follows_gives_no_partial_at_the_start(
+        string pattern,
+        int beginning
+    )
     {
-        var regex = new FuzzyRegex(@"(?:(?(?=a\b|a)a|b)){i<=1}a");
+        Match m = new FuzzyRegex(pattern).MatchAtStart("ab", beginning, 2 - beginning, partial: true);
 
-        Match m = regex.Match("ab", 0, 2, partial: true);
-
-        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+        m.Success.Should().BeFalse();
     }
 
     // D11 (docs/plan/2026-09-28-partial-boundary-design.md; the ids are its table's). A partial

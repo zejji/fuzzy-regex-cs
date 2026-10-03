@@ -26,38 +26,38 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class PartialBlockedEndTests
 {
     [Test]
-    [Arguments("C1", "match", @"(?(DEFINE)(?<c>(?(?=a$)a|a)))(?&c)\n", "a", 0, 1, "0,1")]
-    [Arguments("C1", "search", @"(?(DEFINE)(?<c>(?(?=a$)a|a)))(?&c)\n", "a", 0, 1, "0,1")]
-    [Arguments("C2", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0")]
-    [Arguments("C2", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0")]
-    [Arguments("C3", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", -1, -1, "n/a")]
-    [Arguments("C3", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", 1, 1, "unset")]
-    [Arguments("C4", "match", @"(?(DEFINE)(?<c>(?=a\b|a)))(?&c)(b)", "a", 0, 1, "unset")]
-    [Arguments("C5", "match", @"(?(DEFINE)(?<c>(?!a\b)))(?&c)a", "a", 0, 1, "0,0")]
-    [Arguments("C6", "match", @"(?(DEFINE)(?<c>(?!a$)))(?&c)a\n", "a", 0, 1, "0,0")]
-    [Arguments("C7", "match", @"(?(DEFINE)(?<c>(?(?!a$)b|a)))(?&c)\n", "a", 0, 1, "0,1")]
-    [Arguments("C8", "match", @"(?(DEFINE)(?<c>(?<=a\b)))a(?&c)\n", "a", 0, 1, "1,1")]
-    [Arguments("C9", "match", @"(?(DEFINE)(?<c>(?>a\b|)))(?&c)\n", "a", 0, 1, "0,1")]
-    [Arguments("C10", "match", @"(?(DEFINE)(?<c>(?=(?>a$|a))))(?&c)(a)\n", "a", 0, 1, "0,0")]
-    [Arguments("C10", "search", @"(?(DEFINE)(?<c>(?=(?>a$|a))))(?&c)(a)\n", "a", 0, 1, "0,0")]
-    [Arguments("N1", "match", @"(?(DEFINE)(?<c>(?=a$))(?<d>(?&c)))(?&d)a\n", "a", 0, 1, "0,0")]
-    [Arguments("N2", "match", @"(?(DEFINE)(?<c>a)(?<d>(?(?=(?&c)\b)(?&c)|b)))(?&d)\n", "a", 0, 1, "0,1")]
-    [Arguments("N3", "match", @"(?(DEFINE)(?<c>(?=a\b))(?<d>x(?&c)))(?&d)a\n", "xa", 0, 2, "1,1")]
-    [Arguments("R1", "match", @"(?:x(?R)|(?=a\b)a)\n", "xa", 0, 2, "n/a")]
-    [Arguments("R2", "match", @"(?:x(?R)|(?(?=a\b)a|b))\n", "xa", 0, 2, "n/a")]
-    [Arguments("R3", "match", @"(?:x(?R)|(?=a\b)a)\n", "xxa", 0, 3, "n/a")]
-    [Arguments("R3", "search", @"(?:x(?R)|(?=a\b)a)\n", "xxa", 0, 3, "n/a")]
-    [Arguments("R4", "match", @"(?:x(?R)|(?(?=(?>a$|a))a|b))(a)\n", "xa", 0, 2, "unset")]
-    [Arguments("G1", "match", @"(?:((?=a\b)a)|x(?1))\n", "xa", 0, 2, "1,2")]
-    [Arguments("G2", "match", @"(?:((?(?=a\b)a|b))|x(?1))\n", "xa", 0, 2, "1,2")]
-    [Arguments("G3", "match", @"(x(?1)?(?=a\b)a)\n", "xa", 0, 2, "0,2")]
-    [Arguments("K1", "match", @"(x(?=a$))a\n", "xa", 0, 2, "0,1")]
-    [Arguments("K2", "match", @"(x(?(?=a$)a|b))\n", "xa", 0, 2, "0,2")]
-    [Arguments("K3", "match", @"(a(?=b(cd)))", "ab", 0, 2, "0,1")]
-    [Arguments("F1", "match", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a")]
-    [Arguments("F1", "search", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a")]
-    [Arguments("X1", "match", @"(?(?=(?:a|ab)\b)a|b)(a)(\n)", "ab", 0, 2, "unset")]
-    [Arguments("X2", "match", @"a(?=(?:bcd){1<=e<=1}|b)x", "ab", -1, -1, "n/a")]
+    [Arguments("C1", "match", @"(?(DEFINE)(?<c>(?(?=a$)a|a)))(?&c)\n", "a", 0, 1, "0,1", "unset")]
+    [Arguments("C1", "search", @"(?(DEFINE)(?<c>(?(?=a$)a|a)))(?&c)\n", "a", 0, 1, "0,1", "unset")]
+    [Arguments("C2", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("C2", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("C3", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", -1, -1, "n/a", "n/a")]
+    [Arguments("C3", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", 1, 1, "unset", "unset")]
+    [Arguments("C4", "match", @"(?(DEFINE)(?<c>(?=a\b|a)))(?&c)(b)", "a", 0, 1, "unset", "unset")]
+    [Arguments("C5", "match", @"(?(DEFINE)(?<c>(?!a\b)))(?&c)a", "a", 0, 1, "0,0", "unset")]
+    [Arguments("C6", "match", @"(?(DEFINE)(?<c>(?!a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("C7", "match", @"(?(DEFINE)(?<c>(?(?!a$)b|a)))(?&c)\n", "a", 0, 1, "0,1", "unset")]
+    [Arguments("C8", "match", @"(?(DEFINE)(?<c>(?<=a\b)))a(?&c)\n", "a", 0, 1, "1,1", "unset")]
+    [Arguments("C9", "match", @"(?(DEFINE)(?<c>(?>a\b|)))(?&c)\n", "a", 0, 1, "0,1", "unset")]
+    [Arguments("C10", "match", @"(?(DEFINE)(?<c>(?=(?>a$|a))))(?&c)(a)\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("C10", "search", @"(?(DEFINE)(?<c>(?=(?>a$|a))))(?&c)(a)\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("N1", "match", @"(?(DEFINE)(?<c>(?=a$))(?<d>(?&c)))(?&d)a\n", "a", 0, 1, "0,0", "unset")]
+    [Arguments("N2", "match", @"(?(DEFINE)(?<c>a)(?<d>(?(?=(?&c)\b)(?&c)|b)))(?&d)\n", "a", 0, 1, "0,1", "unset")]
+    [Arguments("N3", "match", @"(?(DEFINE)(?<c>(?=a\b))(?<d>x(?&c)))(?&d)a\n", "xa", 0, 2, "1,1", "unset")]
+    [Arguments("R1", "match", @"(?:x(?R)|(?=a\b)a)\n", "xa", 0, 2, "n/a", "n/a")]
+    [Arguments("R2", "match", @"(?:x(?R)|(?(?=a\b)a|b))\n", "xa", 0, 2, "n/a", "n/a")]
+    [Arguments("R3", "match", @"(?:x(?R)|(?=a\b)a)\n", "xxa", 0, 3, "n/a", "n/a")]
+    [Arguments("R3", "search", @"(?:x(?R)|(?=a\b)a)\n", "xxa", 0, 3, "n/a", "n/a")]
+    [Arguments("R4", "match", @"(?:x(?R)|(?(?=(?>a$|a))a|b))(a)\n", "xa", 0, 2, "unset", "unset")]
+    [Arguments("G1", "match", @"(?:((?=a\b)a)|x(?1))\n", "xa", 0, 2, "1,2", "unset")]
+    [Arguments("G2", "match", @"(?:((?(?=a\b)a|b))|x(?1))\n", "xa", 0, 2, "1,2", "unset")]
+    [Arguments("G3", "match", @"(x(?1)?(?=a\b)a)\n", "xa", 0, 2, "0,2", "0,2")]
+    [Arguments("K1", "match", @"(x(?=a$))a\n", "xa", 0, 2, "0,1", "0,1")]
+    [Arguments("K2", "match", @"(x(?(?=a$)a|b))\n", "xa", 0, 2, "0,2", "0,2")]
+    [Arguments("K3", "match", @"(a(?=b(cd)))", "ab", 0, 2, "0,1", "0,1")]
+    [Arguments("F1", "match", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a", "n/a")]
+    [Arguments("F1", "search", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a", "n/a")]
+    [Arguments("X1", "match", @"(?(?=(?:a|ab)\b)a|b)(a)(\n)", "ab", 0, 2, "unset", "unset")]
+    [Arguments("X2", "match", @"a(?=(?:bcd){1<=e<=1}|b)x", "ab", -1, -1, "n/a", "n/a")]
     public void A_blocked_end_leaves_the_saved_stack_as_a_normal_end_does(
         string id,
         string operation,
@@ -65,16 +65,35 @@ public sealed class PartialBlockedEndTests
         string text,
         int start,
         int end,
-        string group1
+        string group1,
+        string defaultGroup1
+    )
+    {
+        // Group 1 is the witness that the continuation read the right saved stack, and in most rows
+        // it is set only inside a call. Since D51 (ledger entry 63) a call discards its captures on
+        // return, so `group1` is read under upstream's rule, which keeps them, as the judge does.
+        // `defaultGroup1` is the default rule's answer on the same row, the D11 x D62 path (a
+        // partial inside an open call after a blocked end): a group set only inside the call is
+        // unset, as in the written-out forms, for example `(?:(?(?=a$)a|a))\n` for C1 (chunk 9
+        // review, finding 5, measured 2026-10-03).
+        ShouldAnswerUnder(id, operation, pattern, text, start, end, group1, keepCallCaptures: true);
+        ShouldAnswerUnder(id, operation, pattern, text, start, end, defaultGroup1, keepCallCaptures: false);
+    }
+
+    private static void ShouldAnswerUnder(
+        string id,
+        string operation,
+        string pattern,
+        string text,
+        int start,
+        int end,
+        string group1,
+        bool keepCallCaptures
     )
     {
         var regex = new FuzzyRegex(pattern);
-
-        // Group 1 is the witness that the continuation read the right saved stack, and in most rows
-        // it is set only inside a call. Since D51 (ledger entry 63) a call discards its captures on
-        // return, so the expected spans are read under upstream's rule, which keeps them, as the
-        // judge does. The default rule is D51's own tests' concern.
-        regex.PatternObject.KeepCallCaptures = true;
+        regex.PatternObject.KeepCallCaptures = keepCallCaptures;
+        id += keepCallCaptures ? " (upstream's capture rule)" : " (D51's capture rule)";
         Match m = operation switch
         {
             "search" => regex.Match(text, partial: true),

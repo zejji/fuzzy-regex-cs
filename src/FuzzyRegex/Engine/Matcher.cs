@@ -3777,12 +3777,24 @@ internal static class Matcher
     /// <para>
     /// What the save protects is the guards recorded inside the test, and a memo repeat has none
     /// there: it is not inside a test (<c>NodeCompiler.BuildRepeat</c>), and with no group call none
-    /// of its nodes can run inside one. So a pop straight after the test finds its lists as they
-    /// were, and a pop when the yes-arm is undone finds only records made after the test, each true
-    /// whatever runs next. A <c>BRANCH</c> already treats the guards that way; for a memo repeat a
-    /// conditional is now a branch between its arms. The rest of the saved state (count, start,
-    /// capture change, run) is still put back, and every other repeat keeps upstream's save,
-    /// including every repeat in the partial pass of a partial call, where the memo is off. <see cref="CheckKeptGuards"/> asserts both facts.
+    /// of its nodes can run inside one. So a pop when the yes-arm is undone finds only records made
+    /// after the test, each true whatever runs next. A <c>BRANCH</c> already treats the guards that
+    /// way; for a memo repeat a conditional is now a branch between its arms. The rest of the saved
+    /// state (count, start, capture change, run) is still put back, and every other repeat keeps
+    /// upstream's save.
+    /// </para>
+    /// <para>
+    /// A pop when the test has ended without the yes-arm running finds the lists as they were,
+    /// because nothing but the test ran since the push. That holds outside a partial call's second
+    /// pass, and in it for a negative test and for a positive test whose end was never blocked.
+    /// The exception is the second pass, which keeps the memo since D11 build chunk 9: a positive
+    /// test whose end was blocked (D11 amendment 2) lets the yes-arm and the rest of the pattern
+    /// run before backtracking returns into the test, and when the test's body is then exhausted
+    /// the test fails and pops the repeats. The records made in between are the yes-arm's, made
+    /// after the test, so they are true for the no-arm as for any other arrival (row X2,
+    /// <c>(?:(?(?=.*z)a|a))*b</c> over 'a' * 40 + 'c', the chunk 9 review's finding 1).
+    /// <see cref="CheckKeptGuards"/> asserts that only such a pop finds the lists changed, and that
+    /// a kept list holds failures only.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -4889,9 +4901,11 @@ internal static class Matcher
                 return LookaroundEnd.Cut;
             }
 
+            // Not a fork yet: a negative construct keeps two outcomes once, when its body is
+            // exhausted and it passes undetermined, and that is where it is counted (the LOOKAROUND
+            // and CONDITIONAL backtracking arms), however many of its body's successes were blocked.
             TaintTheFrame(state, frame);
             state.NotePartialEvent(blockedEvent);
-            CountFork(state);
             return LookaroundEnd.Backtrack;
         }
 
@@ -4906,8 +4920,17 @@ internal static class Matcher
             state.NotePartialEvent(PartialEvent.Dedup);
             if (!blocked)
             {
-                // Cut and fail: the frame's entry is next, and its arm fails the lookaround.
+                // Cut and fail: the frame's entry is next, and its arm fails the construct. A test
+                // that held for every continuation must not be read as one that failed, which would
+                // take the condition's no-branch (D38: `(?(?=ab$|a)ac|abc)` over 'ab', where the `a`
+                // success holds whatever follows, answered the no-branch's run-out). A lookaround's
+                // arm only tries ledger 50's insertion in front of it, which changed no answer when
+                // planted out (30,240 fuzzy rows, 2026-10-03), so it is left as it was.
                 CutBstack(state, (int)mark);
+                if (op == Opcode.Conditional)
+                {
+                    state.AddWMark(frame, WMarkKind.Held);
+                }
             }
 
             return LookaroundEnd.Backtrack;
@@ -6319,10 +6342,23 @@ internal static class Matcher
     /// this brings forward, answers the partial at the attempt's start (<see cref="ForkBudgetPartial"/>).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The count is per attempt, because a search makes one attempt per start and a per-call count
     /// grows with the starts: `a*(?=.*z)b` over 'a' * n + 'c' crosses a per-call budget from about
     /// n = 256 (review round 3). The check rides on the cancellation gate, so a matching step pays
     /// nothing for it; only the second pass forks (assert A6).
+    /// </para>
+    /// <para>
+    /// Each fork is counted at one site: an atomic group's or possessive repeat's blocked cut
+    /// (<see cref="BlockAtomicCut"/>), a skipped verb (<see cref="SkipABlockedVerb"/>), a positive
+    /// lookaround's or test's blocked end that goes on (<see cref="EndALookaroundInTheSecondPass"/>),
+    /// a negative lookaround passing undetermined (the LOOKAROUND backtracking arm), a negative test
+    /// taking both branches (the CONDITIONAL backtracking arm), and a group-exists condition on an
+    /// unknown capture (the GROUP_EXISTS arm). A negative construct's blocked body successes are not
+    /// forks of their own, and a positive test's no-branch is one of the outcomes its blocked ends
+    /// counted; counting those too made one construct two forks (chunk 9 review, finding 3).
+    /// <c>PartialForkBudgetTests.Each_fork_is_counted_once</c> witnesses every site.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     private static void CountFork(MatchState state)
@@ -6345,7 +6381,8 @@ internal static class Matcher
     /// <remarks>
     /// A partial is never a refusal, so the budget cannot lose a match (design section 1); each
     /// firing is a phantom of class C5 (section 6). No path completed, so no capture is attested
-    /// and the groups are cleared, as S57d's escalation clears them.
+    /// and the groups are cleared, as S57d's escalation clears them, with a group call open too:
+    /// <see cref="BasicMatch"/> does not put the caller's groups back for this partial.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see cref="MatchStatus.Partial"/>.</returns>
@@ -10780,6 +10817,7 @@ internal static class Matcher
     /// Upstream <c>basic_match</c>, and NOT UPSTREAM'S (D62) in what a partial result reports.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A partial match reports, for each group, what every completion of the path the partial took
     /// would report (owner ruling on D62, DECISIONS.md 2026-09-30). A group call that has not
     /// returned when the text ran out will return in any completion, and its return puts the
@@ -10790,6 +10828,17 @@ internal static class Matcher
     /// arm that answers <see cref="MatchStatus.Partial"/> does so only when a partial side is set,
     /// which the assertion below checks. Under <see cref="PatternObject.KeepCallCaptures"/> the
     /// groups are left as upstream leaves them.
+    /// </para>
+    /// <para>
+    /// A partial from the D11 fork budget (<see cref="ForkBudgetPartial"/>) is not restored: it
+    /// stands for no path, so no completion attests any group, and it reports none, as the
+    /// written-out pattern does. Restored, <c>(x)(?&amp;c)(?(DEFINE)(?&lt;c&gt;(?:(a)|a){12}(?!\b)(*FAIL)\3))</c>
+    /// over 'x' + 'a' * 12 reported group 1 as (0, 1) where <c>(x)(?:(a)|a){12}(?!\b)(*FAIL)\2</c>
+    /// reports it unset (D11 chunk 9 review, finding 2). <see cref="MatchState.ForkBudgetSpent"/>
+    /// marks that partial: once it is set, the next step's cancellation gate answers it, and no arm
+    /// that counts a fork answers a partial in the same step (each goes on, breaks or backtracks:
+    /// <see cref="CountFork"/>'s callers).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to search, or to match at the current position only.</param>
@@ -10797,7 +10846,12 @@ internal static class Matcher
     internal static int BasicMatch(MatchState state, bool search)
     {
         int status = BasicMatchCore(state, search);
-        if (status == MatchStatus.Partial && state.OpenCalls.Count > 0 && !state.Pattern.KeepCallCaptures)
+        if (
+            status == MatchStatus.Partial
+            && state.OpenCalls.Count > 0
+            && !state.Pattern.KeepCallCaptures
+            && !state.ForkBudgetSpent
+        )
         {
             Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial search answers partial");
             if (state.Pattern.PartialRestoresFrameByFrame)
@@ -15571,9 +15625,11 @@ internal static class Matcher
                     // success of the test was blocked, so the branch the test's failure picks is
                     // taken only for some continuations.
                     bool condWasBlocked = false;
+                    bool condHeld = false;
                     if (state.WMarks.Count != 0)
                     {
                         condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+                        condHeld = HasWMarkAt(state, state.Bstack.Count, WMarkKind.Held);
                         state.DropWMarksFrom(state.Bstack.Count);
                     }
 
@@ -15617,13 +15673,26 @@ internal static class Matcher
 
                     state.CaptureChange = condCaptureChange;
 
+                    // Only the test has run since the push, unless a positive test's end was blocked
+                    // and let the yes-branch go on (D35's remarks, PushRepeats).
                     if (
                         !state.PopSubAttemptFuzzyState(state.Bstack)
-                        || !PopRepeats(state, state.Bstack, testJustEnded: true)
+                        || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
                         || !PopCaptures(state, state.Bstack)
                     )
                     {
                         return MatchStatus.Illegal;
+                    }
+
+                    // D11 (D38): the test held for every continuation, and its yes-branch has failed
+                    // (EndALookaroundInTheSecondPass's dedup), so the conditional fails.
+                    if (condHeld)
+                    {
+                        Debug.Assert(
+                            condWasBlocked && condNode.Match,
+                            "D11: only a positive test that went on from a blocked end can be held"
+                        );
+                        break;
                     }
 
                     // A positive condition that failed means the condition does not hold, so take the
@@ -15637,6 +15706,9 @@ internal static class Matcher
                     // takes its no-branch for them when backtracking reaches the NO_BRANCH entry.
                     if (condWasBlocked)
                     {
+                        // A negative test forks here, once. A positive one forked at each blocked
+                        // end that went on (EndALookaroundInTheSecondPass), and this branch is
+                        // one of the outcomes those counted.
                         if (!condNode.Match)
                         {
                             state.Bstack.PushSize(state.TextPos);
@@ -15644,11 +15716,12 @@ internal static class Matcher
                             state.Bstack.PushUInt8((byte)Opcode.NoBranch);
 
                             /* bstack: text_pos node NO_BRANCH */
+
+                            CountFork(state);
                         }
 
                         PushTouchMark(state);
                         state.NotePartialEvent(PartialEvent.ConditionBothWays);
-                        CountFork(state);
                     }
 
                     goto advance;
@@ -18362,6 +18435,14 @@ internal static class Matcher
         state.TextPos = edge;
         state.InsideW = true;
 
+        // A scan after an empty match must advance past that match's position, and the attempts
+        // in the held text have done so. This attempt stands for starts past the edge, never that
+        // position, so the ban does not apply: carried in, it refused the attempt's empty success
+        // and lost the scan's trailing partial (finditer `(?<=a)(?=\X)` over 'abb'; the D64
+        // design review, finding 1).
+        bool mustAdvance = state.MustAdvance;
+        state.MustAdvance = false;
+
         int status;
         try
         {
@@ -18369,6 +18450,7 @@ internal static class Matcher
         }
         finally
         {
+            state.MustAdvance = mustAdvance;
             state.InsideW = false;
             (state.TextStart, state.TextEnd, state.InitialSliceStart, state.InitialSliceEnd) = (
                 textStart,

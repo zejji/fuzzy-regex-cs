@@ -24,6 +24,14 @@ internal enum WMarkKind : byte
     /// skipped.
     /// </summary>
     VerbTaint,
+
+    /// <summary>
+    /// At a positive condition test's frame: its body succeeded unblocked, so it holds for every
+    /// continuation, with the captures and fuzzy counts of an earlier success whose yes-branch has
+    /// already failed. The CONDITIONAL backtracking arm then fails the conditional, as backtracking
+    /// past a test that cut does, rather than taking the no-branch (D38).
+    /// </summary>
+    Held,
 }
 
 /// <summary>NOT UPSTREAM'S, D11: one w-mark, live while its position is on the backtracking stack.</summary>
