@@ -1323,33 +1323,56 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
 
-    // Known defect D45, the rest of ledger entry 32. A negative condition or lookaround whose body
-    // matched is thrown away, and its fuzzy section with it: the counts went back, but the running
-    // total the section's END_FUZZY wrote stayed, and BESTMATCH and ENHANCEMATCH rank by that total.
-    // At 0 the condition (?!(?:a){e<=1}) fails with one error spent, the 'c' branch matches with a
-    // deletion, and the zero-error 'dc' at 1 was then scored as no better than a match whose counts
-    // were (0, 0, 1) and total two. Upstream regex 2026.9.10 answers the one-deletion (0, 1) on all
-    // three rows: it never restores total_errors. The control is the zero-error match, found at 1
-    // without the flag.
+    // Known defect D45, the rest of ledger entry 32. A lookaround or atomic group whose body is
+    // thrown away throws away its fuzzy section too: the counts went back, but the running total the
+    // section's END_FUZZY wrote stayed, and BESTMATCH and ENHANCEMATCH rank by that total. Over 'c',
+    // `(?!(?:q){e<=1})` fails with one error spent and the empty branch's (0, 0) was ranked by that
+    // stale total; over 'abcxx' a (*SKIP) throws the atomic group's body away and the exact 'b' at 1
+    // lost to a one-error (0, 4). With PatternObject.KeepDiscardedTotals set, the two rows answer
+    // (0, 0) and (0, 4) (measured 2026-10-03). A CONDITION's test is thrown away when its branch
+    // fails and the match backtracks out of the whole conditional: `(?(?!(?:q){e<=1})|y)` and its
+    // positive twin `(?(?=(?:q){e<=1})y|)` over 'c' spend one error in the test, the branch fails,
+    // and the exact 'c' alternative must not be ranked by that error. Upstream 2026.9.10 answers
+    // (0, 0) on both, the live answer is (0, 1) (checked with python, 2026-10-03). These two rows
+    // are the only witnesses of END_CONDITIONAL's backtrack arm restoring the totals. A failed
+    // negative test whose conditional goes on to match keeps its block (D54, see
+    // Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made).
+    [Test]
+    [Arguments("(?b)(?:(?!(?:q){e<=1})|c)", "c", 0, 1)]
+    [Arguments("(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)", "abcxx", 1, 2)]
+    [Arguments("(?b)(?:(?(?!(?:q){e<=1})|y)|c)", "c", 0, 1)]
+    [Arguments("(?b)(?:(?(?=(?:q){e<=1})y|)|c)", "c", 0, 1)]
+    public void Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // D54 (ledger entry 65), decided 2026-10-03: a failed negative condition's no branch keeps the
+    // test's whole block, its errors included, so these rows answer as their positive twin
+    // `(?b)(?:(?(?=(?:a){e<=1})d|c)c|(?:bc){e<=1})` does: (0, 1) with one deletion, as upstream 2026.9.10
+    // answers all three. They pinned D45's (1, 3) with no error until then, but that match is not
+    // exact either: `(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'.
     [Test]
     [Arguments("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})")]
     [Arguments("(?b)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
     [Arguments("(?be)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
-    public void Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away(string pattern)
+    public void Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made(string pattern)
     {
         Match m = new FuzzyRegex(pattern).Match("cdcx");
+        Match twin = new FuzzyRegex("(?b)(?:(?(?=(?:a){e<=1})d|c)c|(?:bc){e<=1})").Match("cdcx");
 
-        m.Success.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((1, 3));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        Match plain = new FuzzyRegex(pattern[(pattern.IndexOf(')', StringComparison.Ordinal) + 1)..]).Match(
-            "cdcx",
-            1,
-            3
-        );
-        (plain.Index, plain.Index + plain.Length).Should().Be((1, 3));
-        plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        (twin.Index, twin.Index + twin.Length, twin.FuzzyCounts).Should().Be((0, 1, new FuzzyCounts(0, 0, 1)));
     }
 
     // D45 through an atomic group: a (*SKIP) inside it throws the group's body away wholesale, and

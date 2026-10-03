@@ -1253,6 +1253,7 @@ internal static class ParseFunctions
         return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
         {
             UpstreamCallFeatures = info.UpstreamCallFeatures,
+            UpstreamFuzzyTest = info.UpstreamFuzzyConditionTest,
         };
     }
 

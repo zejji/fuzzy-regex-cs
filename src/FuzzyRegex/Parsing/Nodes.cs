@@ -4289,15 +4289,22 @@ internal sealed class LookAroundConditional : RegexBase
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// NOT UPSTREAM (D43): the test is fixed under <see cref="Behind"/>, the direction
     /// <see cref="CompileCore"/> compiles it in (<c>upstream/regex/_regex_core.py</c>:3267).
     /// Upstream fixes it under the caller's direction (:3230), so a call in a lookbehind test ran
     /// its group forwards: <c>bc(?(?&lt;=(?&amp;g))x|y)(?P&lt;g&gt;bc)?</c> refused 'bcxzzz', which
     /// <c>bc(?(?&lt;=bc)x|y)</c> matches.
+    /// </para>
+    /// <para>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test is exact, like a plain lookaround's body
+    /// (<c>upstream/regex/_regex_core.py</c>:3201), so its calls are fixed exact too. See
+    /// <see cref="CompileCore"/>.
+    /// </para>
     /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, fuzzy);
+        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, UpstreamFuzzyTest && fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
@@ -4307,6 +4314,13 @@ internal sealed class LookAroundConditional : RegexBase
     /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
     /// </summary>
     internal bool UpstreamCallFeatures { get; init; }
+
+    /// <summary>
+    /// Whether the test is compiled with the enclosing section's fuzziness, as upstream's is (the
+    /// D52 fix switched off). Set from <see cref="Info.UpstreamFuzzyConditionTest"/>, for the oracle
+    /// alone.
+    /// </summary>
+    internal bool UpstreamFuzzyTest { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse) =>
@@ -4319,6 +4333,7 @@ internal sealed class LookAroundConditional : RegexBase
         )
         {
             UpstreamCallFeatures = UpstreamCallFeatures,
+            UpstreamFuzzyTest = UpstreamFuzzyTest,
         };
 
     /// <inheritdoc />
@@ -4392,13 +4407,21 @@ internal sealed class LookAroundConditional : RegexBase
     public override int GetHashCode() => typeof(LookAroundConditional).GetHashCode();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test compiles exact, as a plain lookaround's body
+    /// does (<see cref="LookAround"/>, upstream <c>_regex_core.py</c>:3201), where upstream passes the
+    /// enclosing section's <paramref name="fuzzy"/> (:3267). The test is atomic, so a test that
+    /// held only by an edit was never asked again exactly, and the budget took a match away:
+    /// <c>(?:(?(?=a)ab|b)){s&lt;=1}</c> over 'b' was None where <c>(?(?=a)ab|b)</c> gives (0, 1). A
+    /// fuzzy section written inside the test still applies there.
+    /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
         List<uint[]> code =
         [
             [(uint)Opcode.Conditional, Positive ? 1u : 0u, Behind ? 0u : 1u],
         ];
-        code.AddRange(Subpattern.Compile(Behind, fuzzy));
+        code.AddRange(Subpattern.Compile(Behind, UpstreamFuzzyTest && fuzzy));
         code.Add([(uint)Opcode.Next]);
         code.AddRange(YesItem.Compile(reverse, fuzzy));
 

@@ -10229,21 +10229,29 @@ internal static class Matcher
                      * pstack: -
                      */
 
-                    if (endCondNode.Match)
+                    if (endCondNode.Match || !pattern.DropNegativeTestCaptures)
                     {
-                        // It's a positive lookaround that's succeeded, so the condition holds. The
-                        // saved block stays on the stack for the backtrack case to undo.
+                        // The test's body matched. The saved block stays on the stack for the
+                        // backtrack case to undo, and what the body did stands until then.
                         state.Bstack.PushUInt8((byte)Opcode.EndConditional);
 
                         /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
 
-                        // Go to the 'true' branch.
-                        node = node.Next1.Node!;
+                        // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
+                        // entry 65): a negative test fails, and the 'false' branch keeps the whole
+                        // block as the positive arm does - the captures, the repeats and the errors
+                        // of a fuzzy section inside the test - so (?(?!X)A|B) answers as
+                        // (?(?=X)B|A). Only backtracking undoes them, and none has happened: the
+                        // test chose the branch, so its work is not thrown away (owner ruling
+                        // 2026-09-30 on OPEN-2; errors decided 2026-10-03, DECISIONS). Upstream
+                        // restores the block first (_regex.c:12423-12432).
+                        node = endCondNode.Match ? node.Next1.Node! : endCondNode.Next2.Node!;
                     }
                     else
                     {
-                        // It's a negative lookaround that's succeeded, so the condition does not
-                        // hold. Undo what the condition did before taking the other branch.
+                        // Oracle-only (PatternObject.DropNegativeTestCaptures): upstream's arm. A
+                        // negative test has failed, so undo what the test did before taking the
+                        // 'false' branch.
                         if (!state.Bstack.PopSize(out long endCondCaptureChange))
                         {
                             return MatchStatus.Illegal;

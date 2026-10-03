@@ -74,6 +74,9 @@ internal static class PatternCompiler
     /// <param name="upstreamCallFeatures">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
     /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFuzzyConditionTest"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
@@ -83,7 +86,8 @@ internal static class PatternCompiler
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false
     )
     {
         try
@@ -96,7 +100,8 @@ internal static class PatternCompiler
                 upstreamReverseGrapheme,
                 upstreamFoldedRuns,
                 upstreamWholePatternCall,
-                upstreamCallFeatures
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest
             );
         }
         catch (FuzzyRegexParseException unterminated)
@@ -184,7 +189,8 @@ internal static class PatternCompiler
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -212,6 +218,7 @@ internal static class PatternCompiler
                     UpstreamFoldedRuns = upstreamFoldedRuns,
                     UpstreamWholePatternCall = upstreamWholePatternCall,
                     UpstreamCallFeatures = upstreamCallFeatures,
+                    UpstreamFuzzyConditionTest = upstreamFuzzyConditionTest,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
