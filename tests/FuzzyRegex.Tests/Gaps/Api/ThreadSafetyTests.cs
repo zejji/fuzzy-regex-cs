@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names seventy-one, and under the JIT this set is exactly those seventy-one. A floor of
+        // The allowlist names seventy-three, and under the JIT this set is exactly those seventy-three. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names seventy-one writable fields, so a near-empty answer means the "
+                "the allowlist names seventy-three writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -293,6 +293,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<StatesInitialised>k__BackingField",
                 "WorkCounter.<StepLimit>k__BackingField",
                 "WorkCounter.<Steps>k__BackingField"
@@ -718,7 +719,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all seventy-one, and it is the reason they are not readonly: the engine's
+            // ONE writer for all seventy-three, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -729,16 +730,22 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-one
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all seventy-three
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
             // passes (the required-string node, the start optimisations, the fuzzy survey).
             // S60 added two, both written by Compile and by nothing else: ReqStringText beside the
             // required-string node it belongs to, and HasSkipVerb in the node-numbering loop.
-            // S57c added AnchorGuards, written by Optimiser.FindAnchorGuards, the last pass
-            // OptimisePattern runs.
+            // D61 added LiftsAnchorBan (replacing S57c's AnchorGuards), written by
+            // Optimiser.FindAnchorBanLift, the last pass OptimisePattern runs, and cleared only by
+            // OracleComparer.RunWithoutTheAnchorPin on a pattern compiled for that one call.
+            "PatternObject.LiftsAnchorBan",
+            // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
+            // only since D61.
             "PatternObject.AnchorGuards",
+            // And LiftsAnchorBanWhenPartial, written beside it.
+            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",
@@ -773,6 +780,13 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // D44 and D45 added KeepSectionOpenAfterAVerb and KeepDiscardedTotals, likewise set
+            // only by the oracle's ablations on a pattern it compiled for one call.
+            "PatternObject.KeepSectionOpenAfterAVerb",
+            "PatternObject.KeepDiscardedTotals",
+            // D37 added MatchMayEndInsideTheWholePatternCall, likewise set only by
+            // OracleComparer.RunWithTheUpstreamWholePatternCall.
+            "PatternObject.MatchMayEndInsideTheWholePatternCall",
             // Ledger entry 50 added SkipLookaroundInsertion, likewise set only by
             // OracleComparer.RunWithoutTheLookaroundInsertion.
             "PatternObject.SkipLookaroundInsertion",
@@ -785,6 +799,18 @@ public sealed class ThreadSafetyTests
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
+            // D10 (ledger entry 54) added LookaroundsSavingOnlyForCalls, filled by
+            // NodeCompiler.BuildLookaround inside Compile and never read by the library. Only
+            // OracleComparer.RunWithTheUpstreamLookaroundCallCaptures reads it, to clear its nodes'
+            // flag on a pattern compiled for that one call.
+            "PatternObject.LookaroundsSavingOnlyForCalls",
+            // D51 (ledger entry 63) added KeepCallCaptures, never set by the library. Only
+            // OracleComparer.RunWithTheUpstreamCallCaptures sets it, on a pattern compiled for that
+            // one call.
+            "PatternObject.KeepCallCaptures",
+            // D62 added PartialRestoresFrameByFrame, likewise set only by
+            // OracleComparer.RunWithTheFrameByFrameRestore.
+            "PatternObject.PartialRestoresFrameByFrame",
             // D11 added SecondPassAsBeforeD11, likewise set only by
             // OracleComparer.RunWithTheSecondPassAsBeforeD11.
             "PatternObject.SecondPassAsBeforeD11",
@@ -822,6 +848,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
             "PatternObject.UseRepeatMemo",
+            // The capture-dependent call guard added one, written in Compile beside MemoGroups.
+            "PatternObject.CallReadGroups",
+            "PatternObject.CapturesAgainstDirection",
             // The failed-call memo added these three, written by Compile (GroupCallSites and
             // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
             // (WritesInDiscardingConstruct).
@@ -835,6 +864,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
+            // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never
+            // read by the library. Only OracleComparer.RunWithTheUpstreamCallFeatures reads it, to
+            // put upstream's width back on a pattern compiled for that one call.
+            "PatternObject.UpstreamMinWidth",
             "PatternObject.NamedListIndexes",
             "PatternObject.NamedLists",
             "PatternObject.PatternCallRef",
@@ -888,6 +921,8 @@ public sealed class ThreadSafetyTests
             "GroupInfo.HasName",
             "GroupInfo.Node",
             "GroupInfo.Referenced",
+            "GroupInfo.TextRead",
+            "GroupInfo.CapturedInRepeat",
             "CallRefInfo.Defined",
             "CallRefInfo.Node",
             "CallRefInfo.Used",

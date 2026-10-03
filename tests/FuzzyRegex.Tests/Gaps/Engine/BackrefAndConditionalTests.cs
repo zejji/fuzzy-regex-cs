@@ -271,4 +271,73 @@ public sealed class BackrefAndConditionalTests
         FuzzyRegex.Match("bb", "(?>(?(?=b)b*|))b").Success.Should().BeFalse();
         FuzzyRegex.Match("aaa", "(?>(?(?=a)a*|))a").Success.Should().BeFalse();
     }
+
+    // Known defect D55, ledger entry 62. A negative condition whose test fails goes to the yes
+    // branch through CONDITIONAL's TrueNode, and the optimiser's 1-way-branch skip tested the
+    // BRANCH's own TrueNode, which a branch never sets, where it meant its second exit
+    // (upstream/src/_regex.c:23203-23208 has the same test; true_node and next_2 are separate
+    // members of the node's `nonstring` struct, :294-297, so it is not a union read). Every
+    // alternation at the start of such a yes branch lost all but its first alternative. A
+    // positive test reaches the yes branch through END_CONDITIONAL's first exit, whose skip is
+    // right, so it was unaffected.
+    //
+    // Measured 2026-09-30 (tools/matrix/survey.py): upstream regex 2026.9.10 answers None, or no
+    // matches, on every row; PCRE2 10.47 and Perl 5.42.3 both answer the span asserted. The last
+    // three are matrix rows 8301, 11941 (group 1 (2, 3)) and 11948 (finditer, one match) of the
+    // 2026-09-30 complete matrix.
+    [Test]
+    [Arguments("(?(?!a)(?:x|))x", "x", 0, 1)]
+    [Arguments("(?(?<!q)(?:xz|x))c", "xc", 0, 2)]
+    [Arguments("(?(?<!x)(?:ab|a))c", "ac", 0, 2)]
+    [Arguments("(?(?<!x)(?:ab|a)(?<!(?:(?:ab|a)(*FAIL)|ba[ab]))|(?:ab|a))", "  bab", 3, 1)]
+    [Arguments("(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)", "aax", 2, 1)]
+    [Arguments("(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)", "b", 0, 1)]
+    public void A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+    }
+
+    [Test]
+    public void The_negative_condition_rows_answer_every_engine_s_groups_and_iteration()
+    {
+        // Rows 11941 and 11948 of the matrix check more than the span: PCRE2 and Perl give group 1
+        // (2, 3) on the first and exactly one match, (0, 1), from finditer on the second.
+        Match called = FuzzyRegex.Match("aax", "(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)");
+        (called.Groups[1].Index, called.Groups[1].Length).Should().Be((2, 1));
+
+        new FuzzyRegex("(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)")
+            .Matches("b")
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 1));
+    }
+
+    [Test]
+    [Arguments("(?(?!a)(?:x|y))x", "x", false)]
+    [Arguments("(?(?=x)(?:x|))x", "x", true)]
+    public void The_conditions_the_true_branch_skip_did_not_break_keep_their_answers(
+        string pattern,
+        string subject,
+        bool matches
+    )
+    {
+        // Controls for D55. The first has no empty alternative, so dropping 'y' could not change
+        // the answer; the second is a positive test, which never reads TrueNode. Upstream, PCRE2
+        // 10.47 and Perl 5.42.3 answer None and (0, 1) (measured 2026-09-30).
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        m.Success.Should().Be(matches);
+        if (matches)
+        {
+            (m.Index, m.Length).Should().Be((0, 1));
+        }
+    }
 }

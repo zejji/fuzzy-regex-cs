@@ -1153,7 +1153,7 @@ internal static class ParseFunctions
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
-        return new LookAround(behind, positive, subpattern);
+        return new LookAround(behind, positive, subpattern) { UpstreamCallFeatures = info.UpstreamCallFeatures };
     }
 
     /// <summary>Upstream <c>parse_conditional</c> (lines 1007-1048).</summary>
@@ -1250,7 +1250,10 @@ internal static class ParseFunctions
 
         source.Expect(")");
 
-        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch);
+        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
+        {
+            UpstreamCallFeatures = info.UpstreamCallFeatures,
+        };
     }
 
     /// <summary>Upstream <c>parse_atomic</c> (lines 1070-1080).</summary>
@@ -3201,9 +3204,16 @@ internal static class ParseFunctions
     }
 
     /// <summary>Upstream <c>_check_group_features</c> (lines 4421-4458).</summary>
+    /// <remarks>
+    /// NOT UPSTREAM (D40): the calls inside each copy are then resolved for the copy's own
+    /// features (<see cref="ResolveCallsInCopy"/>), here and before anything is compiled, so that a
+    /// reference whose features are the group's own is carried by the group as written, as every
+    /// other reference is, rather than by a copy.
+    /// </remarks>
     /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, for the copies' walk.</param>
     /// <param name="parsed">The parsed pattern.</param>
-    internal static void CheckGroupFeatures(Info info, RegexBase parsed)
+    internal static void CheckGroupFeatures(Info info, string pattern, RegexBase parsed)
     {
         Dictionary<(int Group, bool Reverse, bool Fuzzy), int> callRefs = [];
         List<(RegexBase Group, bool Reverse, bool Fuzzy)> additionalGroups = [];
@@ -3251,13 +3261,137 @@ internal static class ParseFunctions
 
         info.CallRefs = callRefs;
         info.AdditionalGroups = additionalGroups;
+
+        if (info.UpstreamCallFeatures)
+        {
+            return;
+        }
+
+        // The copies' walks re-point the call nodes they share with the pattern as written, so the
+        // pattern's own references are put back afterwards; each copy's are set again just before
+        // it compiles. The list grows while this runs, and each (group, direction, fuzziness) is
+        // added once, so it ends.
+        (CallGroup Call, int Reference)[] written =
+        [
+            .. info.GroupCalls.Select(static entry => ((CallGroup)entry.Call, ((CallGroup)entry.Call).CallRefIndex)),
+        ];
+        for (int i = 0; i < additionalGroups.Count; i++)
+        {
+            (RegexBase copy, bool copyReverse, bool copyFuzzy) = additionalGroups[i];
+            ResolveCallsInCopy(info, pattern, parsed, copy, copyReverse, copyFuzzy);
+        }
+
+        foreach ((CallGroup call, int reference) in written)
+        {
+            call.CallRefIndex = reference;
+        }
+    }
+
+    /// <summary>
+    /// Points the calls inside one additional copy at the references for the copy's own direction
+    /// and fuzziness: once before the pattern compiles, to find them, and again just before the copy
+    /// compiles. Not in upstream (D40).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A copy shares its call nodes with the group as written, and <see cref="CheckGroupFeatures"/>
+    /// resolved each of those for where it is written. Upstream compiles the copy with them as they
+    /// are, so an exact copy of a group in a fuzzy section calls the fuzzy compile of the next
+    /// group, whose items then fail with no section in force: upstream segfaults and this port read
+    /// a null section, on <c>(?&amp;g4)(?:(?P&lt;g4&gt;(?&amp;g3))){s&lt;=1}(?P&lt;g3&gt;a)</c> over
+    /// 'ba'. A fuzzy copy likewise called the exact compile and lost matches.
+    /// </para>
+    /// <para>
+    /// This walks the copy with <see cref="RegexBase.FixGroups"/>, the walk that gave every other
+    /// call its features, from the copy's features, and sets each call's reference for this compile.
+    /// Setting it in place is sound because the code is compiled one copy at a time and a call node
+    /// reads its reference only when compiled. The walk also records each group it passes, and that
+    /// record is put back: it says where a group is written, and later copies are made from it.
+    /// </para>
+    /// <para>
+    /// A reference first needed here gets a copy only where the group as written has other
+    /// features, as <see cref="CheckGroupFeatures"/> decides for the pattern's own calls; it runs
+    /// this for every copy before anything compiles, so the group as written then carries the
+    /// reference. New copies are appended to <see cref="Info.AdditionalGroups"/> and reached in
+    /// turn. It ends: each (group, direction, fuzziness) is added once.
+    /// </para>
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, which the walk needs for its errors (none can arise: the pattern's own walk passed).</param>
+    /// <param name="parsed">The parsed pattern, for a copy of the whole pattern.</param>
+    /// <param name="copy">The copy about to be compiled.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    internal static void ResolveCallsInCopy(
+        Info info,
+        string pattern,
+        RegexBase parsed,
+        RegexBase copy,
+        bool reverse,
+        bool fuzzy
+    )
+    {
+        int firstCall = info.GroupCalls.Count;
+        KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)>[] definitions = [.. info.DefinedGroups];
+
+        copy.FixGroups(pattern, reverse, fuzzy);
+
+        info.DefinedGroups.Clear();
+        foreach (KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)> definition in definitions)
+        {
+            info.DefinedGroups.Add(definition.Key, definition.Value);
+        }
+
+        for (int i = firstCall; i < info.GroupCalls.Count; i++)
+        {
+            (RegexBase call, bool callReverse, bool callFuzzy) = info.GroupCalls[i];
+            var callGroup = (CallGroup)call;
+            (int, bool, bool) key = (callGroup.GroupNumber, callReverse, callFuzzy);
+            if (!info.CallRefs.TryGetValue(key, out int reference))
+            {
+                reference = info.CallRefs.Count;
+                info.CallRefs[key] = reference;
+
+                // As CheckGroupFeatures decides for the pattern's own calls: a copy only where the
+                // group as written has other features.
+                bool written =
+                    callGroup.GroupNumber == 0
+                        ? (callReverse, callFuzzy) == ((info.Flags & RegexFlags.Reverse) != 0, parsed is Fuzzy)
+                        : (callReverse, callFuzzy)
+                            == (
+                                info.DefinedGroups[callGroup.GroupNumber].Reverse,
+                                info.DefinedGroups[callGroup.GroupNumber].Fuzzy
+                            );
+                if (!written)
+                {
+                    info.AdditionalGroups.Add(
+                        (
+                            callGroup.GroupNumber == 0
+                                ? new CallRef(reference, parsed)
+                                : info.DefinedGroups[callGroup.GroupNumber].Group,
+                            callReverse,
+                            callFuzzy
+                        )
+                    );
+                }
+            }
+
+            callGroup.CallRefIndex = reference;
+        }
+
+        info.GroupCalls.RemoveRange(firstCall, info.GroupCalls.Count - firstCall);
     }
 
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>
     /// <param name="parsed">The parsed pattern.</param>
     /// <param name="flags">The resolved flags.</param>
+    /// <param name="upstreamCallFeatures">Mark the run for every exact compile, as upstream does (D48); for the oracle alone.</param>
     /// <returns>The required string's offset, characters and case flags.</returns>
-    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(RegexBase parsed, int flags)
+    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(
+        RegexBase parsed,
+        int flags,
+        bool upstreamCallFeatures = false
+    )
     {
         (long reqOffset, RegexBase? required) = parsed.GetRequiredString((flags & RegexFlags.Reverse) != 0);
 
@@ -3273,6 +3407,8 @@ internal static class ParseFunctions
         if (required is String requiredString)
         {
             requiredString.Required = true;
+            requiredString.RequiredReverse = (flags & RegexFlags.Reverse) != 0;
+            requiredString.RequiredInEveryDirection = upstreamCallFeatures;
         }
 
         if (reqOffset >= RegexFlags.Unlimited)

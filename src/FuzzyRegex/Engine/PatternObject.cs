@@ -18,6 +18,20 @@ internal sealed class GroupInfo
     /// <summary>Upstream <c>referenced</c>: something refers back to this group.</summary>
     internal bool Referenced;
 
+    /// <summary>
+    /// NOT UPSTREAM'S: a backreference reads this group's text, as opposed to only a conditional
+    /// reading whether it is set. The call guard keys such a group on its text and any other
+    /// <see cref="Referenced"/> group on one bit (<c>CallRead</c>).
+    /// </summary>
+    internal bool TextRead;
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the group is captured inside a repeat body, where a repeat's empty-iteration
+    /// test reads whether the capture changed its span, so the call guard keys it on its span
+    /// (<c>CallRead.Span</c>).
+    /// </summary>
+    internal bool CapturedInRepeat;
+
     /// <summary>Upstream <c>has_name</c>: the group is named.</summary>
     internal bool HasName;
 }
@@ -71,6 +85,8 @@ internal sealed class RepeatInfo
     /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
     /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial call's second pass uses
     /// it as well, since D11 build chunk 9 (<c>MatchState.KeepsFailureMemo</c> gives the argument).
+    /// Where it does apply, a conditional's restore leaves the repeat's guards in place rather than
+    /// putting back the saved ones (D35, <c>Matcher.PushRepeats</c>).
     /// </para>
     /// <para>
     /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
@@ -193,6 +209,13 @@ internal sealed class PatternObject
     /// Upstream <c>min_width</c>: the shortest string the pattern can match, ignoring fuzziness.
     /// </summary>
     internal long MinWidth;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never read by this library: <see cref="MinWidth"/> as upstream computes it,
+    /// with the called copies after the pattern's SUCCESS counted too (D49). The oracle's
+    /// <c>RunWithTheUpstreamCallFeatures</c> puts it back.
+    /// </summary>
+    internal long UpstreamMinWidth;
 
     /// <summary>Upstream <c>fuzzy_count</c>: how many fuzzy sections the pattern has.</summary>
     internal int FuzzyCount;
@@ -398,6 +421,35 @@ internal sealed class PatternObject
     internal int[] MemoGroups = [];
 
     /// <summary>
+    /// NOT UPSTREAM'S: the groups the call guard keys a call on (<c>CallRead</c>), as indexes into
+    /// <c>MatchState.Groups</c>, each with what the key holds of it; empty when the
+    /// pattern has no group call. Set when the pattern is compiled.
+    /// </summary>
+    internal (int Index, CallRead Read)[] CallReadGroups = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: whether a capture group is matched against the pattern's direction, inside a
+    /// lookbehind of a forward pattern or a lookahead of a reverse one, where its span can lie
+    /// behind the position it is captured from. <c>Matcher.CouldRefuseInside</c> reads it. Written
+    /// by <c>NodeCompiler</c>.
+    /// </summary>
+    internal bool CapturesAgainstDirection;
+
+    /// <summary>What the call guard keys a read group on; see <c>CallRead</c>.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="info">The group, which a conditional or backreference reads.</param>
+    /// <returns>Its span where the capture-change counter can see the span, else its text or one bit.</returns>
+    private static CallRead CallReadOf(PatternObject pattern, GroupInfo info)
+    {
+        if (pattern.IsFuzzy || info.CapturedInRepeat)
+        {
+            return CallRead.Span;
+        }
+
+        return info.TextRead ? CallRead.Text : CallRead.SetOrUnset;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM (the failed-call memo): whether <c>GROUP_CALL</c> may fail a call at once
     /// because an earlier call with the same entry key ran out of choices without returning
     /// (<c>Matcher.FailedCallKey</c>). Set when the pattern is compiled, for a pattern with a group
@@ -414,10 +466,18 @@ internal sealed class PatternObject
     /// same to the whole-match error total, which <c>END_FUZZY</c> restores only from the entry the
     /// construct threw away: <c>(?e)((?=(?:a){e&lt;=1}))(((?&gt;a)){1}()?(.?(?1)|(?0))){d&lt;=1}((?0)(a))?</c>
     /// over <c>xa</c> answered (0, 1) with two errors with the memo and (1, 1) with one without. So one
-    /// of those constructs whose body holds a capture group, a call, a fuzzy section or a
-    /// <c>\K</c> turns the memo off (<see cref="WritesInDiscardingConstruct"/>,
-    /// <see cref="KeepInSubmatch"/>). That also covers a call inside a lookbehind, which runs the
-    /// other way and so can meet open calls the key does not hold.
+    /// of those constructs whose body holds a call, a fuzzy section or a <c>\K</c> turns the memo
+    /// off (<see cref="WritesInDiscardingConstruct"/>, <see cref="KeepInSubmatch"/>). That also
+    /// covers a call inside a lookbehind, which runs the other way and so can meet open calls the
+    /// key does not hold. A capture group in there does not: the stray entry appeared only when a
+    /// call wrote the capture, because a lookaround saved the captures only for a body holding a
+    /// capture group, so <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> gave group 1 [0,1][2,1] where
+    /// <c>(a)(?:(?!.(a))|.)+?b</c> gives [0,1] (upstream 2026.9.10 still does). D10 made a call count
+    /// as a group (<c>NodeCompiler.BuildGroupCall</c>), and the capture-list witness above now
+    /// answers the same with the memo forced on. A call in there still turns the memo off: the group
+    /// it calls may hold a fuzzy section, which leaves the error total as above, and in a lookbehind
+    /// it meets open calls the key does not hold. Keeping the memo on for a capture group there is
+    /// what keeps <c>(?:(?=(a*))|a)(?R)|\1x</c> polynomial.
     /// </para>
     /// <para>
     /// <c>(*PRUNE)</c> and <c>(*SKIP)</c> keep it off, and so does POSIX matching, without a
@@ -437,7 +497,7 @@ internal sealed class PatternObject
     internal int GroupCallSites;
 
     /// <summary>
-    /// NOT UPSTREAM (the failed-call memo): whether a capture group, a group call or a fuzzy section
+    /// NOT UPSTREAM (the failed-call memo): whether a group call or a fuzzy section
     /// sits inside an atomic group, a possessive repeat, a lookaround or a conditional's lookaround
     /// test. Written by <c>NodeCompiler</c>, read where <see cref="UseCallMemo"/> is set.
     /// </summary>
@@ -568,10 +628,27 @@ internal sealed class PatternObject
     /// so every one of them is passed on every path to every item in the pattern. An assertion
     /// reachable only down one branch - <c>(?:\bq|)</c>, <c>(?:\bq)*</c>, the body of a negative
     /// lookaround - is not here, which is what stops the rule firing on a path the engine abandons.
-    /// <see cref="Optimiser"/> fills this in, for fuzzy patterns only.
+    /// <see cref="Optimiser"/> fills this in, for BESTMATCH fuzzy patterns only since D61: every other
+    /// search follows rule H' (<see cref="LiftsAnchorBan"/>).
     /// </para>
     /// </remarks>
     internal IReadOnlyList<Node>? AnchorGuards;
+
+    /// <summary>
+    /// Whether rule H' can change a search's answer, so that <c>Matcher.DoMatch2LiftingTheAnchorBan</c>
+    /// runs the attempt at the anchor without the ban. <b>This port's own field (known defect D61).</b>
+    /// Filled by <c>Optimiser.FindAnchorBanLift</c>; cleared by <c>OracleComparer.RunWithoutTheAnchorPin</c>,
+    /// the oracle's ablation, and by nothing in the library.
+    /// </summary>
+    internal bool LiftsAnchorBan;
+
+    /// <summary>
+    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
+    /// section that permits an insertion, since removing leading insertions can leave a partial match
+    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
+    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
+    /// </summary>
+    internal bool LiftsAnchorBanWhenPartial;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
@@ -643,6 +720,31 @@ internal sealed class PatternObject
     /// 47). Set only by <c>OracleComparer</c>'s ablation; never by the library.
     /// </summary>
     internal bool VerbsAreConfinedToTheInnermostGroup;
+
+    /// <summary>
+    /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
+    /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 61). Set only by
+    /// <c>OracleComparer</c>'s ablation; never by the library. See
+    /// <c>MatchState.PushSubAttemptFuzzyState</c>.
+    /// </summary>
+    internal bool KeepSectionOpenAfterAVerb;
+
+    /// <summary>
+    /// Oracle-only: a match may reach SUCCESS with a group call and its fuzzy section still open,
+    /// and with more changes listed than counted, as upstream's does when a call to the whole
+    /// pattern jumps to its start with no return (D37, ledger entry 55). It
+    /// changes no answer; it only lets <c>Matcher.AssertMatchIsClosed</c> accept the ablation that
+    /// reproduces that on purpose. Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool MatchMayEndInsideTheWholePatternCall;
+
+    /// <summary>
+    /// Oracle-only: the running error total and cost keep the errors of a fuzzy section an atomic
+    /// group, lookaround, condition or verb threw away, as upstream's <c>total_errors</c> does (D45,
+    /// ledger entry 32). Set only by <c>OracleComparer</c>'s ablation; never by the library. See
+    /// <c>MatchState.PushSubAttemptFuzzyState</c>.
+    /// </summary>
+    internal bool KeepDiscardedTotals;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
@@ -724,6 +826,45 @@ internal sealed class PatternObject
     /// nothing in <c>bxc</c>. See <c>Matcher.InsertBeforeAFailedLookaround</c>.
     /// </remarks>
     internal bool SkipLookaroundInsertion;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never read by this library: the lookarounds that save and restore the
+    /// captures only because their body calls a group (D10), or <see langword="null"/> when there
+    /// are none. Written by <c>NodeCompiler.BuildLookaround</c>. The oracle clears their
+    /// <see cref="NodeStatus.HasGroups"/> flag on a pattern it compiled for one call, to show that
+    /// the D10 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream saves the captures around a lookaround only when its body holds a capture group
+    /// (<c>upstream/src/_regex.c</c>:13772), so a call's capture outlives a body that is thrown away:
+    /// <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> leaves group 1 with [0,1][2,1]. See
+    /// <c>NodeCompiler.BuildGroupCall</c>.
+    /// </remarks>
+    internal List<Node>? LookaroundsSavingOnlyForCalls;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a group call's captures stay on the
+    /// group's capture list when the call returns, which is upstream's rule. The oracle sets it on a
+    /// pattern it compiled for one call, to show that the D51 fix (ledger entry 63) is the whole of a
+    /// divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>GROUP_RETURN</c> restores only each group's <c>current</c>
+    /// (<c>push_groups</c>, <c>upstream/src/_regex.c</c>:2490, pushed at :13405 and popped at :13516), so
+    /// <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' leaves c unset with the capture 'a'
+    /// listed. See <c>Matcher.ReturnToCallerCaptures</c>.
+    /// </remarks>
+    internal bool KeepCallCaptures;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a partial result restores the groups
+    /// by walking every open call's frame, innermost first, instead of from the outermost frame
+    /// alone. Both give the same groups, since each frame saved its caller's; the oracle sets it on
+    /// a pattern it compiled for one call, as a second computation the D62 key compares against, so
+    /// a restore from the wrong frame is not accounted for as the divergence (blind review,
+    /// 2026-09-30). See <c>Matcher.BasicMatch</c>.
+    /// </summary>
+    internal bool PartialRestoresFrameByFrame;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a fuzzy section that reaches its end
@@ -958,6 +1099,9 @@ internal sealed class PatternObject
             }
         }
 
+        // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
+        Optimiser.FindAnchorBanLift(self);
+
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
         if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)
         {
@@ -988,6 +1132,10 @@ internal sealed class PatternObject
 
         self.UseRepeatMemo = self.IsFuzzy && tested.Count <= 2;
         self.MemoGroups = [.. tested];
+        if (self.HasGroupCalls)
+        {
+            self.CallReadGroups = [.. tested.Select(g => (g - 1, CallReadOf(self, self.GroupInfoList[g - 1])))];
+        }
 
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index. A run is of fuzzy items, so

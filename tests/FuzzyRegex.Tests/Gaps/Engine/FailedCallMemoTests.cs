@@ -140,10 +140,12 @@ public sealed class FailedCallMemoTests
     [Test]
     public void A_call_inside_a_lookaround_keeps_the_memo_off()
     {
-        // When a lookaround succeeds it throws away the undo entries of the captures made inside
-        // it, so a capture list keeps an entry from a path that later failed. Skipping a failed
-        // call leaves that entry out: with the memo forced on, group 1's list here loses an entry.
-        // Spans and counts do not change, so only the capture lists can show it.
+        // Before D10 a lookaround whose body only called a group kept the call's capture after the
+        // body was thrown away, so skipping a failed call left an entry out: with the memo forced
+        // on, group 1's list here lost one. D10 saves the captures around such a body, and this row
+        // now answers the same with the memo forced on (measured 2026-09-29). The switch stays off
+        // because the called group may hold a fuzzy section (see the fuzzy test below) and a call
+        // in a lookbehind meets open calls the key does not hold; this pins the switch.
         const string pattern = "(?r)(((?R)?R(?!.(?)(?R))(.))){2<=e<3}";
 
         FuzzyRegex on = WithMemo(pattern, eager: true);
@@ -151,6 +153,27 @@ public sealed class FailedCallMemoTests
 
         on.PatternObject.UseCallMemo.Should().BeFalse();
         CaptureLists(on.Match("aa")).Should().Equal(CaptureLists(off.Match("aa")));
+    }
+
+    [Test]
+    [Arguments(@"(?:(?=(a*))|a)(?R)|\1x", "aaay")]
+    [Arguments(@"(?:(?=(a))ax|a)(?R)?b", "aab")]
+    [Arguments(@"(a)(?:(?!.(a))|.)+?(?1)?b", "aaab")]
+    public void A_capture_group_inside_a_lookaround_leaves_the_memo_on(string pattern, string subject)
+    {
+        // Only a call writing a capture inside a lookaround leaves a stray capture-list entry
+        // behind; a capture group there does not (upstream 2026.9.10 agrees: (?:(?=(a))ax|a)b over
+        // 'ab' leaves group 1 no capture). So the memo stays on, and answers as it does off.
+        FuzzyRegex on = WithMemo(pattern, eager: true);
+        FuzzyRegex off = WithMemo(pattern, eager: false);
+
+        on.PatternObject.UseCallMemo.Should().BeTrue();
+        Match onMatch = on.Match(subject);
+        Match offMatch = off.Match(subject);
+        (onMatch.Success, onMatch.Index, onMatch.Length)
+            .Should()
+            .Be((offMatch.Success, offMatch.Index, offMatch.Length));
+        CaptureLists(onMatch).Should().Equal(CaptureLists(offMatch));
     }
 
     [Test]
@@ -165,6 +188,11 @@ public sealed class FailedCallMemoTests
         const string pattern = "(?e)((?=(?:a){e<=1}))(((?>a)){1}()?(.?(?1)|(?0))){d<=1}((?0)(a))?";
 
         FuzzyRegex on = WithMemo(pattern, eager: true);
+
+        // The banned search is where the memo acted, so it is asked with rule H' off (D61): with H'
+        // the answer is (0, 1) with a substitution and a deletion whatever the memo does, because
+        // the banned search's (1, 1) starts at the attempt's end (FuzzyAnchorPinTests).
+        on.PatternObject.LiftsAnchorBan = false;
         Match m = on.Match("xa");
 
         on.PatternObject.UseCallMemo.Should().BeFalse();
@@ -179,11 +207,12 @@ public sealed class FailedCallMemoTests
         // the position, which the key does not hold. The exclusion for a call inside any
         // lookaround covers it. This row does not go wrong with the memo forced on; it pins
         // the direction. Upstream: regex.search(r'(a)b(?<=(?1)b)', 'ab') is None, regex
-        // 2026.9.10.
+        // 2026.9.10, because it counts the call's backwards copy towards the pattern's minimum
+        // width; with the call written out, (a)b(?<=ab), it is (0, 2), as here since D49.
         FuzzyRegex regex = WithMemo("(a)b(?<=(?1)b)", eager: true);
 
         regex.PatternObject.UseCallMemo.Should().BeFalse();
-        regex.Match("ab").Success.Should().BeFalse();
+        (regex.Match("ab").Index, regex.Match("ab").Length).Should().Be((0, 2));
     }
 
     [Test]

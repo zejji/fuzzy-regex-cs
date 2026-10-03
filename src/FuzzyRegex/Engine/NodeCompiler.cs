@@ -29,6 +29,12 @@ internal struct CompileArgs
     /// <summary>Upstream <c>min_width</c>.</summary>
     internal long MinWidth;
 
+    /// <summary>
+    /// <see cref="MinWidth"/> where the pattern's <c>SUCCESS</c> was built, or -1 before. Not in
+    /// upstream (D49): the pattern's width, without the called copies compiled after it.
+    /// </summary>
+    internal long MinWidthAtSuccess;
+
     /// <summary>Upstream <c>start</c>.</summary>
     internal Node? Start;
 
@@ -79,7 +85,7 @@ internal struct CompileArgs
     /// <summary>
     /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
     /// lookaround test: a construct that throws away its body's undo entries when the body
-    /// succeeds. <b>Not upstream</b>; a capture group, a group call or a fuzzy section in here turns
+    /// succeeds. <b>Not upstream</b>; a group call or a fuzzy section in here turns
     /// off the failed-call memo (<see cref="PatternObject.WritesInDiscardingConstruct"/>).
     /// </summary>
     internal bool WithinDiscardingConstruct;
@@ -159,6 +165,7 @@ internal static class NodeCompiler
             WithinFuzzy = false,
             VisibleCaptureCount = 0,
             InDefine = false,
+            MinWidthAtSuccess = -1,
         };
 
         // Upstream calls set_error(RE_ERROR_ILLEGAL) here and returns FALSE; a status of
@@ -170,7 +177,14 @@ internal static class NodeCompiler
             return false;
         }
 
-        pattern.MinWidth = args.MinWidth;
+        // NOT UPSTREAM (D49): the width the pattern needs is what its own code needs, up to its
+        // SUCCESS. Upstream adds the called copies after it too (`build_CALL_REF`, :24560), whose
+        // width counts only where a call reaches them - and a call inside a lookaround consumes
+        // nothing - so `(?P<g1>\w)(?<=(?&g1))\W` needed three characters and refused 'a ', which
+        // the same pattern with the call written out matches.
+        Debug.Assert(args.MinWidthAtSuccess >= 0, "The pattern's code ends in SUCCESS.");
+        pattern.MinWidth = args.MinWidthAtSuccess;
+        pattern.UpstreamMinWidth = args.MinWidth;
         pattern.IsFuzzy = args.IsFuzzy;
 
         // NOT UPSTREAM (ledger entry 44's addendum): without a fuzzy section no pass spends an
@@ -1152,8 +1166,19 @@ internal static class NodeCompiler
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
-        // NOT UPSTREAM: see PatternObject.UseCallMemo.
-        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
+        // NOT UPSTREAM: see GroupInfo.CapturedInRepeat. Both numbers, since a conditional or
+        // backreference may name either.
+        if (args.RepeatDepth > 0)
+        {
+            args.Pattern.GroupInfoAt((int)privateGroup).CapturedInRepeat = true;
+            args.Pattern.GroupInfoAt((int)publicGroup).CapturedInRepeat = true;
+        }
+
+        // NOT UPSTREAM: see PatternObject.CapturesAgainstDirection.
+        args.Pattern.CapturesAgainstDirection |= forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+
+        // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
+        // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.
 
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
@@ -1218,6 +1243,13 @@ internal static class NodeCompiler
 
         node.Status |= NodeStatus.HasGroups;
         node.Status |= NodeStatus.HasRepeats;
+
+        // NOT UPSTREAM (D10): a call writes the called group's captures, so it counts as a group for
+        // the enclosing sequence. Upstream sets only the call node's own flag, but the flag is read
+        // only on a LOOKAROUND node (:13772), so a lookaround whose body only calls a group never
+        // saves the captures and keeps the call's capture after a negative body succeeded or a
+        // positive one was backtracked past.
+        args.HasGroups = true;
 
         args.Code += 2;
 
@@ -1373,6 +1405,7 @@ internal static class NodeCompiler
         subargs.WithinSubmatch = true;
         subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
+        long groupEndsBefore = args.Pattern.GroupEndIndex;
         int status = BuildSequence(ref subargs);
         if (status != _success)
         {
@@ -1397,6 +1430,15 @@ internal static class NodeCompiler
         if (subargs.HasGroups)
         {
             lookaroundNode.Status |= NodeStatus.HasGroups;
+        }
+
+        // NOT UPSTREAM (D10), for the oracle alone: upstream's flag means the body built a capture
+        // group (build_GROUP is the only place that sets has_groups, :24811), and every group built
+        // bumps GroupEndIndex, so a flag with no group built came from a call.
+        Debug.Assert(subargs.HasGroups || args.Pattern.GroupEndIndex == groupEndsBefore);
+        if (subargs.HasGroups && args.Pattern.GroupEndIndex == groupEndsBefore)
+        {
+            (args.Pattern.LookaroundsSavingOnlyForCalls ??= []).Add(lookaroundNode);
         }
 
         if (subargs.HasRepeats)
@@ -1486,6 +1528,9 @@ internal static class NodeCompiler
 
         // Record that we have a reference to a group.
         RecordRefGroup(args.Pattern, (int)group);
+
+        // NOT UPSTREAM: a backreference reads the group's text. See GroupInfo.TextRead.
+        args.Pattern.GroupInfoAt((int)group).TextRead = true;
 
         // Append the reference.
         AddNode(args.End!, node);
@@ -2142,6 +2187,11 @@ internal static class NodeCompiler
                 case Opcode.Failure:
                 case Opcode.Prune:
                 case Opcode.Success:
+                    if (args.Op == Opcode.Success)
+                    {
+                        args.MinWidthAtSuccess = args.MinWidth;
+                    }
+
                     status = BuildSuccess(ref args);
                     if (status != _success)
                     {

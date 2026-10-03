@@ -110,6 +110,9 @@ internal static class ExpectedDivergences
     /// <summary>Upstream's <c>REVERSE</c> flag bit, which is <c>regex.R</c>.</summary>
     private const int _reverse = 0x400;
 
+    /// <summary>Upstream's <c>BESTMATCH</c> flag bit, which is <c>regex.B</c>.</summary>
+    private const int _bestmatch = 0x1000;
+
     /// <summary>
     /// The one row of <c>enhancematch-ranks-by-cost</c>, hand-built and recorded by
     /// <c>python tools/record-oracle.py --rows</c> on 2026-09-13. No wave has drawn this family -
@@ -140,6 +143,16 @@ internal static class ExpectedDivergences
     /// </summary>
     private const string _bestCostRankedRow =
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
+
+    /// <summary>
+    /// The two rows of <c>bestmatch-loses-a-candidate</c> that its predicate arm classifies rather
+    /// than its row list: complete-matrix rows 2836 and 10830 of 2026-09-30, BESTMATCH set by the
+    /// flag bit, recorded by <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
+    /// </summary>
+    private const string _bestmatchDoubledGuardPredicateRows = """
+        {"generator": "rows", "pattern": "(?:\\w){e<=2,1i+2d<=2}", "flags": 4096, "namedLists": {}, "subject": "aaa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "rows", "pattern": "(?:\\m\\w.){e<=2}", "flags": 4096, "namedLists": {}, "subject": "aaxa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 3], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        """;
 
     /// <summary>
     /// The thirty-eight rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
@@ -1494,6 +1507,9 @@ internal static class ExpectedDivergences
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP).|[abz])(?P<g1>[a])*?\\1", "flags": 0, "namedLists": {}, "subject": "\naa ", "operation": "search", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "oracle": "prefilter-free", "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP)|a).", "flags": 0, "namedLists": {}, "subject": "\n ", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "rows", "pattern": "A(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "QQA", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "aa(*SKIP)x", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "search", "partial": true, "codepointSpan": [4, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "aa(*SKIP)x(?:.\\w){s<=1}", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "finditer", "partial": true, "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [4, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [2, 4]}]}}
+        {"generator": "rows", "pattern": "aa(*SKIP)x", "flags": 0, "namedLists": {}, "subject": "axaa", "operation": "finditer", "partial": true, "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [4, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "codepointSpan": [2, 4]}]}}
         """;
 
     /// <summary>
@@ -1582,6 +1598,20 @@ internal static class ExpectedDivergences
         // this port's span; PCRE2 10.47 answers the same partial (2, 3), with and without its start
         // optimisations. Measured 2026-09-25 on regex 2026.9.10.
         "match 0:(2,1)[(2,1)] last=-1/- partial",
+        // Known defect D57 (complete-matrix row 12240's shape, 2026-09-30), the smallest row of this
+        // door: `aa(*SKIP)x` searched with partial over 'axaa'. The non-partial pass runs the verb at
+        // 4 and leaves `slice_start` there, so the partial pass (do_match, :18159-18170) can only
+        // answer (4, 4). Upstream's `(*PRUNE)` spelling, `aax`, and its own `match('axaa', 2,
+        // partial=True)` all answer (2, 4), which is this port's answer; 'axaax' completes at 2.
+        // Measured 2026-10-01 on regex 2026.9.10.
+        "match 0:(2,2)[(2,2)] last=-1/- partial",
+        // Complete-matrix row 12240 itself (C1x on 2026-09-30, recordable since the recorder asks
+        // `finditer` with `partial`, 2026-10-01): the row above's door as a scan. Upstream's scan
+        // reports the zero-width partial at 4; its `(*PRUNE)` spelling reports (2, 4).
+        "matches 1 | match 0:(2,2)[(2,2)] last=-1/- partial",
+        // D57's plain `aa(*SKIP)x` as a partial scan (blind review, 2026-10-01): upstream's
+        // finditer gives (4, 4) partial, its `(*PRUNE)` spelling (2, 4).
+        "matches 1 | match 0:(2,2)[(2,2)] last=-1/- partial",
     ];
 
     /// <summary>
@@ -1848,8 +1878,10 @@ internal static class ExpectedDivergences
         "sub 2 '\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\u000d\\u000daaa\\ud801\\udc28\\ud801\\udc28'",
         "sub 2 '\\u000a\\u000a\\ufb00\\u000d\\u000d\\ufb00\\u0130\\u0130'",
         // The COMPLETE match upstream degrades to a partial, trailing group and all - and the exact
-        // answer upstream's own inline copy of the lookbehind gives.
-        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1),(3,1)] 2:(5,0)[(5,0)] last=1/g1",
+        // answer upstream's own inline copy of the lookbehind gives, less the call's capture of g1
+        // at 3, which the call discards on return since D51 (ledger entry 63). Judged 2026-09-30:
+        // it was "1:(3,1)[(3,1),(3,1)]" before.
+        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] 2:(5,0)[(5,0)] last=1/g1",
     ];
 
     /// <summary>
@@ -2352,6 +2384,10 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(b{i}){1<=e<2}(*SKIP)", "flags": 0, "namedLists": {}, "subject": "xyb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "interactions", "pattern": "(?b)\\p{Nd}*(?:(?:\\p{ASCII}\\d(?:([a-f])){e<=2}){1<=e<=2}(*SKIP)\\w|[abz])(?:\\p{L}?([\\p{L}\\p{N}])){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "a\r\ud835\udd18aa", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "anchoredScan": [], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 2], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": null, "partial": false, "codepointSpan": [3, 5]}]}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "interactions", "pattern": "(?b)(?r)\\b\\L<w1>{s<=1,i<=1,d<=1}\\b(?:.(*SKIP)[^\\d]|[\\p{L}\\p{N}])", "flags": 10, "namedLists": {"w1": ["A", "A\ud801\udc00a", "a\ud801\udc28", "\ud83d\ude00"]}, "subject": "A\ud83d\ude00\ud801\udc28A\n\n", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 2]}]}}
+        {"generator": "rows", "pattern": "a(*SKIP)a+(?<=b?)(?:a+){i<=1,d<=1}", "flags": 6144, "namedLists": {}, "subject": "aaaax", "operation": "match", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": [5]}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "\\w(*SKIP)(?:[ab]a+){s<=1}", "flags": 6144, "namedLists": {}, "subject": "aaax", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "x(*SKIP)(?:ba+){e<=1}", "flags": 4096, "namedLists": {}, "subject": "xbaabbbx", "operation": "match", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?b)x(*SKIP)(?:ba+){e<=1}", "flags": 0, "namedLists": {}, "subject": "xbaabbbx", "operation": "match", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         """;
 
     /// <summary>
@@ -2398,6 +2434,18 @@ internal static class ExpectedDivergences
         // (1, 4) for no error, where its drawn scan pays a substitution for (0, 4). Measured 2026-09-26
         // on regex 2026.9.10.
         "matches 3 | match 0:(1,5)[(1,5)] last=-1/- || match 0:(0,5)[(0,5)] last=-1/- || match 0:(0,3)[(0,3)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
+        // Complete-matrix rows 5849, 8589 and 8595 of 2026-09-30 (known defect D56), BESTMATCH by the
+        // flag bit. Each is upstream's own `pruneOutcome`: with `(*PRUNE)` for `(*SKIP)` upstream
+        // finds these exact fits, and without `(?b)` both verbs give the same costlier first match,
+        // so the verb's pruning is innocent and its moved `slice_start` ends the walk (:17625).
+        // Recorded and measured 2026-10-01 on regex 2026.9.10.
+        "match 0:(0,4)[(0,4)] last=-1/-",
+        "match 0:(0,3)[(0,3)] last=-1/-",
+        "match 0:(0,4)[(0,4)] last=-1/-",
+        // D56 with `(?b)` written inline rather than as the flag bit (blind review, 2026-10-01):
+        // a different question to the key, the same answer. Upstream (0, 5) with a substitution
+        // at 4; its `(*PRUNE)` spelling (0, 4) exact.
+        "match 0:(0,4)[(0,4)] last=-1/-",
     ];
 
     /// <summary>
@@ -2408,6 +2456,16 @@ internal static class ExpectedDivergences
         .ParseRows(_bestmatchWalkTruncatedRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchWalkTruncatedOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The two rows of <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> that its predicate arm
+    /// classifies rather than its row list: complete-matrix rows 11574 and 11578 of 2026-09-30 (D58),
+    /// recorded by <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
+    /// </summary>
+    private const string _posixOvercostPredicateRows = """
+        {"generator": "rows", "pattern": "(?:b?){e<=2}", "flags": 98304, "namedLists": {}, "subject": "", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 0]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 0]}]}}
+        {"generator": "rows", "pattern": "(?:b?){d<=1}", "flags": 100352, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1]}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "selfContradiction": ["posix-chooses-among-flagless-answers"]}
+        """;
 
     /// <summary>
     /// The nine rows of <c>posix-fuzzy-contradicts-its-own-flagless-answer</c>, as
@@ -2871,6 +2929,31 @@ internal static class ExpectedDivergences
         .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
+    /// The judged rows where an atomic group's leaked change position sits behind a fuzzy fix's
+    /// ablation, read by <see cref="TheAblationExplainsItBarAPinnedLeak"/>. Complete-matrix row 2310
+    /// (2026-09-30), recorded by <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
+    /// </summary>
+    /// <remarks>
+    /// <c>(?|(b?)(?&gt;(?:a*){e&lt;=2,1i+2d&lt;=2})[ab]|(x))</c> matched over 'b'. This port answers
+    /// (0, 1) with no errors: <c>b?</c> matches nothing, <c>a*</c> takes no iteration and
+    /// <c>[ab]</c> takes the 'b' (ledger entry 44: nothing needs the empty iteration's deletion).
+    /// With entry 44 switched off it answers one deletion at 0, and upstream answers one deletion at
+    /// 1. Upstream's own cut-free spelling, <c>(?:</c> for <c>(?&gt;</c>, answers the deletion at
+    /// 0, which is the ablated answer exactly; the 1 is the abandoned first pass of the atomic
+    /// group, consistent with a first pass where <c>b?</c> took the 'b' (ledger entry 11, the
+    /// atomic door).
+    /// </remarks>
+    private const string _atomicLeakBehindAnAblationRows = """
+        {"generator": "rows", "pattern": "(?|(b?)(?>(?:a*){e<=2,1i+2d<=2})[ab]|(x))", "flags": 2048, "namedLists": {}, "subject": "b", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}], "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}}
+        """;
+
+    /// <summary><see cref="_atomicLeakBehindAnAblationRows"/> by its question.</summary>
+    private static readonly HashSet<string> _atomicLeakBehindAnAblation = OracleWave
+        .ParseRows(_atomicLeakBehindAnAblationRows)
+        .Select(Question)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
     /// The one row of <c>atomic-leak-beside-a-wrong-kinded-list</c>, sweep row 26
     /// (<c>sweep-678716286</c> row 25919, <c>interactions</c>), as
     /// <c>tools/probes/sweep-divergence-rows.jsonl</c> holds it.
@@ -3177,6 +3260,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?:(?:a){d<=1}ab|a)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?r)a(?:a){d<=1}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(a)(?:\\1){d<=1}a", "flags": 0, "namedLists": {}, "subject": "aA", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?:a){1<=d<=2}){i<=1,d<=1}\\w(*SKIP)ab", "flags": 34816, "namedLists": {}, "subject": "aabaaxab", "operation": "search", "codepointSpan": [5, 8], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 3, "captures": [[5, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [5]}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 3, "captures": [[5, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}}
         """;
 
     /// <summary>
@@ -3194,6 +3278,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?:(?:x){d<=1}){1,3}y", "flags": 0, "namedLists": {}, "subject": "y", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1, 2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1, 2]}}]}
         {"generator": "rows", "pattern": "(?:a|){d<=1}", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
         {"generator": "rows", "pattern": "(?:(?:a|b|)c){d<=1}", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
+        {"generator": "rows", "pattern": "(?:(?:a*)*+){1<=d<=2}", "flags": 256, "namedLists": {}, "subject": "bxaaax", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}, "codepointSpan": [0, 0]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}, "codepointSpan": [1, 1]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [5, 6]}, "codepointSpan": [5, 5]}, {"groups": [{"number": 0, "success": true, "index": 6, "length": 0, "captures": [[6, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [5]}, "codepointSpan": [6, 6]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, null, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [5]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [6]}}]}
         """;
 
     /// <summary>
@@ -3212,6 +3297,126 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The twelve rows of <c>group-call-runs-with-its-call-sites-features</c>, recorded 2026-09-30
+    /// by <c>python tools/record-oracle.py --rows tools/probes/call-site-features-rows.jsonl</c>: two
+    /// rows each for D40's fuzzy copy, D42 and D43 (the NestedGroupCallTests rows), and six rows of
+    /// the D40 grid (tools/probes/d40-copy-call-grid, seed 20260930) where upstream disagrees with
+    /// its own answer for the pattern with the calls written out. Grid rows whose lookarounds also
+    /// carry D10's capture (ledger entry 54) are left out: this entry's ablation does not undo that.
+    /// </summary>
+    private const string _callSiteFeaturesRows = """
+        {"generator": "rows", "pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g>a)(?:b(?:(?R)){s<=1}|c(?&g))", "flags": 0, "namedLists": {}, "subject": "abacb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?=(?&g))..){s<=1}(?P<g>ab)?", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?:..(?<=(?&g))){s<=1}(?P<g>ab)?", "flags": 0, "namedLists": {}, "subject": "xb", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "bc(?(?<=(?&g))x|y)(?P<g>bc)?", "flags": 0, "namedLists": {}, "subject": "bcxzzz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "bc(?(?<!(?&g))x|y)(?P<g>bc)?", "flags": 0, "namedLists": {}, "subject": "bcyzzz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?<=(?P>g2))a|(?&g2)))(?:(?P<g2>b)){d<=1}", "flags": 0, "namedLists": {}, "subject": "aaaababb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?P<g2>(?(?<!(?P>g3))bb|b)b))(?:(?P<g3>b)){e<=1}", "flags": 0, "namedLists": {}, "subject": "abbba", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 3, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?<=(?P>g2))(?P>g2)|b))(?:(?P<g2>bb)){s<=1}", "flags": 0, "namedLists": {}, "subject": "aabbaabaa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?P>g2)(?(?<=(?&g2))b|.*))){e<=1}(?P<g2>a)", "flags": 0, "namedLists": {}, "subject": "ababaaaab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?&g2)b)){d<=1}(?P<g2>(?:(?P<g3>a)){s<=1}(?P>g3))", "flags": 0, "namedLists": {}, "subject": "ababaaa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?P<g1>(?&g2))){e<=1}(?P<g2>(?:(?<=(?P>g3)a)){d<=1}(?:(?P<g3>.*)){s<=1})", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0], [1, 0]]}, {"number": 3, "success": true, "index": 1, "length": 0, "captures": [[0, 0], [1, 0], [0, 0], [1, 0]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}]}
+        """;
+
+    /// <summary>
+    /// The eight rows of <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c>, recorded
+    /// 2026-09-29 by <c>python tools/record-oracle.py --rows tools/probes/lookaround-call-capture-rows.jsonl</c>:
+    /// the four lookaround kinds, a call by name, a partial match, a fuzzy call and a conditional
+    /// whose yes branch holds the lookaround, which is the shape the default waves draw.
+    /// </summary>
+    private const string _lookaroundCallCaptureRows = """
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?1))|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?=.(?1))x|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?<!(?1)).|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?<=(?1))x|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?<n>a)(?:(?!.(?&n))|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": "n", "partial": false}}
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?1))|.)+?bc", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(a)(?:(?!.(?:(?1)){e<=1})|.)+?b", "flags": 0, "namedLists": {}, "subject": "aaxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a?)(?:(?(1)(?!(?1))b|.)){0,2}", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [2, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}, {"number": 1, "success": true, "index": 2, "length": 0, "captures": [[2, 0], [2, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}, {"number": 1, "success": true, "index": 3, "length": 0, "captures": [[3, 0], [3, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [3, 3]}]}}
+        """;
+
+    /// <summary>
+    /// The nine rows of <c>fuzzy-section-cut-by-a-verb-is-closed</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c>: five rows of the D44 grid, every row the fix
+    /// changed, and four of <c>FuzzyMatchingTests</c>. Negative lookarounds, lookbehinds and both
+    /// kinds of condition test, with (*PRUNE) and (*SKIP), under plain and BESTMATCH search.
+    /// </summary>
+    private const string _sectionCutByAVerbRows = """
+        {"generator": "rows", "pattern": "(?:(?!(?:b(*PRUNE)c){s<=1}(*SKIP)c)){e<=1}", "flags": 0, "namedLists": {}, "subject": "x", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?:(?(?!(?:b(*PRUNE)c){s<=1})c|d)){e<=2}d|c)", "flags": 0, "namedLists": {}, "subject": "dxx", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?:(?<!(?:a(*PRUNE)b){e<=1})){e<=2}d|c)", "flags": 0, "namedLists": {}, "subject": "bxacd", "operation": "search", "codepointSpan": [3, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?:(?:(?<!(?:a(*SKIP)b){e<=1})){e<=2}d|c)", "flags": 0, "namedLists": {}, "subject": "xxd", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?b)(?:(?:(?(?=(?:(*SKIP)ab){e<=1})a|b)){e<=2}d|c)", "flags": 0, "namedLists": {}, "subject": "xada", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}", "flags": 0, "namedLists": {}, "subject": "ad", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
+        {"generator": "rows", "pattern": "(?:(?!(?:a(*SKIP)b){d<=0})cd){e<=2}", "flags": 0, "namedLists": {}, "subject": "ad", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}}
+        {"generator": "rows", "pattern": "(?:(?(?!(?:a(*PRUNE)b){d<=0})cd|x)){e<=2}", "flags": 0, "namedLists": {}, "subject": "ad", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
+        {"generator": "rows", "pattern": "(?:(?(?=(?:a(*PRUNE)b){d<=0})x|cd)){e<=2}", "flags": 0, "namedLists": {}, "subject": "ad", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
+        """;
+
+    /// <summary>
+    /// The six rows of <c>negative-condition-keeps-its-alternatives</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the three D55 witnesses (a
+    /// negative lookahead test and two negative lookbehind tests) and matrix rows 8301, 11941 and
+    /// 11948 (a verb, a group call and a whole-pattern call in the yes branch). Upstream answers no
+    /// match to all six; PCRE2 10.47 and Perl 5.42.3 match every one.
+    /// </summary>
+    private const string _negativeConditionAlternativeRows = """
+        {"generator": "rows", "pattern": "(?(?!a)(?:x|))x", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!q)(?:xz|x))c", "flags": 0, "namedLists": {}, "subject": "xc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab|a))c", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab|a)(?<!(?:(?:ab|a)(*FAIL)|ba[ab]))|(?:ab|a))", "flags": 0, "namedLists": {}, "subject": "  bab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)", "flags": 0, "namedLists": {}, "subject": "aax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)", "flags": 0, "namedLists": {}, "subject": "b", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        """;
+
+    /// <summary>
+    /// The two rows of <c>enhancematch-trailing-insertion-double-count</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: <c>(?e)(?:ob+?a){e&lt;=3}</c>
+    /// fullmatched against 'bab', and its reversed form against 'aob'. Upstream answers three
+    /// substitutions to both; this port answers one insertion and one deletion.
+    /// </summary>
+    private const string _enhanceDoubledGuardRows = """
+        {"generator": "rows", "pattern": "(?e)(?:ob+?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "bab", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?e)(?r)(?:ob+?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "aob", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 2, 1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        """;
+
+    /// <summary>
+    /// The six rows of <c>fuzzy-total-drops-a-discarded-section</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows</c>: five rows of the D45 grid, every row the fix
+    /// changed where the unfixed port gave upstream's answer exactly but one, whose live answer is
+    /// the control's stand-in match at 1, and one of <c>FuzzyBestMatchTests</c>. BESTMATCH and ENHANCEMATCH over negative lookarounds,
+    /// lookbehinds and a group call inside a lookahead.
+    /// </summary>
+    private const string _discardedTotalRows = """
+        {"generator": "rows", "pattern": "(?b)(a)(?:(?!.(?:(?1)){e<=1})|.)+?b", "flags": 0, "namedLists": {}, "subject": "abbx", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?be)(?:(?<!(?:bc){e<=2})|c)", "flags": 0, "namedLists": {}, "subject": "cbc", "operation": "match", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?e)(?:(?!(?:bc){e<=2})|c)", "flags": 0, "namedLists": {}, "subject": "cbdbc", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?e)(?:(?<!(?:a){d<=1})|c)", "flags": 0, "namedLists": {}, "subject": "cxcd", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?e)(a)(?:(?!.(?:(?1)){e<=1})|.)+?b", "flags": 0, "namedLists": {}, "subject": "abxb", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?b)(?:(?!(?:q){e<=1})|c)", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
+    /// The ten rows of <c>fuzzy-whole-pattern-call-returns-to-its-caller</c>, recorded 2026-09-30
+    /// by <c>python tools/record-oracle.py --rows</c> over rows of the D37 grid: every row the fix
+    /// changes where upstream answers, but one (see the entry). Plain, BESTMATCH, ENHANCEMATCH and
+    /// reversed patterns, a nested section and a numbered spelling, <c>(?0)</c>.
+    /// </summary>
+    private const string _wholePatternFuzzyCallRows = """
+        {"generator": "rows", "pattern": "(?b)(?:b||b(?0)*){e<=2}", "flags": 0, "namedLists": {}, "subject": "azx", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 0], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": []}}}
+        {"generator": "rows", "pattern": "(?:|b*(?R)(?:(?R)a*?(?R)?)*){s<=1}", "flags": 0, "namedLists": {}, "subject": "zx", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:||(?:[ab](?R))*){e<=1}){d<=1}", "flags": 0, "namedLists": {}, "subject": "zabx", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?b)(?:(?:azb*(?R)|){s<=1}a){e<=1}", "flags": 0, "namedLists": {}, "subject": "bzb", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [3]}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [3]}}}
+        {"generator": "rows", "pattern": "(?:|z?(?R)?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "aaba", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 3, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [1, 2, 3], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:(?R)?|[ab]){s<=1}a){s<=1}", "flags": 0, "namedLists": {}, "subject": "azxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?r)(?:(?:b(?R)|baz?|){s<=1}b){1<=s<=1}", "flags": 0, "namedLists": {}, "subject": "zza", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:x[ab]|(?R)?){d<=1}a){e<=3}", "flags": 0, "namedLists": {}, "subject": "xza", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:(?:[ab](?R))*|){e<=1,s<=0}a){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "azxz", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:(?:b(?R)(?R)|[ab])*.|){s<=1}", "flags": 0, "namedLists": {}, "subject": "abzz", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>fuzzy-minimum-met-by-a-trailing-insertion</c>, recorded 2026-09-28 by
     /// <c>python tools/record-oracle.py --rows tools/probes/fuzzy-minimum-rows.jsonl</c>: an e and an
     /// i minimum, a search that now starts earlier, a full match, nested sections, a group
@@ -3226,6 +3431,8 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(a)(?:\\1){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aaab", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?r)b(?:a){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "baa", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?b)(?:a){1<=e<=2}b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}}
+        {"generator": "rows", "pattern": "(?:(?>.\\w)(?!a+)){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "a axbx", "operation": "search", "codepointSpan": [5, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [6]}}], "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "selfContradiction": ["fuzzy-counts-match-changes"]}
+        {"generator": "rows", "pattern": "a*(?<=(?:a*){1<=e<=2})", "flags": 1024, "namedLists": {}, "subject": "axb", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [3, 2], "insertions": [], "deletions": []}, "codepointSpan": [3, 3]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}, "codepointSpan": [0, 0]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [3, 2], "insertions": [], "deletions": []}}, {"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}], "selfContradiction": ["fuzzy-counts-match-changes"]}
         """;
 
     /// <summary>
@@ -3370,8 +3577,120 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy-overhang", "pattern": "(?fi)(?r)(?:\\A(?:(?:\\1)a){e<=2,s<=1}[^a]){e<=3,1i+1d+2s<=3:[a-f]}(f)", "flags": 0, "namedLists": {}, "subject": "ﬀAf", "operation": "match", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
         """;
 
+    /// <summary>
+    /// The four rows of <c>enhancematch-stops-on-a-stale-total</c> (known defect D59): complete-matrix
+    /// rows 7619 and 11464 of 2026-09-30, the register's minimal search and its unrolled form, recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-10-01.
+    /// </summary>
+    private const string _enhanceStaleTotalRows = """
+        {"generator": "rows", "pattern": "(?:(?:a+){i<=1,d<=1}){1,2}+", "flags": 32768, "namedLists": {}, "subject": " x aaaa", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}]}
+        {"generator": "rows", "pattern": "(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 49154, "namedLists": {}, "subject": "xaaabaxa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}, "codepointSpan": [1, 6]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}, "codepointSpan": [7, 8]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}}]}
+        {"generator": "rows", "pattern": "(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}", "flags": 0, "namedLists": {}, "subject": "xaaabaxa", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 4], [5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?", "flags": 0, "namedLists": {}, "subject": "xaaabaxa", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4, 7]}}]}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_enhanceStaleTotalRows"/>, in the same
+    /// order, as the report renders it: the fit with the fewest errors at the plain search's start.
+    /// </summary>
+    private static readonly string[] _enhanceStaleTotalOurs =
+    [
+        "match 0:(0,0)[(0,0)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
+        "matches 3 | match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1 || match 0:(5,1)[(5,1)] 1:(5,1)[(5,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:6] || match 0:(7,1)[(7,1)] 1:(7,1)[(7,1)] last=1/g1 fuzzy=(0,0,1)[s:][i:][d:8]",
+        "match 0:(1,4)[(1,4)] 1:(1,4)[(1,4)] last=1/g1",
+        "match 0:(1,4)[(1,4)] last=-1/-",
+    ];
+
+    /// <summary><see cref="_enhanceStaleTotalRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _enhanceStaleTotal = OracleWave
+        .ParseRows(_enhanceStaleTotalRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _enhanceStaleTotalOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The sixteen rows of <c>group-call-discards-its-captures-on-return</c>, recorded 2026-09-30 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/call-capture-rows.jsonl</c>: the ruling's
+    /// second witness, a fullmatch, whole-pattern recursion, a call in a repeat and in a lookahead, a
+    /// fuzzy call, a reversed call, a partial match, finditer, and a backreference to a group inside
+    /// the called group; and six partial matches that run out inside a call that has not returned
+    /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row, a
+    /// reversed one, and two nested calls of one group (blind review of D62). The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
+    /// 'ab', is not among them: the oracle does not compare the capture list of a group with no
+    /// value (<c>OracleGroup.Describe</c>), so it agrees there.
+    /// </summary>
+    private const string _callCaptureRows = """
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g1>a)(?1)", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}}
+        {"generator": "rows", "pattern": "\\((?<p>[^()]|(?R))*\\)", "flags": 0, "namedLists": {}, "subject": "(a(b)c)", "operation": "search", "codepointSpan": [0, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[1, 1], [3, 1], [2, 3], [5, 1]]}], "lastIndex": 1, "lastGroup": "p", "partial": false}}
+        {"generator": "rows", "pattern": "(?:(?<c>[ab])(?&c))+", "flags": 0, "namedLists": {}, "subject": "abba", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?=(?<c>a)(?&c))", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?<c>ab)(?:(?&c)){s<=1}", "flags": 0, "namedLists": {}, "subject": "abxb", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [2, 2]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)b(?&c)(?<c>a)", "flags": 0, "namedLists": {}, "subject": "baa", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<c>a)(?&c)", "flags": 0, "namedLists": {}, "subject": "aaaa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false, "codepointSpan": [2, 4]}]}}
+        {"generator": "rows", "pattern": "(?<o>x(?<i>y)?)(?&o)\\2", "flags": 0, "namedLists": {}, "subject": "xyxyy", "operation": "search", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": false}}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)b)(?&o)", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [2, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "flags": 0, "namedLists": {}, "subject": "cebcebc", "operation": "search", "partial": true, "codepointSpan": [0, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2], [3, 2]]}, {"number": 2, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[2, 1], [5, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "a(?<g>b)(?R)?c", "flags": 0, "namedLists": {}, "subject": "abab", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[1, 1], [3, 1]]}], "lastIndex": 1, "lastGroup": "g", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "namedLists": {}, "subject": "ababa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[0, 1], [2, 1], [4, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[2, 1], [0, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
+        // FIRST OF ALL, before entry 42: every other entry's ablation runs with the D51 fix off
+        // too (OracleComparer.Run), so any of them would claim a row D51 alone explains. D51's own
+        // ablation switches nothing else off, so it claims no row another fix explains.
+        new(
+            Id: "group-call-discards-its-captures-on-return",
+            Reason: "A GROUP CALL KEEPS NONE OF THE CAPTURES ITS BODY MADE HERE: when the call returns, "
+                + "each group is left exactly as the caller had it, span and capture list both, as in "
+                + "Perl 5.42 and PCRE2 10.47. Ledger entry 63, known defect D51, owner ruling (a) of "
+                + "2026-09-30, recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM BEHAVIOUR: GROUP_CALL saves only each group's `current` "
+                + "(`push_groups`, upstream/src/_regex.c:2490, called at :13405) and GROUP_RETURN "
+                + "restores only that (:13516), so the callee's captures stay on the list while the "
+                + "span goes back: `regex.search(r'(?(DEFINE)(?<c>a))(?&c)b', 'ab')` reports c "
+                + "unset with captures ['a'], a group with no value and a capture, which .NET's Group "
+                + "contract has no room for; `(?<c>a)(?&c)b` over 'aab' lists c as ['a', 'a'] where "
+                + "PCRE2 and Perl give c = (0, 1).\n"
+                + "THE FIX saves each group's count as well at the call and restores both on return, "
+                + "keeping the callee's spans on the backtracking stack for a re-entry "
+                + "(`Matcher.ReturnToCallerCaptures`). On a complete match, spans, group values, fuzzy counts and every "
+                + "match decision are unchanged, because `current` was already restored.\n"
+                + "AND ON A PARTIAL RESULT (D62, owner ruling 2026-09-30) each group reports what every "
+                + "completion of the path the partial took would report: a call that has not returned "
+                + "returns in any completion, so the groups are restored from the outermost open call's "
+                + "frame (`Matcher.BasicMatch`). `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (0, 1) "
+                + "here, as its written-out form does in both engines, and the unfinished call's (2, 3) "
+                + "upstream. On a partial the shape clause sets the group values aside as well, so a "
+                + "partial answer must also equal `OracleComparer.RunWithTheFrameByFrameRestore`'s, the "
+                + "same restore computed by walking every open call's frame (`PartialIsTheFrameRestore`; "
+                + "a restore from the innermost frame fails it, blind review of D62).\n"
+                + "KEYED ON AN ABLATION, AND ON THE SHAPE OF THE DIFFERENCE. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamCallCaptures`, which sets "
+                + "`PatternObject.KeepCallCaptures` and nothing else, reproduces upstream's recorded "
+                + "answer exactly, this port's live answer is the one being judged, AND the live answer "
+                + "differs from the ablated one only by captures missing from the lists "
+                + "(`OnlyCallCapturesAreMissing`). The last clause is what stops a bug in the discard "
+                + "itself hiding here: a return that failed to restore a span on re-entry changes a "
+                + "match, which the clause refuses "
+                + "(`A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence`). "
+                + "The residual risk is a port bug that drops a capture the caller made, other than "
+                + "its last, and changes nothing else. The control is "
+                + "`A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.CallCaptureTests",
+            Example: _callCaptureRows,
+            Applies: static (row, ours) =>
+                OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } ablated
+                && OnlyTheAblationExplainsIt(row, ours, ablated)
+                && OnlyCallCapturesAreMissing(ours, ablated)
+                && PartialIsTheFrameRestore(
+                    ours,
+                    IsPartial(ours) ? OracleComparer.RunWithTheFrameByFrameRestore(row) : null
+                )
+        ),
         // FIRST, so that a row ledger entry 42 alone explains is classified before an entry keyed
         // on another fix's ablation can see it: those ablations run with entries 42 and 44 off too
         // (OracleComparer.Run), and would otherwise claim it. Entry 44's comes second, for the same
@@ -3401,12 +3720,14 @@ internal static class ExpectedDivergences
                 + "KEYED ON AN ABLATION. A row belongs here when `OracleComparer.RunWithoutTheExactDeletion`, "
                 + "which sets `PatternObject.SkipExactDeletionRetry` and leaves entry 44's rule on, "
                 + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
-                + "being judged. The control is "
+                + "being judged. SINCE 2026-10-01 the ablated answer may also differ from upstream's in "
+                + "the change positions alone where upstream's own control proves its positions leaked "
+                + "(`TheAblationExplainsItBarAPinnedLeak`; complete-matrix row 8598). The control is "
                 + "`A_row_the_exact_deletion_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FuzzyExactDeletionTests",
             Example: _exactDeletionRows,
             Applies: static (row, ours) =>
-                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheExactDeletion(row))
+                TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithoutTheExactDeletion(row))
         ),
         new(
             Id: "fuzzy-empty-iteration-needed-rule",
@@ -3439,12 +3760,15 @@ internal static class ExpectedDivergences
                 + "`PatternObject.UpstreamEmptyIterations`, which turns off the repeat's rule and the "
                 + "alternation's alike, and also takes entry 42 away, reproduces "
                 + "upstream's recorded answer exactly, AND this port's live answer is the one being "
-                + "judged. A row entry 42 alone explains was claimed by the entry above first. The "
+                + "judged. A row entry 42 alone explains was claimed by the entry above first. SINCE "
+                + "2026-10-01 the ablated answer may also differ from upstream's in the change positions "
+                + "alone where upstream's own control proves its positions leaked "
+                + "(`TheAblationExplainsItBarAPinnedLeak`; complete-matrix rows 1408 and 2310). The "
                 + "control is `A_row_the_needed_rule_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FuzzyNeededEmptyIterationTests and FuzzyEmptyIterationTests",
-            Example: _neededEmptyIterationRows,
+            Example: _neededEmptyIterationRows + "\n" + _atomicLeakBehindAnAblationRows,
             Applies: static (row, ours) =>
-                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithUpstreamEmptyIterations(row))
+                TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithUpstreamEmptyIterations(row))
         ),
         new(
             Id: "fuzzy-insertion-before-a-failing-lookaround",
@@ -3477,6 +3801,206 @@ internal static class ExpectedDivergences
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
         ),
         new(
+            Id: "group-call-runs-with-its-call-sites-features",
+            Reason: "A GROUP CALL RUNS HERE WITH THE DIRECTION AND FUZZINESS OF ITS CALL SITE, as the called "
+                + "body written out there would; upstream disagrees with its own written-out form. Ledger "
+                + "entries 56-60, known defects D40, D42, D43, D48 and D49, fixed 2026-09-30 and recorded as "
+                + "deliberate divergences in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECTS: (D40) a group called with other features than where it is written "
+                + "is compiled again as a copy (upstream/regex/_regex_core.py:4420), but the calls inside "
+                + "the copy keep the references resolved for where they are written, so a fuzzy copy calls "
+                + "the exact compile of the next group, and an exact copy calls the fuzzy one and segfaults "
+                + "(`regex.search(r'(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)', 'ba')`); "
+                + "`regex.search(r'(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}', 'aab')` is None while "
+                + "`(?P<g3>a)(?P<g4>a)(?:(?&g4)){s<=1}` is (0, 3). (D42) a lookaround's calls are "
+                + "registered with the caller's fuzziness (:3160) while its body is compiled exact (:3201): "
+                + "`(?:(?=(?&g))..){s<=1}(?P<g>ab)?` matches 'xb', `(?:(?=ab)..){s<=1}` does not. (D43) a "
+                + "conditional's lookbehind test's calls are registered with the caller's direction "
+                + "(:3230) while the test is compiled backwards (:3267): `bc(?(?<=(?&g))x|y)(?P<g>bc)?` "
+                + "refuses 'bcxzzz', `bc(?(?<=bc)x|y)` matches it. (D48) a backwards copy of the whole "
+                + "pattern carries the required string's mark, and at the prefilter's position the run jumps "
+                + "to the string's forward end (`_regex.c:15109`): `aa(?:(?<=a(?R)){i<=1}a|)` over 'aaaa' is "
+                + "(0, 3). (D49) the copies compiled after SUCCESS count towards min_width (:24560), so "
+                + "`(?P<g1>\\w)(?<=(?&g1))\\W` refuses 'a ', which `(?P<g1>\\w)(?<=\\w)\\W` matches.\n"
+                + "THE FIX resolves each copy's calls for the copy's own features "
+                + "(`ParseFunctions.ResolveCallsInCopy`) and registers each lookaround body's calls as "
+                + "compiled, marks the required string only in its own direction, and takes min_width at "
+                + "SUCCESS. Over the D40 grids (2,000 rows each at seeds 20260930 and 7, and the first padded) "
+                + "the port's answer equals its own written-out answer on every row that has one. PCRE2 "
+                + "10.47 and Perl give the written-out answer on the rows without fuzziness (blind review, "
+                + "2026-09-30); the rule for fuzziness is upstream's own (`_check_group_features`), applied "
+                + "consistently.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamCallFeatures`, which restores upstream's call features "
+                + "and min_width at compile time with entries 42 and 44 off, reproduces upstream's recorded "
+                + "answer exactly, AND this port's live answer is the one being judged. Also here: a row "
+                + "where that ablated run reaches a fuzzy item with no fuzzy section in force, which is "
+                + "D40's crash; upstream segfaults there or, when the pointer happens to hold an old "
+                + "section, answers from it, which no ablation can reproduce. Rows that also carry another "
+                + "entry's divergence are not accounted for here (D40 grid row 1655 is one). The control is "
+                + "`A_row_the_call_site_features_do_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.NestedGroupCallTests",
+            Example: _callSiteFeaturesRows,
+            Applies: static (row, ours) =>
+                OracleComparer.RunWithTheUpstreamCallFeatures(row) is { } ablated
+                && (
+                    OnlyTheAblationExplainsIt(row, ours, ablated)
+                    || (
+                        ablated is ErrorOutcome { WhileMatching: true } crash
+                        && (
+                            string.Equals(crash.Exception, nameof(NullReferenceException), StringComparison.Ordinal)
+                            || crash.Message.Contains("no fuzzy section in force", StringComparison.Ordinal)
+                        )
+                        && IsTheLiveAnswer(row, ours)
+                    )
+                )
+        ),
+        new(
+            Id: "group-call-in-a-discarded-lookaround-leaves-no-capture",
+            Reason: "A GROUP CALL INSIDE A LOOKAROUND WHOSE BODY IS THROWN AWAY LEAVES NO CAPTURE HERE, "
+                + "as a capture group there leaves none in both engines. Ledger entry 54, known defect "
+                + "D10, fixed 2026-09-29 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: LOOKAROUND saves the captures only when its node carries "
+                + "RE_STATUS_HAS_GROUPS (upstream/src/_regex.c:13772), which `build_LOOKAROUND` sets "
+                + "only when the body built a capture group (:25023, set by `build_GROUP` at :24811). "
+                + "`build_GROUP_CALL` flags only its own node (:24850), so a body that only calls a "
+                + "group is not saved, and the call's entry in the group's capture list outlives a "
+                + "negative body that matched or a positive one the match backtracked past: "
+                + "`regex.search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1)` is [(0, 1), (2, 3)], "
+                + "while `(?P<x>a)(?:(?!.(?P<x>a))|.)+?b`, writing the same group directly, gives "
+                + "[(0, 1)]. Adding an empty capture group to each lookaround body gives upstream's "
+                + "own answer this port now gives.\n"
+                + "THE FIX counts a call as a group for the enclosing sequence "
+                + "(`NodeCompiler.BuildGroupCall`). Only capture lists change; spans, group values and "
+                + "fuzzy counts do not. PCRE2 10.47 and Perl 5.42 keep no capture lists and restore a "
+                + "called group on return, so they cannot show the entry; every engine discards what "
+                + "a failed assertion captured.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamLookaroundCallCaptures`, which clears the flag on "
+                + "every lookaround in `PatternObject.LookaroundsSavingOnlyForCalls` with entries 42 "
+                + "and 44 off, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. The control is "
+                + "`A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.LookaroundTests",
+            Example: _lookaroundCallCaptureRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row))
+        ),
+        new(
+            Id: "fuzzy-whole-pattern-call-returns-to-its-caller",
+            Reason: "A CALL TO THE WHOLE PATTERN FROM INSIDE A PATTERN THAT IS ONE FUZZY SECTION RETURNS TO "
+                + "ITS CALLER HERE, so the errors spent before and after the call are counted and the "
+                + "section's limits are checked on the whole match. Ledger entry 55, known defect D37, "
+                + "fixed 2026-09-30 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: `_main.py:577` decides `fuzzy = isinstance(parsed, Fuzzy)` "
+                + "BEFORE optimising, when `(?:z(?R)|){e<=1}` is still a one-item Sequence, and "
+                + "`_check_group_features` (`_regex_core.py:4436`) decides it AFTER, when it is the "
+                + "Fuzzy. The two disagree, so the call gets neither an extra copy of the pattern nor "
+                + "the CALL_REF wrapper, and GROUP_CALL (`_regex.c:13394`) jumps to the start node, "
+                + "whose end is SUCCESS rather than GROUP_RETURN. A match then ends inside the call "
+                + "with the outer section open: `regex.fullmatch(r'(?b)(?:b||b(?0)*){e<=2}', 'azx')` "
+                + "is (0, 3) with one error, where every reading of the pattern needs three, and "
+                + "`(?:|z?(?R)?a){e<=3}` over 'aaba' reports four errors under a limit of three. Most "
+                + "such rows raise MemoryError upstream instead, the recursion never returning.\n"
+                + "THE FIX reads both from the optimised pattern (`PatternCompiler`), which adds the "
+                + "same whole-pattern wrapper a pattern with no fuzzy section gets. A recursive "
+                + "instance is then a nested instance of the same section, and its errors count "
+                + "against every instance that encloses it.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamWholePatternCall`, which compiles with "
+                + "`Info.UpstreamWholePatternCall` and entries 42 and 44 off, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_whole_pattern_call_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyRecursionCountsTests",
+            Example: _wholePatternFuzzyCallRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamWholePatternCall(row))
+        ),
+        new(
+            Id: "fuzzy-section-cut-by-a-verb-is-closed",
+            Reason: "A FUZZY SECTION THAT A (*PRUNE) OR (*SKIP) CUT THROUGH IS CLOSED HERE, so its limits "
+                + "stop applying where it ends. Ledger entry 61, known defect D44, fixed 2026-09-30 "
+                + "under the owner's no-known-bugs rule and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: backtracking onto a verb cuts the backtracking stack straight "
+                + "to the innermost negative lookaround, condition or attempt (`top_bstack`, "
+                + "`_regex.c:2811`), past the FUZZY entry of any section opened since, and that entry's "
+                + "backtrack arm (`:15763`) is the only place `fuzzy_node` goes back. Neither "
+                + "LOOKAROUND nor CONDITIONAL saves it (`:13779`, `:12230`), and `start_match` clears "
+                + "only the counts (`:11790`). The inner section then governs the rest of the outer "
+                + "one: `regex.search(r'(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}', 'ad')` is (1, 2) with a "
+                + "substitution and a deletion, where the same pattern without the verb is (0, 2) with "
+                + "one substitution. The verb cannot matter there: the body fails at 'b' either way, "
+                + "and PCRE2 10.47 and Perl 5.42 both match `(?!a(*PRUNE)b)ad` over 'ad' at (0, 2).\n"
+                + "THE FIX saves the open section with the counts at ATOMIC, CONDITIONAL and LOOKAROUND "
+                + "and puts it back in their eight restoring arms "
+                + "(`MatchState.PushSubAttemptFuzzyState`), and `start_match` closes it.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheSectionLeftOpenByAVerb`, which sets "
+                + "`PatternObject.KeepSectionOpenAfterAVerb` with entries 42 and 44 off, reproduces "
+                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
+                + "judged. The control is `A_row_the_verb_section_close_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyMatchingTests",
+            Example: _sectionCutByAVerbRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheSectionLeftOpenByAVerb(row))
+        ),
+        new(
+            Id: "fuzzy-total-drops-a-discarded-section",
+            Reason: "THE RUNNING ERROR TOTAL THAT BESTMATCH AND ENHANCEMATCH RANK BY DROPS THE ERRORS OF A "
+                + "FUZZY SECTION THAT AN ATOMIC GROUP, LOOKAROUND, CONDITION OR VERB THREW AWAY. Known "
+                + "defect D45, the rest of ledger entry 32, fixed 2026-09-30 under the owner's "
+                + "no-known-bugs rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: END_FUZZY writes `total_errors` (`_regex.c:12484`) and nothing "
+                + "restores it, so a body thrown away puts the counts back (`:15277`, `:15421`, "
+                + "`:17160`) and leaves its errors in the total. A perfect first match then looks "
+                + "imperfect and the walk replaces it: `regex.search(r'(?b)(?:(?!(?:q){e<=1})|c)', 'c')` "
+                + "is (0, 0) where the flagless search is (0, 1) with no errors; and a better match "
+                + "loses: `(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx' is (0, 1) with a "
+                + "deletion, over the exact 'dc' at (1, 3).\n"
+                + "THE FIX saves the two totals with the counts at ATOMIC, CONDITIONAL and LOOKAROUND "
+                + "and puts them back in the eight restoring arms "
+                + "(`MatchState.PushSubAttemptFuzzyState`), and `start_match` zeroes them.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheDiscardedTotals`, which sets "
+                + "`PatternObject.KeepDiscardedTotals` with entries 42 and 44 off, reproduces "
+                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
+                + "judged. The control is `A_row_the_discarded_total_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.FuzzyBestMatchTests",
+            Example: _discardedTotalRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheDiscardedTotals(row))
+        ),
+        new(
+            Id: "negative-condition-keeps-its-alternatives",
+            Reason: "A NEGATIVE CONDITION'S YES BRANCH KEEPS EVERY ALTERNATIVE OF AN ALTERNATION AT ITS "
+                + "START. Known defect D55, ledger entry 62, fixed 2026-09-30 under the owner's "
+                + "no-known-bugs rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a negative test that fails goes to the yes branch through "
+                + "CONDITIONAL's `true_node` (`_regex.c:15444`), and `skip_one_way_branches` decides a "
+                + "BRANCH there is 1-way by testing the BRANCH's own `true_node` (`:23206`), which no "
+                + "BRANCH sets, where the two checks above it test `next_2`. The two are separate "
+                + "members of the node's `nonstring` struct (`:294-297`), not a union. So every branch "
+                + "is skipped to its first exit and the other alternatives are lost: "
+                + "`regex.search(r'(?(?!a)(?:x|))x', 'x')` is None and `(?(?<!q)(?:xz|x))c` over 'xc' "
+                + "is None, where PCRE2 10.47 and Perl 5.42.3 answer (0, 1) and (0, 2). A positive "
+                + "test reaches its yes branch through END_CONDITIONAL's first exit, whose check is "
+                + "right, so `(?(?=x)(?:x|))x` over 'x' is (0, 1) in every engine.\n"
+                + "THE FIX tests `next_2` there too (`Optimiser.SkipOneWayBranches`).\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamTrueBranchSkip`, which moves each TrueNode along "
+                + "the first exit of every BRANCH it meets, as upstream's optimiser does, with entries "
+                + "42 and 44 off, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. The control is "
+                + "`A_row_the_true_branch_skip_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _negativeConditionAlternativeRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamTrueBranchSkip(row))
+        ),
+        new(
             Id: "fuzzy-minimum-met-by-a-trailing-insertion",
             Reason: "THIS PORT LETS A TRAILING INSERTION MEET A FUZZY SECTION'S MINIMUM ERROR COUNT, and "
                 + "upstream checks the minimum first. Ledger entry 51, known defect D9 (finding F-D), "
@@ -3498,12 +4022,14 @@ internal static class ExpectedDivergences
                 + "`OracleComparer.RunWithTheUpstreamMinimumOrder`, which sets "
                 + "`PatternObject.CheckMinimumBeforeTrailingInsertions` with entries 42, 44 and 50 off, "
                 + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
-                + "being judged. The control is "
-                + "`A_row_the_minimum_order_does_not_explain_is_not_accounted_for`.",
+                + "being judged. SINCE 2026-10-01 the ablated answer may also differ from upstream's in "
+                + "the change positions alone where upstream's own control proves its positions leaked "
+                + "(`TheAblationExplainsItBarAPinnedLeak`; complete-matrix rows 1365 and 5914). The "
+                + "control is `A_row_the_minimum_order_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FuzzyMinimumErrorTests",
             Example: _minimumTrailingInsertionRows,
             Applies: static (row, ours) =>
-                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamMinimumOrder(row))
+                TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithTheUpstreamMinimumOrder(row))
         ),
         new(
             Id: "search-start-partial",
@@ -4700,7 +5226,27 @@ internal static class ExpectedDivergences
                 (
                     HasGroupCall(row.Pattern)
                     && CallsThroughAnOppositeDirectionLookaround(row)
-                    && UpstreamFoundStrictlyLess(row, ours)
+                    && (
+                        UpstreamFoundStrictlyLess(row, ours)
+                        // A row that also carries D10's stray capture (ledger entry 54) renders
+                        // upstream's matches identically only with that fix switched off, as the
+                        // second row of the examples does: g2's second [1, 3] is the call's capture
+                        // from a negative lookbehind that failed.
+                        || (
+                            OracleComparer.RunWithTheUpstreamLookaroundCallCaptures(row) is { } withTheStrayCapture
+                            && UpstreamFoundStrictlyLess(row, withTheStrayCapture)
+                            && IsTheLiveAnswer(row, ours)
+                        )
+                        // And every row whose calls capture now renders upstream's matches
+                        // identically only with the D51 fix (ledger entry 63) off, which keeps the
+                        // calls' captures on the lists as upstream does; the D10 arm above has it
+                        // off too, stacked by OracleComparer.Run.
+                        || (
+                            OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } withTheCallCaptures
+                            && UpstreamFoundStrictlyLess(row, withTheCallCaptures)
+                            && IsTheLiveAnswer(row, ours)
+                        )
+                    )
                 )
                 // ...plus the rows the predicate cannot reach, judged one at a time. See
                 // _groupCallLostMatchJudgedRows for why widening the predicate instead is the worse
@@ -5247,7 +5793,7 @@ internal static class ExpectedDivergences
                 + "returns what it started with. What is not established is which of the two limits "
                 + "the re-run applies differs from the section's own - `state->max_errors` at :17978 "
                 + "and `values[RE_FUZZY_VAL_MAX_ERR]` are read side by side in `this_error_permitted` "
-                + "(:9675) and look equivalent - and no part of this entry rests on the answer.\n"
+                + "(:9675) and look equivalent - and no part of this entry rests on the answer. Known defect D46 (2026-09-30) settled it: it is ledger entry 12's doubled trailing-insertion guard, reached through the loop's `max_errors` (`:17978`), and `enhancematch-trailing-insertion-double-count` below keys on that.\n"
                 + "THIS PORT'S PLAIN ANSWER IS UPSTREAM'S, which is what says the divergence is the "
                 + "loop and not the fuzzy matcher underneath it. Without `(?e)` both engines answer "
                 + "three substitutions on the minimised row and on the wave row; with it, this port "
@@ -5268,6 +5814,64 @@ internal static class ExpectedDivergences
             Example: _enhancematchLostCandidateRows,
             Applies: static (row, ours) =>
                 _enhancematchLostCandidate.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "enhancematch-trailing-insertion-double-count",
+            Reason: "UPSTREAM'S DOUBLED TRAILING-INSERTION GUARD (LEDGER ENTRY 12) SHOWS UNDER "
+                + "ENHANCEMATCH ALONE, and upstream keeps a three-error fit where a two-error one "
+                + "exists. Known defect D46, triaged 2026-09-30: this port is right and upstream is "
+                + "wrong, so the divergence is pinned and not fixed away.\n"
+                + "THE UPSTREAM DEFECT: the enhance loop tightens `max_errors` to the total minus one "
+                + "(`_regex.c:17978`), so END_FUZZY's trailing-insertion guard (`:15516`) meets a "
+                + "bounded budget and counts the section's errors twice, the same mechanism that "
+                + "`bestmatch-loses-a-candidate` records for `(?b)`. Measured 2026-09-30 on regex "
+                + "2026.9.10: `(?e)(?:ob+?a){e<=3}` fullmatched against 'bab' is (0, 3) at three "
+                + "substitutions upstream, and (0, 3) at one insertion and one deletion with "
+                + "`{e<=2}`, which is this port's answer to both.\n"
+                + "ENTRY 25 (`enhancematch-loses-a-candidate`, above) IS THE SAME DEFECT, FOUND EARLIER: its row `(?e)(?:a\\d+Z){e<=3}` over 'a6ZZ_' is explained by the same ablation, and this entry sits below it so that entry keeps its own row.\n"
+                + "KEYED ON THE ABLATION, for a pattern with `(?e)` and without `(?b)`: a row belongs "
+                + "here when `OracleComparer.RunWithTheDoubledInsertionGuard`, which sets "
+                + "`PatternObject.DoubleCountTrailingInsertions`, reproduces upstream's recorded "
+                + "answer exactly, AND this port's live answer is the one being judged. The control "
+                + "is `A_row_the_enhancematch_double_count_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FuzzyBestMatchTests.Enhancematch_keeps_the_two_error_fit_upstream_trades_for_three_substitutions",
+            Example: _enhanceDoubledGuardRows,
+            Applies: static (row, ours) =>
+                row.Pattern.Contains("(?e", StringComparison.Ordinal)
+                && !row.Pattern.Contains("(?b", StringComparison.Ordinal)
+                && TheDoubledGuardAloneExplainsIt(row, ours)
+        ),
+        new(
+            Id: "enhancematch-stops-on-a-stale-total",
+            Reason: "Port right, KNOWN DEFECT D59, owner ruling 2026-09-30 option (a): LEDGER ENTRY 32's "
+                + "main mechanism, reached where a LATER fuzzy section is rejected over budget. END_FUZZY writes "
+                + "`total_errors` and then, when it is over `max_errors`, backtracks without putting "
+                + "the old total back (upstream/src/_regex.c:12484-12486); the backtrack arm subtracts "
+                + "the counts and not the total (:15569-15571). ENHANCEMATCH's improvement pass runs "
+                + "with `max_errors` one below the first match's total (:17978-17980), so a later "
+                + "section that would spend one error too many is rejected there and leaves its "
+                + "total behind, and the pass's own match then reports it: traced 2026-10-01 with "
+                + "`fprintf` in `do_enhanced_fuzzy_match` on a build of the pinned source, "
+                + "`(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' prints pass 2 over the "
+                + "slice (1, 6) with max_errors 1 returning (1, 5) with total_errors 2, which is above "
+                + "its own budget and so no better than the first match's 2, and the loop keeps (1, 6) "
+                + "with two deletions (:17939). Row 7619 prints the same, total 2 at max 1. A repeat "
+                + "is not needed: the unrolled `(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?` over "
+                + "'xaaabaxa' diverges the same way ((1, 6) two deletions upstream, (1, 5) exact here), "
+                + "and is row 4. The "
+                + "simpler forms upstream does improve have no rejected section after the accepted "
+                + "one: the budget outside the repeat, the repeat lazy, or one iteration. README: "
+                + "ENHANCEMATCH will 'attempt to improve the fit (i.e. reduce the number of errors)'. "
+                + "This port restores the totals (S87) and answers the fewest errors at that start.\n"
+                + "KEYED ON ITS ROWS AND THIS PORT'S JUDGED ANSWER TO EACH, because no recorded control "
+                + "can see `total_errors`, and 'this port found a cheaper fit than upstream' is what a "
+                + "ranking defect here would look like too. Widening means tracing another row and "
+                + "adding it.",
+            PinnedBy: "FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat",
+            Example: _enhanceStaleTotalRows,
+            Applies: static (row, ours) =>
+                _enhanceStaleTotal.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
@@ -5627,7 +6231,18 @@ internal static class ExpectedDivergences
                 + "reversed seven-insertion `fullmatch`, the named-list form of row 31, and a reversed "
                 + "`subf` that replaces one emoji run of two. On all four, setting "
                 + "`PatternObject.DoubleCountTrailingInsertions` makes this port answer what upstream "
-                + "does. Recorded 2026-09-23 from tools/probes/s89-bestmatch-rows.jsonl.",
+                + "does. Recorded 2026-09-23 from tools/probes/s89-bestmatch-rows.jsonl.\n"
+                + "SINCE 2026-10-01 ONE ARM IS A PREDICATE, not a row list: BESTMATCH set inline or by "
+                + "the flag bit, this port's answer upstream's own flagless answer exactly, AND "
+                + "`OracleComparer.RunWithTheDoubledInsertionGuard` reproducing upstream's recorded "
+                + "answer exactly (`TheDoubledGuardAloneExplainsIt`). That is two independent pieces of "
+                + "upstream evidence, not the flagless test alone the 2026-09-14 ruling rejected: a "
+                + "port that ignored `(?b)` never tightens the budget, so the doubled guard changes "
+                + "nothing there and the ablation cannot reproduce upstream's refusal. "
+                + "`A_bestmatch_row_answered_as_though_the_flag_were_absent_is_not_accounted_for` "
+                + "still holds. Complete-matrix rows 2836 and 10830 (2026-09-30) are its examples: "
+                + "BESTMATCH as the flag bit, which the inline test never saw, and a fit that ends in "
+                + "two trailing insertions.",
             PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_"
                 + "insertions, .Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget, "
                 + ".Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford, "
@@ -5648,18 +6263,26 @@ internal static class ExpectedDivergences
             // where upstream keeps a match this port beats outright.
             // Recorded by
             // `python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl`, 2026-09-14.
-            Example: _bestmatchLostCandidateRows,
+            Example: _bestmatchLostCandidateRows + "\n" + _bestmatchDoubledGuardPredicateRows,
             Applies: static (row, ours) =>
-                _bestmatchLostCandidate.Contains(Question(row))
-                && (
-                    (
-                        row.BestmatchFree is not null
-                        && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+                (
+                    _bestmatchLostCandidate.Contains(Question(row))
+                    && (
+                        (
+                            row.BestmatchFree is not null
+                            && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+                        )
+                        || (
+                            _bestmatchWorseMatchKept.TryGetValue(Question(row), out string? judged)
+                            && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                        )
                     )
-                    || (
-                        _bestmatchWorseMatchKept.TryGetValue(Question(row), out string? judged)
-                        && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
-                    )
+                )
+                || (
+                    HasBestmatch(row)
+                    && row.BestmatchFree is not null
+                    && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+                    && TheDoubledGuardAloneExplainsIt(row, ours)
                 )
         ),
         new(
@@ -5769,24 +6392,37 @@ internal static class ExpectedDivergences
                 + "number of errors)': it reduced nothing there, both answers cost one error, and "
                 + "the match still moved. Measured 2026-09-21 on regex 2026.9.10, `python "
                 + "tools/probes/s57b-extra-wave-flag-ablations.py "
-                + "tools/probes/s57b-extra-wave-rows.jsonl`.",
+                + "tools/probes/s57b-extra-wave-rows.jsonl`.\n"
+                + "SINCE 2026-10-01 ONE ARM IS A PREDICATE, for entry 9's mechanism only "
+                + "(`PosixChargesMoreForTheSameMatch`): upstream's POSIX answer and its own POSIX-free "
+                + "answer are the same matches with the same groups, the POSIX-free one costs fewer "
+                + "errors on some match and no more on any, and this port's answer is the POSIX-free "
+                + "one. POSIX chooses among matches and must not change what a match costs, so that "
+                + "row is upstream's defect whatever this port did. It is not the flagless test the "
+                + "2026-09-14 ruling rejected: a port that ignored POSIX is masked only where "
+                + "upstream's own two answers already contradict each other. Complete-matrix rows "
+                + "11574 and 11578 (D58): `(?pew)(?:b?){d<=1}` over 'a' is one deletion upstream and "
+                + "none without the `(?p)`.",
             PinnedBy: "FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_"
                 + "costs_without_posix, .A_posix_fuzzy_match_spends_what_the_flagless_engine_spends, "
                 + ".Posix_does_not_add_a_match_the_flagless_engine_cannot_make, "
                 + ".Posix_and_bestmatch_together_keep_a_match_that_either_flag_alone_keeps and "
                 + ".Posix_does_not_lengthen_a_group_inside_the_same_overall_match",
-            Example: _posixOvercostRows,
+            Example: _posixOvercostRows + "\n" + _posixOvercostPredicateRows,
             Applies: static (row, ours) =>
                 _posixOvercost.TryGetValue(Question(row), out string? judged)
-                // The discriminator has to have MOVED upstream's answer, not merely been asked.
-                // Without this clause the recorder's POSIX removal could silently become a no-op -
-                // a `(?p)` spelt somewhere the prefix rule does not reach, say - and the entry would
-                // go on classifying on evidence that says nothing. Every row differs here: in the
-                // counts, in the span, in the replacement text, in the replacement COUNT, or - on
-                // rows 8 and 9 - in there being a match at all.
-                && row.PosixFree is not null
-                && !string.Equals(row.PosixFree.Describe(), row.Expected.Describe(), StringComparison.Ordinal)
-                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                    // The discriminator has to have MOVED upstream's answer, not merely been asked.
+                    // Without this clause the recorder's POSIX removal could silently become a no-op -
+                    // a `(?p)` spelt somewhere the prefix rule does not reach, say - and the entry would
+                    // go on classifying on evidence that says nothing. Every row differs here: in the
+                    // counts, in the span, in the replacement text, in the replacement COUNT, or - on
+                    // rows 8 and 9 - in there being a match at all.
+                    && row.PosixFree is not null
+                    && !string.Equals(row.PosixFree.Describe(), row.Expected.Describe(), StringComparison.Ordinal)
+                    && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                // Ledger entry 9's mechanism as a predicate (2026-10-01, D58): see
+                // `PosixChargesMoreForTheSameMatch` for what it demands and what it masks.
+                || PosixChargesMoreForTheSameMatch(row, ours)
         ),
         new(
             Id: "atomic-group-leaks-a-change-position",
@@ -6857,67 +7493,44 @@ internal static class ExpectedDivergences
         ),
         new(
             Id: "fuzzy-insertion-at-a-pinned-anchor",
-            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
-                + "assertion pins the match to it, and upstream does not. Upstream issues 563 and "
-                + "564, which are one bug; ledger entries 19 and 20; fixed by S57c on 2026-09-21 "
-                + "under the owner's no-known-bugs rule, and recorded as a deliberate divergence in "
-                + "`docs/DIVERGENCES.md`.\n"
+            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where upstream's search "
+                + "finds no match that starts inside the attempt at the anchor (rule H', DECISIONS "
+                + "2026-09-30 and its 2026-10-01 clarification, known defect D61). Upstream issues 563 "
+                + "and 564, which are one bug; ledger entries 19 and 20 and their D61 addendum; "
+                + "recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM RULE IS ONE LINE: `permit_insertion = !search || text_pos != "
                 + "search_anchor` (upstream/src/_regex.c:10214), under its own comment \"Permit "
                 + "insertion except initially when searching (it's better just to start searching "
-                + "one character later)\". `search_anchor` is set once per matching operation "
-                + "(`init_match`, :3410) and never per candidate start, so the ban lands on exactly "
-                + "one of the positions a scan visits, and WHICH one depends on where the caller "
-                + "started the search rather than on the pattern.\n"
-                + "UPSTREAM CONTRADICTS ITSELF ON IT, measured 2026-09-21 on regex 2026.9.10 by "
-                + "`python tools/probes/issue-563-anchor-rule.py`. `\\m(?:Y){i}\\M` finds ['YX'] "
-                + "over 'XY YX' and ['XY', 'YX'] over ' XY YX', the same shape one character along. "
-                + "One span answers two ways according to the start it was asked from: "
-                + "`search(' XY', 0)` is (1, 3) and `search(' XY', 1)` is None. And `^` and `\\A` "
-                + "already escape the rule, because `basic_match` turns a start-anchored pattern "
-                + "into an anchored match and stops searching, so `^(?:abc){i<=1}` keeps the "
-                + "inserted character over 'xabc' while `(?m)^(?:abc){i<=1}` loses it.\n"
-                + "THE RULE THIS PORT APPLIES INSTEAD is narrower than the prohibition it lifts: "
-                + "the insertion is permitted only where a zero-width position assertion at the "
-                + "head of the pattern holds AT the anchor and fails one character on, which is "
-                + "exactly the case where \"start searching one character later\" cannot find the "
-                + "same match minus an insertion. `Optimiser.FindAnchorGuards` collects those "
-                + "assertions at compile time and `Matcher.AnchorIsPinned` re-tests them per call.\n"
-                + "THE WAVE SEES IT IN THE REVERSED DIRECTION, which is where row 1 of the example "
-                + "comes from: seed 20260921 row 3752, `interactions`, minimised to "
-                + "`(?r)^a(?:b){i<=1}$` over 'ab\\r'. Reversed, the anchor is the END of the "
-                + "subject, so upstream bans the trailing insertion and answers None where its own "
-                + "forward spelling of the same pattern answers (0, 3) with one insertion. Before "
-                + "the fix both engines were wrong on every row of this family, which is why no "
-                + "wave had ever reported it (design spec amendment 13).\n"
-                + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE, and that is what stops it "
-                + "silencing anything. A row belongs here when taking away the one field the fix "
-                + "reads - `PatternObject.AnchorGuards`, emptied by "
-                + "`OracleComparer.RunWithoutTheAnchorPin` - makes this port reproduce upstream's "
-                + "recorded answer exactly, AND this port's live answer to the row is the one being "
-                + "judged. A row this port gets wrong for any other reason still diverges without "
-                + "the pin and is reported; a fabricated answer to a row of the family is reported "
-                + "too, which is the control in "
-                + "`A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
-                + "WHAT THE ABLATION CANNOT SEE, measured 2026-09-21 and stated here so nobody "
-                + "reads the wave as covering it: a change to the SHAPE of the rule. Drop the "
-                + "one-character-on test from `Matcher.AnchorIsPinned`, so the pin holds wherever "
-                + "an assertion holds at the anchor at all, and the rows that answer differently "
-                + "land right back in this family - emptying `AnchorGuards` restores upstream's "
-                + "answer under the broken rule exactly as it does under the shipped one. Run "
-                + "`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57c-one-step-on-rows.jsonl` "
-                + "with that edit in place and the wave is GREEN with three rows classified here, "
-                + "where the shipped code classifies one. No predicate that answers by running "
-                + "this engine can do better, because a broken engine breaks the reference run "
-                + "too. The rule's shape is held by tests that carry upstream's own answers "
-                + "instead: the three `InheritedIssueTests` named below, and the ported "
-                + "`test_fuzzy` named-list rows. That edit turns four of the ported suite's 6,510 "
-                + "tests red, measured 2026-09-21: `test_fuzzy` rows 51 and 56, the demo example "
-                + "`Fuzzy matching against a word list`, and "
-                + "`A_word_start_anchor_before_a_fuzzy_section_matches_at_position_zero_here`.",
-            PinnedBy: "InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_matches_at_"
-                + "position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_subject "
-                + "and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
+                + "one character later)\". It keeps a match from swallowing text where a later match "
+                + "could start, and it loses real matches where none can: `(?:^a){i<=1}` over 'xa' "
+                + "is None upstream and (0, 2) here, as `^(?:a){i<=1}` is in both.\n"
+                + "THE RULE THIS PORT APPLIES INSTEAD, once per pass: at anchor A, let u be the banned "
+                + "search's answer. If u starts at A it stands. Otherwise let c be the attempt at A "
+                + "without the ban; c is the answer if it exists and u is None or starts at or after "
+                + "c's end. `Matcher.DoMatch2LiftingTheAnchorBan` applies it to plain and "
+                + "ENHANCEMATCH searches. For them it replaces S57c's exemption (an assertion at the "
+                + "head of the pattern that holds at A and fails one character on), which glued a "
+                + "separator: `\\b(?:dog){e<=2}` finditer over 'dog  dog' gave (3, 8) with two "
+                + "insertions where upstream gives (5, 8).\n"
+                + "BESTMATCH IS UNCHANGED FOR NOW (DECISIONS 2026-10-01, scope cut): it keeps S57c's "
+                + "exemption (`PatternObject.AnchorGuards`, `Matcher.AnchorIsPinned`) and with it the "
+                + "fix for issue 564, `(?b)\\m(?:Y){1i+1d+1s<=2}\\M` over ' XY Z', until what H' means "
+                + "inside a best-match walk is researched.\n"
+                + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE. A row belongs here when "
+                + "`OracleComparer.RunWithoutTheAnchorPin`, which clears `PatternObject.LiftsAnchorBan` "
+                + "and `PatternObject.LiftsAnchorBanWhenPartial` and empties `PatternObject.AnchorGuards`, "
+                + "makes this port reproduce upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
+                + "WHAT THE ABLATION CANNOT SEE: a bug inside rule H' itself (dropping the overlap test, "
+                + "say) still gives upstream's answer "
+                + "when switched off and an insertion at the anchor live, so it would be classified "
+                + "here. The rule's shape is held by tests that carry the expected answers instead: "
+                + "FuzzyAnchorPinTests, which goes red on each of those plants, and the three "
+                + "InheritedIssueTests below.",
+            PinnedBy: "FuzzyAnchorPinTests, InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_"
+                + "matches_at_position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_"
+                + "subject and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
             Example: _anchorPinRows,
             Applies: static (row, ours) => OnlyTheAnchorPinExplainsIt(row, ours)
         ),
@@ -7940,7 +8553,8 @@ internal static class ExpectedDivergences
         && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
 
     /// <summary>
-    /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
+    /// Whether rule H' (D61, which replaced S57c's anchor pin) is the whole of the difference between
+    /// the two engines on a row.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -7951,9 +8565,9 @@ internal static class ExpectedDivergences
     /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
     /// </para>
     /// <para>
-    /// Neither run needs a switch in the engine. Emptying <c>AnchorGuards</c> on a compiled pattern
-    /// leaves <c>Matcher.AnchorIsPinned</c> returning false everywhere, which is upstream's rule
-    /// exactly, and the pattern it is emptied on was compiled for that one call.
+    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c>, and emptying
+    /// <c>AnchorGuards</c> (BESTMATCH's S57c exemption), on a compiled pattern makes every search keep
+    /// upstream's ban, and the pattern they are changed on was compiled for that one call.
     /// </para>
     /// </remarks>
     /// <param name="row">The row, carrying upstream's answer.</param>
@@ -8086,6 +8700,103 @@ internal static class ExpectedDivergences
         );
 
     /// <summary>
+    /// Whether this port's answer differs from the D51 ablation's only by captures missing from the
+    /// groups' lists: the same outcome, spans, group values, partial marker and fuzzy counts, match
+    /// for match, with each of this port's capture lists a subsequence of the ablated one that ends
+    /// in the group's value when it has one.
+    /// </summary>
+    /// <remarks>
+    /// That is all the D51 fix can change. It lowers each group's count back to the caller's on
+    /// return, and <c>current</c> was restored before it, so what goes is a run of the list's
+    /// entries and never a value; and what it restores is .NET's Group contract, under which a
+    /// group's value is its last capture. A discard that dropped the caller's capture and kept the
+    /// callee's breaks the last clause. An outcome without capture lists (no match, an error, a
+    /// substitution, a split) is never this shape: nothing the fix changes reaches it. On a partial
+    /// result the group values may differ as well (D62, see <c>WithoutCaptures</c>).
+    /// </remarks>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="ablated">The answer with the D51 fix off.</param>
+    /// <returns><see langword="true"/> if only captures are missing.</returns>
+    internal static bool OnlyCallCapturesAreMissing(IOracleOutcome ours, IOracleOutcome ablated) =>
+        (ours, ablated) switch
+        {
+            (MatchOutcome one, MatchOutcome other) => OnlyCallCapturesAreMissing(one, other),
+            (MatchesOutcome one, MatchesOutcome other) => one.Matches.Count == other.Matches.Count
+                && one.Matches.Zip(other.Matches)
+                    .All(static pair => OnlyCallCapturesAreMissing(pair.First, pair.Second)),
+            _ => false,
+        };
+
+    /// <summary>Whether an answer is a partial match, or a finditer whose matches include one.</summary>
+    /// <param name="outcome">The answer.</param>
+    /// <returns><see langword="true"/> for a partial.</returns>
+    internal static bool IsPartial(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            MatchOutcome match => match.Partial,
+            MatchesOutcome matches => matches.Matches.Any(static m => m.Partial),
+            _ => false,
+        };
+
+    /// <summary>
+    /// D62's second clause: an answer that is not partial passes; a partial one passes only when it
+    /// is exactly the frame-by-frame restore's answer to the same row (<paramref name="byFrames"/>).
+    /// </summary>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="byFrames">The frame-by-frame restore's answer, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the partial's groups are the outermost frame's.</returns>
+    internal static bool PartialIsTheFrameRestore(IOracleOutcome ours, IOracleOutcome? byFrames) =>
+        !IsPartial(ours)
+        || (byFrames is not null && string.Equals(ours.Describe(), byFrames.Describe(), StringComparison.Ordinal));
+
+    private static bool OnlyCallCapturesAreMissing(MatchOutcome ours, MatchOutcome ablated) =>
+        ours.Groups.Count == ablated.Groups.Count
+        && string.Equals(
+            WithoutCaptures(ours, ours.Partial).Describe(),
+            WithoutCaptures(ablated, ours.Partial).Describe(),
+            StringComparison.Ordinal
+        )
+        && ours.Groups.All(static g =>
+            !g.Success || (g.Captures.Count > 0 && g.Captures[^1] == new OracleSpan(g.Index, g.Length))
+        )
+        && ours.Groups.Zip(ablated.Groups).All(static pair => IsSubsequence(pair.First.Captures, pair.Second.Captures));
+
+    // On a partial result the groups' values are set aside too, and the last group with them: D62
+    // restores the groups a call that has not returned will give back, which can move a value to
+    // the caller's, or unset it. The two clauses on this port's lists still hold there.
+    private static MatchOutcome WithoutCaptures(MatchOutcome outcome, bool partial) =>
+        partial
+            ? outcome with
+            {
+                Groups =
+                [
+                    .. outcome.Groups.Select(static g =>
+                        g.Number == 0 ? g : new OracleGroup(g.Number, false, 0, 0, [])
+                    ),
+                ],
+                LastIndex = -1,
+                LastGroup = null,
+            }
+            : outcome with
+            {
+                Groups = [.. outcome.Groups.Select(static g => g with { Captures = [] })],
+            };
+
+    private static bool IsSubsequence(IReadOnlyList<OracleSpan> part, IReadOnlyList<OracleSpan> whole)
+    {
+        int next = 0;
+        foreach (OracleSpan span in whole)
+        {
+            if (next < part.Count && part[next] == span)
+            {
+                next++;
+            }
+        }
+
+        return next == part.Count;
+    }
+
+    /// <summary>
     /// Whether one ablated run is the whole of the difference between the two engines on a row.
     /// </summary>
     /// <remarks>
@@ -8101,6 +8812,172 @@ internal static class ExpectedDivergences
         ablated is not null
         && OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
         && IsTheLiveAnswer(row, ours);
+
+    /// <summary>
+    /// Whether one ablated run is the whole of the difference between the two engines on a row once
+    /// upstream's own leaked change positions are set aside. Used by the entries for ledger entries
+    /// 42, 44 and 51.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The complete matrix of 2026-09-30 found five rows (1365, 1408, 2310, 5914 and 8598) where
+    /// the fix's ablation reproduced upstream's answer in everything except the change POSITIONS,
+    /// and upstream's positions were a leak: the fix explains the divergence and a second, already
+    /// pinned upstream defect explains the rest. The exact test of
+    /// <see cref="OnlyTheAblationExplainsIt"/> left them unexplained. Three proofs of the leak are
+    /// accepted, and each is upstream's own answer, not a reading of the two compared answers. The
+    /// first two also demand that the ablation moves this port's answer by more than positions, so a
+    /// row whose whole divergence is the leak stays with the leak's own entry:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// Ledger entry 11 mechanism A's STRONG arm: upstream's anchored re-ask
+    /// (<see cref="OracleRow.LeakFreeFuzzy"/>) gives the ablated answer's positions exactly. The weak
+    /// arm, which demands nothing where upstream would not answer, is not accepted here.
+    /// </item>
+    /// <item>
+    /// Upstream's positions on every differing match include one its own span rules out
+    /// (<see cref="UpstreamsDifferingPositionsAreImpossible"/>).
+    /// </item>
+    /// <item>
+    /// On a judged row of <see cref="_atomicLeakBehindAnAblationRows"/>, upstream's cut-free answer
+    /// (<see cref="OracleRow.AtomicFree"/>) is the ablated answer exactly. That is the
+    /// discriminator of <c>atomic-group-leaks-a-change-position</c>, which is keyed on judged rows
+    /// for the reason that entry gives: an atomic group may legitimately move a position.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// The control is <c>A_row_an_ablation_explains_only_bar_an_unproven_leak_is_not_accounted_for</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer and its recorded controls.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="ablated">This port's answer with the fix switched off.</param>
+    /// <returns><see langword="true"/> if the fix and a proven upstream leak explain the divergence.</returns>
+    private static bool TheAblationExplainsItBarAPinnedLeak(
+        OracleRow row,
+        IOracleOutcome ours,
+        IOracleOutcome? ablated
+    ) =>
+        ablated is not null
+        && (
+            OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
+            || (
+                // The fix itself has to move the answer by more than positions, or the whole of the
+                // divergence is the leak and belongs to the leak's own entry. Without this clause the
+                // arm claimed example row 7 of `full-fold-leftover-take-back`, where switching entry 42
+                // off changes nothing.
+                !string.Equals(WithoutPositions(ablated), WithoutPositions(ours), StringComparison.Ordinal)
+                && (
+                    OnlyTheChangePositionsLeaked(row, ablated, anchoredAnswerRequired: true)
+                    || UpstreamsDifferingPositionsAreImpossible(row, ablated)
+                )
+            )
+            || (
+                _atomicLeakBehindAnAblation.Contains(Question(row))
+                && row.AtomicFree is not null
+                && string.Equals(ablated.Describe(), row.AtomicFree.Describe(), StringComparison.Ordinal)
+            )
+        )
+        && IsTheLiveAnswer(row, ours);
+
+    /// <summary>
+    /// Whether the two answers agree in everything but the change positions, and upstream's positions
+    /// on every match where they differ include one that match's own span rules out, while the
+    /// answer held against it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A substitution or an insertion is at a text position inside the match, and a deletion's
+    /// position is its text position plus the number of deletions before it (upstream/README.rst,
+    /// the 'anaconda f~~oo bar' example), so it lies between the start and the end plus the
+    /// deletion count. A position outside those bounds cannot describe the match reported, so the
+    /// list is left over from another attempt. Complete-matrix row 1408,
+    /// <c>(?:(?:a*)*+){1&lt;=d&lt;=2}</c> scanned over 'bxaaax', is the witness: upstream reports
+    /// the empty match at 1 with deletions at 0 and 1, which is the previous match's list.
+    /// </para>
+    /// <para>
+    /// Not applied where a change may legitimately lie outside the span: a reversed pattern, a
+    /// lookaround (a fuzzy section there reads outside the match) or a <c>\K</c> (the reported
+    /// start is not where the attempt began).
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">The answer upstream's is held against.</param>
+    /// <returns><see langword="true"/> if every differing match is upstream's impossible list.</returns>
+    private static bool UpstreamsDifferingPositionsAreImpossible(OracleRow row, IOracleOutcome ours)
+    {
+        if (
+            IsReversed(row)
+            || HasLookbehind(row.Pattern)
+            || row.Pattern.Contains("(?=", StringComparison.Ordinal)
+            || row.Pattern.Contains("(?!", StringComparison.Ordinal)
+            || row.Pattern.Contains(@"\K", StringComparison.Ordinal)
+        )
+        {
+            return false;
+        }
+
+        if (MatchesOf(row.Expected) is not { } theirs || MatchesOf(ours) is not { } mine || theirs.Count != mine.Count)
+        {
+            return false;
+        }
+
+        bool anyDiffer = false;
+
+        for (int m = 0; m < theirs.Count; m++)
+        {
+            if (string.Equals(theirs[m].Describe(), mine[m].Describe(), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            anyDiffer = true;
+
+            if (
+                !AgreeApartFromTheFuzzyHalf(theirs[m], mine[m])
+                || theirs[m].Fuzzy is not { PositionsUnavailable: false } theirFuzzy
+                || mine[m].Fuzzy is not { PositionsUnavailable: false, CountsAgreeWithPositions: true } ourFuzzy
+                || theirFuzzy.Substitutions != ourFuzzy.Substitutions
+                || theirFuzzy.Insertions != ourFuzzy.Insertions
+                || theirFuzzy.Deletions != ourFuzzy.Deletions
+                || !HasAnImpossiblePosition(theirs[m], theirFuzzy)
+                || HasAnImpossiblePosition(mine[m], ourFuzzy)
+            )
+            {
+                return false;
+            }
+        }
+
+        return anyDiffer;
+    }
+
+    /// <summary>An answer described with every change position dropped, counts kept.</summary>
+    /// <param name="outcome">The answer.</param>
+    /// <returns>Its description without positions.</returns>
+    private static string WithoutPositions(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            MatchOutcome single => (single with { Fuzzy = single.Fuzzy?.WithoutPositions() }).Describe(),
+            MatchesOutcome scan => new MatchesOutcome([
+                .. scan.Matches.Select(static m => m with { Fuzzy = m.Fuzzy?.WithoutPositions() }),
+            ]).Describe(),
+            _ => outcome.Describe(),
+        };
+
+    /// <summary>Whether a match's change list holds a position its span rules out.</summary>
+    /// <param name="match">The match.</param>
+    /// <param name="fuzzy">Its fuzzy half, with positions.</param>
+    /// <returns><see langword="true"/> if some position is out of bounds.</returns>
+    private static bool HasAnImpossiblePosition(MatchOutcome match, OracleFuzzy fuzzy)
+    {
+        OracleGroup whole = match.Groups.First(static group => group.Number == 0);
+        int start = whole.Index;
+        int end = whole.Index + whole.Length;
+        return fuzzy.SubstitutionPositions!.Any(p => p < start || p >= end)
+            || fuzzy.InsertionPositions!.Any(p => p < start || p >= end)
+            || fuzzy.DeletionPositions!.Any(p => p < start || p > end + fuzzy.Deletions);
+    }
 
     /// <summary>
     /// Whether upstream's doubled insertion guard ALONE, with every full-fold repair left on,
@@ -8192,6 +9069,12 @@ internal static class ExpectedDivergences
         IOracleOutcome ours,
         IOracleOutcome? ablated
     ) => ablated is not null && UpstreamCountedOnlyTheInnermostSection(row, ablated) && IsTheLiveAnswer(row, ours);
+
+    /// <summary>Whether the row asks for BESTMATCH, inline or by the flag bit.</summary>
+    /// <param name="row">The row.</param>
+    /// <returns><see langword="true"/> if it does.</returns>
+    private static bool HasBestmatch(OracleRow row) =>
+        (row.Flags & _bestmatch) != 0 || row.Pattern.Contains("(?b", StringComparison.Ordinal);
 
     /// <summary>
     /// Whether the row's pattern runs right to left, by either of the two ways it can say so.
@@ -8927,6 +9810,82 @@ internal static class ExpectedDivergences
         );
 
     /// <summary>
+    /// Whether upstream charges a POSIX match more than its own POSIX-free engine charges the same
+    /// match, and this port answers the POSIX-free one: ledger entry 9's mechanism.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// POSIX chooses leftmost-longest among the matches the ordinary engine can make, so it may
+    /// change which match is answered but not what a given match costs
+    /// (<see cref="OracleRow.PosixFree"/>). Upstream's <c>restore_best_match</c> copies back the best
+    /// match's span and <c>fuzzy_counts</c> but not <c>total_errors</c>
+    /// (upstream/src/_regex.c:11564-11576), which keeps a losing candidate's, and under
+    /// ENHANCEMATCH the improvement loop reads that stale total and stops early (:17975).
+    /// </para>
+    /// <para>
+    /// Demands: the row carries a recorded POSIX-free answer (only a POSIX row does); upstream's recorded answer and its POSIX-free answer are the
+    /// same number of matches, each agreeing in everything but the fuzzy half; the POSIX-free answer
+    /// costs no more on any match and less on at least one; and this port's answer equals the
+    /// POSIX-free one, change positions aside (a POSIX row carries none upstream). What it masks: a
+    /// port defect that answers the POSIX-free match where upstream's costlier POSIX answer was right,
+    /// which cannot happen while POSIX may not change a match's cost. The control is
+    /// <c>A_posix_row_whose_cost_upstream_does_not_contradict_is_not_accounted_for</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer and its POSIX-free one.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if the divergence is entry 9's overcharge.</returns>
+    private static bool PosixChargesMoreForTheSameMatch(OracleRow row, IOracleOutcome ours)
+    {
+        if (
+            row.PosixFree is null
+            || MatchesOf(row.Expected) is not { } theirs
+            || MatchesOf(row.PosixFree) is not { } free
+            || MatchesOf(ours) is not { } mine
+            || theirs.Count != free.Count
+            || mine.Count != free.Count
+        )
+        {
+            return false;
+        }
+
+        bool anyCheaper = false;
+
+        for (int m = 0; m < theirs.Count; m++)
+        {
+            if (
+                !AgreeApartFromTheFuzzyHalf(theirs[m], free[m])
+                || !string.Equals(
+                    (mine[m] with { Fuzzy = mine[m].Fuzzy?.WithoutPositions() }).Describe(),
+                    (free[m] with { Fuzzy = free[m].Fuzzy?.WithoutPositions() }).Describe(),
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                return false;
+            }
+
+            int charged = ErrorsOf(theirs[m]);
+            int freeCharge = ErrorsOf(free[m]);
+
+            if (freeCharge > charged)
+            {
+                return false;
+            }
+
+            anyCheaper |= freeCharge < charged;
+        }
+
+        return anyCheaper;
+    }
+
+    /// <summary>The total error count of a match, zero for an exact one.</summary>
+    /// <param name="match">The match.</param>
+    /// <returns>Substitutions plus insertions plus deletions.</returns>
+    private static int ErrorsOf(MatchOutcome match) =>
+        match.Fuzzy is { } fuzzy ? fuzzy.Substitutions + fuzzy.Insertions + fuzzy.Deletions : 0;
+
+    /// <summary>
     /// Whether a divergence is ledger entry 11 mechanism A: the two engines agree on everything
     /// including the fuzzy counts, and upstream's change POSITIONS are a stale attempt's.
     /// </summary>
@@ -8936,8 +9895,15 @@ internal static class ExpectedDivergences
     /// </remarks>
     /// <param name="row">The row, carrying upstream's answer and the recorded leak-free one.</param>
     /// <param name="ours">This port's answer.</param>
+    /// <param name="anchoredAnswerRequired">
+    /// Whether to refuse the WEAK arm, so every differing match needs upstream's anchored answer.
+    /// </param>
     /// <returns><see langword="true"/> if the divergence belongs to the family.</returns>
-    private static bool OnlyTheChangePositionsLeaked(OracleRow row, IOracleOutcome ours)
+    private static bool OnlyTheChangePositionsLeaked(
+        OracleRow row,
+        IOracleOutcome ours,
+        bool anchoredAnswerRequired = false
+    )
     {
         // Absent means the question was never asked, which is every non-fuzzy row and every wave
         // recorded before S47. A null ENTRY means it was asked and upstream would not answer.
@@ -8988,11 +9954,19 @@ internal static class ExpectedDivergences
             }
 
             // The STRONG arm. A null here is the WEAK one: upstream refused the anchored question,
-            // so there is nothing to hold this port's positions to.
-            if (
-                leakFree[m] is { } free
-                && !string.Equals(free.Describe(), ourFuzzy.Describe(), StringComparison.Ordinal)
-            )
+            // so there is nothing to hold this port's positions to, and a caller that demands the
+            // strong arm refuses it.
+            if (leakFree[m] is not { } free)
+            {
+                if (anchoredAnswerRequired)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!string.Equals(free.Describe(), ourFuzzy.Describe(), StringComparison.Ordinal))
             {
                 return false;
             }

@@ -62,6 +62,19 @@ public sealed class VerbScopeTests
     [Arguments(@"(?:(?>a(*PRUNE)b)|a)c", "ac", "None")] // gr3: PCRE2 None, before (0,2)
     [Arguments(@"(?:a(*SKIP)b|a)++|a", "aac", "None")] // ps2: PCRE2 None, before (0,1)
     [Arguments(@"(?:(?>a(*PRUNE)b)|a)++c|a", "ac", "None")] // ps3: PCRE2 None, before (0,2)
+    // D31 (2026-09-29): a quantifier that could exit empty does not catch the unwind either. PCRE2
+    // 10.47 with and without NO_START_OPTIMIZE; upstream answers as noted. The last row is D31's
+    // found row with \m dropped, which PCRE2 lacks; with \m the port and upstream answer the same.
+    [Arguments(@"(?>(*SKIP)a)?", "b", "None")] // q1: PCRE2 None, upstream (0,0)
+    [Arguments(@"(?>(*PRUNE)a)?", "b", "None")] // q2: PCRE2 None, upstream (0,0)
+    [Arguments(@"(?>(*SKIP)a)*", "ab", "None")] // q3: PCRE2 None, upstream (0,1)
+    [Arguments(@"(?>(*SKIP)a)*+", "ab", "None")] // q4: PCRE2 None, upstream (0,1)
+    [Arguments(@"(?>(*PRUNE)a)*", "ab", "None")] // q5: PCRE2 None, upstream (0,1)
+    [Arguments(@"(?>(?>(*SKIP)a))?", "b", "None")] // q6: PCRE2 None, upstream (0,0)
+    [Arguments(@"((?>(*SKIP)\$))?", "b", "None")] // q7: PCRE2 None, upstream (0,0)
+    [Arguments(@"(?>(*SKIP)a)?", "ab", "(0,1)")] // q8: PCRE2 (0,1), upstream (0,1)
+    [Arguments(@"(?:(*SKIP)a)?", "b", "None")] // q9: PCRE2 None, upstream None
+    [Arguments(@"(?m)(?> |(?>(*SKIP)\ba|ab)\w(?:\Z|.))*+(?>\B|(?>aa|(*SKIP)a)(?:a*?|\X)(?: ?+|a$))?", "\n", "None")] // q10: PCRE2 None, upstream (0,0)
     public void A_verb_in_an_unfinished_atomic_group_or_possessive_repeat_fails_the_attempt(
         string pattern,
         string subject,

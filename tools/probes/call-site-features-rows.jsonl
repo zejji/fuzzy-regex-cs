@@ -1,0 +1,12 @@
+{"pattern":"(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}","flags":0,"subject":"aab","operation":"search"}
+{"pattern":"(?P<g>a)(?:b(?:(?R)){s<=1}|c(?&g))","flags":0,"subject":"abacb","operation":"search"}
+{"pattern":"(?:(?=(?&g))..){s<=1}(?P<g>ab)?","flags":0,"subject":"xb","operation":"search"}
+{"pattern":"(?:..(?<=(?&g))){s<=1}(?P<g>ab)?","flags":0,"subject":"xb","operation":"search"}
+{"pattern":"bc(?(?<=(?&g))x|y)(?P<g>bc)?","flags":0,"subject":"bcxzzz","operation":"search"}
+{"pattern":"bc(?(?<!(?&g))x|y)(?P<g>bc)?","flags":0,"subject":"bcyzzz","operation":"search"}
+{"pattern":"(?P<g1>(?(?<=(?P>g2))a|(?&g2)))(?:(?P<g2>b)){d<=1}","flags":0,"subject":"aaaababb","operation":"search"}
+{"pattern":"(?P<g1>(?P<g2>(?(?<!(?P>g3))bb|b)b))(?:(?P<g3>b)){e<=1}","flags":0,"subject":"abbba","operation":"search"}
+{"pattern":"(?P<g1>(?(?<=(?P>g2))(?P>g2)|b))(?:(?P<g2>bb)){s<=1}","flags":0,"subject":"aabbaabaa","operation":"search"}
+{"pattern":"(?:(?P<g1>(?P>g2)(?(?<=(?&g2))b|.*))){e<=1}(?P<g2>a)","flags":0,"subject":"ababaaaab","operation":"search"}
+{"pattern":"(?:(?P<g1>(?&g2)b)){d<=1}(?P<g2>(?:(?P<g3>a)){s<=1}(?P>g3))","flags":0,"subject":"ababaaa","operation":"search"}
+{"pattern":"(?:(?P<g1>(?&g2))){e<=1}(?P<g2>(?:(?<=(?P>g3)a)){d<=1}(?:(?P<g3>.*)){s<=1})","flags":0,"subject":"a","operation":"search"}

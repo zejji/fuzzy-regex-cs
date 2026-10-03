@@ -306,6 +306,24 @@ Describe 'New-StatusReport' {
     It 'uses LF endings so regenerating on Linux or macOS does not rewrite every line' {
         $script:Report | Should -Not -Match "`r"
     }
+
+    It 'renders the same board for a Release run, where work-counter tests skip, as for a Debug run' {
+        # CI diffs docs/STATUS.md after a Release ratchet. In Debug the WorkCounter tests pass; in
+        # Release they skip with the Debug-only reason. The board must not depend on configuration.
+        $debug = @(
+            [pscustomobject]@{ Id = 'a'; Class = 'C'; Name = 'N'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Passed'; SkipReason = $null; WaitingOn = $null }
+            [pscustomobject]@{ Id = 'b'; Class = 'C'; Name = 'M'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Passed'; SkipReason = $null; WaitingOn = $null })
+        $release = @(
+            $debug[0]
+            [pscustomobject]@{ Id = 'b'; Class = 'C'; Name = 'M'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Skipped'; SkipReason = 'Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here'; WaitingOn = $null })
+        $fromRelease = New-StatusReport -Results $release -UpstreamCommit 'abc123'
+        $fromRelease | Should -BeExactly (New-StatusReport -Results $debug -UpstreamCommit 'abc123')
+    }
+
+    It 'still reports a test skipped for any other reason as skipped' {
+        $other = @([pscustomobject]@{ Id = 'a'; Class = 'C'; Name = 'N'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Skipped'; SkipReason = 'something else'; WaitingOn = $null })
+        (New-StatusReport -Results $other -UpstreamCommit 'abc123') | Should -Match '\| Gaps \| 1 \| 0 \| 1 \| 0 \|'
+    }
 }
 
 Describe 'Get-SessionTokenUsage' {

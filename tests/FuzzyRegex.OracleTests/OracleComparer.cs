@@ -1,3 +1,6 @@
+using Fuzzy.Text.RegularExpressions.Engine;
+using Fuzzy.Text.RegularExpressions.Parsing;
+
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
 
 /// <summary>Runs one recorded row through this port and diffs the answer against upstream's.</summary>
@@ -214,10 +217,11 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
     /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
-    /// <see cref="RunWithoutTheLookaroundInsertion"/> and <see cref="RunWithTheUpstreamMinimumOrder"/> and by
-    /// nothing else; the wave always passes
-    /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
-    /// caller shares is mutated.
+    /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
+    /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
+    /// <see cref="RunWithTheDiscardedTotals"/> and <see cref="RunWithTheUpstreamTrueBranchSkip"/> and by
+    /// nothing else; the wave always passes <see langword="null"/>. It runs on a pattern this method
+    /// compiled and drops, so nothing the caller shares is mutated.
     /// </param>
     /// <param name="upstreamReverseGrapheme">
     /// Compile a backwards <c>\X</c> in upstream's order. Unlike <paramref name="ablate"/> this acts
@@ -245,6 +249,22 @@ internal static class OracleComparer
     /// 49). Acts on the compile, like <paramref name="upstreamReverseGrapheme"/>. Used by
     /// <see cref="RunWithTheUpstreamFoldedRuns"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// Decide whether the pattern as a whole is a fuzzy section before optimising, as upstream does
+    /// (known defect D37, ledger entry 55). Acts on the compile, like
+    /// <paramref name="upstreamReverseGrapheme"/>. Used by
+    /// <see cref="RunWithTheUpstreamWholePatternCall"/> and by nothing else.
+    /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// Give every group call the direction and fuzziness upstream gives it (D40, D42, D43). Acts on
+    /// the compile. Used by <see cref="RunWithTheUpstreamCallFeatures"/> and by nothing else.
+    /// </param>
+    /// <param name="upstreamCallCaptures">
+    /// Also switch the D51 fix off (ledger entry 63) for an ablation that passes only
+    /// <paramref name="ablate"/>, as every other named ablation does; see
+    /// <see cref="StackedCallCaptureAnswer"/>. Used by <see cref="RunWithTheUpstreamSkipTiming"/>,
+    /// <see cref="RunWithTheUpstreamVerbScope"/> and <see cref="RunWithTheSecondPassAsBeforeD11"/>.
+    /// </param>
     /// <param name="composeWithD11">
     /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
     /// composed runs themselves pass <see langword="false"/>.
@@ -260,6 +280,9 @@ internal static class OracleComparer
         bool keepEmptyIterationRule = false,
         bool keepMinimumOrderFix = false,
         bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false,
+        bool upstreamCallCaptures = false,
         bool composeWithD11 = true
     )
     {
@@ -295,7 +318,9 @@ internal static class OracleComparer
                 // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion,
                 upstreamReverseGrapheme: upstreamReverseGrapheme,
-                upstreamFoldedRuns: upstreamFoldedRuns
+                upstreamFoldedRuns: upstreamFoldedRuns,
+                upstreamWholePatternCall: upstreamWholePatternCall,
+                upstreamCallFeatures: upstreamCallFeatures
             );
         }
         catch (NotImplementedException)
@@ -332,6 +357,23 @@ internal static class OracleComparer
             compiled.PatternObject.CheckMinimumBeforeTrailingInsertions = !keepMinimumOrderFix;
         }
 
+        // Every named ablation also has the D51 fix off (ledger entry 63): upstream keeps a call's
+        // captures on the list on every row, so with the fix on, taking another fix away cannot
+        // bring back upstream's answer on a row with a call. It changes nothing on a row without
+        // one. D51's own entry sits first and its ablation is this alone, so it claims only the
+        // rows D51 alone explains. See `group-call-discards-its-captures-on-return`. Keyed on the
+        // named ablations' switches, not on `ablate`, which the pattern-reuse test also uses to
+        // dirty a pattern; the named ablations that pass `ablate` alone (skip timing, verb scope
+        // and D11's second pass) ask for it with `upstreamCallCaptures`.
+        bool callCapturesStacked =
+            withoutTheFuzzySearchFixes
+            || upstreamReverseGrapheme
+            || upstreamFoldedRuns
+            || upstreamWholePatternCall
+            || upstreamCallFeatures
+            || upstreamCallCaptures;
+        compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
+
         ablate?.Invoke(compiled);
 
         // NOT A PORT BEHAVIOUR, D11: upstream has none of this port's fixes, so on a partial row an
@@ -352,6 +394,9 @@ internal static class OracleComparer
                 keepEmptyIterationRule,
                 keepMinimumOrderFix,
                 upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamCallCaptures,
                 composeWithD11: false
             );
 
@@ -365,6 +410,7 @@ internal static class OracleComparer
                 timeout,
                 lazy,
                 static c => c.PatternObject.SecondPassAsBeforeD11 = true,
+                upstreamCallCaptures: true,
                 composeWithD11: false
             );
 
@@ -387,126 +433,216 @@ internal static class OracleComparer
                 keepEmptyIterationRule,
                 keepMinimumOrderFix,
                 upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamCallCaptures,
                 composeWithD11: false
             );
 
             return both is not null && Compare(row, both) == OracleVerdict.Agree ? both : alone;
         }
 
-        try
+        IOracleOutcome withoutTheCallCaptureFix = Ask();
+        if (!callCapturesStacked || !compiled.PatternObject.HasGroupCalls)
         {
-            // Upstream's (pos, endpos) as this surface's (beginning, length). Both absent means the
-            // whole subject, which this surface spells as a length of -1.
-            //
-            // Clamped at zero, and that is not cosmetic: -1 is this surface's "no limit" sentinel,
-            // so an endpos below pos - which the recorder records as it was asked, and which
-            // upstream answers by matching nothing - would otherwise become a search over the whole
-            // rest of the subject and be filed as a divergence in this port. Raised by the S31
-            // second blind pass, with `{"pattern": "c", "subject": "abc", "pos": 2, "endpos": 1}`:
-            // upstream answers None and this port answered (2, 3).
-            //
-            // Each end is read on its own, so a row carrying only one of the pair still narrows the
-            // slice at that end. The same pass found `endpos` without `pos` being dropped entirely.
-            //
-            // Hoisted above the operation switch by S53b, which gave `sub` and `subf` the same pair:
-            // the recorder now draws `pos`/`endpos` on a substitution row too, and one reading of
-            // the slice serves every operation that takes one.
-            int beginning = row.Pos ?? 0;
-            int length =
-                row.Pos is null && row.EndPos is null
-                    ? -1
-                    : Math.Max(0, (row.EndPos ?? row.Subject.Length) - beginning);
+            return withoutTheCallCaptureFix;
+        }
 
-            if (row.Operation is "sub" or "subf")
+        // The same ablation with the D51 fix back on. Switching the fix off may only put the calls'
+        // captures back on the lists; if it changes anything else, the fix itself is misbehaving on
+        // this row, and the ablation must not be allowed to reproduce upstream by hiding that.
+        compiled.PatternObject.KeepCallCaptures = false;
+        IOracleOutcome withTheCallCaptureFix = Ask();
+
+        // And on a partial result, the same answer computed a second way (D62): the fix-on answer
+        // must be the one the frame-by-frame restore gives, or a restore from the wrong frame
+        // would be hidden too.
+        IOracleOutcome? byFrames = null;
+        if (ExpectedDivergences.IsPartial(withTheCallCaptureFix))
+        {
+            compiled.PatternObject.PartialRestoresFrameByFrame = true;
+            byFrames = Ask();
+            compiled.PatternObject.PartialRestoresFrameByFrame = false;
+        }
+
+        return StackedCallCaptureAnswer(withTheCallCaptureFix, withoutTheCallCaptureFix, byFrames);
+
+        IOracleOutcome Ask()
+        {
+            try
             {
-                string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
-                    ? compiled.Replace(
-                        row.Subject,
-                        row.Template!,
-                        OurLimit(row.Count),
-                        out int replacements,
-                        beginning,
-                        length,
-                        timeout
-                    )
-                    : compiled.ReplaceFormat(
-                        row.Subject,
-                        row.Template!,
-                        OurLimit(row.Count),
-                        out replacements,
-                        beginning,
-                        length,
-                        timeout
+                // Upstream's (pos, endpos) as this surface's (beginning, length). Both absent means the
+                // whole subject, which this surface spells as a length of -1.
+                //
+                // Clamped at zero, and that is not cosmetic: -1 is this surface's "no limit" sentinel,
+                // so an endpos below pos - which the recorder records as it was asked, and which
+                // upstream answers by matching nothing - would otherwise become a search over the whole
+                // rest of the subject and be filed as a divergence in this port. Raised by the S31
+                // second blind pass, with `{"pattern": "c", "subject": "abc", "pos": 2, "endpos": 1}`:
+                // upstream answers None and this port answered (2, 3).
+                //
+                // Each end is read on its own, so a row carrying only one of the pair still narrows the
+                // slice at that end. The same pass found `endpos` without `pos` being dropped entirely.
+                //
+                // Hoisted above the operation switch by S53b, which gave `sub` and `subf` the same pair:
+                // the recorder now draws `pos`/`endpos` on a substitution row too, and one reading of
+                // the slice serves every operation that takes one.
+                int beginning = row.Pos ?? 0;
+                int length =
+                    row.Pos is null && row.EndPos is null
+                        ? -1
+                        : Math.Max(0, (row.EndPos ?? row.Subject.Length) - beginning);
+
+                if (row.Operation is "sub" or "subf")
+                {
+                    string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
+                        ? compiled.Replace(
+                            row.Subject,
+                            row.Template!,
+                            OurLimit(row.Count),
+                            out int replacements,
+                            beginning,
+                            length,
+                            timeout
+                        )
+                        : compiled.ReplaceFormat(
+                            row.Subject,
+                            row.Template!,
+                            OurLimit(row.Count),
+                            out replacements,
+                            beginning,
+                            length,
+                            timeout
+                        );
+
+                    return new SubOutcome(replaced, replacements);
+                }
+
+                if (row.Operation is "finditer" or "finditer-overlapped")
+                {
+                    bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
+
+                    // The lazy walk is the SAME QUESTION asked through the other entry point (S53b).
+                    // Nothing here compares them - that is
+                    // `The_lazy_walks_answer_exactly_what_the_eager_ones_do` in OracleWaveTests, which
+                    // runs each row both ways - but routing both through this one method is what makes
+                    // the two answers comparable at all.
+                    // The slice and `partial` since 2026-10-01, when the recorder learned to ask upstream's
+                    // `finditer` both; a row without them asks the whole subject, as before.
+                    IEnumerable<Match> found = lazy
+                        ? compiled.EnumerateMatches(row.Subject, beginning, length, overlapped, row.Partial, timeout)
+                        : compiled.Matches(row.Subject, beginning, length, overlapped, row.Partial, timeout);
+
+                    return new MatchesOutcome([
+                        .. found.Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
+                    ]);
+                }
+
+                if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
+                {
+                    return new SplitOutcome(
+                        lazy
+                            ? [.. compiled.EnumerateSplits(row.Subject, OurLimit(row.Count), timeout)]
+                            : compiled.Split(row.Subject, OurLimit(row.Count), timeout)
                     );
+                }
 
-                return new SubOutcome(replaced, replacements);
+                Match match = row.Operation switch
+                {
+                    "search" => compiled.Match(row.Subject, beginning, length, row.Partial, timeout),
+                    "match" => compiled.MatchAtStart(row.Subject, beginning, length, row.Partial, timeout),
+                    // The operation is validated when the row is read, so there is no other case.
+                    _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial, timeout),
+                };
+
+                return Describe(match, PositionsUnavailableUpstream(compiled));
             }
-
-            if (row.Operation is "finditer" or "finditer-overlapped")
+            catch (NotImplementedException)
             {
-                bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
-
-                // The lazy walk is the SAME QUESTION asked through the other entry point (S53b).
-                // Nothing here compares them - that is
-                // `The_lazy_walks_answer_exactly_what_the_eager_ones_do` in OracleWaveTests, which
-                // runs each row both ways - but routing both through this one method is what makes
-                // the two answers comparable at all.
-                IEnumerable<Match> found = lazy
-                    ? compiled.EnumerateMatches(row.Subject, overlapped: overlapped, timeout: timeout)
-                    : compiled.Matches(row.Subject, overlapped: overlapped, timeout: timeout);
-
-                return new MatchesOutcome([
-                    .. found.Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
-                ]);
+                // Not `null`. The pattern compiled, so this port has already answered whether the
+                // input is acceptable, and only the match itself is unknown - see CompiledButUnmatched.
+                return new CompiledButUnmatched();
             }
-
-            if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
+            catch (Exception e)
             {
-                return new SplitOutcome(
-                    lazy
-                        ? [.. compiled.EnumerateSplits(row.Subject, OurLimit(row.Count), timeout)]
-                        : compiled.Split(row.Subject, OurLimit(row.Count), timeout)
-                );
+                return ErrorOutcome.From(e, whileMatching: true);
             }
-
-            Match match = row.Operation switch
-            {
-                "search" => compiled.Match(row.Subject, beginning, length, row.Partial, timeout),
-                "match" => compiled.MatchAtStart(row.Subject, beginning, length, row.Partial, timeout),
-                // The operation is validated when the row is read, so there is no other case.
-                _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial, timeout),
-            };
-
-            return Describe(match, PositionsUnavailableUpstream(compiled));
-        }
-        catch (NotImplementedException)
-        {
-            // Not `null`. The pattern compiled, so this port has already answered whether the
-            // input is acceptable, and only the match itself is unknown - see CompiledButUnmatched.
-            return new CompiledButUnmatched();
-        }
-        catch (Exception e)
-        {
-            return ErrorOutcome.From(e, whileMatching: true);
         }
     }
 
-    /// <summary>Puts a row's question to this port with the issue 563/564 anchor pin switched off.</summary>
+    /// <summary>
+    /// What a named ablation that also has the D51 fix off (ledger entry 63) answers on a row with a
+    /// group call: its answer with the fix off when that differs from its answer with the fix on
+    /// only by captures missing from the lists, and otherwise its answer with the fix ON.
+    /// </summary>
+    /// <remarks>
+    /// Every entry keyed on such an ablation accepts a row when the ablated answer reproduces
+    /// upstream's. With the fix off unconditionally, a call row whose live answer carries a bug in
+    /// the discard itself - one that changes a match, not just a list - would reproduce upstream
+    /// under the ablation and be claimed. Falling back to the fix-on answer keeps that bug visible.
+    /// Found by the blind review of <c>maint/d51-call-captures</c>, 2026-09-30.
+    /// <para>
+    /// On a partial result the shape clause sets group values aside, because D62 moves them, so
+    /// the fix-on answer must also be the frame-by-frame restore's (<paramref name="byFrames"/>):
+    /// a restore from the innermost open call instead of the outermost changes only values there.
+    /// Found by the blind review of D62, 2026-09-30.
+    /// </para>
+    /// </remarks>
+    /// <param name="withTheFix">The ablation's answer with the D51 fix on.</param>
+    /// <param name="withoutTheFix">The same ablation's answer with it off.</param>
+    /// <param name="byFrames">
+    /// On a partial result, the fix-on answer with <c>PatternObject.PartialRestoresFrameByFrame</c>
+    /// set; otherwise <see langword="null"/>.
+    /// </param>
+    /// <returns>The answer the ablation reports.</returns>
+    internal static IOracleOutcome StackedCallCaptureAnswer(
+        IOracleOutcome withTheFix,
+        IOracleOutcome withoutTheFix,
+        IOracleOutcome? byFrames
+    ) =>
+        ExpectedDivergences.PartialIsTheFrameRestore(withTheFix, byFrames)
+        && (
+            string.Equals(withTheFix.Describe(), withoutTheFix.Describe(), StringComparison.Ordinal)
+            || ExpectedDivergences.OnlyCallCapturesAreMissing(withTheFix, withoutTheFix)
+        )
+            ? withoutTheFix
+            : withTheFix;
+
+    /// <summary>
+    /// Puts a row's question to this port with a partial result's groups restored by walking every
+    /// open call's frame, innermost first (<c>PatternObject.PartialRestoresFrameByFrame</c>), and
+    /// nothing else changed: a second computation of D62's answer, which the D51 entry compares
+    /// this port's partial answers against.
+    /// </summary>
+    /// <param name="row">The row to run.</param>
+    /// <returns>The answer, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheFrameByFrameRestore(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true
+        );
+    }
+
+    /// <summary>Puts a row's question to this port with rule H' (D61) switched off.</summary>
     /// <remarks>
     /// <para>
-    /// S57c fixed upstream issues 563 and 564: where a position assertion pins a fuzzy match to the
-    /// search anchor, this port permits an insertion there and upstream does not
-    /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>). The fix reads one field,
-    /// <c>PatternObject.AnchorGuards</c>, which the optimiser fills in; emptying it on a compiled
-    /// pattern leaves an engine that applies upstream's rule exactly, because
-    /// <c>Matcher.AnchorIsPinned</c> then returns false at every site without looking at anything
-    /// else.
+    /// Rule H' lifts upstream's ban on a fuzzy insertion at the search anchor
+    /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>) where the banned search finds no match
+    /// starting inside the attempt at the anchor. Clearing <c>PatternObject.LiftsAnchorBan</c> and
+    /// <c>LiftsAnchorBanWhenPartial</c> makes every plain and ENHANCEMATCH search keep the ban, and
+    /// emptying <c>PatternObject.AnchorGuards</c> removes the ledger 19/20 exemption BESTMATCH keeps
+    /// (D61's scope cut), which together are upstream's rule exactly.
     /// </para>
     /// <para>
     /// That is what makes the <c>fuzzy-insertion-at-a-pinned-anchor</c> entry a classification
     /// rather than a silencer: a row belongs to the family when taking this one piece away
     /// reproduces upstream's recorded answer exactly. A row this port gets wrong for any other
-    /// reason still diverges without the pin, and is reported.
+    /// reason still diverges without it, and is reported.
     /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>
@@ -520,7 +656,12 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             withoutTheFuzzySearchFixes: true,
-            ablate: static compiled => compiled.PatternObject.AnchorGuards = null
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.LiftsAnchorBan = false;
+                compiled.PatternObject.LiftsAnchorBanWhenPartial = false;
+                compiled.PatternObject.AnchorGuards = null;
+            }
         );
     }
 
@@ -649,7 +790,7 @@ internal static class OracleComparer
     /// <para>
     /// S46 made END_FUZZY's backtrack arm count a section's errors once when it asks whether a
     /// trailing insertion fits (<c>_regex.c:15516</c>, ledger entry 12). Upstream counts them twice,
-    /// which only bites under BESTMATCH, where the budget is the best match's own cost. Setting
+    /// which only bites under BESTMATCH and ENHANCEMATCH, where the budget is the match's own cost. Setting
     /// <c>PatternObject.DoubleCountTrailingInsertions</c> restores that.
     /// </para>
     /// <para>
@@ -801,6 +942,66 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with a group call's captures left on the list when the
+    /// call returns, as upstream leaves them (the D51 fix switched off), and nothing else changed.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>GROUP_CALL</c> saves only each group's <c>current</c> (<c>push_groups</c>,
+    /// <c>upstream/src/_regex.c:2490</c>, called at :13405) and <c>GROUP_RETURN</c> restores only
+    /// that (:13516), so <c>(?&lt;c&gt;a)(?&amp;c)b</c> over 'aab' lists c as ['a', 'a'].
+    /// <c>PatternObject.KeepCallCaptures</c> leaves the count where the callee left it, which is
+    /// that line exactly; the spans the port also saves are written back unchanged. No fuzzy fix is
+    /// switched off, so the <c>group-call-discards-its-captures-on-return</c> entry, which keys on
+    /// this and sits first, claims only the rows D51 alone explains.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallCaptures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepCallCaptures = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a group call inside a lookaround no longer counted as
+    /// a group, as upstream counts it (the D10 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream saves the captures around a lookaround only when its body holds a capture group, so
+    /// a call's capture outlives a body that is thrown away: <c>(a)(?:(?!.(?1))|.)+?b</c> over
+    /// 'aaab' leaves group 1 with [0,1][2,1]. Clearing the saved-captures flag of every lookaround in
+    /// <c>PatternObject.LookaroundsSavingOnlyForCalls</c> restores that, which is the whole of the
+    /// fix. The <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamLookaroundCallCaptures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled =>
+            {
+                foreach (Node lookaround in compiled.PatternObject.LookaroundsSavingOnlyForCalls ?? [])
+                {
+                    lookaround.Status &= ~NodeStatus.HasGroups;
+                }
+            },
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with a section's minimum checked before its trailing
     /// insertions, as upstream checks it (ledger entry 51 switched off).
     /// </summary>
@@ -878,7 +1079,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true
+            ablate: static compiled => compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true,
+            upstreamCallCaptures: true
         );
     }
 
@@ -909,7 +1111,8 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
                 compiled.PatternObject.SkipMovesTheSliceWhenItRuns = withUpstreamSkipTiming;
-            }
+            },
+            upstreamCallCaptures: true
         );
     }
 
@@ -933,6 +1136,132 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             upstreamReverseGrapheme: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a call to the whole pattern compiled as upstream
+    /// compiles it where the pattern is one fuzzy section: with no <c>CALL_REF</c> around the
+    /// pattern (the D37 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream decides "the pattern is a fuzzy section" before optimising, when
+    /// <c>(?:z(?R)|){e&lt;=1}</c> is still a one-item sequence, and the group-call check decides it
+    /// after, so the call gets neither a copy of the pattern nor a return. <c>upstreamWholePatternCall</c>
+    /// restores that at compile time, which is the whole of the fix. Ledger entry 51's minimum order
+    /// stays on, as it does for entries 50 and 54, so that this entry, which sits before entry 51's,
+    /// does not claim a row entry 51 alone explains. Such a match ends with the call still open, so
+    /// <c>PatternObject.MatchMayEndInsideTheWholePatternCall</c> keeps the Debug build's closing assert from
+    /// failing the ablation itself. The <c>fuzzy-whole-pattern-call-returns-to-its-caller</c> entry
+    /// keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's compile, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamWholePatternCall(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            ablate: static compiled => compiled.PatternObject.MatchMayEndInsideTheWholePatternCall = true,
+            withoutTheFuzzySearchFixes: true,
+            lazy: false,
+            keepMinimumOrderFix: true,
+            upstreamWholePatternCall: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a fuzzy section a verb cut through left open, as
+    /// upstream leaves it (the D44 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// A <c>(*PRUNE)</c> or <c>(*SKIP)</c> backtracked onto cuts straight to the innermost negative
+    /// lookaround, condition or attempt, past the <c>FUZZY</c> entry of any section opened since,
+    /// and upstream never puts <c>fuzzy_node</c> back, so that section's limits govern what follows.
+    /// <c>PatternObject.KeepSectionOpenAfterAVerb</c> restores that. Ledger entry 51's minimum
+    /// order stays on, as for entry 55. The <c>fuzzy-section-cut-by-a-verb-is-closed</c> entry keys
+    /// on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheSectionLeftOpenByAVerb(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepSectionOpenAfterAVerb = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the running error total keeping the errors of a
+    /// fuzzy section that was thrown away, as upstream's does (the D45 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream writes <c>total_errors</c> at every <c>END_FUZZY</c> and never restores it (ledger
+    /// entry 32), so when an atomic group, lookaround, condition or verb throws a body away, the
+    /// counts go back and the total does not, and <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> rank by
+    /// the total. <c>PatternObject.KeepDiscardedTotals</c> restores that. The
+    /// <c>fuzzy-total-drops-a-discarded-section</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheDiscardedTotals(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.KeepDiscardedTotals = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with each negative condition's yes branch skipped past
+    /// every branch at its start, as upstream's optimiser skips it (the D55 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>skip_one_way_branches</c> tests the branch's own <c>true_node</c>, which no
+    /// BRANCH sets, where it means <c>next_2</c> (<c>_regex.c:23203-23208</c>), so a CONDITIONAL's
+    /// <c>true_node</c> is moved along the first exit of every BRANCH it meets, 2-way or not, until
+    /// it reaches a node that is not one. No later pass reads <c>TrueNode</c> (the matcher is its
+    /// only reader, <c>Matcher.cs</c> at <c>condNode.TrueNode</c>), so doing the same walk on the
+    /// finished graph gives upstream's graph. The <c>negative-condition-keeps-its-alternatives</c>
+    /// entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamTrueBranchSkip(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                foreach (Node node in compiled.PatternObject.NodeList)
+                {
+                    while (node.TrueNode is { Op: Opcode.Branch } branch)
+                    {
+                        node.TrueNode = branch.Next1.Node;
+                    }
+                }
+            },
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
         );
     }
 
@@ -962,6 +1291,35 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with every group call given the direction and fuzziness
+    /// upstream gives it (the D40, D42 and D43 fixes switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream resolves each call once, for where it is written, and compiles a called group's
+    /// copy with those references; it registers a lookaround's calls with the caller's fuzziness
+    /// and a conditional test's calls with the caller's direction, though it compiles both bodies
+    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. The
+    /// <c>group-call-runs-with-its-call-sites-features</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's call features, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallFeatures(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            // D49: upstream's minimum width, which counts the called copies (ledger entry 60).
+            ablate: static compiled => compiled.PatternObject.MinWidth = compiled.PatternObject.UpstreamMinWidth,
+            keepMinimumOrderFix: true,
+            upstreamCallFeatures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with the second pass of a partial call as it was before
     /// D11 and as upstream's is: the word, line and string tests read against the held text, and a
     /// search making no attempt from inside the text to come.
@@ -983,6 +1341,7 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true,
+            upstreamCallCaptures: true,
             composeWithD11: false
         );
     }

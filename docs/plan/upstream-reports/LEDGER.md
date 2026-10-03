@@ -648,6 +648,32 @@ classified by `ExpectedDivergences.bestmatch-walk-truncated-by-a-skip`. Re-runna
 `python tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py` and
 `pwsh -File tools/probes/port-bestmatch-walk-cases.ps1`.
 
+### Two more rows from the complete matrix, 2026-09-30 (known defects D56 and D57), no new door
+
+Both are this entry. The trace is the same line each time: `RE_OP_SKIP` assigns `slice_start`
+(`:14555`) and nothing restores it. The rows are shorter than any above, so they belong at the top
+of the report when it is filed. Measured 2026-10-01 on regex 2026.9.10:
+
+```python
+>>> regex.match(r'(?b)x(*SKIP)(?:ba+){e<=1}', 'xbaabbbx')     # sixth door, :17625
+<regex.Match object; span=(0, 5), match='xbaab', fuzzy_counts=(1, 0, 0)>
+>>> regex.match(r'(?b)x(*PRUNE)(?:ba+){e<=1}', 'xbaabbbx')    # no bound moved
+<regex.Match object; span=(0, 4), match='xbaa'>
+>>> regex.search('aa(*SKIP)x', 'axaa', partial=True)          # fifth door, :18159-18170
+<regex.Match object; span=(4, 4), match='', partial=True>
+>>> regex.search('aa(*PRUNE)x', 'axaa', partial=True)
+<regex.Match object; span=(2, 4), match='aa', partial=True>
+```
+
+In the first, the candidate the `(?b)` walk loses starts at the same position as the one it found,
+so no later start is involved. Without `(?b)` both verbs give (0, 5). In the second, the complete
+pass runs the verb at 4, and the partial pass can then start no earlier. The rows are complete-matrix
+rows 5849, 8589 and 8595 (first) and 12240 (second). They are classified by the row lists of
+`bestmatch-walk-truncated-by-a-skip` and `partial-retry-carried-slice-forward`, and pinned by
+`FuzzyBestMatchTests.Bestmatch_finds_the_exact_fit_at_the_start_a_skip_already_passed` and
+`PartialMatchingTests.A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one`.
+The ledger numbers 63 and 64, reserved for them, are not used.
+
 ### What S52's third sitting added, 2026-09-15, and the one line to put at the top of this report
 
 Six more rows, no new door, and **one fact that says the whole thing more plainly than any of the
@@ -1965,6 +1991,26 @@ Restoring the doubled term in this port (`PatternObject.DoubleCountTrailingInser
 oracle-only switch) gives this port upstream's None, and it moves the other three rows S89 added to
 `bestmatch-loses-a-candidate` the same way.
 
+**ENHANCEMATCH ADDENDUM (D46, 2026-09-30): the same guard bites without `(?b)`.** The enhance loop
+sets `max_errors` to the total minus one after each run (`upstream/src/_regex.c:17978`), so
+END_FUZZY's trailing-insertion guard (`:15516`) meets a bounded budget and counts the section's
+errors twice, exactly as under BESTMATCH. Measured on `regex` 2026.9.10, 2026-09-30:
+
+```python
+>>> regex.fullmatch(r'(?e)(?:ob+?a){e<=3}', 'bab').fuzzy_counts
+(3, 0, 0)
+>>> regex.fullmatch(r'(?e)(?:ob+?a){e<=2}', 'bab').fuzzy_counts
+(0, 1, 1)
+>>> regex.fullmatch(r'(?e)(?r)(?:ob+?a){e<=3}', 'aob').fuzzy_counts
+(3, 0, 0)
+```
+
+`(?e)` is a search for fewer errors, yet a section allowed three errors answers a three-error fit
+while the same pattern allowed two answers a two-error one. This port answers (0, 1, 1) to all three
+rows; setting `PatternObject.DoubleCountTrailingInsertions` gives upstream's (3, 0, 0). Pinned by
+`FuzzyBestMatchTests.Enhancematch_keeps_the_two_error_fit_upstream_trades_for_three_substitutions`
+and the oracle entry `enhancematch-trailing-insertion-double-count`.
+
 **THE HEADLINE SAID "TWO TRAILING INSERTIONS" UNTIL 2026-09-15 AND THAT IS NOT THE BOUNDARY (S52
 sitting 16).** One is enough when the fit spends another error as well, and the five sweep rows this
 entry gained that day include none that needs two. Measured on `regex` 2026.9.10, blocks 6 and 7 of
@@ -2521,22 +2567,53 @@ through when the attempt has looked further into the text since the outer call o
 call's first try failed further on, and the inner call is a genuinely different path. With nothing
 new reached it is failed as before.
 
-**That is still too strict: a new capture can make the inner call different (open, 2026-09-28).**
+**That was still too strict: a new capture can make the inner call different (fixed 2026-09-28).**
 A blind review found `(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))` over `'x'`: upstream answers (0, 1),
 the port None, PCRE2 "nested recursion at the same subject position". Two calls of the whole
 pattern are open at 0 and nothing new is reached, but the group set between them changes which
 branch the conditional takes, so the inner call is not a repeat and the path is finite. The same
 holds for backreferences: `(?:\1x|\2()(?R)|()(?R))` and its named form, (0, 1) upstream, None here.
-Red and `[Explicit]` as
-`OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`.
+Pinned as `GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through`,
+all three rows (0, 1) for search and fullmatch.
 
-The planned fix makes the key `(call, position, reach, captures read)`: the current spans of the
-groups a conditional or backreference reads (`GroupInfo.Referenced`), taken only when the pattern
-has such groups, saved on the backtracking stack at `GROUP_RETURN` so a re-opened call keeps its
-own. It still terminates: each such group's span is one of at most `(TextLength + 1)^2 + 1` values,
-so the entries per position stay finite. A capture-change COUNTER would be cheaper but does not
-terminate in principle - a group that alternates between two spans counts up for ever - so it is
-not the fix.
+The fix makes the key `(call, position, reach, captures)`, where the captures
+(`MatchState.CallCaptures`) are the current spans of the groups some conditional or backreference
+reads (`GroupInfo.Referenced`), and only those. They are taken only when the pattern has a call and
+such a group, so other patterns pay nothing. They go on the backtracking stack at `GROUP_RETURN` so
+a re-opened call keeps its own. It still terminates: with n the text length and r the groups read,
+each read span is one of at most `(n + 1)^2 + 1` values, so at most
+`(n + 1) * ((n + 1)^2 + 1)^r` calls of one group are open at one position.
+
+Keying on EVERY group, the first cut, was a regression the second blind review found:
+`(?:()|()|()|()|()|()|()|()|())(?R)|\1x` let the recursion open a call for each order of setting
+the empty groups, about k! paths - over 5 s at k = 9, 0.6-3.3 s at k = 8, against 0 ms without
+captures in the key (upstream: MemoryError in 0.8 s). Only `\1` is read, so only its span belongs
+in the key, and the rows now answer inside a 100 ms budget
+(`GroupCallTests.A_group_nothing_reads_is_left_out_of_the_call_guard_key`). A capture-change COUNTER would be cheaper but
+does not terminate in principle - a group that alternates between two spans counts up for ever -
+so it is not the fix.
+
+**The key is what the callee reads, not the spans (2026-09-29, D3).** Keying on spans walked a new
+call chain for every position at which an empty group had been set: `(?:()|a)(?R)|(?(1)x)` over
+`a...ay` made 2^n calls. A conditional reads only whether its group is set, and a backreference only
+the text it holds, so the key now holds a set bit for a group only conditionals read and an id of
+the text for a group a backreference reads (`CallCaptures`, `CaptureTextIds`,
+`docs/plan/2026-09-28-capture-dependent-recursion-design.md` section 4d). Engine survey (section 3):
+on the three rows above upstream and PCRE2's JIT answer (0, 1); PCRE2's interpreter and Perl 5.42
+refuse every same-position recursion with an error ("nested recursion at the same subject
+position", "Infinite recursion"); no engine answers None. The same key fixed D5,
+`.*z|\1b|(?(1)(?=(?<g>aa))|(?=(?<g>a)))(?R)` over `aab`: (0, 3) as upstream, where the capture-free
+key answered (1, 3). The failed-call memo keys the same read state, the reach interval, and the
+open calls the guard could refuse against as a set, filtered by reach and by which read groups are
+set (the design's addendum 1); keying the ordered chain made every order of setting k empty groups
+its own key. A capture group inside a lookaround no longer turns the memo off, since only a call
+there leaks a capture-list entry; that keeps `(?:(?=(a*))|a)(?R)|\1x`, where group 1 has a new text
+at every position, polynomial. Pinned in `GroupCallTests.A_call_guard_keyed_on_what_is_read_stays_polynomial`.
+
+Still open: D4. When the attempt has reached the whole text before the first call, as in
+`.*z|(?:|(?R)a)` fullmatch `aa`, no later call can show growth and the finite left recursion is
+refused again (upstream (0, 2), the port None; `OpenDefectTests`). PCRE2's `last_used_ptr` rule
+has the same gap but raises an error. It needs a change to the reach rule, not the key.
 
 In the port the entry is now `(key, reach)`, where the reach is the width of text the attempt has
 touched, measured at both ends so a reversed pattern (where it grows leftwards) works the same.
@@ -3175,6 +3252,38 @@ position - that is what `(?b)` is for - but it cannot make a position stop match
 **What the test asserts:** monotonicity - the `<=2` result contains everything the `<=1` result
 found - rather than an expected span list. That is true whatever the right answer set turns out to
 be, so it does not commit S50 to spans this slice has no authority to fix.
+
+### Addendum to 19 and 20, 2026-09-30: rule H' replaces the fix (known defect D61) - DRAFT - NOT FILED
+
+**Status:** not filed; the S57c fix above is replaced on `maint/d61-anchor-insertion` by rule H'
+(DECISIONS 2026-09-30). The S57c exemption lifted the ban where an assertion at the head of the
+pattern held at the anchor and failed one character on. It was unsound: it glued a separator.
+
+```python
+>>> [m.span() for m in regex.finditer(r'\b(?:dog){e<=2}', 'dog  dog')]
+[(0, 3), (5, 8)]            # upstream, and the right answer; S57c gave (3, 8) with two insertions
+>>> regex.search(r'(?:^a){i<=1}', 'xa')
+None                        # the same assertion inside the section, which S57c did not cover
+```
+
+Measured 2026-09-30 on regex 2026.9.10. Two generalisations (an assertion on the current path, then
+an assertion that dominates the item) were refuted by review with witnesses such as
+`(?:\M|)(?:dog){e<=1}` finditer over 'dog dog', `(?:(?!x)stone|abc){e<=2}` over 'stone xstone' and
+`(?:\Ma|a){i<=2}` over 'a-xa.'.
+
+**What a report would ask for.** At anchor A, run the banned search to get u. If u starts at A,
+return it. Otherwise run the attempt at A without the ban to get c, and return c if it exists and u
+is None or starts at or after c's end. Do this once per pass, so under partial matching a full c
+beats a later partial u. The answer is always u or c. The ban exists so a match never swallows text
+where a later match could start, and u is that later start. Upstream already does this when the
+search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0, 2)). The port applies it to
+plain and ENHANCEMATCH searches. BESTMATCH keeps the S57c exemption for now: its candidate walk
+searches again from each candidate's own start (`init_match`, `:3410`), which is entry 20's
+mechanism, and what the rule means inside that walk is not yet researched.
+
+**Known effect, not a defect.** An extra match can move the next finditer anchor, and so a later
+match:
+`(?:\ma){i<=2}` over 'ba  aba' is `[(2, 5)]` upstream and `[(0, 2), (3, 5)]` with H'.
 
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
@@ -3985,6 +4094,16 @@ equal-cost tie in `Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_
 to the earlier span, as the owner's ranking rule says it should. Row 3752 itself still differs
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
+
+**Known defect D59 (complete matrix, 2026-09-30) is this entry under ENHANCEMATCH, traced
+2026-10-01.** `(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' is (1, 6) with two deletions
+upstream and (1, 5) exact here. A `fprintf` in `do_enhanced_fuzzy_match` shows the improvement
+pass (slice 1 to 6, `max_errors` 1) returning (1, 5) with `total_errors` 2: a second iteration went
+over budget at END_FUZZY (`:12484-12486`) and left its total. Complete-matrix rows 7619 and 11464
+trace the same. Added to the draft as an addendum; classified by
+`ExpectedDivergences.enhancematch-stops-on-a-stale-total`, pinned by
+`FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat`. Ledger number 65,
+reserved for it, is not used.
 
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
@@ -5365,3 +5484,383 @@ So at the start of an expanding group character the frame tries the literal's or
 substitution, the insertion, the whole deletion, then upstream's folded substitution and deletion
 (`Matcher.GroupCharFirst`). Pinned by the backreference tests in
 `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.
+
+## 54. A group call inside a lookaround leaves a capture behind when the lookaround's body is thrown away - FIXED HERE (2026-09-29)
+
+**Status:** not filed, per the owner's rule. Known defect D10. Draft report:
+`entry-54-lookaround-call-capture.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-29 (expected = this port's answer, argued
+below):
+
+```
+search(r'(a)(?:(?!.(?1))|.)+?b', 'aaab').spans(1)          -> [(0, 1), (2, 3)]           expected [(0, 1)]
+search(r'(a)(?:(?=.(?1))x|.)+?b', 'aaab').spans(1)         -> [(0, 1), (2, 3)]           expected [(0, 1)]
+search(r'(a)(?:(?<!(?1)).|.)+?b', 'aaab').spans(1)         -> [(0, 1), (0, 1), (1, 2)]   expected [(0, 1)]
+search(r'(?P<x>a)(?:(?!.(?P<x>a))|.)+?b', 'aaab').spans(1) -> [(0, 1)]                   (the control: the same group written directly)
+search(r'(a)(?:(?!.()(?1))|.)+?b', 'aaab').spans(1)        -> [(0, 1)]                   (the control: an empty group in the body)
+```
+
+**Why upstream is wrong.** A negative lookaround holds only when its body fails, and a positive one
+the match backtracks past is undone, so neither leaves anything behind; upstream does exactly that
+for a capture group written in the body, and the only difference in the call's case is how the
+compiler flags the body. `RE_OP_LOOKAROUND` saves the captures only when its node carries
+`RE_STATUS_HAS_GROUPS` (`upstream/src/_regex.c:13772`), set when the body built a capture group
+(`build_LOOKAROUND`, `:25022`; `build_GROUP`, `:24811`). `build_GROUP_CALL` flags only its own node
+(`:24850`), which nothing reads. Every engine surveyed discards what a failed assertion captured:
+`(?:(?!(a)b)\w|a)` over 'ab' and `(?:(?=(a))x|a)` over 'a' leave group 1 unset in regex, `re`,
+PCRE2 10.47, Perl 5.42.3 and node, and .NET 10 gives it an empty capture list. PCRE2 and Perl give
+the same span and group 1 for every row above; they keep no capture lists and restore a called
+group on return, so they cannot show the entry.
+
+**Proposed fix upstream:** `args->has_groups = TRUE;` in `build_GROUP_CALL`.
+
+**This port.** `NodeCompiler.BuildGroupCall` sets `args.HasGroups`. Only capture lists change.
+Pinned by `Gaps/Engine/LookaroundTests` (the four lookaround kinds, a call by name, a fuzzy call, a
+fuzzy and a partial match, and a control whose lookaround holds). A grid of 4,500 random patterns
+with a group call in a lookaround (`tools/probes/d10-lookaround-call-grid/`, seeds 20260929 and 7,
+Debug build, every lookaround kind, numbered
+and named calls, `(?R)`, fuzzy and partial rows) changed 58 rows, each by removing capture-list
+entries only, and every one equals upstream's own answer, or where upstream errs this port's, with
+an empty capture group added to each lookaround body. The default oracle waves at seeds 7, 4242 and
+20260927 draw six such rows, all conditionals whose yes branch calls a group inside a lookaround;
+the oracle entry `group-call-in-a-discarded-lookaround-leaves-no-capture` keys on
+`PatternObject.LookaroundsSavingOnlyForCalls`. The failed-call memo's capture-list witnesses (design
+C1) answer the same with the memo forced on; the memo's exclusion stays for its other reasons.
+
+## 55. A call to the whole pattern inside a pattern that is one fuzzy section never returns - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D37. Draft report:
+`entry-55-whole-pattern-fuzzy-call.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+fullmatch(r'(?b)(?:b||b(?0)*){e<=2}', 'azx')  -> (0, 3) counts (1, 0, 0)   expected None
+fullmatch(r'(?:b||b(?0)*){e<=2}', 'azx')      -> (0, 3) counts (2, 1, 0)   expected None
+fullmatch(r'(?:|z?(?R)?a){e<=3}', 'aaba')     -> (0, 4) counts (1, 3, 0)   expected (0, 4) counts (1, 2, 0)
+search(r'(?:z(?R)|){e<=1}', 'bz')             -> MemoryError                expected (0, 2) counts (1, 0, 0)
+fullmatch(r'(?:|z?(?R)?a){e<=3}x', 'aabax')   -> (0, 5) counts (2, 1, 0)   (the control: the section is not the whole pattern)
+```
+
+**Why upstream is wrong.** `_main.py:577` sets `fuzzy = isinstance(parsed, Fuzzy)` before the
+pattern is optimised, when `(?:b||b(?0)*){e<=2}` is still a one-item `Sequence`, so the
+whole-pattern key `(0, reverse, fuzzy)` looked up at `:627` is `(0, False, False)`.
+`_check_group_features` (`_regex_core.py:4436`) runs after optimising, when the pattern is the
+`Fuzzy`, so for the call's key `(0, False, True)` it sees matching features and adds no copy. The
+call therefore has neither a copy nor the `CALL_REF` wrapper: its `call_ref_info` node is NULL and
+`RE_OP_GROUP_CALL` jumps to `start_node` (`_regex.c:13394`), whose code ends in `SUCCESS` rather
+than `GROUP_RETURN`. A match can then end inside the call, with the outer instance of the section
+never closed, so its errors are not merged and its limits are not checked: the first two rows need
+three errors (only `b` can match any of 'a', 'z', 'x'), and the third reports four errors under a
+limit of three. Where nothing lets the recursion end early, it recurses until `MemoryError`.
+Adding a character after the section (the control) makes the pattern a `Sequence` after optimising
+as well, and then the call gets its copy and the answer is right. No other engine has both fuzzy
+matching and recursion, so the right answer follows from upstream's own design for nested sections:
+the FUZZY arm saves the outer counts and END_FUZZY adds the inner ones back and checks the limits
+(`:13132`, `:12448`), and a group call does not touch the counts (`:13394`).
+
+**Proposed fix upstream:** decide `fuzzy` after `parsed = parsed.optimise(info, reverse)` in
+`_main._compile`, as `_check_group_features` does. Tried on a copy of 2026.9.10 (2026-09-30): the
+third row then gives this port's (0, 4) with counts (1, 2, 0), and the control is unchanged; the
+first, second and fourth recurse without end (timeout or MemoryError), which is upstream's separate
+unbounded-recursion family (issues 551 and 554) that ledger entry 14's guard ends here.
+
+**This port.** `PatternCompiler.CompileUnderVersion` reads `parsed is Fuzzy` after optimising.
+Pinned by `Gaps/Engine/FuzzyRecursionCountsTests` (the witnesses, nested and `(?0)` spellings,
+numbered-call controls, BESTMATCH, ENHANCEMATCH and a minimum) and by the code pin in
+`Gaps/Parsing/FuzzySectionTests`. A grid of 2,400 random fuzzy recursion rows (`(?R)`, `(?0)`,
+`(?1)`, nested sections, BESTMATCH, ENHANCEMATCH, reverse, minimums; Debug build with a SUCCESS
+assert that no call is open) changed 127 rows. 116 are rows upstream cannot answer (timeout or
+MemoryError). On the 11 upstream answers, 10 are upstream's own answer reproduced by the unfixed
+port, each a match with more errors than the section allows, errors it does not count, or (one row)
+another first success; the eleventh differed from upstream before the fix as well. The oracle entry
+`fuzzy-whole-pattern-call-returns-to-its-caller` keys on `Info.UpstreamWholePatternCall`. The default
+oracle waves at seeds 7, 4242 and 20260927 draw no such row.
+
+## 56. The calls inside a called group's copy keep the features of where they are written, so an exact copy segfaults and a fuzzy one loses matches - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D40. Draft report:
+`entry-56-copy-call-features.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+search(r'(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)', 'ba')   -> access violation     expected None
+search(r'a(?:(?P<g4>a)){s<=1}(?P<g3>a)', 'ba')             -> None                 (the control: the calls written out)
+search(r'(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}', 'aab')  -> None                 expected (0, 3), one substitution
+search(r'(?P<g3>a)(?P<g4>a)(?:(?&g4)){s<=1}', 'aab')       -> (0, 3), (1, 0, 0)    (the control)
+search(r'(?P<g>a)(?:b(?:(?R)){s<=1}|c(?&g))', 'abacb')     -> None                 expected (0, 5), one substitution
+search(r'(?P<g>a)(?:b(?:(?R)){s<=1}|ca)', 'abacb')         -> (0, 5), (1, 0, 0)    (the control)
+```
+
+**Why upstream is wrong.** Upstream's own rule is that a call runs the called group with the call
+site's direction and fuzziness: `_check_group_features` (`upstream/regex/_regex_core.py:4420-4457`)
+compiles a copy of the group with the caller's features whenever they differ from where the group
+is written. But each call is resolved once, for where it is written (`call.call_ref`, `:4454`;
+`CallGroup._compile`, `:2557`), and a copy compiles the same call nodes. So the calls inside an
+exact copy of a group written in a fuzzy section still reach the fuzzy compile of the next group,
+whose first failing item runs with no fuzzy section in force: `any_error_permitted` reads
+`state->fuzzy_node->values` (`upstream/src/_regex.c:9667`) with `fuzzy_node` NULL, the access
+violation above. The other way round, a fuzzy copy's calls reach the exact compile, and the error
+the section allows is refused. The written-out controls, which upstream answers without a call,
+give the answers expected here.
+
+**Proposed fix upstream:** resolve the calls inside each additional copy for the copy's own
+features, as `_check_group_features` does for the pattern: walk the copy with `fix_groups` from its
+features and look each call up again, adding copies for any new key, before compiling it.
+
+**This port.** `ParseFunctions.ResolveCallsInCopy`, called from `PatternCompiler` just before each
+copy compiles. `Matcher.AnyErrorPermitted` asserts that a fuzzy section is in force. Pinned by
+`Gaps/Engine/NestedGroupCallTests` and the oracle entry
+`group-call-runs-with-its-call-sites-features`, keyed on `Info.UpstreamCallFeatures`. The grid in
+`tools/probes/d40-copy-call-grid/` (2,000 rows, seed 20260930, Debug) had 138
+NullReferenceExceptions before and none after; with entries 57 and 58, the port's answer equals its
+own answer for the pattern with the calls written out on all 1,932 rows that have one. No other
+engine surveyed has fuzzy sections; PCRE2 runs a subroutine with the options of its definition, so
+it has no copies to get wrong.
+
+## 57. A call inside a lookaround in a fuzzy section runs its group fuzzily, while the lookaround's own body is exact - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D42. Draft report:
+`entry-57-lookaround-call-fuzziness.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?:(?=(?&g))..){s<=1}(?P<g>ab)?', 'xb')    -> (0, 2), (1, 0, 0)   expected None
+search(r'(?:(?=ab)..){s<=1}', 'xb')                 -> None                (the control: the call written out)
+search(r'(?:..(?<=(?&g))){s<=1}(?P<g>ab)?', 'xb')   -> (0, 2), (1, 0, 0)   expected None
+search(r'(?:..(?<=ab)){s<=1}', 'xb')                -> None                (the control)
+```
+
+**Why upstream is wrong.** `LookAround._compile` compiles the body exact whatever the caller's
+fuzziness (`upstream/regex/_regex_core.py:3201`, `self.subpattern.compile(self.behind)`), so a
+literal in the body must match exactly. `LookAround.fix_groups` registers the body's calls with the
+caller's fuzziness (`:3160`), so a call there runs the group's fuzzy copy instead. A call must
+behave as its body written out, and the written-out controls answer None.
+
+**Proposed fix upstream:** `self.subpattern.fix_groups(pattern, self.behind, False)` in
+`LookAround.fix_groups`.
+
+**This port.** `LookAround.FixGroups` passes `false`. Pinned by `Gaps/Engine/NestedGroupCallTests`
+(`A_call_inside_a_lookaround_in_a_fuzzy_section_runs_exactly`) and the oracle entry above. D40's
+grid row 1914 needs this fix: with entry 55 alone, the fuzzy copy of a group holding such a
+lookaround ran its call fuzzily there too.
+
+## 58. A call in a conditional's lookbehind test runs its group forwards - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D43. Draft report:
+`entry-58-conditional-lookbehind-call-direction.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'bc(?(?<=(?&g))x|y)(?P<g>bc)?', 'bcxzzz')   -> None                expected (0, 3)
+search(r'bc(?(?<=bc)x|y)', 'bcxzzz')                -> (0, 3), (0, 0, 0)   (the control: the call written out)
+search(r'bc(?(?<!(?&g))x|y)(?P<g>bc)?', 'bcyzzz')   -> None                expected (0, 3)
+search(r'bc(?(?<!bc)x|y)', 'bcyzzz')                -> (0, 3), (0, 0, 0)   (the control)
+```
+
+The subjects end in 'zzz' only to stay longer than the call's inflated minimum width, which
+refuses 'bcx' before matching starts in both engines (see `Gaps/Engine/GroupCallTests`).
+
+**Why upstream is wrong.** `LookAroundConditional._compile` compiles the test in its own direction
+(`upstream/regex/_regex_core.py:3267`, `self.subpattern.compile(self.behind, fuzzy)`), but
+`fix_groups` registers the test's calls with the caller's direction (`:3230`), so a call in a
+lookbehind test runs the group's forward compile from the current position.
+
+**Proposed fix upstream:** `self.subpattern.fix_groups(pattern, self.behind, fuzzy)` in
+`LookAroundConditional.fix_groups`.
+
+**This port.** `LookAroundConditional.FixGroups` walks the test under `Behind`. Pinned by
+`Gaps/Engine/NestedGroupCallTests` (`A_call_in_a_conditional_lookbehind_test_runs_backwards`) and
+the oracle entry above. D40's grid rows 343, 388, 569, 629, 1655 and 1796 carry it.
+
+## 59. A backwards copy of the whole pattern carries the required string's mark, so its run jumps to the string's forward end - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D48. Draft report:
+`entry-59-backwards-copy-required-string.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 (expected = this port's answer, argued
+below):
+
+```
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaaa')   -> (0, 3), (0, 1, 0)   expected (0, 4), (0, 1, 0)
+search(r'aa(?:(?<=a(?R)){i<=1}a|)', 'aaab')   -> (0, 3), (0, 1, 0)   expected (0, 2), (0, 0, 0)
+```
+
+**Why upstream is wrong.** The (0, 3) spans a match whose last `a` was read at 2, after an
+insertion at 2: the text position went back by one. `_get_required_string` marks the pattern's
+required run (`upstream/regex/_regex_core.py:4464`), and the engine skips comparing a marked run
+where the prefilter found it, moving to `req_end` (`STRING_REV`, `upstream/src/_regex.c:15109`).
+The `(?R)` inside the lookbehind compiles the whole pattern again backwards, marked run included,
+so a backwards `aa` that starts at the prefilter's position lands on the run's forward end. With
+the call written out to depth 2 the port answers (0, 4) with one insertion and (0, 2); upstream
+answers (0, 2) on both written-out rows, because it never passes a failing lookaround with an
+insertion (entry 50), and D40's review row `aa(?<=(?<=aa(?R)a)(?:q?){i<=1})a|aa` over 'aaab' is
+(0, 3) in upstream and (0, 2) written out in both engines.
+
+**Proposed fix upstream:** mark the run only in the compile whose direction the prefilter
+searched: compile the additional copies with `required` cleared, or check the node's direction
+in the skip.
+
+**This port.** `String.CompileCore` marks the run only when `reverse` equals the direction it was
+found in (`String.RequiredReverse`); D34 already left it off the fuzzy copies. Pinned by
+`Gaps/Engine/NestedGroupCallTests` and the oracle entry `group-call-runs-with-its-call-sites-features`.
+
+## 60. The called copies after SUCCESS count towards the pattern's minimum width - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D49. Draft report:
+`entry-60-copy-min-width.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?P<g1>\w)(?<=(?&g1))\W', 'a ')   -> None       expected (0, 2)
+search(r'(?P<g1>\w)(?<=\w)\W', 'a ')       -> (0, 2)     (the control: the call written out)
+search(r'(a)b(?<=(?1)b)', 'ab')            -> None       expected (0, 2)
+search(r'(a)b(?<=ab)', 'ab')               -> (0, 2)     (the control)
+```
+
+**Why upstream is wrong.** The copies of called groups (`additional_groups`) are compiled after
+the pattern's `SUCCESS`, and `build_CALL_REF` adds each copy's width to `min_width`
+(`upstream/src/_regex.c:24560`) as if it were matched in sequence. A copy is only reached through a
+call, and a call inside a lookbehind consumes nothing, so the pattern above needs two characters,
+not three; `do_exact_match`'s width early-out (`:18064`) then refuses a subject the pattern matches.
+With a partial request the same early-out skips the non-partial pass, so a complete match is
+reported as partial (`GroupCallTests`, `PartialMatchingTests`).
+
+**Proposed fix upstream:** take `min_width` where `SUCCESS` is built, before the additional copies.
+
+**This port.** `NodeCompiler` takes the width at `SUCCESS` (`CompileArgs.MinWidthAtSuccess`);
+`PatternObject.UpstreamMinWidth` keeps upstream's for the oracle's ablation. The tests that pinned
+the inflation (S40c) now assert the written-out answers. Pinned by `Gaps/Engine/NestedGroupCallTests`
+and the oracle entry above.
+
+## 61. A fuzzy section a verb cut through stays open, and its limits govern what follows - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D44. Draft report:
+`entry-61-verb-leaves-fuzzy-section-open.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30:
+
+```
+search(r'(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}', 'ad')    -> (1, 2) counts (1, 0, 1)   expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?!(?:a(*SKIP)b){d<=0})cd){e<=2}', 'ad')     -> (1, 2) counts (1, 0, 1)   expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?(?!(?:a(*PRUNE)b){d<=0})cd|x)){e<=2}', 'ad') -> (1, 2) counts (1, 0, 1)  expected (0, 2) counts (1, 0, 0)
+search(r'(?:(?!(?:ab){d<=0})cd){e<=2}', 'ad')            -> (0, 2) counts (1, 0, 0)   (the control: no verb)
+```
+
+**Why upstream is wrong.** The lookahead body fails at 'b' whether or not the verb is there, so
+the verb cannot change the answer: PCRE2 10.47 and Perl 5.42 both match `(?!a(*PRUNE)b)ad` over 'ad'
+at (0, 2), as they do `(?!ab)ad`. Upstream's answer changes because backtracking onto the verb cuts
+the backtracking stack to the lookaround's mark (`top_bstack`, `_regex.c:2811`), discarding the
+inner section's `FUZZY` entry, whose backtrack arm (`:15763`) is the only place `fuzzy_node` goes
+back. `LOOKAROUND` and `CONDITIONAL` do not save it (`:13779`, `:12230`), and `start_match` clears
+only the counts (`:11790`). The inner `{d<=0}` then stays the open section, so `cd` cannot use the
+outer section's substitution at 0.
+
+**Proposed fix upstream:** push `fuzzy_node` beside `fuzzy_counts` at `ATOMIC`, `CONDITIONAL` and
+`LOOKAROUND` and restore it wherever those counts are restored, and clear it in `start_match`.
+
+**This port.** `MatchState.PushSubAttemptFuzzyState` and `PopSubAttemptFuzzyState` do that, and a
+Debug assert at `SUCCESS` checks that no section is open. Pinned by
+`Gaps/Engine/FuzzyMatchingTests.A_verb_that_ends_a_lookaround_or_a_condition_closes_the_section_it_cut_through`
+(four rows with their verb-free controls). A grid of 6,000 generated rows (verbs, atomic groups,
+lookarounds and conditions around fuzzy sections, BESTMATCH, ENHANCEMATCH, calls) changed 5 rows.
+The rule is that a lookaround or condition gives back the section it was entered in; that equals the
+verb-free answer on the pinned row but is not a general rule, since a verb in a negative lookaround can
+change an answer (`(?!a(*PRUNE)b|ac)ac` over 'ac': (0, 2) in PCRE2, Perl and upstream, None without it). The oracle entry `fuzzy-section-cut-by-a-verb-is-closed`
+keys on `PatternObject.KeepSectionOpenAfterAVerb`. The default oracle waves at seeds 7, 4242 and
+20260927 draw no such row.
+
+## 62. An alternation at the start of a negative condition's yes branch keeps only its first alternative - FIXED HERE (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D55. Draft report:
+`entry-62-negative-condition-drops-alternatives.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `tools/matrix/survey.py`:
+
+```
+search(r'(?(?!a)(?:x|))x', 'x')        -> None   expected (0, 1)
+search(r'(?(?<!q)(?:xz|x))c', 'xc')    -> None   expected (0, 2)
+search(r'(?(?<!x)(?:ab|a))c', 'ac')    -> None   expected (0, 2)
+search(r'(?(?=x)(?:x|))x', 'x')        -> (0, 1)            (the control: a positive test)
+search(r'(?(?!a)(?:x|y))x', 'x')       -> None              (the control: no alternative can match)
+```
+
+**Why upstream is wrong.** At 'x' the test `(?!a)` holds, so the yes branch `(?:x|)` runs and its
+empty alternative leaves the 'x' for the final `x`. PCRE2 10.47 and Perl 5.42.3 answer (0, 1),
+(0, 2) and (0, 2) on the three rows. The cause is in `skip_one_way_branches`
+(`_regex.c:23203-23208`). A negative test that fails goes to the yes branch through CONDITIONAL's
+`nonstring.true_node` (`:15444`), and the skip decides that a BRANCH there is 1-way by testing the
+BRANCH's own `nonstring.true_node`, which no BRANCH sets. The two checks above it test
+`nonstring.next_2.node`. `true_node` and `next_2` are separate members of the `nonstring` struct
+(`:294-297`), so this is not a read through a union: every BRANCH at the start of such a yes branch
+is skipped to its first exit. A positive test reaches its yes branch through END_CONDITIONAL's
+`next_1`, whose check is right, so it is unaffected. Complete-matrix rows 8301, 11941 and 11948
+(2026-09-30) are this defect with a verb, a group call and a whole-pattern call in the pattern.
+
+**Proposed fix upstream:** test `!next->nonstring.next_2.node` at `:23206`, as the two checks above
+it do.
+
+**This port.** `Optimiser.SkipOneWayBranches` tests `Next2` there. Pinned by
+`Gaps/Engine/BackrefAndConditionalTests.A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch`
+(the three rows and the three matrix rows) and its two controls. The oracle entry
+`negative-condition-keeps-its-alternatives` keys on `OracleComparer.RunWithTheUpstreamTrueBranchSkip`,
+which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
+does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.
+
+## 63. A group call's captures stay on the group's capture list after it returns - DIVERGES HERE BY RULING (2026-09-30)
+
+**Status:** not filed, per the owner's rule. Known defect D51, owner ruling (a) of 2026-09-30
+(DECISIONS.md), which reverses the 2026-09-11 entry. Draft report, framed as a question:
+`entry-63-call-captures.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-30 with `tools/probes/d51-call-capture-survey.py` over `tools/probes/d51-call-capture-witnesses.tsv` (upstream,
+PCRE2 10.47 through pip `pcre2` 0.7.1, Perl 5.42.3):
+
+```
+search(r'(?(DEFINE)(?<c>a))(?&c)b', 'ab')     c: None, captures ['a']        PCRE2 (-1, -1), Perl unset
+search(r'(?<c>a)(?&c)b', 'aab')               c: (0, 1), captures ['a', 'a']  PCRE2 and Perl (0, 1)
+fullmatch(r'(?P<x>.)*(?&x)', 'abc')           x: 'b', captures ['a', 'b', 'c']
+search(r'\((?<p>[^()]|(?R))*\)', '(a(b)c)')   p: (5, 6), captures ['a', 'b', '(b)', 'c']   PCRE2 and Perl (5, 6)
+```
+
+**Why the port differs.** Upstream's behaviour is deliberate (Hg issue 78; `test_hg_bugs#54`
+asserts every nested run of a recursive group), so this is not claimed as an upstream bug.
+`GROUP_CALL` saves only each group's `current` (`push_groups`, `upstream/src/_regex.c:2490`, called
+at `:13405`) and `GROUP_RETURN` restores only that (`pop_groups`, `:13516`), so `count` stays where
+the callee left it. Copied into .NET that breaks the `Group` contract: Success false with a capture
+listed, and a Value that is not the last capture. PCRE2 and Perl run a call as a subroutine and
+restore the group on return; every span and group value across 29 surveyed witnesses (backreference
+and conditional after a call, recursion, a call in a repeat and in a lookaround, nested groups)
+agrees between them and upstream, so only the lists differ.
+
+**This port.** `Matcher.ReturnToCallerCaptures`: GROUP_CALL saves each group's count and current
+(`PushCaptures`), GROUP_RETURN restores both and puts the spans the call added on the backtracking
+stack, and its backtrack arm writes them back (`PopCalleeCaptures`), because the caller can reuse
+the freed slots before it backtracks into the call. The span restore is load-bearing: planted out,
+`(?(DEFINE)(?<d>(.)(?:.)?\2))(?&d)(?:(?2)x)?ab` over 'aaab' answers None where every engine gives
+(0, 4). Pinned by `Gaps/Engine/CallCaptureTests` (24 tests, 20 red before the fix) and the ported
+rows listed in DIVERGENCES.md, which assert upstream's list through the ablation too. The oracle
+entry `group-call-discards-its-captures-on-return` keys on `OracleComparer.RunWithTheUpstreamCallCaptures`
+(`PatternObject.KeepCallCaptures`, which leaves the count where the callee left it and restores only
+`current` when backtracking past the call, as `pop_groups` does) plus `OnlyCallCapturesAreMissing`;
+every other named ablation has the fix off too. It accounts for 12, 5 and 14 rows of the default
+waves at seeds 7, 4242 and 20260927 (diverge 0 at all three). Complete matrix over its 1,619 call rows: C2 502 to 9 and
+C7 68 to 0, no assert on the Debug build.
+
+**Partial results: known defect D62, fixed here too (owner ruling 2026-09-30).** A partial match
+that runs out of text inside a call that has not returned kept that call's captures, value
+included: `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (2, 3) with ['a', 'a'] upstream, where
+the written-out `(?<o>(?<i>a)b)(?:(?:a)b)` gives i = (0, 1) in both engines. A partial now reports
+what every completion of the path it took would report: the call returns in any completion, so
+`Matcher.BasicMatch` restores the groups from the outermost open call's frame, whose captures
+`GROUP_CALL` now pushes last, directly under the return node. PCRE2 leaves a partial's groups
+undefined and Perl has no partial matching, so no engine contradicts it. Pinned by
+`CallCaptureTests` (six call rows red without the restore, two controls) and five partial rows
+in the same oracle entry.

@@ -69,6 +69,12 @@ public sealed class PartialBlockedEndTests
     )
     {
         var regex = new FuzzyRegex(pattern);
+
+        // Group 1 is the witness that the continuation read the right saved stack, and in most rows
+        // it is set only inside a call. Since D51 (ledger entry 63) a call discards its captures on
+        // return, so the expected spans are read under upstream's rule, which keeps them, as the
+        // judge does. The default rule is D51's own tests' concern.
+        regex.PatternObject.KeepCallCaptures = true;
         Match m = operation switch
         {
             "search" => regex.Match(text, partial: true),

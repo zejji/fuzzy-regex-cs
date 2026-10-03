@@ -38,6 +38,15 @@ internal static class OracleWave
     /// </remarks>
     private static readonly string _repoRoot = FindRepoRoot();
 
+    /// <summary>The category of the tests that read a recorded wave (<see cref="Load"/>).</summary>
+    /// <remarks>
+    /// Only <c>tools/run-oracle.ps1</c> records a wave, so <c>tools/check-ratchet.ps1</c> runs this project
+    /// without these tests: CI's merge gate records none (design amendment 7), and a local run would
+    /// otherwise judge whatever git-ignored <c>TestResults/oracle/wave.jsonl</c> an earlier run left
+    /// behind (CI was red from 3def5eba while a 2026-09-27 wave kept the local ratchet green).
+    /// </remarks>
+    public const string NeedsARecordedWave = "NeedsARecordedWave";
+
     /// <summary>Where the recorder writes the wave and where this consumer reads it.</summary>
     /// <remarks>
     /// <c>FUZZYREGEX_ORACLE_WAVE_PATH</c> overrides the fixed default when set. <c>tools/run-oracle.ps1</c>

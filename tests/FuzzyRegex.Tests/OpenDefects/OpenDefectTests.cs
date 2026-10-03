@@ -29,26 +29,39 @@ public sealed class OpenDefectTests
         m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1));
     }
 
-    // Blind review of the refined call guard, 2026-09-28 (ledger entry 14, "The guard refined").
-    // Each pattern needs two calls of itself open at 0 at once. The second reaches no new text, but
-    // a group set between the two calls changes what it does: a conditional or backreference reads
-    // that group, so the inner call is not a repeat of the outer one and the path is finite.
-    // Upstream 2026.9.10 answers (0, 1) for every row, search and fullmatch alike (measured
-    // 2026-09-28); PCRE2 10.47 raises "nested recursion at the same subject position" on the first.
-    // The port answers None, because the guard's key holds no capture state.
+    // D4 (the capture-dependent recursion design, section 6b). The `.*z` branch fails only after
+    // reading the whole text, so the attempt's reach is already full when the first call is made,
+    // no later call can show growth, and the finite left recursion `(?:|(?R)a)` is refused one
+    // level down. Upstream 2026.9.10 answers (0, 2) on both rows; PCRE2 10.47 raises "nested
+    // recursion at the same subject position" on the first. Without the `.*z|` branch the port
+    // answers (0, 2) as well (GroupCallTests).
     [Test]
-    [Arguments(@"(?(a)(?(b)x|(?<b>)(?R))|(?<a>)(?R))")]
-    [Arguments(@"(?:\1x|\2()(?R)|()(?R))")]
-    [Arguments(@"(?:(?P=b)x|(?P=a)(?<b>)(?R)|(?<a>)(?R))")]
-    public void A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through(string pattern)
+    [Arguments(@".*z|(?:|(?R)a)", "aa")]
+    [Arguments(@"(?:a|(?<g>))*?(?P=g)|(?<g>)a(?R)|(?R)(?P=g)x", "ax")]
+    public void A_left_recursion_is_let_through_when_the_reach_is_full_before_the_first_call(
+        string pattern,
+        string subject
+    )
     {
-        var regex = new FuzzyRegex(pattern);
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(30)).FullMatch(subject);
 
-        Match search = regex.Match("x");
-        Match full = regex.FullMatch("x");
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
 
-        (search.Success, search.Index, search.Length).Should().Be((true, 0, 1));
-        (full.Success, full.Index, full.Length).Should().Be((true, 0, 1));
+    // D38. Over 'aba' this pattern matches (0, 3) with one insertion, here and upstream, so 'ab' is
+    // a partial match at start 0, and MatchAtStart there says so. Search reports start 1 instead: the
+    // attempt at 0 fails with only the end-of-text flag set (the `\b` in the condition's test is
+    // decided at the end), and DoMatch reads that flag only when every start has failed, so a real
+    // partial at start 1 wins. The leftmost start wins in a search. Upstream 2026.9.10 answers
+    // (1, 2) for the search and None for match(partial=True).
+    [Test]
+    public void A_partial_search_reports_the_leftmost_start_that_the_anchored_matcher_finds()
+    {
+        var regex = new FuzzyRegex(@"(?:(?(?=a\b|a)a|b)){i<=1}a");
+
+        Match m = regex.Match("ab", 0, 2, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
     }
 
     // D11 (docs/plan/2026-09-28-partial-boundary-design.md; the ids are its table's). A partial

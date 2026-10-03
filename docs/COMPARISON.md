@@ -96,7 +96,7 @@ itself has none:
 | `Match.NextMatch()` | `Match.NextMatch()` | Same name and meaning: resumes from where this match ended, within the same slice. The one input-dependent method with no per-call `timeout` or `CancellationToken`: it runs under the pattern's `MatchTimeout`, as `Regex`'s does. |
 | `Match.Result(replacement)` | `Match.Result(replacement)` | Same name, different template language - `\1`/`\g<name>` here, `$1` there. `$` is ordinary text in this port's templates. |
 | `Group.Success`, `.Value`, `.Index`, `.Length` | `Group.Success`, `.Value`, `.Index`, `.Length` | Same shape. |
-| `Group.Captures` | `Group.Captures` | Here, every group keeps its full capture list, oldest first, even outside a quantified construct; the built-in only populates this for a group inside a repeat. |
+| `Group.Captures` | `Group.Captures` | Here, every group keeps its full capture list, oldest first, even outside a quantified construct; the built-in only populates this for a group inside a repeat. Captures made inside a group call are dropped when it returns (see "A group call keeps none of the captures its body made"). |
 | `Capture.Value`, `.Index`, `.Length` | `Capture.Value`, `.Index`, `.Length`, plus `.ValueSpan` | Same shape, with an added zero-copy `ReadOnlySpan<char>` accessor. |
 | `GroupCollection[name]`, `[number]` | `GroupCollection[name]`, `[number]` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>` as well as a list**" below: the dictionary face here is total (every group), matching .NET 5+'s own `GroupCollection`, not upstream's named-only `groupdict`. |
 | `GroupCollection.Count` | `GroupCollection.Count` | Includes group 0 on both. |
@@ -1035,7 +1035,7 @@ var regex = new FuzzyRegex(
     "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
     FuzzyRegexOptions.None,
     TimeSpan.FromSeconds(2));
-Console.WriteLine(regex.Match("baxbax").Success);   // False, in milliseconds
+Console.WriteLine(regex.Match("baxbax").Success);   // False - in milliseconds
 ```
 
 ### In a branch reset, a group never takes a number another group in the same branch will use
@@ -1175,33 +1175,32 @@ the memory has already been spent by then, so a graph that is refused may be sma
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
 
-### A fuzzy section may open with an inserted character at the search anchor, where a position assertion pins the match there
+### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
-Upstream refuses to let a fuzzy section begin with an inserted character at the exact position the
-search started from, on the reasoning that starting the search one character later finds the same
-match without paying for the insertion. That reasoning holds only when the match is free to slide.
-Put a position assertion in front of the fuzzy section and it is not free: `^` in multiline mode
-holds at the start of `"xabc"` and nowhere else in it, so there is no later start to try, and
-upstream returns nothing.
+Upstream refuses to let a fuzzy match begin with an inserted character at the exact position the
+search started from, on the reasoning that starting one character later finds the same match
+without paying for the insertion. That keeps finditer from gluing a separator onto the next word:
+`(?:dog){e<=1}` over `"dog dog dog"` gives three exact matches rather than `" dog"`. But where no
+later start can match, it throws the match away. `^` holds at the start of `"xa"` and nowhere
+else, so upstream finds nothing:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 // One insertion, 'x', at the position the search began.
-Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
-Console.WriteLine(m.Success ? m.Value : "no match");   // xabc - upstream: no match
+Match m = new FuzzyRegex("(?:^a){i<=1}").Match("xa");
+Console.WriteLine(m.Success ? m.Value : "no match");   // xa - upstream: no match
 ```
 
-This port permits the insertion where a position assertion at the head of the pattern holds at the
-anchor and fails one character on, which is exactly the case upstream's own reasoning does not
-cover. Everywhere else the upstream rule stands, so `(?:abc){i<=1}` over `"xabc"` still matches
-`abc` rather than `xabc` in both engines.
-
-Upstream contradicts itself here, which is why this is a fix rather than a preference: the same
-pattern over the same span answers two ways according to where the caller started. With
-`\m(?:Y){i}\M`, upstream's `search(" XY", 0)` finds (1, 3) and `search(" XY", 1)` finds nothing.
-Upstream issues 563 and 564 have tracked it since 17 April 2025, with the maintainer's own comment
-"It looks like a bug". There is no option to restore the upstream answer.
+This port keeps the match at the starting position whenever the search with upstream's rule finds
+nothing that starts inside it, and otherwise returns upstream's match. So the separators stay out:
+`\b(?:dog){e<=2}` over `"dog  dog"` gives `dog` and `dog` in both engines, not `  dog` for the
+second. BESTMATCH keeps this port's earlier rule for now, a leading assertion that holds where the
+search started and fails one character on. Upstream contradicts itself here, which is why this is a fix rather than a preference:
+`^(?:a){i<=1}` over `"xa"` already gives `xa` upstream, and `\m(?:Y){i}\M` over `" XY"` answers
+two ways according to where the caller started. Upstream issues 563 and 564 have tracked it since
+17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to
+restore the upstream answer.
 
 ### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
 
@@ -1304,6 +1303,19 @@ Console.WriteLine(m.Value);   // 2 - upstream: never returns
 Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two substitutions
 upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
 inner `{s<=1}` removed. There is no option to restore the upstream answer.
+
+The same stale total stops `(?e)` improving a match when a later fuzzy section went over budget
+and was given up. A repeat is one way to get there; two sections written out in a row are another:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var repeated = new FuzzyRegex(@"(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}");
+Console.WriteLine(repeated.Match("xaaabaxa").Value);   // aaab - upstream: aaaba, with two deletions
+
+var unrolled = new FuzzyRegex(@"(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})?");
+Console.WriteLine(unrolled.Match("xaaabaxa").Value);   // aaab - upstream: aaaba, with two deletions
+```
 
 ### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
@@ -1646,7 +1658,199 @@ Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:ß){s<=1}").FullMatch("ßxa").Le
 Console.WriteLine(new FuzzyRegex(@"(?fi)(ß)x(?:\1){s<=1}").FullMatch("ßxa").Length); // 3 - upstream: no match
 ```
 
-### `BestMatch` keeps a fit that ends in trailing insertions
+### A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away
+
+Upstream adds a group call's captures to the called group's capture list, as the group itself
+does, and saves and restores the capture lists around a lookaround only when its body holds a
+capture group. So when the body only calls one, the call's capture outlives a negative lookaround
+whose body matched, or a positive one the match backtracked past. Here a call keeps no captures at
+all (see the next section), and a call counts as a group, so the lists are restored, as they are
+for a group written directly.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("aaab", "(a)(?:(?!.(?1))|.)+?b");
+Console.WriteLine(m.Groups[1].Captures.Count);   // 1 - upstream: 2
+Console.WriteLine(m.Groups[1].Index);   // 0 - upstream: 0
+```
+
+Spans, group values and fuzzy counts are unchanged; only capture lists differ. There is no option
+to restore the upstream answer. Ledger entry 54.
+
+### A group call keeps none of the captures its body made
+
+A call such as `(?1)`, `(?&name)` or `(?R)` runs like a subroutine, as in PCRE2 and Perl: when it
+returns, every group is exactly as the caller left it, value and capture list both. Upstream puts
+the value back but leaves the call's captures on the list, so a group can report no value while
+listing a capture, or a value that is not its last capture. Here a group's value is always its last
+capture, as .NET's `Group` promises.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("ab", "(?(DEFINE)(?<c>a))(?&c)b");
+Console.WriteLine(m.Groups["c"].Success);   // False - upstream: no value
+Console.WriteLine(m.Groups["c"].Captures.Count);   // 0 - upstream: 1
+
+Match n = FuzzyRegex.Match("aab", "(?<c>a)(?&c)b");
+Console.WriteLine(n.Groups["c"].Index);   // 0 - upstream: 0
+Console.WriteLine(n.Groups["c"].Captures.Count);   // 1 - upstream: 2
+```
+
+On a complete match, spans, group values, fuzzy counts and which texts match are unchanged; only
+capture lists differ. A recursive pattern such as `(?<rec>\((?:[^()]++|(?&rec))*\))` therefore
+lists only its outermost run, where upstream lists every nested one.
+
+On a partial match a group's value can differ too. One that runs out of text inside a call reports
+the groups as the call would leave them on returning, since every completion of the match returns from it: `(?<o>(?<i>a)b)(?&o)` over
+'aba' as a partial match reports i at 0, as the same pattern with the call written out does; upstream
+reports the unfinished call's i at 2. There is no option to restore the upstream answer.
+Ledger entry 63.
+
+### A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller
+
+When the whole pattern is one fuzzy section, such as `(?:z(?R)|){e<=1}`, each `(?R)` enters the
+section again. Here that inner instance nests like any inner section: its errors are added to the
+instance that called it, so the one `{e<=1}` bounds the whole match, however deep it recurses.
+Upstream never returns from such a call. Most such patterns run out of memory there, and the rest
+can report a match with more errors than the limit allows.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex("(?:z(?R)|){e<=1}").Match("bz");
+Console.WriteLine(m.FuzzyCounts.Substitutions);   // 1 - upstream: MemoryError
+Console.WriteLine(new FuzzyRegex("(?:b||b(?0)*){e<=2}").FullMatch("azx").Success);   // False - upstream: True, with 3 errors
+Console.WriteLine(new FuzzyRegex("(?:|z?(?R)?a){e<=3}").FullMatch("aaba").FuzzyCounts.Total);   // 3 - upstream: 4
+```
+
+There is no option to restore the upstream answer. Ledger entry 55.
+
+### A verb that cuts through a fuzzy section closes it
+
+A `(*PRUNE)` or `(*SKIP)` inside a negative lookaround or a condition's test can end that construct
+with a fuzzy section opened inside it still unfinished. Here the section closes with the construct,
+so the enclosing section's limits apply to what follows. Upstream keeps the inner section's limits in
+force, so the match below moves one character on.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex("(?:(?!(?:a(*PRUNE)b){d<=0})cd){e<=2}").Match("ad");
+Console.WriteLine(m.Index);   // 0 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 61.
+
+### BESTMATCH counts only the errors a match contains
+
+A negative lookaround or condition whose body matched fuzzily is thrown away, and so are its errors.
+Upstream keeps them in the total that BESTMATCH and ENHANCEMATCH rank by, so an exact match can lose
+to one with an error.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})").Match("cdcx");
+Console.WriteLine(m.Index);   // 1 - upstream: 0, with a deletion
+Console.WriteLine(m.FuzzyCounts.Total);   // 0
+```
+
+There is no option to restore the upstream answer. Ledger entry 32.
+
+### The calls inside a called group run with the call's direction and fuzziness too
+
+A call such as `(?&g)` matches what the group's body would match written out at the call: exactly
+outside a fuzzy section, fuzzily inside one. Upstream compiles the called group that way, but the
+calls that group makes in turn keep the features of where they are written, so a fuzzy call can
+reach an exact group, and an exact call a fuzzy one, which crashes upstream.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}").Match("aab").Length); // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)").Match("ba").Success); // False - upstream: crashes
+```
+
+Upstream gives this port's answers with the calls written out. There is no option to restore the
+upstream answer. Ledger entry 56.
+
+### A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does
+
+A lookaround's body is exact even inside a fuzzy section, in both engines. Upstream nevertheless
+runs a call in that body fuzzily; here it runs exactly, as its body written out would.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?:(?=(?&g))..){s<=1}(?P<g>ab)?").Match("xb").Success); // False - upstream: True
+Console.WriteLine(new FuzzyRegex("(?:(?=ab)..){s<=1}").Match("xb").Success); // False - upstream: False
+```
+
+There is no option to restore the upstream answer. Ledger entry 57.
+
+### A call in a conditional's lookbehind test runs its group backwards
+
+A conditional's lookbehind test reads backwards from the current position. Upstream runs a call in
+that test forwards; here it runs backwards, as its body written out would.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("bc(?(?<=(?&g))x|y)(?P<g>bc)?").Match("bcxzzz").Length); // 3 - upstream: no match
+Console.WriteLine(new FuzzyRegex("bc(?(?<=bc)x|y)").Match("bcxzzz").Length); // 3 - upstream: 3
+```
+
+There is no option to restore the upstream answer. Ledger entry 58.
+
+### A backwards copy of the whole pattern does not skip to the required string's forward end
+
+A `(?R)` inside a lookbehind runs the whole pattern backwards. Upstream's backwards copy still
+carries the mark of the pattern's required string, and at the place the prefilter found that string
+it jumps to the string's forward end, so the lookbehind leaves the text position in the wrong place.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaaa").Length); // 4 - upstream: 3
+Console.WriteLine(new FuzzyRegex("aa(?:(?<=a(?R)){i<=1}a|)").Match("aaab").Length); // 2 - upstream: 3
+```
+
+There is no option to restore the upstream answer. Ledger entry 59.
+
+### A called copy adds nothing to the pattern's minimum width
+
+A group called from a lookbehind needs a backwards copy of the group. Upstream counts that copy's
+width in the pattern's minimum width, although a lookbehind consumes nothing, and refuses subjects
+the pattern matches.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a ").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); // 2 - upstream: 2
+```
+
+There is no option to restore the upstream answer. Ledger entry 60.
+
+### An alternation at the start of a negative condition's yes branch keeps all its alternatives
+
+When a condition's test is a negative lookaround and the test holds, upstream tries only the first
+alternative of an alternation that starts the yes branch. Here every alternative is tried, as in
+PCRE2 and Perl. A positive test was never affected.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?(?!a)(?:x|))x").Match("x").Length); // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?(?<!q)(?:xz|x))c").Match("xc").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?(?=x)(?:x|))x").Match("x").Length); // 1 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 62.
+
+### `BestMatch` and `EnhanceMatch` keep a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.
 Upstream can lose a match whose best fit ends in inserted characters, because the check that
@@ -1661,6 +1865,18 @@ using Fuzzy.Text.RegularExpressions;
 Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}").FullMatch("bba").Length);      // 3 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?b)(?:b){e<=2}$").MatchAtStart("bba").Length);  // 3 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?:b){e<=2}").FullMatch("bba").Length);          // 3 - upstream: 3
+```
+
+`(?e)` reaches the same check without `(?b)`, because each improving run narrows the error budget
+to one below its own total. Upstream can then settle for a costlier fit than the one it would find
+with the tighter limit written out. This port answers the cheaper one.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// One insertion and one deletion fit in two errors. Upstream settles for three substitutions.
+Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=3}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 3
+Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=2}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 2
 ```
 
 ### Inherited upstream bugs are fixed here

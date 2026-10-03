@@ -11,11 +11,26 @@ public sealed class RegressionsRecursionTests
 {
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#54")]
-    public void Named_recursive_group_captures_every_nested_parenthesized_run()
+    public void Named_recursive_group_keeps_only_its_outermost_run()
     {
-        // Hg issue 78: "Captures" doesn't work for recursive calls.
+        // Hg issue 78: "Captures" doesn't work for recursive calls. Upstream answered it by
+        // keeping every capture a call makes, and lists ['(1+0)', '((1+0)+1)', '(((1+0)+1)+1)'].
+        // DIVERGES FROM UPSTREAM, deliberately (D51, ledger entry 63, owner ruling (a)): a call
+        // keeps none of its captures, as in Perl and PCRE2, so only the outermost run, the one the
+        // group matched where it is written, is listed. Upstream's list is what the oracle's
+        // ablation gives. A known divergence for the parity board.
+        const string pattern = @"(?<rec>\((?:[^()]++|(?&rec))*\))";
+
         Upstream
-            .Match("aaa(((1+0)+1)+1)bbb", @"(?<rec>\((?:[^()]++|(?&rec))*\))")
+            .Match("aaa(((1+0)+1)+1)bbb", pattern)
+            .Groups["rec"]
+            .Captures.Select(static c => c.Value)
+            .Should()
+            .Equal("(((1+0)+1)+1)");
+
+        FuzzyRegex kept = Upstream.Compile(pattern);
+        kept.PatternObject.KeepCallCaptures = true;
+        kept.Match("aaa(((1+0)+1)+1)bbb")
             .Groups["rec"]
             .Captures.Select(static c => c.Value)
             .Should()

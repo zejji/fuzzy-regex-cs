@@ -89,7 +89,8 @@ internal static class Optimiser
     /// <param name="pattern">The pattern.</param>
     private static void FindAnchorGuards(PatternObject pattern)
     {
-        if (!pattern.IsFuzzy)
+        // D61: BESTMATCH only. Every other search follows rule H' (Matcher.DoMatch2LiftingTheAnchorBan).
+        if (!pattern.IsFuzzy || (pattern.Flags & RegexFlags.BestMatch) == 0)
         {
             return;
         }
@@ -159,6 +160,101 @@ internal static class Optimiser
         };
 
     /// <summary>
+    /// Fills in <see cref="PatternObject.LiftsAnchorBan"/>: whether rule H' can give a different
+    /// answer from upstream's ban. <b>Not an upstream pass</b> (known defect D61).
+    /// </summary>
+    /// <remarks>
+    /// Only a fuzzy pattern ever inserts. In one with no construct that depends on position or on
+    /// the path - an assertion, a lookaround, <c>\G</c>, a backreference, a conditional, a group
+    /// call, a verb or <c>\K</c>, an atomic group or possessive quantifier - and no fuzzy lower bound,
+    /// deleting a match's leading insertions leaves a match from a later start with fewer errors, so
+    /// the banned search already finds one starting inside any candidate and H' returns upstream's
+    /// answer (DECISIONS 2026-09-30). The atomic group is in the list because it commits to its
+    /// first match, which a later start need not reproduce (<c>(?>a?)(?:a){i&lt;=1}</c> over ' a').
+    /// <para>
+    /// Called by <c>PatternObject.Compile</c> once the node list is final and
+    /// <see cref="PatternObject.HasFuzzyMinimum"/> is known.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    internal static void FindAnchorBanLift(PatternObject pattern)
+    {
+        // A pattern whose fuzzy sections permit no insertion never meets the ban.
+        // SHORTCUT: BESTMATCH is gated out and keeps main's path (the ledger 19/20 exemption in
+        // FindAnchorGuards and main's fix for upstream issue 564): H' inside a best-match walk, which
+        // re-searches from each candidate's start, is unresearched, and running it there gave answers
+        // that were neither u nor c (`(?b)(?:\mdog){1<=e<=2}` finditer over 'do; xdog-dog').
+        // Upgrade path: derive how H' composes with the walk's ranking, then refutation-review it.
+        pattern.LiftsAnchorBanWhenPartial =
+            pattern.IsFuzzy
+            && (pattern.Flags & RegexFlags.BestMatch) == 0
+            && pattern.NodeList.Any(static n => PermitsAnInsertion(n));
+        pattern.LiftsAnchorBan =
+            pattern.LiftsAnchorBanWhenPartial
+            && (
+                pattern.HasFuzzyMinimum
+                || pattern.HasGroupCalls
+                || pattern.NodeList.Any(static n => DependsOnThePosition(n.Op))
+            );
+    }
+
+    /// <summary>
+    /// Whether a node is a fuzzy section that permits at least one insertion: its insertion and
+    /// error limits are above zero, and one insertion is within its cost limit.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> for such a section.</returns>
+    private static bool PermitsAnInsertion(Node node) =>
+        node.Op == Opcode.Fuzzy
+        && node.Values[FuzzyValue.MaxIns] > 0
+        && node.Values[FuzzyValue.MaxErr] > 0
+        && node.Values[FuzzyValue.InsCost] <= node.Values[FuzzyValue.MaxCost];
+
+    /// <summary>
+    /// Whether an opcode is one of the constructs that gate rule H' in (see
+    /// <see cref="FindAnchorBanLift"/>).
+    /// </summary>
+    /// <param name="op">The opcode.</param>
+    /// <returns><see langword="true"/> if it depends on the position or the path.</returns>
+    private static bool DependsOnThePosition(Opcode op) =>
+        op switch
+        {
+            Opcode.Boundary
+            or Opcode.DefaultBoundary
+            or Opcode.DefaultEndOfWord
+            or Opcode.DefaultStartOfWord
+            or Opcode.EndOfLine
+            or Opcode.EndOfLineU
+            or Opcode.EndOfString
+            or Opcode.EndOfStringLine
+            or Opcode.EndOfStringLineU
+            or Opcode.EndOfWord
+            or Opcode.GraphemeBoundary
+            or Opcode.SearchAnchor
+            or Opcode.StartOfLine
+            or Opcode.StartOfLineU
+            or Opcode.StartOfString
+            or Opcode.StartOfWord
+            or Opcode.Lookaround
+            or Opcode.RefGroup
+            or Opcode.RefGroupFld
+            or Opcode.RefGroupFldRev
+            or Opcode.RefGroupIgn
+            or Opcode.RefGroupIgnRev
+            or Opcode.RefGroupRev
+            or Opcode.Conditional
+            or Opcode.GroupExists
+            or Opcode.GroupCall
+            or Opcode.CallRef
+            or Opcode.Prune
+            or Opcode.Skip
+            or Opcode.Failure
+            or Opcode.Keep
+            or Opcode.Atomic => true,
+            _ => false,
+        };
+
+    /// <summary>
     /// Upstream <c>skip_one_way_branches</c> (line 23136): a branch with a single exit exists only
     /// to give the builders something to attach to, so nothing should point at one.
     /// </summary>
@@ -191,9 +287,13 @@ internal static class Optimiser
                     modified = true;
                 }
 
-                // Check the true branch for CONDITIONAL.
+                // Check the true branch for CONDITIONAL. NOT UPSTREAM (known defect D55, ledger
+                // entry 62): upstream tests the branch's own true_node here (_regex.c:23206), which
+                // no BRANCH sets, so every alternation at the start of a negative condition's yes
+                // branch lost all but its first alternative. A branch is 1-way when it has no
+                // second exit, as the two checks above test.
                 next = node.TrueNode;
-                if (next is not null && next.Op == Opcode.Branch && next.TrueNode is null)
+                if (next is not null && next.Op == Opcode.Branch && next.Next2.Node is null)
                 {
                     node.TrueNode = next.Next1.Node;
                     modified = true;

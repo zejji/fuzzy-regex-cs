@@ -95,15 +95,41 @@ public sealed class RecursiveTests
         m.Groups[1].Value.Should().Be("ef");
     }
 
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately (D51, ledger entry 63): the recursion is a call, and a
+    /// call keeps none of its captures, as in Perl and PCRE2, so the inner 'cd' is not listed.
+    /// Upstream lists ['ab', 'cd', '(cd)', 'ef'], which the oracle's ablation gives and is asserted
+    /// through it. KEPT rather than dropped, and a known divergence for the parity board, as is
+    /// #16 below.
+    /// </remarks>
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#14")]
-    public void Recursive_atomic_alternation_captures_every_repetition_of_group_one() =>
-        Upstream
-            .Match("(ab(cd)ef)", @"\(((?>[^()]+)|(?R))*\)")
-            .Groups[1]
-            .Captures.Select(static c => c.Value)
-            .Should()
-            .Equal("ab", "cd", "(cd)", "ef");
+    public void Recursive_atomic_alternation_captures_every_top_level_repetition_of_group_one()
+    {
+        const string pattern = @"\(((?>[^()]+)|(?R))*\)";
+
+        Captures(Upstream.Compile(pattern)).Should().Equal("ab", "(cd)", "ef");
+        Captures(WithUpstreamCallCaptures(pattern)).Should().Equal("ab", "cd", "(cd)", "ef");
+    }
+
+    /// <summary>Group 1's captures over <c>(ab(cd)ef)</c>.</summary>
+    /// <param name="regex">The compiled pattern.</param>
+    /// <returns>The captured texts.</returns>
+    private static IEnumerable<string> Captures(FuzzyRegex regex) =>
+        regex.Match("(ab(cd)ef)").Groups[1].Captures.Select(static c => c.Value);
+
+    /// <summary>
+    /// The pattern compiled as <see cref="Upstream"/> compiles it, with the oracle's D51 ablation
+    /// set so that a call's captures stay on the list as upstream leaves them.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The compiled pattern.</returns>
+    private static FuzzyRegex WithUpstreamCallCaptures(string pattern)
+    {
+        FuzzyRegex regex = Upstream.Compile(pattern);
+        regex.PatternObject.KeepCallCaptures = true;
+        return regex;
+    }
 
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#15")]
@@ -115,15 +141,16 @@ public sealed class RecursiveTests
         m.Groups[1].Value.Should().Be("ab");
     }
 
+    // DIVERGES FROM UPSTREAM (D51), as #14 above: upstream lists ['ef', 'cd', '(cd)', 'ab'].
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#16")]
-    public void Reversed_recursive_atomic_alternation_captures_every_repetition_of_group_one_in_reverse() =>
-        Upstream
-            .Match("(ab(cd)ef)", @"(?r)\(((?R)|(?>[^()]+))*\)")
-            .Groups[1]
-            .Captures.Select(static c => c.Value)
-            .Should()
-            .Equal("ef", "cd", "(cd)", "ab");
+    public void Reversed_recursive_atomic_alternation_captures_every_top_level_repetition_of_group_one_in_reverse()
+    {
+        const string pattern = @"(?r)\(((?R)|(?>[^()]+))*\)";
+
+        Captures(Upstream.Compile(pattern)).Should().Equal("ef", "(cd)", "ab");
+        Captures(WithUpstreamCallCaptures(pattern)).Should().Equal("ef", "cd", "(cd)", "ab");
+    }
 
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#17")]

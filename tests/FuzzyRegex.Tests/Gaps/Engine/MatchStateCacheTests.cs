@@ -407,6 +407,13 @@ public sealed class MatchStateCacheTests
             case HashSet<(long Key, int Reach)> set:
                 set.Add((7, 7));
                 break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                counts.Add((7, 7), 7);
+                break;
+            case CaptureTextIds ids:
+                ids.Reset("scribbled".AsMemory());
+                _ = ids.IdOf(1, 2);
+                break;
             case HashSet<EmptyIterationState> states:
                 states.Add(new EmptyIterationState(7, [7]));
                 break;
@@ -442,6 +449,10 @@ public sealed class MatchStateCacheTests
                 break;
             case null when field.FieldType == typeof(CharacterIndex):
                 _ = state.GetCharacterIndex();
+                break;
+            case null when field.FieldType == typeof(Matcher.AnchorBanSnapshot):
+                // D61's rule H' keeps one snapshot per state; a reused state must drop it.
+                field.SetValue(state, new Matcher.AnchorBanSnapshot { MatchPos = 7 });
                 break;
             default:
                 throw new InvalidOperationException(
@@ -531,6 +542,12 @@ public sealed class MatchStateCacheTests
             case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
                 break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                RenderItems(path, counts.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
+                break;
+            case CaptureTextIds ids:
+                lines.Add($"{path}=({ids.Count},{(ReadOnlyMemory<char>)Private(ids, "_text")})");
+                break;
             case HashSet<EmptyIterationState> states:
                 // Allocated on first use and then kept, so an empty one is the same as none.
                 lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
@@ -553,6 +570,9 @@ public sealed class MatchStateCacheTests
                 break;
             case IList list:
                 RenderItems(path, list.Cast<object>(), lines);
+                break;
+            case Matcher.AnchorBanSnapshot snapshot:
+                lines.Add($"{path}=snapshot({snapshot.MatchPos},{snapshot.TextPos})");
                 break;
             default:
                 throw new InvalidOperationException(

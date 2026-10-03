@@ -171,20 +171,24 @@ public sealed class GroupDictionaryViewTests
     }
 
     /// <summary>
-    /// Upstream's <c>capturesdict</c> re-expressed through the dictionary view. It differs from
-    /// <c>groupdict</c> on a <c>(?(DEFINE)...)</c> group, which records a capture while reporting
-    /// no group value.
+    /// Upstream's <c>capturesdict</c> re-expressed through the dictionary view.
     /// </summary>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM on the two <c>(?(DEFINE)...)</c> rows, deliberately (D51, ledger
+    /// entry 63): a group called with <c>(?&amp;name)</c> keeps none of the call's captures, so both
+    /// lists are empty here, where upstream's <c>capturesdict</c> gives <c>routine=[a]</c> and
+    /// <c>func=[a]</c> while its <c>groupdict</c> reports no value. See <c>CallCaptureTests</c>.
+    /// </remarks>
     /// <param name="pattern">The pattern.</param>
     /// <param name="subject">The subject.</param>
     /// <param name="expected">
     /// Upstream's <c>capturesdict</c>, rendered as <c>name=[a,b]</c> lines. From the same probe
-    /// run.
+    /// run, but for the D51 rows.
     /// </param>
     [Test]
     [Arguments("(?P<first>first) (?P<second>second)", "first second", "first=[first]|second=[second]")]
-    [Arguments(@"(?&routine)(?(DEFINE)(?<routine>.))", "a", "routine=[a]")]
-    [Arguments(@"(?(DEFINE)(?<func>.))(?&func)", "abc", "func=[a]")]
+    [Arguments(@"(?&routine)(?(DEFINE)(?<routine>.))", "a", "routine=[]")]
+    [Arguments(@"(?(DEFINE)(?<func>.))(?&func)", "abc", "func=[]")]
     [Arguments("(?<a>a)(b)(?<c>c)?", "ab", "a=[a]|c=[]")]
     [Arguments("(?<x>a)|(?<y>b)", "b", "x=[]|y=[b]")]
     [Arguments("(?<r>[ab])+", "aba", "r=[a,b,a]")]

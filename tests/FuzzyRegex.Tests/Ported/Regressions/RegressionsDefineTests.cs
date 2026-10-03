@@ -46,15 +46,42 @@ public sealed class RegressionsDefineTests
     public void Group_called_only_from_inside_define_reports_no_group_value() =>
         Upstream.Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))").Groups["routine"].Success.Should().BeFalse();
 
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately (D51, ledger entry 63): a call keeps none of its
+    /// captures, as in Perl and PCRE2, so the list is empty here. Upstream's answer,
+    /// <c>regex.match(r'(?&amp;routine)(?(DEFINE)(?&lt;routine&gt;.))', 'a').captures('routine') ==
+    /// ['a']</c>, is what the oracle's ablation gives, and is asserted through it so the row still
+    /// asks upstream's question. KEPT rather than dropped: a row that records the divergence is
+    /// worth more than a row that hides it. A known divergence for the parity board, as are
+    /// #302, #305, #308 and #377 below.
+    /// </remarks>
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#171")]
-    public void Group_called_only_from_inside_define_still_records_its_capture() =>
-        Upstream
-            .Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))")
+    public void Group_called_only_from_inside_define_records_no_capture()
+    {
+        const string pattern = @"(?&routine)(?(DEFINE)(?<routine>.))";
+
+        Upstream.Match("a", pattern).Groups["routine"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures(pattern)
+            .Match("a")
             .Groups["routine"]
             .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
+    }
+
+    /// <summary>
+    /// The pattern compiled as <see cref="Upstream"/> compiles it, with the oracle's D51 ablation
+    /// set so that a call's captures stay on the list as upstream leaves them.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The compiled pattern.</returns>
+    private static FuzzyRegex WithUpstreamCallCaptures(string pattern)
+    {
+        FuzzyRegex regex = Upstream.Compile(pattern);
+        regex.PatternObject.KeepCallCaptures = true;
+        return regex;
+    }
 
     // Hg issue 158: Group issue with (?(DEFINE)...).
     [Test]
@@ -103,15 +130,21 @@ public sealed class RegressionsDefineTests
     public void Define_group_called_directly_reports_no_group_value_by_name() =>
         Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups["func"].Success.Should().BeFalse();
 
+    // DIVERGES FROM UPSTREAM (D51), as #171 above: upstream lists ['a'], which the ablation gives.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#302")]
-    public void Define_group_called_directly_still_records_its_single_capture() =>
-        Upstream
-            .Match("abc", @"(?(DEFINE)(?<func>.))(?&func)")
+    public void Define_group_called_directly_records_no_capture()
+    {
+        const string pattern = @"(?(DEFINE)(?<func>.))(?&func)";
+
+        Upstream.Match("abc", pattern).Groups["func"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures(pattern)
+            .Match("abc")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
+    }
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#303")]
@@ -123,15 +156,21 @@ public sealed class RegressionsDefineTests
     public void Define_group_called_from_a_lookahead_reports_no_group_value_by_name() =>
         Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups["func"].Success.Should().BeFalse();
 
+    // DIVERGES FROM UPSTREAM (D51), as #171 above: upstream lists ['a'], which the ablation gives.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#305")]
-    public void Define_group_called_from_a_lookahead_still_records_its_single_capture() =>
-        Upstream
-            .Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))")
+    public void Define_group_called_from_a_lookahead_records_no_capture()
+    {
+        const string pattern = @"(?(DEFINE)(?<func>.))(?=(?&func))";
+
+        Upstream.Match("abc", pattern).Groups["func"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures(pattern)
+            .Match("abc")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
+    }
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#306")]
@@ -143,15 +182,21 @@ public sealed class RegressionsDefineTests
     public void Define_group_called_from_a_lookbehind_reports_no_group_value_by_name() =>
         Upstream.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups["func"].Success.Should().BeFalse();
 
+    // DIVERGES FROM UPSTREAM (D51), as #171 above: upstream lists ['a'], which the ablation gives.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#308")]
-    public void Define_group_called_from_a_lookbehind_still_records_its_single_capture() =>
-        Upstream
-            .Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))")
+    public void Define_group_called_from_a_lookbehind_records_no_capture()
+    {
+        const string pattern = @"(?(DEFINE)(?<func>.)).(?<=(?&func))";
+
+        Upstream.Match("abc", pattern).Groups["func"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures(pattern)
+            .Match("abc")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
+    }
 
     // Hg issue 329: Wrong group matches when question mark quantifier is used within a look
     // behind.
@@ -159,11 +204,15 @@ public sealed class RegressionsDefineTests
     [Property("Upstream", "RegexTests.test_hg_bugs#377")]
     public void Define_group_with_an_internal_alternative_records_captures_only_for_the_branch_that_matched()
     {
-        Match m = Upstream.Match(
-            "x right",
-            @"(?(DEFINE)(?<mydef>(?<wrong>THIS_SHOULD_NOT_MATCHx?)|(?<right>right))).*(?<=(?&mydef).*)"
-        );
+        // DIVERGES FROM UPSTREAM (D51), as #171 above: every capture here is made inside the call,
+        // so none survives it. Upstream's issue - a branch that failed left its capture behind - is
+        // asked through the ablation, which keeps the call's captures as upstream does.
+        const string pattern =
+            @"(?(DEFINE)(?<mydef>(?<wrong>THIS_SHOULD_NOT_MATCHx?)|(?<right>right))).*(?<=(?&mydef).*)";
+        Match own = Upstream.Match("x right", pattern);
+        Match m = WithUpstreamCallCaptures(pattern).Match("x right");
 
+        own.Groups.Values.Skip(1).Should().AllSatisfy(static g => g.Captures.Should().BeEmpty());
         m.Groups["mydef"].Captures.Select(static c => c.Value).Should().Equal("right");
         m.Groups["wrong"].Captures.Select(static c => c.Value).Should().BeEmpty();
         m.Groups["right"].Captures.Select(static c => c.Value).Should().Equal("right");

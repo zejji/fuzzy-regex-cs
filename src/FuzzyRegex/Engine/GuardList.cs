@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -53,8 +54,40 @@ internal sealed class GuardList
     /// <summary>Upstream <c>count</c>: how many of <see cref="_spans"/> are live.</summary>
     internal int Count;
 
+    /// <summary>
+    /// NOT UPSTREAM (D35), counted in Debug only: how many times the list has been guarded, reset
+    /// or popped, so <c>Matcher.CheckKeptGuards</c> can tell that nothing touched it in between.
+    /// </summary>
+    internal long Edits;
+
     /// <summary>Upstream <c>reset_guard_list</c> (<c>upstream/src/_regex.c</c> line 3363).</summary>
-    internal void Reset() => Count = 0;
+    internal void Reset()
+    {
+        NoteEdit();
+        Count = 0;
+    }
+
+    /// <summary>Counts one edit in <see cref="Edits"/>, in Debug only.</summary>
+    [Conditional("DEBUG")]
+    private void NoteEdit() => Edits++;
+
+    /// <summary>
+    /// NOT UPSTREAM (D35), for a Debug assertion: whether every live span blocks matching, that is,
+    /// the list records failures and no success mark.
+    /// </summary>
+    /// <returns><see langword="true"/> if no live span is unprotected.</returns>
+    internal bool HoldsFailuresOnly()
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            if (!_spans[i].Protect)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many.</summary>
     /// <param name="stack">The stack to push onto.</param>
@@ -74,6 +107,7 @@ internal sealed class GuardList
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopFrom(ByteStack stack)
     {
+        NoteEdit();
         if (!stack.PopSize(out long count))
         {
             return false;
@@ -164,6 +198,7 @@ internal sealed class GuardList
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
     internal void Guard(int textPos, bool protect)
     {
+        NoteEdit();
         GuardSpan[] spans = _spans;
         int count = Count;
         int below;
@@ -255,6 +290,7 @@ internal sealed class GuardList
     /// <returns>One past the highest position now guarded.</returns>
     internal int GuardRange(int loPos, int hiPos, bool protect)
     {
+        NoteEdit();
         GuardSpan[] spans = _spans;
         int count = Count;
 

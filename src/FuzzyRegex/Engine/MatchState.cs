@@ -40,6 +40,101 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
+/// NOT UPSTREAM'S: what of a group that a conditional or backreference reads the call guard
+/// compares, to tell whether a call would repeat an open one (<see cref="MatchState.ActiveCalls"/>).
+/// </summary>
+/// <remarks>
+/// <para>
+/// The guard compares exactly what a reader can see (the capture-dependent recursion design,
+/// <c>docs/plan/2026-09-28-capture-dependent-recursion-design.md</c> section 4d). A conditional
+/// reads only whether its group is set. A backreference compares the group's text with the text
+/// ahead, so two captures with equal text behave the same for every backreference, wherever they
+/// sit. Comparing the spans instead walked a new call chain for every position at which an empty
+/// group had been set, 2^n of them on <c>(?:()|a)(?R)|(?(1)x)</c> over <c>a...ay</c>. Exact text is
+/// finer than a case-insensitive or fuzzy comparison needs, so it can keep apart two states that
+/// could have been merged, but never merges two that differ.
+/// </para>
+/// <para>
+/// One more thing reads a group's span: the capture-change counter, which a capture bumps only
+/// when the new span differs from the current one, and which a repeat's empty-iteration test and
+/// an optional pass read. So a group captured inside a repeat body, and every read group of a
+/// fuzzy pattern, is compared by span (<see cref="Span"/>).
+/// <c>(?:(?:(?:(?(g)|z)b)?.|(?:a(?(g)b)|a(?:(?&lt;g&gt;)|a)*)))|(?&lt;g&gt;)(?R)(?:(?R)|\1)|(?:(?P=g)(?R)|(?R))</c>
+/// fullmatch over <c>aax</c> gave group 1 two captures more than upstream's <c>[0,0][1,0]</c> when
+/// that group was compared by text (the design grid, 2026-09-29).
+/// </para>
+/// </remarks>
+internal enum CallRead : byte
+{
+    /// <summary>Only whether it is set: only conditionals read it.</summary>
+    SetOrUnset,
+
+    /// <summary>Its text: a backreference reads it.</summary>
+    Text,
+
+    /// <summary>Its span: it is captured inside a repeat body, or the pattern is fuzzy.</summary>
+    Span,
+}
+
+/// <summary>
+/// NOT UPSTREAM'S: numbers the distinct texts that groups a backreference reads have captured, so
+/// the failed-call memo can key a group on its text with one number (<c>Matcher.ReadValue</c>).
+/// Two spans get the same id exactly when their texts are equal, compared ordinally.
+/// </summary>
+/// <remarks>
+/// The ids hold for one subject: <see cref="MatchState.Init"/> calls <see cref="Reset"/>, and the
+/// failed-call memo, the one set of keys that holds an id, is emptied there too. SHORTCUT: the table
+/// only grows while one subject is matched. It gains an entry only for a new text seen while the
+/// memo builds keys, so it is no larger than the calls made; a cap with a fallback to keying on
+/// spans would bound it, if a workload ever shows it matters.
+/// </remarks>
+internal sealed class CaptureTextIds : IEqualityComparer<(int Start, int Length)>
+{
+    private readonly Dictionary<(int Start, int Length), long> _ids;
+    private ReadOnlyMemory<char> _text;
+
+    /// <summary>Initializes a new instance of the <see cref="CaptureTextIds"/> class.</summary>
+    internal CaptureTextIds()
+    {
+        _ids = new Dictionary<(int Start, int Length), long>(this);
+    }
+
+    /// <summary>How many distinct texts have an id.</summary>
+    internal int Count => _ids.Count;
+
+    /// <summary>Forgets every id and starts numbering the texts of <paramref name="text"/>.</summary>
+    /// <param name="text">The subject.</param>
+    internal void Reset(ReadOnlyMemory<char> text)
+    {
+        _ids.Clear();
+        _text = text;
+    }
+
+    /// <summary>The id of the text at <paramref name="start"/>, numbering it if it is new.</summary>
+    /// <param name="start">Where the text starts in the subject.</param>
+    /// <param name="length">Its length.</param>
+    /// <returns>The id, at least 1, so it is never the value of an unset group (-1) or of a set group only conditionals read (0).</returns>
+    internal long IdOf(int start, int length)
+    {
+        ref long id = ref CollectionsMarshal.GetValueRefOrAddDefault(_ids, (start, length), out bool exists);
+        if (!exists)
+        {
+            id = _ids.Count;
+        }
+
+        return id;
+    }
+
+    /// <inheritdoc/>
+    public bool Equals((int Start, int Length) x, (int Start, int Length) y) =>
+        x.Length == y.Length && _text.Span.Slice(x.Start, x.Length).SequenceEqual(_text.Span.Slice(y.Start, y.Length));
+
+    /// <inheritdoc/>
+    public int GetHashCode((int Start, int Length) obj) =>
+        string.GetHashCode(_text.Span.Slice(obj.Start, obj.Length), StringComparison.Ordinal);
+}
+
+/// <summary>
 /// Everything one capture group has captured during this match. Port of <c>RE_GroupData</c>
 /// (<c>upstream/src/_regex.c</c> lines 329-334).
 /// </summary>
@@ -163,6 +258,12 @@ internal sealed class MatchState : IDisposable
     /// of <c>docs/plan/2026-09-19-span-threading-decision.md</c>).
     /// </summary>
     internal ReadOnlyMemory<char> Text;
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the ids of the texts the failed-call memo has keyed a backreferenced group on.
+    /// See <see cref="CaptureTextIds"/>.
+    /// </summary>
+    internal readonly CaptureTextIds CaptureTexts = new();
 
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
@@ -335,18 +436,20 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
-    /// call was made.
+    /// call was made. In a pattern where a conditional or backreference reads a group, two open
+    /// calls can share an entry, so <see cref="ActiveCallCounts"/> is used in its place.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Ledger entry 14: the guard against a recursion that can never finish. A call that
     /// re-enters a group at the text position where a call of that group is already open, when the
-    /// attempt has reached no text since that call opened, is failed. Usually such a call can only
-    /// repeat the open call's work one level deeper, but NOT always: a conditional or
-    /// backreference that reads a group set between the two calls can make the inner call do
-    /// something different, and then the path is finite and this guard wrongly fails it
-    /// (<c>OpenDefectTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
-    /// PCRE2 refuses the same shapes, upstream answers them). If the attempt HAS reached
+    /// attempt has reached no text since that call opened AND with every group a conditional or
+    /// backreference reads showing what it showed then (<see cref="CallRead"/>: set or not for a
+    /// conditional, the text for a backreference), can only repeat the open call's work one level
+    /// deeper, so that path recurses for ever and is failed. The captures matter
+    /// because a group set between the two calls can change what a conditional or backreference
+    /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
+    /// PCRE2 refuses those shapes, upstream answers them). If the attempt HAS reached
     /// further, the inner call is let through: that is left recursion, <c>G -&gt; '' | G 'a'</c>,
     /// where the outer call's first try failed further on and the inner call is how 'aa' gets
     /// matched. The rule is PCRE2's (<c>OP_RECURSE</c> in <c>pcre2_match.c</c> 10.47, lines
@@ -356,17 +459,32 @@ internal sealed class MatchState : IDisposable
     /// </para>
     /// <para>
     /// Why it terminates: the width only grows during an attempt and never passes the text length,
-    /// and the set holds each entry once, so at most <c>TextLength + 1</c> calls of one group can be
-    /// open at one position.
+    /// each read group shows one of at most <c>(n + 1)^2 + 1</c> values (n the text length: a text
+    /// or unset; a group only conditionals read has two), and the set holds each entry once, so at
+    /// most <c>(n + 1) * ((n + 1)^2 + 1)^r</c> calls of one group can be open at one position, r the
+    /// number of groups read. Groups nothing reads are left out
+    /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
+    /// for every order of setting the empty groups, about k! paths. When no group is read at all
+    /// the bound is <c>n + 1</c>.
     /// </para>
     /// <para>
-    /// A set rather than a counter, because an entry is only ever added when it is absent - that is
-    /// what the guard tests. <see cref="OpenCalls"/> is the same information as a stack, and is what
-    /// keeps the two in step; this is only here so the test itself costs O(1) on a recursion ten
-    /// thousand deep.
+    /// A set rather than a counter where no group is read, because an entry is only ever added when
+    /// it is absent - that is what the guard tests. Where groups are read, a count per key
+    /// (<see cref="ActiveCallCounts"/>), so a call whose key and reach no open call shares is let
+    /// through without looking at any capture; only when one does are the open calls with that key
+    /// and reach compared with the read groups now (<see cref="OpenCallSpans"/>). Either way the test
+    /// costs O(1) on a recursion ten thousand deep. <see cref="OpenCalls"/> is the same information
+    /// as a stack, and is what keeps them in step.
     /// </para>
     /// </remarks>
     internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: <see cref="ActiveCalls"/> for a pattern with a group a conditional or
+    /// backreference reads: how many calls are open for each key and reach. Only keys with an open
+    /// call are present.
+    /// </summary>
+    internal readonly Dictionary<(long Key, int Reach), int> ActiveCallCounts = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
@@ -421,6 +539,14 @@ internal sealed class MatchState : IDisposable
     internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
 
     /// <summary>
+    /// NOT UPSTREAM'S: for each entry of <see cref="OpenCalls"/>, in the same order, the packed span
+    /// (<c>Matcher.PackedSpan</c>, -1 when unset) that each group of
+    /// <see cref="PatternObject.CallReadGroups"/> held when the call was made. The guard compares
+    /// them (<see cref="CallRead"/>) and the failed-call memo keys them; empty when no group is read.
+    /// </summary>
+    internal readonly List<long> OpenCallSpans = [];
+
+    /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
     /// choices without ever returning, or <see langword="null"/> before the first is recorded. See
     /// <c>Matcher.FailedCallKey</c> for what a key holds and why a call with a recorded key can be
@@ -459,6 +585,12 @@ internal sealed class MatchState : IDisposable
     /// allocates nothing.
     /// </summary>
     internal readonly List<long> CallMemoKey = [];
+
+    /// <summary>
+    /// Where <c>Matcher.FailedCallKey</c> collects the open calls its key holds, as indexes into
+    /// <see cref="OpenCalls"/>, kept so building a key allocates nothing.
+    /// </summary>
+    internal readonly List<int> CallMemoAncestors = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): how many calls the memo has failed at once since the
@@ -828,6 +960,13 @@ internal sealed class MatchState : IDisposable
     internal bool IsFuzzy;
 
     /// <summary>
+    /// NOT UPSTREAM (D61): the storage rule H' keeps the banned search's match in while it tries the
+    /// attempt at the anchor (<c>Matcher.AnchorBanSnapshot</c>), reused across the searches of one
+    /// call. Dropped at reset.
+    /// </summary>
+    internal Matcher.AnchorBanSnapshot? AnchorBanScratch;
+
+    /// <summary>
     /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
     /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
     /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
@@ -1077,6 +1216,7 @@ internal sealed class MatchState : IDisposable
 
         Text = text;
         TextLength = text.Length;
+        CaptureTexts.Reset(text);
         // The ushort form of the same search allocates nothing; the char form allocated 96 B on
         // every call, even after tier-up, in Debug and Release (measured 2026-09-22, .NET 10).
         // That 96 B was the whole of a warm IsMatch's allocation; AllocationTests pins the 0.
@@ -1122,11 +1262,14 @@ internal sealed class MatchState : IDisposable
         Array.Clear(OptionalPasses);
 
         ActiveCalls.Clear();
+        ActiveCallCounts.Clear();
         OpenCalls.Clear();
+        OpenCallSpans.Clear();
         FailedCalls = null;
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
         CallMemoKey.Clear();
+        CallMemoAncestors.Clear();
         VerbMarks.Clear();
         CallMemoHits = 0;
         ReachedLow = int.MaxValue;
@@ -1175,6 +1318,7 @@ internal sealed class MatchState : IDisposable
         ScreenClearedHigh = 0;
         FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
+        AnchorBanScratch = null;
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);
@@ -1321,6 +1465,7 @@ internal sealed class MatchState : IDisposable
         }
 
         Text = default;
+        CaptureTexts.Reset(default);
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
@@ -1704,8 +1849,48 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
-    /// Upstream <c>pop_fuzzy_counts</c> (line 2652), <b>restoring</b>: the counts and the change list
-    /// both go back to what they were at the matching push.
+    /// What <c>ATOMIC</c>, <c>CONDITIONAL</c> and <c>LOOKAROUND</c> save so that their eight
+    /// <b>restoring</b> arms can put the fuzzy state back as if the body had never run: upstream
+    /// <c>push_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 2480), the change-list length
+    /// beside it (see <see cref="PushFuzzyCounts"/>), the open section and the running totals.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The open section is this port's (D44), and upstream does not save it.</b> The body always
+    /// ends in the section it started in, except where a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cuts the
+    /// backtracking straight to the construct: that throws away the <c>FUZZY</c> entry of a section
+    /// opened inside the body, whose backtrack arm is what would have put <see cref="FuzzyNode"/>
+    /// back. The inner section then stayed the open one and its limits governed the rest of the
+    /// enclosing section: <c>(?:(?!(?:a(*PRUNE)b){d&lt;=0})cd){e&lt;=2}</c> over 'ad' moved to (1, 2),
+    /// in upstream too, where the same pattern without the verb matches at (0, 2) with one
+    /// substitution.
+    /// </para>
+    /// <para>
+    /// <b>The running totals are this port's too (D45).</b> <see cref="TotalErrors"/> and
+    /// <see cref="TotalCost"/> are written by every <c>END_FUZZY</c> the body passes, so a body
+    /// thrown away with a closed section in it left its errors in the totals while the counts went
+    /// back: <c>(?:(?=(?:q){e&lt;=1})z)?a</c> over 'a' reached SUCCESS with no errors counted and a
+    /// total of one. Upstream never restores <c>total_errors</c> at all (ledger entry 32).
+    /// </para>
+    /// </remarks>
+    /// <param name="stack">The stack to push onto.</param>
+    internal void PushSubAttemptFuzzyState(ByteStack stack)
+    {
+        if (!IsFuzzy)
+        {
+            return;
+        }
+
+        stack.PushSize(TotalErrors);
+        stack.PushSize(TotalCost);
+        stack.PushNode(FuzzyNode);
+        PushFuzzyCounts(stack, FuzzyCounts);
+    }
+
+    /// <summary>
+    /// Upstream <c>pop_fuzzy_counts</c> (line 2652) at the eight <b>restoring</b> sites: the counts,
+    /// the change list, the open section and the running totals all go back to what they were at the matching
+    /// <see cref="PushSubAttemptFuzzyState"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1719,20 +1904,37 @@ internal sealed class MatchState : IDisposable
     /// <para>
     /// <b>The eight restoring sites are the constructs that abandon a sub-attempt without
     /// backtracking through it</b> - <c>ATOMIC</c>/<c>END_ATOMIC</c>,
-    /// <c>CONDITIONAL</c>/<c>END_CONDITIONAL</c> and <c>LOOKAROUND</c>/<c>END_LOOKAROUND</c>. A rough
-    /// rule is that a pop into a scratch span is a merge and a pop into <see cref="FuzzyCounts"/> is
-    /// a restore, <b>and the <c>FUZZY</c> backtrack arm is the exception that breaks it</b>: it
-    /// merges into <see cref="FuzzyCounts"/>. Read the site, not the buffer.
+    /// <c>CONDITIONAL</c>/<c>END_CONDITIONAL</c> and <c>LOOKAROUND</c>/<c>END_LOOKAROUND</c>.
     /// </para>
     /// </remarks>
     /// <param name="stack">The stack to pop from.</param>
-    /// <param name="fuzzyCounts">Receives the counts, and is left alone for a non-fuzzy pattern.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    internal bool PopFuzzyCounts(ByteStack stack, Span<long> fuzzyCounts)
+    internal bool PopSubAttemptFuzzyState(ByteStack stack)
     {
-        if (!PopFuzzyCountsMerging(stack, fuzzyCounts, out long changeCount))
+        if (!IsFuzzy)
+        {
+            return true;
+        }
+
+        if (
+            !PopFuzzyCountsMerging(stack, FuzzyCounts, out long changeCount)
+            || !stack.PopNode(Pattern, out Node? fuzzyNode)
+            || !stack.PopSize(out long totalCost)
+            || !stack.PopSize(out long totalErrors)
+        )
         {
             return false;
+        }
+
+        if (!Pattern.KeepSectionOpenAfterAVerb)
+        {
+            FuzzyNode = fuzzyNode;
+        }
+
+        if (!Pattern.KeepDiscardedTotals)
+        {
+            TotalErrors = totalErrors;
+            TotalCost = totalCost;
         }
 
         TruncateFuzzyChanges(changeCount);
