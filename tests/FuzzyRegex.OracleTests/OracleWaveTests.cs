@@ -477,9 +477,8 @@ public sealed class OracleWaveTests
                         row.Number
                     );
                 // The Id first, so a row another entry claims names that entry in the failure.
-                ExpectedDivergences
-                    .For(row, ours)
-                    ?.Id.Should()
+                (ExpectedDivergences.For(row, ours)?.Id)
+                    .Should()
                     .Be(entry.Id, "{0}: an entry must account for its own example row {1}", entry.Id, row.Number);
                 ExpectedDivergences
                     .For(row, ours)
@@ -724,9 +723,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -922,9 +920,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -953,9 +950,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1014,9 +1010,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1046,9 +1041,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1078,9 +1072,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1110,9 +1103,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1144,9 +1136,8 @@ public sealed class OracleWaveTests
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            ExpectedDivergences
-                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
                 .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
                 .For(row, row.Expected)
@@ -1367,9 +1358,8 @@ public sealed class OracleWaveTests
             IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
             IOracleOutcome defect = live is NoMatchOutcome ? matchAtZero : new NoMatchOutcome();
 
-            ExpectedDivergences
-                .For(row, live)
-                ?.Id.Should()
+            (ExpectedDivergences.For(row, live)?.Id)
+                .Should()
                 .Be(id, "this port's live answer to row {0} is the family", row.Number);
             entry
                 .Applies(row, row.Expected)
@@ -1441,9 +1431,8 @@ public sealed class OracleWaveTests
             .Subject;
         IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
 
-        ExpectedDivergences
-            .For(row, live)
-            ?.Id.Should()
+        (ExpectedDivergences.For(row, live)?.Id)
+            .Should()
             .Be(entry.Id, "the extra match ends before a CR, where `$` is false");
 
         // Under WORD the same CR ends a line, so the extra match no longer refutes itself - whether
