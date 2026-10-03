@@ -392,6 +392,39 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// A fuzzy deletion of <c>\X</c>'s character leaves its grapheme boundary tested where it
+    /// started, so over an empty text the boundary sits at the edge with no character on the known
+    /// side: the start of the text forward, its end reversed. Every continuation is non-empty, so
+    /// the boundary there is a break (UAX #29 GB1, GB2), whatever the text to come. The test read the
+    /// character before the text instead: an assert in Debug, an index out of range in Release.
+    /// </summary>
+    /// <remarks>
+    /// Expected answers: the brute-force judge and the port's own non-partial judge, which agree
+    /// (2026-10-03). A search reports the start inside the text to come as P(0, 0) ('\n' + 'ab'
+    /// matches the lookbehind at 2).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to the two searches without the b.
+    [Test]
+    [Arguments("match", @"(?<=(?:\X\X){e<=1})", "None")]
+    [Arguments("search", @"(?<=(?:\X\X){e<=1})", "P(0,0)")]
+    [Arguments("fullmatch", @"(?<=(?:\X\X){e<=1})", "None")]
+    [Arguments("match", @"(?r)(?=(?:\X\X){e<=1})", "None")]
+    [Arguments("search", @"(?r)(?=(?:\X\X){e<=1})", "P(0,0)")]
+    [Arguments("fullmatch", @"(?r)(?=(?:\X\X){e<=1})", "None")]
+    [Arguments("search", @"(?<=(?:\X\X){e<=1})b", "P(0,0)")]
+    public void A_grapheme_boundary_at_the_edge_of_an_empty_text_is_a_break(
+        string operation,
+        string pattern,
+        string expected
+    )
+    {
+        Match m = Partial(operation, pattern, "");
+        string kind = m.PartialMatch ? "P" : "F";
+
+        (m.Success ? $"{kind}({m.Index},{m.Index + m.Length})" : "None").Should().Be(expected);
+    }
+
+    /// <summary>
     /// D26: a fuzzy zero-width test that passes undetermined at the edge still offers the insertion
     /// in front of what follows, so the path through it is not the only one. Over 'a', the
     /// <c>$</c> after the <c>a</c> passes undetermined, and the lookbehind <c>(?&lt;=:)</c> then

@@ -2513,9 +2513,12 @@ internal static class Matcher
     /// Control or LF (GB4), or before a Control or CR (GB5), there is always a break, which is also
     /// what the first pass, reading the edge as the end of the text (GB1, GB2), answered. Everywhere
     /// else an Extend character keeps the cluster going (GB9, and GB3 for a CR before an LF) and a
-    /// Control breaks it (GB5, GB4), so the test is undetermined. The known side always holds a
-    /// character here, because <c>\X</c> tests its boundary only after taking one
-    /// (<c>Nodes.cs</c>, <c>Grapheme.CompileCore</c>).
+    /// Control breaks it (GB5, GB4), so the test is undetermined. The known side is empty only when
+    /// the held text is: <c>\X</c> tests its boundary after taking a character
+    /// (<c>Nodes.cs</c>, <c>Grapheme.CompileCore</c>), unless a fuzzy deletion skipped that
+    /// character, which leaves the boundary where the <c>\X</c> started. The edge is then also the
+    /// start of the text forward (its end reversed), and every continuation is non-empty, so there
+    /// is always a break (GB1, GB2), where the first pass, over an empty text, answered none.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The edge.</param>
@@ -2524,10 +2527,13 @@ internal static class Matcher
     {
         bool forward = state.PartialSide == MatchState.PartialRight;
 
-        Debug.Assert(
-            forward ? textPos > state.TextStart : textPos < state.TextEnd,
-            "D11 M1: a grapheme boundary at the edge has a character on its known side"
-        );
+        if (forward ? textPos <= state.TextStart : textPos >= state.TextEnd)
+        {
+            Debug.Assert(state.TextStart == state.TextEnd, "D11 M1: the known side is empty only in an empty text");
+            state.AttemptTouchedTheTextToCome = true;
+            state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+            return MatchStatus.Success;
+        }
 
         uint knownProp = UnicodeTables.GetGraphemeClusterBreak(
             state.CharAt(forward ? state.PrevPos(textPos) : textPos)
