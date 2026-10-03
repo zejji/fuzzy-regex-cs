@@ -46,3 +46,18 @@ Open, not fixed here: D38's anchored `\b` rows answer P(0, 2) through S57d's esc
 `ANY_ALL` runs out at the edge and the partial is answered at once at the anchor (likely D67's
 shape, not must-advance). `(?:(?=a)c){i<=1}` match 'b' answers P(0, 1) where the judge says None
 (a body run-out in a fuzzy section; predates this round). Scratch: `.scratch/fr/` (grids, probes).
+
+## Chunk 9 fix round final checks (2026-10-03, on ee76cb60, no engine change)
+
+Oracle (Release, each seed alone under the test lock): seed 7 GREEN (agree 7393, expected 179,
+timeout 2, resource 4, undefined 2, diverge 0 of 7580); seed 4242 GREEN (agree 7406, expected 169,
+resource 5, diverge 0); seed 20260927 GREEN (agree 7393, expected 183, resource 4, diverge 0).
+`tools/check-doc-examples.ps1`: all examples ok, exit 0.
+
+Perf, af012080 (parent of f74e096e) against f74e096e, Release, `DOTNET_TieredCompilation=0`, same
+harness built against each tree, partial calls over the 8,760 item-0 and memo grid rows
+(`.scratch/fr/rows.jsonl`, `rows2.jsonl`), 3 alternating runs each, per-row median of 9 timed
+batches, median across runs. Machine idle (CPU load 1-2%, nothing else running). Answers differ on
+0 rows. Total 16.3 ms old, 16.0 ms new (ratio 0.981); by operation 0.972 to 0.985, nothing above 1.0.
+Of 204 rows over 10 us, 4 read 10-13% slower (rows 588, 613, 623, 1262 of rows.jsonl, 11-40 us each);
+run-to-run spread on the same row was 10-15%, so this is timing noise, not a path regression.
