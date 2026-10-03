@@ -139,3 +139,20 @@ judge, 0 away, 0 new phantoms. Ratchet GREEN (8131).
   replay and frame emulation); (b) a step budget per attempt next to the fork budget, which bounds
   X1 directly; (c) accept X1's cost, since it is a C5 phantom row. Recommendation: (b) or (c); (a)
   adds the largest mechanism for one pathological row.
+- **Z1 and Z2** answer P(0, 1) through RC5 alone; Z2 (`(?:a\B){i<=1}` fullmatch 'a') joins
+  `PartialEdgeReadTests.An_insertion_at_the_edge_runs_out_of_text`.
+- **Final checks** (on 10300f80 plus the Z2 row): ratchet GREEN (8137); oracle, Release, each seed
+  alone under the test lock: seed 7 GREEN (agree 7394, expected 178, timeout 2, resource 4,
+  undefined 2, diverge 0 of 7580), seed 4242 GREEN (agree 7406, expected 169, resource 5, diverge 0),
+  seed 20260927 GREEN (agree 7393, expected 183, resource 4, diverge 0). Doc examples: all ok.
+  Perf, 4fba2ff2 against 10300f80, Release, `DOTNET_TieredCompilation=0`, the same harness built
+  against each tree, partial calls over 10,760 rows (item 0, memo, 2,000 held-advance rows), 3
+  alternating runs, per-row median of 9 batches: total 16.9 ms old, 16.6 ms new (0.985); every
+  file and operation 0.97-1.00; 2 of 181 rows over 10 us read 11-12% slower (10-19 us; the run-to-run
+  spread). A call without partial runs no changed code: the deleted notes ran in it before
+  (`TryMatchDefaultBoundary` called one unconditionally), and D69's checks sit behind a negative
+  status in partial-only arms.
+- **Not done here, for the merge**: KNOWN-DEFECTS (D26's row still credits chunk 6's retry, D38
+  moves to Completed with its C4 forms registered under D18, D69 to Completed; the `(?w)` rows W1-W3,
+  W5, W6 are misses until chunk 10); the new ledger entry and draft report for upstream's lookaround
+  phantom (design section 5), left to the merge so its number does not collide with main's.

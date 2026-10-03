@@ -372,11 +372,14 @@ public sealed class PartialEdgeReadTests
     /// failed path to a partial, which hid RC5. M1 now decides <c>\m</c> after a word character and
     /// <c>\M</c> after a non-word one without that note, and the insertion that would get past them
     /// failed instead of running out. The judge answers P(0, 1) to every row ('a' + ' ' completes
-    /// the first, and ' ' + 'a' the next three), as 11ccae7 did; upstream 2026.9.10 answers None.
+    /// the first, 'a' + 'b' with the 'b' inserted the second, and ' ' + 'a' the next three), as
+    /// 11ccae7 did; upstream 2026.9.10 answers None. Since build chunk 9 deleted S57d's escalation,
+    /// RC5 alone answers them.
     /// </remarks>
     // DIVERGES FROM UPSTREAM, as 11ccae7 did: upstream's insertion arm has the same slip.
     [Test]
     [Arguments("match", @"(?:a\m){i<=1}", "a")]
+    [Arguments("fullmatch", @"(?:a\B){i<=1}", "a")]
     [Arguments("match", @"(?: ?\M){e<=1}", " ")]
     [Arguments("fullmatch", @"(?: \M){i<=1}", " ")]
     [Arguments("fullmatch", @"(?b)(?: ?\M){e<=1}", " ")]
