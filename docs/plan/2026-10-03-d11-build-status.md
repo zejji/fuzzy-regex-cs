@@ -80,3 +80,26 @@ run-to-run spread on the same row was 10-15%, so this is timing noise, not a pat
   `finditer` operation and lists every event's row count; `d11-held-advance-grid.py` (8,584 rows)
   reaches them: 581 rows with `HeldFailedTheCondition`, 432 with `MustAdvanceLifted`.
 - Grids (Debug): item 0 and memo, 0 answers changed against the fix round, 0 asserts. Ratchet GREEN (8120).
+
+## D69 (2026-10-03): a repeat's backtracking arm answered a run-out at once
+
+A one-character repeat's backtracking arm inside a lookaround body answered the partial at once
+where it reached the edge, skipping chunk 8's `RunOutInALookaroundBody`. Four sites, each routed
+to `runOut` and each with its own witness (planted out one at a time, every listed row red):
+GREEDY_REPEAT_ONE's string tail (`(?=b[^a]*cab)(*FAIL)` over 'bca'), LAZY_REPEAT_ONE's
+`IsTailPartial` (`(?=b.*?c)(*FAIL)` over 'b'), its `MatchOne` (`\X`'s lazy `ANY_ALL`, the finditer
+row `(?<=b)(?=\X)` over 'abb': P(3, 3)), and its tail's `TryMatch` (`(?=b.*?cd)(*FAIL)` over 'bc').
+Tests: `PartialLookaroundRuleTests.A_lazy_repeat_that_backtracks_to_the_edge_in_a_body_runs_out_there`
+and `A_scan_whose_lazy_repeat_backtracks_to_the_edge_in_a_body_reports_the_edge`. The two `\X`
+match rows (`(?=\X)(*FAIL)` over 'b' and its reversed form) are fixed in the second pass but S57d's
+escalation still answers them (the grapheme boundary sets HitEnd), so they wait in `OpenDefectTests`
+for part 2.
+Other arms checked: the general GREEDY_REPEAT / LAZY_REPEAT backtracking arms answer no partial;
+the fuzzy retry arms (`RetryFuzzyMatchItem` and kin, `InsertBeforeAFailedLookaround`) return a
+partial status directly too, but routing them through `runOut` changed no answer over 3,903 rows
+(the item-0 grid, a 672-row fuzzy-body grid, a 231-row zero-width-at-the-edge grid), so they are left
+as they are; no witness found. Lead, not D69: a lookaround whose first body item is a literal runs
+out at the item's start test before its frame is pushed (`(?=b)(*FAIL)` over '' is P(0, 0), judge
+None, upstream P(0, 0)); `RunOutInALookaroundBody` finds no open lookaround there.
+Grids (Debug): item 0 and memo 0 answers changed; held-advance 120 finditer rows moved, all onto the
+judge, 0 away, 0 new phantoms. Ratchet GREEN (8131).

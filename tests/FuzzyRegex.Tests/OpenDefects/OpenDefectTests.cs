@@ -71,6 +71,19 @@ public sealed class OpenDefectTests
         m.Success.Should().BeFalse();
     }
 
+    // D69's `\X` rows. The lazy repeat's arm now runs out inside the body (PartialLookaroundRuleTests),
+    // so the second pass fails, but the grapheme boundary read at the edge sets HitEnd and S57d's
+    // escalation answers P(0, 1). No continuation matches: the (*FAIL) fails whatever follows (the
+    // port's own judge; upstream 2026.9.10 answers None too). D11 build chunk 9 part 2 deletes the
+    // escalation.
+    [Test]
+    [Arguments(@"(?=\X)(*FAIL)")]
+    [Arguments(@"(?r)(*FAIL)(?<=\X)")]
+    public void A_lazy_repeat_that_backtracks_to_the_edge_in_a_body_gives_no_partial(string pattern)
+    {
+        new FuzzyRegex(pattern).MatchAtStart("b", partial: true).Success.Should().BeFalse();
+    }
+
     // D11 (docs/plan/2026-09-28-partial-boundary-design.md; the ids are its table's). A partial
     // means some longer text completes the match (upstream/README.rst:270). In each row no
     // continuation can: the held text already decides the boundary (B1, B2, B7), a later item

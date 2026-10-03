@@ -16558,6 +16558,14 @@ internal static class Matcher
                         status = TryMatch(state, node.Next1, pos, out _);
                         if (status < 0)
                         {
+                            // NOT UPSTREAM'S, D11 (D69): a string tail that runs into the edge runs
+                            // out like any other item, so inside a lookaround body matching goes on
+                            // after the lookaround (`(?=b[^a]*cab)(*FAIL)` over 'bca').
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -16683,12 +16691,24 @@ internal static class Matcher
                         // answers a partial the repeat cannot reach - see IsTailPartial.
                         if (IsTailPartial(state, test, pos))
                         {
-                            return MatchStatus.Partial;
+                            // NOT UPSTREAM'S, D11 (D69): a run-out, which inside a lookaround body
+                            // goes on after the lookaround; this arm answered the partial at once,
+                            // so `(?=b.*?c)(*FAIL)` over 'b' was P(0, 1) where no continuation
+                            // matches.
+                            goto runOut;
                         }
 
                         status = MatchOne(state, repeated, pos);
                         if (status < 0)
                         {
+                            // NOT UPSTREAM'S, D11 (D69): the item runs out at the edge, which inside a
+                            // lookaround body goes on after the lookaround (`\X`'s lazy ANY_ALL in
+                            // `(?=\X)(*FAIL)` over 'b').
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -16721,7 +16741,14 @@ internal static class Matcher
                         {
                             // Upstream returns RE_ERROR_PARTIAL here rather than 'status', where the
                             // GREEDY_REPEAT_ONE arm above returns 'status' (:17040 against :16280).
-                            // Ported as written.
+                            // Ported as written, except that a run-out goes through the run-out
+                            // rule (D69: a string tail that runs into the edge, `(?=b.*?cd)(*FAIL)`
+                            // over 'bc').
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return MatchStatus.Partial;
                         }
 

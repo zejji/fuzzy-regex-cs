@@ -52,6 +52,59 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// D69: a one-character repeat inside a lookaround body that reaches the edge while it
+    /// backtracks runs out like any other item in a body: matching goes on after the lookaround,
+    /// where <c>(*FAIL)</c> fails for every continuation. The backtracking arms answered the partial
+    /// at once instead: a lazy repeat's look ahead at its tail, string tail or next item, and a
+    /// greedy repeat's string tail that runs into the edge ('bca' + 'b' gives 'cab'). The last
+    /// three rows are controls, where what follows the lookaround can match: 'b' + 'c' completes
+    /// <c>(?=b.*?c)b</c>. <c>\X</c>'s lazy <c>ANY_ALL</c> (<c>(?=\X)(*FAIL)</c> over 'b') is the same
+    /// arm, but S57d's escalation answers that row until build chunk 9 part 2 deletes it
+    /// (<c>OpenDefectTests</c>).
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: regex 2026.9.10 answers the partial on every row but
+    // the reversed greedy row, where it answers None too.
+    [Test]
+    [Arguments("match", @"(?=b.*?c)(*FAIL)", "b", "None")]
+    [Arguments("match", @"(?=b.*?cd)(*FAIL)", "bc", "None")]
+    [Arguments("match", @"(?=a*?b)(*FAIL)", "aa", "None")]
+    [Arguments("match", @"(?r)(*FAIL)(?<=c.*?b)", "b", "None")]
+    [Arguments("match", @"(?=b[^a]*cab)(*FAIL)", "bca", "None")]
+    [Arguments("match", @"(?=b.?cab)(*FAIL)", "bca", "None")]
+    [Arguments("match", @"(?r)(*FAIL)(?<=bac[^a]*b)", "acb", "None")]
+    [Arguments("match", @"(?=b.*?c)b", "b", "P(0,1)")]
+    [Arguments("search", @"(?=b.*?c)bx", "b", "P(0,1)")]
+    [Arguments("match", @"(?=b[^a]*cab)b", "bca", "P(0,3)")]
+    public void A_lazy_repeat_that_backtracks_to_the_edge_in_a_body_runs_out_there(
+        string operation,
+        string pattern,
+        string text,
+        string expected
+    )
+    {
+        Match m = Run(operation, pattern, text);
+
+        (m.Success ? $"P({m.Index},{m.Index + m.Length})" : "None").Should().Be(expected);
+        m.PartialMatch.Should().Be(m.Success);
+    }
+
+    /// <summary>
+    /// D69 in a scan: after the empty match at 2 the next attempt may not end empty at 2, so its
+    /// <c>\X</c> backtracks its lazy repeat to the edge, which answered the partial from 2. Only a
+    /// start at the edge can complete a further match ('abb' + 'x' matches at 3), so the scan's
+    /// partial is (3, 3): the brute-force judge's answer and upstream's (2026-10-03).
+    /// </summary>
+    [Test]
+    public void A_scan_whose_lazy_repeat_backtracks_to_the_edge_in_a_body_reports_the_edge()
+    {
+        IEnumerable<string> matches = new FuzzyRegex(@"(?<=b)(?=\X)")
+            .Matches("abb", partial: true)
+            .Select(static m => $"{(m.PartialMatch ? 'P' : 'F')}({m.Index},{m.Index + m.Length})");
+
+        string.Join(' ', matches).Should().Be("F(2,2) P(3,3)");
+    }
+
+    /// <summary>
     /// A negative lookaround whose body runs out inside a string, followed by a string that needs
     /// the text to come: 'a' + 'c' completes each row. The run-out left the matcher's position in
     /// the body's string behind, and the next string then resumed from it instead of from its start
