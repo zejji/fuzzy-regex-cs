@@ -2032,7 +2032,7 @@ public sealed class PartialMatchingTests
     /// has consumed text. They are pinned here whole rather than minimised, so that a later engine
     /// change cannot quietly move them. They were the examples of the
     /// <c>boundary-at-the-end-of-the-text</c> oracle entry, which D11 build chunk 9 removed with
-    /// S57d's escalation: the fullmatch rows left now agree with upstream or are D11's own rule. Upstream answers no match to all three,
+    /// S57d's escalation: the fullmatch rows left now agree with upstream or are a phantom of limit C2 (D19). Upstream answers no match to all three,
     /// which is what the wave recorded from regex 2026.9.10.
     /// <para>
     /// Each row carries the flag word the wave recorded it under, because that is part of the
@@ -2042,8 +2042,13 @@ public sealed class PartialMatchingTests
     /// default is version 1 (<c>OracleWave.OracleRow.DefaultVersion</c>, S50b).
     /// </para>
     /// </remarks>
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's,
-    // on the first row. D11 build chunk 9 moved the seed-20260921 row to upstream's None, the
+    // DIVERGES FROM UPSTREAM on the first row, NOT deliberately: it is a PHANTOM OF LIMIT C2, known
+    // defect D19 (the register's own witness `(?:a\B)+` fullmatch 'a' is the same shape). Both
+    // judges answer None (2026-10-03): a full match must end with the text, where `\B` after a word
+    // character is false. The second pass runs the greedy `[ab]+` out of text at the edge, and
+    // after a run-out the rest is presumed to match. Upstream answers None here (and P(0, 2) to the
+    // exact `(?fi)[ab]+\B`, the same phantom). The day D19 decides the rest, this row moves to
+    // None, on purpose. D11 build chunk 9 moved the seed-20260921 row to upstream's None, the
     // judge's answer: its pattern ends at `b\B`, so a full match would have to end with the text,
     // and S57d's escalation, which answered P(0, 1), is deleted (design section 5).
     // D11 moved the seed-7 row, `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` searched over two astral
@@ -2051,7 +2056,8 @@ public sealed class PartialMatchingTests
     // text is false whatever follows (design row B1), and the brute-force judge answers None. It is
     // pinned in A_word_start_after_a_word_character_at_the_end_is_decided_false.
     [Test]
-    // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent.
+    // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent. P(0, 2)
+    // is the C2 phantom described above, not a right answer.
     [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2, FuzzyRegexOptions.Version0)]
     // Seed 20260921, `partial` row 4830, fullmatch, flags 0x2. The lookbehind condition is false
     // after 'b', so the conditional contributes nothing and the pattern is `b\B`. Now None.
