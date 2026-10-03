@@ -16,13 +16,17 @@ fewer than --min rows, and lists every infeasible cell with the reason the engin
     python tools/matrix/gen.py --out rows.jsonl [--seed 20260930] [--min 50]
     python tools/matrix/gen.py --out pilot.jsonl --sample 2000     # stratified over every cell
     python tools/matrix/gen.py --out rows.jsonl --extra-triples "call,fuzzy,backref;verb,fuzzy,keep"
+    python tools/matrix/gen.py --out scoped.jsonl --scoped-flags --min 30   # check C2's scoped-flag rows
 
 Deterministic: the same seed and arguments give byte-identical rows.
 
 Each row carries, besides the oracle's inputs (pattern, flags, namedLists, subject, operation,
 partial, pos, endpos): `cell` (what it was built for), `tags` (confirmed ids), `depth`, and
 `writtenOut` - the same pattern with every call written out as the body it calls (captures made
-non-capturing), for check C2 - with `recursive` saying whether that needed a depth bound.
+non-capturing), for check C2 - with `recursive` saying whether that needed a depth bound. With
+--scoped-flags only the cells with a call are built, calls and called groups sit in scoped
+`(?i:...)` or `(?-i:...)` now and then, and each written-out copy keeps its definition's case flag.
+The default rows are byte-identical with or without the option's code (checked 2026-10-03).
 """
 
 from __future__ import annotations
@@ -86,6 +90,16 @@ class Tree:
         self.post: list[tuple] = []
         self.whole_recursion = False
         self.named_lists = False
+        # --scoped-flags: every call and called group may sit in a scoped (?i:...) or (?-i:...).
+        self.scoped = False
+        self.global_case = "-i"
+        self.def_flags: dict[str, str] | None = None
+
+    def scope(self, node, p=0.5):
+        """`node` inside a scoped case flag, with probability p, when this tree asks for them."""
+        if not self.scoped or self.rng.random() >= p:
+            return node
+        return ("scope", self.rng.choice(("i", "-i")), node)
 
     def group(self, body) -> tuple:
         name = f"g{len(self.groups) + 1}"
@@ -104,7 +118,7 @@ class Tree:
 
 
 def _nc(node):
-    return node if node[0] in ("nc", "grp", "atomic", "look", "alt") else ("nc", node)
+    return node if node[0] in ("nc", "grp", "atomic", "look", "alt", "scope") else ("nc", node)
 
 
 def wrap(cid: str, inner: tuple, t: Tree) -> tuple:
@@ -120,11 +134,11 @@ def wrap(cid: str, inner: tuple, t: Tree) -> tuple:
         shape = r.choice(("after", "before", "hoist", "define", "recurse", "recurse", "whole"))
         if shape == "define":
             g = t.group(inner)
-            t.pre.append(("define", g))
-            return ("call", g[1])
+            t.pre.append(("define", t.scope(g)))
+            return t.scope(("call", g[1]), 0.6)
         if shape == "recurse":
             name = f"g{len(t.groups) + 1}"
-            call = ("call", name)
+            call = t.scope(("call", name), 0.6)
             body = r.choice((
                 ("alt", [("seq", [t.atom(), call, t.atom()]), inner]),
                 ("seq", [inner, ("rep", call, "?")]),
@@ -132,18 +146,18 @@ def wrap(cid: str, inner: tuple, t: Tree) -> tuple:
             ))
             t.groups.append(name)
             t.bodies[name] = body
-            return ("grp", name, body)
+            return t.scope(("grp", name, body))
         if shape == "whole":
             t.whole_recursion = True
-            return r.choice((("seq", [inner, ("rep", ("call", "R"), "?")]),
-                             ("alt", [("seq", [t.atom(), ("call", "R")]), inner])))
+            return r.choice((("seq", [inner, ("rep", t.scope(("call", "R"), 0.6), "?")]),
+                             ("alt", [("seq", [t.atom(), t.scope(("call", "R"), 0.6)]), inner])))
         g = t.group(inner)
         if shape == "after":
-            return ("seq", [g, ("call", g[1])])
+            return ("seq", [t.scope(g), t.scope(("call", g[1]), 0.6)])
         if shape == "before":
-            return ("seq", [("call", g[1]), g])
-        (t.post if r.random() < 0.7 else t.pre).append(("call", g[1]))
-        return g
+            return ("seq", [t.scope(("call", g[1]), 0.6), t.scope(g)])
+        (t.post if r.random() < 0.7 else t.pre).append(t.scope(("call", g[1]), 0.6))
+        return t.scope(g)
     if cid in LOOKS:
         op = LOOKS[cid]
         behind = "<" in op
@@ -254,9 +268,11 @@ def render(node, t: Tree, inline=None, depth=0, capture=True, number=None) -> st
         return f"({rr(node[1])})" if capture else f"(?:{rr(node[1])})"
     if k == "nc":
         return "(?:" + rr(node[1]) + ")"
+    if k == "scope":
+        return f"(?{node[1]}:" + rr(node[2]) + ")"
     if k == "rep":
         body = rr(node[1])
-        if node[1][0] not in ("grp", "ugrp", "nc", "alt", "atomic", "look", "call") and not (
+        if node[1][0] not in ("grp", "ugrp", "nc", "alt", "atomic", "look", "call", "scope") and not (
                 node[1][0] == "lit" and len(node[1][1]) == 1):
             body = "(?:" + body + ")"
         return body + node[2]
@@ -289,13 +305,17 @@ def render(node, t: Tree, inline=None, depth=0, capture=True, number=None) -> st
             return (f"(?&{target})", f"(?P>{target})", f"(?{n})" if n else f"(?&{target})")[hash_choice(target, 3)]
         if depth >= inline:
             return "(?!)"
-        # SHORTCUT: the copy takes the call site's flags, which is right only because every flag
-        # here is a whole-pattern flag (the generator writes no scoped `(?i:...)`). A called group
-        # keeps its DEFINITION's flags (`(abc)(?i:(?-1))` over 'abcABC' is None in upstream, PCRE2
-        # and Perl), so once scoped flags are generated the copy must be wrapped in the definition's
-        # flags, e.g. `(?-i:abc)` (matrix triage 2026-09-30; 0 of the 1,509 C2 rows are affected).
+        # A called group keeps its DEFINITION's flags: `(abc)(?i:(?-1))` over 'abcABC' is None in
+        # upstream 2026.9.10, PCRE2 10.47 and Perl 5.38, as is `(abc)(?i:(?-i:abc))`, where
+        # `(abc)(?i:(?:abc))` matches (0, 6) (measured 2026-10-03). So in a pattern with scoped
+        # flags the copy sets the case flag its definition sees (`def_flags`; the whole pattern's
+        # for a group outside every scope and for (?R)), whatever the call site's. The generator
+        # scopes only the case flag (--scoped-flags).
         body = t.root if target == "R" else t.bodies[target]
-        return "(?:" + render(body, t, inline, depth + 1, False, number) + ")"
+        copy = render(body, t, inline, depth + 1, False, number)
+        if t.def_flags is None:
+            return "(?:" + copy + ")"
+        return f"(?{t.def_flags.get(target, t.global_case)}:" + copy + ")"
     raise KeyError(k)
 
 
@@ -323,6 +343,8 @@ def sample(node, t: Tree, r: random.Random, depth=0) -> str:
         return s(node[2])
     if k in ("ugrp", "nc", "atomic", "fz"):
         return s(node[1])
+    if k == "scope":
+        return s(node[2])
     if k == "rep":
         q = node[2].rstrip("+?") or node[2]
         lo, hi = {"*": (0, 2), "+": (1, 2), "?": (0, 1)}.get(q[0], (1, 2))
@@ -386,6 +408,22 @@ def _calls_in(node):
                 yield from _calls_in(y)
 
 
+def definition_flags(node, scope=None, out=None) -> dict:
+    """Each group's case flag from its nearest enclosing scope; a group outside every scope is absent."""
+    out = {} if out is None else out
+    if not isinstance(node, tuple):
+        return out
+    if node[0] == "scope":
+        scope = node[1]
+    if node[0] == "grp" and scope is not None:
+        out[node[1]] = scope
+    for x in node[1:]:
+        for y in (x if isinstance(x, list) else [x]):
+            if isinstance(y, tuple):
+                definition_flags(y, scope, out)
+    return out
+
+
 def _has(node, kinds) -> bool:
     if not isinstance(node, tuple):
         return False
@@ -417,8 +455,9 @@ def edit(s: str, r: random.Random, n: int) -> str:
     return s
 
 
-def make_row(cell: tuple[str, ...], r: random.Random, families: dict) -> dict | None:
+def make_row(cell: tuple[str, ...], r: random.Random, families: dict, scoped=False) -> dict | None:
     t = Tree(r)
+    t.scoped = scoped
     flags = 0
     op = None
     partial = slice_ = False
@@ -470,6 +509,8 @@ def make_row(cell: tuple[str, ...], r: random.Random, families: dict) -> dict | 
     for extra in ("flag-i", "flag-r", "flag-V1", "flag-w"):
         if not flags & FLAG_BITS[extra] and r.random() < 0.04:
             flags |= FLAG_BITS[extra]
+    if scoped and r.random() < 0.3:
+        flags |= FLAG_BITS["flag-i"]  # so a (?-i:...) scope differs from the whole pattern's flag
     named = dict(NAMED_LIST) if t.named_lists else {}
     try:
         compiled = regex.compile(text, flags, **named)
@@ -488,6 +529,8 @@ def make_row(cell: tuple[str, ...], r: random.Random, families: dict) -> dict | 
     if r.random() < 0.2:
         s = s + "".join(r.choice("abx") for _ in range(r.randint(1, 4)))
     s = s[:12] if r.random() < 0.2 else s[:8]
+    if scoped and r.random() < 0.6:
+        s = "".join(c.upper() if r.random() < 0.4 else c for c in s)  # case flags read upper case
     if op is None:
         op = r.choices(OPS, OP_WEIGHTS)[0]
     if not partial and r.random() < 0.1:
@@ -510,6 +553,9 @@ def make_row(cell: tuple[str, ...], r: random.Random, families: dict) -> dict | 
         if bodies_read:
             row["writtenOut"] = None
         else:
+            if scoped:
+                t.global_case = "i" if flags & regex.IGNORECASE else "-i"
+                t.def_flags = definition_flags(root)
             try:
                 depths = (2, 3, 4, 5, 6) if recursive else (8,)
                 row["writtenOut"] = {str(d): render(root, t, inline=d, number=numbers) for d in depths}
@@ -558,10 +604,14 @@ def target_ids(cell: tuple, fam: dict, r: random.Random) -> tuple:
     return cell
 
 
-def generate(constructs: dict, seed: int, minimum: int, extra_triples=()):
+def generate(constructs: dict, seed: int, minimum: int, extra_triples=(), scoped=False):
     pairs, triples = cells_of(constructs, extra_triples)
     cells = pairs + triples
     fam = family_members(constructs)
+    if scoped:
+        # Check C2's scoped-flag rows: only the cells with a call, each call and called group
+        # in a scoped case flag now and then.
+        cells = [c for c in cells if "call" in c]
     counts = {c: 0 for c in cells}
     errors: dict = {}
     rows = []
@@ -571,7 +621,7 @@ def generate(constructs: dict, seed: int, minimum: int, extra_triples=()):
         while counts[cell] < minimum and attempts < ROW_ATTEMPTS_PER_CELL * minimum:
             attempts += 1
             ids = target_ids(cell, fam, r)
-            row = make_row(ids, r, fam)
+            row = make_row(ids, r, fam, scoped)
             if row is None:
                 continue
             if "error" in row:
@@ -636,11 +686,13 @@ def main(argv=None) -> int:
     ap.add_argument("--constructs", type=Path, default=None)
     ap.add_argument("--extra-triples", default="", help="id triples, ';'-separated, each ','-separated")
     ap.add_argument("--counts", type=Path, default=None, help="write per-cell counts CSV here")
+    ap.add_argument("--scoped-flags", action="store_true",
+                    help="only the cells with a call, with scoped (?i:...) and (?-i:...) round calls and groups")
     args = ap.parse_args(argv)
 
     constructs = load_constructs(args.constructs)
     extra = [tuple(x.split(",")) for x in args.extra_triples.split(";") if x.strip()]
-    rows, cells, counts, errors, fam = generate(constructs, args.seed, args.min, extra)
+    rows, cells, counts, errors, fam = generate(constructs, args.seed, args.min, extra, args.scoped_flags)
 
     infeasible = [c for c in cells if counts[c] == 0]
     short = [c for c in cells if 0 < counts[c] < args.min]
