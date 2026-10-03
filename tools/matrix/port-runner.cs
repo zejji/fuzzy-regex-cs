@@ -25,6 +25,7 @@
 // whole-pattern call, WITHOUT the exemption from the closing assert), callfeatures (D40's
 // upstream call features, on the base answer only), exactdeletion (ledger entry 42 off), and
 // unsafememo (the failed-call memo forced on where the compiler turned it off, on `on` only),
+// callmemokey (the failed-call memo's key without the position, on `on` only),
 // d52 (a conditional's test compiled with the section's fuzziness, ledger entry 64) and d54 (a
 // failed negative test's captures dropped, ledger entry 65), each on every variant but `wo`.
 using System.Diagnostics;
@@ -58,7 +59,8 @@ Type po = patternObjectProperty.PropertyType;
 FieldInfo F(string name) => po.GetField(name, Any) ?? throw new MissingFieldException(po.Name, name);
 FieldInfo skipCallMemo = F("SkipCallMemo"),
     eagerCallMemo = F("EagerCallMemo"),
-    useCallMemo = F("UseCallMemo");
+    useCallMemo = F("UseCallMemo"),
+    callMemoKeyOmitsPosition = F("CallMemoKeyOmitsPosition");
 FieldInfo repeatInfoList = F("RepeatInfoList");
 FieldInfo skipExactDeletion = F("SkipExactDeletionRetry"),
     upstreamEmpty = F("UpstreamEmptyIterations");
@@ -205,6 +207,7 @@ FuzzyRegex Compile(string pattern, string variant)
                 d37,
                 callFeatures,
                 ablate == "d52" && variant != "wo", // upstreamFuzzyConditionTest (ledger entry 64)
+                callFeatures, // upstreamCallCopies: OracleComparer.RunWithTheUpstreamCallFeatures sets both
             ]
         )!;
     object pobj = patternObjectProperty.GetValue(regex)!;
@@ -255,6 +258,9 @@ FuzzyRegex Compile(string pattern, string variant)
         eagerCallMemo.SetValue(pobj, true);
         if (ablate == "unsafememo")
             useCallMemo.SetValue(pobj, true);
+        // The failed-call memo's key without the position (C5's firing control for that memo).
+        if (ablate == "callmemokey")
+            callMemoKeyOmitsPosition.SetValue(pobj, true);
         // Every repeat's failure memo on, including where Optimiser.KeepFailureMemosSound withdrew
         // it (backreferences, calls, fuzzy, verbs, POSIX).
         if (ablate == "unsaferepeatmemo")
