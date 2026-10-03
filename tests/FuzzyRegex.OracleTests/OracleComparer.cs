@@ -259,6 +259,11 @@ internal static class OracleComparer
     /// Give every group call the direction and fuzziness upstream gives it (D40, D42, D43). Acts on
     /// the compile. Used by <see cref="RunWithTheUpstreamCallFeatures"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamCallCopies">
+    /// Compile each called group's copy from the group as parsed, as upstream does (D50, ledger entry
+    /// 66). Acts on the compile. Used by <see cref="RunWithTheUpstreamCallCopies"/> and
+    /// <see cref="RunWithTheUpstreamCallFeatures"/>.
+    /// </param>
     /// <param name="upstreamCallCaptures">
     /// Also switch the D51 fix off (ledger entry 63) for an ablation that passes only
     /// <paramref name="ablate"/>, as every other named ablation does; see
@@ -291,7 +296,8 @@ internal static class OracleComparer
         bool upstreamCallFeatures = false,
         bool upstreamCallCaptures = false,
         bool upstreamFuzzyConditionTest = false,
-        bool upstreamNegativeTestCaptures = false
+        bool upstreamNegativeTestCaptures = false,
+        bool upstreamCallCopies = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -310,6 +316,7 @@ internal static class OracleComparer
             || upstreamFoldedRuns
             || upstreamWholePatternCall
             || upstreamCallFeatures
+            || upstreamCallCopies
             || upstreamCallCaptures;
 
         // Compiling and matching are caught separately, because *which of the two* threw is the
@@ -345,7 +352,8 @@ internal static class OracleComparer
                 upstreamFoldedRuns: upstreamFoldedRuns,
                 upstreamWholePatternCall: upstreamWholePatternCall,
                 upstreamCallFeatures: upstreamCallFeatures,
-                upstreamFuzzyConditionTest: upstreamFuzzyConditionTest || namedAblation
+                upstreamFuzzyConditionTest: upstreamFuzzyConditionTest || namedAblation,
+                upstreamCallCopies: upstreamCallCopies
             );
         }
         catch (NotImplementedException)
@@ -1304,7 +1312,9 @@ internal static class OracleComparer
     /// Upstream resolves each call once, for where it is written, and compiles a called group's
     /// copy with those references; it registers a lookaround's calls with the caller's fuzziness
     /// and a conditional test's calls with the caller's direction, though it compiles both bodies
-    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. The
+    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. Upstream also
+    /// compiles each copy from the group as parsed (D50), so <c>upstreamCallCopies</c> is on too:
+    /// a row that carries both differences is this entry's, not D50's. The
     /// <c>group-call-runs-with-its-call-sites-features</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
@@ -1321,7 +1331,34 @@ internal static class OracleComparer
             // D49: upstream's minimum width, which counts the called copies (ledger entry 60).
             ablate: static compiled => compiled.PatternObject.MinWidth = compiled.PatternObject.UpstreamMinWidth,
             keepMinimumOrderFix: true,
-            upstreamCallFeatures: true
+            upstreamCallFeatures: true,
+            upstreamCallCopies: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with each called group's copy compiled from the group as
+    /// parsed, as upstream compiles it (the D50 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream compiles a copy from the group the parser built, never optimised or packed, so a run
+    /// of characters in it never meets a full case fold. <c>upstreamCallCopies</c> restores that at
+    /// compile time. The <c>group-call-copy-is-the-group-written-out</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's copies, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallCopies(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            // Entry 51's entry sits after this one, as it does after the call-site features entry.
+            keepMinimumOrderFix: true,
+            upstreamCallCopies: true
         );
     }
 

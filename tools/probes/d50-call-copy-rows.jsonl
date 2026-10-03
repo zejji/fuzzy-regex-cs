@@ -1,0 +1,6 @@
+{"pattern": "(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))", "flags": 0, "subject": "ß", "operation": "search"}
+{"pattern": "(?fi)(?(DEFINE)(?P<g1>SS))(?:(?&g1)){i<=1}", "flags": 0, "subject": "ß", "operation": "search"}
+{"pattern": "(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}", "flags": 0, "subject": "b", "operation": "search"}
+{"pattern": "(?i)(?(DEFINE)(?P<g1>(?>a|b)))(?:a(?&g1)){s<=1}", "flags": 0, "subject": "ab", "operation": "search"}
+{"pattern": "(?fi)(?P<g1>ß(?:(?&g3))*)(?:(?P<g2>(?&g3))){e<=1}(?<!(?&g1)(?P<g3>st))", "flags": 0, "subject": "ftßßxtxS", "operation": "search"}
+{"pattern": "(?fi)(?:(?P<g1>(?P>g2))){d<=1}(?P<g2>(?:ss|st))", "flags": 0, "subject": "Sﬀbfßß", "operation": "search"}

@@ -5967,3 +5967,50 @@ for 2, 2 and 2 rows of the default waves at seeds 7, 4242 and 20260927 (diverge 
 one of them, `^(?(?<!(\d?))_[^\p{L}]|)\g<1>` with `subf` template `{0[2]}`, now matches here, so the
 template's out-of-range capture index raises where upstream, finding no match, returns the subject.
 `ledger-reproductions.jsonl` re-checks upstream's answer to the first row.
+
+## 66. A called group's copy is compiled from the group as parsed, never optimised or packed - FIXED HERE (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D50. Draft report:
+`entry-66-call-copy-as-parsed.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03:
+
+```
+search(r'(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))', 'ß')        -> None     expected (1, 1)
+search(r'(?fi)(?<=(?:SS))', 'ß')                             -> (1, 1)   (the control: the call written out)
+search(r'(?fi)(?(DEFINE)(?P<g1>SS))(?:(?&g1)){i<=1}', 'ß')   -> None     expected (0, 1)
+search(r'(?fi)(?:(?:SS)){i<=1}', 'ß')                        -> (0, 1)   (the control)
+search(r'(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}', 'b')  -> (0, 1)   expected None
+search(r'(?:(?:(?>a|b)c)){d<=1}', 'b')                       -> None     (the control)
+```
+
+**Why upstream is wrong.** A call answers as its group written out at the call (the rule of
+entries 56-60). A group called with other features than where it is written is compiled again from
+`info.defined_groups` (`upstream/regex/_regex_core.py:4449`, compiled at `_main.py:637`), which
+records the group the parser built. `Group.optimise` returns a new group (`_regex_core.py:3073`),
+and `pack_characters` runs on that one, so the copy's characters are never packed into a string.
+Only a packed string meets a full case fold, so `SS` in a backwards or fuzzy copy never matches
+'ß'. The parsed tree is not left as parsed either: `Atomic.optimise` rewrites its body in place
+(`:2083`), so a fuzzy copy runs the atomic group's alternation as the optimised set. A fuzzy section
+written out is never optimised (`Fuzzy` has no `optimise`), and in one the first alternative of
+`(?>a|b)` can match 'b' with a deletion and be kept; the set has no first alternative.
+
+PCRE2, .NET and JavaScript have no multi-character case fold. Perl 5.42.3 matches the forward call
+`(?iu)(?(DEFINE)(?<g1>SS))(?&g1)` against 'ßzzz' at (0, 1), as written out; on the subject 'ß'
+alone its minimum-length check refuses first, and it finds nothing for the call in a lookbehind,
+where `(?iu)(?<=SS)` matches. No engine has fuzzy matching.
+
+**Proposed fix upstream:** compile each copy from the group optimised in the copy's direction (not
+optimised when the copy is fuzzy) and packed, starting from a tree the pattern's own pass has not
+rewritten.
+
+**This port.** A pattern with a call is optimised from a copy of its tree (`RegexBase.Clone`), so
+the parsed tree stays as written, and `ParseFunctions.PrepareCopy` prepares each called copy from
+it, the whole pattern's included. Over the D50 grids (`tools/probes/d50-call-copy-grid`: 5,000 rows
+of calls with full folding, alternations and atomic groups, 4,000 whole-pattern calls, 4,000 calls
+to atomic alternations; Debug build, two million steps and two seconds per row) 20 rows changed
+from main, each to the port's own answer for the pattern with the calls written out, and no row
+now differs from its written-out form where main agreed with it. A pattern with no call compiles
+exactly as before. Pinned by `Gaps/Engine/CalledCopyTests` and the oracle entry
+`group-call-copy-is-the-group-written-out`, keyed on `OracleComparer.RunWithTheUpstreamCallCopies`
+(`Info.UpstreamCallCopies`), which reproduced main's answer on every grid row.

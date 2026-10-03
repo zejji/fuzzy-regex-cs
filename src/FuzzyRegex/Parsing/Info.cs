@@ -120,6 +120,21 @@ internal sealed class Info
     /// </summary>
     internal bool UpstreamFuzzyConditionTest { get; init; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a called group's copy is compiled from
+    /// the group as parsed, as upstream compiles it, rather than prepared as the group written out at
+    /// the call would be (D50). The oracle sets it to show that the fix is the whole of a divergence;
+    /// see <see cref="ParseFunctions.PrepareCopy"/>.
+    /// </summary>
+    internal bool UpstreamCallCopies { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM (D50): the parsed pattern, which the optimiser never touches when the pattern
+    /// has a group call, so that a copy of the whole pattern can be prepared from it. Null until
+    /// then, and in a pattern with no call.
+    /// </summary>
+    internal RegexBase? PatternAsWritten { get; set; }
+
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
 

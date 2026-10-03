@@ -1837,6 +1837,22 @@ Console.WriteLine(new FuzzyRegex(@"(?P<g1>\w)(?<=\w)\W").Match("a ").Length); //
 
 There is no option to restore the upstream answer. Ledger entry 60.
 
+### A called group's copy runs as the group written out at the call
+
+A group called from a lookbehind or a fuzzy section runs as a separate copy. Upstream builds that
+copy from the group as first parsed, before its letters are joined into one string, so under full
+case folding `SS` in the copy never matches `ß`. Here the copy is prepared as the group written out
+at the call would be.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))").Match("ß").Index); // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?fi)(?<=(?:SS))").Match("ß").Index); // 1 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 66.
+
 ### An alternation at the start of a negative condition's yes branch keeps all its alternatives
 
 When a condition's test is a negative lookaround and the test holds, upstream tries only the first
