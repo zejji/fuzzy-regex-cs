@@ -171,6 +171,22 @@ internal abstract class RegexBase
     /// children a pass can reassign overrides this; the rest are never changed by either pass, so
     /// they are shared, as <c>Optimise</c> already shares them. <see cref="CallGroup"/> is one,
     /// and must be: the copies' walks set its reference just before each compile.
+    /// <para>
+    /// Witnesses (<c>CalledCopyTests.A_copy_compiles_to_the_code_of_its_group_written_out</c>): with
+    /// <see cref="Atomic"/>, <see cref="Branch"/>, <see cref="GreedyRepeat"/>, <see cref="LookAround"/>,
+    /// <see cref="LookAroundConditional"/> or <see cref="Fuzzy"/> returning itself, the copy's code
+    /// stops being the written-out group's; <see cref="Sequence"/>, <see cref="Group"/> and
+    /// <see cref="Conditional"/> fail the same rows through the atomic group under them. No witness
+    /// can exist for a set or a named list, so their copies are defensive only. A set's members are
+    /// leaves whose in-set <c>Optimise</c> returns them unchanged (<see cref="Range"/>, <see cref="Property"/>,
+    /// <see cref="Character"/>), a set's own <c>Optimise</c> takes no direction from its caller, and
+    /// <c>PackCharacters</c> leaves it alone, so running the passes on a shared set a second time
+    /// rebuilds the same members. A <see cref="StringSet"/> is rebuilt by <see cref="Branch.Optimise"/>
+    /// and is changed in place only by <c>PackCharacters</c> in a fuzzy section, where every
+    /// member is one run of characters under the list's own case flags, which packs to the same
+    /// string twice. Measured 2026-10-03: with either returning itself, 9,000 generated called
+    /// copies (sets, named lists, scoped flags) compiled to the same bytes.
+    /// </para>
     /// </remarks>
     /// <returns>This node, or a copy of it whose children are copies.</returns>
     internal virtual RegexBase Clone() => this;

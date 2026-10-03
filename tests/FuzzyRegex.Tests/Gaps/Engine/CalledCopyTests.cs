@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -71,5 +72,46 @@ public sealed class CalledCopyTests
         Match m = new FuzzyRegex("(?fi)(?(DEFINE)(?P<g1>SS))(?&g1)").Match("ß");
 
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 1));
+    }
+
+    // The copy is compiled from a tree the pattern's own optimiser pass never touched, so its code
+    // is the code of the group written out where the call is. Each row puts an atomic group, whose
+    // Optimise rewrites its body in place, or a fuzzy section with a scoped flag, which a second
+    // PackCharacters packs differently, under one kind of node. If that node's Clone shared it
+    // instead of copying it, the pattern's pass would rewrite the node the copy is made from, and
+    // the copy's code would no longer appear in the written-out form's code. Each row fails with
+    // its own node's Clone returning the node itself (checked 2026-10-03; a set or a named list
+    // shares nothing that can change, see RegexBase.Clone).
+    [Test]
+    [Arguments("Branch", "(?(DEFINE)(?P<g1>(?:(?>a|b)c|z)))(?:(?&g1)){d<=1}", "(?:(?P<g1>(?:(?>a|b)c|z))){d<=1}")]
+    [Arguments("GreedyRepeat", "(?(DEFINE)(?P<g1>(?:(?>a|b)c)+))(?:(?&g1)){d<=1}", "(?:(?P<g1>(?:(?>a|b)c)+)){d<=1}")]
+    [Arguments("LookAround", "(?(DEFINE)(?P<g1>(?=(?>a|b)c)))(?:(?&g1)){d<=1}", "(?:(?P<g1>(?=(?>a|b)c))){d<=1}")]
+    [Arguments(
+        "LookAroundConditional",
+        "(?(DEFINE)(?P<g1>(?(?=(?>a|b)c)x|y)))(?:(?&g1)){d<=1}",
+        "(?:(?P<g1>(?(?=(?>a|b)c)x|y))){d<=1}"
+    )]
+    [Arguments("Fuzzy", "(?(DEFINE)(?P<g1>(?:ss|ﬀ(?-i:ss)){e<=1}))(?<=(?&g1))", "(?<=(?P<g1>(?:ss|ﬀ(?-i:ss)){e<=1}))")]
+    [Arguments("Atomic", "(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}", "(?:(?P<g1>(?>a|b)c)){d<=1}")]
+    public void A_copy_compiles_to_the_code_of_its_group_written_out(string node, string called, string writtenOut)
+    {
+        uint[] call = [.. PatternCompiler.Compile(called).Code];
+        uint[] written = [.. PatternCompiler.Compile(writtenOut).Code];
+
+        // The one copy follows the pattern's SUCCESS: CALL_REF and its reference, the group, and
+        // the END of the CALL_REF.
+        int[] successes =
+        [
+            .. Enumerable
+                .Range(0, call.Length - 1)
+                .Where(i => call[i] == (uint)Opcode.Success && call[i + 1] == (uint)Opcode.CallRef),
+        ];
+        successes.Should().ContainSingle("{0}'s pattern has one copy", node);
+        uint[] copy = call[(successes[0] + 3)..^1];
+
+        bool found = Enumerable
+            .Range(0, written.Length - copy.Length + 1)
+            .Any(j => written.AsSpan(j, copy.Length).SequenceEqual(copy));
+        found.Should().BeTrue("the copy under {0} is the group written out: {1}", node, writtenOut);
     }
 }

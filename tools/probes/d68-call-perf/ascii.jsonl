@@ -1,0 +1,8 @@
+{"pattern": "(?i)(?:(?P<g1>(?P>g3)(?:(?:ab|ac))*)){e<=1}(?&g2)(?P<g2>(?(?<!(?P>g3))qq|(?P<g3>.*gg)))", "inline": "(?i)(?:(?P<g1>(?:.*gg)(?:(?:ab|ac))*)){e<=1}(?:(?(?<!(?:.*gg))qq|(?:.*gg)))(?P<g2>(?(?<!(?:.*gg))qq|(?P<g3>.*gg)))", "subject": "ggbggft"}
+{"pattern": "(?i)(?:(?P<g1>(?P>g2)(?(?<!(?P>g2))gg|a{1,2}))){i<=1}(?P<g2>(?:gg){1,2})", "inline": "(?i)(?:(?P<g1>(?:(?:gg){1,2})(?(?<!(?:(?:gg){1,2}))gg|a{1,2}))){i<=1}(?P<g2>(?:gg){1,2})", "subject": "ggQggggQ"}
+{"pattern": "(?i)(?:(?P<g1>(?&g2).)){e<=1}(?P>g2)(?P<g2>(?:qq|qt))(?:.)*", "inline": "(?i)(?:(?P<g1>(?:(?:qq|qt)).)){e<=1}(?:(?:qq|qt))(?P<g2>(?:qq|qt))(?:.)*", "subject": "qtxqttq"}
+{"pattern": "(?i)(?:(?P<g1>(?&g2))){e<=1}(?=(?P>g2)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>qq)", "inline": "(?i)(?:(?P<g1>(?:qq))){e<=1}(?=(?:qq)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>qq)", "subject": "qqqqqtbb"}
+{"pattern": "(?i)(?:(?P<g1>(?&g2)(?:QQ){e<=1})){e<=1}(?P<g2>(?:qq|qt))", "inline": "(?i)(?:(?P<g1>(?:(?:qq|qt))(?:QQ){e<=1})){e<=1}(?P<g2>(?:qq|qt))", "subject": "qtfggqqxfx"}
+{"pattern": "(?i)(?:(?P<g1>(?P>g2)(?<!(?P>g2)qt))){s<=1}(?P<g2>(?:(?:a|b)){e<=1}(?:qq|qt))", "inline": "(?i)(?:(?P<g1>(?:(?:(?:a|b)){e<=1}(?:qq|qt))(?<!(?:(?:(?:a|b)){e<=1}(?:qq|qt))qt))){s<=1}(?P<g2>(?:(?:a|b)){e<=1}(?:qq|qt))", "subject": "fggqatggqt"}
+{"pattern": "(?i)(?:(?&g2)){i<=1}(?P<g2>(?:gg){1,2})", "inline": "(?i)(?:(?:(?:gg){1,2})){i<=1}(?P<g2>(?:gg){1,2})", "subject": "ggQggggQ"}
+{"pattern": "(?i)(?:(?&g2)){i<=1}(?P<g2>gg)", "inline": "(?i)(?:(?:gg)){i<=1}(?P<g2>gg)", "subject": "ggQggggQ"}

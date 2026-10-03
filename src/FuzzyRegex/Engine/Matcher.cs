@@ -11533,6 +11533,13 @@ internal static class Matcher
                     // ReturnToCallerCaptures). The captures go last, right under the return node,
                     // so a partial result can find them at a fixed offset (D62, see
                     // ReturnFromOpenCallsAtAPartial); upstream's order is groups first.
+                    // SHORTCUT (D68): every call saves, and its return restores, every repeat and
+                    // every group, whatever the called body can change. That is most of what a call
+                    // costs over its written-out body, 1.1-2.4x on the D68 rows, and a fuzzy section
+                    // pays it on every retry that re-enters the call. Upgrade: compile, for each
+                    // call reference, the groups and repeats its body can write, and save only
+                    // those; D51 and D62 depend on what is restored, so it needs nested and
+                    // recursive witnesses. docs/plan/2026-10-03-d68-call-copy-perf.md.
                     PushRepeats(state, state.Sstack);
                     state.Sstack.PushSize(state.CaptureChange);
                     PushCaptures(state, state.Sstack);

@@ -1,0 +1,3 @@
+{"pattern": "(?i)(?:(?P<g1>(?&g2))){e<=1}(?=(?P>g2)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>qq)", "inline": "(?i)(?:(?P<g1>(?:qq))){e<=1}(?=(?:qq)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>qq)", "subject": "qqqqqtbb"}
+{"pattern": "(?i)(?:(?&g2)){e<=1}(?P<g2>qq)", "inline": "(?i)(?:(?:qq)){e<=1}(?P<g2>qq)", "subject": "qqqqqtbb"}
+{"pattern": "(?i)(?:(?&g2)){e<=1}(?P<g2>q)", "inline": "(?i)(?:(?:q)){e<=1}(?P<g2>q)", "subject": "qqqqqtbb"}
