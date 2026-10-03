@@ -158,6 +158,39 @@ internal abstract class RegexBase
     /// <returns>The packed node.</returns>
     internal virtual RegexBase PackCharacters(Info info) => this;
 
+    /// <summary>
+    /// A copy of the tree that <see cref="Optimise(Info, bool)"/> and <see cref="PackCharacters"/>
+    /// can rewrite without touching this one. Not in upstream (D50).
+    /// </summary>
+    /// <remarks>
+    /// Those two passes reassign the children of some nodes in place (<see cref="Atomic"/>'s
+    /// <c>Optimise</c>, every composite's <c>PackCharacters</c>, a set's <c>Optimise</c>), and
+    /// <see cref="Fuzzy"/> is not optimised at all, so it reaches <c>PackCharacters</c> as the node
+    /// the parser built. Run on the parsed tree they leave it half optimised in the pattern's own
+    /// direction, which is no state a copy of a called group can be prepared from. Every node whose
+    /// children a pass can reassign overrides this; the rest are never changed by either pass, so
+    /// they are shared, as <c>Optimise</c> already shares them. <see cref="CallGroup"/> is one,
+    /// and must be: the copies' walks set its reference just before each compile.
+    /// <para>
+    /// Witnesses (<c>CalledCopyTests.A_copy_compiles_to_the_code_of_its_group_written_out</c>): with
+    /// <see cref="Atomic"/>, <see cref="Branch"/>, <see cref="GreedyRepeat"/>, <see cref="LookAround"/>,
+    /// <see cref="LookAroundConditional"/> or <see cref="Fuzzy"/> returning itself, the copy's code
+    /// stops being the written-out group's; <see cref="Sequence"/>, <see cref="Group"/> and
+    /// <see cref="Conditional"/> fail the same rows through the atomic group under them. No witness
+    /// can exist for a set or a named list, so their copies are defensive only. A set's members are
+    /// leaves whose in-set <c>Optimise</c> returns them unchanged (<see cref="Range"/>, <see cref="Property"/>,
+    /// <see cref="Character"/>), a set's own <c>Optimise</c> takes no direction from its caller, and
+    /// <c>PackCharacters</c> leaves it alone, so running the passes on a shared set a second time
+    /// rebuilds the same members. A <see cref="StringSet"/> is rebuilt by <see cref="Branch.Optimise"/>
+    /// and is changed in place only by <c>PackCharacters</c> in a fuzzy section, where every
+    /// member is one run of characters under the list's own case flags, which packs to the same
+    /// string twice. Measured 2026-10-03: with either returning itself, 9,000 generated called
+    /// copies (sets, named lists, scoped flags) compiled to the same bytes.
+    /// </para>
+    /// </remarks>
+    /// <returns>This node, or a copy of it whose children are copies.</returns>
+    internal virtual RegexBase Clone() => this;
+
     /// <summary>Strips capture groups from the node. Upstream <c>remove_captures</c>.</summary>
     /// <returns>The node without captures.</returns>
     internal virtual RegexBase RemoveCaptures() => this;
@@ -1182,6 +1215,9 @@ internal sealed class Atomic : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => new Atomic(Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         Subpattern = Subpattern.RemoveCaptures();
@@ -1417,6 +1453,10 @@ internal class Branch : RegexBase
         Branches = [.. Branches.Select(b => b.PackCharacters(info))];
         return this;
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new Branch([.. Branches.Select(static b => b.Clone())], _writtenEmpty) { _covered = _covered };
 
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
@@ -2405,6 +2445,10 @@ internal sealed class Conditional : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new Conditional(_info, _groupText, _group, YesItem.Clone(), NoItem.Clone(), _position);
+
+    /// <inheritdoc />
     /// <remarks>
     /// Upstream's body falls off the end and returns <c>None</c>, which its one caller would then
     /// store in place of the node - a bug, and unreachable, because <c>remove_captures</c> is only
@@ -2825,8 +2869,20 @@ internal sealed class StringSet : Branch
         ];
     }
 
+    /// <summary>A copy of a list, which is already registered with the parse state.</summary>
+    /// <param name="source">The list to copy.</param>
+    private StringSet(StringSet source)
+        : base([.. source.Branches.Select(static b => b.Clone())])
+    {
+        Name = source.Name;
+        SetCaseFlags = source.SetCaseFlags;
+    }
+
     /// <summary>The list's name. Upstream <c>name</c>.</summary>
     internal string Name { get; }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() => new StringSet(this);
 
     /// <inheritdoc />
     /// <remarks>
@@ -2956,6 +3012,9 @@ internal sealed class Sequence : RegexBase
 
         return MakeSequence(items);
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() => new Sequence([.. Items.Select(static s => s.Clone())]);
 
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
@@ -3456,6 +3515,11 @@ internal abstract class SetBase(
     /// <inheritdoc />
     protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
         Recreate(Info, Items, positive, caseFlags, zerowidth).Optimise(Info, reverse: false);
+
+    /// <inheritdoc />
+    /// <remarks>A set's <c>Optimise</c> reassigns its members in place.</remarks>
+    internal override RegexBase Clone() =>
+        Recreate(Info, [.. Items.Select(static i => i.Clone())], Positive, CaseFlags, Zerowidth);
 
     /// <summary>Upstream <c>SetBase._handle_case_folding</c> (lines 3762-3790).</summary>
     /// <param name="info">The parse state; upstream takes it and reads <c>self.info</c> instead.</param>
@@ -4032,6 +4096,9 @@ internal sealed class Group : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => new Group(_info, GroupNumber, Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures() => Subpattern.RemoveCaptures();
 
     /// <inheritdoc />
@@ -4168,6 +4235,10 @@ internal sealed class LookAround : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new LookAround(Behind, Positive, Subpattern.Clone()) { UpstreamCallFeatures = UpstreamCallFeatures };
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures() => Subpattern.RemoveCaptures();
 
     /// <inheritdoc />
@@ -4289,15 +4360,22 @@ internal sealed class LookAroundConditional : RegexBase
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// NOT UPSTREAM (D43): the test is fixed under <see cref="Behind"/>, the direction
     /// <see cref="CompileCore"/> compiles it in (<c>upstream/regex/_regex_core.py</c>:3267).
     /// Upstream fixes it under the caller's direction (:3230), so a call in a lookbehind test ran
     /// its group forwards: <c>bc(?(?&lt;=(?&amp;g))x|y)(?P&lt;g&gt;bc)?</c> refused 'bcxzzz', which
     /// <c>bc(?(?&lt;=bc)x|y)</c> matches.
+    /// </para>
+    /// <para>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test is exact, like a plain lookaround's body
+    /// (<c>upstream/regex/_regex_core.py</c>:3201), so its calls are fixed exact too. See
+    /// <see cref="CompileCore"/>.
+    /// </para>
     /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, fuzzy);
+        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, UpstreamFuzzyTest && fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
@@ -4307,6 +4385,13 @@ internal sealed class LookAroundConditional : RegexBase
     /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
     /// </summary>
     internal bool UpstreamCallFeatures { get; init; }
+
+    /// <summary>
+    /// Whether the test is compiled with the enclosing section's fuzziness, as upstream's is (the
+    /// D52 fix switched off). Set from <see cref="Info.UpstreamFuzzyConditionTest"/>, for the oracle
+    /// alone.
+    /// </summary>
+    internal bool UpstreamFuzzyTest { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse) =>
@@ -4319,6 +4404,7 @@ internal sealed class LookAroundConditional : RegexBase
         )
         {
             UpstreamCallFeatures = UpstreamCallFeatures,
+            UpstreamFuzzyTest = UpstreamFuzzyTest,
         };
 
     /// <inheritdoc />
@@ -4329,6 +4415,13 @@ internal sealed class LookAroundConditional : RegexBase
         NoItem = NoItem.PackCharacters(info);
         return this;
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new LookAroundConditional(Behind, Positive, Subpattern.Clone(), YesItem.Clone(), NoItem.Clone())
+        {
+            UpstreamCallFeatures = UpstreamCallFeatures,
+        };
 
     /// <inheritdoc />
     /// <remarks>Upstream returns <c>None</c> here too; see <see cref="Conditional.RemoveCaptures"/>.</remarks>
@@ -4392,13 +4485,21 @@ internal sealed class LookAroundConditional : RegexBase
     public override int GetHashCode() => typeof(LookAroundConditional).GetHashCode();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test compiles exact, as a plain lookaround's body
+    /// does (<see cref="LookAround"/>, upstream <c>_regex_core.py</c>:3201), where upstream passes the
+    /// enclosing section's <paramref name="fuzzy"/> (:3267). The test is atomic, so a test that
+    /// held only by an edit was never asked again exactly, and the budget took a match away:
+    /// <c>(?:(?(?=a)ab|b)){s&lt;=1}</c> over 'b' was None where <c>(?(?=a)ab|b)</c> gives (0, 1). A
+    /// fuzzy section written inside the test still applies there.
+    /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
         List<uint[]> code =
         [
             [(uint)Opcode.Conditional, Positive ? 1u : 0u, Behind ? 0u : 1u],
         ];
-        code.AddRange(Subpattern.Compile(Behind, fuzzy));
+        code.AddRange(Subpattern.Compile(Behind, UpstreamFuzzyTest && fuzzy));
         code.Add([(uint)Opcode.Next]);
         code.AddRange(YesItem.Compile(reverse, fuzzy));
 
@@ -4594,6 +4695,16 @@ internal sealed class Fuzzy : RegexBase
         }
     }
 
+    /// <summary>A copy of a section, whose constraints are already filled in.</summary>
+    /// <param name="source">The section to copy.</param>
+    /// <param name="subpattern">The copy's subpattern.</param>
+    private Fuzzy(Fuzzy source, RegexBase subpattern)
+    {
+        Subpattern = subpattern;
+        Constraints = source.Constraints;
+        IsExact = source.IsExact;
+    }
+
     /// <summary>What the section matches. Upstream <c>subpattern</c>.</summary>
     internal RegexBase Subpattern { get; private set; }
 
@@ -4628,6 +4739,10 @@ internal sealed class Fuzzy : RegexBase
         Subpattern = Subpattern.PackCharacters(info);
         return this;
     }
+
+    /// <inheritdoc />
+    /// <remarks>The constraints are shared: no pass changes them once the section is built.</remarks>
+    internal override RegexBase Clone() => new Fuzzy(this, Subpattern.Clone());
 
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
@@ -4920,6 +5035,9 @@ internal class GreedyRepeat : RegexBase
         Subpattern = Subpattern.PackCharacters(info);
         return this;
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() => Recreate(Subpattern.Clone());
 
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures()

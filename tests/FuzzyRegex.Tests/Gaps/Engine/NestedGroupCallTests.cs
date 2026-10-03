@@ -193,7 +193,8 @@ public sealed class NestedGroupCallTests
     // group as written has other features. Here the backwards copy of g1 calls g2 backwards, and
     // g2 is written inside a lookbehind, so the group as written already has those features and
     // carries the reference. A second copy of g2, compiled from the group before PackCharacters,
-    // would read 'SS' unpacked and miss the 'ß' (the same limit the review registered as D50).
+    // would read 'SS' unpacked and miss the 'ß' (the same limit the review registered as D50,
+    // since fixed: CalledCopyTests).
     // Written out, (?fi)(?<=(?<=SS)) over 'ß' is (1, 1) here, as below.
     [Test]
     public void A_reference_found_in_a_copy_uses_the_group_as_written_when_its_features_match()

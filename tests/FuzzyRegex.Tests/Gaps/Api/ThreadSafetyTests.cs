@@ -784,6 +784,9 @@ public sealed class ThreadSafetyTests
             // only by the oracle's ablations on a pattern it compiled for one call.
             "PatternObject.KeepSectionOpenAfterAVerb",
             "PatternObject.KeepDiscardedTotals",
+            // D54 (ledger entry 65) added DropNegativeTestCaptures, likewise set only by
+            // OracleComparer.RunWithTheUpstreamNegativeTestCaptures.
+            "PatternObject.DropNegativeTestCaptures",
             // D37 added MatchMayEndInsideTheWholePatternCall, likewise set only by
             // OracleComparer.RunWithTheUpstreamWholePatternCall.
             "PatternObject.MatchMayEndInsideTheWholePatternCall",

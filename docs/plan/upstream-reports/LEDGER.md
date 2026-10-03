@@ -4114,6 +4114,22 @@ trace the same. Added to the draft as an addendum; classified by
 `FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat`. Ledger number 65,
 reserved for it, is not used.
 
+### Addendum to 32, 2026-10-03: a failed negative condition's errors count (D54)
+
+D45's fix restores the running total wherever a body is thrown away. Its first pinned row was a
+negative condition, `(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx', answered (1, 3) with
+no error. That body is not thrown away: the test's result chose the no branch, and since ledger
+entry 65 its captures stay, so its errors stay too, as a positive test's do. The row now answers
+(0, 1) with one deletion, upstream's answer and its positive twin's; the "exact" (1, 3) was never
+exact (`(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'). D45 stands for lookarounds, atomic
+groups and verbs, and for a conditional, positive or negative, whose branch fails so that the match
+backtracks out of the whole conditional (`(?b)(?:(?(?!(?:q){e<=1})|y)|c)` over 'c' is (0, 0)
+upstream and (0, 1) here); D54 covers only a failed negative test whose conditional goes on to
+match. Pinned by `(?b)(?:(?!(?:q){e<=1})|c)` over 'c', the conditional row just given and its
+positive twin, and `(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx'
+(`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, all
+red with `PatternObject.KeepDiscardedTotals` set).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -5873,3 +5889,137 @@ what every completion of the path it took would report: the call returns in any 
 undefined and Perl has no partial matching, so no engine contradicts it. Pinned by
 `CallCaptureTests` (six call rows red without the restore, two controls) and five partial rows
 in the same oracle entry.
+
+## 64. A conditional's lookaround test is matched fuzzily inside a fuzzy section, so a budget removes matches - FIXED HERE (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D52. Draft report:
+`entry-64-fuzzy-condition-test.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03:
+
+```
+search(r'(?:(?(?=a)ab|b)){s<=1}', 'b')     -> None        expected (0, 1)
+search(r'(?(?=a)ab|b)', 'b')               -> (0, 1)      (the same pattern with no budget)
+search(r'(?:(?(?<!a)a*|a)){e<=2}', 'aa')   -> (0, 1)      expected (0, 2), as without the budget
+search(r'(?:(?=a)ab|b){s<=1}', 'b')        -> (0, 1)      (the control: a plain lookahead)
+```
+
+**Why upstream is wrong.** A fuzzy budget allows errors; it cannot forbid an exact match. Without
+the budget the test `(?=a)` fails at 'b' and the no branch matches. With it, `(?=a)` holds by
+substituting 'b' for 'a', the yes branch `ab` cannot fit 'b' within one substitution, and the test
+is atomic, so it is never asked again exactly. The cause is in `LookAroundConditional._compile`,
+which compiles the test with the enclosing section's fuzziness
+(`upstream/regex/_regex_core.py:3267`, `self.subpattern.compile(self.behind, fuzzy)`), where
+`LookAround._compile` compiles a plain lookaround's body exact (`:3201`, `compile(self.behind)`).
+So `(?=a)` is exact on its own and fuzzy as a condition. A fuzzy section written inside the test is
+unaffected either way. No other engine has fuzzy matching, so the evidence is the principle and
+upstream's own answers: upstream with that one call patched to `compile(self.behind, False)` gives
+this port's answer on every row (`tools/probes/d52-d54-grid/up.py` on the D52/D54 grid, 2026-10-03).
+
+**Proposed fix upstream:** compile the test exact at `:3267`, as `LookAround` does, and register
+its calls exact in `fix_groups`.
+
+**This port.** `LookAroundConditional.CompileCore` and `FixGroups` (`src/FuzzyRegex/Parsing/Nodes.cs`)
+compile and fix the test exact. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (two rows red
+before the fix, one control) and the oracle entry `conditional-test-is-matched-exactly`, keyed on
+`OracleComparer.RunWithTheUpstreamFuzzyConditionTest` (`Info.UpstreamFuzzyConditionTest`, which
+compiles the test as upstream does, alone). The oracle's default waves draw no conditional inside a
+fuzzy section, so they never reach it (0 rows at seeds 7, 4242 and 20260927). On the 6,000-row
+D52/D54 grid (`docs/plan/2026-10-03-d52-d54-conditional-tests.md`) it changes 1,097 rows on its own,
+every one to upstream's patched answer or to that answer with an already pinned divergence (ledger
+entries 42 and 44, rule H') on top. `ledger-reproductions.jsonl` re-checks upstream's answer to the first row.
+
+## 65. A conditional whose negative test fails drops the captures the test made - DIVERGES HERE BY RULING (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D54, owner ruling of 2026-09-30 on OPEN-2
+(DECISIONS.md, `docs/plan/2026-09-30-open-questions.md`). Draft report, framed as a question:
+`entry-65-negative-condition-captures.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03 with `tools/matrix/survey.py` (upstream,
+PCRE2 10.47, Perl 5.42.3, .NET 10 BCL):
+
+```
+search(r'(?(?!(a))x|\1b)', 'ab')        -> None     PCRE2, Perl (0, 2) group 1 (0, 1); BCL None
+search(r'(?(?=(a))\1b|x)', 'ab')        -> (0, 2)   the positive twin; PCRE2, Perl the same
+search(r'(?(?<!(a))x|\1b)', 'aab')      -> None     PCRE2, Perl (1, 3) group 1 (0, 1)
+search(r'(?(?!(a)(b))x|\1\2)c', 'abc')  -> None     PCRE2, Perl (0, 3)
+search(r'(?:(?(?!(a))x|\1c)|ab)', 'ab') -> (0, 2) group 1 unset, in every engine (backtracking)
+```
+
+**Why the port differs.** When a negative test fails because its body matched, the conditional
+takes its no branch; nothing has backtracked, and only backtracking undoes a capture. So
+`(?(?!X)A|B)` must capture as `(?(?=X)B|A)`, which upstream already does for the positive form.
+PCRE2 documents it (pcre2pattern, "Assertions": "If such an assertion is being used as a condition
+in a conditional group, captured substrings are retained, because matching continues with the 'no'
+branch of the condition"); Perl and Boost.Regex measure the same. The .NET BCL drops a conditional
+test's captures in both forms. Upstream's README says nothing about these captures, so this is a
+question for upstream rather than a claimed bug. The cause is in `END_CONDITIONAL`
+(`upstream/src/_regex.c:12423-12432`): for a negative test it pops the captures saved at
+`CONDITIONAL` (`:12213`) along with the repeats and fuzzy counts before it goes to the no branch.
+
+**This port.** `Matcher`'s `END_CONDITIONAL` arm leaves the test's whole block for the no branch
+exactly as the positive arm leaves it for the yes branch - captures, repeats and the errors of a
+fuzzy section inside the test - and pushes `END_CONDITIONAL`, so the backtrack arm undoes it all
+when the no branch fails. Errors were decided 2026-10-03 (DECISIONS, after the blind review
+`.claude/driver/review-d52-d54-2026-10-03.md`): a first build kept the captures only, and
+`(?(?!((?:ab){e<=1}))b|\1)` over 'ax' then reported (0, 2) with no error and group 1 = 'ax',
+claiming an exact match that does not exist (`(?(?!((?:ab)))b|\1)` has none, upstream too);
+151 of 800 twin pairs with a fuzzy section in the test answered differently. Now it is (0, 2) with
+one substitution, as the positive twin `(?(?=((?:ab){e<=1}))\1|b)` is here and upstream. This
+narrows ledger entry 32 (D45): a negative condition's test is not thrown away, so its errors count;
+see the addendum there. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (eight rows red before
+the fix, one control), `FuzzyBestMatchTests.Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made`
+and the oracle entry `negative-condition-keeps-its-test-captures`, keyed on
+`OracleComparer.RunWithTheUpstreamConditionalTests` (`PatternObject.DropNegativeTestCaptures` plus
+the entry 64 switch, alone; every other named ablation now carries both switches too). It accounts
+for 2, 2 and 2 rows of the default waves at seeds 7, 4242 and 20260927 (diverge 0 at all three);
+one of them, `^(?(?<!(\d?))_[^\p{L}]|)\g<1>` with `subf` template `{0[2]}`, now matches here, so the
+template's out-of-range capture index raises where upstream, finding no match, returns the subject.
+`ledger-reproductions.jsonl` re-checks upstream's answer to the first row.
+
+## 66. A called group's copy is compiled from the group as parsed, never optimised or packed - FIXED HERE (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D50. Draft report:
+`entry-66-call-copy-as-parsed.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03:
+
+```
+search(r'(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))', 'ß')        -> None     expected (1, 1)
+search(r'(?fi)(?<=(?:SS))', 'ß')                             -> (1, 1)   (the control: the call written out)
+search(r'(?fi)(?(DEFINE)(?P<g1>SS))(?:(?&g1)){i<=1}', 'ß')   -> None     expected (0, 1)
+search(r'(?fi)(?:(?:SS)){i<=1}', 'ß')                        -> (0, 1)   (the control)
+search(r'(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}', 'b')  -> (0, 1)   expected None
+search(r'(?:(?:(?>a|b)c)){d<=1}', 'b')                       -> None     (the control)
+```
+
+**Why upstream is wrong.** A call answers as its group written out at the call (the rule of
+entries 56-60). A group called with other features than where it is written is compiled again from
+`info.defined_groups` (`upstream/regex/_regex_core.py:4449`, compiled at `_main.py:637`), which
+records the group the parser built. `Group.optimise` returns a new group (`_regex_core.py:3073`),
+and `pack_characters` runs on that one, so the copy's characters are never packed into a string.
+Only a packed string meets a full case fold, so `SS` in a backwards or fuzzy copy never matches
+'ß'. The parsed tree is not left as parsed either: `Atomic.optimise` rewrites its body in place
+(`:2083`), so a fuzzy copy runs the atomic group's alternation as the optimised set. A fuzzy section
+written out is never optimised (`Fuzzy` has no `optimise`), and in one the first alternative of
+`(?>a|b)` can match 'b' with a deletion and be kept; the set has no first alternative.
+
+PCRE2, .NET and JavaScript have no multi-character case fold. Perl 5.42.3 matches the forward call
+`(?iu)(?(DEFINE)(?<g1>SS))(?&g1)` against 'ßzzz' at (0, 1), as written out; on the subject 'ß'
+alone its minimum-length check refuses first, and it finds nothing for the call in a lookbehind,
+where `(?iu)(?<=SS)` matches. No engine has fuzzy matching.
+
+**Proposed fix upstream:** compile each copy from the group optimised in the copy's direction (not
+optimised when the copy is fuzzy) and packed, starting from a tree the pattern's own pass has not
+rewritten.
+
+**This port.** A pattern with a call is optimised from a copy of its tree (`RegexBase.Clone`), so
+the parsed tree stays as written, and `ParseFunctions.PrepareCopy` prepares each called copy from
+it, the whole pattern's included. Over the D50 grids (`tools/probes/d50-call-copy-grid`: 5,000 rows
+of calls with full folding, alternations and atomic groups, 4,000 whole-pattern calls, 4,000 calls
+to atomic alternations; Debug build, two million steps and two seconds per row) 20 rows changed
+from main, each to the port's own answer for the pattern with the calls written out, and no row
+now differs from its written-out form where main agreed with it. A pattern with no call compiles
+exactly as before. Pinned by `Gaps/Engine/CalledCopyTests` and the oracle entry
+`group-call-copy-is-the-group-written-out`, keyed on `OracleComparer.RunWithTheUpstreamCallCopies`
+(`Info.UpstreamCallCopies`), which reproduced main's answer on every grid row.

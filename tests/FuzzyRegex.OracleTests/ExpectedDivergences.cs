@@ -3320,6 +3320,22 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The six rows of <c>group-call-copy-is-the-group-written-out</c>, recorded 2026-10-03 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/d50-call-copy-rows.jsonl</c>: a backwards
+    /// and a fuzzy copy of a full-folded run, two fuzzy copies of an atomic alternation the
+    /// pattern's own pass had optimised, and two rows of the D50 grid (seeds 20261003 and 7) where
+    /// upstream disagrees with its own answer for the pattern with the calls written out.
+    /// </summary>
+    private const string _callCopyRows = """
+        {"generator": "rows", "pattern": "(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))", "flags": 0, "namedLists": {}, "subject": "\u00df", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?(DEFINE)(?P<g1>SS))(?:(?&g1)){i<=1}", "flags": 0, "namedLists": {}, "subject": "\u00df", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}], "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}}
+        {"generator": "rows", "pattern": "(?i)(?(DEFINE)(?P<g1>(?>a|b)))(?:a(?&g1)){s<=1}", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
+        {"generator": "rows", "pattern": "(?fi)(?P<g1>\u00df(?:(?&g3))*)(?:(?P<g2>(?&g3))){e<=1}(?<!(?&g1)(?P<g3>st))", "flags": 0, "namedLists": {}, "subject": "ft\u00df\u00dfxtxS", "operation": "search", "codepointSpan": [3, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": false, "index": 0, "length": 0, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?fi)(?:(?P<g1>(?P>g2))){d<=1}(?P<g2>(?:ss|st))", "flags": 0, "namedLists": {}, "subject": "S\ufb00bf\u00df\u00df", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c>, recorded
     /// 2026-09-29 by <c>python tools/record-oracle.py --rows tools/probes/lookaround-call-capture-rows.jsonl</c>:
     /// the four lookaround kinds, a call by name, a partial match, a fuzzy call and a conditional
@@ -3368,6 +3384,40 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?(?<!x)(?:ab|a)(?<!(?:(?:ab|a)(*FAIL)|ba[ab]))|(?:ab|a))", "flags": 0, "namedLists": {}, "subject": "  bab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)", "flags": 0, "namedLists": {}, "subject": "aax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)", "flags": 0, "namedLists": {}, "subject": "b", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        """;
+
+    /// <summary>
+    /// The four rows of <c>conditional-test-is-matched-exactly</c>, recorded 2026-10-03 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the D52 witness, then the same
+    /// under BESTMATCH, a positive lookbehind test, and ENHANCEMATCH, from the D52/D54 grid.
+    /// Upstream with the test compiled exact (its <c>LookAroundConditional._compile</c> patched in
+    /// memory) gives this port's answer on all four. Every test here is positive: where a NEGATIVE
+    /// fuzzy test's body matched by an edit, D54 now keeps that edit, so only both switches
+    /// together give upstream's answer and the D54 entry claims the row. Three such rows left this
+    /// set on 2026-10-03: <c>(?:(?(?&lt;!a)a*|a)){e&lt;=2}</c> over 'aa',
+    /// <c>(?r)(?:(?(?!a)b|)){e&lt;=1}</c> match 'b' and <c>(?e)(?:(?(?&lt;!a)b|)){e&lt;=1}</c> over 'b'.
+    /// </summary>
+    private const string _exactConditionTestRows = """
+        {"generator": "rows", "pattern": "(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?b)(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "bx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "((?:(?(?<=a)b|x)){e<=1})", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// The six rows of <c>negative-condition-keeps-its-test-captures</c>, recorded 2026-10-03 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the D54 witness, two negative
+    /// lookbehind tests, a test with two groups, a fuzzy section inside the test, and the witness in
+    /// a fuzzy section (D52 and D54 together). Upstream answers no match to all six; PCRE2 10.47 and
+    /// Perl 5.42.3 match each of the four they can express, with the same groups as this port.
+    /// </summary>
+    private const string _negativeTestCaptureRows = """
+        {"generator": "rows", "pattern": "(?(?!(a))x|\\1b)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!(a))x|\\1)", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!(a))x|\\1b)", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?!(a)(b))x|\\1\\2)c", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?!((?:ab){e<=1}))b|\\1)", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?(?!(a))x|\\1b)){e<=1}", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
     /// <summary>
@@ -3696,6 +3746,60 @@ internal static class ExpectedDivergences
         // (OracleComparer.Run), and would otherwise claim it. Entry 44's comes second, for the same
         // reason, and its ablation takes entry 42 away as well.
         new(
+            Id: "conditional-test-is-matched-exactly",
+            Reason: "A CONDITIONAL'S LOOKAROUND TEST IS MATCHED EXACTLY INSIDE A FUZZY SECTION, as a plain "
+                + "lookaround's body is. Known defect D52, ledger entry 64, fixed 2026-10-03 under the "
+                + "owner's no-known-bugs rule and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: `LookAroundConditional._compile` passes the enclosing section's "
+                + "`fuzzy` to the test (`_regex_core.py:3267`), where `LookAround._compile` compiles its "
+                + "body exact (:3201). The test is atomic, so a test that held only by an edit is never "
+                + "asked again exactly, and the budget takes a match away: "
+                + "`regex.search(r'(?:(?(?=a)ab|b)){s<=1}', 'b')` is None, where the same pattern "
+                + "without the budget gives (0, 1). A budget can only add matches.\n"
+                + "THE FIX compiles the test exact (`LookAroundConditional.CompileCore`), and fixes its "
+                + "calls exact. Upstream with that one line patched in memory gives this port's answer "
+                + "on every example.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamFuzzyConditionTest`, which compiles the test with "
+                + "the section's fuzziness and nothing else, as D51's ablation is its switch alone, "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the "
+                + "one being judged. The control is "
+                + "`A_row_the_fuzzy_condition_test_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _exactConditionTestRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamFuzzyConditionTest(row))
+        ),
+        new(
+            Id: "negative-condition-keeps-its-test-captures",
+            Reason: "A CONDITIONAL WHOSE NEGATIVE TEST FAILS KEEPS THE CAPTURES THE TEST MADE for its no "
+                + "branch, as `(?(?=X)B|A)` keeps them for B. Known defect D54, ledger entry 65, the "
+                + "owner's ruling of 2026-09-30 on OPEN-2, recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM BEHAVIOUR: END_CONDITIONAL restores the captures, repeats and fuzzy "
+                + "counts saved before a negative test whose body matched, then takes the no branch "
+                + "(`_regex.c:12423-12432`), so `regex.search(r'(?(?!(a))x|\\1b)', 'ab')` is None. Only "
+                + "backtracking undoes a capture, and none has happened. PCRE2 documents keeping them "
+                + "(pcre2pattern, \"Assertions\"); PCRE2 10.47 and Perl 5.42.3 answer (0, 2) with "
+                + "group 1 (0, 1).\n"
+                + "THE FIX leaves the test's whole block for the no branch as the positive arm leaves it "
+                + "for the yes branch (`Matcher`, END_CONDITIONAL): captures, repeats and the errors of "
+                + "a fuzzy section inside the test, which count because the test chose the branch "
+                + "(decided 2026-10-03; ledger entry 32's addendum).\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamConditionalTests`, which has both conditional-test "
+                + "fixes off (`PatternObject.DropNegativeTestCaptures` and the fuzzy test) and nothing "
+                + "else, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. It sits after the D52 entry, so it claims the rows "
+                + "D54 explains alone or with D52. The control is "
+                + "`A_row_the_dropped_test_captures_do_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _negativeTestCaptureRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalTests(row))
+        ),
+        new(
             Id: "fuzzy-exact-item-offered-as-a-deletion",
             Reason: "THIS PORT OFFERS A FUZZY ITEM THAT MATCHED EXACTLY AS A DELETION, and upstream never "
                 + "does. Ledger entry 42, finding F-A of the 2026-09-26 fuzzy sweep, fixed under the "
@@ -3799,6 +3903,44 @@ internal static class ExpectedDivergences
             Example: _lookaroundInsertionRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLookaroundInsertion(row))
+        ),
+        new(
+            Id: "group-call-copy-is-the-group-written-out",
+            Reason: "A CALLED GROUP'S COPY IS PREPARED HERE AS THE GROUP WRITTEN OUT AT THE CALL WOULD BE: "
+                + "optimised in its own direction unless it is fuzzy, then packed. Upstream compiles it from "
+                + "the group as parsed and disagrees with its own written-out form. Ledger entry 66, known "
+                + "defect D50, fixed 2026-10-03 and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a group called with other features than where it is written is "
+                + "compiled again from `info.defined_groups` (upstream/regex/_main.py:637, "
+                + "_regex_core.py:4449), which holds the group the parser built: `Group.optimise` returns "
+                + "a new group (:3073) and `pack_characters` runs on that one. So the copy's characters "
+                + "are never packed into a string and never meet a full case fold: "
+                + "`regex.search(r'(?fi)(?(DEFINE)(?P<g1>SS))(?<=(?&g1))', 'ß')` is None while "
+                + "`(?fi)(?<=(?:SS))` matches at 1. The optimiser also rewrites an atomic group's body in "
+                + "place (:2083), so a fuzzy copy runs `(?>a|b)` as the set `[ab]`, which a fuzzy section "
+                + "written out never does: `(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}` matches 'b' "
+                + "upstream, and `(?:(?:(?>a|b)c)){d<=1}` does not.\n"
+                + "THE FIX optimises a pattern with a call from a copy of its tree, so the tree as parsed is "
+                + "left as written, and prepares each called copy from it (`ParseFunctions.PrepareCopy`). "
+                + "Over the D50 grids (5,000 rows of calls with full folding, alternations and atomic "
+                + "groups, 4,000 of whole-pattern calls and 4,000 of called atomic groups) 20 rows changed, "
+                + "each to the port's own answer for the pattern with the calls written out. The rule is "
+                + "D40's: a call answers as its group written out at the call. Perl 5.42 matches a forward "
+                + "call to `(?<g1>SS)` against 'ß', on a subject long enough to pass its minimum-length "
+                + "check, but finds nothing for the call in a lookbehind, as upstream; PCRE2, .NET and "
+                + "JavaScript have no multi-character fold.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamCallCopies`, which compiles each copy from the group as "
+                + "parsed with entries 42 and 44 off, reproduces upstream's recorded answer exactly, AND "
+                + "this port's live answer is the one being judged. A row that also needs upstream's call "
+                + "features belongs to `group-call-runs-with-its-call-sites-features`, whose ablation "
+                + "restores both, and sits after this one. The control is "
+                + "`A_row_the_call_copies_do_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.CalledCopyTests",
+            Example: _callCopyRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamCallCopies(row))
         ),
         new(
             Id: "group-call-runs-with-its-call-sites-features",
@@ -3935,8 +4077,9 @@ internal static class ExpectedDivergences
                 + "one substitution. The verb cannot matter there: the body fails at 'b' either way, "
                 + "and PCRE2 10.47 and Perl 5.42 both match `(?!a(*PRUNE)b)ad` over 'ad' at (0, 2).\n"
                 + "THE FIX saves the open section with the counts at ATOMIC, CONDITIONAL and LOOKAROUND "
-                + "and puts it back in their eight restoring arms "
-                + "(`MatchState.PushSubAttemptFuzzyState`), and `start_match` closes it.\n"
+                + "and puts it back in their seven restoring arms "
+                + "(`MatchState.PopSubAttemptFuzzyState`; an eighth runs only under the oracle switch "
+                + "`DropNegativeTestCaptures`), and `start_match` closes it.\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithTheSectionLeftOpenByAVerb`, which sets "
                 + "`PatternObject.KeepSectionOpenAfterAVerb` with entries 42 and 44 off, reproduces "
@@ -3957,12 +4100,17 @@ internal static class ExpectedDivergences
                 + "restores it, so a body thrown away puts the counts back (`:15277`, `:15421`, "
                 + "`:17160`) and leaves its errors in the total. A perfect first match then looks "
                 + "imperfect and the walk replaces it: `regex.search(r'(?b)(?:(?!(?:q){e<=1})|c)', 'c')` "
-                + "is (0, 0) where the flagless search is (0, 1) with no errors; and a better match "
-                + "loses: `(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx' is (0, 1) with a "
-                + "deletion, over the exact 'dc' at (1, 3).\n"
+                + "is (0, 0) where the flagless search is (0, 1) with no errors. A CONDITION's test is "
+                + "thrown away too when its branch fails and the match backtracks out of the whole "
+                + "conditional: `(?b)(?:(?(?!(?:q){e<=1})|y)|c)` over 'c' is (0, 0) upstream and (0, 1) "
+                + "here, as is its positive twin `(?b)(?:(?(?=(?:q){e<=1})y|)|c)`. A failed negative "
+                + "test whose conditional goes on to match is not thrown away (D54, ledger entry 65): "
+                + "it keeps its block, errors included.\n"
                 + "THE FIX saves the two totals with the counts at ATOMIC, CONDITIONAL and LOOKAROUND "
-                + "and puts them back in the eight restoring arms "
-                + "(`MatchState.PushSubAttemptFuzzyState`), and `start_match` zeroes them.\n"
+                + "and puts them back in the seven restoring arms the library uses "
+                + "(`MatchState.PopSubAttemptFuzzyState`); an eighth, END_CONDITIONAL's forward arm for "
+                + "a failed negative test, runs only under the oracle switch "
+                + "`DropNegativeTestCaptures`. `start_match` zeroes them.\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithTheDiscardedTotals`, which sets "
                 + "`PatternObject.KeepDiscardedTotals` with entries 42 and 44 off, reproduces "

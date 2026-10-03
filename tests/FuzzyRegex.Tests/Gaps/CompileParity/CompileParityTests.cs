@@ -66,7 +66,15 @@ public sealed class CompileParityTests
     /// sequence-of-sections DNA pattern with its two <c>{e&lt;=0}</c> groups among them.
     /// </para>
     /// <para>
-    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a seventh
+    /// The seventh is ledger entry 66's (D50). In
+    /// <c>(?(DEFINE)(?&lt;mydef&gt;...)).*(?&lt;=(?&amp;mydef).*)</c> the call in the lookbehind needs a
+    /// backwards copy of <c>mydef</c>, which upstream compiles from the group as parsed, one
+    /// <c>CHARACTER_REV</c> per letter. This port prepares the copy as the group written out there
+    /// would be, so each run of letters is one <c>STRING_REV</c>. Everything up to the pattern's
+    /// <c>SUCCESS</c> is the same; only the copy after it moves.
+    /// </para>
+    /// <para>
+    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: an eighth
     /// row that starts diverging fails the equality below, and a listed row that stops diverging
     /// fails the inequality. Re-recording the corpus against a newer <c>regex</c> gets the same
     /// alarm either way.
@@ -80,6 +88,8 @@ public sealed class CompileParityTests
         ["(?iV1)[\\w--a]"] = "S45, Turkic case data",
         ["(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)"] = "S82, branch-reset group numbering",
         ["(?e)(dogf(((oo){e<1})|((00){e<1}))d){e<2}"] = "ledger 39, zero-error sections kept",
+        ["(?(DEFINE)(?<mydef>(?<wrong>THIS_SHOULD_NOT_MATCHx?)|(?<right>right))).*(?<=(?&mydef).*)"] =
+            "ledger 66, a called copy is packed",
     };
 
     [Test]

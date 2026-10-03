@@ -747,6 +747,14 @@ internal sealed class PatternObject
     internal bool KeepDiscardedTotals;
 
     /// <summary>
+    /// Oracle-only: a conditional whose negative test fails, because the test's body matched, puts
+    /// back the captures, repeats and fuzzy counts saved before the test and then takes the no
+    /// branch, as upstream's <c>END_CONDITIONAL</c> does (<c>upstream/src/_regex.c</c>:12423-12432;
+    /// D54, ledger entry 65). Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool DropNegativeTestCaptures;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
     /// group reference re-enters the comparison without first stepping past a folding the edit
     /// finished, which is upstream's rule. The oracle sets it on a pattern it compiled for one call,

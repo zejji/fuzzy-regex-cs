@@ -259,6 +259,11 @@ internal static class OracleComparer
     /// Give every group call the direction and fuzziness upstream gives it (D40, D42, D43). Acts on
     /// the compile. Used by <see cref="RunWithTheUpstreamCallFeatures"/> and by nothing else.
     /// </param>
+    /// <param name="upstreamCallCopies">
+    /// Compile each called group's copy from the group as parsed, as upstream does (D50, ledger entry
+    /// 66). Acts on the compile. Used by <see cref="RunWithTheUpstreamCallCopies"/> and
+    /// <see cref="RunWithTheUpstreamCallFeatures"/>.
+    /// </param>
     /// <param name="upstreamCallCaptures">
     /// Also switch the D51 fix off (ledger entry 63) for an ablation that passes only
     /// <paramref name="ablate"/>, as every other named ablation does; see
@@ -268,6 +273,17 @@ internal static class OracleComparer
     /// <param name="composeWithD11">
     /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
     /// composed runs themselves pass <see langword="false"/>.
+    /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// Compile each conditional's lookaround test with the enclosing section's fuzziness, as
+    /// upstream does (the D52 fix off, ledger entry 64). Acts on the compile. Every named ablation
+    /// has it on too; see where it is applied. Passed alone by
+    /// <see cref="RunWithTheUpstreamFuzzyConditionTest"/> and <see cref="RunWithTheUpstreamConditionalTests"/>.
+    /// </param>
+    /// <param name="upstreamNegativeTestCaptures">
+    /// Drop a failed negative test's captures before the no branch, as upstream does (the D54 fix
+    /// off, ledger entry 65). Every named ablation has it on too. Passed alone, with the D52 switch,
+    /// by <see cref="RunWithTheUpstreamConditionalTests"/>.
     /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
@@ -283,10 +299,30 @@ internal static class OracleComparer
         bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false,
         bool upstreamCallCaptures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamNegativeTestCaptures = false,
+        bool upstreamCallCopies = false,
         bool composeWithD11 = true
     )
     {
         ArgumentNullException.ThrowIfNull(row);
+
+        // Every named ablation also has the D52 and D54 fixes off (ledger entries 64 and 65), for
+        // the reason given below for D51: upstream compiles a conditional's test with the section's
+        // fuzziness and drops a failed negative test's captures on every row, so with those fixes
+        // on, taking another fix away need not bring back upstream's answer on a row with a
+        // conditional. They change nothing on a row without a lookaround conditional. Their own
+        // ablations are those switches alone, as D51's is, and their entries sit just after D51's,
+        // so they claim only the rows the two fixes explain; see
+        // `conditional-test-is-matched-exactly` and `negative-condition-keeps-its-test-captures`.
+        bool namedAblation =
+            withoutTheFuzzySearchFixes
+            || upstreamReverseGrapheme
+            || upstreamFoldedRuns
+            || upstreamWholePatternCall
+            || upstreamCallFeatures
+            || upstreamCallCopies
+            || upstreamCallCaptures;
 
         // Compiling and matching are caught separately, because *which of the two* threw is the
         // difference between this port rejecting the input and this port crashing on it, and only
@@ -320,7 +356,9 @@ internal static class OracleComparer
                 upstreamReverseGrapheme: upstreamReverseGrapheme,
                 upstreamFoldedRuns: upstreamFoldedRuns,
                 upstreamWholePatternCall: upstreamWholePatternCall,
-                upstreamCallFeatures: upstreamCallFeatures
+                upstreamCallFeatures: upstreamCallFeatures,
+                upstreamFuzzyConditionTest: upstreamFuzzyConditionTest || namedAblation,
+                upstreamCallCopies: upstreamCallCopies
             );
         }
         catch (NotImplementedException)
@@ -365,14 +403,9 @@ internal static class OracleComparer
         // named ablations' switches, not on `ablate`, which the pattern-reuse test also uses to
         // dirty a pattern; the named ablations that pass `ablate` alone (skip timing, verb scope
         // and D11's second pass) ask for it with `upstreamCallCaptures`.
-        bool callCapturesStacked =
-            withoutTheFuzzySearchFixes
-            || upstreamReverseGrapheme
-            || upstreamFoldedRuns
-            || upstreamWholePatternCall
-            || upstreamCallFeatures
-            || upstreamCallCaptures;
+        bool callCapturesStacked = namedAblation;
         compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
+        compiled.PatternObject.DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation;
 
         ablate?.Invoke(compiled);
 
@@ -397,6 +430,9 @@ internal static class OracleComparer
                 upstreamWholePatternCall,
                 upstreamCallFeatures,
                 upstreamCallCaptures,
+                upstreamFuzzyConditionTest,
+                upstreamNegativeTestCaptures,
+                upstreamCallCopies,
                 composeWithD11: false
             );
 
@@ -436,6 +472,9 @@ internal static class OracleComparer
                 upstreamWholePatternCall,
                 upstreamCallFeatures,
                 upstreamCallCaptures,
+                upstreamFuzzyConditionTest,
+                upstreamNegativeTestCaptures,
+                upstreamCallCopies,
                 composeWithD11: false
             );
 
@@ -1266,6 +1305,58 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with each conditional's lookaround test compiled with the
+    /// enclosing fuzzy section's fuzziness, as upstream compiles it (the D52 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream passes the section's <c>fuzzy</c> to the test (<c>_regex_core.py</c>:3267) where a
+    /// plain lookaround's body compiles exact (:3201). This switch alone, as D51's ablation is its
+    /// alone: every other fix, D54's included, stays on, so the
+    /// <c>conditional-test-is-matched-exactly</c> entry, which keys on this, claims only the rows
+    /// D52 alone explains.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamFuzzyConditionTest(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            upstreamFuzzyConditionTest: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with both conditional-test fixes switched off: a failed
+    /// negative test's captures are put back before the no branch runs (D54), and the test compiles
+    /// with the section's fuzziness (D52), as upstream does both.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's END_CONDITIONAL restores the captures, repeats and fuzzy counts saved before the
+    /// test and then takes the no branch (<c>_regex.c</c>:12423-12432);
+    /// <c>PatternObject.DropNegativeTestCaptures</c> does the same. The two switches alone; every
+    /// other fix stays on. The <c>negative-condition-keeps-its-test-captures</c> entry, which keys
+    /// on this, sits after the D52 entry, so it claims the rows D54 explains alone or with D52.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fixes, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamConditionalTests(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            upstreamFuzzyConditionTest: true,
+            upstreamNegativeTestCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with every fuzzy full-case-folded run compiled to its
     /// folding alone, as upstream compiles it.
     /// </summary>
@@ -1298,7 +1389,9 @@ internal static class OracleComparer
     /// Upstream resolves each call once, for where it is written, and compiles a called group's
     /// copy with those references; it registers a lookaround's calls with the caller's fuzziness
     /// and a conditional test's calls with the caller's direction, though it compiles both bodies
-    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. The
+    /// otherwise. <c>upstreamCallFeatures</c> restores all three at compile time. Upstream also
+    /// compiles each copy from the group as parsed (D50), so <c>upstreamCallCopies</c> is on too:
+    /// a row that carries both differences is this entry's, not D50's. The
     /// <c>group-call-runs-with-its-call-sites-features</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
@@ -1315,7 +1408,34 @@ internal static class OracleComparer
             // D49: upstream's minimum width, which counts the called copies (ledger entry 60).
             ablate: static compiled => compiled.PatternObject.MinWidth = compiled.PatternObject.UpstreamMinWidth,
             keepMinimumOrderFix: true,
-            upstreamCallFeatures: true
+            upstreamCallFeatures: true,
+            upstreamCallCopies: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with each called group's copy compiled from the group as
+    /// parsed, as upstream compiles it (the D50 fix switched off).
+    /// </summary>
+    /// <remarks>
+    /// Upstream compiles a copy from the group the parser built, never optimised or packed, so a run
+    /// of characters in it never meets a full case fold. <c>upstreamCallCopies</c> restores that at
+    /// compile time. The <c>group-call-copy-is-the-group-written-out</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's copies, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCallCopies(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            // Entry 51's entry sits after this one, as it does after the call-site features entry.
+            keepMinimumOrderFix: true,
+            upstreamCallCopies: true
         );
     }
 

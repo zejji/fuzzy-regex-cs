@@ -74,6 +74,12 @@ internal static class PatternCompiler
     /// <param name="upstreamCallFeatures">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
     /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFuzzyConditionTest"/>.
+    /// </param>
+    /// <param name="upstreamCallCopies">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallCopies"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
@@ -83,7 +89,9 @@ internal static class PatternCompiler
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         try
@@ -96,7 +104,9 @@ internal static class PatternCompiler
                 upstreamReverseGrapheme,
                 upstreamFoldedRuns,
                 upstreamWholePatternCall,
-                upstreamCallFeatures
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies
             );
         }
         catch (FuzzyRegexParseException unterminated)
@@ -184,7 +194,9 @@ internal static class PatternCompiler
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -212,6 +224,8 @@ internal static class PatternCompiler
                     UpstreamFoldedRuns = upstreamFoldedRuns,
                     UpstreamWholePatternCall = upstreamWholePatternCall,
                     UpstreamCallFeatures = upstreamCallFeatures,
+                    UpstreamFuzzyConditionTest = upstreamFuzzyConditionTest,
+                    UpstreamCallCopies = upstreamCallCopies,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -284,6 +298,17 @@ internal static class PatternCompiler
         parsed.FixGroups(pattern, reverse, false);
 
         // NOT PORTED: the DEBUG flag's parsed.dump(), which only prints.
+
+        // NOT UPSTREAM (D50): a pattern whose calls need copies is optimised from a copy of its tree,
+        // so the tree as parsed is left as written for the called groups' copies
+        // (ParseFunctions.PrepareCopy). The optimiser rewrites parts of the tree it is given in
+        // place, and upstream compiles each copy from that half-optimised tree. A pattern with no
+        // call, or none that needs a copy, is optimised as before.
+        if (!info.UpstreamCallCopies && ParseFunctions.MayNeedCopies(info))
+        {
+            info.PatternAsWritten = parsed;
+            parsed = parsed.Clone();
+        }
 
         // Optimise the parsed pattern.
         parsed = parsed.Optimise(info, reverse);

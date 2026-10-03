@@ -995,6 +995,66 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_fuzzy_condition_test_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `conditional-test-is-matched-exactly` (ledger entry 64, D52), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "conditional-test-is-matched-exactly", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_dropped_test_captures_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `negative-condition-keeps-its-test-captures` (ledger entry 65, D54), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "negative-condition-keeps-its-test-captures", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_discarded_total_fix_does_not_explain_is_not_accounted_for()
     {
         // The control for `fuzzy-total-drops-a-discarded-section` (ledger entry 32, D45), built as entry 55's: upstream's own answer is what this
@@ -1116,6 +1176,40 @@ public sealed class OracleWaveTests
                 .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
                 ?.Id.Should()
                 .NotBe(entry.Id, "a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_call_copies_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-copy-is-the-group-written-out` (ledger entry 66, D50), built
+        // as entry 54's: upstream's own answer is what this port gave before the fix, so accepting
+        // it would classify a revert as the fix; a match at 1 of length 1, which no engine gives on
+        // any example, stands in for an unrelated defect this entry must refuse; and this port's
+        // live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-copy-is-the-group-written-out", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            (ExpectedDivergences.For(row, row.Expected)?.Id)
+                .Should()
+                .NotBe(entry.Id, "upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                ?.Id.Should()
+                .NotBe(entry.Id, "a match at 1 over {0} is a defect, not this family", row.Subject);
+            OracleComparer
+                .RunWithTheUpstreamCallCopies(row)
+                .Should()
+                .NotBeNull("the ablation must answer {0} for the entry to key on it", row.Pattern);
         }
     }
 

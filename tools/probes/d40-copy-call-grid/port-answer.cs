@@ -102,7 +102,18 @@ static FuzzyRegex Ablated(System.Reflection.MethodInfo withDefaultVersion, strin
     var regex = (FuzzyRegex)
         withDefaultVersion.Invoke(
             null,
-            [pattern, FuzzyRegexOptions.None, timeout, null, (int)FuzzyRegexOptions.Version1, false, false, false, true]
+            [
+                pattern,
+                FuzzyRegexOptions.None,
+                timeout,
+                null,
+                (int)FuzzyRegexOptions.Version1,
+                false,
+                false,
+                false,
+                true,
+                false,
+            ]
         )!;
     const System.Reflection.BindingFlags Any =
         System.Reflection.BindingFlags.NonPublic

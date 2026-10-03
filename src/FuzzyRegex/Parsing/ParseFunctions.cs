@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -1253,6 +1254,7 @@ internal static class ParseFunctions
         return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
         {
             UpstreamCallFeatures = info.UpstreamCallFeatures,
+            UpstreamFuzzyTest = info.UpstreamFuzzyConditionTest,
         };
     }
 
@@ -3237,7 +3239,9 @@ internal static class ParseFunctions
                     {
                         // The pattern as a whole doesn't have the features we want, so we'll need
                         // to make a copy of it with the desired features.
-                        additionalGroups.Add((new CallRef(callRefs.Count, parsed), reverse, fuzzy));
+                        additionalGroups.Add(
+                            (CopyOfPattern(info, parsed, callRefs.Count, reverse, fuzzy), reverse, fuzzy)
+                        );
                     }
                 }
                 else
@@ -3248,7 +3252,7 @@ internal static class ParseFunctions
                     {
                         // The group doesn't have the features we want, so we'll need to make a copy
                         // of it with the desired features.
-                        additionalGroups.Add((group, reverse, fuzzy));
+                        additionalGroups.Add((PrepareCopy(info, group, reverse, fuzzy), reverse, fuzzy));
                     }
                 }
 
@@ -3367,8 +3371,13 @@ internal static class ParseFunctions
                     info.AdditionalGroups.Add(
                         (
                             callGroup.GroupNumber == 0
-                                ? new CallRef(reference, parsed)
-                                : info.DefinedGroups[callGroup.GroupNumber].Group,
+                                ? CopyOfPattern(info, parsed, reference, callReverse, callFuzzy)
+                                : PrepareCopy(
+                                    info,
+                                    info.DefinedGroups[callGroup.GroupNumber].Group,
+                                    callReverse,
+                                    callFuzzy
+                                ),
                             callReverse,
                             callFuzzy
                         )
@@ -3380,6 +3389,115 @@ internal static class ParseFunctions
         }
 
         info.GroupCalls.RemoveRange(firstCall, info.GroupCalls.Count - firstCall);
+    }
+
+    /// <summary>
+    /// Prepares a called group's copy as the group would be if it were written out at the call: the
+    /// group as parsed, optimised in the copy's own direction unless the copy is fuzzy, then packed.
+    /// Not in upstream (D50, ledger entry 66), which compiles the group as parsed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>Group.optimise</c> returns a new group (<c>upstream/regex/_regex_core.py</c>:3073),
+    /// so <c>defined_groups</c> keeps the one the parser built, and a copy compiled from it
+    /// (<c>_main.py</c>:637) is never packed. Packing is more than speed: a run of characters under
+    /// full case folding only meets a folded subject character once it is a string, so
+    /// <c>(?fi)(?(DEFINE)(?P&lt;g1&gt;SS))(?&lt;=(?&amp;g1))</c> found nothing in 'ß' where
+    /// <c>(?fi)(?&lt;=(?:SS))</c> matches at 1.
+    /// </para>
+    /// <para>
+    /// A fuzzy copy is not optimised because a group written out in a fuzzy section is not:
+    /// <see cref="Fuzzy"/> has no <c>Optimise</c>, upstream's either, and the optimiser's rewrites
+    /// need not keep a fuzzy section's answers. An exact copy is optimised in its own direction,
+    /// because the prefix or suffix it factors out and the first-character check it adds before an
+    /// alternation (<see cref="Branch"/>) are read in that direction. Nothing the optimiser builds
+    /// depends on where the copy sits in the pattern: the pattern's first set and required string
+    /// are read from the pattern's own tree, and the copies are compiled after its SUCCESS.
+    /// </para>
+    /// <para>
+    /// An exact call in a lookaround inside a fuzzy section gets an optimised copy where the body
+    /// written out there would not be optimised. Optimising an exact item is meant to keep its
+    /// answers, and the D50 grid found no row where it did not; the copy is not keyed on where the
+    /// call sits, only on its features, so the two cannot be told apart here.
+    /// </para>
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="group">The group as parsed, or the whole pattern as parsed.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    /// <returns>The copy to compile.</returns>
+    internal static RegexBase PrepareCopy(Info info, RegexBase group, bool reverse, bool fuzzy)
+    {
+        if (info.UpstreamCallCopies)
+        {
+            return group;
+        }
+
+        Debug.Assert(
+            info.PatternAsWritten is not null,
+            "MayNeedCopies said no copy, so the pattern's own pass rewrote the tree this copy is made from"
+        );
+
+        // A copy of the tree, because both passes rewrite parts of the tree they are given in place,
+        // and one group can be copied for more than one call.
+        RegexBase copy = group.Clone();
+        if (!fuzzy)
+        {
+            copy = copy.Optimise(info, reverse);
+        }
+
+        return copy.PackCharacters(info);
+    }
+
+    /// <summary>
+    /// Whether <see cref="CheckGroupFeatures"/> can make a copy for any of the pattern's calls, read
+    /// before the pattern is optimised. Not in upstream (D50).
+    /// </summary>
+    /// <remarks>
+    /// A call to a numbered group needs a copy when its direction or fuzziness differs from where the
+    /// group is written, the test <see cref="CheckGroupFeatures"/> makes. A call to the whole pattern
+    /// always says yes: whether the pattern is a fuzzy section is read after optimising (D37). A copy
+    /// found only inside another copy (<see cref="ResolveCallsInCopy"/>) needs that copy first.
+    /// <see cref="PrepareCopy"/> asserts the answer was yes.
+    /// </remarks>
+    /// <param name="info">The parse state, after <see cref="RegexBase.FixGroups"/>.</param>
+    /// <returns><see langword="true"/> if a copy may be made.</returns>
+    internal static bool MayNeedCopies(Info info) =>
+        info.GroupCalls.Exists(entry =>
+        {
+            int group = ((CallGroup)entry.Call).GroupNumber;
+            if (group == 0)
+            {
+                return true;
+            }
+
+            (Group _, bool definedReverse, bool definedFuzzy) = info.DefinedGroups[group];
+            return (definedReverse, definedFuzzy) != (entry.Reverse, entry.Fuzzy);
+        });
+
+    /// <summary>
+    /// The copy of the whole pattern for a call to it with other features than the pattern's own.
+    /// </summary>
+    /// <remarks>
+    /// Upstream copies the pattern as optimised in the pattern's own direction (the
+    /// <paramref name="parsed"/> passed here); this port prepares it from the pattern as parsed, as
+    /// <see cref="PrepareCopy"/> prepares a group (D50).
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="parsed">The pattern as optimised.</param>
+    /// <param name="reference">The call reference the copy answers.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    /// <returns>The copy to compile.</returns>
+    private static CallRef CopyOfPattern(Info info, RegexBase parsed, int reference, bool reverse, bool fuzzy)
+    {
+        if (info.UpstreamCallCopies)
+        {
+            return new CallRef(reference, parsed);
+        }
+
+        Debug.Assert(info.PatternAsWritten is not null, "a pattern with a call keeps its parsed tree");
+        return new CallRef(reference, PrepareCopy(info, info.PatternAsWritten, reverse, fuzzy));
     }
 
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>

@@ -253,6 +253,17 @@ public sealed class FuzzyRegex
     /// fuzziness upstream gives it. The oracle sets it to show that D40, D42 and D43 are the whole
     /// of a divergence; see <see cref="Parsing.Info.UpstreamCallFeatures"/>.
     /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// NOT UPSTREAM, and never set by this library: compile a conditional's lookaround test with
+    /// the enclosing fuzzy section's fuzziness, as upstream does. The oracle sets it to show that
+    /// known defect D52 (ledger entry 64) is the whole of a divergence; see
+    /// <see cref="Parsing.Info.UpstreamFuzzyConditionTest"/>.
+    /// </param>
+    /// <param name="upstreamCallCopies">
+    /// NOT UPSTREAM, and never set by this library: compile a called group's copy from the group as
+    /// parsed, as upstream does. The oracle sets it to show that D50 is the whole of a divergence;
+    /// see <see cref="Parsing.Info.UpstreamCallCopies"/>.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(
         string pattern,
@@ -263,7 +274,9 @@ public sealed class FuzzyRegex
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     ) =>
         new(
             pattern,
@@ -275,7 +288,9 @@ public sealed class FuzzyRegex
             upstreamReverseGrapheme,
             upstreamFoldedRuns,
             upstreamWholePatternCall,
-            upstreamCallFeatures
+            upstreamCallFeatures,
+            upstreamFuzzyConditionTest,
+            upstreamCallCopies
         );
 
     /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
@@ -292,6 +307,8 @@ public sealed class FuzzyRegex
     /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamWholePatternCall">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFuzzyConditionTest">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallCopies">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
@@ -302,7 +319,9 @@ public sealed class FuzzyRegex
         bool upstreamReverseGrapheme = false,
         bool upstreamFoldedRuns = false,
         bool upstreamWholePatternCall = false,
-        bool upstreamCallFeatures = false
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
@@ -322,7 +341,9 @@ public sealed class FuzzyRegex
             upstreamReverseGrapheme,
             upstreamFoldedRuns,
             upstreamWholePatternCall,
-            upstreamCallFeatures
+            upstreamCallFeatures,
+            upstreamFuzzyConditionTest,
+            upstreamCallCopies
         );
 
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
