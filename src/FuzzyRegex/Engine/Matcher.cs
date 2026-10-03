@@ -16844,6 +16844,15 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            // D11: the insertion ran out of text in front of the lookaround, which
+                            // is the item that ran out. `node` is stale here (whatever matched
+                            // last, possibly outside the enclosing body: assert A10).
+                            if (status == MatchStatus.Partial)
+                            {
+                                node = lookNode;
+                                goto runOut;
+                            }
+
                             return status;
                         }
 

@@ -174,3 +174,16 @@ Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
   ledger 64 (upstream's fuzzy test refuses 'ba' from 1). Pins moved to their own test,
   `PartialConditionRuleTests.A_fuzzy_conditional_with_an_exact_test_deletes_its_branch_item`; the
   wrong "ledger 42" reasoning in the D38 summary is gone. No other `{e<=k}` conditional row in the file.
+- **Step 2, F1**: the LOOKAROUND backtracking arm's fuzzy retry (`InsertBeforeAFailedLookaround`)
+  now routes a Partial through `runOut` with `node = lookNode`, the inner lookaround whose
+  insertion ran out. The stale `node` was whatever matched last; under `(?r)` that is the
+  `(*FAIL)` outside the enclosing body, which is what tripped A10 in the reviewer's plant. The
+  lookaround's node lies in the enclosing body (`SetLookaroundBodies` walks every node from the
+  body's first to its end), so A10 holds, and its `RunOutGroups` covers the groups a re-run of the
+  lookaround can set. The END_LOOKAROUND site (negative lookaround) already went to `runOut` with
+  its END node and is left as it is. Witness:
+  `PartialLookaroundRuleTests.An_insertion_before_a_failed_lookaround_at_the_edge_runs_out_in_the_outer_body`,
+  8 rows red without the fix (all the review's rows plus the two reversed A10 rows), 1 control.
+  Reviewer's 5,520-row fuzzy-lookaround grid (Debug, merged head without and with the fix): 62 rows
+  onto the judge, 0 away, judge unchanged; mismatches 355 -> 293. Asserts: the same 3 rows both
+  times, `(?<=(?:\X\X){e<=1})` over '' (step 3a), none new.

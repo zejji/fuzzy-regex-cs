@@ -106,6 +106,46 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// D69's shape in the fuzzy retry of a failed lookaround (ledger entry 50): when the inner
+    /// <c>(?=b)</c> or <c>(?&lt;=b)</c> fails, the retry tries an insertion in front of it, which at
+    /// the edge runs out of text. Inside an outer lookaround that is a run-out in a body like any
+    /// other, so matching goes on after the outer lookaround, where <c>(*FAIL)</c> fails for every
+    /// continuation and the negative form's <c>b</c> alternative needs a later start. The arm
+    /// answered the partial at once instead. The reversed rows are the ones whose stale node (the
+    /// <c>(*FAIL)</c>, outside the body) tripped assert A10 when the arm was first routed through
+    /// the run-out; the run-out is the inner lookaround's own node. The last row is the control: 'a'
+    /// + 'b' completes it.
+    /// </summary>
+    /// <remarks>
+    /// Expected answers: the brute-force judge and the port's own non-partial judge, which agree on
+    /// every row (2026-10-03).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately: regex 2026.9.10 answers P(0, 1) to the first three
+    // rows. It agrees on the rest.
+    [Test]
+    [Arguments("match", @"(?=(?:a(?=b)){e<=1})(*FAIL)", "a", "None")]
+    [Arguments("fullmatch", @"(?=(?:a(?=b)){e<=1})a", "a", "None")]
+    [Arguments("search", @"(?!(?:a(?=b)){e<=1})(*FAIL)|b", "a", "P(1,1)")]
+    [Arguments("match", @"(?=(?:a(?<=b)){i<=1})(*FAIL)", "a", "None")]
+    [Arguments("fullmatch", @"(?=(?:a(?<=b)){i<=1})a", "a", "None")]
+    [Arguments("search", @"(?!(?:a(?<=b)){i<=1})(*FAIL)|b", "a", "P(1,1)")]
+    [Arguments("search", @"(?r)(*FAIL)(?<=(?:a(?=b)){e<=1})", "", "None")]
+    [Arguments("match", @"(?r)(*FAIL)(?<=(?:a(?=b)){e<=1})", "", "None")]
+    [Arguments("match", @"(?=(?:a(?=b)){e<=1})ab", "a", "P(0,1)")]
+    public void An_insertion_before_a_failed_lookaround_at_the_edge_runs_out_in_the_outer_body(
+        string operation,
+        string pattern,
+        string text,
+        string expected
+    )
+    {
+        Match m = Run(operation, pattern, text);
+        string kind = m.PartialMatch ? "P" : "F";
+
+        (m.Success ? $"{kind}({m.Index},{m.Index + m.Length})" : "None").Should().Be(expected);
+    }
+
+    /// <summary>
     /// A negative lookaround whose body runs out inside a string, followed by a string that needs
     /// the text to come: 'a' + 'c' completes each row. The run-out left the matcher's position in
     /// the body's string behind, and the next string then resumed from it instead of from its start
