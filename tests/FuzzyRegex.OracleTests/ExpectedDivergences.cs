@@ -2274,7 +2274,12 @@ internal static class ExpectedDivergences
         // `(?r)[a][[:digit:]]*$` and `(\p{Ll}*)a\1\b`, answers the partial this port answers, (0, 0)
         // and (5, 5). Measured 2026-09-26 on regex 2026.9.10.
         "match 0:(0,0)[(0,0)] last=-1/- partial",
-        "match 0:(5,0)[(5,0)] 1:unset last=-1/- partial",
+        // Row 7's group 1 is set since the D11 fix round 2 (2026-10-03): the first-set check in
+        // front of the pattern used to run out at the edge and answer the partial before group 1
+        // opened; it now lets the attempt through (Matcher.ZeroWidthTestDefersAtTheEdge), group 1
+        // closes empty at 5 and the `a` runs out, so the path's group 1 is (5, 5) in every completion
+        // of it (D62's rule). The span is unchanged.
+        "match 0:(5,0)[(5,0)] 1:(5,0)[(5,0)] last=1/- partial",
     ];
 
     /// <summary>
@@ -7148,7 +7153,11 @@ internal static class ExpectedDivergences
                 + "U+00DF, U+FB00 and U+01F0 can too, the first row's grid reads (3,3) with two "
                 + "substitutions in every cell here, and this port gives upstream's answer to both "
                 + "rows. The swap cells for U+00DF, U+FB00 and U+01F0 are ledger entry 49's divergence, "
-                + "not this one's. Row 34508 is not fuzzy and is unchanged.",
+                + "not this one's. Row 34508 is not fuzzy and is unchanged.\n"
+                + "THE h/i/U+0131 CELLS OF ROW 34508's GRID MOVED TO NONE on 2026-10-03 (D11 fix round "
+                + "2): their partial was the first-set check running out at the edge before `^` was "
+                + "read, and `^` after the U+0130 at 5 fails for every continuation, so None is the "
+                + "brute-force judge's answer. The U+0130 cell, this entry's row, is unchanged.",
             PinnedBy: "Gaps.Engine.CaseFoldingTests.A_leading_literal_that_folds_longer_than_itself_"
                 + "reports_no_partial_on_an_empty_slice, which runs the whole control grid above, plus "
                 + "the 25-cell grid the first Turkic entry names",

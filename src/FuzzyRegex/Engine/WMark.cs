@@ -174,4 +174,10 @@ internal enum PartialEvent
     /// must-advance flag lifted.
     /// </summary>
     MustAdvanceLifted,
+
+    /// <summary>
+    /// A zero-width character test (a first set or a branch's precheck) reached the edge and let
+    /// the path through to the item that reads the same character.
+    /// </summary>
+    ZeroWidthTestDeferred,
 }

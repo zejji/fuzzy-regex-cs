@@ -146,6 +146,49 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
+    /// A pattern that starts with a lookaround gets a first-set check in front of it (upstream
+    /// <c>_check_firstset</c>, <c>_regex_core.py</c>:380-409): a zero-width test of the character the
+    /// pattern will read first. At the edge that test ran out of text before the lookaround's frame
+    /// was pushed, so the attempt answered the partial at once instead of running out in the body,
+    /// where matching goes on after the lookaround and <c>(*FAIL)</c> or a failing lookbehind fails
+    /// for every continuation. The last two rows are controls: 'b' completes <c>(?=b)b</c>, and a
+    /// search of 'xb' matches <c>(?&lt;=x)b</c> at 1.
+    /// </summary>
+    /// <remarks>
+    /// Expected answers: the brute-force judge (2026-10-03). The lead was in the D11 status note.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately: regex 2026.9.10 answers P(0, 0), or P(1, 1) from 'c'
+    // and 'a' forward, to every row but the controls, where it agrees.
+    [Test]
+    [Arguments("match", @"(?=b)(*FAIL)", "", "None")]
+    [Arguments("search", @"(?=b)(*FAIL)", "", "None")]
+    [Arguments("search", @"(?=b)(*FAIL)", "c", "None")]
+    [Arguments("search", @"(?=[bc])(*FAIL)", "a", "None")]
+    [Arguments("match", @"(?<=x)b", "", "None")]
+    [Arguments("fullmatch", @"(?<=x)b", "", "None")]
+    [Arguments("match", @"(?r)(*FAIL)(?<=b)", "", "None")]
+    [Arguments("search", @"(?r)(*FAIL)(?<=b)", "c", "None")]
+    [Arguments("match", @"(?<=(?:\X\X){e<=1})b", "", "None")]
+    [Arguments("fullmatch", @"(?<=(?:\X\X){e<=1})b", "", "None")]
+    [Arguments("match", @"(?=b)b", "", "P(0,0)")]
+    [Arguments("search", @"(?<=x)b", "", "P(0,0)")]
+    public void A_first_set_check_at_the_edge_defers_to_the_lookaround_it_guards(
+        string operation,
+        string pattern,
+        string text,
+        string expected
+    )
+    {
+        Match m = Run(operation, pattern, text);
+
+        (m.Success ? $"P({m.Index},{m.Index + m.Length})" : "None").Should().Be(expected);
+        if (m.Success)
+        {
+            m.PartialMatch.Should().BeTrue();
+        }
+    }
+
+    /// <summary>
     /// A negative lookaround whose body runs out inside a string, followed by a string that needs
     /// the text to come: 'a' + 'c' completes each row. The run-out left the matcher's position in
     /// the body's string behind, and the next string then resumed from it instead of from its start

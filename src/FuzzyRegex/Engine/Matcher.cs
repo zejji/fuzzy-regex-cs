@@ -2475,6 +2475,39 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether a zero-width character test that has reached the edge lets the
+    /// path through instead of running out there.
+    /// </summary>
+    /// <remarks>
+    /// A consuming opcode compiled with a step of 0 is a test, not an item: the first set put in
+    /// front of a pattern whose start is not simple (upstream <c>_check_firstset</c>,
+    /// <c>_regex_core.py</c>:380-409, compiled with <c>zerowidth=True</c>) or a branch's precheck
+    /// (<c>_add_precheck</c>, :2178-2191). Each holds only where a later item reads the same
+    /// character, so at the edge it decides nothing: that item runs out there itself, in its own
+    /// place, which may be a lookaround's body (chunk 8's run-out rule). Answering the run-out at
+    /// the test answered the partial before any such body was open: <c>(?=b)(*FAIL)</c> over ''
+    /// was P(0, 0) where every continuation fails. The path is marked as having read the text to
+    /// come, so a success after it is a partial. A fuzzy test, which the compiler does not make,
+    /// and the oracle's pre-D11 ablation keep the run-out.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A consuming character test with a step of 0, at the edge.</param>
+    /// <returns><see langword="true"/> to go on at the test's next node.</returns>
+    private static bool ZeroWidthTestDefersAtTheEdge(MatchState state, Node node)
+    {
+        Debug.Assert(node.Step == 0, "only a zero-width test defers");
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial call runs out at the edge");
+        if ((node.Status & NodeStatus.Fuzzy) != 0 || state.Pattern.SecondPassAsBeforeD11)
+        {
+            return false;
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        state.NotePartialEvent(PartialEvent.ZeroWidthTestDeferred);
+        return true;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: the grapheme boundary <c>\X</c> ends on, in a partial call's second pass.
     /// Kept out of line so that a call without partial runs the test as it was.
     /// </summary>
@@ -12551,6 +12584,12 @@ internal static class Matcher
                 case Opcode.SetUnionIgn: // Set union, ignoring case.
                     if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                     {
+                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+                        {
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
                         goto runOut;
                     }
 
@@ -12612,6 +12651,12 @@ internal static class Matcher
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
                     if (RanOutOnTheLeft(state, state.TextPos))
                     {
+                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+                        {
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
                         goto runOut;
                     }
 
