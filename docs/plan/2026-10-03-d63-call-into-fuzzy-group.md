@@ -1,8 +1,8 @@
 # D63: a call to a group that carries a fuzzy constraint
 
-Status: design note, 2026-10-03. No code changed. The defect as filed rests on a wrong premise, and
-what is left is a semantic question with two defensible answers, so it goes to the owner for a ruling
-before anything is built.
+Status: decided 2026-10-03, option A (see DECISIONS.md, D63), pinned by `ConstrainedGroupCallTests`.
+No engine code changed. The defect as filed rested on a wrong premise, and what was left was a
+semantic question with two defensible answers.
 
 ## What D63 says
 
