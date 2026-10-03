@@ -340,4 +340,106 @@ public sealed class BackrefAndConditionalTests
             (m.Index, m.Length).Should().Be((0, 1));
         }
     }
+
+    // D52 (ledger entry 64). A conditional's lookaround test is a lookaround, so it is matched
+    // exactly even inside a fuzzy section, as a plain lookaround's body is
+    // (upstream/regex/_regex_core.py:3201). Upstream compiles it with the section's fuzziness
+    // (:3267), so `(?=a)` "held" over 'b' by a substitution, the atomic test was never asked again,
+    // and the yes branch failed: the budget took away the exact match that the pattern without it
+    // finds. A budget can only add matches. Expected values are upstream 2026.9.10's own answers
+    // with LookAroundConditional._compile patched to compile the test exact (measured 2026-10-03,
+    // .scratch/d52d54/up.py); upstream as released answers None and (0, 2) one substitution.
+    [Test]
+    public void A_fuzzy_budget_does_not_take_away_the_exact_match_of_a_conditional()
+    {
+        FuzzyRegex.Match("b", "(?(?=a)ab|b)").Value.Should().Be("b");
+
+        Match m = FuzzyRegex.Match("b", "(?:(?(?=a)ab|b)){s<=1}");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void A_conditional_s_lookbehind_test_is_matched_exactly_inside_a_fuzzy_section()
+    {
+        // At 0 there is nothing behind, so the exact test `(?<![ab])` holds and the yes branch
+        // 'baab' fits 'a ba' with one substitution and one deletion. Upstream's fuzzy test failed
+        // (it inserted a phantom 'a' behind) and took the no branch: (0, 2) one substitution.
+        Match m = FuzzyRegex.Match("a baax", "(?:(?(?<![ab])baab|ab)){1<=e<=2}");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
+    }
+
+    [Test]
+    public void A_conditional_s_branches_stay_fuzzy_when_its_test_is_exact()
+    {
+        // The control for D52: only the test became exact. The exact test holds at 'a' and the yes
+        // branch 'ab' fits 'ax' with one substitution, upstream's answer too.
+        Match m = FuzzyRegex.Match("ax", "(?:(?(?=a)ab|b)){s<=1}");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    // D54 (ledger entry 65; owner ruling of 2026-09-30 on OPEN-2). When a negative test fails
+    // because its body matched, the conditional takes its no branch with the captures the body made,
+    // so `(?(?!X)A|B)` answers as `(?(?=X)B|A)`. Only backtracking undoes a capture. PCRE2 documents
+    // this ("Assertions": "captured substrings are retained, because matching continues with the
+    // 'no' branch"). Measured 2026-10-03 with tools/matrix/survey.py: PCRE2 10.47 and Perl 5.42.3
+    // answer every span and group below; upstream 2026.9.10 and the .NET 10 BCL answer None to all
+    // but the backtracking row.
+    [Test]
+    [Arguments(@"(?(?!(a))x|\1b)", "ab", 0, 2, 0, 1)]
+    [Arguments(@"(?(?<!(a))x|\1)", "aa", 1, 1, 0, 1)]
+    [Arguments(@"(?(?<!(a))x|\1b)", "aab", 1, 2, 0, 1)]
+    [Arguments(@"(?(?!(a)(b))x|\1\2)c", "abc", 0, 3, 0, 1)]
+    [Arguments(@"(?:(?(?!(a))x|\1b)){e<=1}", "ab", 0, 2, 0, 1)]
+    public void A_failed_negative_condition_keeps_the_captures_its_test_made(
+        string pattern,
+        string subject,
+        int index,
+        int length,
+        int groupIndex,
+        int groupLength
+    )
+    {
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((groupIndex, groupLength));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void Backtracking_out_of_the_no_branch_undoes_the_kept_captures()
+    {
+        // The control for D54: the no branch `\1c` fails, the conditional is backtracked past, and
+        // the second alternative matches with group 1 unset, in every engine surveyed (upstream,
+        // PCRE2, Perl and the .NET BCL).
+        Match m = FuzzyRegex.Match("ab", @"(?:(?(?!(a))x|\1c)|ab)");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.Groups[1].Success.Should().BeFalse();
+        m.Groups[1].Captures.Should().BeEmpty();
+    }
+
+    [Test]
+    public void A_failed_negative_condition_keeps_its_test_s_captures_but_not_its_errors()
+    {
+        // D54 keeps the captures; D45 (ledger entry 32) still throws away the errors of a fuzzy
+        // section written inside a negative test whose body matched, as upstream does. So group 1
+        // is the 'ax' that `(?:ab){e<=1}` fitted with one substitution, and the match counts no
+        // error. The positive twin `(?(?=((?:ab){e<=1}))\1|b)` counts it (1, 0, 0), in upstream
+        // too: the ruling's equivalence holds for spans and groups, not for these errors.
+        Match m = FuzzyRegex.Match("ax", @"(?(?!((?:ab){e<=1}))b|\1)");
+
+        (m.Index, m.Length).Should().Be((0, 2));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
 }

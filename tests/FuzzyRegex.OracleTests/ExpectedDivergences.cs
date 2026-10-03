@@ -3295,6 +3295,37 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The five rows of <c>conditional-test-is-matched-exactly</c>, recorded 2026-10-03 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the D52 witness, then the same
+    /// under BESTMATCH, a lookbehind test, a reversed search and ENHANCEMATCH, each from the D52/D54
+    /// grid. Upstream with the test compiled exact (its <c>LookAroundConditional._compile</c>
+    /// patched in memory) gives this port's answer on all five.
+    /// </summary>
+    private const string _exactConditionTestRows = """
+        {"generator": "rows", "pattern": "(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?b)(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "bx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?(?<!a)a*|a)){e<=2}", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?r)(?:(?(?!a)b|)){e<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "match", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?e)(?:(?(?<!a)b|)){e<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
+    /// The six rows of <c>negative-condition-keeps-its-test-captures</c>, recorded 2026-10-03 by
+    /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the D54 witness, two negative
+    /// lookbehind tests, a test with two groups, a fuzzy section inside the test, and the witness in
+    /// a fuzzy section (D52 and D54 together). Upstream answers no match to all six; PCRE2 10.47 and
+    /// Perl 5.42.3 match each of the four they can express, with the same groups as this port.
+    /// </summary>
+    private const string _negativeTestCaptureRows = """
+        {"generator": "rows", "pattern": "(?(?!(a))x|\\1b)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!(a))x|\\1)", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?<!(a))x|\\1b)", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?!(a)(b))x|\\1\\2)c", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?(?!((?:ab){e<=1}))b|\\1)", "flags": 0, "namedLists": {}, "subject": "ax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?:(?(?!(a))x|\\1b)){e<=1}", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The two rows of <c>enhancematch-trailing-insertion-double-count</c>, recorded 2026-09-30 by
     /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: <c>(?e)(?:ob+?a){e&lt;=3}</c>
     /// fullmatched against 'bab', and its reversed form against 'aob'. Upstream answers three
@@ -3619,6 +3650,59 @@ internal static class ExpectedDivergences
         // on another fix's ablation can see it: those ablations run with entries 42 and 44 off too
         // (OracleComparer.Run), and would otherwise claim it. Entry 44's comes second, for the same
         // reason, and its ablation takes entry 42 away as well.
+        new(
+            Id: "conditional-test-is-matched-exactly",
+            Reason: "A CONDITIONAL'S LOOKAROUND TEST IS MATCHED EXACTLY INSIDE A FUZZY SECTION, as a plain "
+                + "lookaround's body is. Known defect D52, ledger entry 64, fixed 2026-10-03 under the "
+                + "owner's no-known-bugs rule and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: `LookAroundConditional._compile` passes the enclosing section's "
+                + "`fuzzy` to the test (`_regex_core.py:3267`), where `LookAround._compile` compiles its "
+                + "body exact (:3201). The test is atomic, so a test that held only by an edit is never "
+                + "asked again exactly, and the budget takes a match away: "
+                + "`regex.search(r'(?:(?(?=a)ab|b)){s<=1}', 'b')` is None, where the same pattern "
+                + "without the budget gives (0, 1). A budget can only add matches.\n"
+                + "THE FIX compiles the test exact (`LookAroundConditional.CompileCore`), and fixes its "
+                + "calls exact. Upstream with that one line patched in memory gives this port's answer "
+                + "on every example.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamFuzzyConditionTest`, which compiles the test with "
+                + "the section's fuzziness and nothing else, as D51's ablation is its switch alone, "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the "
+                + "one being judged. The control is "
+                + "`A_row_the_fuzzy_condition_test_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _exactConditionTestRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamFuzzyConditionTest(row))
+        ),
+        new(
+            Id: "negative-condition-keeps-its-test-captures",
+            Reason: "A CONDITIONAL WHOSE NEGATIVE TEST FAILS KEEPS THE CAPTURES THE TEST MADE for its no "
+                + "branch, as `(?(?=X)B|A)` keeps them for B. Known defect D54, ledger entry 65, the "
+                + "owner's ruling of 2026-09-30 on OPEN-2, recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM BEHAVIOUR: END_CONDITIONAL restores the captures, repeats and fuzzy "
+                + "counts saved before a negative test whose body matched, then takes the no branch "
+                + "(`_regex.c:12423-12432`), so `regex.search(r'(?(?!(a))x|\\1b)', 'ab')` is None. Only "
+                + "backtracking undoes a capture, and none has happened. PCRE2 documents keeping them "
+                + "(pcre2pattern, \"Assertions\"); PCRE2 10.47 and Perl 5.42.3 answer (0, 2) with "
+                + "group 1 (0, 1).\n"
+                + "THE FIX keeps the captures and still restores the repeats and fuzzy counts "
+                + "(`Matcher`, END_CONDITIONAL), so the errors of a fuzzy section inside the test are "
+                + "thrown away as entry 32 (D45) has them.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheUpstreamConditionalTests`, which has both conditional-test "
+                + "fixes off (`PatternObject.DropNegativeTestCaptures` and the fuzzy test) and nothing "
+                + "else, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. It sits after the D52 entry, so it claims the rows "
+                + "D54 explains alone or with D52. The control is "
+                + "`A_row_the_dropped_test_captures_do_not_explain_is_not_accounted_for`.",
+            PinnedBy: "Gaps.Engine.BackrefAndConditionalTests",
+            Example: _negativeTestCaptureRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalTests(row))
+        ),
         new(
             Id: "fuzzy-exact-item-offered-as-a-deletion",
             Reason: "THIS PORT OFFERS A FUZZY ITEM THAT MATCHED EXACTLY AS A DELETION, and upstream never "

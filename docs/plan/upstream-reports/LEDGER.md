@@ -5864,3 +5864,86 @@ what every completion of the path it took would report: the call returns in any 
 undefined and Perl has no partial matching, so no engine contradicts it. Pinned by
 `CallCaptureTests` (six call rows red without the restore, two controls) and five partial rows
 in the same oracle entry.
+
+## 64. A conditional's lookaround test is matched fuzzily inside a fuzzy section, so a budget removes matches - FIXED HERE (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D52. Draft report:
+`entry-64-fuzzy-condition-test.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03:
+
+```
+search(r'(?:(?(?=a)ab|b)){s<=1}', 'b')     -> None        expected (0, 1)
+search(r'(?(?=a)ab|b)', 'b')               -> (0, 1)      (the same pattern with no budget)
+search(r'(?:(?(?<!a)a*|a)){e<=2}', 'aa')   -> (0, 1)      expected (0, 2), as without the budget
+search(r'(?:(?=a)ab|b){s<=1}', 'b')        -> (0, 1)      (the control: a plain lookahead)
+```
+
+**Why upstream is wrong.** A fuzzy budget allows errors; it cannot forbid an exact match. Without
+the budget the test `(?=a)` fails at 'b' and the no branch matches. With it, `(?=a)` holds by
+substituting 'b' for 'a', the yes branch `ab` cannot fit 'b' within one substitution, and the test
+is atomic, so it is never asked again exactly. The cause is in `LookAroundConditional._compile`,
+which compiles the test with the enclosing section's fuzziness
+(`upstream/regex/_regex_core.py:3267`, `self.subpattern.compile(self.behind, fuzzy)`), where
+`LookAround._compile` compiles a plain lookaround's body exact (`:3201`, `compile(self.behind)`).
+So `(?=a)` is exact on its own and fuzzy as a condition. A fuzzy section written inside the test is
+unaffected either way. No other engine has fuzzy matching, so the evidence is the principle and
+upstream's own answers: upstream with that one call patched to `compile(self.behind, False)` gives
+this port's answer on every row (`.scratch/d52d54/up.py` on the D52/D54 grid, 2026-10-03).
+
+**Proposed fix upstream:** compile the test exact at `:3267`, as `LookAround` does, and register
+its calls exact in `fix_groups`.
+
+**This port.** `LookAroundConditional.CompileCore` and `FixGroups` (`src/FuzzyRegex/Parsing/Nodes.cs`)
+compile and fix the test exact. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (two rows red
+before the fix, one control) and the oracle entry `conditional-test-is-matched-exactly`, keyed on
+`OracleComparer.RunWithTheUpstreamFuzzyConditionTest` (`Info.UpstreamFuzzyConditionTest`, which
+compiles the test as upstream does, alone). The oracle's default waves draw no conditional inside a
+fuzzy section, so they never reach it (0 rows at seeds 7, 4242 and 20260927). On the 6,000-row
+D52/D54 grid (`docs/plan/2026-10-03-d52-d54-conditional-tests.md`) it changes 1,097 rows on its own,
+every one to upstream's patched answer or to that answer with an already pinned divergence (ledger
+entries 42 and 44, rule H') on top. `ledger-reproductions.jsonl` re-checks upstream's answer to the first row.
+
+## 65. A conditional whose negative test fails drops the captures the test made - DIVERGES HERE BY RULING (2026-10-03)
+
+**Status:** not filed, per the owner's rule. Known defect D54, owner ruling of 2026-09-30 on OPEN-2
+(DECISIONS.md, `docs/plan/2026-09-30-open-questions.md`). Draft report, framed as a question:
+`entry-65-negative-condition-captures.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-03 with `tools/matrix/survey.py` (upstream,
+PCRE2 10.47, Perl 5.42.3, .NET 10 BCL):
+
+```
+search(r'(?(?!(a))x|\1b)', 'ab')        -> None     PCRE2, Perl (0, 2) group 1 (0, 1); BCL None
+search(r'(?(?=(a))\1b|x)', 'ab')        -> (0, 2)   the positive twin; PCRE2, Perl the same
+search(r'(?(?<!(a))x|\1b)', 'aab')      -> None     PCRE2, Perl (1, 3) group 1 (0, 1)
+search(r'(?(?!(a)(b))x|\1\2)c', 'abc')  -> None     PCRE2, Perl (0, 3)
+search(r'(?:(?(?!(a))x|\1c)|ab)', 'ab') -> (0, 2) group 1 unset, in every engine (backtracking)
+```
+
+**Why the port differs.** When a negative test fails because its body matched, the conditional
+takes its no branch; nothing has backtracked, and only backtracking undoes a capture. So
+`(?(?!X)A|B)` must capture as `(?(?=X)B|A)`, which upstream already does for the positive form.
+PCRE2 documents it (pcre2pattern, "Assertions": "If such an assertion is being used as a condition
+in a conditional group, captured substrings are retained, because matching continues with the 'no'
+branch of the condition"); Perl and Boost.Regex measure the same. The .NET BCL drops a conditional
+test's captures in both forms. Upstream's README says nothing about these captures, so this is a
+question for upstream rather than a claimed bug. The cause is in `END_CONDITIONAL`
+(`upstream/src/_regex.c:12423-12432`): for a negative test it pops the captures saved at
+`CONDITIONAL` (`:12213`) along with the repeats and fuzzy counts before it goes to the no branch.
+
+**This port.** `Matcher`'s `END_CONDITIONAL` arm still restores the repeats and fuzzy counts, as
+upstream does, but leaves the captures and rebuilds the saved block on top of the saved captures,
+so its backtrack arm undoes everything unchanged. The errors of a fuzzy section written inside a
+failed negative test are therefore still thrown away, as ledger entry 32 (D45) has them: the
+ruling's equivalence holds for spans and groups, and not for those errors, where the positive
+twin counts them (`(?(?!((?:ab){e<=1}))b|\1)` over 'ax' is (0, 2) with no error; its twin
+`(?(?=((?:ab){e<=1}))\1|b)` counts one substitution). That corner is left for the owner to rule
+on. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (six rows red before the fix, one control)
+and the oracle entry `negative-condition-keeps-its-test-captures`, keyed on
+`OracleComparer.RunWithTheUpstreamConditionalTests` (`PatternObject.DropNegativeTestCaptures` plus
+the entry 64 switch, alone; every other named ablation now carries both switches too). It accounts
+for 2, 2 and 2 rows of the default waves at seeds 7, 4242 and 20260927 (diverge 0 at all three);
+one of them, `^(?(?<!(\d?))_[^\p{L}]|)\g<1>` with `subf` template `{0[2]}`, now matches here, so the
+template's out-of-range capture index raises where upstream, finding no match, returns the subject.
+`ledger-reproductions.jsonl` re-checks upstream's answer to the first row.

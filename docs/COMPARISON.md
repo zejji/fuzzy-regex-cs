@@ -1850,6 +1850,38 @@ Console.WriteLine(new FuzzyRegex("(?(?=x)(?:x|))x").Match("x").Length); // 1 - u
 
 There is no option to restore the upstream answer. Ledger entry 62.
 
+### A conditional's lookaround test is matched exactly inside a fuzzy section
+
+A fuzzy budget allows errors; it should never take a match away. Upstream matches a conditional's
+lookaround test fuzzily when the conditional sits in a fuzzy section, so the test can hold by an
+edit, and as it is never asked again, the branch it should have taken is lost. Here the test is
+exact, as a plain lookaround's body is in both engines, and the branches stay fuzzy.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?(?=a)ab|b)").Match("b").Length); // 1 - upstream: 1
+Console.WriteLine(new FuzzyRegex("(?:(?(?=a)ab|b)){s<=1}").Match("b").Length); // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex("(?:(?(?<!a)a*|a)){e<=2}").Match("aa").Length); // 2 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 64.
+
+### A conditional whose negative test fails keeps the captures the test made
+
+When the test of `(?(?!X)A|B)` fails because X matched, B runs with the groups X captured, exactly
+as `(?(?=X)B|A)` runs B with them. Upstream resets them first. PCRE2 documents this behaviour and
+Perl agrees.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?(?!(a))x|\1b)").Match("ab").Length); // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?(?=(a))\1b|x)").Match("ab").Length); // 2 - upstream: 2
+```
+
+There is no option to restore the upstream answer. Ledger entry 65.
+
 ### `BestMatch` and `EnhanceMatch` keep a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

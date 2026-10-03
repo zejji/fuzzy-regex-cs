@@ -112,6 +112,14 @@ internal sealed class Info
     /// </summary>
     internal bool UpstreamCallFeatures { get; init; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a conditional's lookaround test is
+    /// compiled with the enclosing fuzzy section's fuzziness, as upstream's is, rather than exact
+    /// like a plain lookaround's body (D52, ledger entry 64). The oracle sets it to show that the
+    /// fix is the whole of a divergence; see <see cref="LookAroundConditional.UpstreamFuzzyTest"/>.
+    /// </summary>
+    internal bool UpstreamFuzzyConditionTest { get; init; }
+
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
 

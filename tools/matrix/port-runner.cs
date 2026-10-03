@@ -24,7 +24,9 @@
 // ablations use, so the validation controls can prove each check fires: d37 (upstream's
 // whole-pattern call, WITHOUT the exemption from the closing assert), callfeatures (D40's
 // upstream call features, on the base answer only), exactdeletion (ledger entry 42 off), and
-// unsafememo (the failed-call memo forced on where the compiler turned it off, on `on` only).
+// unsafememo (the failed-call memo forced on where the compiler turned it off, on `on` only),
+// d52 (a conditional's test compiled with the section's fuzziness, ledger entry 64) and d54 (a
+// failed negative test's captures dropped, ledger entry 65), each on every variant but `wo`.
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -70,7 +72,8 @@ FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
     upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
     skipTiming = F("SkipMovesTheSliceWhenItRuns"),
     verbScope = F("VerbsAreConfinedToTheInnermostGroup"),
-    doubledInsertions = F("DoubleCountTrailingInsertions");
+    doubledInsertions = F("DoubleCountTrailingInsertions"),
+    dropNegativeTestCaptures = F("DropNegativeTestCaptures");
 
 // Check C1x's pinned divergences: the fuzzy ablations OracleComparer's RunWith.../RunWithout...
 // helpers apply for ExpectedDivergences, one variant each. A C1x row whose difference from upstream
@@ -201,6 +204,7 @@ FuzzyRegex Compile(string pattern, string variant)
                 false,
                 d37,
                 callFeatures,
+                ablate == "d52" && variant != "wo", // upstreamFuzzyConditionTest (ledger entry 64)
             ]
         )!;
     object pobj = patternObjectProperty.GetValue(regex)!;
@@ -213,6 +217,8 @@ FuzzyRegex Compile(string pattern, string variant)
     }
     if (callFeatures)
         minWidth.SetValue(pobj, upstreamMinWidth.GetValue(pobj));
+    if (ablate == "d54" && variant != "wo")
+        dropNegativeTestCaptures.SetValue(pobj, true);
     if (Array.IndexOf(pinned, variant) >= 0)
     {
         // OracleComparer.Run's withoutTheFuzzySearchFixes: entry 42 off always; entry 44 off except
