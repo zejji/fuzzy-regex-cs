@@ -348,7 +348,7 @@ public sealed class BackrefAndConditionalTests
     // and the yes branch failed: the budget took away the exact match that the pattern without it
     // finds. A budget can only add matches. Expected values are upstream 2026.9.10's own answers
     // with LookAroundConditional._compile patched to compile the test exact (measured 2026-10-03,
-    // .scratch/d52d54/up.py); upstream as released answers None and (0, 2) one substitution.
+    // tools/probes/d52-d54-grid/up.py); upstream as released answers None and (0, 2) one substitution.
     [Test]
     public void A_fuzzy_budget_does_not_take_away_the_exact_match_of_a_conditional()
     {

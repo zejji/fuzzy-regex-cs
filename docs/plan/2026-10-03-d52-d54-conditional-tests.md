@@ -69,13 +69,17 @@ reported to the owner as an open question, not built around.
 
 ## Grid
 
-6,000 rows (`.scratch/d52d54/gen.py`, seed 52): lookahead and lookbehind tests, positive and
+Scripts in `tools/probes/d52-d54-grid/`: `gen.py` writes the rows, `up.py` answers them with
+upstream three ways, `cmp2.py` classifies the port's changes (rows, upstream, main, branch, and the
+branch's answers to each row's positive twin).
+
+6,000 rows (`tools/probes/d52-d54-grid/gen.py`, seed 52): lookahead and lookbehind tests, positive and
 negative, eleven test bodies with and without groups, eleven branch forms including
 backreferences into the test, fourteen wrappers (no budget, `{e<=1}`, `{s<=1}`, `{i<=1}`, `{d<=1}`,
 `{e<=2}`, repeats, alternations), flags none, `(?b)`, `(?e)` and `(?r)`, search, match, fullmatch
 and finditer, 10% partial. Port answers on a Debug build through `tools/matrix/port-runner.cs`
 (20M step cap, 2 s per call, 20 s per row, 2 GB heap limit), with the failed-call and repeat
-memos forced off and on. Upstream answered three ways (`.scratch/d52d54/up.py`): U as released, A
+memos forced off and on. Upstream answered three ways (`tools/probes/d52-d54-grid/up.py`): U as released, A
 with the test patched exact, J = A on the row's positive twin (the D54 ruling's equivalence).
 
 Rows per construct: negative lookahead 1,795, negative lookbehind 1,833, positive lookahead 1,220,

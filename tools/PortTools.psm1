@@ -402,6 +402,14 @@ function Get-UpstreamCommit {
     }
 }
 
+function Test-BoardPassing {
+    # The board must be identical for a Debug and a Release run. In Release the WorkCounter tests
+    # skip with the Debug-only reason; CI's next step runs exactly those tests in Debug and fails
+    # the build if one fails, so the board counts that skip as Passing.
+    param([Parameter(Mandatory)][object]$Result)
+    $Result.Outcome -eq 'Passed' -or (Test-DebugOnlySkip $Result)
+}
+
 function New-StatusReport {
     <#
     .SYNOPSIS
@@ -431,8 +439,8 @@ function New-StatusReport {
     $lines.Add("Parity against upstream commit ``$UpstreamCommit``.")
     $lines.Add('')
 
-    $overallPercent = Get-Percent -Passed @($ported | Where-Object Outcome -eq 'Passed').Count -Total $ported.Count
-    $lines.Add("**Overall parity: $overallPercent** ($(@($ported | Where-Object Outcome -eq 'Passed').Count) of $($ported.Count) ported upstream tests passing).")
+    $overallPercent = Get-Percent -Passed @($ported | Where-Object { Test-BoardPassing $_ }).Count -Total $ported.Count
+    $lines.Add("**Overall parity: $overallPercent** ($(@($ported | Where-Object { Test-BoardPassing $_ }).Count) of $($ported.Count) ported upstream tests passing).")
     $lines.Add('')
 
     $lines.Add('## Ported upstream tests, by feature area')
@@ -440,8 +448,8 @@ function New-StatusReport {
     $lines.Add('| Area | Tests | Passing | Skipped | Failing | Parity |')
     $lines.Add('|---|---:|---:|---:|---:|---:|')
     foreach ($group in $ported | Group-Object Area | Sort-Object Name) {
-        $passed = @($group.Group | Where-Object Outcome -eq 'Passed').Count
-        $skipped = @($group.Group | Where-Object Outcome -eq 'Skipped').Count
+        $passed = @($group.Group | Where-Object { Test-BoardPassing $_ }).Count
+        $skipped = @($group.Group | Where-Object { $_.Outcome -eq 'Skipped' -and -not (Test-DebugOnlySkip $_) }).Count
         $failed = @($group.Group | Where-Object Outcome -eq 'Failed').Count
         $percent = Get-Percent -Passed $passed -Total $group.Count
         $lines.Add("| $($group.Name) | $($group.Count) | $passed | $skipped | $failed | $percent |")
@@ -455,8 +463,8 @@ function New-StatusReport {
     $lines.Add('| Area | Tests | Passing | Skipped | Failing |')
     $lines.Add('|---|---:|---:|---:|---:|')
     foreach ($group in $gaps | Group-Object Area | Sort-Object Name) {
-        $passed = @($group.Group | Where-Object Outcome -eq 'Passed').Count
-        $skipped = @($group.Group | Where-Object Outcome -eq 'Skipped').Count
+        $passed = @($group.Group | Where-Object { Test-BoardPassing $_ }).Count
+        $skipped = @($group.Group | Where-Object { $_.Outcome -eq 'Skipped' -and -not (Test-DebugOnlySkip $_) }).Count
         $failed = @($group.Group | Where-Object Outcome -eq 'Failed').Count
         $lines.Add("| $($group.Name) | $($group.Count) | $passed | $skipped | $failed |")
     }

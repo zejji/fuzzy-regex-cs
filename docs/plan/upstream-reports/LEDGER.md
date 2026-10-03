@@ -5889,7 +5889,7 @@ which compiles the test with the enclosing section's fuzziness
 So `(?=a)` is exact on its own and fuzzy as a condition. A fuzzy section written inside the test is
 unaffected either way. No other engine has fuzzy matching, so the evidence is the principle and
 upstream's own answers: upstream with that one call patched to `compile(self.behind, False)` gives
-this port's answer on every row (`.scratch/d52d54/up.py` on the D52/D54 grid, 2026-10-03).
+this port's answer on every row (`tools/probes/d52-d54-grid/up.py` on the D52/D54 grid, 2026-10-03).
 
 **Proposed fix upstream:** compile the test exact at `:3267`, as `LookAround` does, and register
 its calls exact in `fix_groups`.
