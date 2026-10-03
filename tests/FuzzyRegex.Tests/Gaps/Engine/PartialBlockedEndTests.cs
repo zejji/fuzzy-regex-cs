@@ -15,10 +15,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// without a call it gave group 1 a wrong span (K1-K3) or a wrong partial (F1). The expected
 /// answers are the brute-force judge's (<c>tools/probes/d11-judge-rows.py</c>, measured 2026-09-29),
 /// with group 1 taken from the judge's completion, except for the rows the amendment names as
-/// sound phantoms: C3's search (the attempt from inside the text to come), C4 and X1 (S57d's
-/// escalation, until build chunk 9), F1 (P(0, 2) for match and search, where the judge's search
+/// sound phantoms: C3's search (the attempt from inside the text to come), F1 (P(0, 2) for match and search, where the judge's search
 /// starts at 1), and R4's group 1 (unset: the judge's completion sets it only from the text still
-/// to come). N2 threw too. The controls (C5-C7, C9, R1-R4) passed
+/// to come). C4 and X1 answered a phantom through S57d's escalation until build chunk 9 deleted
+/// it, and now answer the judge's None. N2 threw too. The controls (C5-C7, C9, R1-R4) passed
 /// before the fix and guard the paths that did not misread. Group 1 is "unset" when it matched
 /// nothing, "n/a" when the row does not check it, and otherwise its last capture (a called group's
 /// captures are what the judge reports, <c>spans(1)</c>).
@@ -32,7 +32,7 @@ public sealed class PartialBlockedEndTests
     [Arguments("C2", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
     [Arguments("C3", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", -1, -1, "n/a", "n/a")]
     [Arguments("C3", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", 1, 1, "unset", "unset")]
-    [Arguments("C4", "match", @"(?(DEFINE)(?<c>(?=a\b|a)))(?&c)(b)", "a", 0, 1, "unset", "unset")]
+    [Arguments("C4", "match", @"(?(DEFINE)(?<c>(?=a\b|a)))(?&c)(b)", "a", -1, -1, "n/a", "n/a")]
     [Arguments("C5", "match", @"(?(DEFINE)(?<c>(?!a\b)))(?&c)a", "a", 0, 1, "0,0", "unset")]
     [Arguments("C6", "match", @"(?(DEFINE)(?<c>(?!a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
     [Arguments("C7", "match", @"(?(DEFINE)(?<c>(?(?!a$)b|a)))(?&c)\n", "a", 0, 1, "0,1", "unset")]
@@ -56,7 +56,7 @@ public sealed class PartialBlockedEndTests
     [Arguments("K3", "match", @"(a(?=b(cd)))", "ab", 0, 2, "0,1", "0,1")]
     [Arguments("F1", "match", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a", "n/a")]
     [Arguments("F1", "search", @"(?:a(?=b\b)b){1<=e<=1}\n", "ab", 0, 2, "n/a", "n/a")]
-    [Arguments("X1", "match", @"(?(?=(?:a|ab)\b)a|b)(a)(\n)", "ab", 0, 2, "unset", "unset")]
+    [Arguments("X1", "match", @"(?(?=(?:a|ab)\b)a|b)(a)(\n)", "ab", -1, -1, "n/a", "n/a")]
     [Arguments("X2", "match", @"a(?=(?:bcd){1<=e<=1}|b)x", "ab", -1, -1, "n/a", "n/a")]
     public void A_blocked_end_leaves_the_saved_stack_as_a_normal_end_does(
         string id,
@@ -139,12 +139,12 @@ public sealed class PartialBlockedEndTests
     /// the review's (before: P(0, 11) on a one-character text, a NullReferenceException, an
     /// InvalidOperationException); the rest are one per call kind and repeat from
     /// <c>tools/probes/d11-called-repeat-grid.py</c>, each an exception before, and each the judge's
-    /// answer. The first row's P(0, 1) is S57d's escalation, as the unrepeated
-    /// <c>(?(DEFINE)(?&lt;c&gt;(?=a\b)))(?&amp;c)b</c> answers, until build chunk 9; the judge answers None.
+    /// answer. The first row answered P(0, 1) through S57d's escalation until build chunk 9
+    /// deleted it; the judge answers None.
     /// </summary>
     // Upstream answers None to every match row and P(|t|, |t|) to every search row.
     [Test]
-    [Arguments("match", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*b", "a", 0, 1)]
+    [Arguments("match", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*b", "a", -1, -1)]
     [Arguments("match", @"(?(DEFINE)(?<c>(?(?=a$)|b)))(?&c)*b", "a", -1, -1)]
     [Arguments("match", @"(?:((?=(?:a|ab)$)a)|x(?1))+(?>a|ab)\n", "xab", -1, -1)]
     [Arguments("search", @"(?(DEFINE)(?<c>(?=a\b)))(?&c)*b", "a", 1, 1)]

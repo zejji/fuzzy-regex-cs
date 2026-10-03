@@ -98,8 +98,9 @@ public sealed class PartialConditionRuleTests
     /// three characters (<c>tools/probes/d11-port-judge-grid.cs</c>, 2026-10-03), which agrees with
     /// the brute-force judge on the exact rows; a fuzzy row follows the port's ledger entry 42.
     /// The last control, <c>(?(?=ab$)ac|abc)</c>, can fail its test: 'ab' + 'c' matches. The
-    /// anchored calls on the <c>\b</c> forms still answer P(0, 2) through S57d's escalation, as
-    /// main does, until build chunk 9 part 2 deletes it (<c>OpenDefectTests</c>, D38's last rows).
+    /// anchored calls on the <c>\b</c> forms answered P(0, 2) (or P(1, 2) from 1) through S57d's
+    /// escalation, as main does, until build chunk 9 deleted it; they now answer the judge's None.
+    /// Upstream answers None to those as well.
     /// </remarks>
     // DIVERGES FROM UPSTREAM on the {i<=1} rows: regex 2026.9.10 answers P(1, 2) to the search
     // and None to the match. It agrees on the rest, except the last control, where it answers None.
@@ -108,6 +109,9 @@ public sealed class PartialConditionRuleTests
     [Arguments("fullmatch", @"(?(?=ab$|a)ac|abc)", 0, -1)]
     [Arguments("search", @"(?(?=ab$|a)ac|abc)", 0, 2)]
     [Arguments("search", @"(?(?=ab\b|a)ac|abc)", 0, 2)]
+    [Arguments("match", @"(?(?=ab\b|a)ac|abc)", 0, -1)]
+    [Arguments("match", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 0, -1)]
+    [Arguments("match", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 1, -1)]
     [Arguments("search", @"(?:(?(?=a\b|a)a|b)){e<=1}a", 0, 2)]
     [Arguments("match", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]
     [Arguments("search", @"(?:(?(?=a\b|a)a|b)){i<=1}a", 0, 0)]

@@ -1106,16 +1106,17 @@ using Fuzzy.Text.RegularExpressions;
 Match m = new FuzzyRegex(@"(?!(True|False)\b)(.*)").MatchAtStart("True", partial: true);
 Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));  // (True, True, 0, 4)
                                                                     // upstream answers None
-Match n = new FuzzyRegex(@"aa\B").FullMatch("aa", partial: true);
+Match n = new FuzzyRegex(@"aa\B").MatchAtStart("aa", partial: true);
 Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));  // (True, True, 0, 2)
                                                                     // upstream answers None
 ```
 
-A complete match still wins, and so does a partial found the ordinary way, so this only ever replaces
-an answer of "no match". `True\b` over `"True"` is a complete match in both engines, boundary or no
-boundary. The partial spans the attempt that reached the end of the text and reports no capture
-groups, since no path through the pattern finished. Under `(?r)` the end of the available text is its
-start, and the rule reads the same way there.
+A complete match still wins, so this only ever replaces an answer of "no match". `True\b` over
+`"True"` is a complete match in both engines, boundary or no boundary. The boundary is taken as
+passed for the continuations that pass it, and matching goes on from there, so the partial reports
+the capture groups of that path. A full match of `aa\B` would have to end where the text ends, so
+`FullMatch` over `"aa"` answers no match in both engines. Under `(?r)` the end of the available text
+is its start, and the rule reads the same way there.
 
 ### A partial match is refused where the match failed on text the engine already held
 

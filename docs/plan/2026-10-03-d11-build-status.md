@@ -103,3 +103,39 @@ out at the item's start test before its frame is pushed (`(?=b)(*FAIL)` over '' 
 None, upstream P(0, 0)); `RunOutInALookaroundBody` finds no open lookaround there.
 Grids (Debug): item 0 and memo 0 answers changed; held-advance 120 finditer rows moved, all onto the
 judge, 0 away, 0 new phantoms. Ratchet GREEN (8131).
+
+## Chunk 9 part 2 (2026-10-03): S57d deleted, pins moved, X2 witnessed; the lookaround memo not built
+
+- **Deleted** (design 4.5): `MatchState.HitEnd`, `HitEndMatchPos`, `NoteBoundaryAtTruncationPoint` and
+  its 8 calls, the snapshot's two fields, and the escalation block in `DoMatch` with its
+  `ClearGroups`. The oracle's `boundary-at-the-end-of-the-text` entry (S57d's signature) and its
+  control test went with it; its example row now agrees with upstream.
+- **Pin moves** (design section 5), the 11 tests that went red, each re-judged with the port's own
+  judge before editing: fullmatch None for `aa\B`, `a{2}\B`, `True\B`, `a?\B`, `(?r)\Ba`,
+  `b\B(?(?<![\w\s])\p{Ll})` and `(?r)\b(?(?!\p{L}).|[^a])\K(\s)`; None for L7, C4, X1 (blocked-end
+  rows) and `(?(DEFINE)(?<c>(?=a\b)))(?&c)*b` match. Every moved row now equals the judge. The other
+  rows of section 5 had moved in earlier chunks.
+- **Turned green, moved out of `OpenDefectTests`**: D38's anchored `\b` rows (now rows of
+  `PartialConditionRuleTests`'s D38 test) and D69's two `\X` rows. Every guard row of section 7
+  (V1, V2, D1-D3, N7, N8, Q1-Q3, T1-T6, G1) stays green without S57d, and so does S4. **Turned red**
+  (explicit tests only): the five `(?w)` rows W1-W3, W5, W6 of the "reported" test, which only S57d
+  answered; they are chunk 10's (exact `(?w)` at the edge).
+- **X2 witness on the merged head**: `FailureMemoTests.A_partial_call_keeps_the_guards_a_blocked_condition_test_let_through`
+  (X2 over 'a' * 40 + 'c', step-bounded) and the four `A_partial_call_keeps_the_memo_in_its_second_pass`
+  rows all go red with `KeepsFailureMemo`'s `PartialSide` test put back (planted, 5 failures).
+- **Grids** (Debug, against D69's commit): item 0 2 rows moved, memo 3, held-advance 175, every one
+  onto the judge; 0 away, 0 new phantoms, 0 asserts.
+- **The lookaround memo (A11-A13) is not built; a design question.** Its stated gate is S4 "in
+  under twice the first pass's time". Measured without it (Release, 2026-10-03): S4 at n = 1000 is
+  2.6 ms against 2.5 ms for the completed text ('...c' + 'zb') and 6.3 ms for a failing full search
+  ('...c' + 'b'); at n = 3000 19.8 / 19.2 / 50.5 ms. The design's other search rows are within about
+  2.2 times the completed text and below the failing full search: `(?:(?(?=.*z)a|a))*b` 1,835 / 824 /
+  7,979 ms at n = 1000, `(?:(?=.*z)a)*b` 1,624 / 765 / 23 ms. Amendment 1's failure memo in the second
+  pass is what brought these down. The row the memo would still help is X1 (`(?:(?=(.*)z|())a)*b\1\2`
+  over 'a' * 1000 + 'c'): 2.9 s to the budget's phantom, where design 7 asks under 100 ms; every fork
+  re-scans `.*`. A11 belongs to the lookaround guard rule, which chunk 6 did not build (its gate
+  failed), and A12 exists. Options for the design step: (a) build the memo as designed (replay of a
+  body's successes with captures, counts and the blocked flag; most of its code is capture-list
+  replay and frame emulation); (b) a step budget per attempt next to the fork budget, which bounds
+  X1 directly; (c) accept X1's cost, since it is a C5 phantom row. Recommendation: (b) or (c); (a)
+  adds the largest mechanism for one pathological row.

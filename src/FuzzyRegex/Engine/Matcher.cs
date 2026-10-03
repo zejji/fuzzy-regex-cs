@@ -2221,53 +2221,6 @@ internal static class Matcher
         return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(node.Encoding, state.CharBefore(textPos)));
     }
 
-    /// <summary>
-    /// Records that a word or grapheme boundary has been decided at the truncation point of a
-    /// partial match, so that a match which then fails outright can be reported as a partial rather
-    /// than as no match at all. S57d; no upstream counterpart, and see
-    /// <see cref="MatchState.HitEnd"/> for why the port has one.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The verdict itself is not touched. The caller goes on to answer exactly what it answered
-    /// before, and <see cref="DoMatch"/> reads the flag only after the whole match has failed, so
-    /// backtracking is never cut short. <b>The flag is set whichever way the boundary answers</b>,
-    /// which ledger entry 21's own row needs: in <c>(?!(True|False)\b)(.*)</c> over 'True' the
-    /// <c>\b</c> SUCCEEDS at the end of the text and it is the enclosing negative lookahead that
-    /// fails, so a flag set only on a failing boundary would never fire there.
-    /// </para>
-    /// <para>
-    /// <b>The attempt must have consumed something</b>, and this clause is a DELIBERATE DEPARTURE
-    /// from the PCRE2 model the rest of this follows. PCRE2 escalates a boundary that has consumed
-    /// nothing: <c>\b</c> over <c>''</c> is <c>PARTIAL (0,0)</c> under both partial options, with
-    /// the start optimisations off and with no following pattern item to explain it
-    /// (<c>tools/probes/pcre2-hitend-partial-span.py</c> sections D and E, 2026-09-21). This port
-    /// does not, for two reasons of its own. A zero-width partial at the truncation point is the
-    /// answer <c>search-start-partial</c> already pins as wrong, and without the clause S50
-    /// measured a default three-seed 6300-row wave going from 0 divergences to 8, 5 and 5, every
-    /// one of the eight at seed 7 being that shape.
-    /// </para>
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <param name="textPos">The position the boundary was asked about.</param>
-    private static void NoteBoundaryAtTruncationPoint(MatchState state, int textPos)
-    {
-        bool atTruncationPoint = state.PartialSide switch
-        {
-            // The same two edges the node handlers use: 'text_end' forward, and 'slice_start'
-            // rather than 'text_start' on the left - see 'RanOutOnTheLeft' for why they differ.
-            MatchState.PartialRight => textPos >= state.TextEnd && textPos > state.MatchPos,
-            MatchState.PartialLeft => textPos <= state.SliceStart && textPos < state.MatchPos,
-            _ => false,
-        };
-
-        if (atTruncationPoint && !state.HitEnd)
-        {
-            state.HitEnd = true;
-            state.HitEndMatchPos = state.MatchPos;
-        }
-    }
-
     /// <summary>Upstream <c>try_match_BOUNDARY</c> (line 7010).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node.</param>
@@ -2285,7 +2238,7 @@ internal static class Matcher
     /// <remarks>
     /// The first pass reads the text as ending at the edge, as upstream does; the second decides
     /// the test at the edge for the text to come (M1). Off the edge the answer is the held text's in
-    /// both passes, and S57d notes the test where it stands at the truncation point.
+    /// both passes.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">A <c>Boundary</c>, <c>StartOfWord</c> or <c>EndOfWord</c> node.</param>
@@ -2298,8 +2251,6 @@ internal static class Matcher
         {
             return WordTestAtEdge(state, node, textPos);
         }
-
-        NoteBoundaryAtTruncationPoint(state, textPos);
 
         return MatchStatus.From(
             WordTest(node, WordLeft(state, node.Encoding, textPos), WordRight(state, node.Encoding, textPos))
@@ -2330,8 +2281,7 @@ internal static class Matcher
     /// both, which is the whole of the enumeration for these four: when the two answers agree the
     /// test is decided, and the first pass, which reads the edge as a non-word side, answered the
     /// same (A4). <c>\m</c> after a word character and <c>\M</c> after a non-word character are
-    /// decided false. When the answers differ the test is undetermined (A3 holds by construction),
-    /// and S57d still notes it until build chunk 9 deletes the escalation.
+    /// decided false. When the answers differ the test is undetermined (A3 holds by construction).
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The test.</param>
@@ -2358,8 +2308,6 @@ internal static class Matcher
 
             return MatchStatus.From(ifWord);
         }
-
-        NoteBoundaryAtTruncationPoint(state, textPos);
 
         return UndeterminedRead(state);
     }
@@ -2443,8 +2391,6 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultBoundary(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
-
         return MatchStatus.From(
             (
                 node.Encoding == CaseEncoding.Ascii
@@ -2461,8 +2407,6 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultEndOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
-
         return MatchStatus.From(
             node.Encoding == CaseEncoding.Ascii
                 ? AtWordEnd(state, CaseEncoding.Ascii, textPos)
@@ -2477,8 +2421,6 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultStartOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
-
         return MatchStatus.From(
             node.Encoding == CaseEncoding.Ascii
                 ? AtWordStart(state, CaseEncoding.Ascii, textPos)
@@ -2539,7 +2481,7 @@ internal static class Matcher
     /// <remarks>
     /// Brought forward from build chunk 10 for chunk 4, because without it no <c>\X</c> ever reads
     /// the text to come and the cut rule has nothing to block (row C3). Off the edge the answer is
-    /// the held text's, and S57d notes the test where it stands at the truncation point. SHORTCUT:
+    /// the held text's. SHORTCUT:
     /// under <c>(?r)</c> a boundary a little right of the edge can still depend on the text to come
     /// (GB9c, GB11 and GB12/GB13 look left through a run that can reach the edge), and it is answered
     /// against the held text. Ceiling: a reversed <c>\X</c> over such a run can refuse a completion.
@@ -2556,8 +2498,6 @@ internal static class Matcher
         {
             return GraphemeBoundaryAtEdge(state, textPos);
         }
-
-        NoteBoundaryAtTruncationPoint(state, textPos);
 
         return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
     }
@@ -2606,8 +2546,6 @@ internal static class Matcher
 
             return MatchStatus.Success;
         }
-
-        NoteBoundaryAtTruncationPoint(state, textPos);
 
         return UndeterminedRead(state);
     }
@@ -2875,7 +2813,8 @@ internal static class Matcher
     /// <summary>
     /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.SecondPassAsBeforeD11"/>):
     /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
-    /// the held text, with S57d noting a word or grapheme test at the truncation point.
+    /// the held text. S57d's escalation, which used to note a word or grapheme test here, is
+    /// deleted (design section 4.5), so this is upstream's answer.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The assertion.</param>
@@ -2883,20 +2822,6 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Success"/> or <see cref="MatchStatus.Failure"/>.</returns>
     private static int ZeroWidthAgainstTheHeldText(MatchState state, Node node, int textPos)
     {
-        if (
-            node.Op
-            is Opcode.Boundary
-                or Opcode.StartOfWord
-                or Opcode.EndOfWord
-                or Opcode.DefaultBoundary
-                or Opcode.DefaultEndOfWord
-                or Opcode.DefaultStartOfWord
-                or Opcode.GraphemeBoundary
-        )
-        {
-            NoteBoundaryAtTruncationPoint(state, textPos);
-        }
-
         int partialSide = state.PartialSide;
         state.PartialSide = MatchState.PartialNone;
         int status = TryMatchZeroWidth(state, node, textPos);
@@ -6381,7 +6306,7 @@ internal static class Matcher
     /// <remarks>
     /// A partial is never a refusal, so the budget cannot lose a match (design section 1); each
     /// firing is a phantom of class C5 (section 6). No path completed, so no capture is attested
-    /// and the groups are cleared, as S57d's escalation clears them, with a group call open too:
+    /// and the groups are cleared, with a group call open too:
     /// <see cref="BasicMatch"/> does not put the caller's groups back for this partial.
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -18357,8 +18282,6 @@ internal static class Matcher
     {
         internal int MatchPos;
         internal int TextPos;
-        internal bool HitEnd;
-        internal int HitEndMatchPos;
         internal long Errors;
         internal long Cost;
         internal long[] Counts = [];
@@ -18376,8 +18299,6 @@ internal static class Matcher
             AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
             snapshot.MatchPos = state.MatchPos;
             snapshot.TextPos = state.TextPos;
-            snapshot.HitEnd = state.HitEnd;
-            snapshot.HitEndMatchPos = state.HitEndMatchPos;
             snapshot.Errors = state.TotalErrors;
             snapshot.Cost = state.TotalCost;
 
@@ -18397,8 +18318,6 @@ internal static class Matcher
         {
             state.MatchPos = MatchPos;
             state.TextPos = TextPos;
-            state.HitEnd = HitEnd;
-            state.HitEndMatchPos = HitEndMatchPos;
             state.TotalErrors = Errors;
             state.TotalCost = Cost;
             Counts.CopyTo(state.FuzzyCounts, 0);
@@ -18599,10 +18518,6 @@ internal static class Matcher
             int sliceStart = state.SliceStart;
             int sliceEnd = state.SliceEnd;
 
-            // One scan reuses one state, so the hitend flag is cleared per match rather than per
-            // state. S57d.
-            state.HitEnd = false;
-
             // UNDER BESTMATCH AND ENHANCEMATCH A PARTIAL IS STILL THE LEFTMOST LIVE START (owner
             // ruling 2026-09-30, option A, DECISIONS). The flags rank complete matches only: the
             // partial pass below runs DoBestFuzzyMatch or DoEnhancedFuzzyMatch, and the first
@@ -18691,36 +18606,6 @@ internal static class Matcher
                 if (status == MatchStatus.Failure && search && !state.Pattern.SecondPassAsBeforeD11)
                 {
                     status = MatchFromInsideTheTextToCome(state, state.Reverse ? sliceStart : sliceEnd);
-                }
-
-                // PCRE2's model, and the point of the whole of S57d: a boundary decided at the
-                // truncation point only reports a partial once EVERYTHING else has failed. A
-                // complete match beat it at the first `DoMatch2` above; a partial found the
-                // ordinary way beat it just now, and keeps its own span and its own capture groups,
-                // which is what saves the two `(\.+?)\1\b` rows S50's predicate-level attempt broke.
-                // Upstream issue 589, ledger entry 21; pcre2partial(3), "if no complete match can be
-                // found, PCRE2_ERROR_PARTIAL is returned instead of PCRE2_ERROR_NOMATCH".
-                if (status == MatchStatus.Failure && state.HitEnd)
-                {
-                    // The span is the leftmost end-reaching attempt's start to the end of the
-                    // available text, measured on PCRE2 10.47 rather than chosen
-                    // (tools/probes/pcre2-hitend-partial-span.py sections A and B, 2026-09-21). The
-                    // far end is filled in below, by the arm every partial shares.
-                    state.MatchPos = state.HitEndMatchPos;
-
-                    // NO CAPTURE GROUPS. No path through the pattern completed, so no group span is
-                    // attested by anything; what the groups hold here is whatever the last failed
-                    // attempt happened to leave. PCRE2 says the same by not defining them -
-                    // pcre2partial(3), "the values in the rest of the ovector are undefined", which
-                    // section C of the probe above measures as uninitialised memory.
-                    //
-                    // IT IS LOAD-BEARING ONLY WHERE A VERB PRUNES THE UNWIND, which is what Control B
-                    // of this slice found: ordinary backtracking restores every group on the way out
-                    // of a failed match, so `(a)(b)\B` clears nothing, and `(a)(*SKIP)(b)\B` over 'ab'
-                    // leaves group 1 set at (0, 1) with `lastindex` 1 without this line.
-                    state.ClearGroups();
-
-                    status = MatchStatus.Partial;
                 }
             }
         }

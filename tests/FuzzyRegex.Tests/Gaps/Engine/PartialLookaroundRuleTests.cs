@@ -58,13 +58,14 @@ public sealed class PartialLookaroundRuleTests
     /// at once instead: a lazy repeat's look ahead at its tail, string tail or next item, and a
     /// greedy repeat's string tail that runs into the edge ('bca' + 'b' gives 'cab'). The last
     /// three rows are controls, where what follows the lookaround can match: 'b' + 'c' completes
-    /// <c>(?=b.*?c)b</c>. <c>\X</c>'s lazy <c>ANY_ALL</c> (<c>(?=\X)(*FAIL)</c> over 'b') is the same
-    /// arm, but S57d's escalation answers that row until build chunk 9 part 2 deletes it
-    /// (<c>OpenDefectTests</c>).
+    /// <c>(?=b.*?c)b</c>. The <c>\X</c> rows (its lazy <c>ANY_ALL</c>) were answered by S57d's
+    /// escalation as well, until build chunk 9 deleted it.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: regex 2026.9.10 answers the partial on every row but
-    // the reversed greedy row, where it answers None too.
+    // the two `\X` rows and the reversed greedy row, where it answers None too.
     [Test]
+    [Arguments("match", @"(?=\X)(*FAIL)", "b", "None")]
+    [Arguments("match", @"(?r)(*FAIL)(?<=\X)", "b", "None")]
     [Arguments("match", @"(?=b.*?c)(*FAIL)", "b", "None")]
     [Arguments("match", @"(?=b.*?cd)(*FAIL)", "bc", "None")]
     [Arguments("match", @"(?=a*?b)(*FAIL)", "aa", "None")]
@@ -219,8 +220,9 @@ public sealed class PartialLookaroundRuleTests
     }
 
     /// <summary>
-    /// The design rows whose read is a word test, which S57d answers with the same span: C2, C7, N7
-    /// and G1 are second-pass successes, L7 is none.
+    /// The design rows whose read is a word test: C2, C7, N7 and G1 are second-pass successes. L7 is
+    /// none, and answers None since build chunk 9 deleted S57d's escalation, which answered P(0, 1)
+    /// (the judge: None, as the refused rows of the design's section 7 say).
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately, on C2 (upstream: None).
     [Test]
@@ -231,7 +233,7 @@ public sealed class PartialLookaroundRuleTests
     [Arguments("match", @"(?:b|)(?=b*(?!b)\B)(?<!b)", "bb", 2, "SuccessTurnedPartial", 1)]
     [Arguments("match", @"(?:b|)(?=(?:b|c)*(?!b)\B)(?<!b)", "bb", 2, "SuccessTurnedPartial", 1)]
     [Arguments("match", @"(?:b|)(?=(?:bb?)*(?!b)\B)(?<!b)", "bb", 2, "SuccessTurnedPartial", 1)]
-    [Arguments("match", @"(?!a(?:\B(?<=b)|))a", "a", 1, "SuccessTurnedPartial", 0)]
+    [Arguments("match", @"(?!a(?:\B(?<=b)|))a", "a", -1, "SuccessTurnedPartial", 0)]
     public void The_design_rows_of_a_lookaround_at_the_edge(
         string operation,
         string pattern,
@@ -244,7 +246,7 @@ public sealed class PartialLookaroundRuleTests
         using MatchState state = RunPartial(operation, pattern, text);
         Match m = Run(operation, pattern, text);
 
-        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, end));
+        (m.PartialMatch, m.Index, m.Length).Should().Be(end < 0 ? (false, 0, 0) : (true, 0, end));
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(Enum.Parse<PartialEvent>(counted)).Should().Be(count);
     }

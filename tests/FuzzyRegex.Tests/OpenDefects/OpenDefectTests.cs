@@ -48,42 +48,6 @@ public sealed class OpenDefectTests
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
     }
 
-    // D38's last rows. The {i<=1} miss and the `$` phantom are fixed by D11 and pinned in
-    // PartialConditionRuleTests. In these the condition's test reads `\b` at the end of the text and
-    // holds for every continuation (its `a` alternative, or under {e<=1} the deletion ledger entry
-    // 42 allows, succeeds whatever follows), so no continuation matches at the start (the port's own
-    // judge, up to three characters, 2026-10-03). The second pass fails, and S57d's escalation turns
-    // the `\b`'s HitEnd into P(0, 2) (or P(1, 2)), as on main; with the escalation planted out each
-    // answers None. D11 build chunk 9 part 2 deletes the escalation. Upstream 2026.9.10 answers None
-    // to all three (probed 2026-10-03; the sizing note's P(0, 2) for the first row does not
-    // reproduce).
-    [Test]
-    [Arguments(@"(?(?=ab\b|a)ac|abc)", 0)]
-    [Arguments(@"(?:(?(?=a\b|a)a|b)){e<=1}a", 0)]
-    [Arguments(@"(?:(?(?=a\b|a)a|b)){e<=1}a", 1)]
-    public void A_condition_test_that_holds_whatever_follows_gives_no_partial_at_the_start(
-        string pattern,
-        int beginning
-    )
-    {
-        Match m = new FuzzyRegex(pattern).MatchAtStart("ab", beginning, 2 - beginning, partial: true);
-
-        m.Success.Should().BeFalse();
-    }
-
-    // D69's `\X` rows. The lazy repeat's arm now runs out inside the body (PartialLookaroundRuleTests),
-    // so the second pass fails, but the grapheme boundary read at the edge sets HitEnd and S57d's
-    // escalation answers P(0, 1). No continuation matches: the (*FAIL) fails whatever follows (the
-    // port's own judge; upstream 2026.9.10 answers None too). D11 build chunk 9 part 2 deletes the
-    // escalation.
-    [Test]
-    [Arguments(@"(?=\X)(*FAIL)")]
-    [Arguments(@"(?r)(*FAIL)(?<=\X)")]
-    public void A_lazy_repeat_that_backtracks_to_the_edge_in_a_body_gives_no_partial(string pattern)
-    {
-        new FuzzyRegex(pattern).MatchAtStart("b", partial: true).Success.Should().BeFalse();
-    }
-
     // D11 (docs/plan/2026-09-28-partial-boundary-design.md; the ids are its table's). A partial
     // means some longer text completes the match (upstream/README.rst:270). In each row no
     // continuation can: the held text already decides the boundary (B1, B2, B7), a later item

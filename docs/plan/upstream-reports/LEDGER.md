@@ -3389,6 +3389,15 @@ forced by measurement rather than chosen:
 `Gaps/UpstreamIssues/InheritedIssueTests.cs`, together with the two `(\.+?)\1\b` rows the reverted
 attempt broke, so the next attempt has to keep them.
 
+**D11 replaced S57d (2026-10-03, build chunk 9).** S57d's escalation, the PCRE2 model above, is
+deleted: `MatchState.HitEnd`, its notes in the word and grapheme tests, and the block in `DoMatch`.
+The partial call's second pass now decides each test at the edge for the text to come
+(`docs/plan/2026-09-28-partial-boundary-design.md`, sections 1 and 4), so this entry's row is a
+partial because the path through the `\b` reaches the end of the pattern for the continuations that
+pass it, and the partial reports that path's groups. Where no continuation completes the match the
+answer is now None, as upstream answers: `fullmatch` of `aa\B` over 'aa' (the match would have to
+end with the text) and `(?r)\Ba` over 'a' on `fullmatch`, which S57d answered with a partial.
+
 ## 22. `(?V0)` does not mean version 0 when `DEFAULT_VERSION` is `VERSION1` - FIXED HERE (S50b)
 
 **Title:** With `DEFAULT_VERSION = VERSION1`, an inline `(?V0)` keeps version 1's `FULLCASE`, so the

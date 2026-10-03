@@ -1815,7 +1815,15 @@ public sealed class PartialMatchingTests
     /// here, where upstream reports nothing at all.
     /// </summary>
     /// <remarks>
-    /// The deliberate divergence S57d adds, and the rule behind it is upstream's rather than this
+    /// <para>
+    /// D11 (design section 5) answers these through the second pass, which takes the boundary at
+    /// the edge as undetermined, in place of S57d's escalation, which build chunk 9 deleted. A full
+    /// match of the first four rows would have to end where the text does, and the text to come is
+    /// not empty, so fullmatch answers None there (the brute-force judge and the port's own,
+    /// 2026-10-03; S57d answered a partial). The history below is S57d's.
+    /// </para>
+    /// <para>
+    /// The deliberate divergence S57d added, and the rule behind it is upstream's rather than this
     /// port's: upstream reports a partial when a node runs out of TEXT, never when a boundary runs
     /// out of CONTEXT. <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> is the
     /// measurement, on regex 2026.9.10, 2026-09-21, and its decisive pair is
@@ -1823,6 +1831,7 @@ public sealed class PartialMatchingTests
     /// both fail there, and only the one whose repeat can ask for a third character answers a
     /// partial. So upstream is not making a judgement about the boundary here; the boundary plays
     /// no part in its answer.
+    /// </para>
     /// <para>
     /// Ledger entry 21 is the case for changing that, and PCRE2 is the second engine that already
     /// has: <c>pcre2partial(3)</c> names <c>\z</c>, <c>\Z</c>, <c>\b</c>, <c>\B</c> and <c>$</c> as
@@ -1837,43 +1846,41 @@ public sealed class PartialMatchingTests
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
     // A boundary that fails at the end of the text, with the attempt having consumed the whole span.
-    [Arguments(@"aa\B", "aa", 2)]
-    [Arguments(@"a{2}\B", "aa", 2)]
-    [Arguments(@"True\B", "True", 4)]
-    [Arguments(@"a?\B", "a", 1)]
+    [Arguments(@"aa\B", "aa", 2, false)]
+    [Arguments(@"a{2}\B", "aa", 2, false)]
+    [Arguments(@"True\B", "True", 4, false)]
+    [Arguments(@"a?\B", "a", 1, false)]
     // A boundary that SUCCEEDS at the end of the text, where what fails is the construct around it.
     // Both rows need this: entry 21's own row is a lookahead whose inner `\b` succeeded, and `\X`
-    // ends at a grapheme boundary that more text could move.
-    [Arguments(@"(?!(True|False)\b)(.*)", "True", 4)]
-    [Arguments(@"\X(?<!a)", "a", 1)]
+    // ends at a grapheme boundary that more text could move ('a' + U+0301 is one cluster).
+    [Arguments(@"(?!(True|False)\b)(.*)", "True", 4, true)]
+    [Arguments(@"\X(?<!a)", "a", 1, true)]
     public void A_boundary_decided_at_the_end_of_the_text_reports_a_partial_upstream_denies(
         string pattern,
         string subject,
-        int expectedLength
+        int expectedLength,
+        bool fullmatchToo
     )
     {
         // Upstream answers None to every row here on both of these doors. The probe prints, for
         // example, 'aa\B' 'aa' match=None fullmatch=None and 'True\B' 'True' match=None
         // fullmatch=None.
         var compiled = new FuzzyRegex(pattern);
+        Match m = compiled.MatchAtStart(subject, partial: true);
 
-        foreach (
-            Match m in new[]
-            {
-                compiled.MatchAtStart(subject, partial: true),
-                compiled.FullMatch(subject, partial: true),
-            }
-        )
-        {
-            m.PartialMatch.Should().BeTrue();
+        m.PartialMatch.Should().BeTrue();
 
-            // The span runs from the start of the attempt that reached the end of the text to the
-            // end of the text, which is PCRE2's answer for the same rows:
-            // tools/probes/pcre2-hitend-partial-span.py, PCRE2 10.47, 2026-09-21.
-            (m.Index, m.Length)
-                .Should()
-                .Be((0, expectedLength));
-        }
+        // The span runs from the start of the attempt that reached the end of the text to the end
+        // of the text, which is PCRE2's answer for the same rows:
+        // tools/probes/pcre2-hitend-partial-span.py, PCRE2 10.47, 2026-09-21.
+        (m.Index, m.Length)
+            .Should()
+            .Be((0, expectedLength));
+
+        Match full = compiled.FullMatch(subject, partial: true);
+        (full.PartialMatch, full.Index, full.Length)
+            .Should()
+            .Be(fullmatchToo ? (true, 0, expectedLength) : (false, 0, 0));
     }
 
     /// <summary>
@@ -2022,10 +2029,10 @@ public sealed class PartialMatchingTests
     /// all three are this rule reaching a pattern nobody would write by hand: a conditional whose
     /// condition fails so the whole group matches empty, a fuzzy section whose budget goes unused, a
     /// reversed lookbehind. Each reduces to a boundary that runs out of context after the attempt
-    /// has consumed text. They are pinned here whole rather than minimised, so that the
-    /// <c>boundary-at-the-end-of-the-text</c> entry in
-    /// <c>tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs</c> has tests carrying its own examples
-    /// and a later engine change cannot quietly move them. Upstream answers no match to all three,
+    /// has consumed text. They are pinned here whole rather than minimised, so that a later engine
+    /// change cannot quietly move them. They were the examples of the
+    /// <c>boundary-at-the-end-of-the-text</c> oracle entry, which D11 build chunk 9 removed with
+    /// S57d's escalation: the fullmatch rows left now agree with upstream or are D11's own rule. Upstream answers no match to all three,
     /// which is what the wave recorded from regex 2026.9.10.
     /// <para>
     /// Each row carries the flag word the wave recorded it under, because that is part of the
@@ -2035,7 +2042,10 @@ public sealed class PartialMatchingTests
     /// default is version 1 (<c>OracleWave.OracleRow.DefaultVersion</c>, S50b).
     /// </para>
     /// </remarks>
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's,
+    // on the first row. D11 build chunk 9 moved the seed-20260921 row to upstream's None, the
+    // judge's answer: its pattern ends at `b\B`, so a full match would have to end with the text,
+    // and S57d's escalation, which answered P(0, 1), is deleted (design section 5).
     // D11 moved the seed-7 row, `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` searched over two astral
     // uppercase letters, to None, where upstream is: `\m` after a word character at the end of the
     // text is false whatever follows (design row B1), and the brute-force judge answers None. It is
@@ -2044,12 +2054,12 @@ public sealed class PartialMatchingTests
     // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent.
     [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2, FuzzyRegexOptions.Version0)]
     // Seed 20260921, `partial` row 4830, fullmatch, flags 0x2. The lookbehind condition is false
-    // after 'b', so the conditional contributes nothing and the pattern is `b\B`.
+    // after 'b', so the conditional contributes nothing and the pattern is `b\B`. Now None.
     [Arguments(
         @"b\B(?(?<![\w\s])\p{Ll})",
         "b",
         "fullmatch",
-        1,
+        -1,
         FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0
     )]
     public void A_boundary_partial_is_what_the_oracle_waves_found(
@@ -2064,6 +2074,12 @@ public sealed class PartialMatchingTests
         Match m = string.Equals(door, "search", StringComparison.Ordinal)
             ? compiled.Match(subject, partial: true)
             : compiled.FullMatch(subject, partial: true);
+
+        if (expectedLength < 0)
+        {
+            m.Success.Should().BeFalse();
+            return;
+        }
 
         m.PartialMatch.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, expectedLength));
@@ -2086,19 +2102,21 @@ public sealed class PartialMatchingTests
     /// </code>
     /// Both consume the 'a' backwards and then ask <c>\B</c> at 0. Only <c>a+</c> can ask for a
     /// character before the text and be told it has run out, so only <c>a+</c> gets a partial from
-    /// upstream. This port answers a partial to both.
+    /// upstream. This port answers a partial to both on match, where a word character before the
+    /// text completes <c>\Ba</c>. A full match of <c>\Ba</c> covers one character, so no longer
+    /// text can be matched in full and fullmatch answers None, as upstream does (D11 design
+    /// section 5; S57d's escalation answered P(0, 1) until build chunk 9 deleted it).
     /// </remarks>
     [Test]
     public void A_reversed_boundary_at_the_start_of_the_text_reports_a_partial_upstream_denies()
     {
-        // DIVERGES FROM UPSTREAM, deliberately. Upstream answers None on both anchored doors.
+        // DIVERGES FROM UPSTREAM, deliberately, on match. Upstream answers None on both anchored doors.
         var denied = new FuzzyRegex(@"(?r)\Ba");
 
-        foreach (Match m in new[] { denied.MatchAtStart("a", partial: true), denied.FullMatch("a", partial: true) })
-        {
-            m.PartialMatch.Should().BeTrue();
-            (m.Index, m.Length).Should().Be((0, 1));
-        }
+        Match matched = denied.MatchAtStart("a", partial: true);
+        matched.PartialMatch.Should().BeTrue();
+        (matched.Index, matched.Length).Should().Be((0, 1));
+        denied.FullMatch("a", partial: true).Success.Should().BeFalse();
 
         // The twin, where upstream agrees, so the test above is about the boundary rather than about
         // reversed partials in general.
@@ -2121,21 +2139,16 @@ public sealed class PartialMatchingTests
     /// the conditional's else branch, and then asks <c>\b</c> at position 0, where '\r' is not a word
     /// character and the boundary fails. Upstream answers no match on this door, which is what the
     /// wave recorded from regex 2026.9.10 and what row 13 of
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> re-measures.
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> re-measures. S57d's escalation
+    /// answered P(0, 1) with no groups; D11 build chunk 9 deleted it, and the answer is now
+    /// upstream's: a full match must cover the whole text, and the pattern consumes two
+    /// characters, which the held '\r\n' already are, so no longer text can be matched in full
+    /// (the port's own judge, 2026-10-03; design section 5).
     /// </remarks>
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_reversed_boundary_partial_is_what_the_gate_wave_found()
-    {
-        Match m = new FuzzyRegex(
-            @"(?r)\b(?(?!\p{L}).|[^a])\K(\s)",
-            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1
-        ).FullMatch("\r\n", partial: true);
-
-        m.PartialMatch.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 1));
-
-        // No capture group survives the escalation, `\K` or no `\K`.
-        m.Groups[1].Success.Should().BeFalse();
-    }
+    public void A_reversed_boundary_partial_is_what_the_gate_wave_found() =>
+        new FuzzyRegex(@"(?r)\b(?(?!\p{L}).|[^a])\K(\s)", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
+            .FullMatch("\r\n", partial: true)
+            .Success.Should()
+            .BeFalse();
 }
