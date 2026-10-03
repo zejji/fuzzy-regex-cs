@@ -429,17 +429,34 @@ public sealed class BackrefAndConditionalTests
     }
 
     [Test]
-    public void A_failed_negative_condition_keeps_its_test_s_captures_but_not_its_errors()
+    public void A_failed_negative_condition_keeps_its_test_s_captures_and_errors()
     {
-        // D54 keeps the captures; D45 (ledger entry 32) still throws away the errors of a fuzzy
-        // section written inside a negative test whose body matched, as upstream does. So group 1
-        // is the 'ax' that `(?:ab){e<=1}` fitted with one substitution, and the match counts no
-        // error. The positive twin `(?(?=((?:ab){e<=1}))\1|b)` counts it (1, 0, 0), in upstream
-        // too: the ruling's equivalence holds for spans and groups, not for these errors.
+        // D54, decided 2026-10-03 after the blind review (DECISIONS): the no branch keeps the
+        // test's whole block, as the positive arm does. Group 1 is the 'ax' that `(?:ab){e<=1}`
+        // fitted with one substitution, so the match must count that substitution: with the budget
+        // removed, `(?(?!((?:ab)))b|\1)` has no match over 'ax' (upstream too), so reporting no
+        // error would claim an exact match that does not exist. The positive twin
+        // `(?(?=((?:ab){e<=1}))\1|b)` gives (0, 2) with (1, 0, 0) here and upstream.
         Match m = FuzzyRegex.Match("ax", @"(?(?!((?:ab){e<=1}))b|\1)");
+        Match twin = FuzzyRegex.Match("ax", @"(?(?=((?:ab){e<=1}))\1|b)");
 
         (m.Index, m.Length).Should().Be((0, 2));
         (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(1);
+        (twin.Index, twin.Length, twin.FuzzyCounts).Should().Be((0, 2, new FuzzyCounts(1, 0, 0)));
+    }
+
+    [Test]
+    public void A_failed_negative_condition_answers_as_its_positive_twin_with_a_fuzzy_test()
+    {
+        // The blind review's twin row (2026-10-03): with the test's errors thrown away the negative
+        // form fullmatched (0, 1) and its positive twin found no match. The two ask the same
+        // question with the branches swapped (here both empty), so they must answer the same.
+        Match negative = FuzzyRegex.FullMatch("b", "(?b)(?:(?:(?(?!((?:a|b){s<=1}))|))+?){i<=1,d<=1}b");
+        Match positive = FuzzyRegex.FullMatch("b", "(?b)(?:(?:(?(?=((?:a|b){s<=1}))|))+?){i<=1,d<=1}b");
+
+        positive.Success.Should().BeFalse();
+        negative.Success.Should().BeFalse();
     }
 }

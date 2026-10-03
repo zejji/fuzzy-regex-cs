@@ -3295,18 +3295,21 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The five rows of <c>conditional-test-is-matched-exactly</c>, recorded 2026-10-03 by
+    /// The four rows of <c>conditional-test-is-matched-exactly</c>, recorded 2026-10-03 by
     /// <c>python tools/record-oracle.py --rows</c> on regex 2026.9.10: the D52 witness, then the same
-    /// under BESTMATCH, a lookbehind test, a reversed search and ENHANCEMATCH, each from the D52/D54
-    /// grid. Upstream with the test compiled exact (its <c>LookAroundConditional._compile</c>
-    /// patched in memory) gives this port's answer on all five.
+    /// under BESTMATCH, a positive lookbehind test, and ENHANCEMATCH, from the D52/D54 grid.
+    /// Upstream with the test compiled exact (its <c>LookAroundConditional._compile</c> patched in
+    /// memory) gives this port's answer on all four. Every test here is positive: where a NEGATIVE
+    /// fuzzy test's body matched by an edit, D54 now keeps that edit, so only both switches
+    /// together give upstream's answer and the D54 entry claims the row. Three such rows left this
+    /// set on 2026-10-03: <c>(?:(?(?&lt;!a)a*|a)){e&lt;=2}</c> over 'aa',
+    /// <c>(?r)(?:(?(?!a)b|)){e&lt;=1}</c> match 'b' and <c>(?e)(?:(?(?&lt;!a)b|)){e&lt;=1}</c> over 'b'.
     /// </summary>
     private const string _exactConditionTestRows = """
         {"generator": "rows", "pattern": "(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?b)(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "bx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
-        {"generator": "rows", "pattern": "(?:(?(?<!a)a*|a)){e<=2}", "flags": 0, "namedLists": {}, "subject": "aa", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
-        {"generator": "rows", "pattern": "(?r)(?:(?(?!a)b|)){e<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "match", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
-        {"generator": "rows", "pattern": "(?e)(?:(?(?<!a)b|)){e<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "((?:(?(?<=a)b|x)){e<=1})", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?:(?(?=a)ab|b)){s<=1}", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
     /// <summary>
@@ -3688,9 +3691,10 @@ internal static class ExpectedDivergences
                 + "backtracking undoes a capture, and none has happened. PCRE2 documents keeping them "
                 + "(pcre2pattern, \"Assertions\"); PCRE2 10.47 and Perl 5.42.3 answer (0, 2) with "
                 + "group 1 (0, 1).\n"
-                + "THE FIX keeps the captures and still restores the repeats and fuzzy counts "
-                + "(`Matcher`, END_CONDITIONAL), so the errors of a fuzzy section inside the test are "
-                + "thrown away as entry 32 (D45) has them.\n"
+                + "THE FIX leaves the test's whole block for the no branch as the positive arm leaves it "
+                + "for the yes branch (`Matcher`, END_CONDITIONAL): captures, repeats and the errors of "
+                + "a fuzzy section inside the test, which count because the test chose the branch "
+                + "(decided 2026-10-03; ledger entry 32's addendum).\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithTheUpstreamConditionalTests`, which has both conditional-test "
                 + "fixes off (`PatternObject.DropNegativeTestCaptures` and the fuzzy test) and nothing "
@@ -3958,7 +3962,7 @@ internal static class ExpectedDivergences
         new(
             Id: "fuzzy-total-drops-a-discarded-section",
             Reason: "THE RUNNING ERROR TOTAL THAT BESTMATCH AND ENHANCEMATCH RANK BY DROPS THE ERRORS OF A "
-                + "FUZZY SECTION THAT AN ATOMIC GROUP, LOOKAROUND, CONDITION OR VERB THREW AWAY. Known "
+                + "FUZZY SECTION THAT AN ATOMIC GROUP, LOOKAROUND OR VERB THREW AWAY. Known "
                 + "defect D45, the rest of ledger entry 32, fixed 2026-09-30 under the owner's "
                 + "no-known-bugs rule and recorded as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
                 + "THE UPSTREAM DEFECT: END_FUZZY writes `total_errors` (`_regex.c:12484`) and nothing "

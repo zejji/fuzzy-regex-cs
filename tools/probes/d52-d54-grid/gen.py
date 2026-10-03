@@ -8,6 +8,11 @@ random.seed(int(sys.argv[2]) if len(sys.argv) > 2 else 52)
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 6000
 
 TESTS = ["a", "(a)", "ab", "(a)b", "(a|b)", "a|b", "(a*)", "[ab]", "(?:(a)|b)", "(a)(b)?", "(ab|a)"]
+# `--fuzzy-tests` (third argument) draws only tests with a fuzzy section written inside them, the
+# rows where the errors a failed negative test made decide the answer (D54 errors, 2026-10-03).
+if len(sys.argv) > 3 and sys.argv[3] == "--fuzzy-tests":
+    TESTS = ["(?:ab){e<=1}", "((?:ab){e<=1})", "((?:a|b){s<=1})", "(?:a){d<=1}", "((?:ab){d<=1})",
+             "(a(?:b){i<=1})", "((?:a){e<=1})b", "(?:(a)|b){s<=1}"]
 BRANCH = ["", "a", "b", "ab", "x", "(b)", "(?:a|ab)", "a*", r"\1b", r"\1", r"(?:\1|b)"]
 KINDS = [("?=", "?!"), ("?<=", "?<!")]
 WRAP = [

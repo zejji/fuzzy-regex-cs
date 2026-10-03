@@ -37,22 +37,20 @@ them in both forms). Owner ruling 2026-09-30 on OPEN-2: keep them.
 upstream `_regex.c:12423-12432`), pops the capture change, fuzzy state, repeats and captures saved
 at `CONDITIONAL` before going to the no branch.
 
-**Fix.** The arm still restores the fuzzy state and repeats, then leaves the captures as the test
-left them, re-pushes the repeats and fuzzy state (now equal to the saved ones) and the saved
-capture change on top of the saved captures, and pushes `END_CONDITIONAL`. The block is then
-exactly what the positive case leaves, so the existing backtrack arm restores everything when the
-no branch fails. `PatternObject.DropNegativeTestCaptures` (oracle only) runs upstream's arm.
+**Fix.** The negative arm now does what the positive arm does: it leaves the saved block on the
+stack, pushes `END_CONDITIONAL` and goes to the no branch. The captures, the repeats and the errors
+of a fuzzy section inside the test all stand until the backtrack arm undoes them. No restore is
+left in the library path, so no invariant needs an assert there.
+`PatternObject.DropNegativeTestCaptures` (oracle only) runs upstream's restoring arm.
 
-**Scope chosen: captures only, not errors.** The ruling's stated equivalence,
-`(?(?!X)A|B)` = `(?(?=X)B|A)`, would also keep the errors of a fuzzy section written inside X,
-because the positive twin keeps them. That contradicts D45 (ledger entry 32), whose pinned test
-`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`
-asserts that a failed negative condition's section errors are thrown away. Keeping them moved that
-test from (1, 3) to (0, 1) on `(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx'. So the
-fix keeps the captures, which is what the ruling names, and leaves the errors where D45 put them.
-Witness of the remaining asymmetry: `(?(?!((?:ab){e<=1}))b|\1)` over 'ax' is (0, 2) with no error,
-group 1 = (0, 2); the positive twin `(?(?=((?:ab){e<=1}))\1|b)` counts one substitution. This is
-reported to the owner as an open question, not built around.
+**Scope: the whole block (decided 2026-10-03, DECISIONS).** The first build kept the captures only
+and restored the fuzzy counts, to keep D45's pinned test. The blind review
+(`.claude/driver/review-d52-d54-2026-10-03.md`, F1) refuted that: `(?(?!((?:ab){e<=1}))b|\1)` over
+'ax' then reported (0, 2) with no error and group 1 = 'ax', though the budget-free pattern has no
+match, and 151 of 800 twin pairs disagreed. The orchestrator decided, under the owner's
+delegation, that the errors count: the test chose the branch and its captures stay, so it is not
+thrown away. D45's conditional rows were re-pinned to (0, 1) with one deletion (upstream's and the
+positive twin's answer); D45 still holds for lookarounds, atomic groups and verbs.
 
 ## Constructs that share the code path
 
@@ -64,7 +62,7 @@ reported to the owner as an open question, not built around.
 | Reverse `(?r)` | same; the test's direction is its own | same arm |
 | Partial | the test is exact, so it reads the edge as a plain lookaround does | same arm |
 | BESTMATCH, ENHANCEMATCH | ranking sees the exact test's (zero) errors | unchanged |
-| Captures inside fuzzy sections | captures in the test are exact now | kept |
+| Captures inside fuzzy sections | captures in the test are exact now | kept, with the test's errors |
 | Calls inside the test | fixed exact (`FixGroups`) | a call's own captures still go on return (D51) |
 
 ## Grid

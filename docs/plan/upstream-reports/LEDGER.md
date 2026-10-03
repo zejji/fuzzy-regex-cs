@@ -4105,6 +4105,19 @@ trace the same. Added to the draft as an addendum; classified by
 `FuzzyEnhanceMatchTests.Enhancematch_improves_a_fuzzy_section_inside_a_repeat`. Ledger number 65,
 reserved for it, is not used.
 
+### Addendum to 32, 2026-10-03: a failed negative condition's errors count (D54)
+
+D45's fix restores the running total wherever a body is thrown away. Its first pinned row was a
+negative condition, `(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx', answered (1, 3) with
+no error. That body is not thrown away: the test's result chose the no branch, and since ledger
+entry 65 its captures stay, so its errors stay too, as a positive test's do. The row now answers
+(0, 1) with one deletion, upstream's answer and its positive twin's; the "exact" (1, 3) was never
+exact (`(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'). D45 stands for lookarounds, atomic
+groups and verbs, pinned by `(?b)(?:(?!(?:q){e<=1})|c)` over 'c' and
+`(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx'
+(`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, both
+red with `PatternObject.KeepDiscardedTotals` set).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -5932,14 +5945,18 @@ question for upstream rather than a claimed bug. The cause is in `END_CONDITIONA
 (`upstream/src/_regex.c:12423-12432`): for a negative test it pops the captures saved at
 `CONDITIONAL` (`:12213`) along with the repeats and fuzzy counts before it goes to the no branch.
 
-**This port.** `Matcher`'s `END_CONDITIONAL` arm still restores the repeats and fuzzy counts, as
-upstream does, but leaves the captures and rebuilds the saved block on top of the saved captures,
-so its backtrack arm undoes everything unchanged. The errors of a fuzzy section written inside a
-failed negative test are therefore still thrown away, as ledger entry 32 (D45) has them: the
-ruling's equivalence holds for spans and groups, and not for those errors, where the positive
-twin counts them (`(?(?!((?:ab){e<=1}))b|\1)` over 'ax' is (0, 2) with no error; its twin
-`(?(?=((?:ab){e<=1}))\1|b)` counts one substitution). That corner is left for the owner to rule
-on. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (six rows red before the fix, one control)
+**This port.** `Matcher`'s `END_CONDITIONAL` arm leaves the test's whole block for the no branch
+exactly as the positive arm leaves it for the yes branch - captures, repeats and the errors of a
+fuzzy section inside the test - and pushes `END_CONDITIONAL`, so the backtrack arm undoes it all
+when the no branch fails. Errors were decided 2026-10-03 (DECISIONS, after the blind review
+`.claude/driver/review-d52-d54-2026-10-03.md`): a first build kept the captures only, and
+`(?(?!((?:ab){e<=1}))b|\1)` over 'ax' then reported (0, 2) with no error and group 1 = 'ax',
+claiming an exact match that does not exist (`(?(?!((?:ab)))b|\1)` has none, upstream too);
+151 of 800 twin pairs with a fuzzy section in the test answered differently. Now it is (0, 2) with
+one substitution, as the positive twin `(?(?=((?:ab){e<=1}))\1|b)` is here and upstream. This
+narrows ledger entry 32 (D45): a negative condition's test is not thrown away, so its errors count;
+see the addendum there. Pinned by `Gaps/Engine/BackrefAndConditionalTests` (eight rows red before
+the fix, one control), `FuzzyBestMatchTests.Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made`
 and the oracle entry `negative-condition-keeps-its-test-captures`, keyed on
 `OracleComparer.RunWithTheUpstreamConditionalTests` (`PatternObject.DropNegativeTestCaptures` plus
 the entry 64 switch, alone; every other named ablation now carries both switches too). It accounts

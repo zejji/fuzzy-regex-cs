@@ -10229,64 +10229,51 @@ internal static class Matcher
                      * pstack: -
                      */
 
-                    if (endCondNode.Match)
+                    if (endCondNode.Match || !pattern.DropNegativeTestCaptures)
                     {
-                        // It's a positive lookaround that's succeeded, so the condition holds. The
-                        // saved block stays on the stack for the backtrack case to undo.
+                        // The test's body matched. The saved block stays on the stack for the
+                        // backtrack case to undo, and what the body did stands until then.
                         state.Bstack.PushUInt8((byte)Opcode.EndConditional);
 
                         /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
 
-                        // Go to the 'true' branch.
-                        node = node.Next1.Node!;
+                        // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
+                        // entry 65): a negative test fails, and the 'false' branch keeps the whole
+                        // block as the positive arm does - the captures, the repeats and the errors
+                        // of a fuzzy section inside the test - so (?(?!X)A|B) answers as
+                        // (?(?=X)B|A). Only backtracking undoes them, and none has happened: the
+                        // test chose the branch, so its work is not thrown away (owner ruling
+                        // 2026-09-30 on OPEN-2; errors decided 2026-10-03, DECISIONS). Upstream
+                        // restores the block first (_regex.c:12423-12432).
+                        node = endCondNode.Match ? node.Next1.Node! : endCondNode.Next2.Node!;
                     }
                     else
                     {
-                        // It's a negative lookaround that's succeeded, so the condition does not
-                        // hold. Undo what the condition did before taking the other branch.
+                        // Oracle-only (PatternObject.DropNegativeTestCaptures): upstream's arm. A
+                        // negative test has failed, so undo what the test did before taking the
+                        // 'false' branch.
                         if (!state.Bstack.PopSize(out long endCondCaptureChange))
                         {
                             return MatchStatus.Illegal;
                         }
 
+                        state.CaptureChange = endCondCaptureChange;
+
                         if (
                             !state.PopSubAttemptFuzzyState(state.Bstack)
                             || !PopRepeats(state, state.Bstack, testJustEnded: true)
+                            || !PopCaptures(state, state.Bstack)
                         )
                         {
                             return MatchStatus.Illegal;
                         }
 
-                        if (pattern.DropNegativeTestCaptures)
-                        {
-                            // Oracle-only: upstream's arm, which restores the captures too.
-                            state.CaptureChange = endCondCaptureChange;
-                            if (!PopCaptures(state, state.Bstack))
-                            {
-                                return MatchStatus.Illegal;
-                            }
-
-                            /* bstack: - */
-                        }
-                        else
-                        {
-                            // NOT UPSTREAM (D54, ledger entry 65): the captures the test made stay
-                            // for the 'false' branch, as they do for a positive test's 'true'
-                            // branch, so (?(?!X)A|B) captures as (?(?=X)B|A). Only backtracking
-                            // undoes a capture, and none has happened here (owner ruling
-                            // 2026-09-30; PCRE2 documents it, Perl agrees). Upstream restores them
-                            // (_regex.c:12430). The repeats and fuzzy counts went back above, as
-                            // upstream's do: the errors of a fuzzy section inside a failed negative
-                            // test are thrown away (D45). The block is rebuilt, the saved captures
-                            // still under it, so END_CONDITIONAL's backtrack arm puts everything
-                            // back unchanged. Repeats and fuzzy state now equal what was saved.
-                            PushRepeats(state, state.Bstack);
-                            state.PushSubAttemptFuzzyState(state.Bstack);
-                            state.Bstack.PushSize(endCondCaptureChange);
-                            state.Bstack.PushUInt8((byte)Opcode.EndConditional);
-
-                            /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
-                        }
+                        /* sstack: -
+                         *
+                         * bstack: -
+                         *
+                         * pstack: -
+                         */
 
                         // Go to the 'false' branch.
                         node = endCondNode.Next2.Node!;

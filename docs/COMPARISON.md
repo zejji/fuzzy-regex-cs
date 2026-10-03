@@ -1745,15 +1745,16 @@ There is no option to restore the upstream answer. Ledger entry 61.
 
 ### BESTMATCH counts only the errors a match contains
 
-A negative lookaround or condition whose body matched fuzzily is thrown away, and so are its errors.
-Upstream keeps them in the total that BESTMATCH and ENHANCEMATCH rank by, so an exact match can lose
-to one with an error.
+A negative lookaround whose body matched fuzzily is thrown away, and so are its errors; so is the
+body of an atomic group a verb cuts through. Upstream keeps them in the total that BESTMATCH and
+ENHANCEMATCH rank by, so a match can lose to one that is no better. A negative condition's test is
+different: it chose the branch, so its errors stay (see the section on conditions below).
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-Match m = new FuzzyRegex("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})").Match("cdcx");
-Console.WriteLine(m.Index);   // 1 - upstream: 0, with a deletion
+Match m = new FuzzyRegex("(?b)(?:(?!(?:q){e<=1})|c)").Match("c");
+Console.WriteLine(m.Length);   // 1 - upstream: 0
 Console.WriteLine(m.FuzzyCounts.Total);   // 0
 ```
 
@@ -1871,13 +1872,15 @@ There is no option to restore the upstream answer. Ledger entry 64.
 
 When the test of `(?(?!X)A|B)` fails because X matched, B runs with the groups X captured, exactly
 as `(?(?=X)B|A)` runs B with them. Upstream resets them first. PCRE2 documents this behaviour and
-Perl agrees.
+Perl agrees. The errors of a fuzzy section inside X count as well, as they do for the positive form,
+so a match that used an edited capture never reports itself as exact.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 Console.WriteLine(new FuzzyRegex(@"(?(?!(a))x|\1b)").Match("ab").Length); // 2 - upstream: no match
 Console.WriteLine(new FuzzyRegex(@"(?(?=(a))\1b|x)").Match("ab").Length); // 2 - upstream: 2
+Console.WriteLine(new FuzzyRegex(@"(?(?!((?:ab){e<=1}))b|\1)").Match("ax").FuzzyCounts.Total); // 1 - upstream: no match
 ```
 
 There is no option to restore the upstream answer. Ledger entry 65.
