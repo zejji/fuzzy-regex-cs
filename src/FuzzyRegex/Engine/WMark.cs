@@ -192,4 +192,10 @@ internal enum PartialEvent
 
     /// <summary>A run-out outside any lookaround body answered the partial (the rest is presumed).</summary>
     RunOutAnswered,
+
+    /// <summary>
+    /// A choice point whose test ran out kept its other alternatives on the backtracking stack
+    /// before the run-out (the repeat run-out rule).
+    /// </summary>
+    RunOutKeptAlternatives,
 }

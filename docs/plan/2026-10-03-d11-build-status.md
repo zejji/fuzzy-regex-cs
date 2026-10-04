@@ -501,3 +501,84 @@ completion is the worse error; the phantoms are D19's to remove).
   0). Performance above, no path slower. **Next:** the blind review of fix round 3 + chunk 10 +
   this step together; then chunk 11. Open, for the review: the two pre-existing lookaround
   phantoms found in step 3 (a PARTIAL returned past the run-out rule).
+
+## The repeat run-out rule (2026-10-04, brief `brief-d11-repeat-runout-chunk11-2026-10-04.md`)
+
+Review answered: `.claude/driver/review-d11-round3-chunk10-2026-10-04.md` (F1, item 7, S1, S2).
+
+**The rule.** A test that runs out at a choice point stands for its alternative having been
+entered and run out at its first item: the arm keeps on the backtracking stack every other
+alternative it would have kept had it entered that one, then takes the run-out through `runOut`,
+never a `return`. Inside a lookaround body the run-out goes on at the body's end with a touch, and
+a blocked end backtracks into the body, so the kept alternatives are tried and a success of one on
+the held text decides the construct (design 4.2's blocked-end rule, unchanged); outside every body
+the run-out answers the partial as before and the entries go with the attempt.
+
+F1, item 7 and S1 are this one cause: an arm that answered the partial at once (`return`), or went
+to `runOut` with its other alternatives dropped (END_GREEDY_REPEAT's body since 5b4f52d2,
+GREEDY_REPEAT_ONE's count at the edge, the BRANCH test), so a negative body's definite success
+was never tried. The run-out keeps its place as the first thing tried rather than the last: the
+blocked-end rule already explores everything below a run-out, so the order changes no answer set,
+and running out first keeps upstream's order (and so its answers and captures) outside bodies. The
+reverse order (definite alternatives first, the run-out as a deferred entry) was weighed and not
+taken: a definite alternative tried first reaches the cuts of constructs between the repeat and the
+lookaround before the run-out has marked anything, so an atomic group would commit and discard the
+deferred run-out, a refusal: `(?!(?>(?:ab)*)(?<=^ab))ab` over 'ab' is completed by 'ab' + 'ab',
+and only a new mark kind that blocks inner cuts but not the lookaround itself, plus verb handling,
+would make it sound.
+
+Sites (`Matcher.cs`): the four multi-character arms through one helper,
+`KeepTheAlternativeThatDidNotRunOut` (the entry is the MATCH_BODY / MATCH_TAIL record the arm
+parks when both alternatives could match; the END_ arms push BODY_END first, which replaces
+5b4f52d2's `--rpData.Count`); GREEDY_REPEAT_ONE's count at the edge (its smaller counts and the
+tail at the held count, a BRANCH entry); GREEDY_REPEAT_ONE's backtracking arm
+(`KeepTheSmallerCounts`); BRANCH's first-alternative test. LAZY_REPEAT_ONE's three run-outs keep
+nothing: at the edge taking a character runs out too, and short of it only a string test runs out,
+leaving fewer characters than the string, so every longer count's test fails or runs out (no row
+of a 5,824-row grid moved with the longer counts kept). The fuzzy retry returns: see step 3.
+
+**Cost (the orchestrator's question, 2026-10-04).** Per run-out the arm pushes O(1) more: one
+MATCH_BODY or MATCH_TAIL record (BODY_END at the END_ arms replaces the count decrement), or one
+GREEDY_REPEAT_ONE and one BRANCH entry; no new state, nothing outside a partial call's second pass
+(every change sits behind a PARTIAL status, which only the second pass produces). What can grow is
+the later exploration of the kept alternatives, and they are exactly the alternatives the first
+pass explores at the same choice point, where the test fails instead of running out. So, per
+attempt, a body's exploration is bounded by the first pass's exploration of the same body on a
+completed text plus its run-outs, and the forks it adds (a positive lookaround's further blocked
+successes) are bounded by the dedup (same captures and counts) and the per-attempt budget
+256 (|t| + 1). A negative lookaround only gains decisions: an unblocked success ends it with no
+fork. So the ordering cannot change a pattern's complexity class; with nesting depth d the bound is
+the first pass's own order on the completed text, which is O(n^(d+1)) for d nested lookarounds over
+repeats that scan to the end.
+
+Measured before building (prototype, Release, tiering off, median of 3, head b811c5ea against the
+rule, `.scratch/d11rr/cost/`), match over 'a' * n + 'c' or 'ab' * n/2, n = 125 / 250 / 500 / 1000:
+
+| row | head ms at 1000 | rule ms at 1000 | growth (both) |
+|---|---|---|---|
+| X1 `(?:(?=(.*)z\|())a)*b\1\2` | 395 | 424 | linear (budget) |
+| `(?:(?=(a*))a)*b\1` | 3.5 | 3.7 | quadratic |
+| `(?:(?!(a*)c)a)*b` over 'a' * n | 3.7 | 7.9 | quadratic (head drops the smaller counts) |
+| `(?:(?=((?:ab)*))ab)*c\1` | 20.7 | 21.5 | quadratic |
+| `(?:(?!(?:ab)*(?<=a))ab)*c` | 24.9 | 26.6 | quadratic |
+| `(?:(?=(?:ab)*(?<=b))ab)*c` | 20.4 | 21.7 | quadratic |
+| search `(?=(.*)z)a` over 'a' * n | 88.8 | 91.2 | quadratic |
+| nested `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` | 20.6 | 1 GB stack limit | see below |
+
+The nested row is the deliberate adversary (a repeat inside a lookahead inside a repeat inside a
+lookahead inside a repeat), and it does change, but not through the rule: with the kept
+alternatives planted out (only the `return`s routed to `runOut`) it costs the same (n = 500 780 ms
+against 730 ms; n = 1000 the 1 GB backtracking-stack limit in both). Head answered it in 20 ms only
+because GREEDY_REPEAT's body test returned the partial at once (item 7) at the first lookahead that
+reached the edge. Routed through the run-out rule, every blocked lookaround keeps its body's
+entries (design 4.2, amendment 2), so the inner lookahead keeps O(n) entries per instance, the
+middle one O(n^2) and the outer path O(n^3): time 8 / 62 / 730 ms at n = 125 / 250 / 500 against
+9 / 54 / 428 ms for the first pass over the completed text ('ab' * n/2 + 'c', the pattern's own
+cubic order; 3.3 s at n = 1000), and memory past the stack's 1 GB limit at n = 1000, which the first
+pass never reaches. The one-character twin (`[ab]*` innermost) never went through item 7 and costs
+the same on head and the rule (687 / 749 ms at n = 1000, no limit hit). **For the register (owner):**
+a partial call's second pass keeps every blocked body's entries, so stack memory grows as
+n^(depth + 1) for nested lookarounds over repeats; options: (a) accept, as D71 accepted X1's time;
+(b) count stack bytes in the fork budget so the call answers the budget's C5 partial instead of
+the stack limit; (c) the performance phase. Recommendation (b) if the owner wants no exception
+from a partial call, else (a).

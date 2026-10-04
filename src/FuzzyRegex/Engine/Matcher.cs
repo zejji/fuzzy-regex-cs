@@ -6228,6 +6228,111 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule at a choice point: the test of one of a repeat's two
+    /// alternatives (its body or its tail) ran out of text, and the other one passed its test, so
+    /// the other one is kept on the backtracking stack before the run-out is taken.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A test that runs out stands for its alternative having been entered and run out at its first
+    /// item, so the arm keeps every other alternative it would have kept had it entered that one,
+    /// and then takes the run-out through <c>runOut</c> (never a <c>return</c>). Inside a lookaround
+    /// body the run-out goes on at the body's end with a touch; a blocked end backtracks into the
+    /// body, so the kept alternative is tried, and a success of it on the held text decides the
+    /// construct as the blocked-end rule says (design section 4.2). Upstream returns the partial at
+    /// once and the alternative was lost: `(?!(?:ab)*(?&lt;=b))ab` over 'ab' answered P(0, 2) where
+    /// the tail's lookbehind fails the lookahead for every continuation (review of 2026-10-04, F1
+    /// and item 7). Outside every body the run-out answers the partial, as before, and the entry
+    /// goes with the attempt.
+    /// </para>
+    /// <para>
+    /// The run-out is taken first even where the alternative that ran out is the one the repeat
+    /// tries second (a greedy repeat's tail, a lazy repeat's body). Both orders keep the same set of
+    /// paths, and a run-out first is what upstream does outside a body, so the answers there,
+    /// captures included, do not move.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="bodyStatus">The body's test.</param>
+    /// <param name="tailStatus">The tail's test.</param>
+    /// <param name="kept">The entry for the alternative that did not run out, in the shape this arm
+    /// parks for it when both could match.</param>
+    private static void KeepTheAlternativeThatDidNotRunOut(
+        MatchState state,
+        int bodyStatus,
+        int tailStatus,
+        MatchBodyTailStateData kept
+    )
+    {
+        Debug.Assert(
+            bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial,
+            "D11 run-out rule: one alternative ran out"
+        );
+
+        Opcode op;
+        if (bodyStatus == MatchStatus.Success)
+        {
+            op = Opcode.MatchBody;
+        }
+        else if (tailStatus == MatchStatus.Success)
+        {
+            op = Opcode.MatchTail;
+        }
+        else
+        {
+            return;
+        }
+
+        PushMatchBodyTailStateData(state.Bstack, kept, state.IsFuzzy);
+        state.Bstack.PushUInt8((byte)op);
+
+        /* bstack: position count start capture_change index text_pos MATCH_BODY | MATCH_TAIL */
+
+        state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule (<see cref="KeepTheAlternativeThatDidNotRunOut"/>) in
+    /// <c>GREEDY_REPEAT_ONE</c>'s backtracking arm: the tail's test ran out at
+    /// <paramref name="pos"/>, so the counts below it are kept, exactly as the arm keeps them when
+    /// the tail could match there.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat.</param>
+    /// <param name="pos">Where the tail ran out.</param>
+    /// <param name="start">The start the arm's entry parked.</param>
+    /// <param name="savedCount">The count the arm's entry parked.</param>
+    /// <param name="node">The repeat's node.</param>
+    /// <param name="index">The repeat's index.</param>
+    private static void KeepTheSmallerCounts(
+        MatchState state,
+        RepeatData rpData,
+        int pos,
+        int start,
+        long savedCount,
+        Node node,
+        int index
+    )
+    {
+        long count = CountBetween(state, pos, rpData.Start);
+        if (count > node.Values[1])
+        {
+            rpData.Count = count;
+            PushRepeatOneStateData(state.Bstack, new RepeatOneStateData(savedCount, start, node, index));
+            state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
+
+            /* bstack: count start node index GREEDY_REPEAT_ONE */
+
+            state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+        }
+        else
+        {
+            rpData.Start = start;
+            rpData.Count = savedCount;
+        }
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, ledger entry 47: whether the innermost construct open around a
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> is one that backtracking onto the verb passes straight
     /// through - an atomic group (which is also what a possessive repeat compiles to) or a positive
@@ -12623,17 +12728,17 @@ internal static class Matcher
                 case Opcode.Branch: // 2-way branch.
                 {
                     status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
-                    if (status < 0)
+                    if (status is < 0 and not MatchStatus.Partial)
                     {
-                        if (status == MatchStatus.Partial)
-                        {
-                            goto runOut;
-                        }
-
                         return status;
                     }
 
-                    if (status == MatchStatus.Success)
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): a
+                    // first alternative whose test runs out keeps the second one, which is kept
+                    // below as for an entered first alternative, and then runs out. Upstream
+                    // answers the partial at once: `(?!ab|a)` over 'a' was P(0, 1), where the 'a'
+                    // held fails the lookahead for every continuation.
+                    if (status != MatchStatus.Failure)
                     {
                         // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
                         // one after it opens a pass, whose entry does the branch's job too; see
@@ -12649,6 +12754,12 @@ internal static class Matcher
                             state.Bstack.PushUInt8((byte)Opcode.Branch);
 
                             /* bstack: text_pos node BRANCH */
+                        }
+
+                        if (status == MatchStatus.Partial)
+                        {
+                            state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+                            goto runOut;
                         }
 
                         node = nextPosition.Node;
@@ -12974,12 +13085,10 @@ internal static class Matcher
                             // TryMatch's test node), and there every complete match is the first
                             // pass's, already refused: a tail success reads the text to come, and
                             // under fullmatch it backtracks. NOT UPSTREAM'S, D11: so the run-out
-                            // stays a run-out, through the run-out rule; `(?:.\b)+` fullmatch over
-                            // 'a ' found no partial where 'a b' matches (D11 fix round 3's grid).
-                            // The oracle's pre-D11 ablation keeps upstream's failure. The count goes
-                            // back first, as on the failure below: inside a lookaround body the
-                            // run-out goes on after the lookaround, and backtracking from there
-                            // re-enters this case through the body.
+                            // stays a run-out, through the run-out rule below, with the tail kept
+                            // (KeepTheAlternativeThatDidNotRunOut); `(?:.\b)+` fullmatch over 'a '
+                            // found no partial where 'a b' matches (D11 fix round 3's grid). The
+                            // oracle's pre-D11 ablation keeps upstream's failure.
                             if (bodyStatus == MatchStatus.Partial && !pattern.SecondPassAsBeforeD11)
                             {
                                 // Design assert A15: only a partial call's second pass gets here.
@@ -12988,11 +13097,12 @@ internal static class Matcher
                                     "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
                                 );
                                 state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
-                                --rpData.Count;
-                                goto runOut;
                             }
-
-                            if (bodyStatus == MatchStatus.Partial && rpData.Count >= node.Values[1] && AtEnd(state))
+                            else if (
+                                bodyStatus == MatchStatus.Partial
+                                && rpData.Count >= node.Values[1]
+                                && AtEnd(state)
+                            )
                             {
                                 bodyStatus = MatchStatus.Failure;
                             }
@@ -13021,7 +13131,9 @@ internal static class Matcher
                     if (tryTail)
                     {
                         tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -13043,11 +13155,6 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
-                    {
-                        goto runOut;
-                    }
-
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
@@ -13063,6 +13170,29 @@ internal static class Matcher
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
                     /* bstack: count start capture_change index BODY_END */
+
+                    // NOT UPSTREAM'S, D11, the run-out rule: upstream returns the partial here,
+                    // dropping the other alternative. BODY_END goes first, as for an entered
+                    // alternative, so backtracking from the run-out puts the count back (inside a
+                    // body it re-enters this case through the body: `(?!(?:.\b|.){1,3}b)` over 'ab').
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+                    {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
+                            )
+                        );
+                        goto runOut;
+                    }
 
                     if (tryBody)
                     {
@@ -13187,9 +13317,10 @@ internal static class Matcher
                     {
                         // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
                         // minimum has been reached and the text has run out (:12575); this case does
-                        // not, and the asymmetry is upstream's own.
+                        // not, and the asymmetry is upstream's own. NOT UPSTREAM'S, D11: a run-out is
+                        // handled below, with the tail kept.
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -13213,7 +13344,9 @@ internal static class Matcher
                     if (tryTail)
                     {
                         tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -13235,11 +13368,6 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
-                    {
-                        goto runOut;
-                    }
-
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
@@ -13255,6 +13383,26 @@ internal static class Matcher
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
                     /* bstack: count start capture_change index BODY_END */
+
+                    // NOT UPSTREAM'S, D11, the run-out rule, as in END_GREEDY_REPEAT above.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+                    {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count
+                            )
+                        );
+                        goto runOut;
+                    }
 
                     if (tryTail)
                     {
@@ -13777,7 +13925,9 @@ internal static class Matcher
                     if (tryBody)
                     {
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the tail kept.
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -13799,7 +13949,9 @@ internal static class Matcher
                     if (tryTail)
                     {
                         tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -13820,8 +13972,24 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): upstream
+                    // returns the partial at either test, dropping the other alternative.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
                     {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart
+                            )
+                        );
                         goto runOut;
                     }
 
@@ -13905,10 +14073,22 @@ internal static class Matcher
                         out bool isPartial,
                         out int pos
                     );
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): the
+                    // repeat could take a character of the text to come, which runs out, but the
+                    // counts the held text allows are kept first, as the arm keeps them for a repeat
+                    // that stopped inside the text. Upstream answers the partial at once:
+                    // `a(?!b*(?<=b))b` over 'ab' was P(0, 2) where the lookbehind after the 'b' held
+                    // fails the lookahead for every continuation (review of 2026-10-04, S1).
+                    int runOutAt = -1;
                     if (isPartial)
                     {
-                        state.TextPos = pos;
-                        goto runOut;
+                        if (pattern.SecondPassAsBeforeD11)
+                        {
+                            state.TextPos = pos;
+                            goto runOut;
+                        }
+
+                        runOutAt = pos;
                     }
 
                     // Unmatch until it's not guarded. 'pos' is upstream's
@@ -13941,6 +14121,13 @@ internal static class Matcher
 
                     if (!match)
                     {
+                        if (runOutAt >= 0)
+                        {
+                            // No count the held text allows can be kept: only the run-out is left.
+                            state.TextPos = runOutAt;
+                            goto runOut;
+                        }
+
                         // The repeat has failed to match at this position.
                         state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
                         goto backtrack;
@@ -13959,6 +14146,21 @@ internal static class Matcher
 
                         rpData.Start = state.TextPos;
                         rpData.Count = count;
+                    }
+
+                    if (runOutAt >= 0)
+                    {
+                        // The tail at this count is kept too, in a BRANCH entry: its arm resumes
+                        // at a node and a position, which is all the tail's entry needs.
+                        state.Bstack.PushSize(pos);
+                        state.Bstack.PushNode(node.Next1.Node!);
+                        state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+                        /* bstack: text_pos node BRANCH */
+
+                        state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+                        state.TextPos = runOutAt;
+                        goto runOut;
                     }
 
                     // Advance into the tail.
@@ -14268,7 +14470,9 @@ internal static class Matcher
                     if (tryBody)
                     {
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the tail kept.
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -14290,7 +14494,9 @@ internal static class Matcher
                     if (tryTail)
                     {
                         tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -14311,8 +14517,23 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    // NOT UPSTREAM'S, D11, the run-out rule, as in GREEDY_REPEAT above.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
                     {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart
+                            )
+                        );
                         goto runOut;
                     }
 
@@ -17465,9 +17686,16 @@ internal static class Matcher
                         {
                             // NOT UPSTREAM'S, D11 (D69): a string tail that runs into the edge runs
                             // out like any other item, so inside a lookaround body matching goes on
-                            // after the lookaround (`(?=b[^a]*cab)(*FAIL)` over 'bca').
+                            // after the lookaround (`(?=b[^a]*cab)(*FAIL)` over 'bca'). The run-out
+                            // rule (KeepTheAlternativeThatDidNotRunOut): the smaller counts are
+                            // kept first, as the match below keeps them.
                             if (status == MatchStatus.Partial)
                             {
+                                if (!pattern.SecondPassAsBeforeD11)
+                                {
+                                    KeepTheSmallerCounts(state, rpData, pos, start, savedCount, node, index);
+                                }
+
                                 goto runOut;
                             }
 
@@ -17656,7 +17884,13 @@ internal static class Matcher
                             // GREEDY_REPEAT_ONE arm above returns 'status' (:17040 against :16280).
                             // Ported as written, except that a run-out goes through the run-out
                             // rule (D69: a string tail that runs into the edge, `(?=b.*?cd)(*FAIL)`
-                            // over 'bc').
+                            // over 'bc'). The run-out rule (KeepTheAlternativeThatDidNotRunOut)
+                            // keeps nothing here: only a string test runs out short of the edge, and
+                            // then fewer characters than the string follow, so every longer count's
+                            // test fails or runs out too (a one-character test runs out only at the
+                            // edge, where taking a character runs out as well). No row of a
+                            // 5,824-row grid of bounded lazy repeats before a string moved with the
+                            // longer counts kept (2026-10-04).
                             if (status == MatchStatus.Partial)
                             {
                                 goto runOut;

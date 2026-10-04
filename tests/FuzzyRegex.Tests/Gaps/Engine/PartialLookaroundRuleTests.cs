@@ -504,6 +504,92 @@ public sealed class PartialLookaroundRuleTests
             "the dedup keeps the second pass polynomial"
         );
 
+    /// <summary>
+    /// The run-out rule at a choice point: when the test of one alternative runs out of text, the
+    /// other alternatives are kept on the backtracking stack before the run-out is taken. Inside a
+    /// negative lookahead the blocked end then backtracks into them, and a success of one of them
+    /// on the held text fails the lookahead for every continuation. In the first four rows the
+    /// tail's <c>(?&lt;=b)</c> holds after every 'ab' (F1 of the 2026-10-04 review: END_GREEDY_REPEAT
+    /// took the body's run-out without the tail); then the same through GREEDY_REPEAT's body test,
+    /// a bounded repeat, a one-character repeat (twice), a branch, END_LAZY_REPEAT's body test with
+    /// its tail kept, and a one-character repeat that backtracks to a count whose tail runs out with
+    /// a smaller count left. No row has a completion (the port's non-partial judge over every
+    /// continuation of up to three characters, 2026-10-04).
+    /// </summary>
+    /// <remarks>
+    /// Before, each row answered the partial at the attempt's start: the arm returned the partial
+    /// at once or went to the run-out with its other alternatives dropped. Planted out (2026-10-04,
+    /// Debug): without the kept alternative of the four multi-character arms the first six rows go
+    /// red; without GREEDY_REPEAT_ONE's kept counts the next two; without the branch's kept entry
+    /// the ninth; with END_LAZY_REPEAT's body test answering at once the tenth; without the
+    /// backtracking arm's smaller counts the last (86 rows of a 5,824-row grid of bounded repeats
+    /// before a string).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on every row but the first four: regex 2026.9.10 answers the partial
+    // at the start on the others, and None on the first four, where its END_GREEDY_REPEAT turns
+    // the body's run-out at the end of the text into a failure.
+    [Test]
+    [Arguments(@"(?!(?:ab)*(?<=b))ab", "ab")]
+    [Arguments(@"(?!(?:ab)*(?<=b))..", "ab")]
+    [Arguments(@"(?!(?:ab)*(?<=b))", "ab")]
+    [Arguments(@"(?!(?:ab)*(?<=b)).*", "ab")]
+    [Arguments(@"(?!(?:ab)+)ab", "ab")]
+    [Arguments(@"(?!(?:ab){1,3}(?<=b))ab", "ab")]
+    [Arguments(@"(?!(?:a|b)*(?<=b))ab", "ab")]
+    [Arguments(@"a(?!(?:b)*(?<=b))b", "ab")]
+    [Arguments(@"(?!ab|a)", "a")]
+    [Arguments(@"(?!(?:ab)*?c|ab)", "ab")]
+    [Arguments(@"(?![ab]{0,2}aa)", "aa")]
+    public void A_run_out_at_a_choice_point_keeps_the_other_alternatives(string pattern, string text) =>
+        Run("match", pattern, text).Success.Should().BeFalse();
+
+    /// <summary>
+    /// A repeat's body or tail test that runs out of text inside a lookahead's body goes through the
+    /// run-out rule like any other item: matching goes on after the lookahead, where
+    /// <c>(*FAIL)</c> fails for every continuation. Each arm returned the partial at once instead
+    /// (item 7 of the 2026-10-04 review): GREEDY_REPEAT's body test (the first two rows) and tail
+    /// test, LAZY_REPEAT's body test (two rows) and tail test (two rows), END_GREEDY_REPEAT's tail
+    /// test, END_LAZY_REPEAT's body test (two rows) and tail test. No row has a completion.
+    /// </summary>
+    /// <remarks>
+    /// Planted out (2026-10-04, Debug): GREEDY_REPEAT's body test answering at once turns the first
+    /// two rows red, END_LAZY_REPEAT's the two rows of its body test.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers the partial at the start on every row but
+    // the fifth, where it answers None too.
+    [Test]
+    [Arguments(@"(?=(?:ab)+$)(*FAIL)", "ab")]
+    [Arguments(@"(?=(?:a\b)+)(*FAIL)", "a")]
+    [Arguments(@"(?=x(?:ab)*cd)(*FAIL)", "xc")]
+    [Arguments(@"(?=(?:ab)+?$)(*FAIL)", "ab")]
+    [Arguments(@"(?=(?:.\b)+?$)(*FAIL)", "a ")]
+    [Arguments(@"(?=x(?:ab)*?cd)(*FAIL)", "xc")]
+    [Arguments(@"(?=(?:ab)+?(?:ab)c)(*FAIL)", "abab")]
+    [Arguments(@"(?=x(?:ab)*cd)(*FAIL)", "xabc")]
+    [Arguments(@"(?=(?:ab)*?c)(*FAIL)", "ab")]
+    [Arguments(@"(?=(?:ab)+?c)(*FAIL)", "abab")]
+    [Arguments(@"(?=x(?:ab)*?(?:ab)c)(*FAIL)", "xabab")]
+    public void A_repeat_test_that_runs_out_in_a_body_goes_on_after_the_lookaround(string pattern, string text) =>
+        Run("match", pattern, text).Success.Should().BeFalse();
+
+    /// <summary>
+    /// The sound side of the rule's limit: an atomic group around the repeat commits to the run-out's
+    /// longer path in the continuations where it exists, so the held text's success after it is not
+    /// certain, and the lookahead stays undetermined. Here 'ab' + 'ab' completes the match: the
+    /// group takes 'abab', `(?&lt;=^ab)` then fails, so the lookahead passes. Upstream 2026.9.10 and
+    /// main answer None, a refused completion. The <c>(?&lt;=b)</c> form of the same pattern, which
+    /// no continuation completes, answers the same partial: limit C2, in
+    /// <c>OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body</c>.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None.
+    [Test]
+    public void An_atomic_group_around_a_repeat_that_runs_out_keeps_the_lookahead_undetermined()
+    {
+        Match m = Run("match", @"(?!(?>(?:ab)*)(?<=^ab))ab", "ab");
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
+
     private static Match Run(string operation, string pattern, string text) =>
         operation switch
         {

@@ -283,6 +283,28 @@ public sealed class OpenDefectTests
         (m.Success, m.Success ? m.Index : -1).Should().Be((start >= 0, start));
     }
 
+    // D19 again, inside a lookahead's body (D11's run-out rule, 2026-10-04). The repeat's body test
+    // runs out at the edge and the run-out presumes the body can still succeed, so the negative
+    // lookahead is undetermined. In the match rows an atomic group (or a possessive repeat) around
+    // the repeat commits to the run-out's longer path where it exists, so the held text's success
+    // after it is not certain either; in the search row the attempt from inside the text to come
+    // cannot see that its lookbehind and the 'ab' after it read the same characters. Yet no
+    // continuation completes any of them: after any number of 'ab' the lookbehind holds, so the
+    // lookahead fails (the port's non-partial judge over every continuation of up to three
+    // characters, 2026-10-04). The sibling `(?!(?>(?:ab)*)(?<=^ab))ab` over 'ab' does complete
+    // ('ab' + 'ab'), which is why the atomic rows cannot be decided without deciding the rest
+    // (PartialLookaroundRuleTests). Upstream 2026.9.10: None, None, P(2, 2); main 2c51e356: None,
+    // None, P(2, 2) (the atomic rows through upstream's failure at END_GREEDY_REPEAT, which also
+    // refuses the sibling).
+    [Test]
+    [Arguments("match", @"(?!(?:ab)*+(?<=b))ab", "ab")]
+    [Arguments("match", @"(?!(?>(?:ab)*)(?<=b))ab", "ab")]
+    [Arguments("search", @"(?!(?:ab)*(?<=b))ab", "ab")]
+    public void A_run_out_in_a_lookahead_presumes_the_rest_of_its_body(string operation, string pattern, string text)
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);
