@@ -100,21 +100,19 @@ public sealed class OpenDefectTests
 
     // D11, the other direction: some continuation completes each row, so the answer is a partial
     // spanning from the leftmost start that a continuation completes to the end of the text.
-    // W1-W5 are owner ruling Q2 = B, a complete match whose word boundary read past the end ('a:'
-    // followed by 'a' keeps 'a:a' one word under UAX #29 WB6, WB4 and WB12). L1 and A2 start where
+    // (W1-W6, owner ruling Q2 = B, moved to PartialWindowReadTests with D11 build chunk 10.) L1 and A2 start where
     // the lookahead or the `\m` still can hold; A5, P1, P2 and P3 are zero-width attempts that a
     // word character after the truncation point completes (P1 and P2 invert
     // PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_reports_the_partial_a_word_character_completes
     // and P3 inverts A_boundary_that_consumed_nothing_reports_the_partial_a_word_character_completes, see the design's open
     // questions). S3 is the search convention the slow path already follows, (1, 1) for `\ma` over
-    // 'b', reached through the prefilter. Upstream, measured 2026-09-28: W1 None, W2 (3, 3), W3 None,
-    // W5 None, L1 (1, 1), A2 (2, 2), A5 None, P1 (0, 0), P2 None, P3 None, S3 (1, 1).
+    // 'b', reached through the prefilter. Upstream, measured 2026-09-28: L1 (1, 1), A2 (2, 2), A5
+    // None, P1 (0, 0), P2 None, P3 None, S3 (1, 1).
     // Review round 1 adds V1-V3, a verb reached only after a boundary the continuation decides ('ab'
     // makes the `\b` fail, so `a.` matches), and D1-D4, the path an atomic group or possessive repeat
     // takes when the continuation makes its first path fail ('xa', 'abc', 'aa', 'ab'). Upstream: None
     // on all but V3 (1, 1). V1, V2 and D1-D3 pass today only through S57d's escalation, which the
-    // design deletes; they guard the design's verb and commit rules. W6 is WB7b: a Hebrew letter,
-    // a double quote and a Hebrew letter to come stay one word (upstream and the port: None).
+    // design deletes; they guard the design's verb and commit rules.
     // N7 and N8 came from tools/probes/d11-universe-model.py's grid, and each broke a draft of the
     // round-2 invariant: N7 ('b' + 'aa') needs the outer lookahead's frame kept for the decision's
     // other world, N8 (' b' + 'a') needs a run-out inside a lookaround to mean also "takes the
@@ -127,10 +125,6 @@ public sealed class OpenDefectTests
     // inside a lookaround body while a taint lives) and F1 (the dedup key holds the fuzzy counts).
     // Upstream 2026.9.10, measured 2026-09-28: Q2, Q3, T3 and G1 partial, the others None.
     [Test]
-    [Arguments("match", @"(?w)a\B", "a:", 0, 2)]
-    [Arguments("search", @"(?w)a\B", "xa:", 1, 3)]
-    [Arguments("match", "(?w)a\\B", "a:\u0301", 0, 3)]
-    [Arguments("match", @"(?w)1\B", "1,", 0, 2)]
     [Arguments("search", @"(?=..)[ab]", "x", 1, 1)]
     [Arguments("search", "(?fi)\\m\u0130(?(?<!\\w)[^a-f]|\\p{Ll})$", "\uFB01 ", 2, 2)]
     [Arguments("match", @"(?r)[a\d]\M", "", 0, 0)]
@@ -145,7 +139,6 @@ public sealed class OpenDefectTests
     [Arguments("match", @"(?>ab\b|a)(?<=a)b", "ab", 0, 2)]
     [Arguments("match", @"(?:a\b)?+(?<!a)a", "a", 0, 1)]
     [Arguments("match", @"(?>a\Z|)(?<!a)a", "a", 0, 1)]
-    [Arguments("match", "(?w)א\\B", "א\"", 0, 2)]
     [Arguments("match", @"b(?!(?!\w.))", "b", 0, 1)]
     [Arguments("match", @".(?!(?>\wa|(?<!b))(?<!a))", " b", 0, 2)]
     [Arguments("match", @"(?!(?>a\b|)(?<!a)a(*PRUNE)(?<=b)|a)", "a", 0, 1)]
@@ -288,6 +281,49 @@ public sealed class OpenDefectTests
         Match m = Partial(operation, pattern, text);
 
         (m.Success, m.Success ? m.Index : -1).Should().Be((start >= 0, start));
+    }
+
+    // Found in D11 fix round 3 (chunk 10's grid). A one-character lazy repeat that reaches the
+    // edge by backtracking cannot take one character more: its backtracking arm keeps an entry only
+    // while the count is below the text held (Matcher.cs, LAZY_REPEAT_ONE's backtracking arm,
+    // `count < maxCount`, upstream's bound), so it never runs out, where the main loop's arm and a
+    // greedy repeat do. 'aac' matches the first row at (0, 3); 'क्क' is one cluster (GB9c), so it
+    // fullmatches the second, whose `\X` must take a consonant to come. Upstream 2026.9.10: None,
+    // None. The one-line fix (also keep the entry when the next character lies in the text to come)
+    // moved 382 rows of a 13,650-row lazy-repeat grid onto the judge and 390 away, all limit C2 (the
+    // repeat takes a character to come and the rest is presumed, as `a+(?<=b)` over 'aa' already
+    // answers), so it waits for a decision.
+    [Test]
+    [Arguments("match", @".*?(?<=c)", "aa", 0)]
+    [Arguments("fullmatch", "(?r)\\X", "्क", 0)]
+    public void A_lazy_repeat_that_reaches_the_edge_by_backtracking_still_runs_out(
+        string operation,
+        string pattern,
+        string text,
+        int start
+    )
+    {
+        Match m = Partial(operation, pattern, text);
+
+        (m.PartialMatch, m.Index).Should().Be((true, start));
+    }
+
+    // Found in D11 fix round 3 (chunk 10's grid); a D11 regression (main answers P(0, 2) through
+    // S57d's escalation). A greedy repeat's end turns its body's run-out into a failure once the
+    // minimum is reached at the end of the text (Matcher.cs, END_GREEDY_REPEAT, upstream :12575), so
+    // that the tail's complete match wins. In the second pass that tail's success has read the text
+    // to come, so under fullmatch it backtracks, and the run-out it replaced is gone: 'a b' (and
+    // 'a ' + 'b') fullmatch the row. Upstream 2026.9.10: None. Keeping the run-out moved 2 rows of a
+    // 5,000-row repeat grid onto the judge and 25 away, all limit C2, so it waits for a decision with
+    // the lazy repeat's bound above.
+    [Test]
+    [Arguments(@"(?:.\b)+", "a ")]
+    [Arguments(@"(?:.\b)+", "1,")]
+    public void A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text(string pattern, string text)
+    {
+        Match m = Partial("fullmatch", pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
     }
 
     private static Match Partial(string operation, string pattern, string text)

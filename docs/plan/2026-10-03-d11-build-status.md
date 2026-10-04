@@ -344,3 +344,62 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   **No change**: composing them would be the step that could hide something, and nothing asks for
   it. If a future wave shows such a divergence, the fix is to key the composition on "any named
   ablation" (`namedAblation` or either conditional switch) instead of `ablate`.
+- **Step 5, chunk 10** (exact `(?w)` and grapheme M1 through property cores). `AtDefaultBoundary`
+  is split into `DefaultBoundaryNear` (WB3-WB4, the two neighbours) and `DefaultBoundaryFar`
+  (WB5-WB999 over the values WB4 leaves), and `AtGraphemeBoundary` loses GB3-GB9b to
+  `GraphemeBoundaryNear`; the text versions call them, so there is one copy of each rule. In a
+  partial call's second pass the three `(?w)` tests go to `DefaultWordTestInAPartialCall`, which
+  enumerates the unknown places of the window: the character beside the edge over 27
+  representatives (one per Word_Break x Extended_Pictographic x `\w` class of Unicode 17), a place
+  further out (WB6/WB7/WB7b/WB7c/WB11/WB12's second character, WB4's walk, the regional-indicator
+  parity) over the values it can take; decided when every combination agrees, else undetermined.
+  Forward only the character after a mid-type right neighbour, or the edge itself, can be unknown;
+  reversed, any leftward walk (WB4's skip, the character before a mid-type left neighbour, the RI
+  count) that reaches the edge is open. Under `(?a)` the tests are the plain word tests with their
+  M1. A reversed grapheme boundary inside the held text is undetermined when GB9c's, GB11's or
+  GB12's walk reaches the edge and no held-text rule keeps the cluster together
+  (`ReversedGraphemeBoundaryReadsTheTextToCome`); this replaces chunk 4's SHORTCUT. Forward
+  grapheme reads were already exact (every GB rule looks right only at the neighbour).
+  Assumptions (rule 10): Word_Break 0 is Other, what the first pass reads past the end, and the
+  values run to Regional_Indicator; the representatives cover every class exactly
+  (`PartialWindowReadTests.Every_character_class_the_default_word_rules_read_has_a_representative`
+  scans all code points); a decided `(?w)` answer differs from the first pass only over an empty
+  text (Debug.Assert A4 in `DefaultWordTestInAPartialCall`); the rules read a character only
+  through those three properties (Matcher.cs, `DefaultBoundaryNear`/`Far`, `AtDefaultWordStartOrEnd`).
+  Witnesses (rule 12), each red with its part planted out (dev-tree probe, Debug, 21 rows): whole
+  mechanism 13 red; WB4's right skip W3; the inside-window read W1, W2, W3, W5, W6; the edge
+  `(?w)a\B` 'a'; the empty text 3 rows; `(?a)` routing `(?wa)a\B` 'a'; reversed edge
+  `(?wr)\Ba` 'a'; reversed WB4 walk '\u0301a'; reversed WB7 ':a'; reversed RI parity RI x 3; GB9c,
+  GB11, GB12 one row each. The quick bound `WindowCanReachTheEdge` (performance, below): each of
+  its five clauses red when weakened (W3; ':a' crashes reading before the text; RI x 3;
+  ':́a'; '́:a'). The `\m`/`\M` word-class shortcut changes no answer by construction
+  (it returns only where `DefaultWordTest` is false for every combination), so it has no witness.
+  Tests: `PartialWindowReadTests` (24 rows, 20 red on the old engine with a stub for the
+  representatives, 4 controls green); W1-W3, W5, W6 leave `OpenDefectTests`.
+  Grid (Debug, 3,020 rows: `(?w)`, `(?wr)`, `(?wa)`, `(?wi)` with `\b \B \m \M` in six shapes
+  over 32 subjects, reversed `\X` shapes; judge the port's non-partial matcher over continuations of
+  up to 2 from a 19-character alphabet), against af3e3c49: misses 83 -> 1, 176 rows onto the judge,
+  22 away and 14 other, every one checked by hand as limit C3 (a word test and `$` or the item after
+  it read the same character independently) or C2 (a repeat takes a character to come and the rest
+  is presumed); 0 asserts. Rule 11 (rows with the construct / rows where it read the text to come):
+  `(?w)` `\b` 175/29, `\B` 208/89, `\m` 178/44, `\M` 193/43; `(?wr)` 182/31, 191/49, 178/39,
+  201/24; `(?wa)` 159/27, 182/28, 171/25, 171/12; `(?wi)` 185/33, 217/83, 202/36, 174/37; reversed
+  `\X` 44/5; `DecidedReadDiffering` 11 rows. Full grid (Release, 51,648 rows): 51 misses, all of two
+  pre-existing causes found here, below. B1's family grid (8,820 rows): 0 moved.
+  **Found here, not chunk 10's:** (1) a one-character lazy repeat that reaches the edge by
+  backtracking never runs out (LAZY_REPEAT_ONE's backtracking arm keeps an entry only while
+  `count < maxCount`, the text held; upstream's bound): `.*?(?<=c)` match 'aa' None, judge P(0, 2),
+  upstream None; it also stops a reversed `\X` from taking a character to come (`(?r)\X` fullmatch
+  'क्क'[1:]...). Red in `OpenDefectTests.A_lazy_repeat_that_reaches_the_edge_by_backtracking_still_runs_out`.
+  The one-line fix moved 382 rows of a 13,650-row lazy grid onto the judge and 390 away (all C2),
+  so it waits for a decision. (2) a greedy repeat's end turns its body's run-out into a failure at
+  the end of the text (upstream :12575), and the tail's touched success then backtracks under
+  fullmatch: `(?:.\b)+` fullmatch 'a ' None, judge and main 27b9de33 P(0, 2) (main through S57d),
+  upstream None - a D11 regression against main. Keeping the run-out (and routing it through the
+  run-out rule) moved 2 rows of a 5,000-row repeat grid onto the judge and 25 away, all C2, so it
+  waits with (1). Red in `OpenDefectTests.A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text`.
+  Performance (Release, `DOTNET_TieredCompilation=0`, medians of 9 batches, 3 alternating runs,
+  af3e3c49 against chunk 10; machine shared with another agent's oracle run): calls without
+  partial over 20 KB of mixed text, `(?w)\b` 1.019, `(?w)\b\w+\b` 1.016, `(?w)\m\w` 1.000, `\X`
+  1.005, `(?r)\X` 1.012, `\b` 0.951; partial calls over the grid's 2,808 rows whose answer did not
+  change 1.081 (it was 1.45 before the quick bound and the reordered representatives).

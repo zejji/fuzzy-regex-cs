@@ -1363,53 +1363,13 @@ internal static class Matcher
         }
 
         int leftPos = state.PrevPos(textPos);
-        int rightPos = textPos;
-        uint leftChar = state.CharAt(leftPos);
-        uint rightChar = state.CharAt(rightPos);
-
-        // Do not break within CRLF.
-        // WB3
-        uint leftProp = UnicodeTables.GetWordBreak(leftChar);
+        uint rightChar = state.CharAt(textPos);
         uint rightProp = UnicodeTables.GetWordBreak(rightChar);
+        int near = DefaultBoundaryNear(UnicodeTables.GetWordBreak(state.CharAt(leftPos)), rightProp, rightChar);
 
-        if (leftProp == UnicodeTables.WbreakCr && rightProp == UnicodeTables.WbreakLf)
+        if (near != _boundaryNotDecided)
         {
-            return false;
-        }
-
-        // Otherwise break before and after Newlines (including CR and LF).
-        // WB3a
-        if (IsWordBreakNewline(leftProp))
-        {
-            return true;
-        }
-
-        // WB3b
-        if (IsWordBreakNewline(rightProp))
-        {
-            return true;
-        }
-
-        // Do not break within emoji zwj sequences.
-        // WB3c
-        if (leftProp == UnicodeTables.WbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
-        {
-            return false;
-        }
-
-        // Keep horizontal whitespace together.
-        // WB3d
-        if (leftProp == UnicodeTables.WbreakWsegspace && rightProp == UnicodeTables.WbreakWsegspace)
-        {
-            return false;
-        }
-
-        // Ignore Format and Extend characters, except after sot, CR, LF, and Newline. This also has
-        // the effect of: Any x (Format || Extend || ZWJ)
-        // WB4
-        if (IsWordBreakIgnored(rightProp))
-        {
-            return false;
+            return near == _boundaryBreak;
         }
 
         // From here on every rule sees the text with the ignored characters taken out: each one
@@ -1417,7 +1377,7 @@ internal static class Matcher
         // break, and then it stands alone and matches no rule below. The same goes for the
         // characters two away that WB6, WB7, WB7b, WB7c, WB11 and WB12 look at.
         leftPos = SkipIgnoredLeft(state, leftPos);
-        leftProp = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
 
         int leftLeftPos = SkipIgnoredLeft(state, state.PrevPos(leftPos));
         uint leftLeftProp =
@@ -1425,10 +1385,109 @@ internal static class Matcher
                 ? UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos))
                 : 0;
 
-        int rightRightPos = SkipIgnoredRight(state, state.NextPos(rightPos));
+        int rightRightPos = SkipIgnoredRight(state, state.NextPos(textPos));
         uint rightRightProp =
             rightRightPos < state.TextEnd ? UnicodeTables.GetWordBreak(state.CharAt(rightRightPos)) : 0;
 
+        return DefaultBoundaryFar(
+            leftProp,
+            leftLeftProp,
+            rightProp,
+            rightRightProp,
+            rightProp == UnicodeTables.WbreakRegionalindicator
+                && CountRegionalIndicatorsLeftIgnoring(state, leftPos) % 2 == 1
+        );
+    }
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when WB3 to WB4 decide a break.</summary>
+    private const int _boundaryBreak = 1;
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when WB3 to WB4 decide no break.</summary>
+    private const int _boundaryNoBreak = 0;
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when the later rules decide.</summary>
+    private const int _boundaryNotDecided = -1;
+
+    /// <summary>
+    /// WB3 to WB4 of <see cref="AtDefaultBoundary"/>, which read only the two characters beside the
+    /// position, before WB4 takes the ignored characters out. Split from the text so that a partial
+    /// call can ask it about a character the text does not hold (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The Word_Break value of the character to the left.</param>
+    /// <param name="rightProp">The Word_Break value of the character to the right.</param>
+    /// <param name="rightChar">The character to the right, for WB3c's Extended_Pictographic.</param>
+    /// <returns><see cref="_boundaryBreak"/>, <see cref="_boundaryNoBreak"/> or <see cref="_boundaryNotDecided"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DefaultBoundaryNear(uint leftProp, uint rightProp, uint rightChar)
+    {
+        // Do not break within CRLF.
+        // WB3
+        if (leftProp == UnicodeTables.WbreakCr && rightProp == UnicodeTables.WbreakLf)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Otherwise break before and after Newlines (including CR and LF).
+        // WB3a
+        if (IsWordBreakNewline(leftProp))
+        {
+            return _boundaryBreak;
+        }
+
+        // WB3b
+        if (IsWordBreakNewline(rightProp))
+        {
+            return _boundaryBreak;
+        }
+
+        // Do not break within emoji zwj sequences.
+        // WB3c
+        if (leftProp == UnicodeTables.WbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Keep horizontal whitespace together.
+        // WB3d
+        if (leftProp == UnicodeTables.WbreakWsegspace && rightProp == UnicodeTables.WbreakWsegspace)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Ignore Format and Extend characters, except after sot, CR, LF, and Newline. This also has
+        // the effect of: Any x (Format || Extend || ZWJ)
+        // WB4
+        if (IsWordBreakIgnored(rightProp))
+        {
+            return _boundaryNoBreak;
+        }
+
+        return _boundaryNotDecided;
+    }
+
+    /// <summary>
+    /// WB5 to WB999 of <see cref="AtDefaultBoundary"/>, over the Word_Break values the rules read
+    /// once WB4 has taken the ignored characters out. Split from the text so that a partial call
+    /// can ask it about values the text does not hold (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The character to the left, after WB4.</param>
+    /// <param name="leftLeftProp">The character before that, after WB4, or 0 (Other) at the start.</param>
+    /// <param name="rightProp">The character to the right, which WB4 does not ignore.</param>
+    /// <param name="rightRightProp">The character after that, after WB4, or 0 (Other) at the end.</param>
+    /// <param name="oddRegionalIndicators">
+    /// Whether an odd number of regional indicators run leftwards from the left character (WB15/WB16);
+    /// read only when the right character is one.
+    /// </param>
+    /// <returns><see langword="true"/> for a break.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool DefaultBoundaryFar(
+        uint leftProp,
+        uint leftLeftProp,
+        uint rightProp,
+        uint rightRightProp,
+        bool oddRegionalIndicators
+    )
+    {
         // Do not break between most letters.
         // WB5
         if (IsAhLetter(leftProp) && IsAhLetter(rightProp))
@@ -1558,10 +1617,7 @@ internal static class Matcher
         // Do not break within emoji flag sequences. That is, do not break between regional indicator
         // (RI) symbols if there is an odd number of RI characters before the break point.
         // WB15 and WB16
-        if (
-            rightProp == UnicodeTables.WbreakRegionalindicator
-            && CountRegionalIndicatorsLeftIgnoring(state, leftPos) % 2 == 1
-        )
+        if (rightProp == UnicodeTables.WbreakRegionalindicator && oddRegionalIndicators)
         {
             return false;
         }
@@ -1978,76 +2034,13 @@ internal static class Matcher
         uint leftChar = state.CharAt(leftPos);
         uint rightChar = state.CharAt(rightPos);
 
-        // Do not break between a CR and LF. Otherwise, break before and after controls.
-        // GB3
         uint leftProp = UnicodeTables.GetGraphemeClusterBreak(leftChar);
         uint rightProp = UnicodeTables.GetGraphemeClusterBreak(rightChar);
+        int near = GraphemeBoundaryNear(leftProp, rightProp);
 
-        if (leftProp == UnicodeTables.GbreakCr && rightProp == UnicodeTables.GbreakLf)
+        if (near != _boundaryNotDecided)
         {
-            return false;
-        }
-
-        // GB4
-        if (leftProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
-        {
-            return true;
-        }
-
-        // GB5
-        if (rightProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
-        {
-            return true;
-        }
-
-        // Do not break Hangul syllable sequences.
-        // GB6
-        if (
-            leftProp == UnicodeTables.GbreakL
-            && rightProp
-                is UnicodeTables.GbreakL
-                    or UnicodeTables.GbreakV
-                    or UnicodeTables.GbreakLv
-                    or UnicodeTables.GbreakLvt
-        )
-        {
-            return false;
-        }
-
-        // GB7
-        if (
-            leftProp is UnicodeTables.GbreakLv or UnicodeTables.GbreakV
-            && rightProp is UnicodeTables.GbreakV or UnicodeTables.GbreakT
-        )
-        {
-            return false;
-        }
-
-        // GB8
-        if (leftProp is UnicodeTables.GbreakLvt or UnicodeTables.GbreakT && rightProp == UnicodeTables.GbreakT)
-        {
-            return false;
-        }
-
-        // Do not break before extending characters or ZWJ.
-        // GB9
-        if (rightProp is UnicodeTables.GbreakExtend or UnicodeTables.GbreakZwj)
-        {
-            return false;
-        }
-
-        // The GB9a and GB9b rules only apply to extended grapheme clusters: Do not break before
-        // SpacingMarks, or after Prepend characters.
-        // GB9a
-        if (rightProp == UnicodeTables.GbreakSpacingmark)
-        {
-            return false;
-        }
-
-        // GB9b
-        if (leftProp == UnicodeTables.GbreakPrepend)
-        {
-            return false;
+            return near == _boundaryBreak;
         }
 
         // The GB9c rule only applies to extended grapheme clusters: Do not break within certain
@@ -2133,6 +2126,89 @@ internal static class Matcher
         // Otherwise, break everywhere.
         // GB999
         return true;
+    }
+
+    /// <summary>
+    /// GB3 to GB9b of <see cref="AtGraphemeBoundary"/>, which read only the two characters beside
+    /// the position. Split from the text so that a partial call can tell these rules, which the
+    /// held text decides, from the ones that look further left (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The Grapheme_Cluster_Break value of the character to the left.</param>
+    /// <param name="rightProp">The Grapheme_Cluster_Break value of the character to the right.</param>
+    /// <returns><see cref="_boundaryBreak"/>, <see cref="_boundaryNoBreak"/> or <see cref="_boundaryNotDecided"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GraphemeBoundaryNear(uint leftProp, uint rightProp)
+    {
+        // Do not break between a CR and LF. Otherwise, break before and after controls.
+        // GB3
+        if (leftProp == UnicodeTables.GbreakCr && rightProp == UnicodeTables.GbreakLf)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB4
+        if (leftProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return _boundaryBreak;
+        }
+
+        // GB5
+        if (rightProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return _boundaryBreak;
+        }
+
+        // Do not break Hangul syllable sequences.
+        // GB6
+        if (
+            leftProp == UnicodeTables.GbreakL
+            && rightProp
+                is UnicodeTables.GbreakL
+                    or UnicodeTables.GbreakV
+                    or UnicodeTables.GbreakLv
+                    or UnicodeTables.GbreakLvt
+        )
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB7
+        if (
+            leftProp is UnicodeTables.GbreakLv or UnicodeTables.GbreakV
+            && rightProp is UnicodeTables.GbreakV or UnicodeTables.GbreakT
+        )
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB8
+        if (leftProp is UnicodeTables.GbreakLvt or UnicodeTables.GbreakT && rightProp == UnicodeTables.GbreakT)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Do not break before extending characters or ZWJ.
+        // GB9
+        if (rightProp is UnicodeTables.GbreakExtend or UnicodeTables.GbreakZwj)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // The GB9a and GB9b rules only apply to extended grapheme clusters: Do not break before
+        // SpacingMarks, or after Prepend characters.
+        // GB9a
+        if (rightProp == UnicodeTables.GbreakSpacingmark)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB9b
+        if (leftProp == UnicodeTables.GbreakPrepend)
+        {
+            return _boundaryNoBreak;
+        }
+
+        return _boundaryNotDecided;
     }
 
     /// <summary>Upstream <c>try_match_ANY</c> (<c>upstream/src/_regex.c</c> line 6919).</summary>
@@ -2324,8 +2400,8 @@ internal static class Matcher
     private static bool WordTest(Node node, bool wordLeft, bool wordRight) =>
         node.Op switch
         {
-            Opcode.Boundary => node.Match ? wordLeft != wordRight : wordLeft == wordRight,
-            Opcode.StartOfWord => !wordLeft && wordRight,
+            Opcode.Boundary or Opcode.DefaultBoundary => node.Match ? wordLeft != wordRight : wordLeft == wordRight,
+            Opcode.StartOfWord or Opcode.DefaultStartOfWord => !wordLeft && wordRight,
             _ => wordLeft && !wordRight,
         };
 
@@ -2391,6 +2467,11 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultBoundary(MatchState state, Node node, int textPos)
     {
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
+
         return MatchStatus.From(
             (
                 node.Encoding == CaseEncoding.Ascii
@@ -2407,6 +2488,11 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultEndOfWord(MatchState state, Node node, int textPos)
     {
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
+
         return MatchStatus.From(
             node.Encoding == CaseEncoding.Ascii
                 ? AtWordEnd(state, CaseEncoding.Ascii, textPos)
@@ -2421,11 +2507,665 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultStartOfWord(MatchState state, Node node, int textPos)
     {
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
+
         return MatchStatus.From(
             node.Encoding == CaseEncoding.Ascii
                 ? AtWordStart(state, CaseEncoding.Ascii, textPos)
                 : AtDefaultWordStartOrEnd(state, textPos, true)
         );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): one character for each combination of
+    /// Word_Break value, Extended_Pictographic and Unicode <c>\w</c> that a character can have, the
+    /// three things the default word rules read about a character beside a position. Unicode
+    /// 17.0.0, the tables' version, has 27 combinations;
+    /// <c>PartialWindowReadTests.Every_character_class_the_default_word_rules_read_has_a_representative</c>
+    /// scans every code point and fails when the tables change the set. The classes that most
+    /// often split a test come first (a line break, an extending mark, a letter, a space, a digit),
+    /// so that an undetermined test stops after a few.
+    /// </summary>
+    internal static readonly uint[] DefaultWordRepresentatives =
+    [
+        0x000A,
+        0x0300,
+        0x0041,
+        0x0020,
+        0x0030,
+        0x0000,
+        0x0E01,
+        0x00A9,
+        0x000B,
+        0x000D,
+        0x0022,
+        0x0027,
+        0x002C,
+        0x002E,
+        0x0600,
+        0x003A,
+        0x00B8,
+        0x2139,
+        0x202F,
+        0x005F,
+        0x00AD,
+        0x1F3FB,
+        0x05D0,
+        0x200D,
+        0x309B,
+        0x3031,
+        0x1F1E6,
+    ];
+
+    /// <summary>The Word_Break value of each of <see cref="DefaultWordRepresentatives"/>.</summary>
+    private static readonly uint[] _representativeWordBreak =
+    [
+        .. DefaultWordRepresentatives.Select(static c => UnicodeTables.GetWordBreak(c)),
+    ];
+
+    /// <summary>Whether each of <see cref="DefaultWordRepresentatives"/> is a word character.</summary>
+    private static readonly bool[] _representativeIsWord = [.. DefaultWordRepresentatives.Select(IsUnicodeWord)];
+
+    /// <summary>
+    /// The Word_Break values a character can have, as a mask with one bit per value: Other (0) to
+    /// Regional_Indicator. The emoji values above it are not assigned to any character since
+    /// Unicode 11 (the representatives' scan checks it).
+    /// </summary>
+    private const uint _wordBreakValues = (1u << (UnicodeTables.WbreakRegionalindicator + 1)) - 1;
+
+    /// <summary>The Word_Break values the left walk of WB4 can stop at: none it ignores, no line break.</summary>
+    private const uint _wordBreakAttachable =
+        _wordBreakValues
+        & ~(
+            (1u << UnicodeTables.WbreakExtend)
+            | (1u << UnicodeTables.WbreakFormat)
+            | (1u << UnicodeTables.WbreakZwj)
+            | (1u << UnicodeTables.WbreakNewline)
+            | (1u << UnicodeTables.WbreakCr)
+            | (1u << UnicodeTables.WbreakLf)
+        );
+
+    /// <summary>
+    /// The Word_Break values whose rules read a second character beyond the position: WB6, WB7,
+    /// WB7b, WB7c, WB11 and WB12 look past MidLetter, MidNumLet, Single_Quote, Double_Quote and
+    /// MidNum, and no other rule reads that far.
+    /// </summary>
+    private const uint _wordBreakLookingFurther =
+        (1u << UnicodeTables.WbreakMidletter)
+        | (1u << UnicodeTables.WbreakMidnumlet)
+        | (1u << UnicodeTables.WbreakSinglequote)
+        | (1u << UnicodeTables.WbreakDoublequote)
+        | (1u << UnicodeTables.WbreakMidnum);
+
+    /// <summary>An outcome mask bit: some continuation passes the test.</summary>
+    private const int _somePass = 1;
+
+    /// <summary>An outcome mask bit: some continuation fails the test.</summary>
+    private const int _someFail = 2;
+
+    /// <summary>A parity mask bit: an even number of regional indicators.</summary>
+    private const int _evenRegionalIndicators = 1;
+
+    /// <summary>A parity mask bit: an odd number of regional indicators.</summary>
+    private const int _oddRegionalIndicators = 2;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): <c>(?w)</c>'s <c>\b</c>, <c>\B</c>, <c>\m</c> and
+    /// <c>\M</c> in a partial call, kept out of line so that a call without partial runs them as
+    /// they were.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The UAX #29 window of a position reaches beyond its two neighbours: WB6, WB7b and WB12 read
+    /// the character after the right one, WB7, WB7c and WB11 the one before the left one, WB4 skips
+    /// any run of Extend, Format and ZWJ to find them, and WB15/WB16 count regional indicators
+    /// leftwards. So a test can read the text to come without standing at the edge: <c>(?w)a\B</c>
+    /// over 'a:' reads it at 1, because 'a:a' keeps the colon inside a word (row W1). The first pass
+    /// reads the end of the text as the character class Other (0) and the edge as WB2's break, as
+    /// upstream does.
+    /// </para>
+    /// <para>
+    /// Here the unknown places are enumerated (design section 4.1): the character beside the edge
+    /// over <see cref="DefaultWordRepresentatives"/>, a place further out over the Word_Break values
+    /// it can have. The test is decided where every combination gives the same answer, and
+    /// undetermined otherwise. The places are independent: any value at one can come with any value
+    /// at another, because each is a different character of the text to come, or the end of it.
+    /// A decided answer is the first pass's except over an empty text, where the first pass found no
+    /// boundary (WB1 and WB2 give none in an empty text) and every continuation makes the position
+    /// the start (forward) or the end (reversed) of a non-empty one, which is a break.
+    /// </para>
+    /// <para>
+    /// Under <c>(?a)</c> the three tests are the plain word tests, as in upstream's encoding tables,
+    /// and take their M1. The oracle's ledger-40 ablation answers against the held text, as
+    /// upstream, which has no M1.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>DefaultBoundary</c>, <c>DefaultStartOfWord</c> or <c>DefaultEndOfWord</c> node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int DefaultWordTestInAPartialCall(MatchState state, Node node, int textPos)
+    {
+        if (node.Encoding == CaseEncoding.Ascii)
+        {
+            return WordTestInAPartialCall(state, node, textPos);
+        }
+
+        if (state.Pattern.UpstreamDefaultBoundary || !WindowCanReachTheEdge(state, textPos))
+        {
+            return MatchStatus.From(DefaultWordTestOnTheHeldText(state, node, textPos));
+        }
+
+        int outcomes = DefaultWordTestOutcomes(state, node, textPos);
+        if (outcomes == 0)
+        {
+            return MatchStatus.From(DefaultWordTestOnTheHeldText(state, node, textPos));
+        }
+
+        if (outcomes == (_somePass | _someFail))
+        {
+            return UndeterminedRead(state);
+        }
+
+        bool decided = outcomes == _somePass;
+        if (decided != DefaultWordTestOnTheHeldText(state, node, textPos))
+        {
+            Debug.Assert(
+                state.TextStart == state.TextEnd,
+                "D11 A4: a decided default word test answers what the first pass answered, but over an empty text"
+            );
+            state.AttemptTouchedTheTextToCome = true;
+            state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+        }
+
+        return MatchStatus.From(decided);
+    }
+
+    /// <summary>
+    /// A quick bound on <see cref="DefaultWordTestOutcomes"/>: whether the position lies close
+    /// enough to the edge for its window to reach it. Forward the window reaches at most the
+    /// character after the right neighbour, past any characters WB4 ignores; reversed, the
+    /// character before the left neighbour, past ignored characters, or a run of regional
+    /// indicators. Two characters WB4 keeps between the position and the edge, and on the left no
+    /// regional indicator next to the position, put the edge out of reach.
+    /// </summary>
+    /// <param name="state">The match state, in a partial call's second pass.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="false"/> if the held text alone decides the test.</returns>
+    private static bool WindowCanReachTheEdge(MatchState state, int textPos)
+    {
+        if (state.PartialSide == MatchState.PartialRight)
+        {
+            if (textPos >= state.TextEnd)
+            {
+                return true;
+            }
+
+            int next = state.NextPos(textPos);
+            return next >= state.TextEnd || IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(next)));
+        }
+
+        if (textPos <= state.TextStart)
+        {
+            return true;
+        }
+
+        int left = state.PrevPos(textPos);
+        if (left <= state.TextStart)
+        {
+            return true;
+        }
+
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+        return IsWordBreakIgnored(leftProp)
+            || leftProp == UnicodeTables.WbreakRegionalindicator
+            || IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(state.PrevPos(left))));
+    }
+
+    /// <summary>A default word test as the first pass asks it, against the held text.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool DefaultWordTestOnTheHeldText(MatchState state, Node node, int textPos) =>
+        node.Op switch
+        {
+            Opcode.DefaultBoundary => AtDefaultBoundary(state, textPos) == node.Match,
+            Opcode.DefaultStartOfWord => AtDefaultWordStartOrEnd(state, textPos, true),
+            _ => AtDefaultWordStartOrEnd(state, textPos, false),
+        };
+
+    /// <summary>
+    /// A default word test's answer from its boundary and the word classes of the two characters
+    /// beside it, as <see cref="AtDefaultWordStartOrEnd"/> combines them.
+    /// </summary>
+    /// <param name="node">The test.</param>
+    /// <param name="boundary">Whether a default word boundary is there.</param>
+    /// <param name="wordLeft">Whether the character to the left is a word character.</param>
+    /// <param name="wordRight">Whether the character to the right is a word character.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool DefaultWordTest(Node node, bool boundary, bool wordLeft, bool wordRight) =>
+        node.Op switch
+        {
+            Opcode.DefaultBoundary => boundary == node.Match,
+            Opcode.DefaultStartOfWord => boundary && !wordLeft && wordRight,
+            _ => boundary && wordLeft && !wordRight,
+        };
+
+    /// <summary>Whether a character is a Unicode word character (<c>\w</c>).</summary>
+    /// <param name="ch">The character.</param>
+    /// <returns><see langword="true"/> for a word character.</returns>
+    private static bool IsUnicodeWord(uint ch) =>
+        Encodings.HasProperty(CaseEncoding.Unicode, UnicodeTables.PropWord, ch);
+
+    /// <summary>
+    /// Which answers the continuations give a default word test whose window reaches the text to
+    /// come, or 0 when it does not reach it and the held text decides.
+    /// </summary>
+    /// <param name="state">The match state, in a partial call's second pass.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordTestOutcomes(MatchState state, Node node, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+        int start = state.TextStart;
+        int end = state.TextEnd;
+
+        if (start == end)
+        {
+            // The position is the start of a non-empty text forward (WB1) and its end reversed
+            // (WB2): a break. Only the far side's word class depends on the continuation.
+            int seen = 0;
+            foreach (bool word in _representativeIsWord)
+            {
+                seen |= Outcome(DefaultWordTest(node, true, !forward && word, forward && word));
+                if (seen == (_somePass | _someFail))
+                {
+                    break;
+                }
+            }
+
+            return seen;
+        }
+
+        // \m needs a non-word character before and a word character after, \M the reverse; the
+        // side the held text holds can already make the test false for every continuation, which
+        // the held text's answer is too.
+        if (node.Op != Opcode.DefaultBoundary)
+        {
+            bool known = forward
+                ? WordLeft(state, CaseEncoding.Unicode, textPos)
+                : WordRight(state, CaseEncoding.Unicode, textPos);
+            bool atStart = node.Op == Opcode.DefaultStartOfWord;
+            if (known == (forward ? atStart : !atStart))
+            {
+                return 0;
+            }
+        }
+
+        return forward
+            ? DefaultWordOutcomesForward(state, node, textPos)
+            : DefaultWordOutcomesReversed(state, node, textPos);
+    }
+
+    /// <summary><see cref="DefaultWordTestOutcomes"/> with the text to come on the right.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position, in a non-empty text.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomesForward(MatchState state, Node node, int textPos)
+    {
+        // WB1 at the start of the held text, which is the start of the whole text.
+        if (textPos <= state.TextStart)
+        {
+            return 0;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        uint leftRaw = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+        bool wordLeft = WordLeft(state, CaseEncoding.Unicode, textPos);
+        uint rightChar;
+        uint rightRaw;
+
+        if (textPos < state.TextEnd)
+        {
+            // Inside the held text only the character two to the right can lie in the text to
+            // come, and only WB6, WB7b and WB12 read it, after a right character WB4 keeps.
+            rightChar = state.CharAt(textPos);
+            rightRaw = UnicodeTables.GetWordBreak(rightChar);
+            if (
+                DefaultBoundaryNear(leftRaw, rightRaw, rightChar) != _boundaryNotDecided
+                || (_wordBreakLookingFurther & (1u << (int)rightRaw)) == 0
+                || SkipIgnoredRight(state, state.NextPos(textPos)) < state.TextEnd
+            )
+            {
+                return 0;
+            }
+        }
+        else
+        {
+            rightChar = 0;
+            rightRaw = 0;
+        }
+
+        // Every place on the left lies in the held text.
+        int left = SkipIgnoredLeft(state, leftPos);
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+        int leftLeftPos = SkipIgnoredLeft(state, state.PrevPos(left));
+        uint leftLeftProp =
+            leftLeftPos >= state.TextStart && left > state.TextStart
+                ? UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos))
+                : 0;
+        int parity =
+            CountRegionalIndicatorsLeftIgnoring(state, left) % 2 == 1
+                ? _oddRegionalIndicators
+                : _evenRegionalIndicators;
+
+        if (textPos < state.TextEnd)
+        {
+            return DefaultWordOutcomes(
+                node,
+                leftRaw,
+                rightRaw,
+                rightChar,
+                1u << (int)leftProp,
+                1u << (int)leftLeftProp,
+                parity,
+                _wordBreakValues,
+                wordLeft,
+                WordRight(state, CaseEncoding.Unicode, textPos)
+            );
+        }
+
+        // At the edge the right character is the continuation's first, and the one after it any
+        // value WB4 can stop at, or the end of the text (0, Other).
+        int seen = 0;
+        for (int i = 0; i < DefaultWordRepresentatives.Length; i++)
+        {
+            seen |= DefaultWordOutcomes(
+                node,
+                leftRaw,
+                _representativeWordBreak[i],
+                DefaultWordRepresentatives[i],
+                1u << (int)leftProp,
+                1u << (int)leftLeftProp,
+                parity,
+                _wordBreakValues,
+                wordLeft,
+                _representativeIsWord[i]
+            );
+            if (seen == (_somePass | _someFail))
+            {
+                break;
+            }
+        }
+
+        return seen;
+    }
+
+    /// <summary>
+    /// <see cref="DefaultWordTestOutcomes"/> with the text to come on the left, where the rules
+    /// that look leftwards (WB4's skip, WB7, WB7c, WB11, WB15/WB16) can walk into it from any
+    /// position whose left side runs back to the edge.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position, in a non-empty text.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomesReversed(MatchState state, Node node, int textPos)
+    {
+        // WB2 at the end of the held text, which is the end of the whole text.
+        if (textPos >= state.TextEnd)
+        {
+            return 0;
+        }
+
+        uint rightChar = state.CharAt(textPos);
+        uint rightRaw = UnicodeTables.GetWordBreak(rightChar);
+        bool wordRight = WordRight(state, CaseEncoding.Unicode, textPos);
+        int rightRightPos = SkipIgnoredRight(state, state.NextPos(textPos));
+        uint rightRights =
+            1u << (int)(rightRightPos < state.TextEnd ? UnicodeTables.GetWordBreak(state.CharAt(rightRightPos)) : 0);
+
+        if (textPos <= state.TextStart)
+        {
+            // At the edge the left character is the continuation's last. Ignored by WB4, it
+            // belongs to a character further into the continuation, or stands alone after a
+            // line break or at the start; the places beyond are any value, and a regional
+            // indicator there can be one of any number.
+            int seen = 0;
+            for (int i = 0; i < DefaultWordRepresentatives.Length; i++)
+            {
+                uint leftRaw = _representativeWordBreak[i];
+                seen |= DefaultWordOutcomes(
+                    node,
+                    leftRaw,
+                    rightRaw,
+                    rightChar,
+                    IsWordBreakIgnored(leftRaw) ? (1u << (int)leftRaw) | _wordBreakAttachable : 1u << (int)leftRaw,
+                    _wordBreakValues,
+                    _evenRegionalIndicators | _oddRegionalIndicators,
+                    rightRights,
+                    _representativeIsWord[i],
+                    wordRight
+                );
+                if (seen == (_somePass | _someFail))
+                {
+                    break;
+                }
+            }
+
+            return seen;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        uint leftRawKnown = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+        if (DefaultBoundaryNear(leftRawKnown, rightRaw, rightChar) != _boundaryNotDecided)
+        {
+            return 0;
+        }
+
+        uint lefts = WalkLeftOverIgnored(state, leftPos, out int left);
+        uint leftLefts = 1u;
+        int parity = _evenRegionalIndicators;
+        if (left >= 0)
+        {
+            uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+            if ((_wordBreakLookingFurther & (1u << (int)leftProp)) != 0)
+            {
+                leftLefts = WalkLeftOverIgnored(state, state.PrevPos(left), out _);
+            }
+
+            if (rightRaw == UnicodeTables.WbreakRegionalindicator)
+            {
+                parity = RegionalIndicatorParityLeft(state, left);
+            }
+        }
+        else
+        {
+            leftLefts = _wordBreakValues;
+            parity = _evenRegionalIndicators | _oddRegionalIndicators;
+        }
+
+        bool open =
+            !IsSingleBit(lefts)
+            || ((lefts & _wordBreakLookingFurther) != 0 && !IsSingleBit(leftLefts))
+            || (
+                rightRaw == UnicodeTables.WbreakRegionalindicator
+                && (lefts & (1u << UnicodeTables.WbreakRegionalindicator)) != 0
+                && parity == (_evenRegionalIndicators | _oddRegionalIndicators)
+            );
+
+        return open
+            ? DefaultWordOutcomes(
+                node,
+                leftRawKnown,
+                rightRaw,
+                rightChar,
+                lefts,
+                leftLefts,
+                parity,
+                rightRights,
+                WordLeft(state, CaseEncoding.Unicode, textPos),
+                wordRight
+            )
+            : 0;
+    }
+
+    /// <summary>Whether a mask has exactly one bit set.</summary>
+    /// <param name="mask">The mask.</param>
+    /// <returns><see langword="true"/> for a single value.</returns>
+    private static bool IsSingleBit(uint mask) => mask != 0 && (mask & (mask - 1)) == 0;
+
+    /// <summary>
+    /// <see cref="SkipIgnoredLeft"/> with the text to come on the left: the Word_Break values the
+    /// walk can stop at. One value when it stops in the held text; when it walks into the text to
+    /// come, any value WB4 can stop at, or the character it started from when a line break or the
+    /// start of the whole text comes first.
+    /// </summary>
+    /// <param name="state">The match state, reversed.</param>
+    /// <param name="pos">Where the walk starts, which may lie in the text to come.</param>
+    /// <param name="at">The position the walk stops at in the held text, or -1.</param>
+    /// <returns>A mask of Word_Break values.</returns>
+    private static uint WalkLeftOverIgnored(MatchState state, int pos, out int at)
+    {
+        at = -1;
+        if (pos < state.TextStart)
+        {
+            return _wordBreakValues;
+        }
+
+        int walk = pos;
+        while (walk >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(walk))))
+        {
+            walk = state.PrevPos(walk);
+        }
+
+        uint own = UnicodeTables.GetWordBreak(state.CharAt(pos));
+        if (walk < state.TextStart)
+        {
+            return (1u << (int)own) | _wordBreakAttachable;
+        }
+
+        at = IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(walk))) ? pos : walk;
+
+        return 1u << (int)UnicodeTables.GetWordBreak(state.CharAt(at));
+    }
+
+    /// <summary>
+    /// <see cref="CountRegionalIndicatorsLeftIgnoring"/>'s parity with the text to come on the left:
+    /// both parities when the run of regional indicators, or the ignored characters between them,
+    /// reaches the edge, because the continuation can end in any number more.
+    /// </summary>
+    /// <param name="state">The match state, reversed.</param>
+    /// <param name="leftPos">The character to the left of the break, after WB4, in the held text.</param>
+    /// <returns>A mask of <see cref="_evenRegionalIndicators"/> and <see cref="_oddRegionalIndicators"/>.</returns>
+    private static int RegionalIndicatorParityLeft(MatchState state, int leftPos)
+    {
+        long count = 0;
+        int pos = leftPos;
+        while (true)
+        {
+            if (UnicodeTables.GetWordBreak(state.CharAt(pos)) != UnicodeTables.WbreakRegionalindicator)
+            {
+                return count % 2 == 1 ? _oddRegionalIndicators : _evenRegionalIndicators;
+            }
+
+            ++count;
+            int previous = state.PrevPos(pos);
+            int walk = previous;
+            while (walk >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(walk))))
+            {
+                walk = state.PrevPos(walk);
+            }
+
+            if (walk < state.TextStart)
+            {
+                return _evenRegionalIndicators | _oddRegionalIndicators;
+            }
+
+            pos = IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(walk))) ? previous : walk;
+        }
+    }
+
+    /// <summary>An outcome mask's bit for one answer.</summary>
+    /// <param name="answer">The answer.</param>
+    /// <returns><see cref="_somePass"/> or <see cref="_someFail"/>.</returns>
+    private static int Outcome(bool answer) => answer ? _somePass : _someFail;
+
+    /// <summary>
+    /// The answers a default word test gives over every combination of the values its unknown
+    /// places can take. A place read by no rule for a combination is not enumerated there.
+    /// </summary>
+    /// <param name="node">The test.</param>
+    /// <param name="leftRaw">The Word_Break value of the character to the left, before WB4.</param>
+    /// <param name="rightRaw">The Word_Break value of the character to the right.</param>
+    /// <param name="rightChar">The character to the right.</param>
+    /// <param name="lefts">The values the left character can have after WB4.</param>
+    /// <param name="leftLefts">The values the character before it can have.</param>
+    /// <param name="parity">The parities the regional indicators running left from a regional indicator on the left can have.</param>
+    /// <param name="rightRights">The values the character after the right one can have.</param>
+    /// <param name="wordLeft">Whether the character to the left is a word character.</param>
+    /// <param name="wordRight">Whether the character to the right is a word character.</param>
+    /// <returns>A mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomes(
+        Node node,
+        uint leftRaw,
+        uint rightRaw,
+        uint rightChar,
+        uint lefts,
+        uint leftLefts,
+        int parity,
+        uint rightRights,
+        bool wordLeft,
+        bool wordRight
+    )
+    {
+        int near = DefaultBoundaryNear(leftRaw, rightRaw, rightChar);
+        if (near != _boundaryNotDecided)
+        {
+            return Outcome(DefaultWordTest(node, near == _boundaryBreak, wordLeft, wordRight));
+        }
+
+        uint rights = (_wordBreakLookingFurther & (1u << (int)rightRaw)) != 0 ? rightRights : 1u;
+        int seen = 0;
+        for (uint ls = lefts; ls != 0; ls &= ls - 1)
+        {
+            uint left = (uint)System.Numerics.BitOperations.TrailingZeroCount(ls);
+            uint lls = (_wordBreakLookingFurther & (1u << (int)left)) != 0 ? leftLefts : 1u;
+            int parities =
+                left == UnicodeTables.WbreakRegionalindicator && rightRaw == UnicodeTables.WbreakRegionalindicator
+                    ? parity
+                    : _evenRegionalIndicators;
+            for (uint a = lls; a != 0; a &= a - 1)
+            {
+                for (uint b = rights; b != 0; b &= b - 1)
+                {
+                    for (int p = parities; p != 0; p &= p - 1)
+                    {
+                        bool boundary = DefaultBoundaryFar(
+                            left,
+                            (uint)System.Numerics.BitOperations.TrailingZeroCount(a),
+                            rightRaw,
+                            (uint)System.Numerics.BitOperations.TrailingZeroCount(b),
+                            (p & -p) == _oddRegionalIndicators
+                        );
+                        seen |= Outcome(DefaultWordTest(node, boundary, wordLeft, wordRight));
+                        if (seen == (_somePass | _someFail))
+                        {
+                            return seen;
+                        }
+                    }
+                }
+            }
+        }
+
+        return seen;
     }
 
     /// <summary>Upstream <c>try_match_END_OF_WORD</c> (line 7141).</summary>
@@ -2514,11 +3254,8 @@ internal static class Matcher
     /// <remarks>
     /// Brought forward from build chunk 10 for chunk 4, because without it no <c>\X</c> ever reads
     /// the text to come and the cut rule has nothing to block (row C3). Off the edge the answer is
-    /// the held text's. SHORTCUT:
-    /// under <c>(?r)</c> a boundary a little right of the edge can still depend on the text to come
-    /// (GB9c, GB11 and GB12/GB13 look left through a run that can reach the edge), and it is answered
-    /// against the held text. Ceiling: a reversed <c>\X</c> over such a run can refuse a completion.
-    /// Upgrade: chunk 10's property cores, which enumerate the unknown side as <c>(?w)</c> does.
+    /// the held text's, except under <c>(?r)</c>, where GB9c, GB11 and GB12/GB13 look left through
+    /// a run that can reach the edge (build chunk 10, <see cref="ReversedGraphemeBoundaryReadsTheTextToCome"/>).
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">A <c>GraphemeBoundary</c> node.</param>
@@ -2527,12 +3264,26 @@ internal static class Matcher
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static int GraphemeBoundaryInAPartialCall(MatchState state, Node node, int textPos)
     {
-        if (node.Encoding != CaseEncoding.Ascii && AtContinuationEdge(state, textPos))
+        if (node.Encoding == CaseEncoding.Ascii)
+        {
+            return MatchStatus.Success;
+        }
+
+        if (AtContinuationEdge(state, textPos))
         {
             return GraphemeBoundaryAtEdge(state, textPos);
         }
 
-        return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+        if (
+            state.PartialSide == MatchState.PartialLeft
+            && textPos < state.TextEnd
+            && ReversedGraphemeBoundaryReadsTheTextToCome(state, textPos)
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtGraphemeBoundary(state, textPos));
     }
 
     /// <summary>
@@ -2587,6 +3338,131 @@ internal static class Matcher
         }
 
         return UndeterminedRead(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): whether a grapheme boundary inside the held text of
+    /// a reversed partial call's second pass depends on the text to come on the left.
+    /// </summary>
+    /// <remarks>
+    /// GB3 to GB9b read only the two characters beside the position, which the held text holds.
+    /// GB9c, GB11 and GB12/GB13 look further left, through a run of Extend and Linker characters to
+    /// a Consonant, of Extend characters to an Extended_Pictographic, or of regional indicators to
+    /// count them; a run that reaches the edge goes on in the text to come, which can end it in the
+    /// way that keeps the cluster together (a Consonant, with a Linker if the run had none; an
+    /// Extended_Pictographic; one regional indicator more). Each such rule therefore holds for some
+    /// continuation, and the boundary is undetermined unless a rule the held text does decide
+    /// holds first or later on the same path, since every rule that holds answers "no break" and
+    /// only GB999 answers a break. Forward, every rule looks left into the held text and right only
+    /// at the neighbour, so only the edge itself reads the text to come
+    /// (<see cref="GraphemeBoundaryAtEdge"/>).
+    /// </remarks>
+    /// <param name="state">The match state, reversed, in a partial call's second pass.</param>
+    /// <param name="textPos">A position strictly inside the held text.</param>
+    /// <returns><see langword="true"/> if some continuation keeps the cluster together and the held text breaks it.</returns>
+    private static bool ReversedGraphemeBoundaryReadsTheTextToCome(MatchState state, int textPos)
+    {
+        int leftPos = state.PrevPos(textPos);
+        uint leftChar = state.CharAt(leftPos);
+        uint rightChar = state.CharAt(textPos);
+        if (
+            GraphemeBoundaryNear(
+                UnicodeTables.GetGraphemeClusterBreak(leftChar),
+                UnicodeTables.GetGraphemeClusterBreak(rightChar)
+            ) != _boundaryNotDecided
+        )
+        {
+            return false;
+        }
+
+        bool open = false;
+
+        // GB9c
+        if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        {
+            bool hasLinker = false;
+            int pos = leftPos;
+            while (true)
+            {
+                if (pos < state.TextStart)
+                {
+                    open = true;
+                    break;
+                }
+
+                uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
+                if (prop == UnicodeTables.IncbLinker)
+                {
+                    hasLinker = true;
+                }
+                else if (prop == UnicodeTables.IncbConsonant)
+                {
+                    if (hasLinker)
+                    {
+                        return false;
+                    }
+
+                    break;
+                }
+                else if (prop != UnicodeTables.IncbExtend)
+                {
+                    break;
+                }
+
+                pos = state.PrevPos(pos);
+            }
+        }
+
+        // GB11
+        if (
+            UnicodeTables.GetGraphemeClusterBreak(leftChar) == UnicodeTables.GbreakZwj
+            && UnicodeTables.GetExtendedPictographic(rightChar) != 0
+        )
+        {
+            int pos = state.PrevPos(leftPos);
+            while (
+                pos >= state.TextStart
+                && UnicodeTables.GetGraphemeClusterBreak(state.CharAt(pos)) == UnicodeTables.GbreakExtend
+            )
+            {
+                pos = state.PrevPos(pos);
+            }
+
+            if (pos < state.TextStart)
+            {
+                open = true;
+            }
+            else if (UnicodeTables.GetExtendedPictographic(state.CharAt(pos)) != 0)
+            {
+                return false;
+            }
+        }
+
+        // GB12 and GB13
+        if (UnicodeTables.GetGraphemeClusterBreak(rightChar) == UnicodeTables.GbreakRegionalindicator)
+        {
+            long count = 0;
+            int pos = leftPos;
+            while (
+                pos >= state.TextStart
+                && UnicodeTables.GetGraphemeClusterBreak(state.CharAt(pos)) == UnicodeTables.GbreakRegionalindicator
+            )
+            {
+                ++count;
+                pos = state.PrevPos(pos);
+            }
+
+            if (pos < state.TextStart)
+            {
+                open = true;
+            }
+            else if (count % 2 == 1)
+            {
+                return false;
+            }
+        }
+
+        return open;
     }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
@@ -2880,8 +3756,8 @@ internal static class Matcher
     /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
     /// the matcher's own arm pushes the touch mark, and the prefilter and
     /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
-    /// <c>(?w)</c> tests keep answering against the held text until build chunk 10; the grapheme
-    /// test is decided at the edge itself since chunk 4 (<see cref="GraphemeBoundaryAtEdge"/>).
+    /// <c>(?w)</c> tests read a window that can reach the text to come from inside the held text
+    /// (<see cref="DefaultWordTestInAPartialCall"/>), and so does a reversed grapheme test.
     /// It stays one method, as before D11: a wrapper around the switch added a call to every
     /// zero-width test and cost a call without partial about 3% on a multiline <c>$</c> scan
     /// (measured 2026-09-29).
