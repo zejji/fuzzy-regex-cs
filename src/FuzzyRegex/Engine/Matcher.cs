@@ -4879,7 +4879,7 @@ internal static class Matcher
             [.. state.FuzzyCounts],
             (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0 ? [.. state.FuzzyChanges] : []
         );
-        if (state.LookaroundSuccesses.Exists(success.SameContinuation))
+        if (state.HasSameContinuation(success))
         {
             state.NotePartialEvent(PartialEvent.Dedup);
             if (!blocked)
@@ -4906,7 +4906,7 @@ internal static class Matcher
         }
 
         TaintTheFrame(state, frame);
-        state.LookaroundSuccesses.Add(success);
+        state.AddLookaroundSuccess(success);
         _ = state.Pstack.DropSize();
 
         // Amendment 2: the continuation starts from the saved stack a normal end leaves (S0, the

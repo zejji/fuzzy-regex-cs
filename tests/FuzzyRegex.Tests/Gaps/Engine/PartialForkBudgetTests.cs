@@ -143,4 +143,35 @@ public sealed class PartialForkBudgetTests
         regex.MatchAtStart("abb", partial: true).PartialMatch.Should().BeTrue();
         regex.MatchAtStart("abb").Success.Should().BeFalse();
     }
+
+    /// <summary>
+    /// Row X1's cost: every iteration's lookahead ends blocked and leaves a dedup entry for its
+    /// frame, so up to n entries are live at once, and the dedup scanned all of them at every
+    /// look-up and every drop. The call ran in time quadratic in n up to the budget (2.5 s at
+    /// n = 1000, Release, 2026-10-03; a profile put 72% of it in those scans). Kept in frame order,
+    /// a look-up reads only its own frame's entries and a drop only the entries it drops. Debug
+    /// builds count the entries examined; Release counts none.
+    /// </summary>
+    [Test]
+    public void The_dedup_examines_a_bounded_number_of_entries_per_fork()
+    {
+        const int n = 400;
+        var regex = new FuzzyRegex(@"(?:(?=(.*)z|())a)*b\1\2");
+        string subject = new string('a', n) + "c";
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: false);
+
+        state.DedupEntriesExamined.Should().BeLessThanOrEqualTo(8L * 256 * (n + 1));
+    }
 }

@@ -187,3 +187,73 @@ Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
   Reviewer's 5,520-row fuzzy-lookaround grid (Debug, merged head without and with the fix): 62 rows
   onto the judge, 0 away, judge unchanged; mismatches 355 -> 293. Asserts: the same 3 rows both
   times, `(?<=(?:\X\X){e<=1})` over '' (step 3a), none new.
+- **Step 3a, `(?<=(?:\X\X){e<=1})` over ''**: root cause `GraphemeBoundaryAtEdge` (Matcher.cs, the
+  `forward ? textPos > TextStart : textPos < TextEnd` assert): it assumed `\X` tests its boundary
+  only after taking a character, but a fuzzy deletion of that character leaves the boundary where
+  the `\X` started, so over an empty text the known side is empty. Release read the character
+  before the text (IndexOutOfRangeException, a crash), Debug asserted. With the known side empty
+  the edge is also the start of the text forward (its end reversed) and every continuation is
+  non-empty, so it is a break (GB1, GB2): decided, `DecidedReadDiffering`, Success; the first
+  pass, over an empty text, answers no boundary, so A4 does not apply there. Witness:
+  `PartialEdgeReadTests.A_grapheme_boundary_at_the_edge_of_an_empty_text_is_a_break`, 7 rows, 6 red
+  before (the asserts), all equal to both judges after. Its two anchored `...b` rows (P(0, 0),
+  judge None) are 3d's cause and sit in 3d's witness.
+- **Step 3b, `(?fi)(?:[ab]+\B){d<=1}` fullmatch 'ba' P(0, 2)**: re-judged, both judges None
+  (upstream None; upstream P(0, 2) to the exact `(?fi)[ab]+\B`). Class: limit C2, known defect D19
+  (the register's own witness `(?:a\B)+` fullmatch 'a' is the shape): the greedy `[ab]+` runs out
+  at the edge outside any body and the rest is presumed; no partial event fires. Not a deliberate
+  divergence: the pin stays at P(0, 2) (so the ratchet sees it move) with its comment rewritten
+  as a C2 phantom that moves to None when D19 decides the rest.
+  **For the register (owner):** D19 gains this witness; nothing else.
+- **Step 3d, the lead `(?=b)(*FAIL)` over ''**: root cause is the first-set check upstream's
+  compiler puts in front of a pattern whose start is not simple (`_check_firstset`,
+  `_regex_core.py`:380-409; port `PatternCompiler.cs`:412-430), a zero-width CHARACTER/SET node
+  (step 0). At the edge it ran out of text before the lookaround's frame was pushed, so the
+  attempt answered the partial at once and chunk 8's run-out rule never saw the body. In D11's
+  design (C-class, the same shape as D69 and F1: a run-out route around `RunOutInALookaroundBody`),
+  so fixed: a zero-width character test at the edge in the second pass lets the path through to
+  the item that reads the same character (`ZeroWidthTestDefersAtTheEdge`, both the forward and the
+  reversed character arms; new event `ZeroWidthTestDeferred`; marks the attempt touched). Branch
+  prechecks (`_add_precheck`) are the same kind of node and take the same path. Witness:
+  `PartialLookaroundRuleTests.A_first_set_check_at_the_edge_defers_to_the_lookaround_it_guards`,
+  10 rows plus 2 controls (`(?=b)(*FAIL)` match/search '' and search 'c', `(?=[bc])(*FAIL)` 'a',
+  `(?<=x)b` match/fullmatch '', two reversed rows, `(?<=(?:\X\X){e<=1})b` match/fullmatch '').
+- **Step 4, X1 and the lookaround memo: the memo is not built; X1's quadratic cost was the dedup's
+  list, now fixed.** Before building, X1 at n = 1000 was profiled (dotnet-trace, Release,
+  tiering off, the merged head plus steps 1-3): `MatchState.DropLookaroundSuccessesFrom` 36%
+  exclusive and the dedup's `List.Exists` (`FindIndex`) 29%, against 8% for all of
+  `BasicMatchCore` and 0.8% for `MatchesMany`, the `.*` scan. The review's cause ("each fork
+  re-scans `.*`") is refuted: every iteration's blocked lookahead leaves a dedup entry for its
+  frame, so up to n entries are live, and every look-up and every drop scanned all of them. The
+  fix keeps `LookaroundSuccesses` in frame order (`MatchState.AddLookaroundSuccess`, an insertion
+  from the end for the one out-of-order case, a nested frame recorded before its outer one), so a
+  look-up reads only the entries at or above its frame (`HasSameContinuation`) and a drop only the
+  run it drops. Witness: `PartialForkBudgetTests.The_dedup_examines_a_bounded_number_of_entries_per_fork`
+  (Debug counter `DedupEntriesExamined`, X1 at n = 400, bound 8 * 256 * (n + 1) = 821,248):
+  205,042 entries examined for 102,913 forks with the fix, 160,662,327 without (probe, Debug).
+  X1 after the fix (Release, `DOTNET_TieredCompilation=0`, median of 3): n = 250 89 ms, 500 181 ms,
+  1000 374 ms, 2000 745 ms (before: 227, 717, 2,546, 10,250-16,429). Linear: about 1.45 us per
+  fork, and the budget allows 256 (n + 1) forks.
+  **Why the memo is not built:** after the fix, the profile of X1 is ordinary engine work
+  (`BasicMatchCore` 34%, `Memmove` 21% from the stack moves of blocked ends and captures,
+  `ByteStack` pushes and pops); the body's own exploration (the `.*` and its backtracking) is a
+  few percent. A memo removes body work only, so it cannot bring X1 near the 100 ms target: the
+  fork count is fixed by the budget (X1 forks 256 (n + 1) times with or without it) and the cost
+  per fork outside the body is about 1.4 us, so even a free memo leaves X1 at about 350 ms at
+  n = 1000. Building it would add the largest mechanism of the design (replay of a body's
+  successes with captures, counts and the blocked flag, frame and mark emulation) for no measured
+  gain on the row that motivated it; S4 needs nothing (below). This departs from the brief ("build
+  it"), on the measurement: the brief's premise was the review's rescan cause, which the profile refutes.
+  **Options for the target (owner/design step):** (a) accept X1 at ~0.37 ms per character, linear,
+  as the C5 phantom row it is (its answer is the budget's P(0, n + 1) either way); (b) lower the
+  fork-budget constant (64 would put X1 near 95 ms at n = 1000), at the price of turning some
+  legitimate rows over the new budget into C5 phantoms, to be measured on the grids first; (c) cut
+  the per-fork engine cost (the blocked end's stack move and the capture copies) in the
+  performance phase. Recommendation: (a) now, with (c) in the performance phase; (b) only with a
+  grid showing no row moves.
+  S4 (`a*(?=.*z)b` search 'a' * n + 'c'), before and after (Release, median of 3): n = 1000
+  3.07 / 2.81 ms, n = 3000 24.6 / 23.5 ms, answer P(n + 1, n + 1) both: unchanged.
+  A11-A13: A12 (the dedup entries go with their frames) holds and is now asserted in O(1) per drop
+  plus an order assert per insertion; A11 (no guard recorded while a taint lives) belongs to the
+  lookaround guard rule, which chunk 6 did not build (its gate failed), and A13 is the memo's own
+  assert, so neither exists without the memo.

@@ -443,6 +443,13 @@ internal sealed class MatchState : IDisposable
 #endif
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11, Debug only: how many dedup entries (<see cref="LookaroundSuccesses"/>)
+    /// the dedup's look-ups and drops have examined in this call, so that a test can show the work
+    /// grows with the entries made, not with their product (row X1).
+    /// </summary>
+    internal long DedupEntriesExamined;
+
+    /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
     /// call was made. In a pattern where a conditional or backreference reads a group, two open
@@ -1204,6 +1211,7 @@ internal sealed class MatchState : IDisposable
         HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
+        DedupEntriesExamined = 0;
 #endif
         Sstack.Reset();
         SetBstackCount(0);
@@ -1629,31 +1637,84 @@ internal sealed class MatchState : IDisposable
         Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: records a continued success for the dedup, keeping
+    /// <see cref="LookaroundSuccesses"/> in frame order.
+    /// </summary>
+    /// <remarks>
+    /// Entries are nearly always made in frame order, because a frame is newer than every frame
+    /// below it; the exception is a blocked outer lookaround that records its success after a
+    /// nested one's, whose frame is higher (review of chunk 7, round 2), and that one is inserted
+    /// below the nested entries. The order is what keeps the dedup linear: row X1 leaves one entry
+    /// per iteration live, and scanning all of them at every look-up and drop made its second pass
+    /// quadratic (2.5 s at n = 1000, 2026-10-03).
+    /// </remarks>
+    /// <param name="success">The success.</param>
+    internal void AddLookaroundSuccess(LookaroundSuccess success)
+    {
+        int at = LookaroundSuccesses.Count;
+        while (at > 0 && LookaroundSuccesses[at - 1].Frame > success.Frame)
+        {
+#if DEBUG
+            DedupEntriesExamined++;
+#endif
+            at--;
+        }
+
+        LookaroundSuccesses.Insert(at, success);
+        Debug.Assert(
+            (at == 0 || LookaroundSuccesses[at - 1].Frame <= success.Frame)
+                && (at == LookaroundSuccesses.Count - 1 || LookaroundSuccesses[at + 1].Frame > success.Frame),
+            "D11 A12: the dedup entries are in frame order"
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation was already continued
+    /// from the same frame (the dedup). Reads only the entries at or above the frame, from the end.
+    /// </summary>
+    /// <param name="success">The success.</param>
+    /// <returns><see langword="true"/> if an entry of the same frame leads where it does.</returns>
+    internal bool HasSameContinuation(LookaroundSuccess success)
+    {
+        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
+        {
+#if DEBUG
+            DedupEntriesExamined++;
+#endif
+            if (success.SameContinuation(LookaroundSuccesses[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
     /// <remarks>
-    /// The list is not sorted by frame: a blocked outer lookaround records its success after a
-    /// nested one's, whose frame is higher, so every entry is tested rather than only a run at the
-    /// end (review of chunk 7, round 2). The list is short: entries are made only by a blocked
-    /// positive end in a partial call's second pass (<c>Matcher.EndALookaroundInTheSecondPass</c>),
-    /// each for a frame still on the backtracking stack, and the attempt's FAILURE arm and
-    /// <see cref="InitMatch"/> clear it. Every caller asks <c>LookaroundSuccesses.Count != 0</c>
-    /// first, so a call without partial pays that test alone.
+    /// The entries are in frame order (<see cref="AddLookaroundSuccess"/>), so the ones dropped are
+    /// a run at the end. They are made only by a blocked positive end in a partial call's second
+    /// pass (<c>Matcher.EndALookaroundInTheSecondPass</c>), each for a frame still on the
+    /// backtracking stack, and the attempt's FAILURE arm and <see cref="InitMatch"/> clear them.
+    /// Every caller asks <c>LookaroundSuccesses.Count != 0</c> first, so a call without partial
+    /// pays that test alone.
     /// </remarks>
     /// <param name="position">The lowest frame position dropped.</param>
     internal void DropLookaroundSuccessesFrom(int position)
     {
-        int keep = 0;
-        for (int i = 0; i < LookaroundSuccesses.Count; i++)
+        int keep = LookaroundSuccesses.Count;
+        while (keep > 0 && LookaroundSuccesses[keep - 1].Frame >= position)
         {
-            if (LookaroundSuccesses[i].Frame < position)
-            {
-                LookaroundSuccesses[keep++] = LookaroundSuccesses[i];
-            }
+#if DEBUG
+            DedupEntriesExamined++;
+#endif
+            keep--;
         }
 
         LookaroundSuccesses.RemoveRange(keep, LookaroundSuccesses.Count - keep);
         Debug.Assert(
-            !LookaroundSuccesses.Exists(s => s.Frame >= position),
+            keep == 0 || LookaroundSuccesses[keep - 1].Frame < position,
             "D11 A12: no dedup entry outlives its frame"
         );
     }
