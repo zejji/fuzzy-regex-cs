@@ -257,3 +257,11 @@ Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
   plus an order assert per insertion; A11 (no guard recorded while a taint lives) belongs to the
   lookaround guard rule, which chunk 6 did not build (its gate failed), and A13 is the memo's own
   assert, so neither exists without the memo.
+- **D70 (orchestrator's addition)**: pinned on the branch as
+  `PartialEdgeReadTests.A_search_with_no_first_set_still_tries_a_start_in_the_text_to_come` (5 search
+  rows, each P(edge, edge): `(?(DEFINE)(?P<g1>b))(?<=ab)(?1)` 'b' P(1,1), `...(?&g1)` 'x' P(1,1),
+  `(?(DEFINE)(?P<g1>b))\b(?1)` '' P(0,0), `(?<=ab)(?:b|$)` 'b' P(1,1), `(?<=ab)\Z` 'b' P(1,1)).
+  Branch = brute judge on all five; main 8de483d7 None on all five (probe, Release), so each is red
+  there. **For the ledger (upstream divergence):** regex 2026.9.10 answers None to all five
+  partial searches, where the judge's witnesses ('abb', 'b', 'ab' appended) complete each from a
+  start inside the text to come.

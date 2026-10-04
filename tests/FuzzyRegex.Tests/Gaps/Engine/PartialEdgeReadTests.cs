@@ -167,6 +167,36 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// D70: the same rule for a pattern with no first set. A call (or an alternation ending in
+    /// <c>$</c>, or a bare <c>\Z</c>) gives the search no first set, and before D11 the search gave
+    /// up at "Can we advance?" (main <c>Matcher.cs</c>:14417-14420) before considering a start
+    /// inside the text to come. Every row completes only from such a start: 'b' + 'abb' matches the
+    /// first two rows at 3, '' + 'b' the third at 0, 'b' + 'ab' the last two at 3.
+    /// </summary>
+    /// <remarks>
+    /// Expected answers: the brute-force judge (2026-10-04). Main at 8de483d7 answers None to every
+    /// row (probed), so each is red there.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to every row.
+    [Test]
+    [Arguments(@"(?(DEFINE)(?P<g1>b))(?<=ab)(?1)", "b", 1)]
+    [Arguments(@"(?(DEFINE)(?P<g1>b))(?<=ab)(?&g1)", "x", 1)]
+    [Arguments(@"(?(DEFINE)(?P<g1>b))\b(?1)", "", 0)]
+    [Arguments(@"(?<=ab)(?:b|$)", "b", 1)]
+    [Arguments(@"(?<=ab)\Z", "b", 1)]
+    public void A_search_with_no_first_set_still_tries_a_start_in_the_text_to_come(
+        string pattern,
+        string text,
+        int edge
+    )
+    {
+        Match m = Partial("search", pattern, text);
+
+        m.Success.Should().BeTrue();
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, edge, 0));
+    }
+
+    /// <summary>
     /// A pattern that no text can match reports no partial on any door, however its search ends.
     /// </summary>
     /// <remarks>
