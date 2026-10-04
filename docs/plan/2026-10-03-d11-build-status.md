@@ -321,3 +321,14 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   red with chunk 4's read planted back to the held text's answer). **For the register:** D19 gains
   B1's rows; D11's row notes that the `\X` read and RC5 make C2 reachable through a cluster and a
   trailing insertion (236 grid rows), shared by upstream for greedy repeats, not for these.
+- **Step 3, B2** (match `\X(*FAIL)|c` over 'a' P(0, 1), fullmatch `(?:\X){d<=1}\b` over '\r'
+  P(0, 1); upstream and both judges None). Same mechanism as B1 and in the same class: the boundary
+  closing `\X` is undetermined after 'a' (an Extend joins, GB9; a Control breaks, GB5) and after
+  '\r' (an LF joins, GB3; anything else breaks, GB4); its failing side extends the cluster into the
+  text to come and runs out, and the rest (`(*FAIL)`, or `\b` with the fullmatch end) is presumed:
+  limit C2, D19. It predates D11 on main through S57d's escalation (main 27b9de33 answers P(0, 1)
+  to all three anchored rows), and the branch reaches it through chunk 4's read. Chunk 10's exact
+  grapheme M1 does not move it: forward, the edge test was already exact (only GB4/GB5 decide it, and
+  only after a Control or LF), and both rows' boundaries are genuinely undetermined. **Not in D11's
+  scope; no change.** The rows are in B1's red test (`OpenDefectTests`). **For the register:** D19
+  gains these rows; D19 already covers the class, no separate row.
