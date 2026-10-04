@@ -7,7 +7,8 @@ Results go to .scratch/matrix/results/NAME/ (git-ignored). The rows are cut into
 runs these stages, each writing its own file and a `.done` marker, so a stopped run resumes at the
 first unfinished stage (a half-written port or Python stage resumes at its next row):
 
-  port   tools/matrix/port-runner.cs on a DEBUG build (asserts throw): C2, C3, C4 (port judge), C5,
+  port   tools/matrix/port-runner.cs on a DEBUG build (asserts throw): C2, C3, C4 (port judge, which
+         tries continuations up to 8 characters for a phantom and reports the length it reached), C5,
          and the base answers C1x and C6 are compared with;
   c1     tools/record-oracle.py --rows, then the oracle consumer's The_wave_agrees_with_upstream
          (Release), for every row the recorder can ask;
@@ -330,6 +331,10 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C4"] = ("n/a", "", None, None)
     elif not answered(base):
         out["C4"] = ("n/a", "base unanswered", base, pj)
+    elif pj is not None and not re.match(r"[FP]\(|None$", pj):
+        # The judge ran out of budget or crashed (ERR RowBudget, ERR Timeout, ASSERT, EXC): no
+        # verdict, so the row cannot pass (review R1, 2026-10-04).
+        out["C4"] = ("n/a", "judge unanswered", base, pj)
     else:
         ans = verdict(base)
         kind = "ok"
@@ -349,12 +354,23 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
             # partial answer has it (measured 2026-09-30: `(?:ba)*+.\K\w.` match 'baab' partial is
             # P(3,4) upstream and here). A judge convention, not a disagreement (matrix triage).
             kind = "ok"
+        # How long a continuation the port judge tried: 3 characters, or up to 8 for a row the
+        # port answers with a match and nothing shorter completes (port-runner.cs, `judgeBound`).
+        # A phantom is "no completion up to N characters", a lower bound, so it names its N.
+        bound = port.get("judgeBound", "unknown")
+        judges = f"port judge {pj} (continuations up to {bound}); upstream judge {uj}"
+        if pj and pj.startswith("P") and isinstance(bound, int) and bound > 3:
+            # A deep-phase P is the least start for the shortest completing length, not for every
+            # length (port-runner.cs): a bounded verdict.
+            judges = judges.replace("(continuations", "(deep phase, bounded: least start for the shortest completing length; continuations", 1)
         if kind == "ok":
-            out["C4"] = ("pass", "", ans, f"port judge {pj}; upstream judge {uj}")
+            out["C4"] = ("pass", "", ans, judges)
         elif kind == "phantom":
-            out["C4"] = ("phantom", kind, ans, f"port judge {pj}; upstream judge {uj}")
+            # The kind stays "phantom"; the bound is in the detail field, so the witness list does
+            # not split by bound.
+            out["C4"] = ("phantom", "phantom", ans, judges)
         else:
-            out["C4"] = ("fail", kind, ans, f"port judge {pj}; upstream judge {uj}")
+            out["C4"] = ("fail", kind, ans, judges)
     # C5: memo off and memo on from the first call answer as the default does.
     off, on = port.get("off"), port.get("on")
     if not all(answered(a) for a in (base, off, on)):
@@ -444,6 +460,7 @@ def judge(out: Path, constructs: dict) -> None:
     witness = {}
     controls = []
     c7_kinds = collections.Counter()
+    phantom_kinds = collections.Counter()
     c7_file = open(out / "c7-failures.jsonl", "w", encoding="utf-8", newline="\n")
     c7_others = open(out / "c7-others.jsonl", "w", encoding="utf-8", newline="\n")
     with c7_file, c7_others, open(out / "failures.jsonl", "w", encoding="utf-8", newline="\n") as f:
@@ -461,6 +478,8 @@ def judge(out: Path, constructs: dict) -> None:
             covered = [c for c in cells if gen.covers(tags, c, fam)]
             for check, (status, kind, mine, other) in verdicts.items():
                 totals[check][status] += 1
+                if status == "phantom":
+                    phantom_kinds[re.search(r"continuations up to (\w+)", other).group(1)] += 1
                 for c in covered:
                     table[(gen.cell_name(c), check)][status] += 1
                 if check == "C7":
@@ -503,6 +522,10 @@ def judge(out: Path, constructs: dict) -> None:
         failing_cells = sum(1 for c in cells if table[(gen.cell_name(c), check)]["fail"])
         applicable = sum(t.values()) - t["n/a"] - sum(t[s] for s in OTHER)
         lines_.append(f"| {check} | {applicable} | {t['n/a']} | {t['fail']} | {t['expected']} | {t['phantom']} | {failing_cells} |")
+    if phantom_kinds:
+        lines_ += ["", "C4 phantoms by the longest continuation checked (each a lower bound): "
+                   + ", ".join(f"{n} up to {k} characters"
+                               for k, n in sorted(phantom_kinds.items())) + "."]
     lines_ += ["", "Smallest failing row per check and kind (raw, not triaged):", ""]
     for (check, kind), (_, row, mine, other) in sorted(witness.items()):
         q = {k: row[k] for k in ORACLE_KEYS if k in row and k != "namedLists"}

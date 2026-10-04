@@ -119,6 +119,30 @@ public sealed class FailedCallMemoTests
     }
 
     [Test]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    public void The_matrix_control_that_drops_the_position_from_the_key_changes_the_answer(
+        bool omitPosition,
+        bool matches
+    )
+    {
+        // Check C5 of the complete matrix compares answers with the memo off and on, so it can see
+        // a broken call memo only if a broken key changes an answer. PatternObject.
+        // CallMemoKeyOmitsPosition breaks it on purpose, and the witness of the position test above
+        // then finds no match, where with the key whole it gives upstream's (0, 2).
+        FuzzyRegex regex = WithMemo("(.)((?R)?((?1)))", eager: true);
+        regex.PatternObject.CallMemoKeyOmitsPosition = omitPosition;
+
+        Match m = regex.Match("aba");
+
+        m.Success.Should().Be(matches);
+        if (matches)
+        {
+            (m.Index, m.Length).Should().Be((0, 2));
+        }
+    }
+
+    [Test]
     public void A_partial_search_does_not_inherit_the_failed_calls_of_the_full_pass_before_it()
     {
         // A partial search first tries for a whole match, then searches again allowing one that

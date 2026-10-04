@@ -18,15 +18,21 @@
 // failed-call memo and the repeat failure memo forced off; the failed-call memo on from the first
 // call), `wo` (check C2: each written-out form, by depth), and `judge` (check C4, partial rows only:
 // the port's own non-partial answers over every continuation of up to 3 characters, the approach of
-// d11-port-judge-grid.cs on maint/d11-partial-boundary).
+// d11-port-judge-grid.cs on maint/d11-partial-boundary) with `judgeBound`, the longest continuation
+// it checked. Where the port answers a match but no continuation of up to 3 characters completes one
+// (a phantom), the judge goes on to longer continuations, one length at a time, until one completes,
+// it reaches JudgeMaxLength or JudgeDeepSeconds run out; `judgeBound` is the last length it checked
+// in full.
 //
 // --ablate switches one known bug back on, through the same internal switches the oracle's
 // ablations use, so the validation controls can prove each check fires: d37 (upstream's
 // whole-pattern call, WITHOUT the exemption from the closing assert), callfeatures (D40's
 // upstream call features, on the base answer only), exactdeletion (ledger entry 42 off), and
 // unsafememo (the failed-call memo forced on where the compiler turned it off, on `on` only),
+// callmemokey (the failed-call memo's key without the position, on `on` only),
 // d52 (a conditional's test compiled with the section's fuzziness, ledger entry 64) and d54 (a
 // failed negative test's captures dropped, ledger entry 65), each on every variant but `wo`.
+// d37 and callfeatures also turn D52 and D54 on, as the oracle's named ablations do (OracleComparer.cs `namedAblation`).
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -58,7 +64,8 @@ Type po = patternObjectProperty.PropertyType;
 FieldInfo F(string name) => po.GetField(name, Any) ?? throw new MissingFieldException(po.Name, name);
 FieldInfo skipCallMemo = F("SkipCallMemo"),
     eagerCallMemo = F("EagerCallMemo"),
-    useCallMemo = F("UseCallMemo");
+    useCallMemo = F("UseCallMemo"),
+    callMemoKeyOmitsPosition = F("CallMemoKeyOmitsPosition");
 FieldInfo repeatInfoList = F("RepeatInfoList");
 FieldInfo skipExactDeletion = F("SkipExactDeletionRetry"),
     upstreamEmpty = F("UpstreamEmptyIterations");
@@ -106,10 +113,21 @@ try
 }
 catch (MatrixRunner.AssertFailedException) { }
 
-var timeout = TimeSpan.FromSeconds(2);
+// MATRIX_TIMEOUT_MS shrinks the per-match timeout, to force the deep judge's out-of-budget path.
+var timeout = TimeSpan.FromMilliseconds(
+    int.TryParse(Environment.GetEnvironmentVariable("MATRIX_TIMEOUT_MS"), out int timeoutMs) ? timeoutMs : 2000
+);
 const long StepCap = 20_000_000;
 const double RowBudgetSeconds = 20;
 const string Alphabet = "ab1א :\"\n";
+
+// Check C4's deeper search for a phantom's completion: lengths 4 to 8, at most 20 s a row. The
+// 2026-09-30 matrix has 114 phantoms, so the deeper search adds at most 38 minutes.
+const int JudgeShortLength = 3,
+    JudgeMaxLength = 8;
+const double JudgeDeepSeconds = 20;
+var deepClock = new Stopwatch();
+int judgeBound = 0;
 var json = new JsonSerializerOptions
 {
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -182,7 +200,11 @@ foreach (string line in File.ReadLines(input))
         result["pinned"] = forms;
     }
     if (partial && op != "finditer" && pos is null && endpos is null)
-        result["judge"] = Spent() ? "ERR RowBudget" : Judge(pattern, subject, op);
+    {
+        judgeBound = 0;
+        result["judge"] = Spent() ? "ERR RowBudget" : Judge(pattern, subject, op, (string)result["base"]!);
+        result["judgeBound"] = judgeBound;
+    }
     result["ms"] = (int)clock.ElapsedMilliseconds;
     writer.WriteLine(JsonSerializer.Serialize(result, json));
 }
@@ -204,7 +226,13 @@ FuzzyRegex Compile(string pattern, string variant)
                 false,
                 d37,
                 callFeatures,
-                ablate == "d52" && variant != "wo", // upstreamFuzzyConditionTest (ledger entry 64)
+                // upstreamFuzzyConditionTest (ledger entry 64): its own ablation, and every named
+                // ablation the runner mirrors (OracleComparer's `namedAblation`, which also covers
+                // the pinned variants this runner leaves as they were).
+                (ablate == "d52" && variant != "wo")
+                    || d37
+                    || callFeatures,
+                callFeatures, // upstreamCallCopies: OracleComparer.RunWithTheUpstreamCallFeatures sets both
             ]
         )!;
     object pobj = patternObjectProperty.GetValue(regex)!;
@@ -217,7 +245,9 @@ FuzzyRegex Compile(string pattern, string variant)
     }
     if (callFeatures)
         minWidth.SetValue(pobj, upstreamMinWidth.GetValue(pobj));
-    if (ablate == "d54" && variant != "wo")
+    // Entry 65, as `upstreamFuzzyConditionTest` above: its own ablation, d37 and callFeatures
+    // (OracleComparer.cs: DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation).
+    if ((ablate == "d54" && variant != "wo") || d37 || callFeatures)
         dropNegativeTestCaptures.SetValue(pobj, true);
     if (Array.IndexOf(pinned, variant) >= 0)
     {
@@ -255,6 +285,9 @@ FuzzyRegex Compile(string pattern, string variant)
         eagerCallMemo.SetValue(pobj, true);
         if (ablate == "unsafememo")
             useCallMemo.SetValue(pobj, true);
+        // The failed-call memo's key without the position (C5's firing control for that memo).
+        if (ablate == "callmemokey")
+            callMemoKeyOmitsPosition.SetValue(pobj, true);
         // Every repeat's failure memo on, including where Optimiser.KeepFailureMemosSound withdrew
         // it (backreferences, calls, fuzzy, verbs, POSIX).
         if (ablate == "unsaferepeatmemo")
@@ -306,10 +339,13 @@ string Answer(string pattern, string subject, string op, bool partial, int? pos,
     }
 }
 
-string Judge(string pattern, string t, string op)
+string Judge(string pattern, string t, string op, string baseAnswer)
 {
     // d11-port-judge-grid.cs's judge: the port's non-partial answer, or the best partial any
-    // continuation of up to 3 characters completes, in upstream's partial conventions.
+    // continuation of up to 3 characters completes, in upstream's partial conventions. Where the port
+    // answered a match and none of those completes one, longer continuations are tried (see the
+    // header); judgeBound records how far the search went.
+    bool deepen = baseAnswer.StartsWith('(');
     try
     {
         FuzzyRegex regex = Compile(pattern, "base");
@@ -331,25 +367,64 @@ string Judge(string pattern, string t, string op)
             .Distinct()
             .ToArray();
         if (op == "search" && (regex.Options & (FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.EnhanceMatch)) != 0)
-            return LeftmostLive(regex, t, reverse, alpha);
+            return LeftmostLive(regex, t, reverse, alpha, deepen);
         int best = op == "search" ? (reverse ? -1 : int.MaxValue) : -1;
         bool found = false;
-        foreach (string w in Words(alpha))
+        for (int length = 1; length <= JudgeMaxLength; length++)
         {
-            if (clock.Elapsed.TotalSeconds > RowBudgetSeconds)
-                return "ERR RowBudget";
-            Capped();
-            string text = reverse ? w + t : t + w;
-            Match c = Run(text);
-            if (!c.Success)
-                continue;
-            found = true;
-            if (op != "search")
+            // Up to 3 characters every length is searched, as before; past that only a row whose
+            // port answer is a match and that nothing has completed yet, one length at a time.
+            if (length > JudgeShortLength)
+            {
+                if (found || !deepen)
+                    break;
+                if (length == JudgeShortLength + 1)
+                    deepClock.Restart();
+            }
+            // In a search the deep phase reports the least start for the SHORTEST length that
+            // completes, not the least over all lengths (a longer continuation can start earlier),
+            // and if the budget runs out part-way through that length after a hit, `best` comes from
+            // a partly searched length. A deep-phase P is therefore a bounded verdict (see judgeBound).
+            bool outOfTime = false;
+            foreach (string w in Words(alpha, length))
+            {
+                if (length > JudgeShortLength && deepClock.Elapsed.TotalSeconds > JudgeDeepSeconds)
+                {
+                    outOfTime = true;
+                    break;
+                }
+                if (clock.Elapsed.TotalSeconds > RowBudgetSeconds && length <= JudgeShortLength)
+                    return "ERR RowBudget";
+                Capped();
+                string text = reverse ? w + t : t + w;
+                Match c;
+                try
+                {
+                    c = Run(text);
+                }
+                catch (Exception e) when (length > JudgeShortLength && RanOutOfBudget(e))
+                {
+                    // A timeout or step cap in the deep phase is the budget running out: stop, and
+                    // keep judgeBound at the last length searched in full.
+                    outOfTime = true;
+                    break;
+                }
+                if (!c.Success)
+                    continue;
+                found = true;
+                if (op != "search")
+                    break;
+                best = reverse
+                    ? Math.Max(best, Math.Max(c.Index + c.Length - w.Length, 0))
+                    : Math.Min(best, Math.Min(c.Index, t.Length));
+            }
+            if (outOfTime)
                 break;
-            best = reverse
-                ? Math.Max(best, Math.Max(c.Index + c.Length - w.Length, 0))
-                : Math.Min(best, Math.Min(c.Index, t.Length));
+            judgeBound = length;
+            if (found && op != "search")
+                break;
         }
+
         return !found ? "None"
             : op != "search" ? $"P(0,{t.Length})"
             : reverse ? $"P(0,{best})"
@@ -367,56 +442,107 @@ string Judge(string pattern, string t, string op)
 // matches rather than return the leftmost, so the least start of `search(t + w)` is not the rule.
 // SHORTCUT: reversed, the end is fixed by the slice, which hides a lookahead's view past it; see the
 // Python judge for the ceiling and the upgrade.
-string LeftmostLive(FuzzyRegex regex, string t, bool reverse, char[] alpha)
+// With `deepen`, a row no continuation of up to 3 characters completes is asked again with each
+// longer length in turn, every start for one length before the next, so the start it reports is the
+// least for the shortest length that completes one (a lower bound on the least start overall).
+string LeftmostLive(FuzzyRegex regex, string t, bool reverse, char[] alpha, bool deepen)
 {
-    string[] words = [.. Words(alpha)];
-    if (!reverse)
+    string[] words = [.. Enumerable.Range(1, JudgeShortLength).SelectMany(n => Words(alpha, n))];
+    string? found = Live(words, short_: true);
+    judgeBound = JudgeShortLength;
+    if (found is not null || !deepen)
+        return found ?? "None";
+    deepClock.Restart();
+    for (int length = JudgeShortLength + 1; length <= JudgeMaxLength; length++)
     {
-        for (int s = 0; s <= t.Length; s++)
-            foreach (string w in words)
-            {
-                if (clock.Elapsed.TotalSeconds > RowBudgetSeconds)
-                    return "ERR RowBudget";
-                Capped();
-                string text = t + w;
-                Match m =
-                    s == t.Length
-                        ? regex.Match(text, s, text.Length - s, timeout: timeout)
-                        : regex.MatchAtStart(text, s, text.Length - s, timeout: timeout);
-                if (m.Success)
-                    return $"P({s},{t.Length})";
-            }
-        return "None";
+        found = Live(Words(alpha, length), short_: false);
+        if (found == "")
+            return "None";
+        judgeBound = length;
+        if (found is not null)
+            return found;
     }
-    for (int e = t.Length; e >= 0; e--)
-        foreach (string w in words)
-        {
-            if (clock.Elapsed.TotalSeconds > RowBudgetSeconds)
-                return "ERR RowBudget";
-            Capped();
-            string text = w + t;
-            Match m =
-                e == 0
-                    ? regex.Match(text, 0, w.Length, timeout: timeout)
-                    : regex.MatchAtStart(text, 0, w.Length + e, timeout: timeout);
-            if (m.Success)
-                return $"P(0,{e})";
-        }
     return "None";
+
+    // The verdict, null if no continuation in `ws` completes a match, or "" if the deep budget ran out.
+    string? Live(IEnumerable<string> ws, bool short_)
+    {
+        bool Over() =>
+            short_ ? clock.Elapsed.TotalSeconds > RowBudgetSeconds : deepClock.Elapsed.TotalSeconds > JudgeDeepSeconds;
+        string[] list = [.. ws];
+        if (!reverse)
+        {
+            for (int s = 0; s <= t.Length; s++)
+                foreach (string w in list)
+                {
+                    if (Over())
+                        return short_ ? "ERR RowBudget" : "";
+                    Capped();
+                    string text = t + w;
+                    Match m;
+                    try
+                    {
+                        m =
+                            s == t.Length
+                                ? regex.Match(text, s, text.Length - s, timeout: timeout)
+                                : regex.MatchAtStart(text, s, text.Length - s, timeout: timeout);
+                    }
+                    catch (Exception e) when (!short_ && RanOutOfBudget(e))
+                    {
+                        return "";
+                    }
+                    if (m.Success)
+                        return $"P({s},{t.Length})";
+                }
+            return null;
+        }
+        for (int e = t.Length; e >= 0; e--)
+            foreach (string w in list)
+            {
+                if (Over())
+                    return short_ ? "ERR RowBudget" : "";
+                Capped();
+                string text = w + t;
+                Match m;
+                try
+                {
+                    m =
+                        e == 0
+                            ? regex.Match(text, 0, w.Length, timeout: timeout)
+                            : regex.MatchAtStart(text, 0, w.Length + e, timeout: timeout);
+                }
+                catch (Exception ex) when (!short_ && RanOutOfBudget(ex))
+                {
+                    return "";
+                }
+                if (m.Success)
+                    return $"P(0,{e})";
+            }
+        return null;
+    }
 }
 
-static IEnumerable<string> Words(char[] alpha)
+// Every word of exactly `length` characters over `alpha`, in order.
+static IEnumerable<string> Words(char[] alpha, int length)
 {
-    foreach (char a in alpha)
-        yield return a.ToString();
-    foreach (char a in alpha)
-    foreach (char b in alpha)
-        yield return string.Concat(a, b);
-    foreach (char a in alpha)
-    foreach (char b in alpha)
-    foreach (char c in alpha)
-        yield return string.Concat(a, b, c);
+    var digits = new int[length];
+    var chars = new char[length];
+    while (true)
+    {
+        for (int i = 0; i < length; i++)
+            chars[i] = alpha[digits[i]];
+        yield return new string(chars);
+        int k = length - 1;
+        while (k >= 0 && ++digits[k] == alpha.Length)
+            digits[k--] = 0;
+        if (k < 0)
+            yield break;
+    }
 }
+
+// A per-match timeout or the step cap: in the deep judge, the budget running out (R1, review 2026-10-04).
+static bool RanOutOfBudget(Exception e) =>
+    e is System.Text.RegularExpressions.RegexMatchTimeoutException || e.GetType().Name == "StepLimitReachedException";
 
 void Capped() => stepLimit.SetValue(null, (long)steps.GetValue(null)! + StepCap);
 

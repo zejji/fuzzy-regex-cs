@@ -854,6 +854,10 @@ public sealed class ThreadSafetyTests
             // set them on a pattern compiled for that one purpose.
             "PatternObject.EagerCallMemo",
             "PatternObject.SkipCallMemo",
+            // And CallMemoKeyOmitsPosition, never written by the library: the matrix's C5 control
+            // (tools/matrix/port-runner.cs) and FailedCallMemoTests set it on a pattern compiled
+            // for that one purpose.
+            "PatternObject.CallMemoKeyOmitsPosition",
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
