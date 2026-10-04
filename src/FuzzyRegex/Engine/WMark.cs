@@ -198,4 +198,16 @@ internal enum PartialEvent
     /// before the run-out (the repeat run-out rule).
     /// </summary>
     RunOutKeptAlternatives,
+
+    /// <summary>
+    /// The run-out that answered the partial was a lazy one-character repeat's try past the edge
+    /// (<see cref="LazyRepeatPastTheEdge"/>'s entry): limit C2 by that mechanism.
+    /// </summary>
+    RunOutAnsweredByLazyPastTheEdge,
+
+    /// <summary>
+    /// The run-out that answered the partial was a greedy repeat's body run-out at its end
+    /// (<see cref="GreedyBodyRunOutKept"/>): limit C2 by that mechanism.
+    /// </summary>
+    RunOutAnsweredByGreedyBodyKept,
 }

@@ -512,7 +512,14 @@ alternative it would have kept had it entered that one, then takes the run-out t
 never a `return`. Inside a lookaround body the run-out goes on at the body's end with a touch, and
 a blocked end backtracks into the body, so the kept alternatives are tried and a success of one on
 the held text decides the construct (design 4.2's blocked-end rule, unchanged); outside every body
-the run-out answers the partial as before and the entries go with the attempt.
+the run-out answers the partial as before and the entries go with the attempt. The alternatives
+are kept only where the run-out goes on in a negative body (a negative lookaround or a negative
+condition test, `RunOutIsInANegativeBody`): in a positive body every continuation after a kept
+alternative's success is one the run-out's own continuation already covers (the position goes back
+either way, a capture the body can still set is unknown in a pattern that reads captures, and the
+run-out closes the body's fuzzy section with the errors made so far), so there they only cost
+time (`(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' 3.5 times slower, X2 13 times, with no answer
+changed on any grid but 3 port-grid rows that gained the D38 `Held` precision of a positive test).
 
 F1, item 7 and S1 are this one cause: an arm that answered the partial at once (`return`), or went
 to `runOut` with its other alternatives dropped (END_GREEDY_REPEAT's body since 5b4f52d2,
@@ -582,3 +589,79 @@ n^(depth + 1) for nested lookarounds over repeats; options: (a) accept, as D71 a
 (b) count stack bytes in the fork budget so the call answers the budget's C5 partial instead of
 the stack limit; (c) the performance phase. Recommendation (b) if the owner wants no exception
 from a partial call, else (a).
+
+- **Steps 1-2, witnesses** (Debug, the port's non-partial judge over continuations of up to three
+  characters; red at b811c5ea, green after): `PartialLookaroundRuleTests.A_run_out_at_a_choice_point_keeps_the_other_alternatives`
+  (11 rows: F1 and its empty, `..` and `.*` rests, S1's four, the branch `(?!ab|a)` 'a', END_LAZY's
+  `(?!(?:ab)*?c|ab)` 'ab', the retreat `(?![ab]{0,2}aa)` 'aa'), `A_repeat_test_that_runs_out_in_a_body_goes_on_after_the_lookaround`
+  (11 rows, one or more per item-7 site), `An_atomic_group_around_a_repeat_that_runs_out_keeps_the_lookahead_undetermined`
+  (`(?!(?>(?:ab)*)(?<=^ab))ab` 'ab' P(0, 2), completed by 'abab'; upstream and main None, a refusal).
+  Limit C2, red in `OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body`: F1's
+  possessive and atomic forms (P(0, 2), judge None: the group commits to the run-out's longer path
+  where it exists, and deciding that the rest still holds is D19's) and F1's search (P(2, 2), its
+  value before 5b4f52d2; the attempt from inside the text to come). Plant-outs (Debug, witness
+  rows): the shared keep out, 7 rows red (F1 x 4, `(?!(?:ab)+)ab`, `{1,3}`, search); GREEDY_REPEAT's
+  body `return` back, 4 red; END_LAZY_REPEAT's body `return` back, 6 red; GREEDY_REPEAT_ONE's
+  kept counts out, 2 red (S1's one-character rows); BRANCH's kept entry out, 1 red; the
+  backtracking arm's smaller counts out, 86 of a 5,824-row grid of bounded repeats before a string
+  (`.scratch/d11rr/retreat.jsonl`). The fuzzy retry returns (`if (status < 0) return status;` after
+  `RetryFuzzyMatchItem` and kin): a temporary `Debug.Assert` that no PARTIAL passes them in the
+  second pass never fired over 52,704 rows (the look grid below and 18,144 fuzzy-in-body rows), so
+  they are left as they are, no witness.
+- **Step 3, the grid gap and S2.** New grid `tools/probes/d11-runout-look-grid.py` (34,560 rows:
+  repeats, a branch and fuzzy sections in negative and positive lookaheads whose tail is decided on
+  the held text, `(?<=b)`, `(?<=a)`, `(?<!b)`, `(?<=^ab)`, empty; atomic and possessive forms;
+  six subjects, three doors). Debug, MAXW 2, b811c5ea against the rule: 2,754 onto the judge, 0
+  away, 560 other (every one a search whose phantom start moved later, to P(|t|, |t|), the attempt
+  from inside the text to come), misses 0 both, mismatches 7,335 -> 4,581, 0 asserts. Rule 11, rows
+  with the construct / rows where the alternatives were kept: negative multi-character 5,400 /
+  1,616, one-character or branch 10,800 / 3,169, atomic or possessive 7,020 / 2,649, fuzzy 2,700 /
+  0 (a fuzzy test node is never consulted); positive 8,640 / 0, as the restriction says.
+  **S2 fixed**: the engine records which mechanism produced the run-out that answered
+  (`MatchState.NoteRunOutCause` / `NoteRunOutTaken`, Debug only; events
+  `RunOutAnsweredByLazyPastTheEdge`, `RunOutAnsweredByGreedyBodyKept`), and
+  `tools/probes/d11-classify-runout.py` labels a row C2 only on those. Re-classified, 6d059c83
+  against the rule: lazy grid 410 away / 64 other, repeat 25 / 0 (and 91 onto, was 2), chunk 10
+  4 / 5, full 137 / 42: **every one still C2 by the causal label, 0 unclassified**. F1's `.*` row,
+  which the old tool labelled C2, is None now.
+- **Step 4, chunk 11, the port grid of 8.1** (`tools/probes/d11-port-grid.py`, seeds 1-3, 15,000
+  random + 15,000 shaped patterns' rows each, 90,011 rows; flags `(?w) (?wr) (?a) (?wa) (?p) (?b)
+  (?e) (?r) (?m)`, `\X`, `{e<=1}`, `{i<=1}`, a Hebrew letter, '"', ',', ':', the three fixed
+  subjects, fuzzy sections in bodies, group calls and recursion in bodies, the model's three named
+  semantics rows; Debug, MAXW 2; main 2c51e356 by answers only): misses 0 / 0 / 1 (main 537 / 490 /
+  559), 0 asserts, parse errors 6,325 (random patterns the port rejects). Every counter non-zero but
+  `MemoReplay` and `GuardRefused` (the memo and the guard rule were not built) and `BudgetFired`
+  (no row needs it; X1 and the budget tests cover it). Moved against main: 4,204 onto the judge;
+  away 1,367: C2 787 (the answering run-out lay outside every body), C2 in a body 92 (a run-out
+  inside a body presumed the rest of the body: mostly the attempt from inside the text to come),
+  C3 478 (a second-pass success that read the text to come twice or more), C4 10 (a blocked cut
+  kept both outcomes; D18); 0 unclassified. "Other" 352, same classes. The one miss is
+  pre-existing (main answers None too): search `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))`
+  over '' answers None where '\n' before it completes the match at (0, 0) (upstream 2026.9.10:
+  None, and (0, 0) for '\n'); a reversed search with `(*SKIP)` from inside the text to come, not
+  the run-out rule's class. **For the register (owner):** a row for it (D11's search rule 3).
+- **Step 4, section 9 benchmarks** (`.scratch/d11rr/bench/`, one harness built against the rule,
+  b811c5ea and main 2c51e356; Release, tiering off, median of 5 timed calls, median of 3 alternating
+  runs; the machine shared with another agent's test run). Calls without partial, 100 KB of mixed
+  text: atomic, possessive, lookbehind/lookahead, lookahead in a repeat, verbs, verbs in a repeat,
+  lazy, a failing search: 0.96-1.05 against b811c5ea and 0.96-1.10 against main (the 1.10 is
+  `(?:a(*PRUNE)b|ab)+` at 5 ms, 1.05 against b811c5ea; no changed code runs without a PARTIAL
+  status). Partial calls: f9b67f9's eight cases at 10 KB (and `(?w)(?:a\B)+` at 100 KB) 0.92-1.05
+  against b811c5ea, 0.50-1.00 against main; section 9's rows, the verb-heavy partial search and the
+  run-out adversaries 0.95-1.05 against b811c5ea except four rows:
+
+  | row | rule ms | b811c5ea ms | the first pass over a completed text, ms |
+  |---|---|---|---|
+  | `(?:(?!.*z)a)*b` over 'a' * 1000 + 'c' | 6.5 | 2.7 | 6.7 ('a' * 1000 + 'b') |
+  | search `a*(?!.*z)b` over 'a' * 1000 + 'c' | 2,214 | 886 | 2,133 ('a' * 1000 + 'cb') |
+  | `(?:(?!(a*)c)a)*b` over 'a' * 1000 | 7.0 | 3.1 | 6.8 ('a' * 1000 + 'b') |
+  | `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` over 'ab' * 125 | 51 | 1.1 | 54 at 'ab' * 125 + 'c' |
+
+  The first three are negative bodies whose one-character repeat reached the edge: b811c5ea
+  dropped the repeat's smaller counts, so the negative stayed undetermined after one scan; the rule
+  tries them, which is the work the first pass does over the completed text, and the time now equals
+  it. The fourth is item 7's routing (above, "Cost"). So these rows are over the 10% budget against
+  b811c5ea, at the first pass's own cost; the answers are unchanged on all four. **For the owner:**
+  accept as the price of deciding negative bodies (recommended: the second pass is then never
+  above the first pass's order on these shapes), or keep the smaller counts only where a later
+  alternative can succeed on the held text, which needs a per-repeat test the engine does not have.

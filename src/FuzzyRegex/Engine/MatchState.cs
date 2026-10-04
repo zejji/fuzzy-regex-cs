@@ -443,6 +443,14 @@ internal sealed class MatchState : IDisposable
 #endif
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: the mechanism that produced the run-out the matcher is about to take,
+    /// so that a run-out which answers the partial can be attributed to it (the grid's C2 label,
+    /// review S2 of 2026-10-04). Cleared by every run-out. Written only by Debug builds: its two
+    /// methods are conditional.
+    /// </summary>
+    private PartialEvent? _pendingRunOutCause;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: how many dedup entries (<see cref="LookaroundSuccesses"/>) the dedup's
     /// look-ups and drops have examined in this call, so that a test can show the work grows with
     /// the entries made, not with their product (row X1). Counted in every build, so the test's
@@ -1213,6 +1221,7 @@ internal sealed class MatchState : IDisposable
         HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
+        _pendingRunOutCause = null;
 #endif
         DedupEntriesExamined = 0;
         Sstack.Reset();
@@ -1600,6 +1609,40 @@ internal sealed class MatchState : IDisposable
     /// <param name="partialEvent">The event.</param>
     [Conditional("DEBUG")]
     internal void NotePartialEvent(PartialEvent partialEvent) => PartialEventCounts![(int)partialEvent]++;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: names the mechanism whose run-out the matcher takes next (Debug only).
+    /// </summary>
+    /// <param name="cause">The mechanism's event.</param>
+    [Conditional("DEBUG")]
+    internal void NoteRunOutCause(PartialEvent cause) => _pendingRunOutCause = cause;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a run-out was taken; when it answers the partial, the call records
+    /// <see cref="PartialEvent.RunOutAnswered"/> and, if a mechanism produced it,
+    /// <see cref="PartialEvent.RunOutAnsweredByLazyPastTheEdge"/> or
+    /// <see cref="PartialEvent.RunOutAnsweredByGreedyBodyKept"/> (Debug only). The cause is cleared
+    /// either way, so the answer's label belongs to the run-out that produced it.
+    /// </summary>
+    /// <param name="answered">Whether the run-out answers the partial.</param>
+    [Conditional("DEBUG")]
+    internal void NoteRunOutTaken(bool answered)
+    {
+        if (answered)
+        {
+            NotePartialEvent(PartialEvent.RunOutAnswered);
+            if (_pendingRunOutCause == PartialEvent.LazyRepeatPastTheEdge)
+            {
+                NotePartialEvent(PartialEvent.RunOutAnsweredByLazyPastTheEdge);
+            }
+            else if (_pendingRunOutCause == PartialEvent.GreedyBodyRunOutKept)
+            {
+                NotePartialEvent(PartialEvent.RunOutAnsweredByGreedyBodyKept);
+            }
+        }
+
+        _pendingRunOutCause = null;
+    }
 
     /// <summary>NOT UPSTREAM'S, D11: how many times an event has happened in this call.</summary>
     /// <param name="partialEvent">The event.</param>

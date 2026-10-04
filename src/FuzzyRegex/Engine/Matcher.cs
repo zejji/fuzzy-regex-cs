@@ -6228,9 +6228,65 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in the body of a
+    /// negative lookaround or a negative condition test, the only place where the alternatives a
+    /// choice point keeps before it can change the answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Outside every body the run-out answers the partial and the kept entries go with the attempt.
+    /// In a positive body every continuation after a kept alternative's success is one the run-out's
+    /// own continuation already covers: the position goes back to the lookaround's start either
+    /// way, a capture the body could still set is unknown after the run-out in a pattern that reads
+    /// captures, and the run-out closes the body's fuzzy section with the errors made so far, which
+    /// no longer path through the same choice point can undercut. So there the kept alternatives
+    /// only cost time: `(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' took 3.5 times as long with
+    /// <c>.*</c>'s smaller counts kept (2026-10-04). A negative body is different: a success of a
+    /// kept alternative on the held text fails the assertion for every continuation, where the
+    /// run-out alone leaves it undetermined.
+    /// </para>
+    /// <para>
+    /// The walk is <see cref="RunOutInALookaroundBody"/>'s: the innermost open lookaround or
+    /// condition test, with only atomic groups open above it; none (or a pattern whose run-outs
+    /// are answered at once) means no.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
+    private static bool RunOutIsInANegativeBody(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
+        {
+            return false;
+        }
+
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            if (!ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out LookaroundStateData look))
+            {
+                return false;
+            }
+
+            if (op is Opcode.Lookaround or Opcode.Conditional)
+            {
+                return !look.Node.Match;
+            }
+
+            if (op != Opcode.Atomic)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11, the run-out rule at a choice point: the test of one of a repeat's two
     /// alternatives (its body or its tail) ran out of text, and the other one passed its test, so
-    /// the other one is kept on the backtracking stack before the run-out is taken.
+    /// the other one is kept on the backtracking stack before the run-out is taken, when the run-out
+    /// goes on in a negative body (<see cref="RunOutIsInANegativeBody"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -6268,6 +6324,11 @@ internal static class Matcher
             bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial,
             "D11 run-out rule: one alternative ran out"
         );
+
+        if (!RunOutIsInANegativeBody(state))
+        {
+            return;
+        }
 
         Opcode op;
         if (bodyStatus == MatchStatus.Success)
@@ -12738,6 +12799,11 @@ internal static class Matcher
                     // below as for an entered first alternative, and then runs out. Upstream
                     // answers the partial at once: `(?!ab|a)` over 'a' was P(0, 1), where the 'a'
                     // held fails the lookahead for every continuation.
+                    if (status == MatchStatus.Partial && !RunOutIsInANegativeBody(state))
+                    {
+                        goto runOut;
+                    }
+
                     if (status != MatchStatus.Failure)
                     {
                         // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
@@ -13097,6 +13163,7 @@ internal static class Matcher
                                     "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
                                 );
                                 state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
+                                state.NoteRunOutCause(PartialEvent.GreedyBodyRunOutKept);
                             }
                             else if (
                                 bodyStatus == MatchStatus.Partial
@@ -14082,7 +14149,7 @@ internal static class Matcher
                     int runOutAt = -1;
                     if (isPartial)
                     {
-                        if (pattern.SecondPassAsBeforeD11)
+                        if (!RunOutIsInANegativeBody(state))
                         {
                             state.TextPos = pos;
                             goto runOut;
@@ -16439,6 +16506,7 @@ internal static class Matcher
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
         Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
         if (runOutFails)
         {
             stringPos = -1;
@@ -16447,8 +16515,6 @@ internal static class Matcher
 
         if (runOutEnd is null)
         {
-            state.NotePartialEvent(PartialEvent.RunOutAnswered);
-
             return MatchStatus.Partial;
         }
 
@@ -17691,7 +17757,7 @@ internal static class Matcher
                             // kept first, as the match below keeps them.
                             if (status == MatchStatus.Partial)
                             {
-                                if (!pattern.SecondPassAsBeforeD11)
+                                if (RunOutIsInANegativeBody(state))
                                 {
                                     KeepTheSmallerCounts(state, rpData, pos, start, savedCount, node, index);
                                 }
@@ -17844,9 +17910,15 @@ internal static class Matcher
                         {
                             // NOT UPSTREAM'S, D11 (D69): the item runs out at the edge, which inside a
                             // lookaround body goes on after the lookaround (`\X`'s lazy ANY_ALL in
-                            // `(?=\X)(*FAIL)` over 'b').
+                            // `(?=\X)(*FAIL)` over 'b'). Past the edge it is the try the entry kept
+                            // by LazyRepeatPastTheEdge stands for.
                             if (status == MatchStatus.Partial)
                             {
+                                if (RunsOutPast(state, pos, step))
+                                {
+                                    state.NoteRunOutCause(PartialEvent.LazyRepeatPastTheEdge);
+                                }
+
                                 goto runOut;
                             }
 
