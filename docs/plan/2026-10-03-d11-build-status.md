@@ -332,3 +332,15 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   only after a Control or LF), and both rows' boundaries are genuinely undetermined. **Not in D11's
   scope; no change.** The rows are in B1's red test (`OpenDefectTests`). **For the register:** D19
   gains these rows; D19 already covers the class, no separate row.
+- **Step 4, B3** (`OracleComparer.Run` composes an ablation with D11's only when `ablate` is not
+  null, `tests/FuzzyRegex.OracleTests/OracleComparer.cs`:418). Five named ablations pass only
+  switches: `RunWithTheUpstreamReverseGrapheme`, `...FuzzyConditionTest`, `...ConditionalTests`,
+  `...FoldedRuns` and `...CallCopies` (:1169, :1320, :1346, :1371, :1427). **It hides nothing.** The
+  composed run is consulted only after the ablation alone has failed to agree, and it can only
+  turn that row into an agreement (:437-:476 return `alone` otherwise); so leaving an ablation
+  uncomposed can only leave a row reported as a divergence, never explain one away. A partial row
+  that needed "this fix off and D11 off" would show at the oracle as a divergence, and the three
+  seeds have diverge 0 (step 5 of fix round 2, rerun in step 6 here), so no row needs it today.
+  **No change**: composing them would be the step that could hide something, and nothing asks for
+  it. If a future wave shows such a divergence, the fix is to key the composition on "any named
+  ablation" (`namedAblation` or either conditional switch) instead of `ablate`.
