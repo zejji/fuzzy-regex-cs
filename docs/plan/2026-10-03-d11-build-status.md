@@ -701,7 +701,12 @@ from a partial call, else (a).
   phantoms by design (410 + 64 of a 13,650-row lazy grid, 137 + 42 of the 51,648-row full grid,
   every one C2 by the causal label; the pinned `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` is P(0, 4)); and
   inside a lookahead's body, `(?!(?:ab)*+(?<=b))ab` and `(?!(?>(?:ab)*)(?<=b))ab` match 'ab' and
-  search `(?!(?:ab)*(?<=b))ab` 'ab' (`OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body`)."
+  search `(?!(?:ab)*(?<=b))ab` 'ab' (`OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body`);
+  and one lookahead deeper (the pre-merge review's P1, decided (a), 2026-10-04): a possessive
+  repeat that runs out inside a positive lookahead whose outcome a decision reads,
+  `(?!(?=(?:ab)*+(?<=b)))ab` match and search 'ab' P(0, 2), judge None (49 rows of the review's
+  5,760-row targeted grid; main None and P(2, 2) through upstream's failure at END_GREEDY_REPEAT,
+  which refuses the sibling `(?!(?=(?:ab)*+(?<=^ab)))ab` 'ab', completed by 'abab')."
 - *D18, add:* the port grid's C3 and C4 rows by cause (P2 below: 71 + 137 C3, 8 C4).
 - *New, D73:* "Partial search from inside the text to come with a reversed `(*SKIP)`: search
   `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))` over '' answers None (main and the D11 branch;

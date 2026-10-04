@@ -624,11 +624,19 @@ public sealed class PartialLookaroundRuleTests
     /// no continuation completes, answers the same partial: limit C2, in
     /// <c>OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body</c>.
     /// </summary>
-    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None.
+    /// <remarks>
+    /// The second row is the same one lookahead deeper (D11 pre-merge review, P1): a possessive
+    /// repeat in a positive lookahead inside the negative one; 'ab' + 'ab' completes it too. Its
+    /// <c>(?&lt;=b)</c> form is limit C2, in
+    /// <c>OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body</c>.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to both rows.
     [Test]
-    public void An_atomic_group_around_a_repeat_that_runs_out_keeps_the_lookahead_undetermined()
+    [Arguments(@"(?!(?>(?:ab)*)(?<=^ab))ab")]
+    [Arguments(@"(?!(?=(?:ab)*+(?<=^ab)))ab")]
+    public void An_atomic_group_around_a_repeat_that_runs_out_keeps_the_lookahead_undetermined(string pattern)
     {
-        Match m = Run("match", @"(?!(?>(?:ab)*)(?<=^ab))ab", "ab");
+        Match m = Run("match", pattern, "ab");
 
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
     }

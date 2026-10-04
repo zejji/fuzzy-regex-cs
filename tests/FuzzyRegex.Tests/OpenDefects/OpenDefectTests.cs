@@ -300,6 +300,14 @@ public sealed class OpenDefectTests
     [Arguments("match", @"(?!(?:ab)*+(?<=b))ab", "ab")]
     [Arguments("match", @"(?!(?>(?:ab)*)(?<=b))ab", "ab")]
     [Arguments("search", @"(?!(?:ab)*(?<=b))ab", "ab")]
+    // The same class one lookahead deeper (D11 pre-merge review, P1; decided (a), 2026-10-04): the
+    // possessive repeat's run-out inside the positive lookahead leaves the rest of that body
+    // presumed, so the negative lookahead stays undetermined. Main 5f9468bd answers None to the
+    // match row and P(2, 2) to the search, upstream None and P(2, 2), both through upstream's
+    // failure at END_GREEDY_REPEAT, which refuses the sibling
+    // `(?!(?=(?:ab)*+(?<=^ab)))ab` over 'ab' (PartialLookaroundRuleTests guards its P(0, 2)).
+    [Arguments("match", @"(?!(?=(?:ab)*+(?<=b)))ab", "ab")]
+    [Arguments("search", @"(?!(?=(?:ab)*+(?<=b)))ab", "ab")]
     public void A_run_out_in_a_lookahead_presumes_the_rest_of_its_body(string operation, string pattern, string text)
     {
         Partial(operation, pattern, text).Success.Should().BeFalse();
