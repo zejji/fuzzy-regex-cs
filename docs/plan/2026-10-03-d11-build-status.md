@@ -665,3 +665,92 @@ from a partial call, else (a).
   accept as the price of deciding negative bodies (recommended: the second pass is then never
   above the first pass's order on these shapes), or keep the smaller counts only where a later
   alternative can succeed on the held text, which needs a per-repeat test the engine does not have.
+
+## Merge texts (step 5 of the repeat run-out brief; the owner edits the register and the ledger)
+
+**Register (`docs/KNOWN-DEFECTS.md`):**
+
+- *D11, to Completed:* "Fixed on `maint/d11-partial-boundary` (design
+  `docs/plan/2026-09-28-partial-boundary-design.md`, chunks 1-11, amendments 1-3; status note
+  `docs/plan/2026-10-03-d11-build-status.md`). The second pass of a partial call decides reads of
+  the text to come three-valued (M1), marks paths that read it and blocks the cuts and decisions
+  that depend on them (M2), turns a second-pass success into the partial (M3) and bounds its forks
+  (M4); a run-out inside a lookaround body goes on after the body, and a choice point keeps its
+  other alternatives before a run-out in a negative body (the repeat run-out rule, 2026-10-04).
+  Port grid of design 8.1 (90,011 rows, three seeds, Debug): misses 0 / 0 / 1 against main's
+  537 / 490 / 559, the one pre-existing (D73 below); every row that moved away from the judge is
+  limit C2 (879, D19), C3 (478, D18) or C4 (10, D18). Limits left: C2 is D19; C3, C4 and C5 are
+  D18. Limit C2 is reachable through a cluster and a trailing insertion (chunk 4's `\X` read and
+  RC5: 236 rows of B1's 8,820-row family grid, such as `(?:ab){i<=1}(*FAIL)` match 'ab' P(0, 2));
+  upstream shares C2 for greedy repeats, not for these. The two run-out misses of fix round 3 are
+  fixed (decision (a), full grid misses 51 -> 0)."
+- *D11-R1, to Completed:* "Fixed by the repeat run-out rule (2026-10-04): a repeat's test that runs
+  out inside a lookaround body goes through the run-out rule; `(?=(?:(a))*b)[xy]` over 'aa' is
+  None."
+- *D26, D36, D38, D69, D70, to Completed*, each "fixed on the D11 branch, merged with D11": D26 by
+  chunk 3's RC5 and the undetermined fuzzy retry (`PartialLookaroundRuleTests.Only_the_failing_side_of_an_undetermined_fuzzy_test_reaches_the_insertion`,
+  not chunk 6 as the row says); D36 by chunks 6-7; D38 by chunk 9's fix round (`WMarkKind.Held`),
+  its C4 forms registered under D18 (`OpenDefectTests.A_blocked_cut_keeps_the_alternatives_made_after_the_read`);
+  D69 by 597b6081; D70 by fix round 2 (`PartialEdgeReadTests.A_search_with_no_first_set_still_tries_a_start_in_the_text_to_come`).
+- *D19, add:* "More (D11, 2026-10-04): B1/B2's `\X` rows (search `(?:\X){d<=1}(*FAIL)|c` over 'a'
+  P(0, 1), match `\X(*FAIL)|c` 'a' and fullmatch `(?:\X){d<=1}\b` '\r' P(0, 1)); decision (a)'s
+  phantoms by design (410 + 64 of a 13,650-row lazy grid, 137 + 42 of the 51,648-row full grid,
+  every one C2 by the causal label; the pinned `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` is P(0, 4)); and
+  inside a lookahead's body, `(?!(?:ab)*+(?<=b))ab` and `(?!(?>(?:ab)*)(?<=b))ab` match 'ab' and
+  search `(?!(?:ab)*(?<=b))ab` 'ab' (`OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body`)."
+- *D18, add:* the 478 C3 and 10 C4 rows of the 8.1 port grid (`.scratch/d11rr/away?.txt` until merged).
+- *New, D73:* "Partial search from inside the text to come with a reversed `(*SKIP)`: search
+  `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))` over '' answers None (main and the D11 branch;
+  upstream 2026.9.10 None) where '\n' before it completes the match at (0, 0). Found by D11's 8.1
+  port grid, 2026-10-04; one row of 90,011."
+- *New, performance:* "A partial call's second pass keeps every blocked lookaround body's entries,
+  so stack memory grows as n^(depth + 1) for lookarounds over repeats nested `depth` deep:
+  `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` over 'ab' * 500 hits the 1 GB backtracking-stack limit
+  (the first pass over the completed text takes 3.3 s and no extra memory). Options in the D11
+  status note (repeat run-out rule, Cost)."
+
+**Ledger (`docs/plan/upstream-reports/LEDGER.md`, DRAFT - NOT FILED, numbers after 66 at merge):**
+
+1. *Upstream's lookaround phantom* (design section 5, the entry the merge was to write): upstream
+   ends the whole match with a partial when anything inside a lookaround body runs out of text,
+   so a lookahead that no continuation satisfies still yields a partial: `(?=..)[ab]` match 'x',
+   `(?!.a|x)x` 'x' (P(0, 1) upstream, None here); and from a repeat's or a branch's test node,
+   `(?=(?:ab)+$)(*FAIL)`, `(?=x(?:ab)*cd)(*FAIL)` 'xc', `(?!(?:ab)+)ab` 'ab', `(?!ab|a)` 'a',
+   `(?![ab]{0,2}aa)` 'aa' (P upstream, None here). Root: every `return RE_ERROR_PARTIAL` path in
+   `basic_match` (the try-match sites at `_regex.c:12571-12597`, `:13235-13258`, `:12755-12780` and
+   their lazy twins), with no notion of the lookaround around it. Pinned by
+   `PartialLookaroundRuleTests` (the four tests named above and chunk 6's).
+2. *Decision (a)* (text in "The two run-out misses", step 5 above): upstream bounds a lazy repeat
+   by the text held and turns a greedy body's run-out at the end into a failure (`:12575`), which
+   refuses completions: `.*?(?<=c)` match 'aa', `(?r)\X` fullmatch '्क', `(?:.\b)+` fullmatch 'a ';
+   and inside a lookahead, `(?!(?>(?:ab)*)(?<=^ab))ab` match 'ab' (completed by 'abab'; upstream
+   None).
+3. *D70* (text in fix round 2, step "D70" above): no start inside the text to come for a pattern
+   with no first set (five search rows, None upstream).
+4. *The definitions the design took* (decisions 1 and 3): `\b` over '' is P(0, 0) on match and
+   search (upstream None), and `\Z` at the edge is false in the second pass, so `a\Zb` over 'a' is
+   None (upstream and PCRE2 P(0, 1)); ledger 21 and 27 gain notes that S57d's escalation is gone.
+
+Every entry gets its `ExpectedDivergences` pin (the oracle's pre-D11 ablation keeps upstream's
+behaviour for the rows of 1-3), DIVERGENCES.md and COMPARISON.md rows, and a draft report; those
+edits are the merge's, after the owner's approval of the texts.
+
+## Checks (step 4's oracle and step 5, on d33dbf57, main 610542e6 merged)
+
+- Merge of local main (b3819910..610542e6): conflicts only in the register (both sides kept: the
+  branch's D11-R1 row and main's D70-D72), STATUS.md, the stamp and the baseline's header; main's
+  engine change (the oracle-only call-memo key control) merged cleanly.
+- Ratchet GREEN in Debug (8,278) and Release (8,196 passing, the rest the Debug-only skips).
+  `tests/parity-baseline.json` regenerated with `-UpdateBaseline` (8,170 ids; no removals, so no
+  `-AcceptRemovals`), CRLF normalised. `tools/check-doc-examples.ps1`: all ok.
+- Oracle, Release, each seed alone under the test lock: seed 7 GREEN (agree 7387, expected 185,
+  timeout 2, resource 4, undefined 2, diverge 0 of 7580), seed 4242 GREEN (agree 7399, expected
+  176, resource 5, diverge 0), seed 20260927 GREEN (agree 7390, expected 186, resource 4,
+  diverge 0). Waves `partial,partial-sliced,interactions,verbs,matrix` at seeds 101-104: diverge 0
+  each (agree 1416 / 1436 / 1419 / 1444 of 1,500; expected 72 / 58 / 71 / 51).
+- `(?=(?:(a))*b)[xy]` over 'aa' (D11-R1): None, the judge's answer.
+
+**Chunk 11's gate:** no row moved away from the judge that is not C2, C3 (or C4, D18's, 10 rows) by
+the classifier; misses 1 of 90,011, pre-existing on main (D73); oracle diverge 0; the 10% budget
+held on every path but the four partial rows of the benchmark table, each at the first pass's own
+cost over the completed text. **Next:** the pre-merge blind review.
