@@ -586,7 +586,9 @@ public sealed class PartialLookaroundRuleTests
     /// <remarks>
     /// The second pre-merge review (R1, R2) found the rule switched off by a group call or a
     /// capture read anywhere in the pattern; the last nine rows hold those shapes. Main and upstream
-    /// answer None to them; the branch answered P(0, 2) at a48bc3cf.
+    /// answer None to them; the branch answered P(0, 2) at a48bc3cf. Planted out (Debug,
+    /// 2026-10-04): with any call switching the rule off again, the five call rows go red; with the
+    /// decided end's capture test taken pattern-wide again, the `(*PRUNE)` row with `(c)\1`.
     /// Three parts, each planted out (Debug): without the alternatives kept in a positive body that
     /// feeds a decision (<c>Matcher.RunOutFeedsADecision</c>) the condition row goes red; without
     /// the decided end (<c>Matcher.EndALookaroundInTheSecondPass</c>) the negative, atomic and
@@ -624,8 +626,14 @@ public sealed class PartialLookaroundRuleTests
     /// waits until the body's other paths have been tried (<c>Matcher.RunOutCanWaitForTheBody</c>):
     /// run out first, the repeat's second copy of the lookahead was decided while the first was
     /// still blocked, so the group never committed and its 'ab' branch answered P(0, 2) (the second
-    /// pre-merge review, R3; main and upstream answer None).
+    /// pre-merge review, R3; main and upstream answer None). The last two rows have a verb outside
+    /// the lookahead, which cannot reach its body's paths.
     /// </summary>
+    /// <remarks>
+    /// Planted out (Debug, 2026-10-04): without the waiting run-out, 5 of the first 9 rows go red
+    /// (P(0, 2)); with the verb test taken pattern-wide again (as before the body's
+    /// <c>HasVerbOrCall</c>), the last two.
+    /// </remarks>
     // DIVERGES FROM UPSTREAM: none; regex 2026.9.10 answers None too.
     [Test]
     [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)+)x")]
@@ -637,6 +645,8 @@ public sealed class PartialLookaroundRuleTests
     [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab)?+x")]
     [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab){1,2}+x")]
     [Arguments(@"(?>(?:(?=(?:ab)*(?<!b))|ab)+)x")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)+)x(*PRUNE)")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)+)x|(*PRUNE)q")]
     public void A_lookahead_repeated_inside_an_atomic_group_is_decided_before_the_group_commits(string pattern) =>
         Run("match", pattern, "ab").Success.Should().BeFalse();
 

@@ -679,7 +679,8 @@ from a partial call, else (a).
   run-out rule, 2026-10-04, and the pre-merge fixes).
   Port grid of design 8.1 (90,011 rows, three seeds, Debug): misses 0 / 0 / 1 against main's
   537 / 490 / 559, the one pre-existing (D73 below); every row that moved away from the judge is
-  one of the limit classes, after the pre-merge fixes and by cause (P2 below): 1,359 rows
+  one of the limit classes, after the pre-merge fixes and by cause (P2 below; judged at MAXW 2,
+where some are fixes the horizon misses): 1,359 rows
   away from the judge, 435 labelled by cause alone (C2 by a mechanism 15, C2 with nothing blocked in
   the call 349, C3 with nothing blocked 71), the other 924 by their events (C2 in or after a body
   592, C2 after a blocked construct 187, C3 after a blocked construct 137, C4 8), none of them P1's
@@ -708,6 +709,15 @@ from a partial call, else (a).
   5,760-row targeted grid; main None and P(2, 2) through upstream's failure at END_GREEDY_REPEAT,
   which refuses the sibling `(?!(?=(?:ab)*+(?<=^ab)))ab` 'ab', completed by 'abab')."
 - *D18, add:* the port grid's C3 and C4 rows by cause (P2 below: 71 + 137 C3, 8 C4).
+- *New, D11 follow-up (second pre-merge round, if the owner takes option (a)):* "Partial, D11's run-out
+  rule left off in three shapes, phantoms only (main and upstream answer None): a pattern with a
+  group call that reads captures or is fuzzy (22 rows of the 80,640-row gate grid, all
+  `(?:ab){e<=1}` cores with `|(?P<zc>q)(?&zc)`), a run-out inside a call a lookaround's body
+  opened (`(?(?=(?1))x|ab)((?:ab)*(?<=b))?` over 'ab' P(0, 2)), and a lookahead body that sets a
+  group the pattern reads (`(?>(?=((?:ab)*)(?<=b))|ab)(?(1)x|q)` over 'ab' P(0, 2)); judge None.
+  `OpenDefectTests.A_decided_lookahead_inside_a_call_or_with_a_read_capture_stays_undetermined`.
+  Fix: the call models (`Node.RunOutGroups` and `Node.EnclosingSection` through calls) and REOPEN
+  re-opening the calls a body opened (the SHORTCUT on `Matcher.RunOutInALookaroundBody`)."
 - *New, D73:* "Partial search from inside the text to come with a reversed `(*SKIP)`: search
   `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))` over '' answers None (main and the D11 branch;
   upstream 2026.9.10 None) where '\n' before it completes the match at (0, 0). Found by D11's 8.1
@@ -919,4 +929,115 @@ main does not is one `WMarks.Count` test per verb (the PRUNE arm's `state.WMarks
 `Matcher.cs`, the forward `Opcode.Prune` case), per atomic, lookaround and conditional backtrack
 arm, and one `PartialSide` test per 256 steps at the cancellation gate (`SecondPassStackIsOverBudget`);
 `SkipABlockedVerb` and everything after it run only with a mark, which only a second pass makes.
-So the 1.10 was run-to-run spread on a 5 ms row, not a path that pays.
+So the row pays about 5%, within budget (corrected in the second pre-merge round: the branch
+was slower in 5 of 6 pairs, a consistent small cost, not spread).
+
+## Second pre-merge round (2026-10-04, brief `brief-d11-premerge-fixes2-2026-10-04.md`)
+
+Review answered: `.claude/driver/review-d11-premerge2-2026-10-04.md` (R1-R6; item 4 confirmed C2).
+
+**The gate (step 1), built first.** `tools/probes/d11-runout-gate-grid.py` (80,640 rows): 14
+lookahead shapes (the five P1 wrappers, F1's bare negative body, the repeat wrappers
+`(?>(?:L|ab)+)x` with `*`, `?`, `{2}` and the possessive `++`, `*+`, `?+`, `{1,2}+`) over the look
+grid's 48 repeat and fuzzy cores, five tails, 'a' / 'ab' / 'abab', match and search, each in four
+pattern-wide variants: none, a group call after it (`|(?P<zc>q)(?&zc)`), a capture read after it
+(`|(?P<zz>q)(?(zz)q)`), a capture read before it (`()\1` in front). Counted by
+`tools/probes/d11-gate-count.py` against main 5f9468bd's answers and the port's non-partial judge
+(Debug, MAXW 2). Accepted classes: decision (a)'s run-out answered the partial (causal events); a
+possessive repeat inside the lookahead (item 4, C2); and a read-before row that answers as its
+prefix-free twin on both engines (main's answer moves only because `()\1` in front leaves the
+pattern no first set, so main never tries a start inside the text to come: D70).
+
+| | ad03f8b8 | now |
+|---|---|---|
+| main right, branch wrong, outside the accepted classes | 1,177 | 22 |
+| accepted: possessive inside the lookahead (C2) | 596 | 804 |
+| accepted: decision (a) | 884 | 0 |
+| accepted: read-before twin (D70) | 34 | 34 |
+| branch right, main wrong | 3,816 | 17,006 |
+| misses | 0 | 0 |
+
+(At ad03f8b8 the 884 "decision (a)" rows were call-variant rows the call exclusion answered at
+once with a decision-(a) cause; they are fixed now, not accepted.) Per shape, now: rest 2 / 6 / 2 /
+6 / 2 / 2 / 2 for atomic / bare / cond / neg / prune / skip / rep{2}, 0 for the other seven; per
+variant: call 22, the other three 0. **The 22 left are all one shape**: a fuzzy core
+(`(?:ab){e<=1}`) in a pattern with a group call, which the narrowed call exclusion still answers
+at once (R1 below). So the gate fails by 22 rows, all R1's.
+
+**R2 (decided end, capture test).** The decided end now asks whether the lookaround's body sets a
+group, not whether the pattern reads captures anywhere: a body that sets no group leaves the
+same state whatever the rest reads. The other option (compare the decided success's captures with
+the blocked one's) gains nothing: after a run-out the blocked success's captures are unknown in a
+pattern that reads captures, so they never compare equal. Witness rows: the review's four
+`(c)\1` / `(?(1)y)()` rows, None; planted back to the pattern-wide test, the `(*PRUNE)` row goes
+red. Left open: a body that sets a group the pattern reads, `(?>(?=((?:ab)*)(?<=b))|ab)(?(1)x|q)`
+over 'ab' (P(0, 2), main and judge None), red in
+`OpenDefectTests.A_decided_lookahead_inside_a_call_or_with_a_read_capture_stays_undetermined`.
+
+**R3 (a repeat around the lookahead).** Root cause, from the trace on
+`(?>(?:(?=(?:ab)*(?<=b))|ab)+)x` over 'ab': `(?:L|ab)+` compiles as a first copy and a starred
+rest, so two instances of the lookahead run at 0. The first one's run-out went first, so its end
+was blocked; the second instance's held-text success was then decided, but the atomic group's end
+was still blocked by the first instance's live taint and touch, and backtracking reached the
+second copy's 'ab' branch (which the group discards for every continuation) before it reached the
+first instance's own held-text success. (A guard the blocked path recorded on the repeat's tail
+was a second, smaller part; it went away with the fix and needs no change.) Fix: in a positive
+lookaround whose outcome feeds a decision, a run-out waits until every other path of the body has
+been tried (`RunOutCanWaitForTheBody`: a `RunOutPending` mark at the frame; a held-text success
+drops it and decides the lookaround; the LOOKAROUND backtracking arm takes the run-out if it is
+still there, passing the lookaround with a touch). Sound where nothing in the body can cut the
+other paths on the run-out's route (no atomic group open around the item, no verb and no call in
+the body: the body's new `HasVerbOrCall` flag, computed with its nodes), and the success leaves
+the same state for every continuation (no group in the body or no capture read; outside every
+fuzzy section). Witness: `A_lookahead_repeated_inside_an_atomic_group_is_decided_before_the_group_commits`
+(the review's eight rows, `(?<!b)`'s twin, and two rows with a verb outside the lookahead); planted
+out, 5 of the first 9 go red, and with the verb test pattern-wide again, the two verb rows.
+
+**R1 (group calls).** The estimate: lifting the exclusion as the SHORTCUT's upgrade states it
+(REOPEN re-opening the calls a body opened) means re-pushing a call's saved frame and its
+OpenCalls entry on REOPEN and undoing it on backtracking, plus building the two models the
+compiler skips for call patterns (`Node.RunOutGroups` where captures are read, through calls; and
+`Node.EnclosingSection` where something is fuzzy, which a section walk through calls cannot assign
+one value per node); amendment 2 kept the exclusion for that reason. More than two hours and a
+design question, so not built. What was built is the narrow part: a call opened outside the body
+no longer switches the rule off, for patterns that neither read captures nor are fuzzy
+(`ACallOpenedInTheBodyIsOpenOrUnmodelled`); the SHORTCUT text now says what is excluded and no
+longer claims "as before D11". Witness: five call rows of
+`A_positive_lookahead_decided_on_the_held_text_decides_what_encloses_it`, red with any call
+switching the rule off. Left: the gate's 22 call+fuzzy rows, and a run-out inside a call a body
+opened (`(?(?=(?1))x|ab)((?:ab)*(?<=b))?` over 'ab', P(0, 2), main and judge None; red in the same
+OpenDefect test). **For the owner, options:** (a) register the residue as a D11 follow-up row (call
+patterns that read captures or are fuzzy, and run-outs inside a call a body opened; each residual
+row is a phantom partial, never a refused completion) and merge; (b) build the call models and REOPEN's call re-open before the merge (a
+design step, several hours); (c) restore main's answers for call patterns by answering every
+run-out in a call pattern as upstream does (`SecondPassAsBeforeD11` for those patterns), which
+re-opens every D11 miss main has in call patterns. Recommendation (a): every residual row is a
+phantom partial, the class is bounded and named, and (c) would bring back refusals.
+
+**R4 (verb anywhere).** Not narrowed: "a verb can run after this lookaround in its own scope" needs
+a reachability analysis over the node graph and the verb-scope rules of ledger entry 47, which is
+not cheap to get right. Cost recorded: `(?:(?=.*z)a)*b|(*PRUNE)q` over 'a' * n + 'c' costs 13.6 ms
+at n = 1000 (5a660a48 4.2 ms, the first pass over 'a' * n + 'zb' 3.5 ms), n^2 in both, about 4x the
+first pass over any completed text, because the pattern's verb makes every positive lookahead
+"feed a decision" and keep `.*`'s smaller counts. Bounded in class, a constant factor; the
+reachability test is the upgrade (SHORTCUT, in `RunOutFeedsADecision`'s remarks).
+
+**R5, R6.** The chunk 11 counts above are at MAXW 2 (the judge's horizon), and some of the 924
+event-classed rows are fixes there (the review found 50 at MAXW 3). The breakdown script is now
+`tools/probes/d11-away-breakdown.py` (writes the list ASCII-safe). The verb-rep benchmark is "about
+5%, within budget": a consistent small cost (the branch was slower in 5 of 6 pairs), from the
+`WMarks.Count` test per verb arm, which predates this round.
+
+**Checks (second round).** No row moved away from the judge on any grid, against a37061a7 (Debug,
+MAXW 2): look 56,160, P1's 5,760, fuzzy-in-body 10,080 / 8,064 / 3,000, lazy 13,650, repeat 5,000,
+full 51,648: 0 moved; port grid 90,011: 74 onto the judge, 6 other (later phantom starts), 0 away,
+misses 0 / 0 / 1 (D73); 0 asserts on every grid. Ratchet GREEN in Debug (8,310) and Release (8,228
+passing); baseline regenerated (8,202 ids, no removals), CRLF normalised; doc examples all ok;
+oracle seed 7 GREEN (agree 7387, expected 185, timeout 2, resource 4, undefined 2, diverge 0 of
+7580). Section 9's benchmarks against ad03f8b8 (Release, tiering off, median of 5 calls, 3
+alternating runs; the call-free rows 6 alternating runs): call-free 0.96-1.04 (the lookaround rows
+1.02-1.04, one more branch in the positive lookaround's failing arm, within budget); f9b67f9's cases
+0.92-1.00; section 9's rows 0.88-1.08, X2 0.99, X1 1.04; R4's `(?:(?=.*z)a)*b|(*PRUNE)q` 7.7 ms
+against 13.8 (the waiting run-out tries the held text's paths once); search
+`(?>(?:(?=(?:ab)*(?<=b))|ab)+)x` over 'ab' * 500 31 ms against 20 ms, now answering P(1000, 1000),
+the judge's start, where ad03f8b8 answered P(0, 1000).

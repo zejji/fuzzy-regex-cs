@@ -6462,6 +6462,13 @@ internal static class Matcher
     /// long with <c>.*</c>'s smaller counts kept). Outside every body the run-out answers the
     /// partial and the kept entries would go with the attempt.
     /// </para>
+    /// <para>
+    /// SHORTCUT: a verb anywhere in the pattern makes every positive lookaround feed a decision.
+    /// Ceiling: `(?:(?=.*z)a)*b|(*PRUNE)q` over 'a' * 1000 + 'c' keeps <c>.*</c>'s smaller counts for
+    /// nothing, about 4 times the first pass over any completed text (n^2 either way; second
+    /// pre-merge review, R4). Upgrade: ask at compile time whether a verb can run after the
+    /// lookaround in its own scope (ledger entry 47's scope rules over the node graph).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
