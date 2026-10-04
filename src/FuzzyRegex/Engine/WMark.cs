@@ -154,6 +154,9 @@ internal enum PartialEvent
     /// <summary>M4: the fork budget fired.</summary>
     BudgetFired,
 
+    /// <summary>M4: the second pass's stack budget fired (it fires the fork budget too).</summary>
+    StackBudgetFired,
+
     /// <summary>RC5: a fuzzy insertion ran out of text.</summary>
     InsertionRunOut,
 

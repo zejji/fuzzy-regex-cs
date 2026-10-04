@@ -175,4 +175,29 @@ public sealed class PartialForkBudgetTests
 
         state.DedupEntriesExamined.Should().BeInRange(1, 8L * 256 * (n + 1));
     }
+
+    /// <summary>
+    /// The second pass's stack budget: a partial call whose second pass keeps more bytes than the
+    /// budget answers the budget's partial at the attempt's start, where it threw at the
+    /// backtracking stack's 1 GB limit. Three lookaheads over repeats nested in repeats keep every
+    /// blocked body's entries, so the stacks grow as the cube of the text; at 'ab' * 500 they passed
+    /// the limit (2026-10-04). No continuation is refused: 'c' after the held text completes the
+    /// match, so the partial is right here, and wherever the budget fires it is a phantom at worst
+    /// (class C5).
+    /// </summary>
+    // Upstream 2026.9.10 answers P(0, 1000) too, at once (its lookaround run-out ends the match).
+    [Test]
+    public void A_second_pass_that_keeps_too_many_bytes_answers_the_budget_partial()
+    {
+        string text = string.Concat(Enumerable.Repeat("ab", 500));
+        var regex = new FuzzyRegex(
+            @"(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+
+        Match m = regex.MatchAtStart(text, partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1000));
+    }
 }

@@ -661,10 +661,11 @@ from a partial call, else (a).
   dropped the repeat's smaller counts, so the negative stayed undetermined after one scan; the rule
   tries them, which is the work the first pass does over the completed text, and the time now equals
   it. The fourth is item 7's routing (above, "Cost"). So these rows are over the 10% budget against
-  b811c5ea, at the first pass's own cost; the answers are unchanged on all four. **For the owner:**
-  accept as the price of deciding negative bodies (recommended: the second pass is then never
-  above the first pass's order on these shapes), or keep the smaller counts only where a later
-  alternative can succeed on the held text, which needs a per-repeat test the engine does not have.
+  b811c5ea, at the first pass's own cost; the answers are unchanged on all four. **Decided
+  (orchestrator, 2026-10-04): accepted.** Each costs what the first pass costs over the completed
+  text, so it is the price of a decided answer, not overhead: b811c5ea was faster only because it
+  dropped the alternatives a negative body needs (the first three) or answered through item 7's
+  bypass (the fourth, now bounded by the stack budget below).
 
 ## Merge texts (step 5 of the repeat run-out brief; the owner edits the register and the ledger)
 
@@ -703,11 +704,12 @@ from a partial call, else (a).
   `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))` over '' answers None (main and the D11 branch;
   upstream 2026.9.10 None) where '\n' before it completes the match at (0, 0). Found by D11's 8.1
   port grid, 2026-10-04; one row of 90,011."
-- *New, performance:* "A partial call's second pass keeps every blocked lookaround body's entries,
-  so stack memory grows as n^(depth + 1) for lookarounds over repeats nested `depth` deep:
-  `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` over 'ab' * 500 hits the 1 GB backtracking-stack limit
-  (the first pass over the completed text takes 3.3 s and no extra memory). Options in the D11
-  status note (repeat run-out rule, Cost)."
+- *D11's row, add (performance, closed by the stack budget):* "A partial call's second pass keeps
+  every blocked lookaround body's entries, so its stacks grow as n^(depth + 1) for lookarounds
+  over repeats nested `depth` deep; `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` over 'ab' * 500 threw at
+  the 1 GB backtracking-stack limit. Fixed before the merge (orchestrator's option (b)): past 256 MB
+  on the two stacks the attempt answers the fork budget's partial (C5), so stack memory is at
+  most 256 MB plus 256 steps' pushes, whatever n and the depth."
 
 **Ledger (`docs/plan/upstream-reports/LEDGER.md`, DRAFT - NOT FILED, numbers after 66 at merge):**
 
@@ -754,3 +756,40 @@ edits are the merge's, after the owner's approval of the texts.
 the classifier; misses 1 of 90,011, pre-existing on main (D73); oracle diverge 0; the 10% budget
 held on every path but the four partial rows of the benchmark table, each at the first pass's own
 cost over the completed text. **Next:** the pre-merge blind review.
+
+## The second pass's stack budget (2026-10-04, orchestrator's decision (b) on the nested adversary)
+
+**The bound, on paper, before building.** A blocked end moves the body's saved-stack entries onto
+the backtracking stack and REOPEN moves them back, so neither changes the bytes the two stacks hold
+together; the total grows only by ordinary pushes, at most P bytes a step, where P is the largest
+single step's push (a frame's captures, repeats and fuzzy state: O(pattern size), independent of
+n). Unbounded, the second pass of lookarounds over repeats nested d deep holds O(n^(d + 1)) bytes
+(each blocked body keeps its entries for the continuations where it matched otherwise). With a
+budget B checked at the cancellation gate (every 256 steps), the stacks hold at most B + 256 P
+bytes, whatever n and d. B = 256 MB (`Matcher._secondPassStackBudget`), a quarter of the 1 GB limit;
+a stack throws when its doubling would reach the limit, at a count of 512 MB, so the budget fires
+first for any P under 1 MB. Past B the attempt sets `ForkBudgetSpent` and answers
+`ForkBudgetPartial` (a C5 phantom at worst; a partial never refuses a completion). The fork-budget
+constant is unchanged.
+
+**Measured** (Release, tiering off), `(?:(?=(?:(?=(?:ab)*(?<=b))ab)*)ab)*c` match:
+
+| text | partial call | plain call, same text | plain call, text + 'c' |
+|---|---|---|---|
+| 'ab' * 125 | 167 ms, P(0, 250) | 0 ms, None | 51 ms, F(0, 251) |
+| 'ab' * 250 | 629 ms, P(0, 500) | 0 ms, None | 377 ms, F(0, 501) |
+| 'ab' * 500 | 407 ms, P(0, 1000) (the budget; threw before) | 0 ms, None | 3.0 s, F(0, 1001) |
+| 'ab' * 1000 | 420 ms, P(0, 2000) (the budget) | 0 ms, None | 24.3 s, F(0, 2001) |
+
+The plain call is bounded in memory (the first pass keeps one body's entries; its time is the
+pattern's own cubic order on the completed text, and on the held text the required 'c' rejects it
+at once). The partial call's time is now bounded by the budget too (about 0.4 s to reach 256 MB).
+
+**Witness:** `PartialForkBudgetTests.A_second_pass_that_keeps_too_many_bytes_answers_the_budget_partial`
+('ab' * 500, P(0, 1000)); with the budget raised out of reach (1 TB) it fails with the 1 GB
+`InvalidOperationException` (Debug, 13 s). New Debug event `StackBudgetFired`. **No row moved**
+(Debug, against the previous engine): look grid 34,560, port grid 90,011, lazy 13,650, repeat
+5,000, full 51,648: 0 moved, `StackBudgetFired` on 0 rows. Ratchet GREEN in Debug (8,279) and
+Release (8,197 passing); oracle seed 7 GREEN (agree 7387, expected 185, timeout 2, resource 4,
+undefined 2, diverge 0 of 7580). A call without partial pays one test of `PartialSide` every 256
+steps.

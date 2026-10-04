@@ -7343,6 +7343,13 @@ internal static class Matcher
                 or Opcode.SetUnionIgnRev;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the bytes the second pass's two stacks may hold before the attempt
+    /// answers the budget's partial (<see cref="SecondPassStackIsOverBudget"/>): a quarter of the
+    /// stack's 1 GB limit.
+    /// </summary>
+    private const long _secondPassStackBudget = 1L << 28;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 M4 (design section 4.4): counts one fork of the current attempt, a
     /// blocked construct that keeps more than one outcome (a blocked cut, a skipped verb, a negative
     /// lookaround or test that passes undetermined, a condition that takes both branches). Past
@@ -7379,6 +7386,47 @@ internal static class Matcher
             // The next step wraps the counter to zero, which opens the cancellation gate.
             state.Iterations = 0xFF00;
         }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the second pass's stack budget. A partial call's second pass keeps
+    /// every blocked lookaround body's entries for the continuations where the body matched
+    /// otherwise, so lookarounds over repeats nested d deep keep O(n^(d + 1)) bytes, where the first
+    /// pass keeps the body of one. Past <see cref="_secondPassStackBudget"/> bytes on the two stacks
+    /// the budget is spent like the fork budget, and the call answers the budget's partial
+    /// (<see cref="ForkBudgetPartial"/>) instead of throwing at the stack's 1 GB limit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked at the cancellation gate, every 256 steps. A blocked end and REOPEN only move bytes
+    /// between the two stacks, so the total grows by one step's pushes at a time, and between two
+    /// checks by at most 256 of them: the stacks never hold more than the budget plus 256 times the
+    /// largest single step (a few groups' captures and repeats, bytes per group, whatever n and the
+    /// nesting depth). The budget is a quarter of the limit, and a stack throws when its doubling
+    /// would reach the limit, at half of it, so the budget always fires first.
+    /// </para>
+    /// <para>
+    /// `(?:(?=(?:(?=(?:ab)*(?&lt;=b))ab)*)ab)*c` over 'ab' * 500 threw at the limit (D11's repeat run-out
+    /// rule exposed it, 2026-10-04); it now answers P(0, 1000), a phantom of class C5, as X1 does
+    /// through the fork budget. A first pass and a call without partial pay the one test of
+    /// <see cref="MatchState.PartialSide"/>, once every 256 steps.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the attempt must stop with the budget's partial.</returns>
+    private static bool SecondPassStackIsOverBudget(MatchState state)
+    {
+        if (
+            state.PartialSide == MatchState.PartialNone
+            || (long)state.Bstack.Count + state.Sstack.Count <= _secondPassStackBudget
+        )
+        {
+            return false;
+        }
+
+        state.ForkBudgetSpent = true;
+        state.NotePartialEvent(PartialEvent.StackBudgetFired);
+        return true;
     }
 
     /// <summary>
@@ -12330,7 +12378,7 @@ internal static class Matcher
                     return MatchStatus.Cancelled;
                 }
 
-                if (state.ForkBudgetSpent)
+                if (state.ForkBudgetSpent || SecondPassStackIsOverBudget(state))
                 {
                     return ForkBudgetPartial(state);
                 }
@@ -16549,7 +16597,7 @@ internal static class Matcher
                     return MatchStatus.Cancelled;
                 }
 
-                if (state.ForkBudgetSpent)
+                if (state.ForkBudgetSpent || SecondPassStackIsOverBudget(state))
                 {
                     return ForkBudgetPartial(state);
                 }
