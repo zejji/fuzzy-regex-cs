@@ -298,3 +298,26 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   (D13). The count runs only in the dedup, which only a partial call's second pass reaches. Witness,
   Release: with the old whole-list scans planted back (look-up and drop), the test reads
   160,662,327 and fails; with the fix it passes. Ratchet (Debug) GREEN, 8,215.
+- **Step 2, B1** (search `(?:\X){d<=1}(*FAIL)|c` over 'a' P(0, 1); main, both judges and upstream
+  P(1, 1)). Bisected: fcfb406d P(1, 1), bc9ab56f (chunk 4) P(0, 1). Root cause: chunk 4's
+  `GraphemeBoundaryAtEdge` (Matcher.cs, the `UndeterminedRead` at its end) makes the boundary
+  closing `\X` after 'a' or '\r' undetermined, as it must (a combining mark or an LF can join the
+  cluster); its failing side takes the next character, runs out at the edge outside any body, and
+  the rest of the pattern is presumed to match. That is limit C2 (D19), the way `.+(*FAIL)|c`
+  search 'a' has always answered (port, main, upstream: P(0, 1)). Main's P(1, 1) is right only
+  because main's `\X` never reads the text to come, which also makes it refuse real completions:
+  search `\X(?<!a)|c` 'a', `(?:\X){d<=1}(?<!a)|c` 'a' and `\X(?<![a\r])|c` '\r' are P(1, 1) on main
+  and upstream, P(0, 1) on the branch and the judge. **No engine change**: removing the read brings
+  those misses back, and deciding the rest after a run-out is D19's, out of D11's scope by design
+  decision 4. Family grid (8,820 rows: 15 multi-character items, exact and under `{d,e,i,s<=1}`, with
+  `(*FAIL)`, `(?!)`, `(?<=c)z` tails, alone and `|c`, 6 subjects, 3 doors; branch Debug with the
+  port judge over continuations up to 3 with U+0301 and '\r'; main 27b9de33 and upstream by probe):
+  236 rows differ from main where main equals the judge, all one of two siblings of this class:
+  172 `\X` rows (search start moved to the run-out's) and 64 match/fullmatch rows where a trailing
+  insertion runs out (`(?:ab){i<=1}(*FAIL)` 'ab' P(0, 2); RC5, chunk 3; main None). Tests: the truth
+  rows red in `OpenDefectTests.A_cluster_or_insertion_that_runs_out_presumes_the_rest_of_the_pattern`
+  (5 rows); the sound side pinned in
+  `PartialCutRuleTests.A_search_reports_the_start_whose_cluster_text_to_come_can_extend` (3 rows,
+  red with chunk 4's read planted back to the held text's answer). **For the register:** D19 gains
+  B1's rows; D11's row notes that the `\X` read and RC5 make C2 reachable through a cluster and a
+  trailing insertion (236 grid rows), shared by upstream for greedy repeats, not for these.

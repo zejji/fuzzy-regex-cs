@@ -261,6 +261,35 @@ public sealed class OpenDefectTests
             .BeFalse();
     }
 
+    // D19 again, through a cluster or an insertion that takes text to come (D11 fix round 3,
+    // review B1). After 'a' or '\r' at the edge a combining mark or an LF can extend the cluster,
+    // so `\X`'s closing grapheme test is undetermined; its failing side takes the next character,
+    // runs out, and the rest, which no text can match, is presumed. A trailing insertion (ledger
+    // 51) runs out the same way. This is how `.+(*FAIL)|c` has always answered (port, upstream:
+    // P(0, 1)); D11 build chunk 4 (bc9ab56f) gave `\X` the read, which is what makes
+    // `\X(?<!a)|c` search 'a' P(0, 1) right where main and upstream answer P(1, 1)
+    // (PartialCutRuleTests). Right answers: the edge is the leftmost completable start ('a' + 'c')
+    // and the anchored calls complete nowhere (the port's non-partial judge over continuations of
+    // up to three characters, U+0301 and '\r' included, 2026-10-04). Upstream 2026.9.10: P(1, 1),
+    // P(1, 1), None, None, None; main 27b9de33: P(1, 1), P(1, 1), P(0, 1), P(0, 1), None.
+    [Test]
+    [Arguments("search", @"(?:\X){d<=1}(*FAIL)|c", "a", 1)]
+    [Arguments("search", @"\X(*FAIL)|c", "a", 1)]
+    [Arguments("match", @"\X(*FAIL)|c", "a", -1)]
+    [Arguments("fullmatch", @"(?:\X){d<=1}\b", "\r", -1)]
+    [Arguments("match", @"(?:ab){i<=1}(*FAIL)", "ab", -1)]
+    public void A_cluster_or_insertion_that_runs_out_presumes_the_rest_of_the_pattern(
+        string operation,
+        string pattern,
+        string text,
+        int start
+    )
+    {
+        Match m = Partial(operation, pattern, text);
+
+        (m.Success, m.Success ? m.Index : -1).Should().Be((start >= 0, start));
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

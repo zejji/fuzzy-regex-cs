@@ -80,6 +80,29 @@ public sealed class PartialCutRuleTests
     }
 
     /// <summary>
+    /// Row C3 searched: the start the cluster's run-out gives is the leftmost completable start
+    /// ('a' + U+0301 matches at 0), not the 'c' alternative's at the edge.
+    /// </summary>
+    /// <remarks>
+    /// The same read makes the D19 phantom of review B1 (D11 fix round 3): with a tail no text
+    /// matches, the run-out still presumes it (<c>OpenDefectTests</c>), and this row is why the
+    /// read is kept. Judged by the port's non-partial matcher over continuations of up to three
+    /// characters with U+0301 and '\r' (2026-10-04). Upstream 2026.9.10 and main 27b9de33 answer
+    /// P(1, 1) to every row.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, as row C3 does.
+    [Test]
+    [Arguments(@"\X(?<!a)|c", "a")]
+    [Arguments(@"(?:\X){d<=1}(?<!a)|c", "a")]
+    [Arguments(@"\X(?<![a\r])|c", "\r")]
+    public void A_search_reports_the_start_whose_cluster_text_to_come_can_extend(string pattern, string text)
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
+    }
+
+    /// <summary>
     /// The reversed twin of row C3's CR case: an LF at the left edge can be joined by a CR to come.
     /// </summary>
     /// <remarks>
