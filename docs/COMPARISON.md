@@ -1138,7 +1138,7 @@ defines a partial as the answer to whether "a complete match could be possible i
 been truncated" - and its answer one character later agrees in practice, since `".ab"` is no match
 there too. PCRE2 refuses the partial on every one of these subjects.
 
-### A run-out of text inside a lookaround's body does not end a partial call with a partial
+### A run-out of text inside a lookaround's body no longer ends a partial call with a partial
 
 A partial match says that a longer text could complete the match. When a lookaround's body runs out
 of text, upstream ends the whole match with a partial, even when nothing that follows the lookaround
@@ -1193,7 +1193,7 @@ Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));   // (True, T
 
 There is no option to restore the upstream answer. Ledger entry 69.
 
-### `\b` over the empty text is a partial, and `\Z` at the edge is not
+### `\b` over the empty text is a partial, and `\Z` at the edge is false in a partial call's second pass
 
 With `partial: true`, `\b` over the empty text holds for any text to come that starts with a word
 character, so this port reports a partial; upstream answers no match. `\Z` holds only when no text
