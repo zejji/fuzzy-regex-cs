@@ -434,9 +434,18 @@ completion is the worse error; the phantoms are D19's to remove).
   failure. Every complete match there is the first pass's (A1), so nothing is lost. Witnesses
   (`A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text`, 3 rows, red on step 1 alone):
   `(?:.\b)+` fullmatch 'a ' and '1,' P(0, 2), `(?r)(?:\b.)+` ' a' P(0, 2). The run-out rule's
-  part: `A_greedy_repeat_body_run_out_in_a_lookaround_goes_on_after_it` (2 rows, None), red when
-  the arm answers the partial at once (plant 1 moved 26 rows of the small grids away). Assert A15:
-  only a partial call's second pass gets a PARTIAL there.
+  part: `A_greedy_repeat_body_run_out_in_a_lookaround_goes_on_after_it` (3 rows, None): the first
+  two go red when the arm answers the partial at once (that plant moved 59 rows of 21,685 in the
+  witness, repeat, lazy and chunk-10 grids away); the third, `(?!(?:.\b|.){1,3}b)` match 'ab', goes
+  red without the count put back (no row of those grids moved; a 22,197-row targeted grid of
+  bounded repeats over alternations inside lookarounds moved 122 away). Assert A15: only a partial
+  call's second pass gets a PARTIAL there.
+- **Performance** (Release, `DOTNET_TieredCompilation=0`, medians of 9 batches over 3 alternating
+  runs, 6d059c83 against the fix; machine shared with other agents' oracle runs): calls without
+  partial over 20 KB of mixed text, `.*?\.` 1.001, `\w+?\b` 0.989, `[a-z]{1,8}?[^a-z]` 0.974,
+  `(?:\w\b|\W)+` 0.993, `(?:wo)+rd` 0.979, `\X` 0.998; partial calls over the 17,767 lazy and
+  repeat grid rows whose answer did not change 0.984. The added test runs only when a lazy
+  repeat's count reaches the text held, and the greedy change only on a PARTIAL status.
 - **Step 3, grids** (MAXW 2; before = 6d059c83, after = both steps; Debug except the full grid's
   answers, which are Release and Debug alike):
 
@@ -484,7 +493,11 @@ completion is the worse error; the phantoms are D19's to remove).
     (a consonant to come, GB9c) and `(?:.\b)+` fullmatch 'a ' ('b' to come) answer None upstream
     (2026.9.10) and P(0, 2) here, the port judge's answer. Pinned by the two
     `PartialEdgeReadTests` above; the oracle's pre-D11 ablation keeps upstream's bounds.
-- **Status (07:00)**: both steps built; code commit waits on the Debug ratchet (queued behind
-  another agent's oracle run on the test lock since 06:31). **Next:** ratchet Debug and Release,
-  oracle three seeds, doc examples, perf (`.scratch/ro/perf11.cs`, Release, tiering off), commit,
-  then stop for the blind review of round 3 + chunk 10 + this step.
+- **Step 4, checks** (code 5b4f52d2 plus the count witness row): ratchet GREEN in Debug (8,253)
+  and Release (8,171 passing, the rest the Debug-only counter skips). Doc examples: all ok.
+  Oracle, Release, each seed alone under the test lock: seed 7 GREEN (agree 7387, expected 185,
+  timeout 2, resource 4, undefined 2, diverge 0 of 7580), seed 4242 GREEN (agree 7399, expected
+  176, resource 5, diverge 0), seed 20260927 GREEN (agree 7390, expected 186, resource 4, diverge
+  0). Performance above, no path slower. **Next:** the blind review of fix round 3 + chunk 10 +
+  this step together; then chunk 11. Open, for the review: the two pre-existing lookaround
+  phantoms found in step 3 (a PARTIAL returned past the run-out rule).

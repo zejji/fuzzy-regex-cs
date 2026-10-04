@@ -594,11 +594,14 @@ public sealed class PartialEdgeReadTests
     /// matching goes on after the lookaround, where <c>(*FAIL)</c> fails for every continuation and
     /// a fullmatch's end needs the text to end. The port's judge (its non-partial call over the
     /// continuations of up to two characters) answers None to both (2026-10-04); answering the
-    /// partial at once gave P(0, 2).
+    /// partial at once gave P(0, 2). The last row is the witness for putting the repeat's count back
+    /// before the run-out, where backtracking can re-enter the body through its other branch: without
+    /// it the row answered P(0, 2) (122 rows of a 22,197-row targeted grid moved away).
     /// </summary>
     [Test]
     [Arguments("match", @"(?=(?:.\b)+)(*FAIL)", "a ")]
     [Arguments("fullmatch", @"(?=((?:a(?=.))*))", "aa")]
+    [Arguments("match", @"(?!(?:.\b|.){1,3}b)", "ab")]
     public void A_greedy_repeat_body_run_out_in_a_lookaround_goes_on_after_it(
         string operation,
         string pattern,
