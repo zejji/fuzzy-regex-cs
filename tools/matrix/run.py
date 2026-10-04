@@ -331,6 +331,10 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C4"] = ("n/a", "", None, None)
     elif not answered(base):
         out["C4"] = ("n/a", "base unanswered", base, pj)
+    elif pj is not None and not re.match(r"[FP]\(|None$", pj):
+        # The judge ran out of budget or crashed (ERR RowBudget, ERR Timeout, ASSERT, EXC): no
+        # verdict, so the row cannot pass (review R1, 2026-10-04).
+        out["C4"] = ("n/a", "judge unanswered", base, pj)
     else:
         ans = verdict(base)
         kind = "ok"
@@ -353,12 +357,14 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         # How long a continuation the port judge tried: 3 characters, or up to 8 for a row the
         # port answers with a match and nothing shorter completes (port-runner.cs, `judgeBound`).
         # A phantom is "no completion up to N characters", a lower bound, so it names its N.
-        bound = port.get("judgeBound")
+        bound = port.get("judgeBound", "unknown")
         judges = f"port judge {pj} (continuations up to {bound}); upstream judge {uj}"
         if kind == "ok":
             out["C4"] = ("pass", "", ans, judges)
         elif kind == "phantom":
-            out["C4"] = ("phantom", f"phantom (no completion up to {bound} characters)", ans, judges)
+            # The kind stays "phantom"; the bound is in the detail field, so the witness list does
+            # not split by bound.
+            out["C4"] = ("phantom", "phantom", ans, judges)
         else:
             out["C4"] = ("fail", kind, ans, judges)
     # C5: memo off and memo on from the first call answer as the default does.
@@ -469,7 +475,7 @@ def judge(out: Path, constructs: dict) -> None:
             for check, (status, kind, mine, other) in verdicts.items():
                 totals[check][status] += 1
                 if status == "phantom":
-                    phantom_kinds[kind] += 1
+                    phantom_kinds[re.search(r"continuations up to (\w+)", other).group(1)] += 1
                 for c in covered:
                     table[(gen.cell_name(c), check)][status] += 1
                 if check == "C7":
@@ -514,7 +520,7 @@ def judge(out: Path, constructs: dict) -> None:
         lines_.append(f"| {check} | {applicable} | {t['n/a']} | {t['fail']} | {t['expected']} | {t['phantom']} | {failing_cells} |")
     if phantom_kinds:
         lines_ += ["", "C4 phantoms by the longest continuation checked (each a lower bound): "
-                   + ", ".join(f"{n} {k.removeprefix('phantom (').rstrip(')')}"
+                   + ", ".join(f"{n} up to {k} characters"
                                for k, n in sorted(phantom_kinds.items())) + "."]
     lines_ += ["", "Smallest failing row per check and kind (raw, not triaged):", ""]
     for (check, kind), (_, row, mine, other) in sorted(witness.items()):

@@ -32,6 +32,7 @@
 // callmemokey (the failed-call memo's key without the position, on `on` only),
 // d52 (a conditional's test compiled with the section's fuzziness, ledger entry 64) and d54 (a
 // failed negative test's captures dropped, ledger entry 65), each on every variant but `wo`.
+// d37 and callfeatures also turn D52 and D54 on, as the oracle's named ablations do (OracleComparer.cs `namedAblation`).
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -112,7 +113,10 @@ try
 }
 catch (MatrixRunner.AssertFailedException) { }
 
-var timeout = TimeSpan.FromSeconds(2);
+// MATRIX_TIMEOUT_MS shrinks the per-match timeout, to force the deep judge's out-of-budget path.
+var timeout = TimeSpan.FromMilliseconds(
+    int.TryParse(Environment.GetEnvironmentVariable("MATRIX_TIMEOUT_MS"), out int timeoutMs) ? timeoutMs : 2000
+);
 const long StepCap = 20_000_000;
 const double RowBudgetSeconds = 20;
 const string Alphabet = "ab1א :\"\n";
@@ -222,7 +226,12 @@ FuzzyRegex Compile(string pattern, string variant)
                 false,
                 d37,
                 callFeatures,
-                ablate == "d52" && variant != "wo", // upstreamFuzzyConditionTest (ledger entry 64)
+                // upstreamFuzzyConditionTest (ledger entry 64): its own ablation, and every named
+                // ablation the runner mirrors (OracleComparer's `namedAblation`, which also covers
+                // the pinned variants this runner leaves as they were).
+                (ablate == "d52" && variant != "wo")
+                    || d37
+                    || callFeatures,
                 callFeatures, // upstreamCallCopies: OracleComparer.RunWithTheUpstreamCallFeatures sets both
             ]
         )!;
@@ -236,7 +245,9 @@ FuzzyRegex Compile(string pattern, string variant)
     }
     if (callFeatures)
         minWidth.SetValue(pobj, upstreamMinWidth.GetValue(pobj));
-    if (ablate == "d54" && variant != "wo")
+    // Entry 65, as `upstreamFuzzyConditionTest` above: its own ablation, d37 and callFeatures
+    // (OracleComparer.cs: DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation).
+    if ((ablate == "d54" && variant != "wo") || d37 || callFeatures)
         dropNegativeTestCaptures.SetValue(pobj, true);
     if (Array.IndexOf(pinned, variant) >= 0)
     {
@@ -370,6 +381,10 @@ string Judge(string pattern, string t, string op, string baseAnswer)
                 if (length == JudgeShortLength + 1)
                     deepClock.Restart();
             }
+            // In a search the deep phase reports the least start for the SHORTEST length that
+            // completes, not the least over all lengths (a longer continuation can start earlier),
+            // and if the budget runs out part-way through that length after a hit, `best` comes from
+            // a partly searched length. A deep-phase P is therefore a bounded verdict (see judgeBound).
             bool outOfTime = false;
             foreach (string w in Words(alpha, length))
             {
@@ -382,7 +397,18 @@ string Judge(string pattern, string t, string op, string baseAnswer)
                     return "ERR RowBudget";
                 Capped();
                 string text = reverse ? w + t : t + w;
-                Match c = Run(text);
+                Match c;
+                try
+                {
+                    c = Run(text);
+                }
+                catch (Exception e) when (length > JudgeShortLength && RanOutOfBudget(e))
+                {
+                    // A timeout or step cap in the deep phase is the budget running out: stop, and
+                    // keep judgeBound at the last length searched in full.
+                    outOfTime = true;
+                    break;
+                }
                 if (!c.Success)
                     continue;
                 found = true;
@@ -453,10 +479,18 @@ string LeftmostLive(FuzzyRegex regex, string t, bool reverse, char[] alpha, bool
                         return short_ ? "ERR RowBudget" : "";
                     Capped();
                     string text = t + w;
-                    Match m =
-                        s == t.Length
-                            ? regex.Match(text, s, text.Length - s, timeout: timeout)
-                            : regex.MatchAtStart(text, s, text.Length - s, timeout: timeout);
+                    Match m;
+                    try
+                    {
+                        m =
+                            s == t.Length
+                                ? regex.Match(text, s, text.Length - s, timeout: timeout)
+                                : regex.MatchAtStart(text, s, text.Length - s, timeout: timeout);
+                    }
+                    catch (Exception e) when (!short_ && RanOutOfBudget(e))
+                    {
+                        return "";
+                    }
                     if (m.Success)
                         return $"P({s},{t.Length})";
                 }
@@ -469,10 +503,18 @@ string LeftmostLive(FuzzyRegex regex, string t, bool reverse, char[] alpha, bool
                     return short_ ? "ERR RowBudget" : "";
                 Capped();
                 string text = w + t;
-                Match m =
-                    e == 0
-                        ? regex.Match(text, 0, w.Length, timeout: timeout)
-                        : regex.MatchAtStart(text, 0, w.Length + e, timeout: timeout);
+                Match m;
+                try
+                {
+                    m =
+                        e == 0
+                            ? regex.Match(text, 0, w.Length, timeout: timeout)
+                            : regex.MatchAtStart(text, 0, w.Length + e, timeout: timeout);
+                }
+                catch (Exception ex) when (!short_ && RanOutOfBudget(ex))
+                {
+                    return "";
+                }
                 if (m.Success)
                     return $"P(0,{e})";
             }
@@ -497,6 +539,10 @@ static IEnumerable<string> Words(char[] alpha, int length)
             yield break;
     }
 }
+
+// A per-match timeout or the step cap: in the deep judge, the budget running out (R1, review 2026-10-04).
+static bool RanOutOfBudget(Exception e) =>
+    e is System.Text.RegularExpressions.RegexMatchTimeoutException || e.GetType().Name == "StepLimitReachedException";
 
 void Capped() => stepLimit.SetValue(null, (long)steps.GetValue(null)! + StepCap);
 
