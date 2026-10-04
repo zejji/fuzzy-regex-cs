@@ -897,3 +897,21 @@ alternative), not limit C2. Fix: keep the error alternatives at the string's run
 
 **Stack budget:** the per-step ceiling is in the code comment now (a step pushes a frame's
 captures, repeats and fuzzy state; the budget fires first while a step is under 1 MB).
+
+**P5 and merge prep.** Local main bb17c198 merged (the register only, clean). Parity baseline
+regenerated with `-UpdateBaseline` (8,181 ids, no removals; it now holds the stack-budget test and
+the P1/P4 tests), CRLF normalised. Ratchet GREEN in Debug (8,289) and Release (8,207 passing, the
+rest the Debug-only skips); doc examples all ok; oracle seed 7 GREEN (agree 7387, expected 185,
+timeout 2, resource 4, undefined 2, diverge 0 of 7580).
+
+**Benchmarks after the stack budget and P1** (Release, tiering off, median of 5 calls; against
+5a660a48, 3 alternating runs): every call-free row 0.99-1.05, every f9b67f9 partial row 0.93-1.02,
+section 9's plain positive rows 0.93-1.00; X2 and the atomic-alternation row as in the P1 table.
+The call-free worst row against main, `(?:a(*PRUNE)b|ab)+` (1.10 before), re-measured in six
+alternating runs against main bb17c198: medians 5.64 / 5.35 ms (1.055), ranges 5.35-6.94 and
+4.60-5.96, overlapping; the other call-free rows 0.96-1.02. What a call without partial runs that
+main does not is one `WMarks.Count` test per verb (the PRUNE arm's `state.WMarks.Count == 0 ||`,
+`Matcher.cs`, the forward `Opcode.Prune` case), per atomic, lookaround and conditional backtrack
+arm, and one `PartialSide` test per 256 steps at the cancellation gate (`SecondPassStackIsOverBudget`);
+`SkipABlockedVerb` and everything after it run only with a mark, which only a second pass makes.
+So the 1.10 was run-to-run spread on a 5 ms row, not a path that pays.
