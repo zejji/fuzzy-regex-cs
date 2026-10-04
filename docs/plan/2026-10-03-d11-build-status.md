@@ -410,3 +410,57 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   diverge 0), seed 20260927 GREEN (agree 7390, expected 186, resource 4, diverge 0). Performance
   as in step 5. **Next:** the blind review of this round; then the decision on the two run-out
   bounds found in step 5 (lazy repeat, greedy repeat end), then chunk 11.
+
+## The two run-out misses, decision (a) (2026-10-04, brief `brief-d11-runout-fixes-2026-10-04.md`)
+
+Owner decision: fix both and accept the extra limit-C2 phantoms (ledger-21 ruling: a refused
+completion is the worse error; the phantoms are D19's to remove).
+
+- **Step 1, the lazy repeat** (Matcher.cs, LAZY_REPEAT_ONE's backtracking arm). The arm now keeps
+  its entry when the count has reached the text held but not the repeat's maximum and the next
+  character lies in the text to come (`RunsOutPast`; false under the oracle's pre-D11 ablation), so
+  the next try runs out there. Witnesses, red before and green after
+  (`PartialEdgeReadTests.A_lazy_repeat_that_reaches_the_edge_by_backtracking_runs_out`, 4 rows):
+  `.*?(?<=c)` match 'aa' P(0, 2), `.{0,3}?(?<=c)` 'aa' P(0, 2), `(?r)\X` fullmatch '्क' P(0, 2),
+  `(?r)(?=c).*?` match 'aa' P(0, 2); upstream None to all four. Plant-outs: without the maximum
+  clause the control `.{0,2}?(?<=c)` 'aa' goes red; without the reversed half the two reversed rows
+  go red. Assert A14: the try past the edge runs out (without `RunsOutRight` in `RunsOutPast` a
+  call without partial would keep a dead entry and fire it). The pinned seed-7 row
+  `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` moves from None/P(4, 4) to P(0, 4) on both doors, a C2 phantom
+  (judge None), and is re-pinned as such.
+- **Step 2, the greedy repeat's end** (END_GREEDY_REPEAT, upstream :12575). In the second pass a
+  body's run-out at the end of the text now goes through the run-out rule instead of becoming a
+  failure (the count goes back first, as on the failure path); the ablation keeps upstream's
+  failure. Every complete match there is the first pass's (A1), so nothing is lost. Witnesses
+  (`A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text`, 3 rows, red on step 1 alone):
+  `(?:.\b)+` fullmatch 'a ' and '1,' P(0, 2), `(?r)(?:\b.)+` ' a' P(0, 2). The run-out rule's
+  part: `A_greedy_repeat_body_run_out_in_a_lookaround_goes_on_after_it` (2 rows, None), red when
+  the arm answers the partial at once (plant 1 moved 26 rows of the small grids away). Assert A15:
+  only a partial call's second pass gets a PARTIAL there.
+- **Step 3, grids** (MAXW 2; before = 6d059c83, after = both steps; Debug except the full grid's
+  answers, which are Release and Debug alike):
+
+  | grid | rows | onto judge | away | other | misses before -> after |
+  |---|---|---|---|---|---|
+  | lazy | 13,650 | 382 | 410 | 64 | 332 -> 0 |
+  | repeat | 5,000 | 2 | 25 | 0 | 2 -> 0 |
+  | chunk 10 (Debug) | 3,020 | 1 | 4 | 5 | 1 -> 0 |
+  | full (Release) | 51,648 | 62 | 137 | 42 | 51 -> 0 |
+
+  Every away and other row is limit C2 by tool (`.scratch/ro/classify.py`): its answer is a
+  partial that a run-out outside any body answered (new Debug event `RunOutAnswered`: the rest of
+  the pattern is presumed) and one of the two mechanisms fired (`LazyRepeatPastTheEdge`,
+  `GreedyBodyRunOutKept`); 0 unclassified. The "other" rows are earlier search starts (for example
+  `(?r)(?=bc)[ab]+?` search 'ab' P(0, 2), judge P(0, 0)), C2 at a phantom start. Spot-checked by
+  hand: `(?:ab)*(?<=c)` search 'ab' (P(0, 2): `(?<=c)` never follows `(?:ab)*`), `(?:\w\B)*`
+  fullmatch 'a'. Rule 11, rows where each mechanism fired, all grids: lazy past the edge 1,561
+  (forward 831, reversed 730; match, fullmatch and search each over 190), 19 of them inside a body;
+  greedy run-out kept 232 (reversed 15), 112 inside a body. Asserts: 0 rows.
+- **Found here, not fixed (pre-existing, upstream shares it)**: `(?=(?:ab)+$)(*FAIL)` and
+  `(?=(?:ab)+?$)(*FAIL)` match 'ab' answer P(0, 2), judge None, upstream P(0, 2); no run-out
+  event fires, so a PARTIAL reaches the caller past the run-out rule by another `return` (D69's
+  class). Also `(?=(?:.\b)+?$)(*FAIL)` 'a ' P(0, 2), judge and upstream None: END_LAZY_REPEAT's
+  body try returns a PARTIAL directly (`return bodyStatus`).
+- **Status (06:55)**: both steps built and committed as WIP once the Debug ratchet (waiting behind
+  another agent's test lock since 06:31) passes. **Next:** ratchet Debug and Release, oracle three
+  seeds, doc examples, perf (`.scratch/ro/perf11.cs`, Release, tiering off), then step 5's texts.
