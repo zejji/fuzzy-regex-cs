@@ -285,3 +285,16 @@ Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
   other agents' jobs. A call without partial runs no changed code (every change sits behind the
   second pass's run-out tests or the dedup's `Count != 0`). X1 and S4 as in step 4.
   **Next:** the round's review; the X1 target decision (options in step 4).
+
+## Fix round 3 and chunk 10 (2026-10-04, brief `brief-d11-round3-chunk10-2026-10-04.md`)
+
+Review answered: `.claude/driver/review-d11-fixround2-2026-10-04.md`. Owner decision: X1's linear
+cost (366 ms at n = 1000) is accepted until the performance phase (register D71).
+
+- **Step 1, L1**: `MatchState.DedupEntriesExamined` now counts in every build (it was `#if DEBUG`,
+  so CI's Release ratchet read 0 and the bound held for nothing), and
+  `PartialForkBudgetTests.The_dedup_examines_a_bounded_number_of_entries_per_fork` asks for a count
+  in 1..821,248, so a count that stopped being kept fails too. A structural count, not a wall bound
+  (D13). The count runs only in the dedup, which only a partial call's second pass reaches. Witness,
+  Release: with the old whole-list scans planted back (look-up and drop), the test reads
+  160,662,327 and fails; with the fix it passes. Ratchet (Debug) GREEN, 8,215.

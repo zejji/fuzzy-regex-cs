@@ -149,8 +149,9 @@ public sealed class PartialForkBudgetTests
     /// frame, so up to n entries are live at once, and the dedup scanned all of them at every
     /// look-up and every drop. The call ran in time quadratic in n up to the budget (2.5 s at
     /// n = 1000, Release, 2026-10-03; a profile put 72% of it in those scans). Kept in frame order,
-    /// a look-up reads only its own frame's entries and a drop only the entries it drops. Debug
-    /// builds count the entries examined; Release counts none.
+    /// a look-up reads only its own frame's entries and a drop only the entries it drops. The count
+    /// is kept in every build, and the test asks for a non-zero count as well, so it cannot pass
+    /// for nothing in the Release suite CI runs (review L1, 2026-10-04: the count was Debug-only).
     /// </summary>
     [Test]
     public void The_dedup_examines_a_bounded_number_of_entries_per_fork()
@@ -172,6 +173,6 @@ public sealed class PartialForkBudgetTests
 
         _ = Matcher.DoMatch(state, search: false);
 
-        state.DedupEntriesExamined.Should().BeLessThanOrEqualTo(8L * 256 * (n + 1));
+        state.DedupEntriesExamined.Should().BeInRange(1, 8L * 256 * (n + 1));
     }
 }

@@ -443,9 +443,11 @@ internal sealed class MatchState : IDisposable
 #endif
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11, Debug only: how many dedup entries (<see cref="LookaroundSuccesses"/>)
-    /// the dedup's look-ups and drops have examined in this call, so that a test can show the work
-    /// grows with the entries made, not with their product (row X1).
+    /// NOT UPSTREAM'S, D11: how many dedup entries (<see cref="LookaroundSuccesses"/>) the dedup's
+    /// look-ups and drops have examined in this call, so that a test can show the work grows with
+    /// the entries made, not with their product (row X1). Counted in every build, so the test's
+    /// bound is live in the Release suite CI runs (review L1, 2026-10-04); the dedup runs only in a
+    /// partial call's second pass, so no other call pays for the count.
     /// </summary>
     internal long DedupEntriesExamined;
 
@@ -1211,8 +1213,8 @@ internal sealed class MatchState : IDisposable
         HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
-        DedupEntriesExamined = 0;
 #endif
+        DedupEntriesExamined = 0;
         Sstack.Reset();
         SetBstackCount(0);
         Pstack.Reset();
@@ -1655,9 +1657,7 @@ internal sealed class MatchState : IDisposable
         int at = LookaroundSuccesses.Count;
         while (at > 0 && LookaroundSuccesses[at - 1].Frame > success.Frame)
         {
-#if DEBUG
             DedupEntriesExamined++;
-#endif
             at--;
         }
 
@@ -1679,9 +1679,7 @@ internal sealed class MatchState : IDisposable
     {
         for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
         {
-#if DEBUG
             DedupEntriesExamined++;
-#endif
             if (success.SameContinuation(LookaroundSuccesses[i]))
             {
                 return true;
@@ -1706,9 +1704,7 @@ internal sealed class MatchState : IDisposable
         int keep = LookaroundSuccesses.Count;
         while (keep > 0 && LookaroundSuccesses[keep - 1].Frame >= position)
         {
-#if DEBUG
             DedupEntriesExamined++;
-#endif
             keep--;
         }
 
