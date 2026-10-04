@@ -573,6 +573,49 @@ public sealed class PartialLookaroundRuleTests
         Run("match", pattern, text).Success.Should().BeFalse();
 
     /// <summary>
+    /// A positive lookahead whose outcome feeds a decision: its body's repeat runs out at the edge,
+    /// and the tail's success on the held text then decides it, so the decision around it is taken
+    /// for every continuation. Around it: a negative lookahead, a condition, an atomic group, a
+    /// `(*PRUNE)` after it, and, from main's own phantoms, a branch and a one-character repeat. No
+    /// row has a completion (the port's non-partial judge over continuations of up to three
+    /// characters, 2026-10-04). Before, the run-out's blocked success came first, the decided
+    /// success was taken as a repeat of it (the dedup), and the enclosing decision stayed open:
+    /// P(0, 2) on the first five rows, where main and upstream answer None (the 2026-10-04
+    /// pre-merge review, P1), and P on the last four, as on main and upstream.
+    /// </summary>
+    /// <remarks>
+    /// Three parts, each planted out (Debug): without the alternatives kept in a positive body that
+    /// feeds a decision (<c>Matcher.RunOutFeedsADecision</c>) the condition row goes red; without
+    /// the decided end (<c>Matcher.EndALookaroundInTheSecondPass</c>) the negative, atomic and
+    /// branch rows; without the later verb acting (<c>Matcher.ActingEndsTheScopeAsTheSkippedVerbDid</c>)
+    /// the `(*PRUNE)` row.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the last four rows, where regex 2026.9.10 answers the partial.
+    [Test]
+    [Arguments(@"(?!(?=(?:ab)*(?<=b)))ab", "ab")]
+    [Arguments(@"(?!(?=(?:ab)*(?<=b)))", "ab")]
+    [Arguments(@"(?(?=(?:ab)*(?<=b))x|ab)", "ab")]
+    [Arguments(@"(?>(?=(?:ab)*(?<=b))|ab)x", "ab")]
+    [Arguments(@"(?=(?:ab)*(?<=b))(*PRUNE)x|ab", "ab")]
+    [Arguments(@"(?!(?=ab|a))a", "a")]
+    [Arguments(@"(?(?=ab|a)x|a)", "a")]
+    [Arguments(@"a(?!(?=b*(?<=b)))b", "ab")]
+    [Arguments(@"(?!(?=[ab]*(?<=b)))ab", "ab")]
+    public void A_positive_lookahead_decided_on_the_held_text_decides_what_encloses_it(string pattern, string text) =>
+        Run("match", pattern, text).Success.Should().BeFalse();
+
+    /// <summary>
+    /// D11-R1: a repeat's test that runs out inside a lookahead's body goes through the run-out
+    /// rule, so matching goes on after the lookahead, where <c>[xy]</c> fails on 'a' for every
+    /// continuation. The test returned the partial at once before the repeat run-out rule; main
+    /// and upstream answer P(0, 2).
+    /// </summary>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers P(0, 2).
+    [Test]
+    public void A_repeat_test_that_runs_out_in_a_lookahead_does_not_answer_for_what_follows() =>
+        Run("match", @"(?=(?:(a))*b)[xy]", "aa").Success.Should().BeFalse();
+
+    /// <summary>
     /// The sound side of the rule's limit: an atomic group around the repeat commits to the run-out's
     /// longer path in the continuations where it exists, so the held text's success after it is not
     /// certain, and the lookahead stays undetermined. Here 'ab' + 'ab' completes the match: the

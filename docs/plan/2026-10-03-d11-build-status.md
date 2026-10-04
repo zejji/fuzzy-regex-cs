@@ -513,20 +513,18 @@ never a `return`. Inside a lookaround body the run-out goes on at the body's end
 a blocked end backtracks into the body, so the kept alternatives are tried and a success of one on
 the held text decides the construct (design 4.2's blocked-end rule, unchanged); outside every body
 the run-out answers the partial as before and the entries go with the attempt. The alternatives
-are kept only where the run-out goes on in a negative body (a negative lookaround or a negative
-condition test, `RunOutIsInANegativeBody`): in a positive body every continuation after a kept
-alternative's success is one the run-out's own continuation already covers (the position goes back
-either way, a capture the body can still set is unknown in a pattern that reads captures, and the
-run-out closes the body's fuzzy section with the errors made so far), so there they only cost
-time (`(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' 3.5 times slower, X2 13 times, with no answer
-changed on any grid but 3 port-grid rows that gained the D38 `Held` precision of a positive test).
+are kept only where the run-out goes on in a body whose outcome feeds a decision
+(`RunOutFeedsADecision`, widened by the pre-merge fixes below; this paragraph first said "a negative
+body", and its claim that a positive body's kept alternatives "only cost time" was wrong: see the
+pre-merge fixes, P1).
 
 F1, item 7 and S1 are this one cause: an arm that answered the partial at once (`return`), or went
 to `runOut` with its other alternatives dropped (END_GREEDY_REPEAT's body since 5b4f52d2,
 GREEDY_REPEAT_ONE's count at the edge, the BRANCH test), so a negative body's definite success
-was never tried. The run-out keeps its place as the first thing tried rather than the last: the
-blocked-end rule already explores everything below a run-out, so the order changes no answer set,
-and running out first keeps upstream's order (and so its answers and captures) outside bodies. The
+was never tried. The run-out keeps its place as the first thing tried rather than the last, which
+keeps upstream's order (and so its answers and captures) outside bodies. (This first said the order
+changes no answer set; it does, for a positive lookaround whose kept success came after a blocked
+one: the dedup took it for a repeat. The pre-merge fixes' decided end corrects that.) The
 reverse order (definite alternatives first, the run-out as a deferred entry) was weighed and not
 taken: a definite alternative tried first reaches the cuts of constructs between the repeat and the
 lookaround before the run-out has marked anything, so an atomic group would commit and discard the
@@ -677,10 +675,15 @@ from a partial call, else (a).
   the text to come three-valued (M1), marks paths that read it and blocks the cuts and decisions
   that depend on them (M2), turns a second-pass success into the partial (M3) and bounds its forks
   (M4); a run-out inside a lookaround body goes on after the body, and a choice point keeps its
-  other alternatives before a run-out in a negative body (the repeat run-out rule, 2026-10-04).
+  other alternatives before a run-out in a body whose outcome feeds a decision (the repeat
+  run-out rule, 2026-10-04, and the pre-merge fixes).
   Port grid of design 8.1 (90,011 rows, three seeds, Debug): misses 0 / 0 / 1 against main's
   537 / 490 / 559, the one pre-existing (D73 below); every row that moved away from the judge is
-  limit C2 (879, D19), C3 (478, D18) or C4 (10, D18). Limits left: C2 is D19; C3, C4 and C5 are
+  one of the limit classes, after the pre-merge fixes and by cause (P2 below): 1,359 rows
+  away from the judge, 435 labelled by cause alone (C2 by a mechanism 15, C2 with nothing blocked in
+  the call 349, C3 with nothing blocked 71), the other 924 by their events (C2 in or after a body
+  592, C2 after a blocked construct 187, C3 after a blocked construct 137, C4 8), none of them P1's
+  shape (forcing every body to keep its alternatives moves none). Limits left: C2 is D19; C3, C4 and C5 are
   D18. Limit C2 is reachable through a cluster and a trailing insertion (chunk 4's `\X` read and
   RC5: 236 rows of B1's 8,820-row family grid, such as `(?:ab){i<=1}(*FAIL)` match 'ab' P(0, 2));
   upstream shares C2 for greedy repeats, not for these. The two run-out misses of fix round 3 are
@@ -699,7 +702,7 @@ from a partial call, else (a).
   every one C2 by the causal label; the pinned `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` is P(0, 4)); and
   inside a lookahead's body, `(?!(?:ab)*+(?<=b))ab` and `(?!(?>(?:ab)*)(?<=b))ab` match 'ab' and
   search `(?!(?:ab)*(?<=b))ab` 'ab' (`OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body`)."
-- *D18, add:* the 478 C3 and 10 C4 rows of the 8.1 port grid (`.scratch/d11rr/away?.txt` until merged).
+- *D18, add:* the port grid's C3 and C4 rows by cause (P2 below: 71 + 137 C3, 8 C4).
 - *New, D73:* "Partial search from inside the text to come with a reversed `(*SKIP)`: search
   `(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))` over '' answers None (main and the D11 branch;
   upstream 2026.9.10 None) where '\n' before it completes the match at (0, 0). Found by D11's 8.1
@@ -793,3 +796,104 @@ at once). The partial call's time is now bounded by the budget too (about 0.4 s 
 Release (8,197 passing); oracle seed 7 GREEN (agree 7387, expected 185, timeout 2, resource 4,
 undefined 2, diverge 0 of 7580). A call without partial pays one test of `PartialSide` every 256
 steps.
+
+## Pre-merge fixes (2026-10-04, brief `brief-d11-premerge-fixes-2026-10-04.md`)
+
+Review answered: `.claude/driver/review-d11-premerge-2026-10-04.md` (P1-P5).
+
+**P1, the decision.** The review's rows are positive lookaheads whose outcome a decision reads (a
+negative lookahead, a condition, an atomic group or a verb around or after them). Two things went
+wrong: the alternatives were not kept there, and when they were (the review's plant) the kept
+success came after the run-out's blocked one, so the dedup took it for a repeat and cut and failed;
+a third, the verb case, was a verb taint left by the blocked path's skipped `(*PRUNE)` that stopped
+the decided path's `(*PRUNE)` from acting. Option (i) of the brief, built in three parts:
+
+1. **Scope** (`RunOutFeedsADecision`, replacing `RunOutIsInANegativeBody`): keep the alternatives
+   when the innermost body is negative or a condition's test, or a positive lookaround with a verb
+   anywhere in the pattern or an atomic group, a condition's test or a negative lookaround open
+   around it. Asked from `Pstack` at the run-out, O(depth); a plain positive lookahead keeps nothing.
+2. **The decided end** (`EndALookaroundInTheSecondPass`): a positive lookaround or test whose end
+   is not blocked, whose frame carries a cut taint from an earlier blocked success, and whose
+   success leaves the same state for every continuation (no capture read while matching; nothing
+   fuzzy, or the lookaround outside every fuzzy section) removes its own taint and cuts, before the
+   dedup. Argument: the success read nothing of the text to come, so the construct succeeds for
+   every continuation; only the position matters after it, and it goes back to the start; the
+   dedup's premise (a later success carries no fewer marks) is false here. New event
+   `DecidedAfterBlocked`.
+3. **A later verb acts** (`ActingEndsTheScopeAsTheSkippedVerbDid`): a verb whose path is not
+   blocked acts although an earlier verb of its scope was skipped, when acting ends the scope as the
+   skipped one would have: always for a construct's scope; for the attempt, when the skipped verb is
+   the same verb (`MatchState.SkippedAttemptVerb`: a `(*SKIP)`'s position or -1 for `(*PRUNE)`).
+   In the continuations where the skipped verb acted the scope ended already; in the others this
+   one acts; both end the scope in the same state. The taint still blocks the scope's own decision
+   (Q1, T2).
+
+Cost, on paper and measured (Release, tiering off, median of 3; n = 1000):
+
+| part | cost per event | worst row | rule | 5a660a48 | the first pass, completed text |
+|---|---|---|---|---|---|
+| scope | O(depth) walk at a run-out; the kept alternatives are the first pass's own at that choice point | X2 `(?:(?(?=.*z)a\|a))*b` over 'a' * n + 'c' | 47.7 ms | 3.5 ms | 50.4 ms ('a' * n + 'b', where `.*z` retreats in full) |
+| scope | as above | `(?:(?>a(?=.*z)\|ab))*c` over 'ab' * 1000 | 14.8 ms | 6.2 ms | - |
+| decided end | O(marks above the frame), once per end; cuts, so it removes work | - | - | - | - |
+| verb | O(1) | - | - | - | - |
+
+X2 grows as n^2 in both passes (n = 500 / 1000 / 2000: 13.0 / 49.2 / 201 ms; first pass over
+'a' * n + 'b' 12.0 / 50.4 / 194 ms): the second pass now costs what the first pass costs over a
+completed text in which the test fails, which is the design's criterion; 5a660a48 was cheaper only
+because it dropped the alternatives a condition's test needs. Section 9's plain positive rows pay
+nothing (`(?:(?=.*z)a)*b` 0.95, its `|` twin 0.93, S4 0.99, X1 1.00, `(?=(?:a*)*b)` 0.93 against
+5a660a48). Adversary: lookarounds nested d deep, each feeding a decision, cost the first pass's
+O(n^(d + 1)) over the completed text; the stack budget bounds their memory.
+
+Witnesses (red at 5a660a48, green now):
+`PartialLookaroundRuleTests.A_positive_lookahead_decided_on_the_held_text_decides_what_encloses_it`
+(9 rows: the review's negative, condition, atomic and `(*PRUNE)` rows, and main's own four
+phantoms `(?!(?=ab|a))a`, `(?(?=ab|a)x|a)`, `a(?!(?=b*(?<=b)))b`, `(?!(?=[ab]*(?<=b)))ab`).
+Plant-outs (Debug, its rows): the positive keep out, 7 red; the condition clause back to negative
+tests only, the 2 condition rows; the decided end out, 7 red; the verb change out, the `(*PRUNE)`
+row. The `(*SKIP)` row `(?:(?=(?:ab)*(?<=b))(*SKIP)x|ab)` is None too (grid).
+
+Grids (Debug, MAXW 2): the review's targeted grid (5,760 rows: the four wrappers over the look
+grid's cores, five tails, 'a' / 'ab' / 'abab', match and search): rows main answers right and the
+branch wrong 153 -> 49, misses 0; 961 rows moved onto the judge against 5a660a48. The 49 are all
+possessive forms (`(?!(?=(?:ab)*+(?<=b)))ab`), F1's possessive class: the repeat's run-out inside
+the possessive group leaves the rest of the lookahead presumed (C2, D19), and main's None is
+upstream's failure at END_GREEDY_REPEAT, which refuses the sibling
+`(?!(?=(?:ab)*+(?<=^ab)))ab` over 'ab' (main None; the branch and the judge P(0, 2), 'ab' + 'ab').
+The look grid now has the five wrappers (`tools/probes/d11-runout-look-grid.py`, 56,160 rows): misses
+0; against main, 213 rows main answers right and the branch wrong, every one through decision
+(a)'s mechanisms (209 `GreedyBodyRunOutKept`, the F1 possessive and atomic forms among them; 4
+`LazyRepeatPastTheEdge`), the owner-accepted C2 class whose main answers come from upstream's
+bounds that refuse completions elsewhere (before the fuzzy widening of the decided end there were
+13 more, fuzzy, now 0). Port grid (90,011): misses 0 / 0 / 1 (D73), 69 rows onto the judge, 0
+away, 6 other (later phantom starts). Lazy, repeat and full grids: 0 moved. Fuzzy-in-body grids (fz2, fz3, and a new
+3,000-row fz4 with fuzzy sections after the lookahead): misses 0; fz4 against main 0 regressions,
+51 rows fixed.
+
+**P2.** `.scratch/d11pm/away2.py` labels a moved row only by cause: C2 by a mechanism
+(`RunOutAnsweredBy*`), C2 when a run-out outside every body answered and the call blocked nothing
+(no blocked cut or end, no undetermined negative, no condition both ways, no skipped verb, no
+run-out in a body), C3 when a second-pass success answered, the call read the text to come twice
+or more and blocked nothing. Port grid, the rule against main: 1,359 rows away from the judge;
+by cause C2-mech 15, C2 349, C3 71; the other 924 are listed (`.scratch/d11pm/away?.txt`) with
+their event classes: C2 in a body (357) or a body's run-out then an answering one (235), C2 after
+a blocked construct (187), C3 after a blocked construct (137), C4 (8). None has P1's shape:
+re-run with every body keeping its alternatives (and the decided end), 0 of the 924 moved. The
+review's hand checks stand: `(?r)\n\b` over '' is C3 (two reads of one character), and search
+`(?w)((?<=a)(?=(?1)?(?=a\B|))a.)` over '\n' is right on the port ('\n' + 'aab' completes it): the
+judge's horizon (MAXW 2) is too short, a judge limit, not a phantom. The closure text's counts are
+corrected above.
+
+**P3, for the register (owner), not built here:** "Partial, found by D11's pre-merge review,
+2026-10-04, the same on main and upstream: a fuzzy string's run-out at the edge is taken without
+its error alternatives, so a negative lookahead whose body matches the held text with an error is
+left undetermined: `(?!(?:abc){e<=1})ab` match 'ab' P(0, 2) (deleting 'c' matches 'ab', so no
+continuation completes it; judge None), also `{d<=1}`, `(?:abcd){e<=2}`, under `(?i) (?fi) (?b)
+(?e)`; 159 rows of a 3,900-row fuzzy-in-body grid. F1's class (a run-out that drops a definite
+alternative), not limit C2. Fix: keep the error alternatives at the string's run-out."
+
+**P4.** `PartialLookaroundRuleTests.A_repeat_test_that_runs_out_in_a_lookahead_does_not_answer_for_what_follows`:
+`(?=(?:(a))*b)[xy]` over 'aa' None; main bb17c198 answers P(0, 2) (probe), as does upstream.
+
+**Stack budget:** the per-step ceiling is in the code comment now (a step pushes a frame's
+captures, repeats and fuzzy state; the budget fires first while a step is under 1 MB).

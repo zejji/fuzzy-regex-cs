@@ -402,6 +402,21 @@ internal sealed class MatchState : IDisposable
     /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
     internal int ForkAttemptStart;
 
+    /// <summary>No verb whose scope is the attempt has been skipped (<see cref="SkippedAttemptVerb"/>).</summary>
+    internal const long NoSkippedVerb = long.MinValue;
+
+    /// <summary>Verbs of two kinds or positions were skipped (<see cref="SkippedAttemptVerb"/>).</summary>
+    internal const long SkippedVerbsDiffer = long.MaxValue;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: which verb whose scope is the attempt the second pass skipped in this
+    /// attempt: a <c>(*SKIP)</c>'s position, -1 for a <c>(*PRUNE)</c>, or one of the two constants.
+    /// A later verb of the attempt whose path is not blocked may act only when it is the same verb
+    /// (<c>Matcher.ActingEndsTheScopeAsTheSkippedVerbDid</c>): then the attempt ends as the skipped
+    /// one would have ended it.
+    /// </summary>
+    internal long SkippedAttemptVerb = NoSkippedVerb;
+
 #if DEBUG
     /// <summary>
     /// NOT UPSTREAM'S, D11 M4, Debug only: set by <c>Matcher.ForkBudgetPartial</c>, so that
@@ -1286,6 +1301,7 @@ internal sealed class MatchState : IDisposable
         ForkBudgetSpent = false;
         Forks = 0;
         ForkAttemptStart = 0;
+        SkippedAttemptVerb = NoSkippedVerb;
 #if DEBUG
         ForkBudgetAnswered = false;
 #endif
@@ -1816,6 +1832,7 @@ internal sealed class MatchState : IDisposable
         ForkBudgetSpent = false;
         Forks = 0;
         ForkAttemptStart = 0;
+        SkippedAttemptVerb = NoSkippedVerb;
 
         // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
         // the memo never leaves the threshold or the set other than Reset leaves them, so it pays

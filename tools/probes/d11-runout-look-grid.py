@@ -7,7 +7,10 @@ error's "rows with RunOutKeptAlternatives"; classify moved rows with d11-classif
 """
 import json, sys
 W = ["(?!{c}{t})ab", "(?!{c}{t})", "(?!{c}{t}).*", "(?={c}{t})(*FAIL)", "(?={c}{t})ab",
-     "(?!(?>{c}){t})ab", "(?!{c}{t}|b)a", "a(?!{c}{t})"]
+     "(?!(?>{c}){t})ab", "(?!{c}{t}|b)a", "a(?!{c}{t})",
+     # A positive lookahead whose outcome feeds a decision (2026-10-04 pre-merge review, P1).
+     "(?!(?={c}{t}))ab", "(?(?={c}{t})x|ab)", "(?>(?={c}{t})|ab)x", "(?={c}{t})(*PRUNE)x|ab",
+     "(?:(?={c}{t})(*SKIP)x|ab)"]
 xs = ["ab", "a", "[ab]", "(?:a|b)", "(?:a|ab)", "."]
 qs = ["*", "+", "{1,3}", "*?", "+?", "?", "*+"]
 ts = ["(?<=b)", "(?<=a)", "(?<!b)", "(?<=^ab)", ""]

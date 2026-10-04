@@ -157,6 +157,12 @@ internal enum PartialEvent
     /// <summary>M4: the second pass's stack budget fired (it fires the fork budget too).</summary>
     StackBudgetFired,
 
+    /// <summary>
+    /// M2: a positive lookaround or test whose earlier success was blocked succeeded on the held
+    /// text, and its success is the same for every continuation, so it cut as decided.
+    /// </summary>
+    DecidedAfterBlocked,
+
     /// <summary>RC5: a fuzzy insertion ran out of text.</summary>
     InsertionRunOut,
 

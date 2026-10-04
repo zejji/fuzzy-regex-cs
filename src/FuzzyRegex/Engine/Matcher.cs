@@ -5590,6 +5590,43 @@ internal static class Matcher
         && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 M2 (2026-10-04 pre-merge review, P1): whether a verb whose path to it is
+    /// not blocked may act although an earlier verb of the same scope was skipped (a verb taint at
+    /// the scope's frame).
+    /// </summary>
+    /// <remarks>
+    /// The path to this verb exists only in the continuations where the skipped verb did not act;
+    /// in those, nothing above the scope's frame read the text to come, so this verb acts in every
+    /// one of them. In the others the skipped verb acted and ended the scope already. Either way the
+    /// scope's other paths are gone and matching goes on below its frame in the same state, so
+    /// acting is right for every continuation, unless the two verbs end the scope differently: when
+    /// the scope is the attempt, a <c>(*SKIP)</c> sets the next start at its own position, so the
+    /// skipped verb and this one must be the same kind at the same position
+    /// (<see cref="MatchState.SkippedAttemptVerb"/>). Before,
+    /// the taint blocked every later verb of the scope, and a positive lookahead decided on the held
+    /// text could not prune: `(?=(?:ab)*(?&lt;=b))(*PRUNE)x|ab` over 'ab' answered P(0, 2) where main
+    /// and the judge say None. The taint still blocks the scope's own decision (rows Q1, T2).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">The scope's pruning mark.</param>
+    /// <param name="verb">This verb: a <c>(*SKIP)</c>'s position, or -1 for a <c>(*PRUNE)</c>.</param>
+    /// <returns><see langword="true"/> if acting ends the scope as the skipped verb would have.</returns>
+    private static bool ActingEndsTheScopeAsTheSkippedVerbDid(MatchState state, long targetMark, long verb) =>
+        ScopeIsAConstruct(state, targetMark) || state.SkippedAttemptVerb == verb;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: whether a verb's scope is a construct (a negative lookaround, a
+    /// condition's test, or under the oracle's ablation an atomic group or lookaround) rather than
+    /// the attempt.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">The scope's pruning mark.</param>
+    /// <returns><see langword="true"/> for a construct.</returns>
+    private static bool ScopeIsAConstruct(MatchState state, long targetMark) =>
+        ReadPruningMark(state, (int)targetMark, out Opcode op, out _)
+        && op is Opcode.Lookaround or Opcode.Conditional or Opcode.Atomic;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 M2: the cut rule for a <c>(*PRUNE)</c> or <c>(*SKIP)</c> about to act
     /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). The verb discards the
     /// paths of its scope, which is a decision about the text to come whenever the path to the verb
@@ -5615,8 +5652,9 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <param name="verb">Which verb: a <c>(*SKIP)</c>'s position, or -1 for a <c>(*PRUNE)</c>.</param>
     /// <returns><see langword="true"/> if the verb was blocked and must do nothing.</returns>
-    private static bool SkipABlockedVerb(MatchState state)
+    private static bool SkipABlockedVerb(MatchState state, long verb)
     {
         // A verb whose scope is a condition's test is skipped as any other is: its verb taint then
         // blocks the test's end, so the test takes both branches rather than letting its other
@@ -5628,7 +5666,13 @@ internal static class Matcher
         }
 
         int frame = (int)targetMark - 1;
-        if (state.WMarks[^1].Position <= frame && !HasWMarkAt(state, frame, WMarkKind.VerbTaint))
+        if (
+            state.WMarks[^1].Position <= frame
+            && (
+                !HasWMarkAt(state, frame, WMarkKind.VerbTaint)
+                || ActingEndsTheScopeAsTheSkippedVerbDid(state, targetMark, verb)
+            )
+        )
         {
             return false;
         }
@@ -5637,6 +5681,15 @@ internal static class Matcher
         if (!HasWMarkAt(state, frame, WMarkKind.VerbTaint))
         {
             state.AddWMark(frame, WMarkKind.VerbTaint);
+        }
+
+        if (!ScopeIsAConstruct(state, targetMark))
+        {
+            // The attempt's scope: which verb was skipped decides where the next attempt starts.
+            state.SkippedAttemptVerb =
+                state.SkippedAttemptVerb == MatchState.NoSkippedVerb || state.SkippedAttemptVerb == verb
+                    ? verb
+                    : MatchState.SkippedVerbsDiffer;
         }
 
         state.NotePartialEvent(PartialEvent.VerbSkipped);
@@ -5749,6 +5802,25 @@ internal static class Matcher
             TaintTheFrame(state, frame);
             state.NotePartialEvent(blockedEvent);
             return LookaroundEnd.Backtrack;
+        }
+
+        // The decided end (2026-10-04 pre-merge review, P1). An earlier success of this body was
+        // blocked, so the frame carries a cut taint, but this one read nothing of the text to come:
+        // the construct succeeds for every continuation. Where its success leaves the same state in
+        // every continuation (no capture is read while matching and nothing is fuzzy, so only the
+        // position matters, and it goes back to the start either way), the continuation is decided
+        // as well: the taint goes, the construct cuts, and an enclosing decision (a negative
+        // lookaround, an atomic group, a verb) can be taken on it. The dedup must not catch it
+        // first: its premise, that a later success carries no fewer marks, fails here.
+        if (
+            !blocked
+            && !state.Pattern.ReadsCapturesWhileMatching
+            && (!state.Pattern.IsFuzzy || look.Node.EnclosingSection is null)
+            && RemoveCutTaintAt(state, frame)
+        )
+        {
+            state.NotePartialEvent(PartialEvent.DecidedAfterBlocked);
+            return LookaroundEnd.Cut;
         }
 
         LookaroundSuccess success = new(
@@ -6076,6 +6148,24 @@ internal static class Matcher
             && TotalCost(counts, section) <= values[FuzzyValue.MaxCost];
     }
 
+    /// <summary>NOT UPSTREAM'S, D11 M2: removes a construct's own cut taint, if it has one.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    /// <returns><see langword="true"/> if there was one.</returns>
+    private static bool RemoveCutTaintAt(MatchState state, int frame)
+    {
+        for (int i = state.WMarks.Count - 1; i >= 0 && state.WMarks[i].Position >= frame; i--)
+        {
+            if (state.WMarks[i] == new WMark(frame, WMarkKind.CutTaint))
+            {
+                state.WMarks.RemoveAt(i);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="frame">The frame's backtracking-stack position.</param>
@@ -6230,32 +6320,34 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in the body of a
-    /// negative lookaround or a negative condition test, the only place where the alternatives a
-    /// choice point keeps before it can change the answer.
+    /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in a body whose outcome
+    /// feeds a decision, the only place where the alternatives a choice point keeps before it can
+    /// change the answer.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Outside every body the run-out answers the partial and the kept entries go with the attempt.
-    /// In a positive body every continuation after a kept alternative's success is one the run-out's
-    /// own continuation already covers: the position goes back to the lookaround's start either
-    /// way, a capture the body could still set is unknown after the run-out in a pattern that reads
-    /// captures, and the run-out closes the body's fuzzy section with the errors made so far, which
-    /// no longer path through the same choice point can undercut. So there the kept alternatives
-    /// only cost time: `(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' took 3.5 times as long with
-    /// <c>.*</c>'s smaller counts kept (2026-10-04). A negative body is different: a success of a
-    /// kept alternative on the held text fails the assertion for every continuation, where the
-    /// run-out alone leaves it undetermined.
+    /// The body is the innermost open lookaround or condition test, with only atomic groups open
+    /// above it (<see cref="RunOutInALookaroundBody"/>'s walk). Its outcome feeds a decision when
+    /// it is negative or a condition's test (a success of a kept alternative on the held text
+    /// decides it, where the run-out alone leaves it undetermined); or when it is a positive
+    /// lookaround and something can still cut on its outcome: a verb anywhere in the pattern, or an
+    /// atomic group, a condition's test or a negative lookaround open around it (the 2026-10-04
+    /// pre-merge review, P1: `(?!(?=(?:ab)*(?&lt;=b)))ab`, `(?&gt;(?=(?:ab)*(?&lt;=b))|ab)x` and
+    /// `(?=(?:ab)*(?&lt;=b))(*PRUNE)x|ab` over 'ab' answered P(0, 2) where main and the judge say
+    /// None). There the kept success also needs <see cref="EndALookaroundInTheSecondPass"/>'s
+    /// decided end.
     /// </para>
     /// <para>
-    /// The walk is <see cref="RunOutInALookaroundBody"/>'s: the innermost open lookaround or
-    /// condition test, with only atomic groups open above it; none (or a pattern whose run-outs
-    /// are answered at once) means no.
+    /// A positive lookaround that feeds nothing keeps nothing: every continuation after a kept
+    /// alternative's success is one the run-out's own continuation already covers, so there the
+    /// kept alternatives only cost time (`(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' took 3.5 times as
+    /// long with <c>.*</c>'s smaller counts kept). Outside every body the run-out answers the
+    /// partial and the kept entries would go with the attempt.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
-    private static bool RunOutIsInANegativeBody(MatchState state)
+    private static bool RunOutFeedsADecision(MatchState state)
     {
         PatternObject pattern = state.Pattern;
         if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
@@ -6263,6 +6355,7 @@ internal static class Matcher
             return false;
         }
 
+        bool inBody = false;
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
             if (!ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out LookaroundStateData look))
@@ -6270,12 +6363,28 @@ internal static class Matcher
                 return false;
             }
 
-            if (op is Opcode.Lookaround or Opcode.Conditional)
+            if (op == Opcode.Conditional || (op == Opcode.Lookaround && !look.Node.Match))
             {
-                return !look.Node.Match;
+                return true;
             }
 
-            if (op != Opcode.Atomic)
+            if (op == Opcode.Lookaround)
+            {
+                if (!inBody && pattern.HasBacktrackingVerb)
+                {
+                    return true;
+                }
+
+                inBody = true;
+            }
+            else if (op == Opcode.Atomic)
+            {
+                if (inBody)
+                {
+                    return true;
+                }
+            }
+            else
             {
                 return false;
             }
@@ -6288,7 +6397,7 @@ internal static class Matcher
     /// NOT UPSTREAM'S, D11, the run-out rule at a choice point: the test of one of a repeat's two
     /// alternatives (its body or its tail) ran out of text, and the other one passed its test, so
     /// the other one is kept on the backtracking stack before the run-out is taken, when the run-out
-    /// goes on in a negative body (<see cref="RunOutIsInANegativeBody"/>).
+    /// goes on in a body whose outcome feeds a decision (<see cref="RunOutFeedsADecision"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -6305,9 +6414,11 @@ internal static class Matcher
     /// </para>
     /// <para>
     /// The run-out is taken first even where the alternative that ran out is the one the repeat
-    /// tries second (a greedy repeat's tail, a lazy repeat's body). Both orders keep the same set of
-    /// paths, and a run-out first is what upstream does outside a body, so the answers there,
-    /// captures included, do not move.
+    /// tries second (a greedy repeat's tail, a lazy repeat's body): a run-out first is what upstream
+    /// does outside a body, so the answers there, captures included, do not move. Inside a body the
+    /// kept alternatives are still tried, after the run-out; for a positive lookaround whose kept
+    /// success comes after its blocked one, <see cref="EndALookaroundInTheSecondPass"/>'s decided
+    /// end lets that success decide what encloses it (the dedup would take it for a repeat).
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -6327,7 +6438,7 @@ internal static class Matcher
             "D11 run-out rule: one alternative ran out"
         );
 
-        if (!RunOutIsInANegativeBody(state))
+        if (!RunOutFeedsADecision(state))
         {
             return;
         }
@@ -7401,9 +7512,11 @@ internal static class Matcher
     /// Asked at the cancellation gate, every 256 steps. A blocked end and REOPEN only move bytes
     /// between the two stacks, so the total grows by one step's pushes at a time, and between two
     /// checks by at most 256 of them: the stacks never hold more than the budget plus 256 times the
-    /// largest single step (a few groups' captures and repeats, bytes per group, whatever n and the
-    /// nesting depth). The budget is a quarter of the limit, and a stack throws when its doubling
-    /// would reach the limit, at half of it, so the budget always fires first.
+    /// largest single step, whatever n and the nesting depth. That step is a frame's captures,
+    /// repeats and fuzzy state, so it grows with the pattern's groups and repeats (tens of bytes
+    /// each). The budget is a quarter of the limit, and a stack throws when its doubling would reach
+    /// the limit, at half of it (512 MB), so the budget fires first while one step pushes under
+    /// 1 MB, which takes a pattern of tens of thousands of groups.
     /// </para>
     /// <para>
     /// `(?:(?=(?:(?=(?:ab)*(?&lt;=b))ab)*)ab)*c` over 'ab' * 500 threw at the limit (D11's repeat run-out
@@ -12330,6 +12443,7 @@ internal static class Matcher
 
             state.MatchPos = state.TextPos;
             state.ForkAttemptStart = state.TextPos;
+            state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
 
             if (node.Op == Opcode.Success)
             {
@@ -12360,6 +12474,7 @@ internal static class Matcher
 
             node = startNode;
             state.ForkAttemptStart = state.TextPos;
+            state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
         }
 
         advance:
@@ -12849,7 +12964,7 @@ internal static class Matcher
                     // below as for an entered first alternative, and then runs out. Upstream
                     // answers the partial at once: `(?!ab|a)` over 'a' was P(0, 1), where the 'a'
                     // held fails the lookahead for every continuation.
-                    if (status == MatchStatus.Partial && !RunOutIsInANegativeBody(state))
+                    if (status == MatchStatus.Partial && !RunOutFeedsADecision(state))
                     {
                         goto runOut;
                     }
@@ -14199,7 +14314,7 @@ internal static class Matcher
                     int runOutAt = -1;
                     if (isPartial)
                     {
-                        if (!RunOutIsInANegativeBody(state))
+                        if (!RunOutFeedsADecision(state))
                         {
                             state.TextPos = pos;
                             goto runOut;
@@ -14820,7 +14935,7 @@ internal static class Matcher
 
                         /* bstack: ... | ... PRUNE */
                     }
-                    else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state))
+                    else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state, -1))
                     {
                         // Prune the backtracking back to an appropriate backtracking point, unless
                         // the path here read the text to come (D11 M2, the cut rule for a verb).
@@ -15690,7 +15805,9 @@ internal static class Matcher
                     // here read the text to come; the backtrack arm below asks again.
                     bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
                     bool skipIsBlocked =
-                        !skipIsInsideATransparentGroup && state.WMarks.Count != 0 && SkipABlockedVerb(state);
+                        !skipIsInsideATransparentGroup
+                        && state.WMarks.Count != 0
+                        && SkipABlockedVerb(state, state.TextPos);
                     if (!skipIsInsideATransparentGroup && !skipIsBlocked)
                     {
                         TopBstack(state);
@@ -17807,7 +17924,7 @@ internal static class Matcher
                             // kept first, as the match below keeps them.
                             if (status == MatchStatus.Partial)
                             {
-                                if (RunOutIsInANegativeBody(state))
+                                if (RunOutFeedsADecision(state))
                                 {
                                     KeepTheSmallerCounts(state, rpData, pos, start, savedCount, node, index);
                                 }
@@ -18479,7 +18596,7 @@ internal static class Matcher
 
                     // D11 M2: a verb whose path read the text to come does nothing, and the attempt
                     // keeps its ordinary bump-along, which visits every start the skip would.
-                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state))
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, skipPos))
                     {
                         break;
                     }
@@ -18513,7 +18630,7 @@ internal static class Matcher
                     /* bstack: - */
 
                     // D11 M2: a verb whose path read the text to come does nothing.
-                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state))
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, -1))
                     {
                         break;
                     }
