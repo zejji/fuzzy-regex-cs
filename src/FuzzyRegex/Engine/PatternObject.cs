@@ -519,6 +519,14 @@ internal sealed class PatternObject
     internal bool EagerCallMemo;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the failed-call memo's key leaves out
+    /// the position, a deliberately wrong key, so a call that failed at one position fails at
+    /// every other. The matrix's check C5 sets it to prove the check can see a broken call memo
+    /// (<c>tools/matrix/controls.py</c>); <c>FailedCallMemoTests</c> pins its witness.
+    /// </summary>
+    internal bool CallMemoKeyOmitsPosition;
+
+    /// <summary>
     /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
     /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
     /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which

@@ -57,11 +57,16 @@ CONTROLS = [
     ({"pattern": "ab", "subject": "a", "operation": "match", "partial": True}, "C4", "pass"),
     # C5: every repeat's failure memo forced on, including where Optimiser.KeepFailureMemosSound
     # withdraws it because a group test reads the captures. Measured 2026-09-30: (0,3) with the
-    # memo as compiled, (1,3) with it forced on. (PatternObject.UseCallMemo's documented witnesses no
-    # longer change with the call memo forced on, and memo-grid.cs "unsafe" found none in 25,864
-    # rows, so the call memo has no firing control.)
+    # memo as compiled, (1,3) with it forced on.
     ({"pattern": "(?:(a)|.)*(?(1)x|y)", "subject": "aby", "operation": "search", "ablate": "unsaferepeatmemo"}, "C5", "fail"),
     ({"pattern": "(?:(a)|.)*(?(1)x|y)", "subject": "aby", "operation": "search"}, "C5", "pass"),
+    # C5 for the failed-call memo. PatternObject.UseCallMemo's documented witnesses no longer change
+    # with the memo forced on, and memo-grid.cs "unsafe" found none in 25,864 rows, so the control
+    # breaks the key instead: PatternObject.CallMemoKeyOmitsPosition leaves the position out, and a
+    # call that failed at one position then fails at every other. Measured 2026-10-03: (0,2) with
+    # the key whole, no match with it broken (FailedCallMemoTests pins both).
+    ({"pattern": "(.)((?R)?((?1)))", "subject": "aba", "operation": "search", "ablate": "callmemokey"}, "C5", "fail"),
+    ({"pattern": "(.)((?R)?((?1)))", "subject": "aba", "operation": "search"}, "C5", "pass"),
     # C6: ledger entry 42 switched off; the reference's rule 3 offers the deletion after an exact
     # match, so it answers (0,1) with one deletion where the ablated port answers None.
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match", "ablate": "exactdeletion"}, "C6", "fail"),

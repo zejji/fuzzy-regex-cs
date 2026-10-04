@@ -577,9 +577,13 @@ D26, D29, D33, D36, D38, D39 and D50.
   covers only simple fuzzy patterns. They are judged only by checks that compare the port with
   itself (C2-C6) and by C1 against upstream. So an inherited bug in a fuzzy-only cell, with no call
   and no partial matching, is visible only to C6's reference matcher.
-- **C5 has no firing control for the failed-call memo.** Its "0 failures" proves the repeat memo
-  only.
-- **C4 covers only 1,093 partial rows**, and its phantom counts are lower bounds: no completion
-  within 5 characters over the whole alphabet, or 8 over a/b/x/space.
+- **C5 had no firing control for the failed-call memo** until 2026-10-03: its "0 failures" proved
+  the repeat memo only. The control `callmemokey` (`PatternObject.CallMemoKeyOmitsPosition`) now
+  breaks the memo's key, and C5 then fails 5 of the 1,619 call rows.
+- **C4 covers only 1,093 partial rows**, and its phantom counts are lower bounds. Since
+  2026-10-03 the port judge goes on past 3 characters for a phantom, one length at a time up to 8
+  within 20 s a row, and names the length it checked in full. Over the 1,093 rows on main
+  (b719572a) that took 35 minutes and cut 114 phantoms to 102: 1 checked to 3 characters, 5 to 4,
+  27 to 5, 41 to 6 and 28 to 7; the 12 others complete within 4 to 6.
 - **One seed.** A second seed, and widening the cells that failed, would test whether the list is
   complete; see the plan for what counts as done.

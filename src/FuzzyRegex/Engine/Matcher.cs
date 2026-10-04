@@ -5069,7 +5069,9 @@ internal static class Matcher
 
         long[] counts = state.FuzzyCounts;
         key.Add(callIndex);
-        key.Add(state.TextPos);
+        // Oracle-only (PatternObject.CallMemoKeyOmitsPosition): a deliberately wrong key, check C5's
+        // firing control.
+        key.Add(state.Pattern.CallMemoKeyOmitsPosition ? -1 : state.TextPos);
         key.Add(counts[FuzzyValue.Sub]);
         key.Add(counts[FuzzyValue.Ins]);
         key.Add(counts[FuzzyValue.Del]);
