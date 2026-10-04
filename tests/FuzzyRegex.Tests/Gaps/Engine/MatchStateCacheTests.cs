@@ -441,6 +441,10 @@ public sealed class MatchStateCacheTests
             case List<LookaroundSuccess> successes:
                 successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
                 break;
+            case null when field.FieldType == typeof(PartialEvent?):
+                // D11's Debug-only run-out cause (MatchState.NoteRunOutCause).
+                field.SetValue(state, PartialEvent.RunOutAnswered);
+                break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);
                 break;

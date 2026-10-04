@@ -1221,8 +1221,8 @@ internal sealed class MatchState : IDisposable
         HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
-        _pendingRunOutCause = null;
 #endif
+        _pendingRunOutCause = null;
         DedupEntriesExamined = 0;
         Sstack.Reset();
         SetBstackCount(0);
