@@ -5807,18 +5807,20 @@ internal static class Matcher
         // The decided end (2026-10-04 pre-merge review, P1). An earlier success of this body was
         // blocked, so the frame carries a cut taint, but this one read nothing of the text to come:
         // the construct succeeds for every continuation. Where its success leaves the same state in
-        // every continuation (no capture is read while matching and nothing is fuzzy, so only the
-        // position matters, and it goes back to the start either way), the continuation is decided
+        // every continuation (its body sets no group, or no capture is read while matching; nothing
+        // is fuzzy, or it lies outside every fuzzy section; so only the position matters, and it
+        // goes back to the start either way), the continuation is decided
         // as well: the taint goes, the construct cuts, and an enclosing decision (a negative
         // lookaround, an atomic group, a verb) can be taken on it. The dedup must not catch it
         // first: its premise, that a later success carries no fewer marks, fails here.
         if (
             !blocked
-            && !state.Pattern.ReadsCapturesWhileMatching
+            && ((look.Node.Status & NodeStatus.HasGroups) == 0 || !state.Pattern.ReadsCapturesWhileMatching)
             && (!state.Pattern.IsFuzzy || look.Node.EnclosingSection is null)
             && RemoveCutTaintAt(state, frame)
         )
         {
+            RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
             state.NotePartialEvent(PartialEvent.DecidedAfterBlocked);
             return LookaroundEnd.Cut;
         }
@@ -5852,6 +5854,8 @@ internal static class Matcher
 
         if (!blocked)
         {
+            // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
+            RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
             return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
         }
 
@@ -6152,11 +6156,19 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="frame">The frame's backtracking-stack position.</param>
     /// <returns><see langword="true"/> if there was one.</returns>
-    private static bool RemoveCutTaintAt(MatchState state, int frame)
+    private static bool RemoveCutTaintAt(MatchState state, int frame) =>
+        RemoveWMarkAt(state, frame, WMarkKind.CutTaint);
+
+    /// <summary>NOT UPSTREAM'S, D11 M2: removes a mark of one kind at a frame, if there is one.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    /// <param name="kind">The mark's kind.</param>
+    /// <returns><see langword="true"/> if there was one.</returns>
+    private static bool RemoveWMarkAt(MatchState state, int frame, WMarkKind kind)
     {
         for (int i = state.WMarks.Count - 1; i >= 0 && state.WMarks[i].Position >= frame; i--)
         {
-            if (state.WMarks[i] == new WMark(frame, WMarkKind.CutTaint))
+            if (state.WMarks[i] == new WMark(frame, kind))
             {
                 state.WMarks.RemoveAt(i);
                 return true;
@@ -6210,12 +6222,13 @@ internal static class Matcher
     /// branches and a backreference to one runs out.
     /// </para>
     /// <para>
-    /// SHORTCUT: a pattern with group calls answers the run-out partial, as before D11, and so does
-    /// the oracle's pre-D11 ablation. A call opened inside the body is still open at the run-out, and
-    /// REOPEN would have to open it again as well (amendment 2). Ceiling: those patterns answer a
-    /// partial at the attempt's start whatever follows (30 run-out phantoms on amendment 2's call
-    /// grid, of which lifting it would remove 6). Upgrade: REOPEN re-opens the calls opened in the
-    /// body.
+    /// SHORTCUT: a run-out inside a group call that the body opened, and every run-out under the
+    /// oracle's pre-D11 ablation, answers the partial at the attempt's start
+    /// (<see cref="ACallOpenedInTheBodyIsOpen"/>). Such a call is still open at the run-out, and
+    /// REOPEN would have to open it again as well (amendment 2). Ceiling: a partial at the attempt's
+    /// start whatever follows, a phantom where main may answer None (`(?!(?1))ab((?=(?:ab)*(?&lt;=b)))?`
+    /// over 'ab', P(0, 2), judge None). Upgrade: REOPEN re-opens the calls opened in the body. Until
+    /// the second pre-merge review (R1) any group call anywhere in the pattern switched the rule off.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -6227,7 +6240,7 @@ internal static class Matcher
     {
         fails = false;
         PatternObject pattern = state.Pattern;
-        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
         {
             return null;
         }
@@ -6262,6 +6275,11 @@ internal static class Matcher
 
             atomics++;
             offset -= sizeof(long);
+        }
+
+        if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark))
+        {
+            return null;
         }
 
         // A fuzzy section the body opened and left open: the continuation runs in the section
@@ -6320,6 +6338,106 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11 (second pre-merge review, R3): a run-out in a positive lookaround's body
+    /// waits until every other path of the body has been tried. The lookaround's frame gets a
+    /// <see cref="WMarkKind.RunOutPending"/> mark and backtracking goes on; a success of the body on
+    /// the held text then decides the lookaround (its end is not blocked, and it drops the mark),
+    /// and if none comes, the LOOKAROUND backtracking arm takes the run-out there: the lookaround
+    /// holds for some continuations, so matching goes on after it with a touch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Run-out first, the lookaround's first success was blocked and a later one on the held text
+    /// was decided only once backtracking reached it, after everything opened above the lookaround,
+    /// and in another order than a decision around it needs: in
+    /// `(?&gt;(?:(?=(?:ab)*(?&lt;!b))|ab)+)x` over 'ab' the atomic group's 'ab' branch was tried
+    /// while the first copy of the lookahead was still blocked, so the group never committed and the
+    /// call answered P(0, 2), where main and the judge say None. The lookahead holds at 0 for every
+    /// continuation (no 'ab' before 0), which the success on the held text now decides at once.
+    /// </para>
+    /// <para>
+    /// Sound where the lookaround is the innermost body with no atomic group open in it around the
+    /// item (which could commit on the run-out's longer path where it exists), no call opened in it
+    /// is open, the body holds no verb and no call (a verb on the run-out's path, reached directly or
+    /// through a called group, could prune the body's other paths; a verb after the lookaround
+    /// cannot reach them), and its success leaves the same state for every continuation (no group in its body,
+    /// or no capture read while matching; nothing fuzzy, or the lookaround outside every fuzzy
+    /// section). Then the lookaround succeeds in
+    /// every continuation where any path of its body succeeds on the held text, whichever path the
+    /// continuation takes first; and where none does, the waiting run-out stands for the paths that
+    /// read the text to come. Only where its outcome feeds a decision
+    /// (<see cref="RunOutFeedsADecision"/>): elsewhere the run-out at once is cheaper and answers the
+    /// same.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the run-out waits.</returns>
+    private static bool RunOutCanWaitForTheBody(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            state.PartialSide == MatchState.PartialNone
+            || pattern.SecondPassAsBeforeD11
+            || !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op != Opcode.Lookaround
+            || !look.Node.Match
+            || look.Node.BodyInfo is not { HasVerbOrCall: false }
+            || ((look.Node.Status & NodeStatus.HasGroups) != 0 && pattern.ReadsCapturesWhileMatching)
+            || (pattern.IsFuzzy && look.Node.EnclosingSection is not null)
+            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark))
+            || !RunOutFeedsADecision(state)
+        )
+        {
+            return false;
+        }
+
+        int frame = (int)mark - 1;
+        if (!HasWMarkAt(state, frame, WMarkKind.RunOutPending))
+        {
+            state.AddWMark(frame, WMarkKind.RunOutPending);
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        state.NoteRunOutTaken(answered: false);
+        state.NotePartialEvent(PartialEvent.RunOutWaits);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether a group call that a lookaround's (or condition test's) body
+    /// opened is still open, so that a run-out here lies inside the called group; or the pattern is
+    /// one whose call-free models the run-out rule needs are not built (the SHORTCUT on
+    /// <see cref="RunOutInALookaroundBody"/>).
+    /// </summary>
+    /// <remarks>
+    /// A call pushes no pruning mark, only its frame on the saved stack, and records the saved
+    /// stack's depth after it in <see cref="MatchState.OpenCalls"/>. The construct parked its state
+    /// on the saved stack when it opened (the depth sits under its backtracking entry), so a call
+    /// opened inside its body is one whose depth lies above that state, as amendment 2's assert 3
+    /// reads it. A call open around the construct lies below it and does not count.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <returns><see langword="true"/> if a call opened in the body is open, or the pattern needs a
+    /// model the compiler skips for patterns with calls: the groups a run-out leaves unknown
+    /// (<see cref="Node.RunOutGroups"/>, only where captures are read) and the section around a
+    /// lookaround (<see cref="Node.EnclosingSection"/>, only where something is fuzzy).</returns>
+    private static bool ACallOpenedInTheBodyIsOpenOrUnmodelled(MatchState state, long mark) =>
+        state.Pattern.ReadsCapturesWhileMatching || state.Pattern.IsFuzzy || ACallOpenedInTheBodyIsOpen(state, mark);
+
+    /// <summary>NOT UPSTREAM'S, D11: the half of <see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/> that reads the stacks.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <returns><see langword="true"/> if a call opened in the body is open.</returns>
+    private static bool ACallOpenedInTheBodyIsOpen(MatchState state, long mark) =>
+        state.OpenCalls.Count != 0
+        && (
+            !state.Bstack.ReadSizeBelow((int)mark - 1, out long savedSstack)
+            || state.OpenCalls[^1].SstackDepth > savedSstack - _lookaroundStateDataSize
+        );
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in a body whose outcome
     /// feeds a decision, the only place where the alternatives a choice point keeps before it can
     /// change the answer.
@@ -6350,7 +6468,7 @@ internal static class Matcher
     private static bool RunOutFeedsADecision(MatchState state)
     {
         PatternObject pattern = state.Pattern;
-        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || pattern.HasGroupCalls)
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
         {
             return false;
         }
@@ -6358,7 +6476,19 @@ internal static class Matcher
         bool inBody = false;
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
-            if (!ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out LookaroundStateData look))
+            long mark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look))
+            {
+                return false;
+            }
+
+            // The innermost body: a run-out inside a call it opened is answered at once.
+            if (
+                !inBody
+                && op is Opcode.Lookaround or Opcode.Conditional
+                && pattern.HasGroupCalls
+                && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark)
+            )
             {
                 return false;
             }
@@ -16672,6 +16802,12 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
+        if (RunOutCanWaitForTheBody(state))
+        {
+            stringPos = -1;
+            goto backtrack;
+        }
+
         Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
         state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
         if (runOutFails)
@@ -18215,9 +18351,11 @@ internal static class Matcher
                     // D11 M2: the frame's marks go with it. A cut taint means a success of the body
                     // was blocked, so a negative lookaround holds only for some continuations.
                     bool lookWasBlocked = false;
+                    bool lookRunOutWaits = false;
                     if (state.WMarks.Count != 0)
                     {
                         lookWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+                        lookRunOutWaits = HasWMarkAt(state, state.Bstack.Count, WMarkKind.RunOutPending);
                         state.DropWMarksFrom(state.Bstack.Count);
                     }
 
@@ -18288,6 +18426,19 @@ internal static class Matcher
                             CountFork(state);
                         }
 
+                        node = lookNode.Next2.Node!;
+                        goto advance;
+                    }
+
+                    // D11 (RunOutCanWaitForTheBody): no path of the body succeeded on the held text,
+                    // and a run-out waited, so the lookaround holds for the continuations where that
+                    // path goes on. Its body sets no group and nothing fuzzy is left open, so what
+                    // the arm put back is the state its end would leave.
+                    if (lookRunOutWaits)
+                    {
+                        PushTouchMark(state);
+                        state.NotePartialEvent(PartialEvent.RunOutInBody);
+                        CountFork(state);
                         node = lookNode.Next2.Node!;
                         goto advance;
                     }

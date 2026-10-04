@@ -584,6 +584,9 @@ public sealed class PartialLookaroundRuleTests
     /// pre-merge review, P1), and P on the last four, as on main and upstream.
     /// </summary>
     /// <remarks>
+    /// The second pre-merge review (R1, R2) found the rule switched off by a group call or a
+    /// capture read anywhere in the pattern; the last nine rows hold those shapes. Main and upstream
+    /// answer None to them; the branch answered P(0, 2) at a48bc3cf.
     /// Three parts, each planted out (Debug): without the alternatives kept in a positive body that
     /// feeds a decision (<c>Matcher.RunOutFeedsADecision</c>) the condition row goes red; without
     /// the decided end (<c>Matcher.EndALookaroundInTheSecondPass</c>) the negative, atomic and
@@ -601,8 +604,41 @@ public sealed class PartialLookaroundRuleTests
     [Arguments(@"(?(?=ab|a)x|a)", "a")]
     [Arguments(@"a(?!(?=b*(?<=b)))b", "ab")]
     [Arguments(@"(?!(?=[ab]*(?<=b)))ab", "ab")]
+    [Arguments(@"(?!(?=(?:ab)*(?<=b)))ab|(c)(?1)", "ab")]
+    [Arguments(@"(?!(?:ab)*(?<=b))ab|(c)(?1)", "ab")]
+    [Arguments(@"(?>(?=(?:ab)*(?<=b))|ab)x|(c)(?1)", "ab")]
+    [Arguments(@"(?(?=(?:ab)*(?<=b))x|ab)|(c)(?1)", "ab")]
+    [Arguments(@"(?!(?1))ab((?=(?:ab)*(?<=b)))?", "ab")]
+    [Arguments(@"(?>(?=(?:ab)*(?<=b))|ab)x|(c)\1", "ab")]
+    [Arguments(@"(?!(?=(?:ab)*(?<=b)))ab|(c)\1", "ab")]
+    [Arguments(@"(?=(?:ab)*(?<=b))(*PRUNE)x|ab|(c)\1", "ab")]
+    [Arguments(@"(?!(?=(?:ab)*(?<=b)))ab(?(1)y)()", "ab")]
     public void A_positive_lookahead_decided_on_the_held_text_decides_what_encloses_it(string pattern, string text) =>
         Run("match", pattern, text).Success.Should().BeFalse();
+
+    /// <summary>
+    /// A lookahead in a repeat inside an atomic group (or a possessive repeat) holds at 0 for
+    /// every continuation, since the tail's lookbehind succeeds on the held text, so the group
+    /// commits to its first iteration and <c>x</c> then fails: no continuation completes the match
+    /// (the port's non-partial judge, 2026-10-04). The run-out of the lookahead's own repeat now
+    /// waits until the body's other paths have been tried (<c>Matcher.RunOutCanWaitForTheBody</c>):
+    /// run out first, the repeat's second copy of the lookahead was decided while the first was
+    /// still blocked, so the group never committed and its 'ab' branch answered P(0, 2) (the second
+    /// pre-merge review, R3; main and upstream answer None).
+    /// </summary>
+    // DIVERGES FROM UPSTREAM: none; regex 2026.9.10 answers None too.
+    [Test]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)+)x")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)*)x")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab)?)x")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<=b))|ab){2})x")]
+    [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab)++x")]
+    [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab)*+x")]
+    [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab)?+x")]
+    [Arguments(@"(?:(?=(?:ab)*(?<=b))|ab){1,2}+x")]
+    [Arguments(@"(?>(?:(?=(?:ab)*(?<!b))|ab)+)x")]
+    public void A_lookahead_repeated_inside_an_atomic_group_is_decided_before_the_group_commits(string pattern) =>
+        Run("match", pattern, "ab").Success.Should().BeFalse();
 
     /// <summary>
     /// D11-R1: a repeat's test that runs out inside a lookahead's body goes through the run-out

@@ -32,6 +32,13 @@ internal enum WMarkKind : byte
     /// past a test that cut does, rather than taking the no-branch (D38).
     /// </summary>
     Held,
+
+    /// <summary>
+    /// At a positive lookaround's frame: a run-out in its body waits until the body's other paths
+    /// have been tried (<c>Matcher.RunOutCanWaitForTheBody</c>). A success of the body drops it;
+    /// the lookaround's backtracking arm takes the run-out if it is still there.
+    /// </summary>
+    RunOutPending,
 }
 
 /// <summary>NOT UPSTREAM'S, D11: one w-mark, live while its position is on the backtracking stack.</summary>
@@ -162,6 +169,9 @@ internal enum PartialEvent
     /// text, and its success is the same for every continuation, so it cut as decided.
     /// </summary>
     DecidedAfterBlocked,
+
+    /// <summary>A run-out in a positive lookaround's body waited for the body's other paths.</summary>
+    RunOutWaits,
 
     /// <summary>RC5: a fuzzy insertion ran out of text.</summary>
     InsertionRunOut,

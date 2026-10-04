@@ -1235,6 +1235,7 @@ internal sealed class PatternObject
             var nodes = new HashSet<int>();
             var groups = new List<(int Private, int Public)>();
             var todo = new Stack<Node>();
+            bool hasVerbOrCall = false;
             todo.Push(test.Next1.Node!);
             while (todo.Count > 0)
             {
@@ -1243,6 +1244,8 @@ internal sealed class PatternObject
                 {
                     continue;
                 }
+
+                hasVerbOrCall |= n.Op is Opcode.Prune or Opcode.Skip or Opcode.GroupCall;
 
                 if (n.Op is Opcode.StartGroup or Opcode.EndGroup && n.Values[2] != 0)
                 {
@@ -1264,7 +1267,7 @@ internal sealed class PatternObject
 
             int[] sorted = [.. nodes];
             Array.Sort(sorted);
-            test.BodyInfo = new Node.Body(sorted, [.. groups]);
+            test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
         }
 
         if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)

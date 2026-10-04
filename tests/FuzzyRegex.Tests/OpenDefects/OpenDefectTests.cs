@@ -313,6 +313,22 @@ public sealed class OpenDefectTests
         Partial(operation, pattern, text).Success.Should().BeFalse();
     }
 
+    // D11's run-out rule, left open by the second pre-merge round (2026-10-04): a positive
+    // lookahead whose success the held text decides is still treated as undetermined where (1) the
+    // run-out lies inside a group call that a condition's test opened, which the SHORTCUT in
+    // Matcher.RunOutInALookaroundBody answers at once, and (2) the lookahead's body sets a group
+    // that the pattern reads later, so its decided success differs from the run-out's (the
+    // capture is unknown after the run-out). No continuation completes either row (the port's
+    // non-partial judge over continuations of up to three characters); main 5f9468bd and upstream
+    // 2026.9.10 answer None to both.
+    [Test]
+    [Arguments(@"(?(?=(?1))x|ab)((?:ab)*(?<=b))?")]
+    [Arguments(@"(?>(?=((?:ab)*)(?<=b))|ab)(?(1)x|q)")]
+    public void A_decided_lookahead_inside_a_call_or_with_a_read_capture_stays_undetermined(string pattern)
+    {
+        Partial("match", pattern, "ab").Success.Should().BeFalse();
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

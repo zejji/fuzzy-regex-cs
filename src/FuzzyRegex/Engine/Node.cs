@@ -106,7 +106,9 @@ internal sealed class Node
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end
     /// node, sorted.</param>
     /// <param name="Groups">The capturing groups whose start or end is among them.</param>
-    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups);
+    /// <param name="HasVerbOrCall">Whether a <c>(*PRUNE)</c>, <c>(*SKIP)</c> or group call is among
+    /// them (a call can reach a verb in the group it calls).</param>
+    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups, bool HasVerbOrCall);
 
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
