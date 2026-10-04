@@ -1106,16 +1106,17 @@ using Fuzzy.Text.RegularExpressions;
 Match m = new FuzzyRegex(@"(?!(True|False)\b)(.*)").MatchAtStart("True", partial: true);
 Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));  // (True, True, 0, 4)
                                                                     // upstream answers None
-Match n = new FuzzyRegex(@"aa\B").FullMatch("aa", partial: true);
+Match n = new FuzzyRegex(@"aa\B").MatchAtStart("aa", partial: true);
 Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));  // (True, True, 0, 2)
                                                                     // upstream answers None
 ```
 
-A complete match still wins, and so does a partial found the ordinary way, so this only ever replaces
-an answer of "no match". `True\b` over `"True"` is a complete match in both engines, boundary or no
-boundary. The partial spans the attempt that reached the end of the text and reports no capture
-groups, since no path through the pattern finished. Under `(?r)` the end of the available text is its
-start, and the rule reads the same way there.
+A complete match still wins, so this only ever replaces an answer of "no match". `True\b` over
+`"True"` is a complete match in both engines, boundary or no boundary. The boundary is taken as
+passed for the continuations that pass it, and matching goes on from there, so the partial reports
+the capture groups of that path. A full match of `aa\B` would have to end where the text ends, so
+`FullMatch` over `"aa"` answers no match in both engines. Under `(?r)` the end of the available text
+is its start, and the rule reads the same way there.
 
 ### A partial match is refused where the match failed on text the engine already held
 
@@ -1136,6 +1137,78 @@ two-character match ends in a full stop. Upstream's own documentation agrees in 
 defines a partial as the answer to whether "a complete match could be possible if the string had not
 been truncated" - and its answer one character later agrees in practice, since `".ab"` is no match
 there too. PCRE2 refuses the partial on every one of these subjects.
+
+### A run-out of text inside a lookaround's body does not end a partial call with a partial
+
+A partial match says that a longer text could complete the match. When a lookaround's body runs out
+of text, upstream ends the whole match with a partial, even when nothing that follows the lookaround
+can succeed. Here matching goes on after the lookaround, and the answer is a partial only where some
+continuation completes the match.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// [ab] after the lookahead fails on 'x' whatever follows, so no longer text completes the match.
+Match m = new FuzzyRegex(@"(?=..)[ab]").MatchAtStart("x", partial: true);
+Console.WriteLine(m.Success);   // False - upstream answers a partial at (0, 1)
+// The branch x of the negative lookahead matches the text held, so the lookahead fails for every continuation.
+Console.WriteLine(new FuzzyRegex(@"(?!.a|x)x").MatchAtStart("x", partial: true).Success);   // False - upstream: True
+// A search can still start at the edge, where a longer text could begin a match.
+Match s = new FuzzyRegex(@"(?=..)[ab]").Match("x", partial: true);
+Console.WriteLine((s.Success, s.PartialMatch, s.Index, s.Length));   // (True, True, 1, 0)
+```
+
+There is no option to restore the upstream answer. Ledger entry 67.
+
+### A partial call reports a partial where upstream refuses a completion that exists
+
+The other side of the rule above. Upstream bounds a lazy repeat by the text held and turns a greedy
+body's run-out at the end of the text into a failure, so it answers no match where a longer text
+completes the match. Here the second pass presumes the rest of the body and reports the partial. A
+few patterns answer a partial that no text completes, but a partial never takes a completion away.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@".*?(?<=c)").MatchAtStart("aa", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));   // (True, True, 0, 2) - upstream answers None; 'aac' completes it
+Match n = new FuzzyRegex(@"(?!(?>(?:ab)*)(?<=^ab))ab").MatchAtStart("ab", partial: true);
+Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));   // (True, True, 0, 2) - upstream answers None; 'abab' completes it
+```
+
+There is no option to restore the upstream answer. Ledger entry 68.
+
+### A partial search tries a start inside the text to come for a pattern with no first set
+
+A partial search reports a partial from an attempt that starts inside the text still to come.
+Upstream makes no such start for a pattern that has no first set to test the next character
+against, and answers no match where this port reports an empty partial at the edge of the text.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?<=ab)(?:b|$)").Match("b", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));   // (True, True, 1, 0) - upstream answers None
+```
+
+There is no option to restore the upstream answer. Ledger entry 69.
+
+### `\b` over the empty text is a partial, and `\Z` at the edge is not
+
+With `partial: true`, `\b` over the empty text holds for any text to come that starts with a word
+character, so this port reports a partial; upstream answers no match. `\Z` holds only when no text
+follows, so at the edge of a partial call it is false: `a\Zb` over `"a"` can never be completed, and
+here it is no match, where upstream reports a partial because the `b` runs out of text.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"\b").MatchAtStart("", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));   // (True, True, 0, 0) - upstream answers None
+Console.WriteLine(new FuzzyRegex(@"a\Zb").MatchAtStart("a", partial: true).Success);   // False - upstream: True
+```
+
+There is no option to restore the upstream answer. Ledger entry 70.
 
 ### Compile budget
 

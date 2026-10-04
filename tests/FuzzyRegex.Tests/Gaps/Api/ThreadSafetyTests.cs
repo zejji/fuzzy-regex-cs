@@ -814,6 +814,9 @@ public sealed class ThreadSafetyTests
             // D62 added PartialRestoresFrameByFrame, likewise set only by
             // OracleComparer.RunWithTheFrameByFrameRestore.
             "PatternObject.PartialRestoresFrameByFrame",
+            // D11 added SecondPassAsBeforeD11, likewise set only by
+            // OracleComparer.RunWithTheSecondPassAsBeforeD11.
+            "PatternObject.SecondPassAsBeforeD11",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
@@ -826,6 +829,13 @@ public sealed class ThreadSafetyTests
             // while the pattern is built and only read afterwards.
             "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
+            "PatternObject.HasBacktrackingVerb",
+            // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
+            "PatternObject.AnAttemptCanMoveTheNextStart",
+            // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through
+            // SetLookaroundBodies.
+            "PatternObject.HasFuzzyInABody",
+            "PatternObject.ReadsCapturesWhileMatching",
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
@@ -893,6 +903,16 @@ public sealed class ThreadSafetyTests
             "Node.FuzzyRunLength",
             // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
+            // D11: written by NodeCompiler.BuildLookaround while the graph is built.
+            "Node.LookaroundEnd",
+            // D11 chunk 8: written by PatternObject.SetLookaroundBodies, which Compile calls once
+            // the nodes are numbered.
+            "Node.BodyInfo",
+            // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
+            // SetLookaroundBodies calls.
+            "Node.RunOutGroups",
+            // D11 chunk 8: written by PatternObject.SetEnclosingSections.
+            "Node.EnclosingSection",
             "Node.Match",
             "Node.Op",
             "Node.Status",

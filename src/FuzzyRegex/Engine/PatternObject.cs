@@ -83,10 +83,10 @@ internal sealed class RepeatInfo
     /// the pattern has anything that reads more than the position: a backreference, a group-exists
     /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
     /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
-    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial match does not use it
-    /// either (<c>MatchState.KeepsFailureMemo</c>). Where it does apply, a conditional's restore
-    /// leaves the repeat's guards in place rather than putting back the saved ones (D35,
-    /// <c>Matcher.PushRepeats</c>).
+    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial call's second pass uses
+    /// it as well, since D11 build chunk 9 (<c>MatchState.KeepsFailureMemo</c> gives the argument).
+    /// Where it does apply, a conditional's restore leaves the repeat's guards in place rather than
+    /// putting back the saved ones (D35, <c>Matcher.PushRepeats</c>).
     /// </para>
     /// <para>
     /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
@@ -100,9 +100,8 @@ internal sealed class RepeatInfo
     /// only ever means "cannot reach the end of the construct from here", a fact about the
     /// position; and a group call clears the guard lists on the way in and restores them on the
     /// way out. A repeat inside a bounded
-    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body). A
-    /// partial match returns at the first path that reaches the end of the text, POSIX matching
-    /// replaces its best match only with a longer one, and the guards are not consulted under
+    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body).
+    /// POSIX matching replaces its best match only with a longer one, and the guards are not consulted under
     /// fuzzy matching. They stay as exclusions anyway: each is a place where the rest of the match
     /// can read more than the position, and none of those arguments has been proved in general.
     /// <c>docs/plan/2026-09-26-backtrack-memoisation-design.md</c> gives the full reasoning.
@@ -336,6 +335,35 @@ internal sealed class PatternObject
     /// </para>
     /// </remarks>
     internal bool HasSkipVerb;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
+    /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
+    /// </summary>
+    internal bool HasBacktrackingVerb;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether an attempt can choose a next start other than the ordinary
+    /// bump-along's: a <c>(*SKIP)</c> moves the slice, and a <c>\K</c> whose backtracking entry a cut
+    /// discards leaves the match position where it was set. A second-pass attempt that follows a
+    /// touched one then counts as touched (<c>Matcher.BasicMatch</c>, at the attempt's start).
+    /// </summary>
+    internal bool AnAttemptCanMoveTheNextStart;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a fuzzy section lies inside a lookaround body or a
+    /// condition's test, in a pattern without group calls, so that a run-out there may leave the
+    /// section open (<c>Matcher.CloseTheBodysSection</c>). Set with <see cref="Node.EnclosingSection"/>.
+    /// </summary>
+    internal bool HasFuzzyInABody;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the pattern reads a group's capture while it matches, through a
+    /// backreference or a group condition. A run-out in a lookaround body leaves the body's later
+    /// captures unknown, which build chunk 8 models; until then such a pattern keeps the run-out
+    /// partial (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// </summary>
+    internal bool ReadsCapturesWhileMatching;
 
     /// <summary>
     /// NOT UPSTREAM (finding F-A): whether <c>Matcher.ExactDeletionMayMatch</c> may leave out the
@@ -779,6 +807,18 @@ internal sealed class PatternObject
     internal bool UpstreamDefaultBoundary;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a partial call's second pass runs as it
+    /// did before D11, as upstream's does: the word, line and string tests read against the held
+    /// text (M1 off), no attempt from inside the text to come, so that a search the second pass
+    /// finds nothing for answers failure, and a fuzzy insertion at the edge that fails rather than
+    /// running out (RC5 off). The oracle sets it on a pattern it compiled for one call, to show that
+    /// D11 is the whole of a divergence. See <c>Matcher.TryMatchZeroWidth</c>,
+    /// <c>Matcher.MatchFromInsideTheTextToCome</c> and the insertion arm of
+    /// <c>Matcher.NextFuzzyMatchItem</c>.
+    /// </summary>
+    internal bool SecondPassAsBeforeD11;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether an item that matched exactly is never
     /// offered as a deletion, which is upstream's rule. The oracle sets it on a pattern it compiled
     /// for one call, to show that the ledger entry 42 fix is the whole of a divergence.
@@ -1022,6 +1062,31 @@ internal sealed class PatternObject
                 self.HasSkipVerb = true;
             }
 
+            // NOT UPSTREAM'S, D11: see HasBacktrackingVerb and ReadsCapturesWhileMatching.
+            if (self.NodeList[i].Op is Opcode.Skip or Opcode.Prune)
+            {
+                self.HasBacktrackingVerb = true;
+            }
+
+            if (self.NodeList[i].Op is Opcode.Skip or Opcode.Keep)
+            {
+                self.AnAttemptCanMoveTheNextStart = true;
+            }
+
+            if (
+                self.NodeList[i].Op
+                is Opcode.GroupExists
+                    or Opcode.RefGroup
+                    or Opcode.RefGroupFld
+                    or Opcode.RefGroupFldRev
+                    or Opcode.RefGroupIgn
+                    or Opcode.RefGroupIgnRev
+                    or Opcode.RefGroupRev
+            )
+            {
+                self.ReadsCapturesWhileMatching = true;
+            }
+
             // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
             Node node = self.NodeList[i];
             if (
@@ -1096,6 +1161,10 @@ internal sealed class PatternObject
             SetFuzzyRunLengths(self);
         }
 
+        // NOT UPSTREAM'S, D11 chunk 8: the bodies a run-out inside a lookaround or condition test
+        // reads, once the nodes are numbered.
+        SetLookaroundBodies(self);
+
         // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
         if (self.OptionalPassBranches is { } optionalPassBranches)
         {
@@ -1145,6 +1214,194 @@ internal sealed class PatternObject
         }
 
         return ceiling;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
+    /// <remarks>
+    /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
+    /// group call's target is not followed, and a pattern with group calls does not continue a
+    /// run-out (<c>Matcher.RunOutInALookaroundBody</c>), so its bodies are never read.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    private static void SetLookaroundBodies(PatternObject pattern)
+    {
+        foreach (Node test in pattern.NodeList)
+        {
+            if (test.Op is not (Opcode.Lookaround or Opcode.Conditional) || test.LookaroundEnd is null)
+            {
+                continue;
+            }
+
+            var nodes = new HashSet<int>();
+            var groups = new List<(int Private, int Public)>();
+            var todo = new Stack<Node>();
+            bool hasVerbOrCall = false;
+            todo.Push(test.Next1.Node!);
+            while (todo.Count > 0)
+            {
+                Node n = todo.Pop();
+                if (ReferenceEquals(n, test.LookaroundEnd) || !nodes.Add(n.Index))
+                {
+                    continue;
+                }
+
+                hasVerbOrCall |= n.Op is Opcode.Prune or Opcode.Skip or Opcode.GroupCall;
+
+                if (n.Op is Opcode.StartGroup or Opcode.EndGroup && n.Values[2] != 0)
+                {
+                    (int, int) g = ((int)n.Values[0], (int)n.Values[1]);
+                    if (!groups.Contains(g))
+                    {
+                        groups.Add(g);
+                    }
+                }
+
+                foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                {
+                    if (next is not null)
+                    {
+                        todo.Push(next);
+                    }
+                }
+            }
+
+            int[] sorted = [.. nodes];
+            Array.Sort(sorted);
+            test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
+        }
+
+        if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
+        {
+            SetRunOutGroups(pattern);
+        }
+
+        if (pattern.IsFuzzy && !pattern.HasGroupCalls)
+        {
+            SetEnclosingSections(pattern);
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.EnclosingSection"/>.</summary>
+    /// <remarks>
+    /// A walk from the start node that carries the section open at each node: FUZZY opens its own
+    /// for its body, and END_FUZZY goes back to the one FUZZY was reached in. Sections nest, so each
+    /// node is reached in one section whichever path reaches it; a repeat's end leads back to its
+    /// body in the same section.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its bodies set.</param>
+    private static void SetEnclosingSections(PatternObject pattern)
+    {
+        var fuzzyInABody = false;
+        foreach (Node test in pattern.NodeList)
+        {
+            if (test.BodyInfo is { } body)
+            {
+                foreach (int i in body.Nodes)
+                {
+                    fuzzyInABody |= pattern.NodeList[i].Op == Opcode.Fuzzy;
+                }
+            }
+        }
+
+        if (!fuzzyInABody || pattern.StartNode is not { } start)
+        {
+            return;
+        }
+
+        pattern.HasFuzzyInABody = true;
+        var outerOf = new Dictionary<int, Node?>();
+        var seen = new HashSet<int>();
+        var todo = new Stack<(Node Node, Node? Section)>();
+        todo.Push((start, null));
+        while (todo.Count > 0)
+        {
+            (Node n, Node? section) = todo.Pop();
+            if (!seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            Node? after = section;
+            if (n.Op is Opcode.Lookaround or Opcode.Conditional)
+            {
+                n.EnclosingSection = section;
+            }
+            else if (n.Op == Opcode.Fuzzy)
+            {
+                outerOf[n.Index] = section;
+                after = n;
+            }
+            else if (n.Op == Opcode.EndFuzzy && section is not null)
+            {
+                after = outerOf.GetValueOrDefault(section.Index);
+            }
+
+            foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+            {
+                if (next is not null)
+                {
+                    todo.Push((next, after));
+                }
+            }
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.RunOutGroups"/>.</summary>
+    /// <remarks>
+    /// Per body, the groups each node reaches are its own and those of the nodes after it, which a
+    /// few passes over the body settle (a repeat's end leads back to its body, so the graph has
+    /// cycles). The bodies are taken largest first, so a node inside a nested body keeps the
+    /// innermost body's set, which is the one a run-out at it reads (assert A10).
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its bodies set.</param>
+    private static void SetRunOutGroups(PatternObject pattern)
+    {
+        var byIndex = new Dictionary<int, Node>();
+        foreach (Node n in pattern.NodeList)
+        {
+            byIndex[n.Index] = n;
+        }
+
+        IEnumerable<Node> tests = pattern
+            .NodeList.Where(static t => t.BodyInfo is not null)
+            .OrderByDescending(static t => t.BodyInfo!.Nodes.Length);
+        foreach (Node test in tests)
+        {
+            int[] body = test.BodyInfo!.Nodes;
+            var reach = new Dictionary<int, HashSet<(int Private, int Public)>>();
+            foreach (int i in body)
+            {
+                Node n = byIndex[i];
+                reach[i] =
+                    n.Op is Opcode.StartGroup or Opcode.EndGroup && n.Values[2] != 0
+                        ? [((int)n.Values[0], (int)n.Values[1])]
+                        : [];
+            }
+
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                for (int k = body.Length - 1; k >= 0; k--)
+                {
+                    Node n = byIndex[body[k]];
+                    foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                    {
+                        if (next is not null && reach.TryGetValue(next.Index, out var after))
+                        {
+                            int before = reach[body[k]].Count;
+                            reach[body[k]].UnionWith(after);
+                            changed |= reach[body[k]].Count != before;
+                        }
+                    }
+                }
+            }
+
+            foreach (int i in body)
+            {
+                byIndex[i].RunOutGroups = [.. reach[i]];
+            }
+        }
     }
 
     /// <summary>

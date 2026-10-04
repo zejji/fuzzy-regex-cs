@@ -24,6 +24,7 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// graph - <c>END_GROUP</c>, <c>END_FUZZY</c>, <c>GREEDY_REPEAT_ONE</c> and the rest. They are here,
 /// in the same enum, because upstream keeps one numbering across both files and the engine's
 /// <c>switch</c> is keyed on it; a second enum would only add a cast at every node it builds.
+/// Value 98, <see cref="WTouch"/>, is this port's own and only ever a backtracking-stack entry.
 /// </para>
 /// <para>
 /// <b>Value 98 is this port's own</b>, after upstream's last, so no upstream value moves.
@@ -340,4 +341,54 @@ internal enum Opcode : uint
     /// (<c>Matcher.FuzzyFrameOp</c>).
     /// </summary>
     FuzzyLookaround = 99,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry of a touch mark, pushed where a
+    /// partial call's second pass passes a test that reads the text to come
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). It never appears on a
+    /// node or in a code list, and its backtracking arm only drops the mark.
+    /// </summary>
+    WTouch = 100,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a blocked atomic group,
+    /// possessive repeat or <c>\X</c> leaves where its cut would have been, holding the pruning-stack
+    /// mark its end popped (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2).
+    /// Backtracking onto it pushes the mark back, so the group is open again for its body's other
+    /// paths. It never appears on a node or in a code list.
+    /// </summary>
+    Reopen = 101,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a fuzzy zero-width test leaves
+    /// when a partial call's second pass passes it undetermined, holding the node and the text
+    /// position. The continuations that fail the test may still match it with an insertion, so
+    /// backtracking onto the entry tries that, as the forward arm does for a test that failed. It
+    /// never appears on a node or in a code list.
+    /// </summary>
+    UndeterminedFuzzyRetry = 102,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11): the backtracking entry a negative condition test leaves
+    /// when a partial call's second pass exhausts its body after a blocked success, holding the
+    /// no-branch's node and the text position (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>,
+    /// section 4.2). The yes-branch runs first; backtracking onto the entry runs the no-branch, which
+    /// the continuations where that success held need. It never appears on a node or in a code list.
+    /// </summary>
+    NoBranch = 103,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11 chunk 8): the backtracking entry of an unknown capture,
+    /// which a run-out inside a lookaround body gives each group of the body in a pattern that reads
+    /// captures while it matches. Its arm takes the capture back as END_GROUP's arm does. It never
+    /// appears on a node or in a code list.
+    /// </summary>
+    UnknownCapture = 104,
+
+    /// <summary>
+    /// Engine-only and NOT UPSTREAM'S (D11 chunk 8): the backtracking entry of a run-out inside a
+    /// lookaround body that closed the fuzzy section the body left open. Its arm puts the section's
+    /// counts, node and totals back. It never appears on a node or in a code list.
+    /// </summary>
+    RunOutClosedSection = 105,
 }

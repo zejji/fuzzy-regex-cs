@@ -298,12 +298,14 @@ public sealed class MatchStateCacheTests
             }
 
             // MatchState.FilterMemory is null exactly when the pattern has no fuzzy-literal filter,
-            // and readonly, so no call can set it. MatchState.EmptyIterationScratch is the same,
-            // null exactly when the pattern tests no group; otherwise it is an array, which the
-            // long[] rule below scribbles, and a reused state must clear it.
+            // and readonly, so no call can set it. MatchState.PartialEventCounts is null exactly in
+            // a Release build (D11). MatchState.EmptyIterationScratch is the same, null exactly when
+            // the pattern tests no group; otherwise it is an array, which the long[] rule below
+            // scribbles, and a reused state must clear it.
             if (
                 (
                     string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.PartialEventCounts), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
                 ) && field.GetValue(state) is null
             )
@@ -432,6 +434,16 @@ public sealed class MatchStateCacheTests
                 break;
             case null when field.FieldType == typeof(HashSet<long[]>):
                 field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
+                break;
+            case List<WMark> marks:
+                marks.Add(new WMark(7, WMarkKind.Touch));
+                break;
+            case List<LookaroundSuccess> successes:
+                successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
+                break;
+            case null when field.FieldType == typeof(PartialEvent?):
+                // D11's Debug-only run-out cause (MatchState.NoteRunOutCause).
+                field.SetValue(state, PartialEvent.RunOutAnswered);
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);

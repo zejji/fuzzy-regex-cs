@@ -1055,6 +1055,7 @@ internal static class NodeCompiler
         // test node -> test -> end test node
         AddNode(testNode, subargs.Start!);
         AddNode(subargs.End!, endTestNode);
+        testNode.LookaroundEnd = endTestNode;
 
         // Compile the true branch.
         subargs = args;
@@ -1447,6 +1448,7 @@ internal static class NodeCompiler
 
         // Create the node to terminate the subpattern.
         Node endNode = CreateNode(args.Pattern, Opcode.EndLookaround, 0, 0, 0);
+        lookaroundNode.LookaroundEnd = endNode;
 
         // Make a continuation node.
         Node nextNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);

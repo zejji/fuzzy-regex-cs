@@ -345,6 +345,136 @@ internal sealed class MatchState : IDisposable
     internal readonly ByteStack Pstack;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: the w-marks of a partial call's second pass, sorted by position, each
+    /// live while its entry is on <see cref="Bstack"/> (design section 4.2).
+    /// </summary>
+    /// <remarks>
+    /// Empty outside the second pass (A6), and at the start of every attempt (A5). The list is made
+    /// with the state and has no storage until the first mark, so a call without partial allocates
+    /// nothing for it; a reused state keeps the storage, as the stacks keep theirs. Every truncation
+    /// of <see cref="Bstack"/> other than a pop goes through <see cref="SetBstackCount"/>, which
+    /// asserts that no mark is left above the new count (A7).
+    /// </remarks>
+    internal readonly List<WMark> WMarks = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2, the dedup: the successes of each open positive lookaround that a
+    /// partial call's second pass continued after a blocked end, by the frame's backtracking-stack
+    /// position (design section 4.2). A second success with the same captures, fuzzy counts and
+    /// fuzzy changes leads where the first did, so it is not continued again. An entry goes when
+    /// its frame goes (A12).
+    /// </summary>
+    internal readonly List<LookaroundSuccess> LookaroundSuccesses = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the attempt running is the one that starts inside the text to
+    /// come, with both sides of its start unknown (<c>Matcher.MatchFromInsideTheTextToCome</c>).
+    /// </summary>
+    internal bool InsideW;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the attempt running in a partial call's second pass has read
+    /// the text to come: an undetermined test, a decided one that differs from the first pass, or
+    /// any test of the attempt from inside that text. Cleared at each attempt's start. It is the
+    /// per-attempt flag of the design's assert A1; M3 turns a success into a partial only when it
+    /// is set, because any other success is one the first pass could have found.
+    /// </summary>
+    /// <remarks>
+    /// A touch mark cannot say this: a cut discards it with the path it marks, and a decided read
+    /// leaves none. A run-out needs no flag, because it answers the partial itself.
+    /// </remarks>
+    internal bool AttemptTouchedTheTextToCome;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4 (design section 4.4): the forks of the current attempt of a partial
+    /// call's second pass, a fork being a blocked construct that keeps more than one outcome.
+    /// Cleared at each attempt's start; always 0 in a first pass (assert A6).
+    /// </summary>
+    internal long Forks;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: set when <see cref="Forks"/> passes the budget. The matcher reads it
+    /// at its next cancellation check (which the firing brings forward) and answers the partial at
+    /// the attempt's start (<see cref="ForkAttemptStart"/>).
+    /// </summary>
+    internal bool ForkBudgetSpent;
+
+    /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
+    internal int ForkAttemptStart;
+
+    /// <summary>No verb whose scope is the attempt has been skipped (<see cref="SkippedAttemptVerb"/>).</summary>
+    internal const long NoSkippedVerb = long.MinValue;
+
+    /// <summary>Verbs of two kinds or positions were skipped (<see cref="SkippedAttemptVerb"/>).</summary>
+    internal const long SkippedVerbsDiffer = long.MaxValue;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: which verb whose scope is the attempt the second pass skipped in this
+    /// attempt: a <c>(*SKIP)</c>'s position, -1 for a <c>(*PRUNE)</c>, or one of the two constants.
+    /// A later verb of the attempt whose path is not blocked may act only when it is the same verb
+    /// (<c>Matcher.ActingEndsTheScopeAsTheSkippedVerbDid</c>): then the attempt ends as the skipped
+    /// one would have ended it.
+    /// </summary>
+    internal long SkippedAttemptVerb = NoSkippedVerb;
+
+#if DEBUG
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4, Debug only: set by <c>Matcher.ForkBudgetPartial</c>, so that
+    /// <c>Matcher.BasicMatch</c> can assert that a partial returned with <see cref="ForkBudgetSpent"/>
+    /// set is the budget's own (rule 10; chunk 9 fix round's re-review, finding 3).
+    /// </summary>
+    internal bool ForkBudgetAnswered;
+#endif
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a run-out has given this call an unknown capture, so
+    /// the backreference and group-condition arms must ask (<c>Matcher.MarkTheBodysCapturesUnknown</c>).
+    /// A call without partial never sets it and pays one test per such arm.
+    /// </summary>
+    internal bool HasUnknownCaptures;
+
+    /// <summary>
+    /// Whether consumption past the right edge of the text is a run-out (a partial) rather than a
+    /// failure: forward partial calls, and the attempt from inside the text to come either way.
+    /// </summary>
+    internal bool RunsOutRight => PartialSide == PartialRight || InsideW;
+
+    /// <summary>The same as <see cref="RunsOutRight"/>, for the left edge.</summary>
+    internal bool RunsOutLeft => PartialSide == PartialLeft || InsideW;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: how many times each <see cref="PartialEvent"/> happened in this call,
+    /// which the port grid reads per row to show every mechanism fired (VERIFICATION rule 11).
+    /// </summary>
+    /// <remarks>
+    /// Null outside Debug builds. It is on the state rather than in a static because the library
+    /// holds no writable static (<c>ThreadSafetyTests</c>). <see cref="Init"/> zeroes it for each
+    /// call.
+    /// </remarks>
+#if DEBUG
+    internal readonly long[]? PartialEventCounts = new long[Enum.GetValues<PartialEvent>().Length];
+#else
+    internal readonly long[]? PartialEventCounts;
+#endif
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the mechanism that produced the run-out the matcher is about to take,
+    /// so that a run-out which answers the partial can be attributed to it (the grid's C2 label,
+    /// review S2 of 2026-10-04). Cleared by every run-out. Written only by Debug builds: its two
+    /// methods are conditional.
+    /// </summary>
+    private PartialEvent? _pendingRunOutCause;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: how many dedup entries (<see cref="LookaroundSuccesses"/>) the dedup's
+    /// look-ups and drops have examined in this call, so that a test can show the work grows with
+    /// the entries made, not with their product (row X1). Counted in every build, so the test's
+    /// bound is live in the Release suite CI runs (review L1, 2026-10-04); the dedup runs only in a
+    /// partial call's second pass, so no other call pays for the count.
+    /// </summary>
+    internal long DedupEntriesExamined;
+
+    /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
     /// call was made. In a pattern where a conditional or backreference reads a group, two open
@@ -571,45 +701,6 @@ internal sealed class MatchState : IDisposable
 
     /// <summary>Upstream <c>partial_side</c>.</summary>
     internal int PartialSide;
-
-    /// <summary>
-    /// PCRE2's <c>hitend</c>: a word or grapheme boundary was decided at the truncation point of a
-    /// partial match, so the answer it gave rests on text the caller has said is missing.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This has no upstream counterpart. Upstream resolves such a boundary against the truncated
-    /// text and is done with it, which is upstream issue 589 and ledger entry 21: 'True' is denied
-    /// as a partial of <c>(?!(True|False)\b)(.*)</c> even though 'Truest' is a complete match, so a
-    /// prefix whose completion exists is reported as impossible. S57d takes PCRE2's model instead,
-    /// which pcre2partial(3) states in one line - under the soft option "the partial match is
-    /// remembered, but matching continues as normal", and "if no complete match can be found,
-    /// PCRE2_ERROR_PARTIAL is returned instead of PCRE2_ERROR_NOMATCH".
-    /// </para>
-    /// <para>
-    /// <b>Setting this flag is all a predicate does; it never ends the match.</b> That is the whole
-    /// difference from S50's reverted attempt, which returned a partial status from the predicate
-    /// itself and so truncated a capture group that backtracking had not finished growing -
-    /// <c>search(r'(\.+?)\1\b', '..', partial=True)</c> came back with group 1 at (0, 1) where
-    /// upstream gives (0, 2). Only <see cref="Matcher.DoMatch"/> reads the flag, and only once the
-    /// whole match has failed.
-    /// </para>
-    /// </remarks>
-    internal bool HitEnd;
-
-    /// <summary>
-    /// Where the attempt that first set <see cref="HitEnd"/> began, which is the start of the span a
-    /// hitend-derived partial reports.
-    /// </summary>
-    /// <remarks>
-    /// Written once per match and not overwritten, so that the leftmost end-reaching attempt is the
-    /// one reported. Measured on PCRE2 10.47, 2026-09-21,
-    /// <c>tools/probes/pcre2-hitend-partial-span.py</c> section B: <c>a*c\B</c> over <c>'ac'</c>
-    /// reaches the end from start 0 and again from start 1, and the answer is PARTIAL (0,2).
-    /// Section A is the same question from the other side - <c>cd\B</c> over <c>'xabcd'</c> is
-    /// PARTIAL (3,5), so the start is the attempt's and not the subject's.
-    /// </remarks>
-    internal int HitEndMatchPos;
 
     /// <summary>Upstream <c>max_errors</c>.</summary>
     internal long MaxErrors;
@@ -1136,9 +1227,20 @@ internal sealed class MatchState : IDisposable
             ?? MemoryMarshal.Cast<char, ushort>(text.Span).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
         _characterIndex = null;
 
-        // What a new state holds by default, and a reused one must be given back.
+        // What a new state holds by default, and a reused one must be given back. A call that
+        // succeeded leaves its stack, and so its marks, where they were (D11).
+        WMarks.Clear();
+        LookaroundSuccesses.Clear();
+        InsideW = false;
+        AttemptTouchedTheTextToCome = false;
+        HasUnknownCaptures = false;
+#if DEBUG
+        Array.Clear(PartialEventCounts!);
+#endif
+        _pendingRunOutCause = null;
+        DedupEntriesExamined = 0;
         Sstack.Reset();
-        Bstack.Reset();
+        SetBstackCount(0);
         Pstack.Reset();
         ClearGroups();
         foreach (RepeatData repeat in Repeats)
@@ -1185,8 +1287,6 @@ internal sealed class MatchState : IDisposable
         BestFuzzyChanges.Clear();
         BestTotalErrors = 0;
         BestTotalCost = 0;
-        HitEnd = false;
-        HitEndMatchPos = 0;
         MaxErrors = 0;
         MaxCost = 0;
         TotalErrors = 0;
@@ -1198,6 +1298,13 @@ internal sealed class MatchState : IDisposable
         LastIndex = 0;
         LastGroup = 0;
         Iterations = 0;
+        ForkBudgetSpent = false;
+        Forks = 0;
+        ForkAttemptStart = 0;
+        SkippedAttemptVerb = NoSkippedVerb;
+#if DEBUG
+        ForkBudgetAnswered = false;
+#endif
         TooFewErrors = false;
         FoundMatch = false;
         Array.Clear(FuzzyCounts);
@@ -1338,6 +1445,11 @@ internal sealed class MatchState : IDisposable
         // ArrayPool<byte>.Shared after every call made a warm call allocate whenever another thread
         // had taken them from the pool's shared stacks in between: 280 B at a time in the parallel
         // native-AOT run, and deterministically in AllocationTests (2026-09-25).
+        WMarks.Clear();
+        LookaroundSuccesses.Clear();
+        InsideW = false;
+        AttemptTouchedTheTextToCome = false;
+        HasUnknownCaptures = false;
         Sstack.KeepUpTo(_cachedStackLimit);
         Bstack.KeepUpTo(_cachedStackLimit);
         Pstack.KeepUpTo(_cachedStackLimit);
@@ -1490,13 +1602,208 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: sets <see cref="Bstack"/>'s count, which is how every truncation of the
+    /// backtracking stack is made (upstream assigns <c>bstack.count</c> directly).
+    /// </summary>
+    /// <remarks>
+    /// The one check is A7: no live w-mark lies at or above the new count, so the caller must have
+    /// dropped the marks it discards. The design's one exception, an unblocked construct's own-frame
+    /// cut taint, which moves to the entry its cut pushes, needs nothing here: the frame lies below
+    /// the count its cut sets, and the cut drops the taint before it pops the frame and adds it
+    /// again at the end entry (<c>Matcher.DropOwnCutTaint</c>, build chunk 4). The check is Debug
+    /// only, so a Release build pays nothing here.
+    /// </remarks>
+    /// <param name="count">The new count, at most the current one.</param>
+    internal void SetBstackCount(int count)
+    {
+        Debug.Assert(count <= Bstack.Count, "a truncation never grows the backtracking stack");
+        Debug.Assert(NoWMarkAtOrAbove(count), "D11 A7: a truncation discards no live w-mark");
+        Bstack.Count = count;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: counts one second-pass event. Compiled away outside Debug builds.</summary>
+    /// <param name="partialEvent">The event.</param>
+    [Conditional("DEBUG")]
+    internal void NotePartialEvent(PartialEvent partialEvent) => PartialEventCounts![(int)partialEvent]++;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: names the mechanism whose run-out the matcher takes next (Debug only).
+    /// </summary>
+    /// <param name="cause">The mechanism's event.</param>
+    [Conditional("DEBUG")]
+    internal void NoteRunOutCause(PartialEvent cause) => _pendingRunOutCause = cause;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a run-out was taken; when it answers the partial, the call records
+    /// <see cref="PartialEvent.RunOutAnswered"/> and, if a mechanism produced it,
+    /// <see cref="PartialEvent.RunOutAnsweredByLazyPastTheEdge"/> or
+    /// <see cref="PartialEvent.RunOutAnsweredByGreedyBodyKept"/> (Debug only). The cause is cleared
+    /// either way, so the answer's label belongs to the run-out that produced it.
+    /// </summary>
+    /// <param name="answered">Whether the run-out answers the partial.</param>
+    [Conditional("DEBUG")]
+    internal void NoteRunOutTaken(bool answered)
+    {
+        if (answered)
+        {
+            NotePartialEvent(PartialEvent.RunOutAnswered);
+            if (_pendingRunOutCause == PartialEvent.LazyRepeatPastTheEdge)
+            {
+                NotePartialEvent(PartialEvent.RunOutAnsweredByLazyPastTheEdge);
+            }
+            else if (_pendingRunOutCause == PartialEvent.GreedyBodyRunOutKept)
+            {
+                NotePartialEvent(PartialEvent.RunOutAnsweredByGreedyBodyKept);
+            }
+        }
+
+        _pendingRunOutCause = null;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: how many times an event has happened in this call.</summary>
+    /// <param name="partialEvent">The event.</param>
+    /// <returns>The count; always 0 outside Debug builds.</returns>
+    internal long PartialEventCount(PartialEvent partialEvent) => PartialEventCounts?[(int)partialEvent] ?? 0;
+
+    /// <summary>NOT UPSTREAM'S, D11: records a w-mark (design section 4.2).</summary>
+    /// <param name="position">The index of the backtracking-stack entry the mark belongs to.</param>
+    /// <param name="kind">What the mark records.</param>
+    internal void AddWMark(int position, WMarkKind kind)
+    {
+        Debug.Assert(PartialSide != PartialNone, "D11 A6: only a partial call's second pass marks");
+
+        // Marks are nearly always made at the top of the stack; a verb taint goes to its scope's
+        // frame, lower down, and sits after any mark already at that position.
+        int index = WMarks.Count;
+        while (index > 0 && WMarks[index - 1].Position > position)
+        {
+            index--;
+        }
+
+        WMarks.Insert(index, new WMark(position, kind));
+        Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: drops every w-mark at or above a position.</summary>
+    /// <param name="position">The lowest position dropped.</param>
+    internal void DropWMarksFrom(int position)
+    {
+        int keep = WMarks.Count;
+        while (keep > 0 && WMarks[keep - 1].Position >= position)
+        {
+            keep--;
+        }
+
+        WMarks.RemoveRange(keep, WMarks.Count - keep);
+        Debug.Assert(WMarksAreInOrder(), "D11 A8: w-marks sorted, each below the backtracking stack's count");
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: records a continued success for the dedup, keeping
+    /// <see cref="LookaroundSuccesses"/> in frame order.
+    /// </summary>
+    /// <remarks>
+    /// Entries are nearly always made in frame order, because a frame is newer than every frame
+    /// below it; the exception is a blocked outer lookaround that records its success after a
+    /// nested one's, whose frame is higher (review of chunk 7, round 2), and that one is inserted
+    /// below the nested entries. The order is what keeps the dedup linear: row X1 leaves one entry
+    /// per iteration live, and scanning all of them at every look-up and drop made its second pass
+    /// quadratic (2.5 s at n = 1000, 2026-10-03).
+    /// </remarks>
+    /// <param name="success">The success.</param>
+    internal void AddLookaroundSuccess(LookaroundSuccess success)
+    {
+        int at = LookaroundSuccesses.Count;
+        while (at > 0 && LookaroundSuccesses[at - 1].Frame > success.Frame)
+        {
+            DedupEntriesExamined++;
+            at--;
+        }
+
+        LookaroundSuccesses.Insert(at, success);
+        Debug.Assert(
+            (at == 0 || LookaroundSuccesses[at - 1].Frame <= success.Frame)
+                && (at == LookaroundSuccesses.Count - 1 || LookaroundSuccesses[at + 1].Frame > success.Frame),
+            "D11 A12: the dedup entries are in frame order"
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation was already continued
+    /// from the same frame (the dedup). Reads only the entries at or above the frame, from the end.
+    /// </summary>
+    /// <param name="success">The success.</param>
+    /// <returns><see langword="true"/> if an entry of the same frame leads where it does.</returns>
+    internal bool HasSameContinuation(LookaroundSuccess success)
+    {
+        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
+        {
+            DedupEntriesExamined++;
+            if (success.SameContinuation(LookaroundSuccesses[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
+    /// <remarks>
+    /// The entries are in frame order (<see cref="AddLookaroundSuccess"/>), so the ones dropped are
+    /// a run at the end. They are made only by a blocked positive end in a partial call's second
+    /// pass (<c>Matcher.EndALookaroundInTheSecondPass</c>), each for a frame still on the
+    /// backtracking stack, and the attempt's FAILURE arm and <see cref="InitMatch"/> clear them.
+    /// Every caller asks <c>LookaroundSuccesses.Count != 0</c> first, so a call without partial
+    /// pays that test alone.
+    /// </remarks>
+    /// <param name="position">The lowest frame position dropped.</param>
+    internal void DropLookaroundSuccessesFrom(int position)
+    {
+        int keep = LookaroundSuccesses.Count;
+        while (keep > 0 && LookaroundSuccesses[keep - 1].Frame >= position)
+        {
+            DedupEntriesExamined++;
+            keep--;
+        }
+
+        LookaroundSuccesses.RemoveRange(keep, LookaroundSuccesses.Count - keep);
+        Debug.Assert(
+            keep == 0 || LookaroundSuccesses[keep - 1].Frame < position,
+            "D11 A12: no dedup entry outlives its frame"
+        );
+    }
+
+    /// <summary>A7's test: whether every live w-mark lies below <paramref name="count"/>.</summary>
+    /// <param name="count">A backtracking-stack count.</param>
+    /// <returns><see langword="true"/> if no mark would be left above that count.</returns>
+    internal bool NoWMarkAtOrAbove(int count) => WMarks.Count == 0 || WMarks[^1].Position < count;
+
+    /// <summary>A8's test: the w-marks are sorted by position and each lies below the stack's count.</summary>
+    /// <returns><see langword="true"/> if they are.</returns>
+    internal bool WMarksAreInOrder()
+    {
+        for (int i = 0; i < WMarks.Count; i++)
+        {
+            if (WMarks[i].Position < 0 || (i > 0 && WMarks[i - 1].Position > WMarks[i].Position))
+            {
+                return false;
+            }
+        }
+
+        return NoWMarkAtOrAbove(Bstack.Count);
+    }
+
+    /// <summary>
     /// Upstream <c>init_match</c> (<c>upstream/src/_regex.c</c> line 3404).
     /// </summary>
     internal void InitMatch()
     {
-        // Reset the stacks.
+        // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
+        WMarks.Clear();
+        LookaroundSuccesses.Clear();
         Sstack.Reset();
-        Bstack.Reset();
+        SetBstackCount(0);
         Pstack.Reset();
 
         SearchAnchor = TextPos;
@@ -1522,6 +1829,10 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;
+        ForkBudgetSpent = false;
+        Forks = 0;
+        ForkAttemptStart = 0;
+        SkippedAttemptVerb = NoSkippedVerb;
 
         // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
         // the memo never leaves the threshold or the set other than Reset leaves them, so it pays
@@ -1865,12 +2176,22 @@ internal sealed class MatchState : IDisposable
     /// <see cref="RepeatInfo.FailureMemo"/>.
     /// </summary>
     /// <remarks>
-    /// A partial match is excluded here rather than in the pattern because it is a property of the
-    /// call: a path that reaches the end of the text is neither a success nor a failure.
+    /// A partial call's second pass keeps the memo too (D11 build chunk 9, design amendment 1). The
+    /// exclusion came from the memo's design ("a partial result is neither success nor failure")
+    /// with no witness, and it made the second pass exponential wherever the memo had made the
+    /// first pass linear: `(?:a|a)+c` over 24 'a's and "bc" took 2.1 s. The memo needs one fact,
+    /// that entering the body of the repeat at a position has one outcome whatever path arrived
+    /// there, and nothing a second-pass path carries beyond the position breaks it for a memo
+    /// repeat: a w-mark blocks only constructs older than itself, and a memo repeat's continuation
+    /// holds no cut, lookaround or verb older than the repeat; the touch flag decides only what
+    /// <c>Success</c> does, the same for every arrival; a run-out outside a body ends the attempt,
+    /// and a memo repeat is never inside a body; unknown captures matter only to backreferences and
+    /// group conditions, which switch the memo off. A 42,240-row differential grid gave identical
+    /// answers with and without the exclusion (amendment 1).
     /// </remarks>
     /// <param name="index">The repeat index.</param>
     /// <returns><see langword="true"/> if a matched body leaves no mark.</returns>
-    internal bool KeepsFailureMemo(int index) => PartialSide == PartialNone && Pattern.RepeatInfoAt(index).FailureMemo;
+    internal bool KeepsFailureMemo(int index) => Pattern.RepeatInfoAt(index).FailureMemo;
 
     /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
     /// <remarks>
@@ -1889,7 +2210,24 @@ internal sealed class MatchState : IDisposable
             return false;
         }
 
-        return ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        NoteSecondPassGuard(guarded);
+
+        return guarded;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 build chunk 9 (rule 11): counts a guard that held in a partial call's
+    /// second pass, which the failure memo there makes possible for memo repeats.
+    /// </summary>
+    /// <param name="guarded">Whether the guard held.</param>
+    [Conditional("DEBUG")]
+    private void NoteSecondPassGuard(bool guarded)
+    {
+        if (guarded && PartialSide != PartialNone)
+        {
+            NotePartialEvent(PartialEvent.SecondPassGuardHeld);
+        }
     }
 
     /// <summary>

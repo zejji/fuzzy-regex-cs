@@ -467,6 +467,16 @@ public sealed class CaseFoldingTests
     /// <c>tools/probes/upstream-turkic-from-the-pattern-side.py</c> and its port half
     /// <c>tools/probes/port-turkic-from-the-pattern-side.ps1</c>, which print the whole grid.
     /// </para>
+    /// <para>
+    /// <b>The one-character rows moved to None with D11's fix round 2 (2026-10-03), and None is
+    /// right.</b> Their partial was the first-set check in front of the pattern (a zero-width test
+    /// of <c>h</c>) running out of text at the edge, which answered before <c>^</c> was read. The
+    /// check now lets the path through (<c>Matcher.ZeroWidthTestDefersAtTheEdge</c>), and <c>^</c>
+    /// after the U+0130 at 5 fails whatever follows, so no continuation completes any row: the
+    /// brute-force judge answers None to all seven. Upstream still answers (5, 5) to the
+    /// one-character rows and to U+0130, which keeps the upstream half of the control (U+0130
+    /// behaves as <c>h</c> there); this port's half now reads None everywhere.
+    /// </para>
     /// </remarks>
     /// <param name="literal">The pattern's leading literal.</param>
     /// <param name="partialExpected">Whether a zero-width partial is reported.</param>
@@ -476,10 +486,11 @@ public sealed class CaseFoldingTests
     [Arguments("ß", false)]
     [Arguments("ﬀ", false)]
     [Arguments("ǰ", false)]
-    // Folds of exactly one character: the partial. upstream agrees on all three.
-    [Arguments("h", true)]
-    [Arguments("i", true)]
-    [Arguments("ı", true)]
+    // Folds of exactly one character: no partial either since the D11 fix round 2. DIVERGES FROM
+    // UPSTREAM, deliberately: upstream answers the (5, 5) partial, which no continuation completes.
+    [Arguments("h", false)]
+    [Arguments("i", false)]
+    [Arguments("ı", false)]
     public void A_leading_literal_that_folds_longer_than_itself_reports_no_partial_on_an_empty_slice(
         string literal,
         bool partialExpected

@@ -142,6 +142,25 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         Count = newCount;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: moves the top <paramref name="length"/> bytes of this stack
+    /// onto <paramref name="target"/>, in the same order, without an intermediate buffer.
+    /// </summary>
+    /// <param name="target">The stack that receives the bytes.</param>
+    /// <param name="length">How many bytes to move.</param>
+    /// <returns><see langword="false"/> if this stack holds fewer bytes than that.</returns>
+    internal bool MoveTopTo(ByteStack target, int length)
+    {
+        if (length < 0 || length > Count)
+        {
+            return false;
+        }
+
+        target.PushBlock(_storage.AsSpan(Count - length, length));
+        Count -= length;
+        return true;
+    }
+
     /// <summary>Upstream <c>ByteStack_pop</c> (line 2372).</summary>
     /// <param name="item">Receives the byte.</param>
     /// <returns><see langword="false"/> if the stack is empty.</returns>
@@ -210,6 +229,68 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         }
 
         _storage.AsSpan(Count - block.Length, block.Length).CopyTo(block);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S: reads the bytes that sit just below <paramref name="top"/>, as a pop would if
+    /// the stack were <paramref name="top"/> bytes deep, without touching <see cref="Count"/>.
+    /// </summary>
+    /// <remarks>
+    /// Upstream reads a pruning mark by setting the count to the mark, popping and setting it back.
+    /// This port routes every change of the backtracking stack's count through
+    /// <c>MatchState.SetBstackCount</c>, which asserts the D11 w-marks (A7), and a read that lowers
+    /// the count for a moment is not a truncation, so it reads in place instead.
+    /// </remarks>
+    /// <param name="top">The depth to read below; at most <see cref="Count"/>.</param>
+    /// <param name="block">Receives the bytes.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool ReadBlockBelow(int top, Span<byte> block)
+    {
+        if (top > Count || block.Length > top)
+        {
+            return false;
+        }
+
+        _storage.AsSpan(top - block.Length, block.Length).CopyTo(block);
+        return true;
+    }
+
+    /// <summary>The byte <see cref="ReadBlockBelow"/> reads just below <paramref name="top"/>.</summary>
+    /// <param name="top">The depth to read below.</param>
+    /// <param name="item">Receives the byte.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or 0.</returns>
+    internal bool ReadUInt8Below(int top, out byte item)
+    {
+        item = 0;
+        return ReadBlockBelow(top, new Span<byte>(ref item));
+    }
+
+    /// <summary>The size <see cref="ReadBlockBelow"/> reads just below <paramref name="top"/>.</summary>
+    /// <param name="top">The depth to read below.</param>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool ReadSizeBelow(int top, out long item)
+    {
+        item = 0;
+        return ReadBlockBelow(top, MemoryMarshal.AsBytes(new Span<long>(ref item)));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: overwrites the size just below <paramref name="top"/>, the
+    /// one <see cref="ReadSizeBelow"/> reads.
+    /// </summary>
+    /// <param name="top">The depth to write below.</param>
+    /// <param name="item">The value.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool WriteSizeBelow(int top, long item)
+    {
+        if (top < sizeof(long) || top > Count)
+        {
+            return false;
+        }
+
+        MemoryMarshal.Write(_storage.AsSpan(top - sizeof(long), sizeof(long)), in item);
         return true;
     }
 

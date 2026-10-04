@@ -542,11 +542,16 @@ public sealed class FuzzyCountsAndChangesTests
             FuzzyRegexOptions.Ascii
         ).Match("bB.a.", partial: true);
 
+        // D11 moved this row from (4, 5) with counts (0, 1, 1) to the attempt at 3, whose path
+        // passes `\m` and `$` at the end as undetermined and so reaches the end of the pattern.
+        // Neither answer is a true partial: `\m$` holds for no text, so the brute-force judge
+        // (tools/probes/d11-brute-judge.py, 2026-09-29) answers None. It is the design's limit C3,
+        // two reads of the text to come that no single continuation satisfies together, which is
+        // known defect D18. What this test holds is that the change list agrees with the counts.
         forward.PartialMatch.Should().BeTrue();
-        (forward.Index, forward.Length).Should().Be((4, 1));
-        forward.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 1));
-        forward.FuzzyChanges.Insertions.Should().Equal(4);
-        forward.FuzzyChanges.Deletions.Should().Equal(4);
+        (forward.Index, forward.Length).Should().Be((3, 2));
+        forward.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        forward.FuzzyChanges.Substitutions.Should().Equal(4);
         AssertChangesAgreeWithCounts(forward);
 
         // The second row. Its pattern spells its own verb `(*PRUNE)`, so the verb moves no bound
@@ -565,7 +570,8 @@ public sealed class FuzzyCountsAndChangesTests
         // Moved by the empty-iteration rule (2026-09-26), which no longer counts undone edits as a
         // repeat's progress: the partial now starts at 0, where it was (2, 4) with (2, 0, 0) and
         // substitutions at 2 and 5. The point of the row, that the changes agree with the counts,
-        // holds either way.
+        // holds either way. D11 alone had moved it to (2, 4) with one substitution at 2; with both,
+        // entry 44's answer stands (measured on the merge, 2026-09-29).
         astral.PartialMatch.Should().BeTrue();
         (astral.Index, astral.Length).Should().Be((0, 6));
         astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
