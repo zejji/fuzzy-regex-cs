@@ -265,3 +265,23 @@ Review answered: `.claude/driver/review-d11-chunk9-part2-2026-10-03.md`.
   there. **For the ledger (upstream divergence):** regex 2026.9.10 answers None to all five
   partial searches, where the judge's witnesses ('abb', 'b', 'ab' appended) complete each from a
   start inside the text to come.
+- **Step 3c, the baseline**: `tests/parity-baseline.json` regenerated with `-UpdateBaseline` (8,107
+  ids); it now holds the renamed `..._upstream_denies(..)` and oracle-wave pins, the D69, F1 and Z2
+  tests and this round's (checked by id). The only removals accepted are the three
+  `CaseFoldingTests` one-character rows, renamed by 3d's pin move (True -> False). 3d also moved
+  row 7 of the oracle entry `bounded-lazy-repeat-partial` (same span; group 1 now (5, 5), D62's
+  rule) and noted the h/i/U+0131 cells in `turkic-default-folding-from-the-pattern-side`.
+- **Step 5, final checks (on d28319d7)**: ratchet GREEN (8,215). Oracle, each seed alone under the
+  test lock: seed 7 GREEN (agree 7387, expected 185, timeout 2, resource 4, undefined 2, diverge 0
+  of 7580), seed 4242 GREEN (agree 7399, expected 176, resource 5, diverge 0), seed 20260927 GREEN
+  (agree 7390, expected 186, resource 4, diverge 0). `tools/check-doc-examples.ps1`: all ok.
+  Grids (Debug, 359cf248+F1 head 19a42426 against the final engine): item 0 (3,000) 0 moved;
+  memo (5,760) 0 moved; held-advance (8,584) 21 onto the judge, 0 away; fuzzy-lookaround/body
+  (the review's 5,520) 3 onto the judge (the 3a assert rows), 0 away; asserts 3 -> 0. Events
+  reached: `ZeroWidthTestDeferred` in all four (153 / 531 / 20 / 451 rows), `DecidedReadDiffering`
+  3 rows (fz). Perf (Release, tiering off, 359cf248 against the final engine, 10,760 partial rows,
+  3 alternating runs, per-row median of 9): total 20.5 / 20.4 ms (0.994), every file 0.98-1.02,
+  0 of 253 rows over 10 us more than 10% slower, answers identical. The machine was shared with
+  other agents' jobs. A call without partial runs no changed code (every change sits behind the
+  second pass's run-out tests or the dedup's `Count != 0`). X1 and S4 as in step 4.
+  **Next:** the round's review; the X1 target decision (options in step 4).
