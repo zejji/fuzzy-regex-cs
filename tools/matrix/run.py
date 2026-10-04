@@ -359,6 +359,10 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         # A phantom is "no completion up to N characters", a lower bound, so it names its N.
         bound = port.get("judgeBound", "unknown")
         judges = f"port judge {pj} (continuations up to {bound}); upstream judge {uj}"
+        if pj and pj.startswith("P") and isinstance(bound, int) and bound > 3:
+            # A deep-phase P is the least start for the shortest completing length, not for every
+            # length (port-runner.cs): a bounded verdict.
+            judges = judges.replace("(continuations", "(deep phase, bounded: least start for the shortest completing length; continuations", 1)
         if kind == "ok":
             out["C4"] = ("pass", "", ans, judges)
         elif kind == "phantom":
