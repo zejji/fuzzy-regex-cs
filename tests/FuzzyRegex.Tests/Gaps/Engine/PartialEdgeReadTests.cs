@@ -41,15 +41,18 @@ public sealed class PartialEdgeReadTests
     /// <summary>
     /// The seed-7 row of the 2026-09-21 oracle wave, which S57d pinned as a partial at (0, 4): its
     /// <c>\m</c> comes after an astral uppercase letter at the end of the text, so no continuation
-    /// starts a word there, and the attempt at 0 fails.
+    /// starts a word there, and the `\m` read decides nothing.
     /// </summary>
     /// <remarks>
-    /// Searched, it is the partial at the edge (4, 4), a PHANTOM OF LIMIT C2, known defect D19. No
-    /// text completes the pattern (<c>\m$</c> holds nowhere; the judge answers None), but the
-    /// search's second pass runs a <c>\p{Lu}+?</c> out of text, and after a run-out the rest is
-    /// presumed to match. The day D19 decides the rest, this row moves to None, on purpose.
+    /// Both doors answer the partial (0, 4), a PHANTOM OF LIMIT C2, known defect D19. No text
+    /// completes the pattern (<c>\m$</c> holds nowhere; the judge answers None), but the lazy
+    /// <c>\p{Lu}+?</c> backtracks to the edge and takes a character to come, and after a run-out the
+    /// rest is presumed to match. Until D11's run-out fix (2026-10-04) the backtracking repeat stopped
+    /// at the held text, so the anchored door answered None and the search (4, 4); the fix accepts
+    /// this phantom so that a lazy repeat's real completions are not refused (`.*?(?&lt;=c)` over
+    /// 'aa'). The day D19 decides the rest, both doors move to None, on purpose.
     /// </remarks>
-    // DIVERGES FROM UPSTREAM on the search door, as limit C2 (D19).
+    // DIVERGES FROM UPSTREAM (None on the anchored door, (4, 4) searched), as limit C2 (D19).
     [Test]
     public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
     {
@@ -61,11 +64,11 @@ public sealed class PartialEdgeReadTests
                 | FuzzyRegexOptions.Version0
         );
 
-        regex.MatchAtStart("\U00010400\U0001D518", partial: true).Success.Should().BeFalse();
-
+        Match anchored = regex.MatchAtStart("\U00010400\U0001D518", partial: true);
         Match searched = regex.Match("\U00010400\U0001D518", partial: true);
 
-        (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, 4, 0));
+        (anchored.PartialMatch, anchored.Index, anchored.Length).Should().Be((true, 0, 4));
+        (searched.PartialMatch, searched.Index, searched.Length).Should().Be((true, 0, 4));
     }
 
     /// <summary>
@@ -521,6 +524,88 @@ public sealed class PartialEdgeReadTests
     {
         Partial("fullmatch", "(?:a(?=bcd)b.){s<=1}", "abc").Success.Should().BeFalse();
         new FuzzyRegex("(?:b){1<=e<=1}").FullMatch("b").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A one-character lazy repeat that reaches the edge by backtracking can still take a character
+    /// of the text to come, so the next try runs out there, as the main loop's arm and a greedy
+    /// repeat already do (D11 fix round 3's grid). The backtracking arm kept an entry only while the
+    /// count was below the text held, upstream's bound, so it never ran out. 'aac' matches the first
+    /// row at (0, 3) and the bounded second; 'क्क' is one cluster (GB9c), so it fullmatches the
+    /// third, whose `\X` must take a consonant to come; 'caa' matches the reversed row.
+    /// </summary>
+    /// <remarks>
+    /// Each answer is the port's own non-partial call over the continuations of up to three
+    /// characters (2026-10-04). The controls: a repeat at its maximum takes no character to come,
+    /// and a call without partial has no text to come.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to every row.
+    [Test]
+    [Arguments("match", @".*?(?<=c)", "aa")]
+    [Arguments("match", @".{0,3}?(?<=c)", "aa")]
+    [Arguments("fullmatch", @"(?r)\X", "्क")]
+    [Arguments("match", @"(?r)(?=c).*?", "aa")]
+    public void A_lazy_repeat_that_reaches_the_edge_by_backtracking_runs_out(
+        string operation,
+        string pattern,
+        string text
+    )
+    {
+        Match m = Partial(operation, pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, text.Length));
+    }
+
+    /// <summary>The controls of the test above.</summary>
+    [Test]
+    public void A_lazy_repeat_at_its_maximum_or_without_partial_does_not_run_out()
+    {
+        Partial("match", @".{0,2}?(?<=c)", "aa").Success.Should().BeFalse();
+        new FuzzyRegex(@".*?(?<=c)").MatchAtStart("aa").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A greedy repeat's body that runs out at the end of the text stays a run-out, where upstream
+    /// turns it into a failure once the minimum is reached so that the tail's complete match wins
+    /// (<c>upstream/src/_regex.c:12575</c>). In the second pass every complete match is the first
+    /// pass's, already refused, and the tail's success has read the text to come, so under
+    /// fullmatch it backtracks and the run-out it replaced was lost. 'a b' and '1,2' fullmatch the
+    /// first two rows, ' a' + 'b' reversed the third (D11 fix round 3's grid; a D11 regression,
+    /// main 27b9de33 answers P(0, 2) through S57d's escalation).
+    /// </summary>
+    /// <remarks>
+    /// Judged by the port's own non-partial call over the continuations of up to three characters
+    /// (2026-10-04).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to every row.
+    [Test]
+    [Arguments(@"(?:.\b)+", "a ")]
+    [Arguments(@"(?:.\b)+", "1,")]
+    [Arguments(@"(?r)(?:\b.)+", " a")]
+    public void A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text(string pattern, string text)
+    {
+        Match m = Partial("fullmatch", pattern, text);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
+
+    /// <summary>
+    /// The greedy repeat's kept run-out goes through the run-out rule: inside a lookaround body
+    /// matching goes on after the lookaround, where <c>(*FAIL)</c> fails for every continuation and
+    /// a fullmatch's end needs the text to end. The port's judge (its non-partial call over the
+    /// continuations of up to two characters) answers None to both (2026-10-04); answering the
+    /// partial at once gave P(0, 2).
+    /// </summary>
+    [Test]
+    [Arguments("match", @"(?=(?:.\b)+)(*FAIL)", "a ")]
+    [Arguments("fullmatch", @"(?=((?:a(?=.))*))", "aa")]
+    public void A_greedy_repeat_body_run_out_in_a_lookaround_goes_on_after_it(
+        string operation,
+        string pattern,
+        string text
+    )
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
     }
 
     /// <summary>

@@ -283,49 +283,6 @@ public sealed class OpenDefectTests
         (m.Success, m.Success ? m.Index : -1).Should().Be((start >= 0, start));
     }
 
-    // Found in D11 fix round 3 (chunk 10's grid). A one-character lazy repeat that reaches the
-    // edge by backtracking cannot take one character more: its backtracking arm keeps an entry only
-    // while the count is below the text held (Matcher.cs, LAZY_REPEAT_ONE's backtracking arm,
-    // `count < maxCount`, upstream's bound), so it never runs out, where the main loop's arm and a
-    // greedy repeat do. 'aac' matches the first row at (0, 3); 'क्क' is one cluster (GB9c), so it
-    // fullmatches the second, whose `\X` must take a consonant to come. Upstream 2026.9.10: None,
-    // None. The one-line fix (also keep the entry when the next character lies in the text to come)
-    // moved 382 rows of a 13,650-row lazy-repeat grid onto the judge and 390 away, all limit C2 (the
-    // repeat takes a character to come and the rest is presumed, as `a+(?<=b)` over 'aa' already
-    // answers), so it waits for a decision.
-    [Test]
-    [Arguments("match", @".*?(?<=c)", "aa", 0)]
-    [Arguments("fullmatch", "(?r)\\X", "्क", 0)]
-    public void A_lazy_repeat_that_reaches_the_edge_by_backtracking_still_runs_out(
-        string operation,
-        string pattern,
-        string text,
-        int start
-    )
-    {
-        Match m = Partial(operation, pattern, text);
-
-        (m.PartialMatch, m.Index).Should().Be((true, start));
-    }
-
-    // Found in D11 fix round 3 (chunk 10's grid); a D11 regression (main answers P(0, 2) through
-    // S57d's escalation). A greedy repeat's end turns its body's run-out into a failure once the
-    // minimum is reached at the end of the text (Matcher.cs, END_GREEDY_REPEAT, upstream :12575), so
-    // that the tail's complete match wins. In the second pass that tail's success has read the text
-    // to come, so under fullmatch it backtracks, and the run-out it replaced is gone: 'a b' (and
-    // 'a ' + 'b') fullmatch the row. Upstream 2026.9.10: None. Keeping the run-out moved 2 rows of a
-    // 5,000-row repeat grid onto the judge and 25 away, all limit C2, so it waits for a decision with
-    // the lazy repeat's bound above.
-    [Test]
-    [Arguments(@"(?:.\b)+", "a ")]
-    [Arguments(@"(?:.\b)+", "1,")]
-    public void A_greedy_repeat_keeps_its_body_run_out_at_the_end_of_the_text(string pattern, string text)
-    {
-        Match m = Partial("fullmatch", pattern, text);
-
-        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
-    }
-
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

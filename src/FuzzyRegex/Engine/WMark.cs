@@ -180,4 +180,16 @@ internal enum PartialEvent
     /// the path through to the item that reads the same character.
     /// </summary>
     ZeroWidthTestDeferred,
+
+    /// <summary>
+    /// A lazy one-character repeat that backtracked to the edge kept an entry to take a character
+    /// of the text to come.
+    /// </summary>
+    LazyRepeatPastTheEdge,
+
+    /// <summary>A greedy repeat's body ran out at its end and stayed a run-out.</summary>
+    GreedyBodyRunOutKept,
+
+    /// <summary>A run-out outside any lookaround body answered the partial (the rest is presumed).</summary>
+    RunOutAnswered,
 }

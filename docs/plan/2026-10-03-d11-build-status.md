@@ -461,30 +461,6 @@ completion is the worse error; the phantoms are D19's to remove).
   event fires, so a PARTIAL reaches the caller past the run-out rule by another `return` (D69's
   class). Also `(?=(?:.\b)+?$)(*FAIL)` 'a ' P(0, 2), judge and upstream None: END_LAZY_REPEAT's
   body try returns a PARTIAL directly (`return bodyStatus`).
-- **Step 5, texts for the register and the ledger.**
-  - *D19, add to the row:* "More (D11 fix round 3, review B1/B2, 2026-10-04): an undetermined
-    boundary closing `\X` extends the cluster into the text to come and presumes the rest: search
-    `(?:\X){d<=1}(*FAIL)|c` over 'a' P(0, 1) (main, both judges, upstream P(1, 1)), match
-    `\X(*FAIL)|c` 'a' and fullmatch `(?:\X){d<=1}\b` '\r' P(0, 1) (judges and upstream None; main
-    P(0, 1) through S57d). The run-out fixes of 2026-10-04 (decision (a)) add C2 phantoms by design:
-    a lazy repeat backtracked to the edge and a greedy body's run-out at the end now take a
-    character to come, `.*?(?<=b)`-shaped rows (410 + 64 of a 13,650-row lazy grid, 137 + 42 of the
-    51,648-row full grid), and the pinned `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` is P(0, 4) on both
-    doors."
-  - *D11, add to the row:* "Limit C2 is reachable through a cluster and a trailing insertion:
-    chunk 4's `\X` read and RC5 let a `\X` or a trailing insertion run out and presume the rest
-    (236 rows of B1's 8,820-row family grid: 172 `\X` search starts, 64 trailing insertions such as
-    `(?:ab){i<=1}(*FAIL)` match 'ab' P(0, 2)); upstream shares C2 for greedy repeats, not for these.
-    Both run-out misses fixed 2026-10-04 (decision (a)): full grid misses 51 -> 0."
-  - *Ledger entry at merge (upstream divergence, step 1 and step 2):* upstream bounds a lazy
-    one-character repeat's backtracking by the text held (`LAZY_REPEAT_ONE`, the entry is kept only
-    while `count < max_count`, with `max_count` capped by the text) and turns a greedy body's
-    run-out at the end of the text into a failure (`_regex.c:12575`), so it refuses partials that
-    a continuation completes: `.*?(?<=c)` match 'aa' (with 'c' to come), `(?r)\X` fullmatch '्क'
-    (a consonant to come, GB9c) and `(?:.\b)+` fullmatch 'a ' ('b' to come) answer None upstream
-    (2026.9.10) and P(0, 2) here, the port judge's answer. Pinned by the two
-    `PartialEdgeReadTests` above; the oracle's pre-D11 ablation keeps upstream's bounds.
-- **Status (07:00)**: both steps built; code commit waits on the Debug ratchet (queued behind
-  another agent's oracle run on the test lock since 06:31). **Next:** ratchet Debug and Release,
-  oracle three seeds, doc examples, perf (`.scratch/ro/perf11.cs`, Release, tiering off), commit,
-  then stop for the blind review of round 3 + chunk 10 + this step.
+- **Status (06:55)**: both steps built and committed as WIP once the Debug ratchet (waiting behind
+  another agent's test lock since 06:31) passes. **Next:** ratchet Debug and Release, oracle three
+  seeds, doc examples, perf (`.scratch/ro/perf11.cs`, Release, tiering off), then step 5's texts.

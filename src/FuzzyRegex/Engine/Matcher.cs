@@ -7626,6 +7626,20 @@ internal static class Matcher
         state.RunsOutLeft && textPos <= state.SliceStart;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the next character a repeat would take from
+    /// <paramref name="textPos"/>, travelling by <paramref name="step"/>, lies in the text to come
+    /// of a partial call's second pass, so that taking it runs out. The oracle's pre-D11 ablation
+    /// answers <see langword="false"/>, as upstream.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The repeat's position.</param>
+    /// <param name="step">1 forward, -1 reversed.</param>
+    /// <returns><see langword="true"/> if taking another character runs out.</returns>
+    private static bool RunsOutPast(MatchState state, int textPos, long step) =>
+        !state.Pattern.SecondPassAsBeforeD11
+        && (step > 0 ? state.RunsOutRight && textPos >= state.TextEnd : RanOutOnTheLeft(state, textPos));
+
+    /// <summary>
     /// The same edge as <see cref="RanOutOnTheLeft"/>, for a position that has already stepped PAST
     /// it rather than reached it.
     /// </summary>
@@ -12954,8 +12968,30 @@ internal static class Matcher
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
-                            // Unreachable until Phase 7 gives 'try_match' its test-node arm back,
-                            // which is the only thing that can answer PARTIAL here.
+                            // Upstream turns the body's run-out into a failure once the minimum is
+                            // reached at the end of the text, so that the tail's complete match wins
+                            // (:12575). Only a partial call's second pass gets a PARTIAL here (from
+                            // TryMatch's test node), and there every complete match is the first
+                            // pass's, already refused: a tail success reads the text to come, and
+                            // under fullmatch it backtracks. NOT UPSTREAM'S, D11: so the run-out
+                            // stays a run-out, through the run-out rule; `(?:.\b)+` fullmatch over
+                            // 'a ' found no partial where 'a b' matches (D11 fix round 3's grid).
+                            // The oracle's pre-D11 ablation keeps upstream's failure. The count goes
+                            // back first, as on the failure below: inside a lookaround body the
+                            // run-out goes on after the lookaround, and backtracking from there
+                            // re-enters this case through the body.
+                            if (bodyStatus == MatchStatus.Partial && !pattern.SecondPassAsBeforeD11)
+                            {
+                                // Design assert A15: only a partial call's second pass gets here.
+                                Debug.Assert(
+                                    state.PartialSide != MatchState.PartialNone || state.InsideW,
+                                    "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
+                                );
+                                state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
+                                --rpData.Count;
+                                goto runOut;
+                            }
+
                             if (bodyStatus == MatchStatus.Partial && rpData.Count >= node.Values[1] && AtEnd(state))
                             {
                                 bodyStatus = MatchStatus.Failure;
@@ -16190,6 +16226,8 @@ internal static class Matcher
 
         if (runOutEnd is null)
         {
+            state.NotePartialEvent(PartialEvent.RunOutAnswered);
+
             return MatchStatus.Partial;
         }
 
@@ -17566,6 +17604,14 @@ internal static class Matcher
                         }
 
                         status = MatchOne(state, repeated, pos);
+
+                        // Design assert A14: the entry kept for a repeat at the edge (below) is
+                        // answered by this try running out, not by a failure or a character.
+                        Debug.Assert(
+                            !RunsOutPast(state, pos, step) || status == MatchStatus.Partial,
+                            "D11 A14: a lazy repeat's try past the edge runs out"
+                        );
+
                         if (status < 0)
                         {
                             // NOT UPSTREAM'S, D11 (D69): the item runs out at the edge, which inside a
@@ -17637,8 +17683,18 @@ internal static class Matcher
                         count = CountBetween(state, pos, state.TextPos);
                         state.TextPos = pos;
 
-                        if (count < maxCount)
+                        // NOT UPSTREAM'S, D11: a repeat that has taken the held text up to the edge
+                        // can still take a character of the text to come, where the next try runs
+                        // out (MatchOne above). Upstream bounds it by the text held, so
+                        // `.*?(?<=c)` over 'aa' found no partial where 'aac' matches (D11 fix
+                        // round 3's grid).
+                        if (count < maxCount || (count < node.Values[2] && RunsOutPast(state, pos, step)))
                         {
+                            if (count >= maxCount)
+                            {
+                                state.NotePartialEvent(PartialEvent.LazyRepeatPastTheEdge);
+                            }
+
                             // The match is shorter than the maximum, so we might need to backtrack
                             // the repeat again to consume more.
                             rpData.Count = count;
