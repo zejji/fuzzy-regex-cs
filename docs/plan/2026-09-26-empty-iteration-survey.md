@@ -817,7 +817,7 @@ check (`bool changed = state.TextPos != rpData.Start;` at `:7606`) 17 of its 27 
 removed from the lazy check (`:7817`) 4 fail (the `*?` rows and the law test); the controls pass
 under both. Four rows pass under both mutants, so they pin the answer but would not catch a
 position-only engine: the `+` row, the `+?` row, the `^(?:(?:(?(1)c|z)|())+)*$` row and the
-`^(?:|(?=(c)))+$` row (blind review, 2026-09-28).
+`^(?:\1|(?=(c)))+$` row (blind review, 2026-09-28).
 
 **What the rule still lacks: termination when a group cycles (D17).** Upstream's rule counts any
 span change, so a pass that flips a tested group between two spans at one position is progress
