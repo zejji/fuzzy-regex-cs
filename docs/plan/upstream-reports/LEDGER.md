@@ -3398,6 +3398,8 @@ pass it, and the partial reports that path's groups. Where no continuation compl
 answer is now None, as upstream answers: `fullmatch` of `aa\B` over 'aa' (the match would have to
 end with the text) and `(?r)\Ba` over 'a' on `fullmatch`, which S57d answered with a partial.
 
+**Note (D11, 2026-10-04):** S57d's escalation is gone; the definitions that replace it are ledger entry 70.
+
 ## 22. `(?V0)` does not mean version 0 when `DEFAULT_VERSION` is `VERSION1` - FIXED HERE (S50b)
 
 **Title:** With `DEFAULT_VERSION = VERSION1`, an inline `(?V0)` keeps version 1's `FULLCASE`, so the
@@ -3879,6 +3881,8 @@ Failing that, the minimum a report should ask for is consistency between `'.a'` 
 `partial-the-pattern-can-never-complete` in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`
 with the test
 `Gaps/Engine/PartialMatchingTests.A_partial_fullmatch_needs_a_completion_that_could_exist`.
+
+**Note (D11, 2026-10-04):** S57d's escalation is gone; see ledger entry 70.
 
 ## 28. A fuzzy deletion that finishes a full-case-folded string is charged twice - FIXED HERE (S83)
 
@@ -6023,3 +6027,125 @@ now differs from its written-out form where main agreed with it. A pattern with 
 exactly as before. Pinned by `Gaps/Engine/CalledCopyTests` and the oracle entry
 `group-call-copy-is-the-group-written-out`, keyed on `OracleComparer.RunWithTheUpstreamCallCopies`
 (`Info.UpstreamCallCopies`), which reproduced main's answer on every grid row.
+
+## 67. A run-out of text anywhere inside a lookaround's body ends the whole match with a partial - DIVERGES HERE (D11, 2026-10-04)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D11 (design section 5, the entry the
+merge was to write). Draft report: `entry-67-lookaround-partial-phantom.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-04 (venv `.venvs/regex-2026.9.10`), all with
+`partial=True`:
+
+```
+match(r'(?=..)[ab]', 'x')            -> P(0, 1)   here None (search: partial at the edge, (1, 1))
+match(r'(?!.a|x)x', 'x')             -> P(0, 1)   here None
+match(r'(?=(?:ab)+$)(*FAIL)', 'ab')  -> P(0, 2)   here None
+match(r'(?=x(?:ab)*cd)(*FAIL)', 'xc') -> P(0, 2)  here None
+match(r'(?!(?:ab)+)ab', 'ab')        -> P(0, 2)   here None
+match(r'(?!ab|a)', 'a')              -> P(0, 1)   here None
+match(r'(?![ab]{0,2}aa)', 'aa')      -> P(0, 2)   here None
+```
+
+**Why the port differs.** A partial match says some longer text could complete the match
+(`upstream/README.rst:270`). Upstream ends the whole match with a partial when anything inside a
+lookaround's body runs out of text, so a lookahead that no continuation satisfies still yields one:
+in `(?=..)[ab]` over 'x' the `[ab]` after the lookahead fails on the held 'x' whatever follows, and
+in `(?!.a|x)x` the branch `x` matches the held text, so the negative lookahead fails for every
+continuation. The first group shows it from a repeat's or a branch's test node, where the same
+return leaves no notion of the lookaround around it. The cause is every `return RE_ERROR_PARTIAL`
+path in `basic_match`: the try-match sites at `upstream/src/_regex.c:12571-12597`, `:13235-13258` and
+`:12755-12780`, and their lazy twins.
+
+**This port.** A run-out inside a body does not end the attempt. Matching goes on after the
+lookaround for the continuations that pass it (the three-valued reads of design section 4, M1-M3),
+and the answer is a partial only where some continuation completes the match. A repeat's or a
+branch's test that runs out inside a body goes through the same rule (the repeat run-out rule of
+2026-10-04). Pinned by `Gaps/Engine/PartialLookaroundRuleTests` (`A_run_out_in_a_lookaround_body_goes_on_after_the_lookaround`,
+`A_run_out_at_a_choice_point_keeps_the_other_alternatives`,
+`A_repeat_test_that_runs_out_in_a_body_goes_on_after_the_lookaround`) and by the oracle entry
+`partial-edge-read` in `ExpectedDivergences.cs`, keyed on the pre-D11 ablation
+`OracleComparer.RunWithTheSecondPassAsBeforeD11`, which reproduces upstream's answer on these rows.
+
+## 68. Upstream bounds a lazy repeat by the text held and turns a greedy body's run-out at the end into a failure, so it refuses completions - DIVERGES HERE (D11, decision (a), 2026-10-04)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D11, decision (a) ("The two run-out
+misses" in `docs/plan/2026-10-03-d11-build-status.md`). Draft report:
+`entry-68-run-out-refuses-completions.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-04, `partial=True`:
+
+```
+match(r'.*?(?<=c)', 'aa')                     -> None   here P(0, 2) (completed by 'aac')
+fullmatch(r'(?r)\X', '्क')          -> None   here a partial (the reversed cluster can still grow)
+fullmatch(r'(?:.\b)+', 'a ')                  -> None   here a partial
+match(r'(?!(?>(?:ab)*)(?<=^ab))ab', 'ab')     -> None   here P(0, 2) (completed by 'abab': upstream
+                                                        answers (0, 2) to that, complete)
+```
+
+**Why the port differs.** Each subject above is a prefix of a longer text that the pattern matches,
+so by the definition of a partial match the answer is a partial. Upstream bounds a lazy repeat by the
+text held, and turns a greedy body's run-out at the end into a failure (`upstream/src/_regex.c:12575`),
+so the attempt backtracks where the next character of the text to come would have decided it. The
+same happens inside a lookahead, in the last row above.
+
+**This port.** The second pass presumes the rest of the body for a run-out and reports the partial
+(design limit C2, which D19 tracks: a run-out presumes the rest, so a few patterns answer a partial
+that no text completes). A phantom partial never refuses a completion, where upstream's failure does.
+Pinned by `Gaps/Engine/PartialEdgeReadTests` (the `.*?(?<=c)`, `(?r)\X` and `(?:.\b)+` rows),
+`Gaps/Engine/PartialLookaroundRuleTests.An_atomic_group_around_a_repeat_that_runs_out_keeps_the_lookahead_undetermined`
+and the oracle entry `partial-edge-read`.
+
+## 69. A search with no first set never tries a start inside the text to come - DIVERGES HERE (D11, D70, 2026-10-04)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D70, found by D11's fix round 2.
+Draft report: `entry-69-search-with-no-first-set.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-04, `search(..., partial=True)`; each answers
+None upstream:
+
+```
+search(r'(?<=ab)(?:b|$)', 'b')                              -> None   here P(1, 1), an empty partial at the edge
+search(r'(?<=ab)\Z', 'b')                                   -> None   here P(1, 1)
+search(r'(?(DEFINE)(?P<g1>b))(?<=ab)(?1)', 'b')             -> None   here P(1, 1)
+search(r'(?(DEFINE)(?P<g1>b))(?<=ab)(?&g1)', 'x')           -> None   here P(1, 1)
+search(r'(?(DEFINE)(?P<g1>b))\b(?1)', '')                   -> None   here P(0, 0)
+```
+
+**Why the port differs.** A partial match says some longer text could complete the match. A search
+reports its partial from an attempt that starts inside the text to come, and upstream makes no such
+start for a pattern with no first set to test the next character against, so the five rows above
+answer None where the judge (`tools/probes/d11-brute-judge.py`: upstream without partial, over every
+continuation of one to four characters) finds a completion.
+
+**This port.** After the second pass finds nothing, a search makes one more attempt from a start
+inside the text to come, for a pattern with no first set as for any other (the attempt of design
+section 1, rule 3). A pattern no text can match fails there, so `(*FAIL)` over '' is still None.
+Pinned by `Gaps/Engine/PartialEdgeReadTests.A_search_with_no_first_set_still_tries_a_start_in_the_text_to_come`
+and the oracle entry `partial-edge-read`.
+
+## 70. A word boundary over the empty text and `\Z` at the edge are decided differently from the text to come - DIVERGES HERE (D11, 2026-10-04)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D11, the design's decisions 1 and 3.
+Draft report: `entry-70-boundary-definitions-at-the-edge.md`. This entry also ends S57d's
+escalation: ledger entries 21 and 27 carry a note.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-04, `partial=True`:
+
+```
+match(r'\b', '')       -> None     here P(0, 0)
+search(r'\b', '')      -> None     here P(0, 0)
+match(r'a\Zb', 'a')    -> P(0, 1)  here None   (PCRE2 also P(0, 1))
+```
+
+**Why the port differs.** `\b` over the empty text is a boundary for any text to come that starts
+with a word character, so a partial match exists and the answer is a partial. `\Z` at the edge is
+true only if no text follows, and in the second pass some text does, so `\Z` is false there and
+`a\Zb` over 'a' has no completion: `\Z` fails before the `b` can be read. Upstream reports a partial
+for `a\Zb` because the `b` runs out of text; the `\Z` plays no part in its answer (entry 21:
+it reports a partial only when a node runs out of characters to read).
+
+**This port.** The definitions are the design's (`docs/plan/2026-09-28-partial-boundary-design.md`,
+decisions 1 and 3), and they replace S57d's escalation, which turned a failed match into a partial
+whenever the failure touched the end of the text. Pinned by `Gaps/Engine/PartialEdgeReadTests`
+(the `\b` over '' rows, and `a\Zb` over 'a'), `OpenDefects/OpenDefectTests` and the oracle entry
+`partial-edge-read`.
