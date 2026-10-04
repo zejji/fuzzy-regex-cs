@@ -403,3 +403,10 @@ cost (366 ms at n = 1000) is accepted until the performance phase (register D71)
   partial over 20 KB of mixed text, `(?w)\b` 1.019, `(?w)\b\w+\b` 1.016, `(?w)\m\w` 1.000, `\X`
   1.005, `(?r)\X` 1.012, `\b` 0.951; partial calls over the grid's 2,808 rows whose answer did not
   change 1.081 (it was 1.45 before the quick bound and the reordered representatives).
+- **Step 6, checks (on 44842b2d)**: ratchet GREEN in Debug (8,242) and Release (8,160 passing,
+  the rest the Debug-only counter skips; the L1 test runs). Doc examples: all ok. Oracle, Release,
+  each seed alone under the test lock: seed 7 GREEN (agree 7387, expected 185, timeout 2, resource
+  4, undefined 2, diverge 0 of 7580), seed 4242 GREEN (agree 7399, expected 176, resource 5,
+  diverge 0), seed 20260927 GREEN (agree 7390, expected 186, resource 4, diverge 0). Performance
+  as in step 5. **Next:** the blind review of this round; then the decision on the two run-out
+  bounds found in step 5 (lazy repeat, greedy repeat end), then chunk 11.
