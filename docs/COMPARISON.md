@@ -1233,7 +1233,7 @@ Group o = m.Groups["o"];
 Console.WriteLine((m.PartialMatch, o.Success, o.Index, o.Length));   // (True, True, 0, 2) - upstream reports o unset; 'bab' completes it with o = 'ba'
 ```
 
-There is no option to restore the upstream answer. Ledger entry 71.
+There is no option to restore the upstream answer. Ledger entry 74.
 
 ### A reversed partial search lets `$` hold before a final newline in the text to come
 
@@ -1252,7 +1252,7 @@ Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));   // (True, T
 The same rule gives some partial matches that no text completes, such as `(?wr)a^$` over '', where
 `^` needs the start of the string with an `a` before it. Upstream reports that one too, and the
 partial contract allows it: a partial promises only that more text may complete the match (see
-`Match.PartialMatch`). There is no option to restore the upstream answer. Ledger entry 72.
+`Match.PartialMatch`). There is no option to restore the upstream answer. Ledger entry 75.
 
 ### Compile budget
 

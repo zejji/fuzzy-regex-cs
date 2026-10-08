@@ -8062,7 +8062,7 @@ internal static class ExpectedDivergences
         ),
         new(
             Id: "partial-group-before-a-repeat-tail",
-            Reason: "PORT RIGHT, D67 (ledger entry 71, 2026-10-08): a partial match reports a group "
+            Reason: "PORT RIGHT, D67 (ledger entry 74, 2026-10-08): a partial match reports a group "
                 + "that closes before a repeat's tail runs out of text. Upstream tests the tail before "
                 + "entering it and answers the partial as soon as that test runs out "
                 + "(upstream/src/_regex.c:12591-12594), before the group's end that comes first in "

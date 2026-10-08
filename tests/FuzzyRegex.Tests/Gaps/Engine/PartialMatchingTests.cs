@@ -218,7 +218,7 @@ public sealed class PartialMatchingTests
         // answers the partial at the test, so the group is unset; S31 copied that (Matcher.TryMatch's
         // remarks). D67 (2026-10-08) enters the tail instead, so the group closes before the `z`
         // runs out, and reports (0, 1), which every completion of that path gives ('az', 'azb'):
-        // D62's rule. DIVERGES FROM UPSTREAM deliberately, ledger entry 71.
+        // D62's rule. DIVERGES FROM UPSTREAM deliberately, ledger entry 74.
         //
         // Measured 2026-09-12, .scratch/min-214.py:
         //   compile(r'(\D*?)z').search('a', partial=True)   -> (0,1) partial True, group 1 (-1,-1)

@@ -1468,7 +1468,7 @@ internal static class OracleComparer
 
     /// <summary>
     /// Puts a row's question to this port with a repeat's tail test answering its run-out at once,
-    /// as upstream's does, rather than entering the tail (D67, ledger entry 71). Setting
+    /// as upstream's does, rather than entering the tail (D67, ledger entry 74). Setting
     /// <c>PatternObject.TailRunOutAsBeforeD67</c> does it. The
     /// <c>partial-group-before-a-repeat-tail</c> entry keys on this.
     /// </summary>

@@ -243,7 +243,7 @@ public sealed class PartialEdgeReadTests
     /// newline is always a word boundary. The partial contract allows this: a partial promises only
     /// that more text may complete the match (<see cref="Match.PartialMatch"/>,
     /// <c>PartialContractTests</c>, owner decision 2026-10-08), while a miss is never allowed. On
-    /// the 20,040-row reversed-anchor grid (ledger entry 72) the fix turned 327 misses into the
+    /// the 20,040-row reversed-anchor grid (ledger entry 75) the fix turned 327 misses into the
     /// right answer and gave 911 such partials; these three rows are from it.
     /// </summary>
     // Upstream 2026.9.10 gives the same empty partial at the start for every row, measured on

@@ -6150,10 +6150,10 @@ whenever the failure touched the end of the text. Pinned by `Gaps/Engine/Partial
 (the `\b` over '' rows, and `a\Zb` over 'a'), `OpenDefects/OpenDefectTests` and the oracle entry
 `partial-edge-read`.
 
-## 71. A partial match leaves a group unset when the repeat inside it stops at a tail that runs out of text - DIVERGES HERE (D67, 2026-10-08)
+## 74. A partial match leaves a group unset when the repeat inside it stops at a tail that runs out of text - DIVERGES HERE (D67, 2026-10-08)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D67. Draft report:
-`entry-71-partial-group-before-a-repeat-tail.md`.
+`entry-74-partial-group-before-a-repeat-tail.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-10-08, `partial=True`:
 
@@ -6181,10 +6181,10 @@ rest of the ovector are undefined", pcre2partial, fetched 2026-10-08). Pinned by
 `bounded-lazy-repeat-partial`'s row 2. S31's `(\D*?)z` over 'a', which had copied upstream's unset
 group, now reports (0, 1) (`PartialMatchingTests.A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed`).
 
-## 72. A reversed partial search over the empty text misses a match that a newline before it completes - DIVERGES HERE (D73, 2026-10-09)
+## 75. A reversed partial search over the empty text misses a match that a newline before it completes - DIVERGES HERE (D73, 2026-10-09)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D73. Draft report:
-`entry-72-reversed-dollar-in-the-text-to-come.md`.
+`entry-75-reversed-dollar-in-the-text-to-come.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-10-09, `partial=True`:
 
