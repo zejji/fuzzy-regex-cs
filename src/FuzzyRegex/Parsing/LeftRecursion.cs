@@ -18,20 +18,29 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// </para>
 /// <para>
 /// An item can match empty unless it is text, a character, a set, a grapheme or
-/// <c>(*FAIL)</c>; this holds inside a fuzzy section too. A lookaround's contents are read in its
-/// own direction from the current position. Both items of a conditional are read, and a
-/// lookaround test is read as a lookaround; a <c>DEFINE</c> matches empty and is not read in
-/// place. A backreference can match empty only if the group it reads can, or is not defined.
+/// <c>(*FAIL)</c>; this holds inside a fuzzy section too. A named list can if it holds the empty
+/// string. A lookaround's contents are read in its own direction from the current position. Both
+/// items of a conditional are read, and a lookaround test is read as a lookaround; a
+/// <c>DEFINE</c> matches empty and is not read in place, and a repeat with a maximum of 0 is not
+/// read at all. A group number can match empty if any group with that number can (a branch reset
+/// or a name used twice gives a number several), and a call of it or a backreference to it then
+/// can too; a number with no group is read as able to. Conservatively, which groups are set is
+/// not followed: a backreference to a group not yet set, or a conditional on one, is read as if
+/// it could match empty.
 /// </para>
 /// <para>
-/// What the check does not catch, such as a lookbehind stepping back to where a group started
-/// (<c>(?&lt;A&gt;a(?&lt;=(?=(?&amp;A))a)|b)</c>), is left to the matcher's runtime rule, which
-/// fails a call re-entered at the position it is already at.
+/// What the check does not catch is left to the matcher's runtime rule, which fails a call
+/// re-entered at the position it is already at: a fuzzy deletion of the text before a call, a
+/// lookbehind stepping back to where a group started
+/// (<c>(?&lt;A&gt;a(?&lt;=(?=(?&amp;A))a)|b)</c>), and a lookahead that reads text with a
+/// lookbehind inside it stepping back over it (<c>(?&lt;A&gt;(?=a(?&lt;=(?&amp;A)a))|b)</c>).
 /// </para>
 /// <para>
-/// Cost: the empty-group fixpoint reads every group body once per round, and a round adds at least
-/// one group, so it is O(g·m) for g groups and pattern size m; the walk and the cycle search are
-/// O(m) and O(g + calls). Patterns with no group call skip the check entirely.
+/// Cost: O(m) for pattern size m, plus the bodies each group's answer rests on. The empty-group
+/// fixpoint is a worklist, so a body is read again only when a group it rests on becomes able to
+/// match empty; a group written in place is an edge of the graph rather than walked again inside
+/// its parent, so each body is walked once in each direction. Patterns with no group call skip the
+/// check entirely.
 /// </para>
 /// </remarks>
 internal static class LeftRecursion

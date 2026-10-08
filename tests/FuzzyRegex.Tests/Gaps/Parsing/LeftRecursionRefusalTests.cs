@@ -17,7 +17,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// judged by what it would do with no errors. <c>(*FAIL)</c> does not match empty; other verbs,
 /// anchors and lookarounds do. A lookaround's contents are read in its own direction from the
 /// current position. Both branches of a conditional are read; a <c>DEFINE</c> matches empty and
-/// is not read in place. A backreference matches empty only if its group can.
+/// is not read in place. A backreference or call matches empty if any group with that number can,
+/// and a named list if it holds the empty string.
 /// </para>
 /// <para>
 /// Patterns the check lets through keep main's runtime rule, which fails a call re-entered at the

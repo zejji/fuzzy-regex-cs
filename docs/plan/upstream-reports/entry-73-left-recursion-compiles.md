@@ -21,8 +21,10 @@ MemoryError
 ```
 
 In the first pattern `list` calls itself before it reads anything, so each call starts another at
-the same position and the matcher never returns. Whether a group can do that depends only on the
-pattern, so it can be found when the pattern is compiled. PCRE2 and Perl report it as an error
+the same position and the matcher never returns. Whether a group can do that as written depends
+only on the pattern, so it can be found when the pattern is compiled. A lookaround that reads text
+and then steps back over it can still bring a call back to where its group started, which such a
+check cannot see, so a matcher still needs a guard at run time. PCRE2 and Perl report it as an error
 while matching ("nested recursion at the same subject position", "Infinite recursion in regex").
 
 A possible fix: when compiling, follow each group's calls that can be reached before any text is
