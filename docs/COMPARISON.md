@@ -1983,6 +1983,24 @@ Console.WriteLine(new FuzzyRegex(@"(?(?!((?:ab){e<=1}))b|\1)").Match("ax").Fuzzy
 
 There is no option to restore the upstream answer. Ledger entry 65.
 
+### A partial search's first-set check does not answer before the anchors it skips
+
+When a pattern's start is not a simple literal, the compiler puts a quick check in front of it:
+can the next character start a match at all? The check skips anchors such as `\A`, `\G` and `$`.
+At the end of the text in a partial search, upstream lets that check answer "partial" before the
+anchors are asked, so it reports partials that no longer text could complete. Here the check steps
+aside at the edge and the anchors decide.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(\A)x").Match(":", partial: true).Success);        // False - upstream: partial at 1
+Console.WriteLine(new FuzzyRegex(@"(?r)(?:x)?ac$").Match("a", partial: true).Success); // False - upstream: partial at 0
+Console.WriteLine(new FuzzyRegex(@"(?r)ac$").Match("a", partial: true).Success);       // False - upstream: False
+```
+
+There is no option to restore the upstream answer. Ledger entry 72.
+
 ### A DEFINE group with a no-branch is refused
 
 A `(?(DEFINE)...)` group holds group definitions that are only ever called, never matched in
