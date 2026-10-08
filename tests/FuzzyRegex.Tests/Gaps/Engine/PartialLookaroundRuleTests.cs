@@ -668,13 +668,13 @@ public sealed class PartialLookaroundRuleTests
     /// group takes 'abab', `(?&lt;=^ab)` then fails, so the lookahead passes. Upstream 2026.9.10 and
     /// main answer None, a refused completion. The <c>(?&lt;=b)</c> form of the same pattern, which
     /// no continuation completes, answers the same partial: limit C2, in
-    /// <c>OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body</c>.
+    /// <c>PartialContractTests.A_run_out_presumes_the_rest_of_the_pattern_can_match</c>.
     /// </summary>
     /// <remarks>
     /// The second row is the same one lookahead deeper (D11 pre-merge review, P1): a possessive
     /// repeat in a positive lookahead inside the negative one; 'ab' + 'ab' completes it too. Its
     /// <c>(?&lt;=b)</c> form is limit C2, in
-    /// <c>OpenDefectTests.A_run_out_in_a_lookahead_presumes_the_rest_of_its_body</c>.
+    /// <c>PartialContractTests.A_run_out_presumes_the_rest_of_the_pattern_can_match</c>.
     /// </remarks>
     // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to both rows.
     [Test]

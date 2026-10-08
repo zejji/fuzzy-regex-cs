@@ -324,6 +324,11 @@ answer, because it lets that `b` be a substitution rather than a contradiction -
 `(?:\d{4}-\d{2}-\d{2}){e<=1}` returns a partial match of all seven characters at index 0, partial
 because the subject ran out while the budget still had room.
 
+"So far, so good" is all a partial promises: more text may complete the match, not that some text
+will. `ba(*FAIL)` over 'b' is a partial, and no longer text completes it. Where some longer text
+does complete the match, though, a partial call never answers no match. The GUIDE's "Reading a
+result" has the details.
+
 ### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right
 
 The search starts at the end of the subject and works backwards, so the first match found is the
@@ -1120,7 +1125,7 @@ is its start, and the rule reads the same way there.
 
 ### A partial match is refused where the match failed on text the engine already held
 
-The other side of the rule above. A partial match says a longer subject could complete the match, so
+The other side of the rule above. A partial match says a longer subject may complete the match, so
 this port reports one only where the attempt asked for a character the text did not have yet. Where
 it failed on a character it already had, no further text can change the outcome and the answer is no
 match. Upstream reports a partial on some of these.
@@ -1140,7 +1145,7 @@ there too. PCRE2 refuses the partial on every one of these subjects.
 
 ### A run-out of text inside a lookaround's body no longer ends a partial call with a partial
 
-A partial match says that a longer text could complete the match. When a lookaround's body runs out
+A partial match says that a longer text may complete the match. When a lookaround's body runs out
 of text, upstream ends the whole match with a partial, even when nothing that follows the lookaround
 can succeed. Here matching goes on after the lookaround, and the answer is a partial only where some
 continuation completes the match.
@@ -1165,7 +1170,9 @@ There is no option to restore the upstream answer. Ledger entry 67.
 The other side of the rule above. Upstream bounds a lazy repeat by the text held and turns a greedy
 body's run-out at the end of the text into a failure, so it answers no match where a longer text
 completes the match. Here the second pass presumes the rest of the body and reports the partial. A
-few patterns answer a partial that no text completes, but a partial never takes a completion away.
+few patterns answer a partial that no text completes, which the partial contract allows (a partial
+promises only that more text may complete the match; see the GUIDE's "Reading a result"), but a
+partial never takes a completion away.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;

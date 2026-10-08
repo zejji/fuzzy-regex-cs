@@ -192,7 +192,8 @@ public sealed class PartialMatchingTests
         // design row L2 (docs/plan/2026-09-28-partial-boundary-design.md). The first lookahead's
         // run-out no longer ends the attempt, so the second is asked. DIVERGES FROM UPSTREAM,
         // deliberately, which answers (0, 1) partial. The empty subject and the even prime are the
-        // issue's case, two lookaheads that each run out: they stay partial (D11's limit C3, D18).
+        // issue's case, two lookaheads that each run out: they stay partial (D11's limit C3,
+        // which the partial contract allows: PartialContractTests).
         var impossible = new FuzzyRegex("(?=ab)(?=cd)");
 
         impossible.MatchAtStart("a", partial: true).Success.Should().BeFalse();
@@ -2042,13 +2043,15 @@ public sealed class PartialMatchingTests
     /// default is version 1 (<c>OracleWave.OracleRow.DefaultVersion</c>, S50b).
     /// </para>
     /// </remarks>
-    // DIVERGES FROM UPSTREAM on the first row, NOT deliberately: it is a PHANTOM OF LIMIT C2, known
-    // defect D19 (the register's own witness `(?:a\B)+` fullmatch 'a' is the same shape). Both
+    // DIVERGES FROM UPSTREAM on the first row, as the documented partial contract allows: it is a
+    // partial no text completes, limit C2 (was known defect D19; `(?:a\B)+` fullmatch 'a' is the
+    // same shape, PartialContractTests). Both
     // judges answer None (2026-10-03): a full match must end with the text, where `\B` after a word
     // character is false. The second pass runs the greedy `[ab]+` out of text at the edge, and
     // after a run-out the rest is presumed to match. Upstream answers None here (and P(0, 2) to the
-    // exact `(?fi)[ab]+\B`, the same phantom). The day D19 decides the rest, this row moves to
-    // None, on purpose. D11 build chunk 9 moved the seed-20260921 row to upstream's None, the
+    // exact `(?fi)[ab]+\B`, the same phantom). A partial promises only that more text may
+    // complete the match (owner decision 2026-10-08), so this is the contract's answer. D11 build
+    // chunk 9 moved the seed-20260921 row to upstream's None, the
     // judge's answer: its pattern ends at `b\B`, so a full match would have to end with the text,
     // and S57d's escalation, which answered P(0, 1), is deleted (design section 5).
     // D11 moved the seed-7 row, `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` searched over two astral

@@ -194,9 +194,9 @@ public sealed class PartialBlockedEndTests
     /// a match (the judge: match None, search P(1, 2), completed by 'aba\n'). It is D18's class,
     /// the design's limits C3 and C4: two blocked lookaheads read position 2 independently and need
     /// contradictory text there. The call-free twins <c>(?:(?=ab?$)){1&lt;=i&lt;=1}b(?=a)</c> and
-    /// <c>(?=ab?$)abx</c> over 'ab' answer the same P(0, 2) (measured 2026-09-30). The fix is
-    /// D18's, the D18a and D19 work after D11 merges; until then these rows guard the link, not
-    /// the answer.
+    /// <c>(?=ab?$)abx</c> over 'ab' answer the same P(0, 2) (measured 2026-09-30). The partial
+    /// contract allows it (<c>PartialContractTests</c>, owner decision 2026-10-08), so these rows
+    /// pin the answer as well as the link.
     /// </para>
     /// </remarks>
     [Test]

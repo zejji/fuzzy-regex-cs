@@ -300,7 +300,7 @@ Which to use:
   for a scan of all of it.
 - Neither when you need the leftmost match, because both can move its start (from index 3 to 4
   in the first example), or when you use partial matching, where a partial result keeps the
-  leftmost start that could still match whatever the flags say (see the partial example under
+  leftmost start still open when the text ran out, whatever the flags say (see the partial example under
   [Reading a result](#reading-a-result)).
 
 **Normally, a search's match never begins with an insertion at the position the search starts
@@ -392,8 +392,8 @@ A `Match` is a `Group` is a `Capture`, each adding fields the one before it does
   produced it passed `partial: true`), `NextMatch()` (find the next match after this one, without
   restarting the scan), and `FuzzyCounts`/`FuzzyChanges` (below).
 
-A partial search reports the leftmost position from which some continuation of the subject
-would match, even under `BestMatch` or `EnhanceMatch`. Those flags choose among complete matches
+A partial search reports the leftmost position whose match was still open when the subject ran
+out, even under `BestMatch` or `EnhanceMatch`. Those flags choose among complete matches
 by their errors, and a partial match has no final error count yet, so the partial start can differ
 from where the flagged search lands once the text is complete. Upstream answers the same way:
 
@@ -411,6 +411,28 @@ Console.WriteLine($"{complete.Index} {complete.Length} {complete.FuzzyCounts.Tot
 
 The partial starts at the space before `d`, spending one insertion on it, because 'cat and dog'
 matches from there with one error. The completed search finds the exact `dog` one character later.
+
+A partial match promises only that the subject ran out while the match was still open, so more
+text *may* complete it. It does not promise that any text will. `ba(*FAIL)` over 'b' is a
+partial, because the match still wanted an 'a' when the text ended, but `(*FAIL)` fails whatever
+comes next, so 'ba', 'bax' and every other longer text give no match:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var never = new FuzzyRegex(@"ba(*FAIL)");
+Console.WriteLine(never.MatchAtStart("b", partial: true).PartialMatch);
+Console.WriteLine(never.MatchAtStart("ba", partial: true).Success);
+// True
+// False
+```
+
+The engine does not look ahead through the rest of the pattern to rule such cases out. Two tests
+at the end of the text that no single next character can satisfy together, such as `a\b\B` over
+'a', give the same kind of partial. PCRE2, Java's `hitEnd()`, Boost and upstream make the same
+promise. It holds firmly the other way round: where some longer text does complete the match, a
+partial call never answers no match, so a caller that stops reading at the first no match never
+misses one.
 
 `Match.Groups` (a `GroupCollection`) is both an ordered list and an `IReadOnlyDictionary<string, Group>`: index it by
 number (`match.Groups[1]`) or by name (`match.Groups["year"]`), and use `ContainsKey`,

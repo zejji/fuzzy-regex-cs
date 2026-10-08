@@ -1089,7 +1089,8 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="partial">
     /// Whether to report a partial match when the subject runs out before the pattern can succeed
-    /// or fail. Upstream's <c>partial=True</c>; see <c>Match.PartialMatch</c>.
+    /// or fail. Upstream's <c>partial=True</c>. A partial promises only that more text may complete
+    /// the match, not that some text will; see <c>Match.PartialMatch</c>.
     /// </param>
     /// <param name="timeout">
     /// How long this call may run, or <see langword="null"/> to use the pattern's
@@ -1120,7 +1121,7 @@ public sealed class FuzzyRegex
     /// <para>
     /// <b>BestMatch and EnhanceMatch rank complete matches only.</b> With either flag and
     /// <paramref name="partial"/>: <see langword="true"/>, a partial match starts at the leftmost
-    /// position from which some continuation of the subject would match, with the first fit found
+    /// position whose match was still open when the subject ran out, with the first fit found
     /// there, as upstream answers. It is not the start the flagged search would report once the
     /// subject is complete: <c>(?e)(dog){e&lt;=1}</c> over <c>"cat and d"</c> is a partial at
     /// (7, 9) with one insertion, while over <c>"cat and dog"</c> it is (8, 11) with no errors. A

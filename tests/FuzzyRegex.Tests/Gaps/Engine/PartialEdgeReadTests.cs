@@ -44,15 +44,16 @@ public sealed class PartialEdgeReadTests
     /// starts a word there, and the `\m` read decides nothing.
     /// </summary>
     /// <remarks>
-    /// Both doors answer the partial (0, 4), a PHANTOM OF LIMIT C2, known defect D19. No text
+    /// Both doors answer the partial (0, 4), limit C2 of the partial contract (was D19). No text
     /// completes the pattern (<c>\m$</c> holds nowhere; the judge answers None), but the lazy
     /// <c>\p{Lu}+?</c> backtracks to the edge and takes a character to come, and after a run-out the
     /// rest is presumed to match. Until D11's run-out fix (2026-10-04) the backtracking repeat stopped
     /// at the held text, so the anchored door answered None and the search (4, 4); the fix accepts
     /// this phantom so that a lazy repeat's real completions are not refused (`.*?(?&lt;=c)` over
-    /// 'aa'). The day D19 decides the rest, both doors move to None, on purpose.
+    /// 'aa'). A partial promises only that more text may complete the match (owner decision
+    /// 2026-10-08, <c>PartialContractTests</c>), so this is the contract's answer.
     /// </remarks>
-    // DIVERGES FROM UPSTREAM (None on the anchored door, (4, 4) searched), as limit C2 (D19).
+    // DIVERGES FROM UPSTREAM (None on the anchored door, (4, 4) searched), as limit C2.
     [Test]
     public void A_word_start_after_a_word_character_at_the_end_is_decided_false()
     {
@@ -334,8 +335,9 @@ public sealed class PartialEdgeReadTests
     /// </summary>
     /// <remarks>
     /// Rows 4841 and 5367 are real completions upstream refuses. Rows 5098, 5310, 6399 and 6589 are
-    /// phantoms of the design's limit C2 (known defect D19), pinned so that the day D19 is fixed
-    /// they move on purpose: the brute-force judge answers None to all four. Rows 6399 and 6589
+    /// partials no text completes, the design's limit C2, which the partial contract allows
+    /// (<c>PartialContractTests</c>; was known defect D19): the brute-force judge answers None to
+    /// all four. Rows 6399 and 6589
     /// moved in chunk 2 and are back at upstream's and 11ccae7's answers since RC5 (build chunk 3):
     /// an insertion at the edge runs out of text, which presumes the rest.
     /// </remarks>

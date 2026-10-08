@@ -546,8 +546,9 @@ public sealed class FuzzyCountsAndChangesTests
         // passes `\m` and `$` at the end as undetermined and so reaches the end of the pattern.
         // Neither answer is a true partial: `\m$` holds for no text, so the brute-force judge
         // (tools/probes/d11-brute-judge.py, 2026-09-29) answers None. It is the design's limit C3,
-        // two reads of the text to come that no single continuation satisfies together, which is
-        // known defect D18. What this test holds is that the change list agrees with the counts.
+        // two reads of the text to come that no single continuation satisfies together, which the
+        // partial contract allows (was known defect D18). What this test holds is that the change
+        // list agrees with the counts.
         forward.PartialMatch.Should().BeTrue();
         (forward.Index, forward.Length).Should().Be((3, 2));
         forward.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));

@@ -85,7 +85,7 @@ public sealed class PartialCutRuleTests
     /// </summary>
     /// <remarks>
     /// The same read makes the D19 phantom of review B1 (D11 fix round 3): with a tail no text
-    /// matches, the run-out still presumes it (<c>OpenDefectTests</c>), and this row is why the
+    /// matches, the run-out still presumes it (<c>PartialContractTests</c>), and this row is why the
     /// read is kept. Judged by the port's non-partial matcher over continuations of up to three
     /// characters with U+0301 and '\r' (2026-10-04). Upstream 2026.9.10 and main 27b9de33 answer
     /// P(1, 1) to every row.

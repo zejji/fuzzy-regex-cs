@@ -391,9 +391,12 @@ public sealed class BackrefAndConditionalTests
     // this ("Assertions": "captured substrings are retained, because matching continues with the
     // 'no' branch"). Measured 2026-10-03 with tools/matrix/survey.py: PCRE2 10.47 and Perl 5.42.3
     // answer every span and group below; upstream 2026.9.10 and the .NET 10 BCL answer None to all
-    // but the backtracking row.
+    // but the backtracking row. The empty row is D76's witness, closed as this behaviour on
+    // 2026-10-08: its test's empty group matches, so the test fails and the capture stays. PCRE2
+    // and Perl give (0, 0) for group 1; upstream 2026.9.10 and the .NET BCL leave it unset.
     [Test]
     [Arguments(@"(?(?!(a))x|\1b)", "ab", 0, 2, 0, 1)]
+    [Arguments(@"(?(?!()))", "", 0, 0, 0, 0)]
     [Arguments(@"(?(?<!(a))x|\1)", "aa", 1, 1, 0, 1)]
     [Arguments(@"(?(?<!(a))x|\1b)", "aab", 1, 2, 0, 1)]
     [Arguments(@"(?(?!(a)(b))x|\1\2)c", "abc", 0, 3, 0, 1)]
@@ -411,7 +414,10 @@ public sealed class BackrefAndConditionalTests
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((index, length));
-        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((groupIndex, groupLength));
+        // An unset group also reads (0, 0), so the empty row needs the group's own success.
+        (m.Groups[1].Success, m.Groups[1].Index, m.Groups[1].Length)
+            .Should()
+            .Be((true, groupIndex, groupLength));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
 

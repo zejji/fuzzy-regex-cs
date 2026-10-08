@@ -331,6 +331,14 @@ public sealed class Match : Group
     /// it, because upstream's <c>finditer</c>/<c>findall</c> take no <c>partial</c> argument.
     /// </para>
     /// <para>
+    /// <b>A partial promises only that more text may complete the match.</b> The subject ran out
+    /// while the match was still open; it does not follow that any text completes it.
+    /// <c>ba(*FAIL)</c> over <c>"b"</c> is a partial, yet <c>(*FAIL)</c> fails whatever follows, so
+    /// <c>"ba"</c> and every longer text give no match. PCRE2, Java's <c>hitEnd()</c>, Boost and
+    /// upstream make the same promise. The other direction is guaranteed: where some longer text
+    /// completes the match, a partial call never answers no match.
+    /// </para>
+    /// <para>
     /// <b>Reversed partial matches run out of text at the slice start</b>. Matched with
     /// <see cref="FuzzyRegexOptions.RightToLeft"/> (upstream's <c>(?r)</c>) and
     /// <c>partial: true</c>, this reports a partial at <c>beginning</c> when the pattern still
