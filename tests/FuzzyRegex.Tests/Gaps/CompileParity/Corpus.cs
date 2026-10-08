@@ -25,6 +25,16 @@ internal static class Corpus
     /// <summary>One row per pattern upstream's suite compiles successfully.</summary>
     public static IEnumerable<CompileRow> Compiles() => _loaded.Value.Compiles;
 
+    /// <summary>
+    /// The patterns upstream compiles that this port refuses as left-recursive (D4, D72): a group
+    /// can call itself before matching any text. Both come from <c>test_hg_bugs</c> (#236, #237),
+    /// which only compiles them. A row here is checked for the refusal instead of the bytecode.
+    /// </summary>
+    public static readonly IReadOnlySet<string> RefusedAsLeftRecursive = new HashSet<string>(
+        ["((?0)){e}", "\0?(?0){e}"],
+        StringComparer.Ordinal
+    );
+
     /// <summary>One row per pattern upstream's suite rejects with a parse error.</summary>
     public static IEnumerable<ErrorRow> Errors() => _loaded.Value.Errors;
 

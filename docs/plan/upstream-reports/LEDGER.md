@@ -6212,3 +6212,32 @@ runs out in its own place. Pinned by
 `Gaps/Engine/PartialEdgeReadTests.A_first_set_check_at_the_edge_does_not_answer_before_the_anchors_it_skips`,
 `A_group_call_and_its_written_out_group_answer_the_same_partial`, and the oracle entry
 `partial-edge-read`.
+
+## 73. A left-recursive group call compiles and then exhausts memory - DIVERGES HERE (D4, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defects D4 and D72, closed by refusing the
+pattern at compile time (owner decision 2026-10-08). Draft report: `entry-73-left-recursion-compiles.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08:
+
+```
+fullmatch(r'(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$', 'a,b,c')   -> MemoryError
+fullmatch(r'(?P<g1>(?:ab)?(?&g1)?)', 'abab')                             -> MemoryError
+fullmatch(r'(?(DEFINE)(?<list>\w+(?:,(?&list))?))^(?&list)$', 'a,b,c')  -> (0, 5)
+```
+
+PCRE2 10.47 raises "nested recursion at the same subject position" on the first two when matching,
+and Perl 5.42 "Infinite recursion in regex" on the first.
+
+**Why the port differs.** A group that can call itself before reading any text comes back to the
+position it started from, so a backtracking engine never finds the match the grammar describes.
+Main's runtime rule (entry 14) failed such a call only on some paths, and answered 283 of 20,011
+generated rows wrongly; no runtime rule measured got every row right. The pattern's shape decides
+the question before any text is read, so the port refuses it when compiling.
+
+**This port.** `Parsing/LeftRecursion.cs`: a group, read in one direction, calls another when the
+call can be reached from its start through items that can match empty, judged on the exact pattern;
+a cycle raises "group 'list' can call itself without matching any text" at the call. Upstream's
+`test_hg_bugs` #236 and #237 compile such patterns and now expect the refusal. Pinned by
+`Gaps/Parsing/LeftRecursionRefusalTests` and DIVERGENCES ("A group that can call itself before it
+has matched any text is refused when the pattern is compiled").

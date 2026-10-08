@@ -542,21 +542,6 @@ public sealed class FuzzyNeededEmptyIterationTests
         ShouldMatch(new FuzzyRegex(pattern).Match(subject), start, end - start, new FuzzyCounts(0, 0, deletions));
     }
 
-    // A call from inside a section runs the optimised top-level code, where the alternatives before
-    // an empty one may have been merged into a set, or stand as one character that the merge pass
-    // rebuilds; that alternative must keep its exit. Each spelling pairs with its X? twin: the
-    // recursion deletes the x, then the alternation's pass would delete the a (review of ac1400b).
-    [Test]
-    [Arguments("(?:a|)z|(?:(?R)x){d<=1}")]
-    [Arguments("(?:a|b|)z|(?:(?R)x){d<=1}")]
-    [Arguments("(?:a?)z|(?:(?R)x){d<=1}")]
-    [Arguments("(?:(?:a|b)?)z|(?:(?R)x){d<=1}")]
-    public void A_set_the_optimiser_merged_keeps_its_exit_under_a_call_from_a_section(string pattern)
-    {
-        // fullmatch(pattern, 'zx')   upstream (0, 2) (0, 0, 1) on all four
-        ShouldMatch(new FuzzyRegex(pattern).FullMatch("zx"), 0, 2, new FuzzyCounts(0, 0, 0));
-    }
-
     // Known defects D27 and D30: loops that upstream never leaves (TimeoutError or MemoryError in
     // regex 2026.9.10, 2026-09-29), and this port did not either before F-A merged at fa42f231
     // (both time out at 7cecdb35). In each, an empty iteration changes no tested group and only

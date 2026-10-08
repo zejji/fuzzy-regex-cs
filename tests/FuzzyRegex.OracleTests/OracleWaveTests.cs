@@ -1116,6 +1116,35 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_left_recursion_refusal_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `left-recursion-is-refused-at-compile-time` (ledger entry 73, D4): this
+        // port's live answer, the refusal, is accepted; upstream's own answer is not, so a revert
+        // that compiles the pattern again is not the family; and neither is another parse error.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "left-recursion-is-refused-at-compile-time", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port refuses {0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new ErrorOutcome(nameof(FuzzyRegexParseException), "unknown group"))
+                .Should()
+                .BeNull("another parse error over {0} is a defect, not this family", row.Pattern);
+        }
+    }
+
+    [Test]
     public void A_row_the_whole_pattern_call_fix_does_not_explain_is_not_accounted_for()
     {
         // The control for `fuzzy-whole-pattern-call-returns-to-its-caller` (ledger entry 55, D37),

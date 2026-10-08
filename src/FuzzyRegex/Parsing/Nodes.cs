@@ -2052,7 +2052,6 @@ internal class Branch : RegexBase
 internal sealed class CallGroup : RegexBase
 {
     private readonly Info _info;
-    private readonly int _position;
     private readonly string _groupText;
 
     /// <summary>Initializes a group call.</summary>
@@ -2063,12 +2062,15 @@ internal sealed class CallGroup : RegexBase
     {
         _info = info;
         _groupText = group;
-        _position = position;
+        Position = position;
         info.HasGroupCall = true;
     }
 
     /// <summary>The group number, resolved by <see cref="FixGroups"/>. Upstream <c>group</c>.</summary>
     internal int GroupNumber { get; private set; }
+
+    /// <summary>Where the call started, for the error messages.</summary>
+    internal int Position { get; }
 
     /// <summary>
     /// Which of the pattern's group-call references this call uses. Upstream <c>call_ref</c>, set
@@ -2090,17 +2092,17 @@ internal sealed class CallGroup : RegexBase
         }
         else
         {
-            throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
+            throw new FuzzyRegexParseException("invalid group reference", pattern, Position);
         }
 
         if (GroupNumber < 0 || GroupNumber > _info.GroupCount)
         {
-            throw new FuzzyRegexParseException("unknown group", pattern, _position);
+            throw new FuzzyRegexParseException("unknown group", pattern, Position);
         }
 
         if (GroupNumber > 0 && _info.OpenGroupCount[GroupNumber] > 1)
         {
-            throw new FuzzyRegexParseException("ambiguous group reference", pattern, _position);
+            throw new FuzzyRegexParseException("ambiguous group reference", pattern, Position);
         }
 
         _info.GroupCalls.Add((this, reverse, fuzzy));
@@ -2394,6 +2396,9 @@ internal sealed class Conditional : RegexBase
 
     /// <summary>What to match when the group did not take part. Upstream <c>no_item</c>.</summary>
     internal RegexBase NoItem { get; set; }
+
+    /// <summary>Whether this is a <c>DEFINE</c>, which resolves to group 0 and matches nothing in place.</summary>
+    internal bool IsDefine => _group == 0;
 
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)

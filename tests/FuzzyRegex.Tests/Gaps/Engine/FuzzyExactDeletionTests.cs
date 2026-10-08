@@ -335,7 +335,11 @@ public sealed class FuzzyExactDeletionTests
         var confined = new FuzzyRegex(pruned);
         confined.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
         ShouldMatch(confined.Match("c"), 0, 0, new FuzzyCounts(0, 0, 1));
-        new FuzzyRegex("(|)((?=(?:(?:(x(a((*SKIP))))){1<=e<=2})?(?R)))").Match("").Success.Should().BeFalse();
+
+        // The second row answered None here and upstream. Its (?R) can be reached before any text,
+        // so since D4's compile-time check it is refused instead (LeftRecursionRefusalTests).
+        Action second = static () => _ = new FuzzyRegex("(|)((?=(?:(?:(x(a((*SKIP))))){1<=e<=2})?(?R)))");
+        second.Should().Throw<FuzzyRegexParseException>();
     }
 
     // In (?:a|b) deleting either alternative leaves the same state, so once an exact 'a' could be

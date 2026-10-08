@@ -1006,18 +1006,48 @@ digits, because CPython caps how many digits `int()` will parse. This port has n
 same pattern compiles here. There is no compact example worth showing for a 4301-digit literal; the
 behaviour is exactly "it compiles here and does not upstream".
 
-### A group call that would re-enter the same group at the same text position fails that PATH
+### A group that can call itself before it has matched any text is refused when the pattern is compiled
 
-If a subroutine call like `(?&name)` would call back into the same group at the same position it
-started from, only that one matching path fails - not the whole match - because a call that returns
-to its own starting point cannot have consumed any text and so cannot ever succeed. Upstream has no
-such guard and allocates memory until it runs out.
+A grammar rule such as `list -> list "," word | word` is left-recursive: to match a `list`, the
+pattern first calls `list` again, at the same position, before reading anything. A backtracking
+engine can never get out of that loop, so the match it describes is never found. Upstream compiles
+the pattern and then runs out of memory; PCRE2 and Perl stop with an error when matching. This port
+refuses the pattern when it is compiled, and the error names the group and points at the call:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
-Console.WriteLine((m.Index, m.Length));   // (0, 4)
+try
+{
+    _ = new FuzzyRegex(@"(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$");
+}
+catch (FuzzyRegexParseException e)
+{
+    Console.WriteLine(e.Message);   // group 'list' can call itself without matching any text
+}
+
+// The same language, with the recursion on the right.
+Console.WriteLine(FuzzyRegex.IsMatch("a,b,c", @"(?(DEFINE)(?<list>\w+(?:,(?&list))?))^(?&list)$"));   // True
+```
+
+The check reads the pattern as written. Anything that can match empty before the call counts as
+nothing: an optional item, an anchor, a lookahead, a backreference to a group that can be empty, or
+a call of a group that can. Text inside a fuzzy section counts as text, as it is matched with no
+errors, so `(?:\((?:[^()]|(?R))*\)){e<=1}` compiles.
+
+### A group call that would re-enter the same group at the same text position fails that PATH
+
+A pattern can still reach a call at the position the same group started from in ways the check
+above cannot see: a fuzzy section can delete the text before the call, or a lookbehind can step
+back to the start. Then only that one matching path fails - not the whole match - because a call
+that returns to its own starting point cannot have consumed any text and so cannot ever succeed.
+Upstream has no such guard and allocates memory until it runs out.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("((a)(b)", @"(?:\((?:[^()]|(?R))*\)){d<=2}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Deletions));   // (0, 7, 1)
 ```
 
 ### A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay exponential, and `MatchTimeout` is their bound
@@ -1802,7 +1832,6 @@ using Fuzzy.Text.RegularExpressions;
 Match m = new FuzzyRegex("(?:z(?R)|){e<=1}").Match("bz");
 Console.WriteLine(m.FuzzyCounts.Substitutions);   // 1 - upstream: MemoryError
 Console.WriteLine(new FuzzyRegex("(?:b||b(?0)*){e<=2}").FullMatch("azx").Success);   // False - upstream: True, with 3 errors
-Console.WriteLine(new FuzzyRegex("(?:|z?(?R)?a){e<=3}").FullMatch("aaba").FuzzyCounts.Total);   // 3 - upstream: 4
 ```
 
 There is no option to restore the upstream answer. Ledger entry 55.
