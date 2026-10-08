@@ -234,6 +234,30 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// The price of the D73 fix, pinned as contract behaviour. Once a reversed <c>$</c> can pass in
+    /// the attempt from inside the text to come, these patterns report a partial at (0, 0) over ''
+    /// although no text completes them: in <c>(?wr)a^$</c> the <c>^</c> needs the start of the
+    /// string, with the <c>a</c> before it; in <c>(?r)$(?&lt;=\n)\A</c> nothing lies before
+    /// <c>\A</c> for the lookbehind; in <c>(?wr)a\B(?=$)</c> an <c>a</c> before the end or a final
+    /// newline is always a word boundary. The partial contract allows this: a partial promises only
+    /// that more text may complete the match (<see cref="Match.PartialMatch"/>,
+    /// <c>PartialContractTests</c>, owner decision 2026-10-08), while a miss is never allowed. On
+    /// the 20,040-row reversed-anchor grid of 2026-10-08 the fix turned 36 misses into the right
+    /// answer and gave 1,202 such partials; these three rows are from it.
+    /// </summary>
+    // Upstream 2026.9.10 answers None to every row, as the port did before D73.
+    [Test]
+    [Arguments(@"(?wr)a^$")]
+    [Arguments(@"(?r)$(?<=\n)\A")]
+    [Arguments(@"(?wr)a\B(?=$)")]
+    public void A_reversed_dollar_in_the_text_to_come_can_give_a_partial_no_text_completes(string pattern)
+    {
+        Match m = Partial("search", pattern, "");
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 0));
+    }
+
+    /// <summary>
     /// A pattern that no text can match reports no partial on any door, however its search ends.
     /// </summary>
     /// <remarks>
