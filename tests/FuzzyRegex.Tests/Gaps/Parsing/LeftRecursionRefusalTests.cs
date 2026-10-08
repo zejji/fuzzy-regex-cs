@@ -56,6 +56,18 @@ public sealed class LeftRecursionRefusalTests
     [Arguments(@"(?<A>b(?<=(?&A))|c)")]
     // A fuzzy section does not hide the cycle: it is judged with no errors.
     [Arguments(@"(?:(?R)a){e<=1}")]
+    // A group number with more than one group behind it, through a branch reset or a name used
+    // twice, can match empty if any of them can, whichever is written first.
+    [Arguments(@"(?|(a)|())(?<B>\1(?&B)|b)")]
+    [Arguments(@"(?|()|(a))(?<B>\1(?&B)|b)")]
+    [Arguments(@"(?:(?<n>a)|(?<n>))(?<B>(?P=n)(?&B)|b)")]
+    [Arguments(@"(?:(?<n>)|(?<n>a))(?<B>(?P=n)(?&B)|b)")]
+    // Conservative on purpose: the check does not follow which groups are set. A backreference to
+    // a group not yet set fails rather than matching empty, and a conditional on a group not yet
+    // set takes its no-branch, but both are read as if they could match empty, so these two are
+    // refused although the call can never run before text. Neither is a known idiom.
+    [Arguments(@"(?<A>\2(?&A)|b)(a*)")]
+    [Arguments(@"(?<A>(?(1)(?&A)|x)(a))")]
     public void A_group_that_can_call_itself_before_matching_text_is_refused(string pattern)
     {
         Action compile = () => _ = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
@@ -294,6 +306,73 @@ public sealed class LeftRecursionRefusalTests
             : regex.Match(subject);
 
         Answer(match).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// The check is linear in the pattern. A chain of 1,000 nested groups, each calling the one
+    /// inside it, needs a group's answer before its parent's; reading every body again on each
+    /// round of the fixpoint took 20.3 s (blind review, 2026-10-08). The bound is generous: the
+    /// whole compile takes a few milliseconds.
+    /// </summary>
+    [Test]
+    public void A_thousand_nested_groups_that_call_each_other_compile_quickly()
+    {
+        // (?<g1>(?<g2>...(?<g1000>)(?&g1000))...(?&g2))x
+        System.Text.StringBuilder text = new();
+        for (int i = 1; i < 1000; i++)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?<g{i}>");
+        }
+
+        text.Append("(?<g1000>)");
+        for (int i = 999; i >= 1; i--)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
+        }
+
+        string pattern = text.Append('x').ToString();
+        TimeSpan elapsed = TimeSpan.MaxValue;
+
+        // The parser recurses once per nesting level, deeper than a test thread's stack allows in
+        // a Debug build, so the compile runs on a thread of its own.
+        Thread compile = new(
+            () =>
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                _ = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
+                elapsed = watch.Elapsed;
+            },
+            64 * 1024 * 1024
+        );
+        compile.Start();
+        compile.Join();
+
+        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>
+    /// A named list can match empty only if it holds the empty string; otherwise it is text.
+    /// </summary>
+    [Test]
+    public void A_named_list_is_empty_only_if_it_holds_the_empty_string()
+    {
+        Dictionary<string, IReadOnlyCollection<string>> noEmpty = new(StringComparer.Ordinal) { ["w"] = ["-", "!"] };
+        Dictionary<string, IReadOnlyCollection<string>> withEmpty = new(StringComparer.Ordinal) { ["w"] = ["-", ""] };
+
+        Match m = new FuzzyRegex(@"(?<e>\L<w>(?&e)|\d+)", FuzzyRegexOptions.None, _timeout, noEmpty).Match("--5");
+        Action refused = () => _ = new FuzzyRegex(@"(?<e>\L<w>(?&e)|\d+)", FuzzyRegexOptions.None, _timeout, withEmpty);
+
+        (m.Index, m.Length).Should().Be((0, 3));
+        refused.Should().Throw<FuzzyRegexParseException>().WithMessage("*can call itself without matching any text");
+    }
+
+    /// <summary>A call under a repeat with a maximum of 0 never runs, so it cannot recurse.</summary>
+    [Test]
+    public void A_call_repeated_at_most_zero_times_is_not_a_recursion()
+    {
+        Match m = new FuzzyRegex(@"(?<A>(?&A){0}a|b)", FuzzyRegexOptions.None, _timeout).Match("ab");
+
+        (m.Index, m.Length).Should().Be((0, 1));
     }
 
     private static string Answer(Match match)

@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -42,42 +44,60 @@ internal static class LeftRecursion
     internal static void Check(Info info, RegexBase parsed, string pattern)
     {
         bool reverse = (info.Flags & RegexFlags.Reverse) != 0;
-        Dictionary<int, RegexBase> bodies = new() { [0] = parsed };
+
+        // Every body of every group number: a branch reset or a name used twice gives a number
+        // several. A body's nullability rests on the bodies nested directly in it and on the
+        // numbers it calls or reads back, so each records whom to tell when it changes.
+        ReferenceEqualityComparer same = ReferenceEqualityComparer.Instance;
+        Dictionary<int, List<RegexBase>> bodies = [];
+        Dictionary<RegexBase, int> numberOf = new(same);
+        Dictionary<RegexBase, List<RegexBase>> parentsOf = new(same);
+        Dictionary<int, List<RegexBase>> readersOf = [];
+        Collect(parsed, parsed, 0);
         foreach ((int number, (Group group, _, _)) in info.DefinedGroups)
         {
-            bodies[number] = group.Subpattern;
-        }
-
-        // The groups that can match empty: the least fixpoint, as a group's answer can rest on
-        // the groups it calls.
-        HashSet<int> empty = [];
-        bool grew = true;
-        while (grew)
-        {
-            grew = false;
-            foreach ((int number, RegexBase body) in bodies)
+            if (!bodies.ContainsKey(number))
             {
-                if (!empty.Contains(number) && Nullable(body))
-                {
-                    _ = empty.Add(number);
-                    grew = true;
-                }
+                Collect(group.Subpattern, group.Subpattern, number);
             }
         }
 
-        // The call graph, from the pattern's own node out to every node a call can reach.
-        Dictionary<(int, bool), List<((int, bool) To, CallGroup Call)>> edges = [];
+        // The bodies that can match empty: the least fixpoint, by a worklist, so a body is read
+        // again only when something it rests on has changed.
+        HashSet<RegexBase> emptyBodies = new(same);
+        HashSet<int> empty = [];
+        Dictionary<RegexBase, bool>? memo = null;
+        Queue<RegexBase> work = new(numberOf.Keys);
+        while (work.Count > 0)
+        {
+            RegexBase body = work.Dequeue();
+            if (emptyBodies.Contains(body) || !Nullable(body))
+            {
+                continue;
+            }
+
+            _ = emptyBodies.Add(body);
+            parentsOf.GetValueOrDefault(body)?.ForEach(work.Enqueue);
+            if (empty.Add(numberOf[body]))
+            {
+                readersOf.GetValueOrDefault(numberOf[body])?.ForEach(work.Enqueue);
+            }
+        }
+
+        // The answers are final now, so each node's is kept for the walk below.
+        memo = new(same);
+
+        // The call graph, from the pattern's own node out to every node a call can reach. A group
+        // written in place is an edge too, with no call, so each body is walked once a direction.
+        Dictionary<(int, bool), List<((int, bool) To, CallGroup? Call)>> edges = [];
         Queue<(int, bool)> todo = new([(0, reverse)]);
         HashSet<(int, bool)> reached = [(0, reverse)];
         while (todo.Count > 0)
         {
             (int number, bool back) = todo.Dequeue();
-            List<((int, bool), CallGroup)> outgoing = [];
+            List<((int, bool), CallGroup?)> outgoing = [];
             edges[(number, back)] = outgoing;
-            if (bodies.TryGetValue(number, out RegexBase? body))
-            {
-                Walk(body, back, true, outgoing);
-            }
+            bodies.GetValueOrDefault(number)?.ForEach(body => Walk(body, back, true, outgoing));
         }
 
         // A depth-first search: an edge back to a node still on the path closes a cycle.
@@ -93,7 +113,7 @@ internal static class LeftRecursion
             while (path.Count > 0)
             {
                 ((int, bool) node, int next) = path.Pop();
-                List<((int, bool) To, CallGroup Call)> outgoing = edges[node];
+                List<((int, bool) To, CallGroup? Call)> outgoing = edges[node];
                 if (next == outgoing.Count)
                 {
                     onPath[node] = false;
@@ -101,26 +121,80 @@ internal static class LeftRecursion
                 }
 
                 path.Push((node, next + 1));
-                ((int group, bool) to, CallGroup call) = outgoing[next];
-                if (onPath.TryAdd(to, true))
+                if (onPath.TryAdd(outgoing[next].To, true))
                 {
-                    path.Push((to, 0));
+                    path.Push((outgoing[next].To, 0));
                 }
-                else if (onPath[to])
+                else if (onPath[outgoing[next].To])
                 {
-                    throw Refusal(info, pattern, to.group, call);
+                    // Report the call on the cycle nearest its closing edge; nesting alone has no
+                    // cycle, so there is one.
+                    foreach (((int, bool) on, int taken) in path)
+                    {
+                        ((int group, bool) to, CallGroup? call) = edges[on][taken - 1];
+                        if (call is not null)
+                        {
+                            throw Refusal(info, pattern, to.group, call);
+                        }
+                    }
                 }
             }
         }
 
-        bool Nullable(RegexBase node) =>
+        // Records each group body under its number, and what each body's answer rests on.
+        void Collect(RegexBase node, RegexBase body, int number)
+        {
+            if (ReferenceEquals(node, body))
+            {
+                numberOf[body] = number;
+                (CollectionsMarshal.GetValueRefOrAddDefault(bodies, number, out _) ??= []).Add(body);
+            }
+
+            switch (node)
+            {
+                case Group group:
+                    (CollectionsMarshal.GetValueRefOrAddDefault(parentsOf, group.Subpattern, out _) ??= []).Add(body);
+                    Collect(group.Subpattern, group.Subpattern, group.GroupNumber);
+                    return;
+                case CallGroup call:
+                    (CollectionsMarshal.GetValueRefOrAddDefault(readersOf, call.GroupNumber, out _) ??= []).Add(body);
+                    return;
+                case RefGroup reference:
+                    (CollectionsMarshal.GetValueRefOrAddDefault(readersOf, reference.GroupNumber, out _) ??= []).Add(
+                        body
+                    );
+                    return;
+            }
+
+            foreach (RegexBase child in Children(node))
+            {
+                Collect(child, body, number);
+            }
+        }
+
+        // Before the fixpoint ends a body is read afresh each time; after it, once per node.
+        bool Nullable(RegexBase node)
+        {
+            if (memo is not null && memo.TryGetValue(node, out bool known))
+            {
+                return known;
+            }
+
+            bool answer = Empty(node);
+            memo?.Add(node, answer);
+            return answer;
+        }
+
+        bool Empty(RegexBase node) =>
             node switch
             {
                 Sequence sequence => sequence.Items.TrueForAll(Nullable),
-                StringSet => true,
+
+                // A named list's members are sequences of characters, so it can match empty only
+                // if it holds the empty string.
                 Branch branch => branch.Branches.Count == 0 || branch.Branches.Exists(Nullable),
                 GreedyRepeat repeat => repeat.MinCount == 0 || Nullable(repeat.Subpattern),
-                Group group => Nullable(group.Subpattern),
+                Group group => emptyBodies.Contains(group.Subpattern),
                 Atomic atomic => Nullable(atomic.Subpattern),
                 Fuzzy section => Nullable(section.Subpattern),
                 CallGroup call => empty.Contains(call.GroupNumber),
@@ -138,7 +212,7 @@ internal static class LeftRecursion
             };
 
         // Records the calls reachable from the start ('atStart') and queues every call's target.
-        void Walk(RegexBase node, bool back, bool atStart, List<((int, bool), CallGroup)> outgoing)
+        void Walk(RegexBase node, bool back, bool atStart, List<((int, bool), CallGroup?)> outgoing)
         {
             switch (node)
             {
@@ -159,11 +233,11 @@ internal static class LeftRecursion
                 case Branch branch:
                     branch.Branches.ForEach(x => Walk(x, back, atStart, outgoing));
                     break;
-                case GreedyRepeat repeat:
+                case GreedyRepeat repeat when repeat.MaxCount != 0:
                     Walk(repeat.Subpattern, back, atStart, outgoing);
                     break;
                 case Group group:
-                    Walk(group.Subpattern, back, atStart, outgoing);
+                    Link((group.GroupNumber, back), null, atStart, outgoing);
                     break;
                 case Atomic atomic:
                     Walk(atomic.Subpattern, back, atStart, outgoing);
@@ -184,21 +258,38 @@ internal static class LeftRecursion
                     Walk(conditional.NoItem, back, atStart, outgoing);
                     break;
                 case CallGroup call:
-                    (int, bool) target = (call.GroupNumber, back);
-                    if (atStart)
-                    {
-                        outgoing.Add((target, call));
-                    }
-
-                    if (reached.Add(target))
-                    {
-                        todo.Enqueue(target);
-                    }
-
+                    Link((call.GroupNumber, back), call, atStart, outgoing);
                     break;
             }
         }
+
+        void Link((int, bool) target, CallGroup? call, bool atStart, List<((int, bool), CallGroup?)> outgoing)
+        {
+            if (atStart)
+            {
+                outgoing.Add((target, call));
+            }
+
+            if (reached.Add(target))
+            {
+                todo.Enqueue(target);
+            }
+        }
     }
+
+    private static List<RegexBase> Children(RegexBase node) =>
+        node switch
+        {
+            Sequence sequence => sequence.Items,
+            Branch branch => branch.Branches,
+            GreedyRepeat repeat => [repeat.Subpattern],
+            Atomic atomic => [atomic.Subpattern],
+            Fuzzy section => [section.Subpattern],
+            Conditional conditional => [conditional.YesItem, conditional.NoItem],
+            LookAround look => [look.Subpattern],
+            LookAroundConditional conditional => [conditional.Subpattern, conditional.YesItem, conditional.NoItem],
+            _ => [],
+        };
 
     private static FuzzyRegexParseException Refusal(Info info, string pattern, int group, CallGroup call)
     {
