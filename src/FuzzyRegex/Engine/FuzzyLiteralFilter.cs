@@ -787,13 +787,22 @@ internal sealed class FuzzyLiteralFilter
 
             WorkCounter.Searched(to - AsciiEnd);
 
+            // Ascii.IsValid first: about three times faster per megabyte than the search below,
+            // which runs only to find where a stretch that has non-ASCII stops being ASCII (D29).
+            if (Ascii.IsValid(text[AsciiEnd..to]))
+            {
+                AsciiEnd = to;
+                return true;
+            }
+
             // The ushort form: the char form of the except-in-range searches boxes its bounds, 96 B
             // a call on .NET 10 (probe, 2026-09-23), and AllocationTests catch it.
             int other = MemoryMarshal
                 .Cast<char, ushort>(text[AsciiEnd..to])
                 .IndexOfAnyExceptInRange((ushort)0, (ushort)0x7F);
-            AsciiEnd = other < 0 ? to : AsciiEnd + other;
-            return other < 0;
+            System.Diagnostics.Debug.Assert(other >= 0, "Ascii.IsValid failed, so a non-ASCII char exists");
+            AsciiEnd += other;
+            return false;
         }
     }
 }
