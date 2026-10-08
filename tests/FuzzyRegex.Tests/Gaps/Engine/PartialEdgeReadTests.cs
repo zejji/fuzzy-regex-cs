@@ -206,12 +206,13 @@ public sealed class PartialEdgeReadTests
     /// position there can pass <c>$</c>: '\n' on the left of '' completes each row at (0, 0) of
     /// '\n'. Before the fix that attempt took <c>$</c> to be false, as it is when held text follows
     /// the edge, and each row answered None. The first row is the grid's witness, from D11's 8.1
-    /// port grid.
+    /// port grid; the last is the shortest row of the D73 grid and the documented example.
     /// </summary>
     // Upstream 2026.9.10 answers None to every row.
     [Test]
     [Arguments(@"(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))")]
     [Arguments(@"(?wr)^(?<=\b$^)")]
+    [Arguments(@"(?wr)\b$^")]
     public void A_reversed_dollar_can_stand_before_a_final_newline_in_the_text_to_come(string pattern)
     {
         Match m = Partial("search", pattern, "");
@@ -242,10 +243,11 @@ public sealed class PartialEdgeReadTests
     /// newline is always a word boundary. The partial contract allows this: a partial promises only
     /// that more text may complete the match (<see cref="Match.PartialMatch"/>,
     /// <c>PartialContractTests</c>, owner decision 2026-10-08), while a miss is never allowed. On
-    /// the 20,040-row reversed-anchor grid of 2026-10-08 the fix turned 36 misses into the right
-    /// answer and gave 1,202 such partials; these three rows are from it.
+    /// the 20,040-row reversed-anchor grid (ledger entry 72) the fix turned 327 misses into the
+    /// right answer and gave 911 such partials; these three rows are from it.
     /// </summary>
-    // Upstream 2026.9.10 answers None to every row, as the port did before D73.
+    // Upstream 2026.9.10 gives the same empty partial at the start for every row, measured on
+    // 2026-10-09, and the port answered None before D73.
     [Test]
     [Arguments(@"(?wr)a^$")]
     [Arguments(@"(?r)$(?<=\n)\A")]

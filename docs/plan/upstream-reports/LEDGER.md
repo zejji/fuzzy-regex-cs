@@ -6180,3 +6180,40 @@ rest of the ovector are undefined", pcre2partial, fetched 2026-10-08). Pinned by
 `Gaps/Engine/PartialRepeatTailTests`, the oracle entry `partial-group-before-a-repeat-tail` and
 `bounded-lazy-repeat-partial`'s row 2. S31's `(\D*?)z` over 'a', which had copied upstream's unset
 group, now reports (0, 1) (`PartialMatchingTests.A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed`).
+
+## 72. A reversed partial search over the empty text misses a match that a newline before it completes - DIVERGES HERE (D73, 2026-10-09)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D73. Draft report:
+`entry-72-reversed-dollar-in-the-text-to-come.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-09, `partial=True`:
+
+```
+search(r'(?wr)\b$^', '')                                          -> None     here P(0, 0)
+search(r'(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))', '')      -> None     here P(0, 0)
+search(r'(?wr)\b$^', '\n')  (no partial)                          -> (0, 0)   (the completion)
+search(r'(?wr)a^$', '')                                           -> P(0, 0)  here P(0, 0), no completion
+search(r'(?r)\b$^', '')                                           -> None     here P(0, 0), no completion
+```
+
+**Why the port differs.** A reversed search runs out of text on the left, so its partial asks
+whether text before the subject completes the match. Over the empty text that text can end in a
+newline, and `$` holds before a final newline, so '\n' completes `(?wr)\b$^` at (0, 0). Upstream
+answers `None` because it reports a partial only when a node runs out of characters to read (entry
+21), and no node in these patterns reads one. The second row is the witness D11's 8.1 port grid
+found (2026-10-04), where the port agreed with upstream.
+
+**This port.** A partial search makes one more attempt from a start inside the text to come (D11,
+design section 1, rule 3). That attempt took a reversed plain `$` to be false, as it is when held
+text lies on the right of the edge. When no held text lies there, the final newline can be in the
+text to come, so `$` is now undetermined (`Matcher.ZeroWidthInsideTheTextToCome`,
+`MatchState.NothingHeldBeyondTheEdge`); `\Z` stays false. A 20,040-row grid of sequences of up to
+three reversed anchors, lookarounds, `(*SKIP)` and literals, under `(?r)` and `(?wr)`, searched
+over '', 'a', '\n' and ' ' and judged against every completion of up to three characters: 327
+misses fixed (319 of them upstream's misses too) and 911 new partials that no text completes, every
+one over '' at (0, 0); upstream gives 360 of those 911 too. No other answer moved. The partial
+contract (owner decision 2026-10-08; `Match.PartialMatch`) allows a partial that no text completes
+and forbids a miss, so the fix is kept. The grid first run had a shell-mangled `\b` (a backspace)
+in 5,288 rows and counted 36 and 1,202; the counts above are from the corrected grid. Pinned by
+`Gaps/Engine/PartialEdgeReadTests` (`A_reversed_dollar_can_stand_before_a_final_newline_in_the_text_to_come`,
+its controls, and `A_reversed_dollar_in_the_text_to_come_can_give_a_partial_no_text_completes`).
