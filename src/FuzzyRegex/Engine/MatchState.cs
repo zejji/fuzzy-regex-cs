@@ -373,6 +373,14 @@ internal sealed class MatchState : IDisposable
     internal bool InsideW;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D73: in the attempt that starts inside the text to come, whether no held text
+    /// lies beyond the edge, so that the edge is the end of the string. Set by
+    /// <c>Matcher.MatchFromInsideTheTextToCome</c> before it sets <see cref="InsideW"/>, read only
+    /// while that is set, and cleared with it when the state is reset.
+    /// </summary>
+    internal bool NothingHeldBeyondTheEdge;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the attempt running in a partial call's second pass has read
     /// the text to come: an undetermined test, a decided one that differs from the first pass, or
     /// any test of the attempt from inside that text. Cleared at each attempt's start. It is the
@@ -1232,6 +1240,7 @@ internal sealed class MatchState : IDisposable
         WMarks.Clear();
         LookaroundSuccesses.Clear();
         InsideW = false;
+        NothingHeldBeyondTheEdge = false;
         AttemptTouchedTheTextToCome = false;
         HasUnknownCaptures = false;
 #if DEBUG
@@ -1448,6 +1457,7 @@ internal sealed class MatchState : IDisposable
         WMarks.Clear();
         LookaroundSuccesses.Clear();
         InsideW = false;
+        NothingHeldBeyondTheEdge = false;
         AttemptTouchedTheTextToCome = false;
         HasUnknownCaptures = false;
         Sstack.KeepUpTo(_cachedStackLimit);

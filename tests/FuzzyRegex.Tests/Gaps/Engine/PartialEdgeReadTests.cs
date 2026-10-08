@@ -201,6 +201,39 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// D73: a reversed <c>$</c> in the attempt from inside the text to come. With no held text after
+    /// the edge, the final newline <c>$</c> can stand before is itself in the text to come, so a
+    /// position there can pass <c>$</c>: '\n' on the left of '' completes each row at (0, 0) of
+    /// '\n'. Before the fix that attempt took <c>$</c> to be false, as it is when held text follows
+    /// the edge, and each row answered None. The first row is the grid's witness, from D11's 8.1
+    /// port grid.
+    /// </summary>
+    // Upstream 2026.9.10 answers None to every row.
+    [Test]
+    [Arguments(@"(?wr)(?:^(*SKIP)(?<=\b$^)|(\Z(*SKIP))(*FAIL))")]
+    [Arguments(@"(?wr)^(?<=\b$^)")]
+    public void A_reversed_dollar_can_stand_before_a_final_newline_in_the_text_to_come(string pattern)
+    {
+        Match m = Partial("search", pattern, "");
+
+        m.Success.Should().BeTrue();
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 0));
+    }
+
+    /// <summary>
+    /// The controls: where held text follows the edge, a final newline cannot lie in the text to
+    /// come, and <c>\Z</c> needs the end itself, so the attempt from inside the text to come fails
+    /// at them as before. No continuation completes these (the brute-force judge, 2026-10-08).
+    /// </summary>
+    [Test]
+    [Arguments(@"(?wr)^(?<=\b$^)", "a")]
+    [Arguments(@"(?wr)^(?<=\b\Z^)", "")]
+    public void A_reversed_dollar_or_end_of_string_stays_false_where_it_cannot_hold(string pattern, string text)
+    {
+        Partial("search", pattern, text).Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// A pattern that no text can match reports no partial on any door, however its search ends.
     /// </summary>
     /// <remarks>

@@ -3704,7 +3704,10 @@ internal static class Matcher
     /// where no position inside the text to come can pass it: <c>\A</c> and a plain <c>^</c>
     /// forward, which need the start of the string, and <c>\Z</c> and a plain <c>$</c> reversed,
     /// which need its end or a final newline, both of which lie in the held text on that side;
-    /// <c>\G</c> either way, which holds only where the search began. Every other test holds for
+    /// <c>\G</c> either way, which holds only where the search began. Except that a plain <c>$</c>
+    /// reversed is undetermined when no held text follows the edge, because then the final newline
+    /// itself can be in the text to come (D73: <c>(?wr)^(?&lt;=\b$^)</c> over '' is completed by
+    /// '\n' on its left). Every other test holds for
     /// some continuation and fails for another, so it is undetermined, which passes and marks the
     /// path as the edge's tests do.
     /// </remarks>
@@ -3717,8 +3720,9 @@ internal static class Matcher
         {
             Opcode.SearchAnchor => true,
             Opcode.StartOfString => state.PartialSide == MatchState.PartialRight,
-            Opcode.EndOfString or Opcode.EndOfStringLine or Opcode.EndOfStringLineU => state.PartialSide
-                == MatchState.PartialLeft,
+            Opcode.EndOfString => state.PartialSide == MatchState.PartialLeft,
+            Opcode.EndOfStringLine or Opcode.EndOfStringLineU => state.PartialSide == MatchState.PartialLeft
+                && !state.NothingHeldBeyondTheEdge,
             _ => false,
         };
 
@@ -20072,6 +20076,7 @@ internal static class Matcher
             state.InitialSliceEnd
         );
 
+        state.NothingHeldBeyondTheEdge = textEnd == edge;
         state.TextStart = state.TextEnd = edge;
         state.InitialSliceStart = state.InitialSliceEnd = edge;
         state.SliceStart = state.SliceEnd = edge;
