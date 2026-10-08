@@ -1467,6 +1467,27 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with a repeat's tail test answering its run-out at once,
+    /// as upstream's does, rather than entering the tail (D67, ledger entry 71). Setting
+    /// <c>PatternObject.TailRunOutAsBeforeD67</c> does it. The
+    /// <c>partial-group-before-a-repeat-tail</c> entry keys on this.
+    /// </summary>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without D67, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamTailRunOut(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.TailRunOutAsBeforeD67 = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with a fuzzy full-folded string editing a subject
     /// character that expands under full case folding one folded character at a time, as upstream
     /// does, and never whole.

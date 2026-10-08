@@ -819,6 +819,14 @@ internal sealed class PatternObject
     internal bool SecondPassAsBeforeD11;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a repeat's tail test that runs out of
+    /// text answers the run-out at once, as upstream's does, rather than letting the tail be entered
+    /// (D67). The oracle sets it on a pattern it compiled for one call, to show that D67 is the whole
+    /// of a divergence. See <c>Matcher.TailMayMatch</c>.
+    /// </summary>
+    internal bool TailRunOutAsBeforeD67;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether an item that matched exactly is never
     /// offered as a deletion, which is upstream's rule. The oracle sets it on a pattern it compiled
     /// for one call, to show that the ledger entry 42 fix is the whole of a divergence.

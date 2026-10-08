@@ -2253,7 +2253,10 @@ internal static class ExpectedDivergences
     private static readonly string[] _boundedLazyOurs =
     [
         "no match",
-        "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial",
+        // Row 2's group 1 is set since D67 (2026-10-08): the lazy repeat enters its tail, so group 1
+        // closes at (0, 1) before the `A` runs out at the slice start. Every completion ('A', 'xA')
+        // gives group 1 the '_', so the partial reports it (D62's rule). The span is unchanged.
+        "match 0:(0,1)[(0,1)] 1:(0,1)[(0,1)] last=1/- partial",
         // Row 3 was "no match" until D11 (2026-09-29): ' \r' + '\n ' matches at 3 under
         // MULTILINE (tools/probes/d11-brute-judge.py: P(2, 2), witness '\n '), from a start inside the
         // text to come, which the second pass now tries (Matcher.MatchFromInsideTheTextToCome). So the
@@ -8056,6 +8059,31 @@ internal static class ExpectedDivergences
                     ours,
                     OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
                 )
+        ),
+        new(
+            Id: "partial-group-before-a-repeat-tail",
+            Reason: "PORT RIGHT, D67 (ledger entry 71, 2026-10-08): a partial match reports a group "
+                + "that closes before a repeat's tail runs out of text. Upstream tests the tail before "
+                + "entering it and answers the partial as soon as that test runs out "
+                + "(upstream/src/_regex.c:12591-12594), before the group's end that comes first in "
+                + "the tail is reached, so the group is unset where every completion of the path sets "
+                + "it. This port enters the tail and the item runs out after the group has closed "
+                + "(`Matcher.TailMayMatch`). D62's rule decides it: a partial reports what every "
+                + "completion of its path would report. Seed 4242 row 5111: "
+                + "`^(?P<g1>.??){0,2}(?P<g2>[a-f])...` matched over '' gives g1 = (0, 0) here; the "
+                + "lazy body is empty on the partial's path, and the completions of that path ('aa', "
+                + "'ab', 'az') all give g1 = (0, 0). Spans and the partial flag never move "
+                + "(tools/probes/d67-repeat-tail-grid.py: 51,200 rows, no span moved).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamTailRunOut`, which sets "
+                + "`PatternObject.TailRunOutAsBeforeD67` and nothing else, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged.",
+            PinnedBy: "PartialRepeatTailTests.A_group_closed_before_the_tail_runs_out_is_reported",
+            Example: """
+            {"generator":"partial-sliced","pattern":"^(?P<g1>.??){0,2}(?P<g2>[a-f])(?:(?(2)(?<=(?&g2))[abz]))$","flags":264,"namedLists":{},"subject":"","operation":"match","partial":true,"oracle":"prefilter-free","codepointSpan":[0,0],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":0,"captures":[[0,0]]},{"number":1,"success":false,"index":0,"length":0,"captures":[]},{"number":2,"success":false,"index":0,"length":0,"captures":[]}],"lastIndex":-1,"lastGroup":null,"partial":true}}
+            """,
+            Applies: static (row, ours) =>
+                row.Partial && OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamTailRunOut(row))
         ),
         new(
             Id: "partial-edge-read",

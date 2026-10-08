@@ -5452,7 +5452,7 @@
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_fullmatch_needs_a_completion_that_could_exist",
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_match_keeps_the_groups_that_had_already_closed",
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_match_of_a_skip_is_not_the_verb_free_answer",
-    "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_raised_inside_a_lazy_repeat_leaves_the_enclosing_group_as_it_was",
+    "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed",
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_partial_search_of_a_skip_is_not_the_verb_free_answer",
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_ranking_flag_leaves_a_partial_search_at_the_leftmost_live_start((?b))",
     "Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.PartialMatchingTests.A_ranking_flag_leaves_a_partial_search_at_the_leftmost_live_start((?e))",

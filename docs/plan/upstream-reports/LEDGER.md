@@ -6149,3 +6149,34 @@ decisions 1 and 3), and they replace S57d's escalation, which turned a failed ma
 whenever the failure touched the end of the text. Pinned by `Gaps/Engine/PartialEdgeReadTests`
 (the `\b` over '' rows, and `a\Zb` over 'a'), `OpenDefects/OpenDefectTests` and the oracle entry
 `partial-edge-read`.
+
+## 71. A partial match leaves a group unset when the repeat inside it stops at a tail that runs out of text - DIVERGES HERE (D67, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D67. Draft report:
+`entry-71-partial-group-before-a-repeat-tail.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08, `partial=True`:
+
+```
+search(r'(?<o>b(?<i>a)?)b', 'ba')    -> (0, 2) partial, o unset   here o = (0, 2)
+search(r'(?<o>a??)b', 'a')           -> (0, 1) partial, o unset   here o = (0, 1)
+search(r'(?r)b(?<o>(?<i>a)?)', 'a')  -> (0, 1) partial, o unset   here o = (0, 1)
+search(r'(?<o>b(?<i>a)?)b', 'bab')   -> (0, 3), o = (0, 2)        (the completion)
+```
+
+**Why the port differs.** A partial match reports what every completion of its path would report
+(D62's rule). A repeat tests its tail before entering it (`try_match`), and when that test runs out
+of text, `END_GREEDY_REPEAT` returns the partial at once (`upstream/src/_regex.c:12591-12594`); the
+other repeat arms do the same. The group's end comes first in the tail, so the partial is reported
+before the group closes, although every completion closes it at the same place.
+
+**This port.** The test is a filter in front of the tail, and a run-out is not a refusal, so the
+repeat enters the tail and the item that ran out runs out again after the group has closed
+(`Matcher.TailMayMatch`, at all six tail tests: the greedy and lazy repeats' start and end, and the
+one-character repeats' backtracking). Grid `tools/probes/d67-repeat-tail-grid.py`: 51,200 rows judged
+against every completion of up to five characters, 4,424 group values wrong before and none after,
+with no span or partial flag moved. PCRE2 leaves the groups of a partial undefined ("the values in the
+rest of the ovector are undefined", pcre2partial, fetched 2026-10-08). Pinned by
+`Gaps/Engine/PartialRepeatTailTests`, the oracle entry `partial-group-before-a-repeat-tail` and
+`bounded-lazy-repeat-partial`'s row 2. S31's `(\D*?)z` over 'a', which had copied upstream's unset
+group, now reports (0, 1) (`PartialMatchingTests.A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed`).

@@ -6557,6 +6557,11 @@ internal static class Matcher
     /// success comes after its blocked one, <see cref="EndALookaroundInTheSecondPass"/>'s decided
     /// end lets that success decide what encloses it (the dedup would take it for a repeat).
     /// </para>
+    /// <para>
+    /// Since D67 a repeat's tail test does not run out here (<see cref="TailMayMatch"/>): the tail is
+    /// entered and its own item runs out, so only a body's run-out reaches this rule, and a tail's
+    /// only under the oracle's ablation (<c>PatternObject.TailRunOutAsBeforeD67</c>).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="bodyStatus">The body's test.</param>
@@ -7267,6 +7272,13 @@ internal static class Matcher
     /// <c>partial_side</c> is set, which no ordinary match sets.
     /// </para>
     /// <para>
+    /// <b>D67 (2026-10-08) undid this for a repeat's tail test, on purpose</b> (see
+    /// <see cref="TailMayMatch"/>). D62's rule says a partial reports what every completion of its
+    /// path would report, and every completion of the path in which the lazy repeat took the 'a' and
+    /// the <c>z</c> ran out ('az', 'azb') gives group 1 (0, 1). So that row reports (0, 1) again, now
+    /// as a deliberate divergence. Body tests and branch tests still propagate the partial.
+    /// </para>
+    /// <para>
     /// <b>S86 restored the <c>SUCCESS</c> arm (<c>:7828</c>), because a wasted tail is not free in a
     /// repeat.</b> When <c>END_GREEDY_REPEAT</c> finds that both the body and the tail could match,
     /// it pushes a <c>MATCH_TAIL</c> record (57 B here) before it re-enters the body, and nothing
@@ -7315,6 +7327,26 @@ internal static class Matcher
 
         return status == MatchStatus.Partial ? status : MatchStatus.Success;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D67: a repeat's tail test that runs out of text means the tail may match, so
+    /// the repeat enters the tail and the tail's own item runs out there. Upstream answers the
+    /// partial at the test, before the tail's group ends are reached, so `(?&lt;o&gt;b(?&lt;i&gt;a)?)b`
+    /// over 'ba' reported o unset where every completion ('bab') sets it to (0, 2) (D62's rule: a
+    /// partial reports what every completion of its path would report).
+    /// </summary>
+    /// <remarks>
+    /// The test is a filter in front of the tail (<see cref="TryMatch"/>): it may refuse a tail that
+    /// cannot match, and may not decide anything else. A run-out is not a refusal, so entering the tail
+    /// is what matching would do with no test at all; the item that ran out runs out again where it
+    /// stands, after the nodes before it (a group's end) have run. Only a partial call's second pass
+    /// gets a run-out from a test, so an ordinary match pays the one comparison.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="status">The tail test's answer.</param>
+    /// <returns><see cref="MatchStatus.Success"/> for a run-out, otherwise <paramref name="status"/>.</returns>
+    private static int TailMayMatch(MatchState state, int status) =>
+        status == MatchStatus.Partial && !state.Pattern.TailRunOutAsBeforeD67 ? MatchStatus.Success : status;
 
     /// <summary>
     /// Whether <c>try_match</c> hands this test node to one of its six <c>try_match_STRING*</c> arms
@@ -13499,7 +13531,10 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
 
                         // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
                         if (tailStatus is < 0 and not MatchStatus.Partial)
@@ -13712,7 +13747,10 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
 
                         // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
                         if (tailStatus is < 0 and not MatchStatus.Partial)
@@ -14317,7 +14355,10 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
 
                         // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
                         if (tailStatus is < 0 and not MatchStatus.Partial)
@@ -14862,7 +14903,10 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
 
                         // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
                         if (tailStatus is < 0 and not MatchStatus.Partial)
@@ -18057,7 +18101,7 @@ internal static class Matcher
                     {
                         pos = Step(state, pos, -step);
 
-                        status = TryMatch(state, node.Next1, pos, out _);
+                        status = TailMayMatch(state, TryMatch(state, node.Next1, pos, out _));
                         if (status < 0)
                         {
                             // NOT UPSTREAM'S, D11 (D69): a string tail that runs into the edge runs
@@ -18258,7 +18302,7 @@ internal static class Matcher
                         // upstream's fast-path rule that a successful try_match consumes the
                         // character it tested - which is why asking the predicate here does not
                         // reinstate the Phase 7 fast path S19 measured and reverted.
-                        status = TryMatch(state, node.Next1, pos, out _);
+                        status = TailMayMatch(state, TryMatch(state, node.Next1, pos, out _));
 
                         if (status < 0)
                         {

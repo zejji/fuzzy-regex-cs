@@ -211,12 +211,14 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
-    public void A_partial_raised_inside_a_lazy_repeat_leaves_the_enclosing_group_as_it_was()
+    public void A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed()
     {
         // The S31 oracle wave's first finding, seed 31, rows 214 and 518, minimised. A lazy repeat
-        // inside a capture group runs out of text while extending: upstream stops inside the repeat
-        // and the group keeps whatever it had, where this port entered the tail, re-closed the group
-        // and reported it as the whole match. The fix is in Matcher.TryMatch - see its remarks.
+        // inside a capture group has taken the 'a', and its tail's test runs out of text. Upstream
+        // answers the partial at the test, so the group is unset; S31 copied that (Matcher.TryMatch's
+        // remarks). D67 (2026-10-08) enters the tail instead, so the group closes before the `z`
+        // runs out, and reports (0, 1), which every completion of that path gives ('az', 'azb'):
+        // D62's rule. DIVERGES FROM UPSTREAM deliberately, ledger entry 71.
         //
         // Measured 2026-09-12, .scratch/min-214.py:
         //   compile(r'(\D*?)z').search('a', partial=True)   -> (0,1) partial True, group 1 (-1,-1)
@@ -226,13 +228,13 @@ public sealed class PartialMatchingTests
 
         lazy.PartialMatch.Should().BeTrue();
         (lazy.Index, lazy.Index + lazy.Length).Should().Be((0, 1));
-        lazy.Groups[1].Success.Should().BeFalse();
-        lazy.LastGroupNumber.Should().Be(-1);
+        (lazy.Groups[1].Success, lazy.Groups[1].Index, lazy.Groups[1].Length).Should().Be((true, 0, 1));
+        lazy.LastGroupNumber.Should().Be(1);
 
         Match reversed = new FuzzyRegex(@"(?r)z(a*?)").Match("a", partial: true);
 
         reversed.PartialMatch.Should().BeTrue();
-        reversed.Groups[1].Success.Should().BeFalse();
+        (reversed.Groups[1].Success, reversed.Groups[1].Index, reversed.Groups[1].Length).Should().Be((true, 0, 1));
 
         // The lazy quantifier that takes zero FIRST does close its group, and keeps it: the partial
         // arrives after the group closed rather than while the repeat was extending.

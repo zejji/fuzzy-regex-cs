@@ -1217,6 +1217,24 @@ Console.WriteLine(new FuzzyRegex(@"a\Zb").MatchAtStart("a", partial: true).Succe
 
 There is no option to restore the upstream answer. Ledger entry 70.
 
+### A partial match reports a group that closes before a repeat's tail runs out of text
+
+A partial match reports what every completion of its path would report. When a repeat inside a
+group is followed by text that runs out, upstream answers the partial while it is still deciding
+whether to leave the repeat, before the group has closed, so the group comes back unset even though
+every longer text that completes the match sets it. Here the repeat leaves first, the group closes,
+and only then does the next item run out. The span is the same in both engines.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?<o>b(?<i>a)?)b").Match("ba", partial: true);
+Group o = m.Groups["o"];
+Console.WriteLine((m.PartialMatch, o.Success, o.Index, o.Length));   // (True, True, 0, 2) - upstream reports o unset; 'bab' completes it with o = 'ba'
+```
+
+There is no option to restore the upstream answer. Ledger entry 71.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted

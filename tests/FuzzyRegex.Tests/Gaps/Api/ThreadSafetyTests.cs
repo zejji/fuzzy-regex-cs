@@ -817,6 +817,9 @@ public sealed class ThreadSafetyTests
             // D11 added SecondPassAsBeforeD11, likewise set only by
             // OracleComparer.RunWithTheSecondPassAsBeforeD11.
             "PatternObject.SecondPassAsBeforeD11",
+            // D67 added TailRunOutAsBeforeD67, likewise set only by
+            // OracleComparer.RunWithTheUpstreamTailRunOut.
+            "PatternObject.TailRunOutAsBeforeD67",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
