@@ -1983,6 +1983,30 @@ Console.WriteLine(new FuzzyRegex(@"(?(?!((?:ab){e<=1}))b|\1)").Match("ax").Fuzzy
 
 There is no option to restore the upstream answer. Ledger entry 65.
 
+### A DEFINE group with a no-branch is refused
+
+A `(?(DEFINE)...)` group holds group definitions that are only ever called, never matched in
+place. Upstream accepts a no-branch after them, `(?(DEFINE)a|b)`, and the whole pattern then never
+matches. Here the pattern is refused when it is constructed, as PCRE2 and Perl refuse it. An empty
+no-branch is still accepted.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+try
+{
+    _ = new FuzzyRegex("(?(DEFINE)a|b)x");
+}
+catch (FuzzyRegexParseException ex)
+{
+    Console.WriteLine(ex.Message);   // DEFINE group contains more than one branch
+}
+
+Console.WriteLine(new FuzzyRegex("(?(DEFINE)a|)x").Match("bx").Index); // 1 - upstream: 1
+```
+
+There is no option to restore the upstream answer, which was no match at all. Ledger entry 71.
+
 ### `BestMatch` and `EnhanceMatch` keep a fit that ends in trailing insertions
 
 `(?b)` asks for the best match among those the constraints allow. It is not meant to remove any.

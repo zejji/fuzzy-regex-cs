@@ -6149,3 +6149,32 @@ decisions 1 and 3), and they replace S57d's escalation, which turned a failed ma
 whenever the failure touched the end of the text. Pinned by `Gaps/Engine/PartialEdgeReadTests`
 (the `\b` over '' rows, and `a\Zb` over 'a'), `OpenDefects/OpenDefectTests` and the oracle entry
 `partial-edge-read`.
+
+## 71. A DEFINE group with a no-branch makes the whole pattern fail - DIVERGES HERE (D75, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D75, found by the D4 cycle gate's
+blind review on 2026-10-07. Draft report: `entry-71-define-with-a-no-branch.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08:
+
+```
+search(r'(?(DEFINE)a|b)x', 'bx')   -> None
+search(r'(?(DEFINE)a|b)x', 'x')    -> None
+search(r'(?(DEFINE)a|b)x', 'ax')   -> None
+search(r'(?(DEFINE)|b)x', 'bx')    -> (1, 2)
+search(r'(?(DEFINE)a|)x', 'bx')    -> (1, 2)
+search(r'(?(DEFINE)a)x', 'bx')     -> (1, 2)
+```
+
+**Why the port differs.** A DEFINE group holds definitions that are only called, never matched in
+place, so a no-branch has no use; upstream compiles it and the pattern then matches nothing (or,
+with an empty yes-branch, silently skips the no-branch). PCRE2 10.47 refuses the pattern ("DEFINE
+subpattern contains more than one branch") and so does Perl 5.42 ("(?(DEFINE)....) does not allow
+branches"); .NET and JavaScript have no DEFINE.
+
+**This port.** A DEFINE group whose no-branch is not empty is refused at construction with
+`FuzzyRegexParseException` ("DEFINE group contains more than one branch"), in
+`Conditional.FixGroups`. An empty no-branch is accepted, because upstream matches it as if it were
+absent, and `DEFINE` stays an ordinary name when a group has it. Pinned by
+`Gaps/Engine/BackrefAndConditionalTests.A_define_group_with_a_no_branch_is_refused` and its
+controls.

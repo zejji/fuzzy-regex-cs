@@ -2410,6 +2410,13 @@ internal sealed class Conditional : RegexBase
         {
             // 'DEFINE' is a special name unless there's a group with that name.
             _group = 0;
+
+            // Port-only (D75): upstream accepts a no-branch here and the pattern never matches.
+            // PCRE2 and Perl refuse it; an empty no-branch is kept, as upstream matches it.
+            if (!NoItem.IsEmpty())
+            {
+                throw new FuzzyRegexParseException("DEFINE group contains more than one branch", pattern, _position);
+            }
         }
         else
         {
