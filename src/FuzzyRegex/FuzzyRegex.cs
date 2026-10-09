@@ -1090,7 +1090,7 @@ public sealed class FuzzyRegex
     /// <param name="partial">
     /// Whether to report a partial match when the subject runs out before the pattern can succeed
     /// or fail. Upstream's <c>partial=True</c>. A partial promises only that more text may complete
-    /// the match, not that some text will; see <c>Match.PartialMatch</c>.
+    /// the match; sometimes no text can. See <c>Match.PartialMatch</c>.
     /// </param>
     /// <param name="timeout">
     /// How long this call may run, or <see langword="null"/> to use the pattern's

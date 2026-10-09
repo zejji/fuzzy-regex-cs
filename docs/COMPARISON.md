@@ -324,8 +324,8 @@ answer, because it lets that `b` be a substitution rather than a contradiction -
 `(?:\d{4}-\d{2}-\d{2}){e<=1}` returns a partial match of all seven characters at index 0, partial
 because the subject ran out while the budget still had room.
 
-"So far, so good" is all a partial promises: more text may complete the match, not that some text
-will. `ba(*FAIL)` over 'b' is a partial, and no longer text completes it. Where some longer text
+A partial promises only "so far, so good": more text may complete the match, but sometimes no
+text can. `ba(*FAIL)` over 'b' is a partial, and no longer text completes it. Where some longer text
 does complete the match, though, a partial call never answers no match. The GUIDE's "Reading a
 result" has the details.
 
@@ -1344,8 +1344,8 @@ Console.WriteLine(m.Success ? m.Value : "no match");   // xa - upstream: no matc
 
 This port keeps the match at the starting position whenever the search with upstream's rule finds
 nothing that starts inside it, and otherwise returns upstream's match. So the separators stay out:
-`\b(?:dog){e<=2}` over `"dog  dog"` gives `dog` and `dog` in both engines, not `  dog` for the
-second. BESTMATCH keeps this port's earlier rule for now, a leading assertion that holds where the
+`\b(?:dog){e<=2}` over `"dog  dog"` gives `dog` and `dog` in both engines, with no leading spaces on
+the second. BESTMATCH keeps this port's earlier rule for now, a leading assertion that holds where the
 search started and fails one character on. Upstream contradicts itself here, which is why this is a fix rather than a preference:
 `^(?:a){i<=1}` over `"xa"` already gives `xa` upstream, and `\m(?:Y){i}\M` over `" XY"` answers
 two ways according to where the caller started. Upstream issues 563 and 564 have tracked it since
@@ -2079,8 +2079,8 @@ There is no option to restore the upstream answer. Ledger entry 65.
 
 ### A partial search's first-set check does not answer before the anchors it skips
 
-When a pattern's start is not a simple literal, the compiler puts a quick check in front of it:
-can the next character start a match at all? The check skips anchors such as `\A`, `\G` and `$`.
+When a pattern starts with something other than a simple literal, the compiler puts a quick check
+in front of it that asks whether the next character can start a match at all. The check skips anchors such as `\A`, `\G` and `$`.
 At the end of the text in a partial search, upstream lets that check answer "partial" before the
 anchors are asked, so it reports partials that no longer text could complete. Here the check steps
 aside at the edge and the anchors decide.
