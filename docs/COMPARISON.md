@@ -1669,6 +1669,31 @@ Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); /
 A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
 Boost; PCRE2 alone makes the call fail instead.
 
+### A verb inside a lookbehind acts in right-to-left order
+
+A lookbehind such as `(?<=ab)` checks the text just before the current position. This library, like
+upstream, checks it backwards: it matches `b` first, then `a`. PCRE2 and Perl match the same body
+forwards, from a start somewhere to the left. For ordinary items the direction makes no difference
+to the answer. For `(*PRUNE)` and `(*SKIP)` it does, because a verb acts only if backtracking
+reaches it, and which items run before the verb depends on the direction.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Backwards, 'b' fails against 'a' before the verb is reached, so the second alternative of the
+// lookbehind matches. Forwards, 'a' matches, the verb runs, 'x' fails and the attempt ends.
+Console.WriteLine(new FuzzyRegex(@"(?:ab(?<=a(*PRUNE)x|b)|a)").Match("ab").Length); // 2 - PCRE2: no match
+// The mirror image: backwards, 'b' matches, the verb runs and 'x' fails, so the attempt ends.
+Console.WriteLine(new FuzzyRegex(@"(?:ab(?<=x(*PRUNE)b|b)|a)").Match("ab").Success); // False - PCRE2: (0, 2)
+```
+
+On `(?m)(?<=$(*SKIP)|a*)` over 'ab' this library's answer, no match at the start and (2, 2) in a
+search, differs from upstream, PCRE2 and Perl alike. Upstream finds (0, 0) only because its
+`(*SKIP)` makes a multiline `$` true everywhere (ledger entry 53), and PCRE2 and Perl find (0, 0)
+by matching forwards. There is no option to match lookbehind bodies forwards. Verbs inside
+lookbehinds have no common use, and known defect D23 records a design for forward order should a
+real pattern need it.
+
 ### A fuzzy item that matched exactly can still be deleted, and that choice comes before any earlier one
 
 A deletion leaves a pattern character out of the match. Upstream tries that only for a character

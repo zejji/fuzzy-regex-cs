@@ -5514,6 +5514,59 @@ substitution, the insertion, the whole deletion, then upstream's folded substitu
 (`Matcher.GroupCharFirst`). Pinned by the backreference tests in
 `Gaps/Engine/FullFoldFuzzyCharacterEditTests`.
 
+## 53. A reversed `(*SKIP)` makes a multiline `$` true everywhere in the rest of a lookbehind - DRAFT - NOT FILED (port does not copy it; same root as entry 5's second defect)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found 2026-09-28 by the D11 design model's
+semantics check (`docs/plan/2026-09-28-partial-boundary-design.md`, section 8.0), in three grid rows
+such as `(?m)(?<=$(*SKIP)(?>a\b|)|[ab]*)\b` over 'ab'. Traced 2026-09-29 by the D23 design
+(`docs/plan/2026-09-29-verbs-in-lookbehind-design.md`, section 4, on branch
+`design/d23-verb-lookbehind`). The root cause is the second defect in entry 5, reached through a
+lookbehind instead of an overlapped scan. File the two together, or file this one as a second
+reproduction on entry 5's report; it needs no report of its own.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-29 and again 2026-10-09 with the same output
+(positions from `finditer`):
+
+```
+                          over 'ab'           over 'a\nb'
+(?<=$(*SKIP))             [2]                 [3]
+(?m)(?<=$(*SKIP))         [0, 1, 2]           [0, 1, 2, 3]     <- $ is not true at 0 or 2
+(?m)(?<=$(*PRUNE))        [2]                 [1, 3]
+(?m)(?<=(*SKIP)$)         [2]                 [1, 3]
+(?w)(?m)(?<=$(*SKIP))     [2]                 [1, 3]           <- the _U twin, correct
+(?m)(?r)$(*SKIP)          [2, 1, 0]           [3, 2, 1, 0]     <- the same fault without a lookbehind
+```
+
+A `(?m)` `$` should hold only at 2 in 'ab', and only at 1 and 3 in 'a\nb'.
+
+**Why.** A lookbehind body runs right to left, so in `$(*SKIP)` the verb runs before `$`. A
+reversed `RE_OP_SKIP` sets `state->slice_end = state->text_pos` when it runs (`_regex.c:14553`).
+Under `(?m)`, `$` compiles to `END_OF_LINE`, and `try_match_END_OF_LINE` (`:7110`) tests
+`text_pos >= state->slice_end || char == '\n'`. The first half is now true at every position. Every
+sibling predicate, including `END_OF_LINE_U` and the non-multiline `END_OF_STRING_LINE` (`:7129`),
+reads `text_end`, which is why `(?w)` and the flag-free rows are right. `(*PRUNE)` does not move the
+slice, and `(*SKIP)` after `$` runs after the test. The slice is put back when the lookbehind ends
+(`(?<=(*SKIP))ab` over 'xab' is (1, 3)), so the fault is confined to the rest of the body, or to the
+rest of a `(?r)` pattern.
+
+**What it is not.** The first draft of this entry said the multiline flag changed what a verb does.
+It does not. The verb acts as it does in every other row; it is `$` that stops testing anything. The
+(0, 0) that `(?m)(?<=$(*SKIP)|a*)` gives over 'ab' happens to equal PCRE2's answer on the bounded
+spelling `(?<=$(*SKIP)|a{0,3})`, but PCRE2 gets there by running the body left to right. That is a
+separate question, known defect D23, decided 2026-10-09: the port keeps upstream's right-to-left
+order (DIVERGENCES, "A verb inside a lookbehind acts in right-to-left order"). So on this witness the
+port answers `None` to `match` and (2, 2) to `search`, with and without `(?m)`, and differs from
+upstream, PCRE2 10.47 and Perl 5.42 alike: upstream reaches (0, 0) through this fault, the other two
+through their direction.
+
+**This port.** It does not copy the fault. `Matcher.TryMatchEndOfLine` has read `TextEnd` since S35,
+and a `(*SKIP)` moves the slice only when backtracking reaches it (entry 45). Pinned by
+`BacktrackingVerbTests.Multiline_dollar_after_a_skip_reads_the_text_end_and_not_the_moved_slice`
+and `Gaps/Engine/VerbInLookbehindTests` (the w11 rows over 'ab' and 'a\nb').
+
+**Proposed fix upstream:** entry 5's: `try_match_END_OF_LINE` reads `state->text_end`, as its `_U`
+twin already does.
+
 ## 54. A group call inside a lookaround leaves a capture behind when the lookaround's body is thrown away - FIXED HERE (2026-09-29)
 
 **Status:** not filed, per the owner's rule. Known defect D10. Draft report:
