@@ -55,27 +55,6 @@ public sealed class FuzzyRecursionCountsTests
     }
 
     [Test]
-    [Arguments("b", 0, 1, 0)]
-    [Arguments("bb", 0, 1, 0)]
-    [Arguments("zbz", 0, 3, 1)]
-    public void An_optional_item_before_the_recursion_reports_its_substitution(
-        string text,
-        int start,
-        int end,
-        int substituted
-    )
-    {
-        // Before the fix 'b' gave the right answer by the wrong path (the outer section never
-        // closed, which only the Debug build's SUCCESS assert sees); 'bb' gave (0, 2) with one
-        // error for two changed characters, and 'zbz' gave (0, 3) with none.
-        Match m = new FuzzyRegex("(?:z?(?R)?){e<=1}").Match(text);
-
-        (m.Index, m.Index + m.Length).Should().Be((start, end));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        m.FuzzyChanges.Substitutions.Should().Equal(substituted);
-    }
-
-    [Test]
     [Arguments("(?:z(?R)|){e<=1}", 1, new[] { 0 })]
     [Arguments("(?:z(?R)|){e<=2}", 2, new[] { 0, 1 })]
     public void The_outermost_maximum_bounds_every_level_of_the_recursion(string pattern, int end, int[] substituted)
@@ -126,16 +105,6 @@ public sealed class FuzzyRecursionCountsTests
         Match m = new FuzzyRegex("(?:z(?R)|){e<=1}", options).Match("bz");
 
         (m.Index, m.Length).Should().Be((0, 0));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
-    [Test]
-    public void Bestmatch_finds_the_error_free_match_that_the_recursion_hid()
-    {
-        // Before the fix (0, 3) with no errors; 'b' at 1 cannot match 'z' for free.
-        Match m = new FuzzyRegex("(?:z?(?R)?){e<=1}", FuzzyRegexOptions.BestMatch).Match("zbz");
-
-        (m.Index, m.Length).Should().Be((0, 1));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
 

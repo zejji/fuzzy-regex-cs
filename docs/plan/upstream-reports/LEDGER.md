@@ -6150,6 +6150,97 @@ whenever the failure touched the end of the text. Pinned by `Gaps/Engine/Partial
 (the `\b` over '' rows, and `a\Zb` over 'a'), `OpenDefects/OpenDefectTests` and the oracle entry
 `partial-edge-read`.
 
+## 71. A DEFINE group with a no-branch makes the whole pattern fail - DIVERGES HERE (D75, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D75, found by the D4 cycle gate's
+blind review on 2026-10-07. Draft report: `entry-71-define-with-a-no-branch.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08:
+
+```
+search(r'(?(DEFINE)a|b)x', 'bx')   -> None
+search(r'(?(DEFINE)a|b)x', 'x')    -> None
+search(r'(?(DEFINE)a|b)x', 'ax')   -> None
+search(r'(?(DEFINE)|b)x', 'bx')    -> (1, 2)
+search(r'(?(DEFINE)a|)x', 'bx')    -> (1, 2)
+search(r'(?(DEFINE)a)x', 'bx')     -> (1, 2)
+```
+
+**Why the port differs.** A DEFINE group holds definitions that are only called, never matched in
+place, so a no-branch has no use; upstream compiles it and the pattern then matches nothing (or,
+with an empty yes-branch, silently skips the no-branch). PCRE2 10.47 refuses the pattern ("DEFINE
+subpattern contains more than one branch") and so does Perl 5.42 ("(?(DEFINE)....) does not allow
+branches"); .NET and JavaScript have no DEFINE.
+
+**This port.** A DEFINE group whose no-branch is not empty is refused at construction with
+`FuzzyRegexParseException` ("DEFINE group contains more than one branch"), in
+`Conditional.FixGroups`. An empty no-branch is accepted, because upstream matches it as if it were
+absent, and `DEFINE` stays an ordinary name when a group has it. Pinned by
+`Gaps/Engine/BackrefAndConditionalTests.A_define_group_with_a_no_branch_is_refused` and its
+controls.
+
+## 72. A partial search's first-set check answers before the anchors it skips - DIVERGES HERE (D28, D64, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defects D28 (found by D11 chunk 2) and
+D64 (found by the D62 blind review). Draft report: `entry-72-first-set-partial-before-anchors.md`.
+The port's fix landed with D11's fix round 2 (9bd36644); the rows were pinned on 2026-10-08.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08, `search(..., partial=True)`:
+
+```
+search(r'(\A)x', ':')                                 -> P(1, 1)   here None
+search(r'\Gx', ':')                                   -> P(1, 1)   here None
+search(r'(?r)b+$', ' ')                               -> P(0, 0)   here None
+search(r'(?r)(?:x)?ac$', 'a')                         -> P(0, 0)   here None
+search(r'(?r)ac$', 'a')                               -> None      here None
+search(r'(?r)(?<o>(?<i>a|ab)c)(?:(?&o)|c)*$', 'a')    -> None      here None
+search(r'(?r)(?<o>(?<i>a|ab)c)(?:(?:(?:a|ab)c)|c)*$', 'a') -> P(0, 0)   here None
+```
+
+**Why the port differs.** A pattern whose start is not simple gets a zero-width first-set check in
+front (`upstream/regex/_regex_core.py:370-409`). The check skips zero-width items, so at the edge
+of a partial call it runs out of text (`upstream/src/_regex.c:12123`, reversed `:12191-12197`) and
+answers a partial before `\A`, `\G` or a reversed `$` is asked. No continuation completes any of
+the rows above (brute-force judge, `docs/plan/2026-10-03-d64-reversed-call-partial.md` on branch
+`design/d64-reversed-call-partial`). Adding `(?:x)?`, which cannot change which texts match,
+changes the answer, and a group call, which gives the pattern no first set, answers differently
+from its written-out group. PCRE2 10.47 has no such check and answers None on the forward rows.
+
+**This port.** At the edge of a partial call a first-set or branch-precheck node lets the path
+through to the item that reads the same character (`Matcher.ZeroWidthTestDefersAtTheEdge`), which
+runs out in its own place. Pinned by
+`Gaps/Engine/PartialEdgeReadTests.A_first_set_check_at_the_edge_does_not_answer_before_the_anchors_it_skips`,
+`A_group_call_and_its_written_out_group_answer_the_same_partial`, and the oracle entry
+`partial-edge-read`.
+
+## 73. A left-recursive group call compiles and then exhausts memory - DIVERGES HERE (D4, 2026-10-08)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defects D4 and D72, closed by refusing the
+pattern at compile time (owner decision 2026-10-08). Draft report: `entry-73-left-recursion-compiles.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-08:
+
+```
+fullmatch(r'(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$', 'a,b,c')   -> MemoryError
+fullmatch(r'(?P<g1>(?:ab)?(?&g1)?)', 'abab')                             -> MemoryError
+fullmatch(r'(?(DEFINE)(?<list>\w+(?:,(?&list))?))^(?&list)$', 'a,b,c')  -> (0, 5)
+```
+
+PCRE2 10.47 raises "nested recursion at the same subject position" on the first two when matching,
+and Perl 5.42 "Infinite recursion in regex" on the first.
+
+**Why the port differs.** A group that can call itself before reading any text comes back to the
+position it started from, so a backtracking engine never finds the match the grammar describes.
+Main's runtime rule (entry 14) failed such a call only on some paths, and answered 283 of 20,011
+generated rows wrongly; no runtime rule measured got every row right. The pattern's shape decides
+the question before any text is read, so the port refuses it when compiling.
+
+**This port.** `Parsing/LeftRecursion.cs`: a group, read in one direction, calls another when the
+call can be reached from its start through items that can match empty, judged on the exact pattern;
+a cycle raises "group 'list' can call itself without matching any text" at the call. Upstream's
+`test_hg_bugs` #236 and #237 compile such patterns and now expect the refusal. Pinned by
+`Gaps/Parsing/LeftRecursionRefusalTests` and DIVERGENCES ("A group that can call itself before it
+has matched any text is refused when the pattern is compiled").
 ## 74. A partial match leaves a group unset when the repeat inside it stops at a tail that runs out of text - DIVERGES HERE (D67, 2026-10-08)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D67. Draft report:

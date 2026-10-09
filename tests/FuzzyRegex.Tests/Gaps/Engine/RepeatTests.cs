@@ -351,7 +351,9 @@ public sealed class RepeatTests
         List<string> withFuzzyTail = [];
         int repeatOnes = 0;
 
-        foreach (CompileRow row in Corpus.Compiles())
+        foreach (
+            CompileRow row in Corpus.Compiles().Where(static r => !Corpus.RefusedAsLeftRecursive.Contains(r.Pattern))
+        )
         {
             PatternObject pattern = PatternObject.Compile(
                 PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion),
@@ -374,8 +376,9 @@ public sealed class RepeatTests
             }
         }
 
-        // Measured 2026-09-13 over the 1,534 compile-parity patterns.
-        repeatOnes.Should().Be(639, "the corpus is fixed, so a change here means the optimiser moved");
+        // Measured 2026-09-13 over the 1,534 compile-parity patterns: 639. One was in '\0?(?0){e}',
+        // which D4's left-recursion check now refuses (2026-10-08).
+        repeatOnes.Should().Be(638, "the corpus is fixed, so a change here means the optimiser moved");
         withFuzzyTail.Should().BeEmpty();
     }
 

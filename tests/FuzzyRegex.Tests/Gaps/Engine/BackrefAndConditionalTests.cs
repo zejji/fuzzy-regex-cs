@@ -93,6 +93,49 @@ public sealed class BackrefAndConditionalTests
         sameText.Groups["x"].Success.Should().BeFalse();
     }
 
+    /// <summary>
+    /// A DEFINE group with a non-empty no-branch is refused at construction (D75). Upstream
+    /// accepts it and the pattern then never matches: <c>regex.search(r'(?(DEFINE)a|b)x', 'bx')</c>
+    /// is None, as are 'x' and 'ax' (2026-10-08). PCRE2 10.47 refuses it ("DEFINE subpattern
+    /// contains more than one branch") and so does Perl ("(?(DEFINE)....) does not allow
+    /// branches").
+    /// </summary>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 compiles these patterns.
+    [Test]
+    [Arguments(@"(?(DEFINE)a|b)x")]
+    [Arguments(@"(?(DEFINE)|b)x")]
+    [Arguments(@"(?(DEFINE)(?<c>a)|b)(?&c)")]
+    public void A_define_group_with_a_no_branch_is_refused(string pattern)
+    {
+        Action compile = () => _ = new FuzzyRegex(pattern);
+
+        compile.Should().Throw<FuzzyRegexParseException>().WithMessage("DEFINE group contains more than one branch*");
+    }
+
+    /// <summary>
+    /// The controls for D75's refusal. An empty no-branch is accepted, as upstream accepts it and
+    /// matches it the same way (<c>(?(DEFINE)a|)x</c> over 'bx' is (1, 2)); and <c>DEFINE</c> is
+    /// an ordinary group name when the pattern has a group of that name, so its no-branch is an
+    /// ordinary no-branch (upstream: <c>(?&lt;DEFINE&gt;a)?(?(DEFINE)b|c)</c> over 'c' is (0, 1)).
+    /// </summary>
+    [Test]
+    [Arguments(@"(?(DEFINE)a)x", "bx", 1, 2)]
+    [Arguments(@"(?(DEFINE)a|)x", "bx", 1, 2)]
+    [Arguments(@"(?<DEFINE>a)?(?(DEFINE)b|c)", "c", 0, 1)]
+    [Arguments(@"(?<DEFINE>a)?(?(DEFINE)b|c)", "ab", 0, 2)]
+    [Arguments(@"(?(DEFINE)a|b)(?<DEFINE>x)", "bx", 0, 2)]
+    public void A_define_group_keeps_its_meaning_where_it_is_not_refused(
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+    }
+
     [Test]
     public void A_backreference_inside_a_repeat_reads_the_span_the_current_iteration_captured()
     {

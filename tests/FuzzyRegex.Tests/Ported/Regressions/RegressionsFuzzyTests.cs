@@ -475,22 +475,29 @@ public sealed class RegressionsFuzzyTests
     // only that the pattern COMPILES, which the parser has done since S13, so nothing about it was
     // ever waiting on the matcher. Two of the 185 fuzzy-tagged tests are this shape; the other 183
     // still fail and still wait for Phase 5.
+    //
+    // DIVERGES FROM UPSTREAM, deliberately (D4, D72): group 1 calls the pattern, which opens group 1
+    // again, before matching any text, so the pattern is refused when compiled. Upstream compiles
+    // it and runs out of memory matching it. KEPT as the refusal, a known divergence for the parity
+    // board (docs/DIVERGENCES.md).
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#236")]
-    public void A_pattern_with_a_fuzzy_recursive_group_reference_compiles()
+    public void A_pattern_with_a_fuzzy_recursive_group_reference_is_refused_as_left_recursive()
     {
         Action act = static () => _ = Upstream.Compile("((?0)){e}");
-        act.Should().NotThrow();
+        act.Should().Throw<FuzzyRegexParseException>().WithMessage("the pattern can call itself*");
     }
 
     // Hg issue 200: AttributeError in regex.compile with latest regex. Un-skipped by the same probe:
     // compile-only, same reasoning as the test above.
+    //
+    // DIVERGES FROM UPSTREAM, as the test above: the NUL is optional, so the call can come first.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#237")]
-    public void A_pattern_starting_with_a_literal_nul_before_a_fuzzy_recursive_reference_compiles()
+    public void A_pattern_starting_with_a_literal_nul_before_a_fuzzy_recursive_reference_is_refused()
     {
         Action act = static () => _ = Upstream.Compile("\x00?(?0){e}");
-        act.Should().NotThrow();
+        act.Should().Throw<FuzzyRegexParseException>().WithMessage("the pattern can call itself*");
     }
 
     // Hg issue 210: Fuzzy matching and Backreference.

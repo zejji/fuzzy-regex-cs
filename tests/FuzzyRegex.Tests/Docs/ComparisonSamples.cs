@@ -403,15 +403,31 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
+    /// "A group that can call itself before it has matched any text is refused when the pattern is
+    /// compiled".
+    /// </summary>
+    [Test]
+    public void A_group_that_can_call_itself_before_matching_text_is_refused_when_compiled()
+    {
+        Action compile = static () => _ = new FuzzyRegex(@"(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$");
+
+        compile
+            .Should()
+            .Throw<FuzzyRegexParseException>()
+            .WithMessage("group 'list' can call itself without matching any text");
+        FuzzyRegex.IsMatch("a,b,c", @"(?(DEFINE)(?<list>\w+(?:,(?&list))?))^(?&list)$").Should().BeTrue();
+    }
+
+    /// <summary>
     /// "A group call that would re-enter the same group at the same text position fails that
     /// PATH".
     /// </summary>
     [Test]
     public void A_group_call_that_would_reenter_the_same_group_fails_that_path()
     {
-        Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
+        Match m = FuzzyRegex.Match("((a)(b)", @"(?:\((?:[^()]|(?R))*\)){d<=2}");
 
-        (m.Index, m.Length).Should().Be((0, 4));
+        (m.Index, m.Length, m.FuzzyCounts.Deletions).Should().Be((0, 7, 1));
     }
 
     /// <summary>

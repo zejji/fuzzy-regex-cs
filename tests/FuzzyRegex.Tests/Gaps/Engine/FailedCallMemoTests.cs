@@ -162,25 +162,6 @@ public sealed class FailedCallMemoTests
     }
 
     [Test]
-    public void A_call_inside_a_lookaround_keeps_the_memo_off()
-    {
-        // Before D10 a lookaround whose body only called a group kept the call's capture after the
-        // body was thrown away, so skipping a failed call left an entry out: with the memo forced
-        // on, group 1's list here lost one. D10 saves the captures around such a body, and this row
-        // now answers the same with the memo forced on (measured 2026-09-29). The switch stays off
-        // because the called group may hold a fuzzy section (see the fuzzy test below) and a call
-        // in a lookbehind meets open calls the key does not hold; this pins the switch.
-        const string pattern = "(?r)(((?R)?R(?!.(?)(?R))(.))){2<=e<3}";
-
-        FuzzyRegex on = WithMemo(pattern, eager: true);
-        FuzzyRegex off = WithMemo(pattern, eager: false);
-
-        on.PatternObject.UseCallMemo.Should().BeFalse();
-        CaptureLists(on.Match("aa")).Should().Equal(CaptureLists(off.Match("aa")));
-    }
-
-    [Test]
-    [Arguments(@"(?:(?=(a*))|a)(?R)|\1x", "aaay")]
     [Arguments(@"(?:(?=(a))ax|a)(?R)?b", "aab")]
     [Arguments(@"(a)(?:(?!.(a))|.)+?(?1)?b", "aaab")]
     public void A_capture_group_inside_a_lookaround_leaves_the_memo_on(string pattern, string subject)
@@ -280,23 +261,6 @@ public sealed class FailedCallMemoTests
         FuzzyRegex regex = WithMemo("(?:(x)|x)(?2)(?(DEFINE)((?(1)b|c)))", eager);
 
         Match m = regex.Match("xc");
-
-        (m.Index, m.Length).Should().Be((0, 2));
-    }
-
-    [Test]
-    [Arguments(false)]
-    [Arguments(true)]
-    public void The_key_holds_the_text_reached(bool eager)
-    {
-        // match('(?1)|((?2)|aa|(?2)|a)((?1)c)', 'ac')   MemoryError
-        // The re-entry guard lets a nested call of a group at the same position through once the
-        // attempt has reached further than when the open call was made, so a call that failed
-        // before the text reached grew can succeed after it. Without the reached text and the open
-        // calls' reach in the key, the later call is failed and the match is (0, 1).
-        FuzzyRegex regex = WithMemo("(?1)|((?2)|aa|(?2)|a)((?1)c)", eager);
-
-        Match m = regex.Match("ac");
 
         (m.Index, m.Length).Should().Be((0, 2));
     }

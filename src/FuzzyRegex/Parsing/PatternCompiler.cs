@@ -396,6 +396,13 @@ internal static class PatternCompiler
         // Flatten the code into a list of ints.
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
 
+        // NOT UPSTREAM (D4, D72): refuse a group that can call itself before matching any text. Read
+        // before the first set, whose walk reverses a reverse pattern's sequences in place.
+        if (info.CallRefs.Count != 0)
+        {
+            LeftRecursion.Check(info, parsed, pattern);
+        }
+
         // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
         // None in most patterns, so the list is made only for the first.
         List<int>? optionalPassEnds = null;

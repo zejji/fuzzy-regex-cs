@@ -98,6 +98,14 @@ public sealed class CompileParityTests
     {
         ArgumentNullException.ThrowIfNull(row);
 
+        if (Corpus.RefusedAsLeftRecursive.Contains(row.Pattern))
+        {
+            Action refused = () =>
+                PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion);
+            refused.Should().Throw<FuzzyRegexParseException>("row #{0} is left-recursive (D4)", row.Index);
+            return;
+        }
+
         CompiledPattern compiled = RunSeam(() =>
             PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
         );

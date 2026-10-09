@@ -201,6 +201,67 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// D28 and D64's face P: the first-set check in front of a pattern ran out at the edge and
+    /// answered a partial before the anchor or lookaround it skipped was asked. No continuation
+    /// lets any of these match: <c>\A</c> and <c>\G</c> hold only at 0, before the held ':',
+    /// and reversed, <c>$</c> holds only at the held text's right end, which ends in neither 'b'
+    /// nor 'c'. A group call gives a pattern no first set, so the call form of the last pair always
+    /// answered None and the written-out form did not; both now answer as the call does.
+    /// </summary>
+    /// <remarks>
+    /// Fixed by D11's fix round 2 (9bd36644, <c>Matcher.ZeroWidthTestDefersAtTheEdge</c>), which is
+    /// half A of the D64 design (<c>design/d64-reversed-call-partial</c>, section 5); each row is
+    /// red with that deferral turned off (2026-10-08). Expected answers: the design's brute-force
+    /// judge and <c>^x</c>, which has no first set, as the control.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers a partial at the edge on every row but the
+    // control and the call form.
+    [Test]
+    [Arguments(@"(\A)x", ":")]
+    [Arguments(@"(?>\A)x", ":")]
+    [Arguments(@"(?=\A)x", ":")]
+    [Arguments(@"(?:\A){0,1}\Ax", ":")]
+    [Arguments(@"\Gx", ":")]
+    [Arguments(@"^x", ":")]
+    [Arguments(@"(?r)b+$", " ")]
+    [Arguments(@"(?r)(?:x)?ac$", "a")]
+    [Arguments(@"(?r)ac$", "a")]
+    [Arguments(@"(?r)(?<o>(?<i>a|ab)c)(?:(?:(?:a|ab)c)|c)*$", "a")]
+    [Arguments(@"(?r)(?<o>(?<i>a|ab)c)(?:(?&o)|c)*$", "a")]
+    public void A_first_set_check_at_the_edge_does_not_answer_before_the_anchors_it_skips(string pattern, string text)
+    {
+        Partial("search", pattern, text).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// D64's face M: a group call and its written-out group answer the same partial. Each row's
+    /// match can lie wholly in the text to come ('ababa' + '' matches the first pair at (0, 4),
+    /// 'aax' + 'c' the second at (0, 2), 'c' + 'xaa' the third at (2, 4)), which a search reports
+    /// at the edge. The forms used to differ
+    /// because only the form with a first set reached that answer, through the first set's
+    /// run-out; D11's start inside the text to come now reaches it for both.
+    /// </summary>
+    /// <remarks>
+    /// The design's rows (<c>design/d64-reversed-call-partial</c>, sections 2.3 and 2.4), judged
+    /// there over every continuation of up to six characters.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM: regex 2026.9.10 answers None to the written-out form of the first
+    // pair and to the call forms of the other two.
+    [Test]
+    [Arguments(@"(?r)(?&o)(?<o>(?<i>a)b(?=a))", "", 0)]
+    [Arguments(@"(?r)(?:(?:a)b(?=a))(?<o>(?<i>a)b(?=a))", "", 0)]
+    [Arguments(@"(?r)(?<o>(?<i>ab|a)(?!c))(?&o)", "c", 0)]
+    [Arguments(@"(?r)(?<o>(?<i>ab|a)(?!c))(?:(?:ab|a)(?!c))", "c", 0)]
+    [Arguments(@"(?&o)(?<o>(?<!c)a)", "c", 1)]
+    [Arguments(@"(?:(?<!c)a)(?<o>(?<!c)a)", "c", 1)]
+    public void A_group_call_and_its_written_out_group_answer_the_same_partial(string pattern, string text, int edge)
+    {
+        Match m = Partial("search", pattern, text);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, edge, 0));
+    }
+
+    /// <summary>
     /// D73: a reversed <c>$</c> in the attempt from inside the text to come. With no held text after
     /// the edge, the final newline <c>$</c> can stand before is itself in the text to come, so a
     /// position there can pass <c>$</c>: '\n' on the left of '' completes each row at (0, 0) of
