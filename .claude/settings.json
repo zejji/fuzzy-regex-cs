@@ -1,5 +1,13 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          { "type": "command", "command": "pwsh -NoProfile -File tools/ci-status.ps1", "timeout": 20 }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "",
