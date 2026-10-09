@@ -22,6 +22,22 @@ sh "$(dirname "$0")/check-identity.sh" commit || exit 1
 staged_tests=$(git diff --cached --name-only --diff-filter=ACMRD -z -- 'tests/*.cs' | tr '\0' '\n')
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR -z -- '*.cs' | tr '\0' '\n')
+
+# The demo's copy rules (demo/web/tests/copy.test.ts) lint the docs and the public doc comments,
+# but ran only in the Pages build, so main 21ddb6ee went out with five findings the owner then saw
+# as a red Pages run (37960856350, 2026-10-09). About two seconds; any commit that stages prose.
+staged_prose=$(git diff --cached --name-only --diff-filter=ACMR -- '*.md' 'src/*.cs' 'demo/*')
+# A fresh worktree has no node_modules; failing there would block every builder's doc commit, so it
+# warns and the Pages build stays the backstop.
+if [ -n "$staged_prose" ] && [ ! -d demo/web/node_modules ]; then
+  echo "pre-commit: copy rules SKIPPED - no demo/web/node_modules here ('npm ci' in demo/web to run them)."
+elif [ -n "$staged_prose" ]; then
+  (cd demo/web && npx vitest run tests/copy.test.ts) || {
+    echo "pre-commit: copy rules RED - reword the paragraphs listed above."
+    exit 1
+  }
+fi
+
 [ -z "$staged" ] && [ -z "$staged_tests" ] && exit 0
 
 # A file that is staged *and* has further unstaged edits cannot be re-staged safely: the
