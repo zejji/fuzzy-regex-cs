@@ -17882,8 +17882,18 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Skip over any repeated leading characters.
-                    if (startNode.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne)
+                    // Skip over any repeated leading characters. NOT UPSTREAM'S, D77: not after a lazy
+                    // repeat in a pattern with a (*PRUNE) or (*SKIP). The skip is sound only if the
+                    // attempt tried the continuation after every length of the run, and a lazy repeat
+                    // tries the short lengths first, so a verb can cut the attempt before the long
+                    // ones; the starts inside the run were then never covered. PCRE2 bumps along
+                    // after either verb here (pcre2pattern, "Backtracking control"). A greedy repeat
+                    // tries the longest length first, so any start inside the run would reach the
+                    // same verb at the same place and fail the same way; it keeps the skip.
+                    if (
+                        startNode.Op is Opcode.GreedyRepeatOne
+                        || (startNode.Op is Opcode.LazyRepeatOne && !pattern.HasBacktrackingVerb)
+                    )
                     {
                         // How many characters did the repeat actually match?
                         long skipCount = CountOne(
