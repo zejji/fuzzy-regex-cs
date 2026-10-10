@@ -72,6 +72,24 @@ public sealed class PartialRepeatTailTests
     }
 
     /// <summary>
+    /// An error allowance changes nothing: the group is still open on the partial's path ('abx' gives
+    /// (1, 2), 'abcx' gives (1, 3)), so it stays unset with or without one. Upstream sets it to (1, 2)
+    /// for <c>{s&lt;=1}</c> and <c>{d&lt;=0}</c> but not for the other two (ledger entry 79).
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:a(\w*))x")]
+    [Arguments(@"(?:a(\w*)){e<=0}x")]
+    [Arguments(@"(?:a(\w*)){s<=1}x")]
+    [Arguments(@"(?:a(\w*)){d<=0}x")]
+    public void An_unused_error_allowance_leaves_an_open_group_unset(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).Match("ab", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 2));
+        m.Groups[1].Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// The oracle's ablation gives upstream's answer back, and only the group moves: the span and
     /// the partial flag are the same either way. This is what the oracle's divergence entry keys on.
     /// </summary>

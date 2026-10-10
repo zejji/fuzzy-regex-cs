@@ -178,6 +178,17 @@ No continuation of 'c' on the left makes `(?r)ab??` match: an anchored reversed 
 end the text with `a`, or with `ab`, and the text ends with 'c' whatever is added before it. The
 greedy twin and the forward mirror both answer None.
 
+**The string-tail arms have the same guard, and a search shows it too (2026-10-10).** The
+`STRING_REV`, `STRING_IGN_REV` and `STRING_FLD_REV` arms of `LAZY_REPEAT_ONE` (`:16803`, `:16916`,
+`:16973`) guard the same way. `regex.search(r'(?r)b(?:a)*?', 'x', partial=True)` is (0, 1) partial
+and over 'xa' (0, 2), where the greedy twin answers (0, 0); `regex.match(r'(?r)bc(?:a)*?', 'x',
+partial=True)` is (0, 1) partial. A build of `_regex.c` changed only at the `CHARACTER_REV` arm's
+guard (`:16664`), to report the partial only when the repeat can take the step, answers (0, 0)
+for the first two and None for `(?r)ab??` over 'c', and keeps 'a', 'ax' and 'aa' as partials; the
+unchanged `IGN` and string arms keep their wrong answers, which ties the fault to the arm. Found by
+a lead from the 2026-10-09 triage; blind review and patched build on 2026-10-10. Pinned by
+`PartialMatchingTests` (the second-door rows).
+
 **Measured over a grid, three sources against each other.** 48,960 rows (`match` and `fullmatch`,
 forward and reversed, six lazy quantifiers, three items, one- and two-character tails, with and
 without IGNORECASE, every subject of up to three characters from `acxb`), `regex` 2026.9.10:
@@ -4116,6 +4127,14 @@ to the earlier span, as the owner's ranking rule says it should. Row 3752 itself
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
 
+**A further witness, inside a discarded lookahead (2026-10-10).** The scheduled sweeps of
+2026-10-09 (seed rows 20261001/28569 and 959901869/24413) found the same loop with the fuzzy
+section inside a negative lookahead. `findall(r'(?b)(?!(?:x(?:a){s<=1}){s<=1})', 'ab')` did not
+finish in 6 s on `regex` 2026.9.10 (measured 2026-10-10; it passed 1.5 GB in 7 s on 2026-10-09),
+while dropping either fuzzy constraint, or `(?b)`, answers `['', '', '']` at once. This port
+answers `['', '', '']` in about 0.1 s. Added to the draft's reproduction. That it is this entry's
+mechanism (a total left behind by the discarded lookahead body) is the judge's reading, not traced.
+
 **Known defect D59 (complete matrix, 2026-09-30) is this entry under ENHANCEMATCH, traced
 2026-10-01.** `(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' is (1, 6) with two deletions
 upstream and (1, 5) exact here. A `fprintf` in `do_enhanced_fuzzy_match` shows the improvement
@@ -6479,3 +6498,25 @@ ledger 19/20 rows do not move. Rows where upstream also bans the insertion at th
 territory as well. `PatternObject.AnchorsBackslashGAtEveryCandidate` restores upstream's `\G` for
 the oracle alone; the entry `bestmatch-search-anchor-moves-per-candidate` keys on it. Pinned by
 `Gaps/Engine/FuzzyBestMatchTests` and `FuzzyEnhanceMatchTests`.
+
+## 79. A partial match sets a group when the pattern is fuzzy and leaves it unset when it is not - DIVERGES HERE (no defect row, 2026-10-10)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. Draft report: `entry-79-partial-group-set-only-when-fuzzy.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-10, `match(..., 'ab', partial=True)`:
+
+```
+(?:a(\w*))x           -> (0,2) partial, g1 unset    here the same
+(?:a(\w*)){e<=0}x     -> (0,2) partial, g1 unset    here the same
+(?:a(\w*)){s<=1}x     -> (0,2) partial, g1 (1,2)    here g1 unset
+(?:a(\w*)){d<=0}x     -> (0,2) partial, g1 (1,2)    here g1 unset
+```
+
+**Why the port differs.** A partial match reports only what every completion of its path would
+report (D62's rule, entry 74). 'abx' completes the text with group 1 at (1, 2) and 'abcx' with it at
+(1, 3), so the group stays unset, as upstream's own exact and `{e<=0}` spellings answer. An error
+allowance that is never used, even `{d<=0}`, should not change the captures. Upstream's cause is not
+traced yet. Found by the scheduled sweeps (seed 774958321, row 25315, judged-row cause "G10 + ledger
+5"); a blind review judged the unset answer right. Pinned by that judged row in
+`tests/FuzzyRegex.OracleTests/JudgedDivergences.jsonl`.

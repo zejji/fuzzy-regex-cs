@@ -271,6 +271,8 @@ public sealed class PartialMatchingTests
                 (@"([^a-f]{3,}?)_\1", "__AAb"),
                 (@"(?r)ab??", "c"),
                 (@"(?ir)Xa*?", "c"),
+                (@"(?r)b(?:a)*?", "xa"),
+                (@"(?r)bc(?:a)*?", "x"),
                 (@"[^c]??x", "c"),
             }
         )
