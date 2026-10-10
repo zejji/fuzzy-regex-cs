@@ -88,6 +88,18 @@ writing it, and `--sweeps` when the sweep folders are in another checkout. The `
 then accounts for the row only while the question and both answers are exactly the recorded ones,
 so if either engine's answer changes, the row turns red again.
 
+**The report must come from the code being judged.** The port's answer is pinned from the report,
+so a report made by older code pins an answer this port no longer gives. On 2026-10-10 a report
+written before the D78 fix did exactly that, and only `Every_judged_row_is_accounted_for` caught
+it. So `tools/run-oracle.ps1` ends every report with `port build: src <tree>`, git's tree id for
+`src/` at HEAD, with `-dirty` added when `src/` had uncommitted changes. `judge-row.py` compares it
+with the checkout it runs in and refuses a different tree, a `-dirty` stamp, or uncommitted `src/`
+changes in the checkout. A report with no stamp (one written before 2026-10-10) is refused unless
+you pass `--allow-unstamped`, which you do only after checking the row's port answer on the
+current build yourself. The tree id of `src/` is the build's identity because it changes exactly
+when the library's code changes: a docs or test commit moves HEAD and the status stamp but cannot
+change an answer. If the sweep's tree is stale, re-run that seed with `run-oracle.ps1` first.
+
 **Rows upstream crashed on.** This port must never reproduce an upstream crash. Where upstream
 crashes on a pattern, the port either answers correctly (preferred) or refuses the pattern at
 compile time. The sweep still puts a crashed row to this port, and its `FAULT` block shows the

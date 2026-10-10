@@ -293,6 +293,11 @@
     after a single run-oracle.ps1 invocation has finished, never mid-run, so the fixed name racing
     between two *separate* run-oracle.ps1 processes is not the failure this fixes.
 
+    The report ends with a `port build: src <tree>` line: git's tree id for src/ at HEAD, the
+    library the consumer built, with `-dirty` appended when src/ had uncommitted changes.
+    tools/judge-row.py refuses to pin a port answer from a report whose tree is not the current
+    one, because the port may answer that row differently now.
+
 .EXAMPLE
     tools/run-oracle.ps1
     tools/run-oracle.ps1 -Count 2000
@@ -422,6 +427,11 @@ foreach ($seed in $runs) {
     # Deleted first, so a consumer that fails before it writes one - a malformed wave, a build error -
     # cannot leave the previous run's report on screen as if it described this one.
     if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+    # The library the consumer is about to build, stamped on the report below for
+    # tools/judge-row.py (see .NOTES). Taken before the build, so an edit made during the run
+    # cannot be stamped as if this run had tested it.
+    $srcTree = (git -C $repoRoot rev-parse 'HEAD:src') -join ''
+    $portBuild = if (git -C $repoRoot status --porcelain -- src) { "$srcTree-dirty" } else { $srcTree }
     # A non-zero exit means a row diverged, or the harness's own tests failed. Either way the report
     # below is what says which, so the exit code is captured rather than thrown on.
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
@@ -475,6 +485,7 @@ foreach ($seed in $runs) {
 
     Write-Host ''
     if (Test-Path -LiteralPath $reportPath) {
+        Add-Content -LiteralPath $reportPath -Value "`nport build: src $portBuild"
         Get-Content -LiteralPath $reportPath | Write-Host
     }
     else {

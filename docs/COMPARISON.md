@@ -1711,6 +1711,21 @@ Console.WriteLine(string.Join(" ", spans)); // (0, 1) (1, 1) (2, 2) (3, 3) (4, 4
 Console.WriteLine(new FuzzyRegex("(?b)(?:ab){d<=2}").Replace("xyz", "<>")); // <>x<>y<>z<> - upstream: <>xy<>z
 ```
 
+### Under BESTMATCH and ENHANCEMATCH, `\G` holds only where the search began
+
+`\G` matches where the search began. To find the best fit, `(?b)` and `(?e)` re-run the pattern
+from several starts, and upstream moves `\G` to the start of each re-run. So a search that began
+at 0 can return a match that needs `\G` at 1. In this library `\G` stays where the search began,
+whichever start the flag is trying.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The search begins at 0, so the match must start there: it opens with the 'x' inserted.
+Match m = new FuzzyRegex(@"(?b)\G(?:abc){e<=2}").Match("xabc");
+Console.WriteLine($"({m.Index}, {m.Index + m.Length}) {m.FuzzyCounts.Insertions}"); // (0, 4) 1 - upstream: (1, 4) 0
+```
+
 ### A verb inside a lookbehind acts in right-to-left order
 
 A lookbehind such as `(?<=ab)` checks the text just before the current position. This library, like

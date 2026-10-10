@@ -303,6 +303,14 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>search_anchor</c>: where this matching operation was asked to start.</summary>
     internal int SearchAnchor;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D79: where this matching operation began, which is what <c>\G</c> reads. It is
+    /// upstream's <c>search_anchor</c> as the operation's FIRST <c>init_match</c> sets it
+    /// (<c>_regex.c:3410</c>); the BESTMATCH and ENHANCEMATCH re-runs move <see cref="SearchAnchor"/>
+    /// to each candidate's start, and the insertion rule keeps reading that.
+    /// </summary>
+    internal int OperationStart;
+
     /// <summary>Upstream <c>match_pos</c>: where the match being attempted starts.</summary>
     internal int MatchPos;
 
@@ -603,11 +611,11 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     /// <remarks>
     /// One set per pass: <see cref="InitMatch"/> empties it. A pass is one <c>basic_match</c>, with
-    /// one <see cref="SearchAnchor"/> and one search flag, and both are read by what a call can do
-    /// (<c>\G</c> and the rule against an insertion where a search began) but neither is in the
-    /// key. A set kept across the best-match walk's passes answered
-    /// <c>(?b)(?:.??(?1)|z)(?:q){e&lt;=1}(?(DEFINE)(\Ga))</c> over <c>zaq</c> with (0, 2) and a
-    /// substitution, where the right answer is (1, 3) with none.
+    /// one <see cref="SearchAnchor"/>, one search flag and one error limit, all read by what a call
+    /// can do (the rule against an insertion where a search began, and the fuzzy limits) but none
+    /// in the key. A set kept across the best-match walk's passes answered
+    /// <c>(?b)(?1)(?(DEFINE)((?:ab){e&lt;=1}))</c> over <c>zb</c> with no match, where the right
+    /// answer is (0, 2) with a substitution.
     /// </remarks>
     internal HashSet<long[]>? FailedCalls;
 
@@ -1288,6 +1296,7 @@ internal sealed class MatchState : IDisposable
         ReachedLow = int.MaxValue;
         ReachedHigh = int.MinValue;
         SearchAnchor = 0;
+        OperationStart = 0;
         MatchPos = 0;
         BestMatchPos = 0;
         BestTextPos = 0;

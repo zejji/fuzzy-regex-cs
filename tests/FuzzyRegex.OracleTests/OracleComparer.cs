@@ -1193,6 +1193,31 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with upstream's <c>\G</c>, which holds at every BESTMATCH
+    /// or ENHANCEMATCH candidate run's start.
+    /// </summary>
+    /// <remarks>
+    /// D79 made <c>\G</c> read where the matching operation began. Setting
+    /// <c>PatternObject.AnchorsBackslashGAtEveryCandidate</c> makes it read the search anchor again,
+    /// which each run's <c>init_match</c> moves to that run's start (<c>_regex.c:3410</c>). The
+    /// <c>bestmatch-search-anchor-moves-per-candidate</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's <c>\G</c>, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamSearchAnchor(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.AnchorsBackslashGAtEveryCandidate = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with upstream's verb scope: a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> fails only the innermost atomic group, possessive repeat or lookaround it is in.
     /// </summary>

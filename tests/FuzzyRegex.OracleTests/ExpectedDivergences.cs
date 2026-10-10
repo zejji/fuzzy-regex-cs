@@ -3525,6 +3525,19 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The four rows of <c>bestmatch-search-anchor-moves-per-candidate</c>, recorded 2026-10-10 by
+    /// <c>python tools/record-oracle.py --rows</c>: a BESTMATCH search, a reversed one, an ENHANCEMATCH
+    /// lookbehind and a BESTMATCH scan. Upstream's own anchored match, or its ^ twin, gives this
+    /// port's answer on each.
+    /// </summary>
+    private const string _searchAnchorRows = """
+        {"generator": "rows", "pattern": "(?b)\\G(?:abc){e<=2}", "flags": 0, "namedLists": {}, "subject": "xabc", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [1], "deletions": []}}}
+        {"generator": "rows", "pattern": "(?br)(?:abc){e<=2}\\G", "flags": 0, "namedLists": {}, "subject": "abcx", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?e)(?<=\\G.)(?:bcd|bc){e<=1}", "flags": 0, "namedLists": {}, "subject": "abcx", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?b)\\G(?:abc){e<=2}", "flags": 0, "namedLists": {}, "subject": "abcxabc", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 3, "captures": [[4, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [4, 7]}]}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [4], "deletions": []}, "codepointSpan": [3, 7]}]}}
+        """;
+
+    /// <summary>
     /// The three rows of <c>lazy-start-skip-passes-a-verb-cut-run</c>, recorded 2026-10-10 by
     /// <c>python tools/record-oracle.py --rows</c>: a (*PRUNE), a (*SKIP) and a reversed search. PCRE2
     /// 10.47 gives this port's answer to the two forward rows, and upstream gives it to all three when
@@ -6566,6 +6579,35 @@ internal static class ExpectedDivergences
             Example: _bestmatchAdvanceRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamBestMatchAdvance(row))
+        ),
+        new(
+            Id: "bestmatch-search-anchor-moves-per-candidate",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - D79, ledger entry 78, fixed "
+                + "2026-10-10 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`. \\G means where the matching operation began. "
+                + "Upstream's \\G reads `search_anchor` (`_regex.c:7288`), `init_match` sets it "
+                + "(`:3410`), and `do_best_fuzzy_match` and `do_enhanced_fuzzy_match` call `init_match` "
+                + "for every candidate re-run from that run's own start, so \\G holds at each "
+                + "candidate's start and a search that began at 0 returns a match that starts later "
+                + "and needs \\G there. The insertion rule, which reads the same field, keeps each "
+                + "candidate's start in this port (D61, ledger 19/20).\n"
+                + "THE ROWS, measured 2026-10-10 on upstream 2026.9.10: search (?b)\\G(?:abc){e<=2} over "
+                + "'xabc' is (1,4) upstream where its own match is (0,4) with one insertion; "
+                + "(?br)(?:abc){e<=2}\\G over 'abcx' is (0,3) where its (?br) match is (0,4); "
+                + "(?e)(?<=\\G.)(?:bcd|bc){e<=1} over 'abcx' is (1,4) with a substitution where the ^ "
+                + "twin is (1,3) exact; finditer (?b)\\G(?:abc){e<=2} over 'abcxabc' gives (4,7) as its "
+                + "second match although the second search began at 3.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamSearchAnchor`, which sets "
+                + "`PatternObject.AnchorsBackslashGAtEveryCandidate` so \\G reads each run's start as "
+                + "upstream's does, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. A row this port gets wrong for any other reason "
+                + "still diverges with upstream's \\G and is reported.",
+            PinnedBy: "FuzzyBestMatchTests.A_bestmatch_search_holds_backslash_G_only_where_the_search_began "
+                + "and FuzzyEnhanceMatchTests.An_enhancematch_refinement_holds_backslash_G_only_where_the_search_began",
+            Example: _searchAnchorRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSearchAnchor(row))
         ),
         new(
             Id: "posix-fuzzy-contradicts-its-own-flagless-answer",

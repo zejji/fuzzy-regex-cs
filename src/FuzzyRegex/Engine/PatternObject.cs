@@ -745,6 +745,14 @@ internal sealed class PatternObject
     internal bool BansAnEmptyMatchAtEveryCandidate;
 
     /// <summary>
+    /// Oracle-only: <c>\G</c> holds at each BESTMATCH or ENHANCEMATCH candidate run's start, as
+    /// upstream's does (it reads <c>search_anchor</c>, which every run's <c>init_match</c> moves),
+    /// instead of only where the matching operation began (D79). Set only by <c>OracleComparer</c>'s
+    /// ablation; never by the library.
+    /// </summary>
+    internal bool AnchorsBackslashGAtEveryCandidate;
+
+    /// <summary>
     /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
     /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 61). Set only by
     /// <c>OracleComparer</c>'s ablation; never by the library. See

@@ -3786,12 +3786,36 @@ internal static class Matcher
                 Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, node, textPos),
                 Opcode.EndOfWord => TryMatchEndOfWord(state, node, textPos),
                 Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, node, textPos),
-                Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
+                Opcode.SearchAnchor => MatchStatus.From(textPos == BackslashGPosition(state)),
                 Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
                 Opcode.StartOfLineU => TryMatchStartOfLineU(state, node, textPos),
                 Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
                 _ => TryMatchStartOfString(state, textPos),
             };
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D79: where <c>\G</c> holds, which is where the matching operation began
+    /// (<see cref="MatchState.OperationStart"/>). Upstream's <c>\G</c> reads <c>search_anchor</c>
+    /// (<c>_regex.c:7288</c>), and the BESTMATCH and ENHANCEMATCH re-runs move that to each
+    /// candidate's start, so <c>(?b)\G(?:abc){e&lt;=2}</c> over 'xabc' answered (1, 4).
+    /// <see cref="PatternObject.AnchorsBackslashGAtEveryCandidate"/> restores that for the oracle.
+    /// The insertion rule (<see cref="AnchorIsPinned"/> and the <c>PermitInsertion</c> lines) keeps
+    /// the candidate's start (D61, ledger 19/20).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The position <c>\G</c> holds at.</returns>
+    private static int BackslashGPosition(MatchState state)
+    {
+        // Only the two flagged walks re-run 'InitMatch' from a later start; every other strategy
+        // inits once, from where the operation began.
+        Debug.Assert(
+            state.SearchAnchor == state.OperationStart
+                || (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0,
+            "D79: only BESTMATCH and ENHANCEMATCH move the search anchor off the operation start"
+        );
+
+        return state.Pattern.AnchorsBackslashGAtEveryCandidate ? state.SearchAnchor : state.OperationStart;
+    }
 
     /// <summary>
     /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
@@ -12065,13 +12089,15 @@ internal static class Matcher
                     break;
 
                 case Opcode.SearchAnchor:
-                    // '\G' can only hold where the search began (:8874-8884).
-                    if (state.Reverse ? startPos < state.SearchAnchor : startPos > state.SearchAnchor)
+                    // '\G' can only hold where the search began (:8874-8884). NOT UPSTREAM'S, D79:
+                    // where the operation began, not the current candidate run.
+                    int gPosition = BackslashGPosition(state);
+                    if (state.Reverse ? startPos < gPosition : startPos > gPosition)
                     {
                         return MatchStatus.Failure;
                     }
 
-                    startPos = state.SearchAnchor;
+                    startPos = gPosition;
                     break;
 
                 case Opcode.String:
@@ -20070,6 +20096,12 @@ internal static class Matcher
     private static int DoMatch2(MatchState state, bool search)
     {
         PatternObject pattern = state.Pattern;
+
+        // NOT UPSTREAM'S, D79: where this operation began, for '\G'. Every caller enters here with
+        // 'TextPos' at the start the operation was asked about: the scan's resume position, each of
+        // rule H''s two runs, the partial pass, and the edge for 'MatchFromInsideTheTextToCome'. The
+        // first 'InitMatch' below sets 'SearchAnchor' to the same value.
+        state.OperationStart = state.TextPos;
 
         if (!pattern.IsFuzzy)
         {
