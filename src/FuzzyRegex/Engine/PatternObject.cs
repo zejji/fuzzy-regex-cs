@@ -737,6 +737,14 @@ internal sealed class PatternObject
     internal bool SkipsALazyRunDespiteAVerb;
 
     /// <summary>
+    /// Oracle-only: a BESTMATCH or ENHANCEMATCH scan step bans an empty match at every candidate run's
+    /// start after an empty match, as upstream's <c>do_best_fuzzy_match</c> and
+    /// <c>do_enhanced_fuzzy_match</c> do, instead of only at the resume position (D78). Set only by
+    /// <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool BansAnEmptyMatchAtEveryCandidate;
+
+    /// <summary>
     /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
     /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 61). Set only by
     /// <c>OracleComparer</c>'s ablation; never by the library. See

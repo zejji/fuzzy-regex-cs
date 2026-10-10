@@ -2499,7 +2499,9 @@ internal static class ExpectedDivergences
     /// and once without it, on a template that expands to nothing either way, so the two answers
     /// carry the same text and only the count says what happened. POSIX chooses leftmost-longest
     /// among the matches the ordinary engine can make; it cannot produce one the flagless engine
-    /// cannot. Both measured 2026-09-15 by the same probe, which carries both rows.
+    /// cannot. Both measured 2026-09-15 by the same probe, which carries both rows. <b>Row 24916
+    /// left this entry on 2026-10-10:</b> the flagless engine does make the second match, and the
+    /// POSIX-free <c>(?b)</c> count of one was D78 (see <see cref="_posixOvercostOurs"/>).
     /// </para>
     /// <para>
     /// <b>S52 sitting 17 added four more, rows 10, 12, 18 and 35 of
@@ -2531,7 +2533,6 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?e)(?r)(?p)(?:[^\\d][a\\d]\\p{L}){s<=1,i<=1,d<=1}(\\p{Lu})+\\b", "flags": 8, "namedLists": {}, "subject": " ﬀS", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}]}}
         {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?:\\p{Ll}+.([a]+)){s<=1:\\W}(?:[a](?P<g2>[\\w\\s]*)){e<=1}$", "flags": 65536, "namedLists": {}, "subject": "ıı\rAAﬁ\r\n", "operation": "subf", "template": "{g2}{g2}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "AAﬁ\rAAﬁ\r\r\n", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b(?P<g1>[[:alpha:]]+?)\\L<w1>{s<=1,i<=1,d<=1:\\d}(?<!(?:[a\\d](?P<g2>[\\p{L}\\p{N}]+?)😀){e<=2,i<=1})", "flags": 65544, "namedLists": {"w1": ["😀A", "😀𝔘", "😀𝔘A"]}, "subject": "a😀𐐨😀𝔘\r\nAa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 2]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [0, 2]}]}}
-        {"generator": "interactions", "pattern": "(?b)(?:([a]*)[a]*){s<=1}\\g<1>\\K$", "flags": 81930, "namedLists": {}, "subject": "\rA\n", "operation": "sub", "template": "\\1", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "posixFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)^(?:(?P<g1>[a]??)[a-f]*){e<=1}\\L<w1>{s<=1,i<=1,d<=1:[^a-z]}", "flags": 82058, "namedLists": {"w1": ["AA", "A_", "ß𐐀ß", "ﬃßß"]}, "subject": "AAaA_A", "operation": "subf", "template": "[{{", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "[{", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "[{A", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?r)(?p)(\\p{L})(?:[abz]*(?P<g2>[^\\d])A){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "𐐨𐐨AAaa", "operation": "sub", "template": "\\1-", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "𐐨𐐨-", "count": 1}}
         {"generator": "interactions", "pattern": "(?b)(?p)^(?:[A-Z][^a-f](\\p{ASCII}{0,})){e<=2}(?>(?:[a\\d]*?(\\s)(\\p{ASCII})){s<=1,i<=1,d<=1})$", "flags": 0, "namedLists": {}, "subject": "aa𝔘𝔘😀", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [4, 1], "deletions": []}}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}}
@@ -2582,7 +2583,12 @@ internal static class ExpectedDivergences
         "matches 2 | match 0:(3,6)[(3,6)] 1:(3,2)[(3,2)] 2:unset last=1/g1 "
             + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:unset last=1/g1 "
             + "fuzzy=(0,0,1)[changes unavailable upstream]",
-        "sub 1 '\\u000dA\\u000a'",
+        // ROW 5 LEFT THIS ENTRY ON 2026-10-10 (D78) and is no longer listed; the row numbers in
+        // these comments still count it. It was row 24916, `(?b)(?:([a]*)[a]*){s<=1}\g<1>\K$`
+        // over '\rA\n', judged "POSIX invents a match" because upstream's subn count=2 is 2 with
+        // POSIX and 1 without. The 1 was D78: upstream 2026.9.10 without POSIX gives (2,2), (3,3)
+        // and subn 2 from plain finditer and from the (?b) overlapped scan, and only the
+        // non-overlapped (?b) scan skips (3,3). With D78 fixed this port answers upstream's 2.
         // S52 sitting 17's four, sweep rows 10, 12, 18 and 35 in that order.
         "sub 1 '[{A'",
         "sub 1 '\\ud801\\udc28\\ud801\\udc28-'",
@@ -3504,6 +3510,18 @@ internal static class ExpectedDivergences
     private const string _skipTimingRows = """
         {"generator": "rows", "pattern": "aa(*SKIP)x(*PRUNE)y|a", "flags": 0, "namedLists": {}, "subject": "aaxz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?>aa(*SKIP))x", "flags": 0, "namedLists": {}, "subject": "aaax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "atomicFreeOutcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
+    /// The four rows of <c>bestmatch-skips-after-an-empty-match</c>, recorded 2026-10-10 by
+    /// <c>python tools/record-oracle.py --rows</c>: a forward, a split, a reversed and an ENHANCEMATCH
+    /// scan. Upstream's own plain and overlapped scans give this port's starts on each.
+    /// </summary>
+    private const string _bestmatchAdvanceRows = """
+        {"generator": "rows", "pattern": "(?b)(?:\\ ){d<=1}", "flags": 0, "namedLists": {}, "subject": " xyz", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [1, 1]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}, "codepointSpan": [3, 3]}]}, "leakFreeFuzzy": [null, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}}], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [1, 1]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [3, 3]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}, "codepointSpan": [4, 4]}]}}
+        {"generator": "rows", "pattern": "(?b)(?:ab){d<=2}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "xy", "z"]}, "bestmatchFreeOutcome": {"kind": "split", "parts": ["", "x", "y", "z", ""]}}
+        {"generator": "rows", "pattern": "(?br)(?:\\ ){d<=1}", "flags": 0, "namedLists": {}, "subject": "xyz ", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 4]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [3, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}, "codepointSpan": [1, 1]}]}, "leakFreeFuzzy": [null, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:abc|d){d<=3}", "flags": 0, "namedLists": {}, "subject": "xy", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}, "codepointSpan": [0, 0]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2, 3]}, "codepointSpan": [1, 1]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3, 4]}, "codepointSpan": [2, 2]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, {"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}]}
         """;
 
     /// <summary>
@@ -6520,6 +6538,36 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
+            Id: "bestmatch-skips-after-an-empty-match",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - D78, ledger entry 77, fixed "
+                + "2026-10-10 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`. After an empty match a non-overlapped scan "
+                + "must not return a second empty match at the same position, and upstream checks that "
+                + "against the search anchor (`_regex.c:15164`). `do_best_fuzzy_match` and "
+                + "`do_enhanced_fuzzy_match` re-run candidates from later starts, each run's "
+                + "`init_match` moves the anchor to its own start, and `must_advance` is kept, so the "
+                + "rule becomes \"no empty match at ANY candidate's start\": a BESTMATCH scan skips "
+                + "positions and an ENHANCEMATCH scan loses the better fit at a refined start. The "
+                + "flags rank fits; they do not remove matches, and upstream's own plain and "
+                + "overlapped scans give every position.\n"
+                + "THE ROWS, measured 2026-10-10 on upstream 2026.9.10: finditer (?b)(?:\\ ){d<=1} "
+                + "over ' xyz' is (0,1), (1,1), (3,3) upstream and (0,1), (1,1), (2,2), (3,3), (4,4) "
+                + "plain and overlapped; split (?b)(?:ab){d<=2} over 'xyz' is ['', 'xy', 'z'] "
+                + "upstream and ['', 'x', 'y', 'z', ''] plain; finditer (?e)(?:abc|d){d<=3} over 'xy' "
+                + "gives (1,1) three deletions upstream where its own overlapped scan gives one.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamBestMatchAdvance`, which sets "
+                + "`PatternObject.BansAnEmptyMatchAtEveryCandidate` so every candidate run is banned "
+                + "as upstream bans it, reproduces upstream's recorded answer exactly, AND this port's "
+                + "live answer is the one being judged. A row this port gets wrong for any other "
+                + "reason still diverges with upstream's ban and is reported.",
+            PinnedBy: "FuzzyBestMatchTests.A_bestmatch_scan_finds_an_empty_match_at_every_position_after_an_empty_match "
+                + "and FuzzyEnhanceMatchTests.An_enhancematch_scan_improves_the_fit_at_the_resume_position_after_an_empty_match",
+            Example: _bestmatchAdvanceRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamBestMatchAdvance(row))
+        ),
+        new(
             Id: "posix-fuzzy-contradicts-its-own-flagless-answer",
             Reason: "Upstream bug, and the inherited half of what S48b fixed on this side. POSIX is "
                 + "a CHOOSING flag - leftmost-longest among the matches the ordinary engine can "
@@ -6553,7 +6601,10 @@ internal static class ExpectedDivergences
                 + "a template that expands to nothing either way, so both answers carry the text "
                 + "unchanged and only the count says what happened. A flag that chooses "
                 + "leftmost-longest among the matches the ordinary engine can make cannot produce one "
-                + "the flagless engine cannot, so this breaks the same contract by a third route.\n"
+                + "the flagless engine cannot, so this breaks the same contract by a third route. "
+                + "WITHDRAWN 2026-10-10: row 24916 left this entry. Upstream's plain finditer and its "
+                + "(?b) overlapped scan both make the second match without POSIX; the POSIX-free (?b) "
+                + "count of one was D78 (`bestmatch-skips-after-an-empty-match`), not POSIX.\n"
                 + "S52 SITTING 17 ADDED FOUR MORE, rows 10, 12, 18 and 35 of "
                 + "tools/probes/sweep-divergence-rows.jsonl, and on two of them POSIX does not move "
                 + "the answer - IT DESTROYS IT. Rows 18 and 35 answer `None` as drawn and give the "
@@ -6639,7 +6690,6 @@ internal static class ExpectedDivergences
                 + "none without the `(?p)`.",
             PinnedBy: "FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_"
                 + "costs_without_posix, .A_posix_fuzzy_match_spends_what_the_flagless_engine_spends, "
-                + ".Posix_does_not_add_a_match_the_flagless_engine_cannot_make, "
                 + ".Posix_and_bestmatch_together_keep_a_match_that_either_flag_alone_keeps and "
                 + ".Posix_does_not_lengthen_a_group_inside_the_same_overall_match",
             Example: _posixOvercostRows + "\n" + _posixOvercostPredicateRows,

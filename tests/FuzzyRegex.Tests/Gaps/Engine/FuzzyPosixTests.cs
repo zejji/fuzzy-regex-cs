@@ -242,29 +242,27 @@ public sealed class FuzzyPosixTests
     }
 
     /// <summary>
-    /// POSIX does not create a match the flagless engine cannot make, so a bounded substitution
-    /// replaces once here and not twice.
+    /// A POSIX BESTMATCH scan keeps the empty match at the end that the flagless engine makes, so a
+    /// bounded substitution replaces twice.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Row 24916 of the seed-7 2000-row wave of commit <c>407c0cb</c> (2026-09-15), and the third
-    /// shape the entry <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> covers. It is the one
-    /// where neither the cost nor the span moves. Upstream's <c>subn</c> with <c>count=2</c> reports
-    /// <b>two</b> replacements under POSIX and <b>one</b> without it, and because the template
-    /// <c>\1</c> expands to the empty group either way the two answers carry the same text - the
-    /// count is the only field that says what happened, which is why no predicate over the rendered
-    /// answer could have found this and the entry is keyed on rows.
+    /// Row 24916 of the seed-7 2000-row wave of commit <c>407c0cb</c> (2026-09-15). Upstream's
+    /// <c>subn</c> with <c>count=2</c> reports <b>two</b> replacements under POSIX and <b>one</b>
+    /// without it, and this test used to pin the one, read as "POSIX invents a match" (ledger entry
+    /// 23). <b>That reading was wrong, and D78 is why.</b> Re-measured 2026-10-10 on regex
+    /// 2026.9.10, with the same flags less POSIX: plain <c>finditer</c> (no <c>(?b)</c>) gives
+    /// (2, 2), (3, 3) and <c>subn</c> 2, and the <c>(?b)</c> overlapped scan gives (2, 2), (3, 3);
+    /// only the non-overlapped <c>(?b)</c> scan gives (2, 2) alone. The missing (3, 3) is the
+    /// BESTMATCH scan skipping a position after an empty match, which is D78, not POSIX.
     /// </para>
     /// <para>
-    /// POSIX is documented as leftmost-longest CHOOSING among the matches the ordinary engine can
-    /// make, so an extra zero-width match that only appears when the flag is set breaks the contract
-    /// as plainly as charging a span more errors does. Measured 2026-09-15 on regex 2026.9.10,
-    /// <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>; this port answers upstream's own
-    /// POSIX-free count.
+    /// The template <c>\1</c> expands to the empty group either way, so the text cannot tell the
+    /// answers apart and the count is the only field that does.
     /// </para>
     /// </remarks>
     [Test]
-    public void Posix_does_not_add_a_match_the_flagless_engine_cannot_make()
+    public void A_posix_bestmatch_scan_keeps_the_empty_match_the_flagless_engine_makes_at_the_end()
     {
         // The flag bits the wave drew it at, 0x1400A: POSIX, FULLCASE, MULTILINE, IGNORECASE. The
         // recorder resolves a version-less pattern under upstream's own default, so Version0 here.
@@ -279,8 +277,19 @@ public sealed class FuzzyPosixTests
 
         string replaced = pattern.Replace("\rA\n", "\\1", 2, out int replacements);
 
-        replacements.Should().Be(1);
+        replacements.Should().Be(2);
         replaced.Should().Be("\rA\n");
+
+        // And without POSIX, as upstream's own plain and overlapped scans answer: both matches.
+        FuzzyRegex posixFree = new(
+            @"(?b)(?:([a]*)[a]*){s<=1}\g<1>\K$",
+            FuzzyRegexOptions.FullCase
+                | FuzzyRegexOptions.Multiline
+                | FuzzyRegexOptions.IgnoreCase
+                | FuzzyRegexOptions.Version0
+        );
+
+        posixFree.Matches("\rA\n").Select(static m => m.Index).Should().Equal(2, 3);
     }
 
     /// <summary>
