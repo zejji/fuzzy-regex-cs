@@ -329,4 +329,31 @@ public sealed class FuzzyEnhanceMatchTests
             .Should()
             .Equal("(2,2) 0,0,1 d:2", "(1,1) 0,0,1 d:1", "(0,0) 0,0,1 d:0");
     }
+
+    [Test]
+    public void An_enhancematch_refinement_holds_backslash_G_only_where_the_search_began()
+    {
+        // D79, the ENHANCEMATCH sibling: each refinement re-run calls init_match from its own start,
+        // which moved \G there. Upstream (?e), regex 2026.9.10 on 2026-10-10: (1, 4) with a
+        // substitution; the ^ twin (?<=^.) gives (1, 3) exact.
+        Match forward = new FuzzyRegex(@"(?e)(?<=\G.)(?:bcd|bc){e<=1}").Match("abcx");
+        (forward.Index, forward.Index + forward.Length).Should().Be((1, 3));
+        forward.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // Upstream (?er): (0, 3) with a substitution; the $ twin (?=.$) gives (1, 3) exact.
+        Match reversed = new FuzzyRegex(@"(?er)(?:dcb|cb){e<=1}(?=.\G)").Match("xcba");
+        (reversed.Index, reversed.Index + reversed.Length).Should().Be((1, 3));
+        reversed.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void An_enhancematch_refinement_keeps_backslash_G_at_the_search_start()
+    {
+        // The D79 control, green before and after: the refinement from the search start itself
+        // still sees \G hold there. Upstream (?e): (0, 4) with one deletion.
+        Match m = new FuzzyRegex(@"(?e)\G(?:abc|xabcd){e<=2}").Match("xabc");
+
+        (m.Index, m.Index + m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+    }
 }

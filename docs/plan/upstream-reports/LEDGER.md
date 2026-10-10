@@ -6445,3 +6445,37 @@ question. `PatternObject.BansAnEmptyMatchAtEveryCandidate` restores upstream's b
 alone; the entry `bestmatch-skips-after-an-empty-match` keys on it. Pinned by
 `Gaps/Engine/FuzzyBestMatchTests` and `FuzzyEnhanceMatchTests`. `\G` under BESTMATCH, which reads
 the same anchor, is D79 and stays open.
+
+## 78. Under BESTMATCH and ENHANCEMATCH, `\G` holds at every candidate's start - DIVERGES HERE (D79, 2026-10-10)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D79. Draft report:
+`entry-78-backslash-g-moves-with-bestmatch-candidates.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-10:
+
+```
+search(r'(?b)\G(?:abc){e<=2}', 'xabc')            -> (1,4) exact      here (0,4) i:1, upstream's own match
+search(r'(?b)\G(?:abc){e<=2}', 'zxabc', pos=1)    -> (2,5) exact      here (1,5) i:1
+finditer(r'(?b)\G(?:abc){e<=2}', 'abcxabc')       -> (0,3), (4,7)     here (0,3), (3,7) i:1
+search(r'(?br)(?:abc){e<=2}\G', 'abcx')           -> (0,3) exact      here (0,4) i:1
+search(r'(?b)(?<=\G.)(?:bcd|bc){e<=1}', 'abcx')   -> (2,3) d:1        here (1,3) exact, the ^ twin
+search(r'(?e)(?<=\G.)(?:bcd|bc){e<=1}', 'abcx')   -> (1,4) s:1        here (1,3) exact, the ^ twin
+search(r'(?er)(?:dcb|cb){e<=1}(?=.\G)', 'xcba')   -> (0,3) s:1        here (1,3) exact, the $ twin
+```
+
+**Why the port differs.** `\G` tests `search_anchor` (`upstream/src/_regex.c:7288`), which
+`init_match` sets (`:3410`). `do_best_fuzzy_match` and `do_enhanced_fuzzy_match` call `init_match`
+for every candidate re-run from that run's own start, so `\G` holds at each candidate's start and a
+search returns a match that starts after the position it began from and needs `\G` there. `\G`
+means where the matching operation began; upstream's `^` twins, and its own anchored `match` from
+the search start, give this port's answers.
+
+**This port.** `MatchState.OperationStart` is set once on entry to `DoMatch2` (each scan step, both
+runs of rule H', the partial pass and the attempt from inside the text to come), and `\G` and the
+leading-`\G` prefilter read it (`Matcher.BackslashGPosition`). The insertion rule keeps reading each
+candidate's start (`AnchorIsPinned` and the `PermitInsertion` lines; D61, entries 19 and 20), so the
+ledger 19/20 rows do not move. Rows where upstream also bans the insertion at the anchor, such as
+`(?b)\G(?:abc){i<=1}` over 'xabc' (None upstream, (0,4) here as its `^` twin), are entries 19/20
+territory as well. `PatternObject.AnchorsBackslashGAtEveryCandidate` restores upstream's `\G` for
+the oracle alone; the entry `bestmatch-search-anchor-moves-per-candidate` keys on it. Pinned by
+`Gaps/Engine/FuzzyBestMatchTests` and `FuzzyEnhanceMatchTests`.

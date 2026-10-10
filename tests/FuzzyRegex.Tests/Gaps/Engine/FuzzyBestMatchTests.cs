@@ -1498,6 +1498,114 @@ public sealed class FuzzyBestMatchTests
             .Equal("(3,3) 0,0,2 d:3,4", "(2,2) 0,0,2 d:2,3", "(1,1) 0,0,2 d:1,2", "(0,0) 0,0,2 d:0,1");
     }
 
+    // D79: \G MEANS WHERE THE MATCHING OPERATION BEGAN, NOT WHERE THE CURRENT CANDIDATE RUN BEGAN.
+    // Upstream's \G reads `search_anchor` (`_regex.c:7288`), which `init_match` sets (`:3410`), and
+    // every candidate re-run of the BESTMATCH walk calls `init_match` from its own start, so \G
+    // holds at each candidate's start and a search that began at 0 returns a match at 1. The
+    // expected answers are upstream's own spellings without the bug, measured on regex 2026.9.10 on
+    // 2026-10-10: the anchored match from the search start for a leading \G, or the ^ twin where
+    // the search start is 0. Upstream's (?b) search answers are quoted for contrast.
+
+    [Test]
+    [Arguments(@"(?b)\G(?:abc){e<=2}", "xabc", 0, 0, 4)] // upstream (1, 4) exact; its match (0, 4) i:1
+    [Arguments(@"(?be)\G(?:abc){e<=2}", "xabc", 0, 0, 4)] // upstream (1, 4) exact
+    [Arguments(@"(?b)\G(?:abc){e<=2}", "zxabc", 1, 1, 5)] // upstream (2, 5) exact; match pos=1 (1, 5)
+    [Arguments(@"(?br)(?:abc){e<=2}\G", "abcx", 0, 0, 4)] // upstream (0, 3) exact; (?br) match (0, 4)
+    [Arguments(@"(?b)\G(?:abc){i<=1}", "xabc", 0, 0, 4)] // upstream None; the ^ twin (0, 4) i:1
+    public void A_bestmatch_search_holds_backslash_G_only_where_the_search_began(
+        string pattern,
+        string subject,
+        int beginning,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, beginning);
+
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    }
+
+    [Test]
+    public void A_bestmatch_scan_holds_backslash_G_only_where_each_search_began()
+    {
+        // Upstream (?b): (0,3), (4,7) - the second search began at 3 and \G held at 4.
+        Scan(@"(?b)\G(?:abc){e<=2}", "abcxabc").Should().Equal("(0,3) 0,0,0 d:", "(3,7) 0,1,0 d:");
+
+        // Upstream (?b): (0,2) alone, because it also bans the insertion where a search began; the
+        // ^ twin of each step (match pos=2, (?br) match endpos=3) gives the second match below.
+        Scan(@"(?b)\G(?:ab){e<=1}", "abxab").Should().Equal("(0,2) 0,0,0 d:", "(2,5) 0,1,0 d:");
+        Scan(@"(?br)(?:ab){e<=1}\G", "abxab").Should().Equal("(3,5) 0,0,0 d:", "(0,3) 0,1,0 d:");
+    }
+
+    [Test]
+    public void A_bestmatch_partial_search_holds_backslash_G_only_where_the_search_began()
+    {
+        // Upstream (?b): the partial P(0, 4) (1, 1, 0). The ^ twin and the anchored partial match
+        // both give the full match (0, 4) (0, 1, 1), which the full pass finds first.
+        Match m = new FuzzyRegex(@"(?b)\G(?:abcd){e<=2}").Match("xabc", partial: true);
+
+        (m.Index, m.Index + m.Length, m.PartialMatch).Should().Be((0, 4, false));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 1));
+    }
+
+    [Test]
+    public void A_bestmatch_lookbehind_holds_backslash_G_only_where_the_search_began()
+    {
+        // Upstream (?b): (2, 3) with a deletion; the ^ twin (?<=^.) gives (1, 3) exact.
+        Match m = new FuzzyRegex(@"(?b)(?<=\G.)(?:bcd|bc){e<=1}").Match("abcx");
+
+        (m.Index, m.Index + m.Length).Should().Be((1, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    [Arguments(@"(?b)(?:.??(?1)|z)(?:q){e<=1}(?(DEFINE)(\Ga))")]
+    [Arguments(@"(?b)(?:.??(?1)|z)(?:q){e<=1}(?:|(\Ga))")]
+    public void A_bestmatch_group_call_holds_backslash_G_only_where_the_search_began(string pattern)
+    {
+        // Upstream (?b): (1, 3) exact, where (\Ga) is called at the second candidate's start. The
+        // ^ twin and upstream's own anchored match at 0 both give (0, 2) with the 'a' at 1
+        // substituted for 'q'. These rows pinned the failed-call memo's per-pass reset until D79
+        // (FailedCallMemoTests has its new witness).
+        Match m = new FuzzyRegex(pattern).Match("zaq");
+
+        (m.Index, m.Index + m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(1);
+        m.Groups[1].Success.Should().BeFalse();
+    }
+
+    [Test]
+    public void Backslash_G_controls_that_D79_does_not_move()
+    {
+        // Green before and after D79. No \G: the walk keeps the exact match at 1.
+        Match plain = new FuzzyRegex("(?b)(?:abc){e<=2}").Match("xabc");
+        (plain.Index, plain.Index + plain.Length, plain.FuzzyCounts).Should().Be((1, 4, new FuzzyCounts(0, 0, 0)));
+
+        // \G where the exact match already starts at the search start.
+        Match atStart = new FuzzyRegex(@"(?b)\G(?:abc){e<=2}").Match("abcx");
+        (atStart.Index, atStart.Index + atStart.Length).Should().Be((0, 3));
+
+        // \G as one alternative of a choice still holds only at the start: upstream None.
+        new FuzzyRegex(@"(?b)(?:x|\G)(?:abc){e<=1}")
+            .Match("yabc")
+            .Success.Should()
+            .BeFalse();
+
+        // Substitutions alone cannot shift 'abc' onto 'xabc' from 0: upstream None.
+        new FuzzyRegex(@"(?b)\G(?:abc){s<=2}")
+            .Match("xabc")
+            .Success.Should()
+            .BeFalse();
+
+        // The insertion rule still reads each candidate's own start (D61 scope cut, ledger 19/20):
+        // a \m guard pins the insertion at the candidate the walk restarts at, under both budgets.
+        Scan(@"(?b)\m(?:Y){1i+1d+1s<=1}\M", " XY Z").Should().Equal("(1,3) 0,1,0 d:", "(4,5) 1,0,0 d:");
+        Scan(@"(?b)\m(?:Y){1i+1d+1s<=2}\M", " XY Z").Should().Equal("(1,3) 0,1,0 d:", "(4,5) 1,0,0 d:");
+        Scan(@"(?b)\m(?:Y){i}\M", "XY YX").Should().Equal("(0,2) 0,1,0 d:", "(3,5) 0,1,0 d:");
+    }
+
     /// <summary>
     /// A scan as one line per match: span, counts as substitutions, insertions, deletions, the
     /// deletion positions, and "partial" when it is one.

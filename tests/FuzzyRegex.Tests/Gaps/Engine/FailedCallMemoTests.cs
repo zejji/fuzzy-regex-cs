@@ -80,23 +80,32 @@ public sealed class FailedCallMemoTests
     }
 
     [Test]
-    [Arguments(@"(?b)(?:.??(?1)|z)(?:q){e<=1}(?(DEFINE)(\Ga))")]
-    [Arguments(@"(?b)(?:.??(?1)|z)(?:q){e<=1}(?:|(\Ga))")]
-    public void Each_best_match_pass_has_its_own_set_of_failed_calls(string pattern)
+    [Arguments(@"(?b)(?1)(?(DEFINE)((?:ab){e<=1}))", "zb", 0, 2, 1, 0)]
+    [Arguments(@"(?b)(?1)(?(DEFINE)((?:abc){e<=1}))", "bcx", 0, 2, 0, 1)]
+    public void Each_best_match_pass_has_its_own_set_of_failed_calls(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int substitutions,
+        int deletions
+    )
     {
-        // \G and the rule against an insertion where a search began both read the search anchor,
-        // which is not in the key, and every pass of the best-match walk sets it afresh. With one
-        // set for the whole walk, the second pass fails the call of (\Ga) at 1 because it failed
-        // in an earlier pass anchored elsewhere, and the answer was (0, 2) with a substitution.
-        // Upstream: regex.search(pattern, 'zaq') spans (1, 3), fuzzy_counts (0, 0, 0), in both
-        // rows, regex 2026.9.10.
+        // The pass's error limit and the rule against an insertion where a search began are not in
+        // the key, and both change between the passes of the best-match walk: the second search
+        // pass runs from the first match's start with one error fewer, and the refinement re-runs
+        // there anchored, with the limit raised from 1 and the insertion permitted. With one set
+        // for the whole walk, the call at 0 that ran out of errors in the second pass failed every
+        // re-run too, and the answer was no match (checked 2026-10-10 by skipping the clear in
+        // MatchState.InitCallMemo). Upstream regex 2026.9.10: (0, 2) with one substitution, and
+        // (0, 2) with one deletion. Until D79 the witness was \G, which read the anchor too.
         FuzzyRegex regex = WithMemo(pattern, eager: true);
 
-        Match m = regex.Match("zaq");
+        Match m = regex.Match(subject);
 
         regex.PatternObject.UseCallMemo.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((1, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, 0, deletions));
     }
 
     [Test]

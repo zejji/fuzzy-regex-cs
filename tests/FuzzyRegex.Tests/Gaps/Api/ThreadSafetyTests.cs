@@ -786,6 +786,9 @@ public sealed class ThreadSafetyTests
             // D78 added BansAnEmptyMatchAtEveryCandidate, likewise set only by
             // OracleComparer.RunWithTheUpstreamBestMatchAdvance.
             "PatternObject.BansAnEmptyMatchAtEveryCandidate",
+            // D79 added AnchorsBackslashGAtEveryCandidate, likewise set only by
+            // OracleComparer.RunWithTheUpstreamSearchAnchor.
+            "PatternObject.AnchorsBackslashGAtEveryCandidate",
             // D44 and D45 added KeepSectionOpenAfterAVerb and KeepDiscardedTotals, likewise set
             // only by the oracle's ablations on a pattern it compiled for one call.
             "PatternObject.KeepSectionOpenAfterAVerb",
