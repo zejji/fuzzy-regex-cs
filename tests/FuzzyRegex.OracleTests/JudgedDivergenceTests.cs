@@ -47,7 +47,15 @@ public sealed class JudgedDivergenceTests
             ours.Describe()
                 .Should()
                 .Be(judged.Port, "{0}: this port's answer is the one that was judged", judged.Source);
-            OracleComparer.Compare(judged.Row, ours).Should().Be(OracleVerdict.Diverge, "{0}", judged.Source);
+            OracleComparer
+                .Compare(judged.Row, ours)
+                .Should()
+                .Be(judged.Crash is null ? OracleVerdict.Diverge : OracleVerdict.Fault, "{0}", judged.Source);
+            // Through the wave loop too, which is where a crash row is claimed.
+            OracleComparer
+                .RunWave([judged.Row], _ => ours)
+                .Tally.Should()
+                .Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Expected] = 1 }, judged.Source);
             // The Id, so a row an earlier key now claims names that key: the judged line is then
             // redundant and should be deleted.
             (ExpectedDivergences.For(judged.Row, ours)?.Id)
@@ -82,7 +90,13 @@ public sealed class JudgedDivergenceTests
                 .BeTrue("{0}: judged is a date", where);
             judged
                 .Upstream.Should()
-                .Be(judged.Row.Expected.Describe(), "{0}: upstream is the recorded row's answer", where);
+                .Be(
+                    judged.Row.Expected is CrashedOutcome
+                        ? JudgedDivergences.CrashedMarker
+                        : judged.Row.Expected.Describe(),
+                    "{0}: upstream is the recorded row's answer",
+                    where
+                );
             judged.Port.Should().NotBe(judged.Upstream, "{0}: a judged row diverges", where);
             judged.Cause.Should().NotBeNullOrWhiteSpace(where);
 
@@ -197,6 +211,78 @@ public sealed class JudgedDivergenceTests
                     .BeFalse("{0}: a question with another {1} is not the judged one", judged.Source, field);
             }
         }
+    }
+
+    [Test]
+    public void A_judged_crash_row_whose_port_answer_changes_fails_the_run_and_shows_the_answer()
+    {
+        // The owner's rule (2026-10-10): this port never reproduces an upstream crash, so a crash row
+        // pins this port's exact answer. Any other answer - a different result, or an error raised while
+        // matching - leaves the row a FAULT, which fails the run, with the answer printed for judging.
+        JudgedRow[] crashes = [.. JudgedDivergences.All.Where(static judged => judged.Crash is not null)];
+        crashes.Should().NotBeEmpty("the file holds a judged crash row");
+
+        foreach (JudgedRow judged in crashes)
+        {
+            IOracleOutcome[] others =
+            [
+                new Described(judged.Port + " "),
+                new NoMatchOutcome(),
+                new ErrorOutcome("IndexOutOfRangeException", "boom", WhileMatching: true),
+            ];
+            foreach (IOracleOutcome other in others)
+            {
+                OracleRunSummary run = OracleComparer.RunWave([judged.Row], _ => other);
+                run.Tally.Should()
+                    .Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Fault] = 1 }, judged.Source);
+                run.Faults.Should()
+                    .ContainSingle()
+                    .Which.Should()
+                    .Contain("  port     " + other.Describe() + Environment.NewLine);
+            }
+        }
+    }
+
+    [Test]
+    [Arguments(
+        """{"cause": "D1", "upstream": "<upstream crashed>", "port": "no match", "witness": "w", "judged": "2026-10-10", "source": "1/1", "crash": "exit -11", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}}""",
+        "the recorded row is not a crash"
+    )]
+    [Arguments(
+        """{"cause": "D1", "upstream": "<upstream crashed>", "port": "error while matching IndexOutOfRangeException: boom", "witness": "w", "judged": "2026-10-10", "source": "1/1", "crash": "exit -11", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}}""",
+        "never an error raised while matching"
+    )]
+    [Arguments(
+        """{"cause": "D1", "upstream": "<upstream crashed>", "port": "no match", "witness": "w", "judged": "2026-10-10", "source": "1/1", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}}""",
+        "needs its crash evidence"
+    )]
+    [Arguments(
+        """{"cause": "D1", "upstream": "<upstream crashed>", "port": "no match", "witness": "w", "judged": "2026-10-10", "source": "1/1", "crash": "exit -6", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}}""",
+        "does not name the recorded exit code -11"
+    )]
+    [Arguments(
+        """{"cause": "D1", "upstream": "upstream crashed (exit -11), again when run alone", "port": "no match", "witness": "w", "judged": "2026-10-10", "source": "1/1", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}}""",
+        "so upstream must be <upstream crashed>"
+    )]
+    [Arguments(
+        """{"cause": "D1", "upstream": "no match", "port": "match 0:(0,1)[(0,1)] last=-1/-", "witness": "w", "judged": "2026-10-10", "source": "1/1", "crash": "exit -11", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}}""",
+        "crash evidence on a line whose upstream is not"
+    )]
+    public void The_loader_refuses_a_crash_line_that_breaks_the_rules(string line, string problem)
+    {
+        Action load = () => JudgedDivergences.Parse(line);
+
+        load.Should().Throw<InvalidDataException>().WithMessage("*" + problem + "*");
+    }
+
+    [Test]
+    public void The_loader_accepts_a_well_formed_crash_line_with_a_compile_time_refusal()
+    {
+        // The owner's second option: refusing the pattern when compiling it is allowed.
+        const string line =
+            """{"cause": "D1", "upstream": "<upstream crashed>", "port": "error FuzzyRegexParseException: no", "witness": "w", "judged": "2026-10-10", "source": "1/1", "crash": "exit -11, reproduced alone", "row": {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}}""";
+
+        JudgedDivergences.Parse(line).Should().ContainSingle().Which.Crash.Should().Be("exit -11, reproduced alone");
     }
 
     /// <summary>Whether one part of a cause names something the repository records.</summary>

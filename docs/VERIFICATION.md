@@ -88,6 +88,24 @@ writing it, and `--sweeps` when the sweep folders are in another checkout. The `
 then accounts for the row only while the question and both answers are exactly the recorded ones,
 so if either engine's answer changes, the row turns red again.
 
+**Rows upstream crashed on.** This port must never reproduce an upstream crash. Where upstream
+crashes on a pattern, the port either answers correctly (preferred) or refuses the pattern at
+compile time. The sweep still puts a crashed row to this port, and its `FAULT` block shows the
+port's answer on a `port` line. Once the crash is explained (a ledger entry, its location in
+upstream's C source, and a check under the MSan screen), judge the row like any other, adding the
+evidence with `--crash`:
+
+```
+python tools/judge-row.py --seed 187242955 --row 25286 --cause "ledger 11" --witness "..." --crash "exit 3221225477 (access violation), again when run alone; invalid-pointer read in match_fuzzy_changes, _regex.c:20554, MSan clean"
+```
+
+The line records upstream's answer as `<upstream crashed>` and pins the port's exact answer. The
+row is then accounted for only while upstream's recorded row is still a crash and the port's
+answer is still exactly the pinned one. The loader refuses a crash line whose pinned answer is an
+error raised while matching, because that is a port bug to fix. It also refuses a
+line marked as a crash whose recorded row is not one, and a crash line whose evidence does not
+name the recorded exit code.
+
 **The triage budget is two hours per scheduled run.** Rows still unjudged when the two hours are up
 stay red in that run and are picked up by the next one. A red run with known rows in it is better
 than a hurried judgement.

@@ -69,14 +69,28 @@ internal static class OracleComparer
         var candidates = new List<int>();
         foreach (OracleRow row in rows)
         {
-            // Upstream crashed, or read memory it never initialised: no answer to compare against,
-            // so asked of nothing. Decided by the row alone - see `Unanswered`.
+            // Upstream crashed, or read memory it never initialised: no answer to compare against.
+            // Decided by the row alone - see `Unanswered` - except that a plain crash IS put to this
+            // port, because the owner's rule (2026-10-10) is that this port never reproduces an
+            // upstream crash: its answer is printed in the FAULT block for judging, and a judged crash
+            // row (JudgedDivergences) is accounted for only while that answer is the pinned one.
             if (Unanswered(row) is { } unanswered)
             {
+                IOracleOutcome? ours = row is { Expected: CrashedOutcome, UndefinedBehaviour: null }
+                    ? engine(row)
+                    : null;
+                if (ours is not null && JudgedDivergences.Claims(row, ours))
+                {
+                    tally[OracleVerdict.Expected] = tally.GetValueOrDefault(OracleVerdict.Expected) + 1;
+                    expected.Add(OracleWave.Describe(row, ours, _judgedRow));
+                    candidates.Add(row.Number);
+                    continue;
+                }
+
                 tally[unanswered] = tally.GetValueOrDefault(unanswered) + 1;
                 if (unanswered == OracleVerdict.Fault)
                 {
-                    faults.Add(OracleWave.DescribeUnanswered(row, "FAULT"));
+                    faults.Add(OracleWave.DescribeUnanswered(row, "FAULT", ours));
                     if (row.UndefinedBehaviour is null)
                     {
                         candidates.Add(row.Number);
@@ -143,6 +157,11 @@ internal static class OracleComparer
 
         return new OracleRunSummary(tally, divergences, expected, faults, undefined, candidates);
     }
+
+    /// <summary>The entry that accounts for a judged crash row, which no other entry may claim.</summary>
+    private static readonly ExpectedDivergence _judgedRow = ExpectedDivergences.All.Single(static entry =>
+        string.Equals(entry.Id, "judged-row", StringComparison.Ordinal)
+    );
 
     /// <summary>
     /// The verdict for a row upstream gave no usable answer to, or <see langword="null"/> if it gave one.

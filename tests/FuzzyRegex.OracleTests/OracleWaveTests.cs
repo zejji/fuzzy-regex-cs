@@ -467,11 +467,13 @@ public sealed class OracleWaveTests
                     .BeAssignableTo<IOracleOutcome>()
                     .Subject;
 
+                // A judged crash row has no upstream answer to diverge from; it is a FAULT that the
+                // judged-row entry claims (JudgedDivergences).
                 OracleComparer
                     .Compare(row, ours)
                     .Should()
                     .Be(
-                        OracleVerdict.Diverge,
+                        row.Expected is CrashedOutcome ? OracleVerdict.Fault : OracleVerdict.Diverge,
                         "{0}: example row {1} is what makes the entry current",
                         entry.Id,
                         row.Number
@@ -2444,12 +2446,14 @@ public sealed class OracleWaveTests
     }
 
     [Test]
-    public void A_row_upstream_crashed_on_is_never_put_to_this_port_and_fails_the_run()
+    public void A_row_upstream_crashed_on_is_put_to_this_port_and_fails_the_run()
     {
         // 2026-09-24: upstream's C engine segfaulted on a `verbs` row on Linux, and the recorder now
         // records such a row as `crashed` instead of dying with it. It has no answer at all, so it is
-        // not compared - and until the MSan screen has explained it, it is not a known defect either,
-        // so it FAILS THE RUN: a crash nobody has attributed is exactly what must not pass quietly.
+        // not compared - and until it is judged, it is not a known defect either, so it FAILS THE
+        // RUN: a crash nobody has attributed is exactly what must not pass quietly. Since 2026-10-10
+        // it IS put to this port, which must never reproduce an upstream crash: the block shows this
+        // port's answer, for tools/judge-row.py to pin.
         OracleRow crashed = OracleWave.ParseRows(
             """
             {"generator": "verbs", "pattern": "(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\\d]", "flags": 0, "namedLists": {}, "subject": "bba\naAA\r", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
@@ -2469,10 +2473,14 @@ public sealed class OracleWaveTests
             }
         );
 
-        asked.Should().BeEmpty("a row upstream never answered is asked of nothing");
+        asked.Should().Equal([1], "this port's answer to a crashed row is what a judgement pins");
         run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Fault] = 1 });
         run.Divergences.Should().BeEmpty("a crash is not a disagreement between the engines");
-        run.Faults.Should().ContainSingle().Which.Should().StartWith("FAULT row 1 (verbs)");
+        run.Faults.Should()
+            .ContainSingle()
+            .Which.Should()
+            .StartWith("FAULT row 1 (verbs)")
+            .And.Contain("  port     no match" + Environment.NewLine);
     }
 
     [Test]
