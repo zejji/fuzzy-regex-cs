@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="JudgedDivergences.jsonl" LogicalName="JudgedDivergences.jsonl" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/FuzzyRegex/FuzzyRegex.csproj" />
   </ItemGroup>
 </Project>

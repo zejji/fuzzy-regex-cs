@@ -8384,6 +8384,37 @@ internal static class ExpectedDivergences
                 || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: false)
                 || TheFoldReadingsTogetherExplainIt(row, ours, withoutTheEarlierFoldFixes: true)
         ),
+        // Last on purpose: For takes the first entry that applies, so a row a mechanism's own key
+        // claims is never claimed here, and Every_expected_divergence_still_diverges reports a
+        // judged row that a key has since learned to recognise.
+        new(
+            Id: "judged-row",
+            Reason: "A ROW JUDGED BY HAND, RECORDED AS DATA in tests/FuzzyRegex.OracleTests/"
+                + "JudgedDivergences.jsonl, the way a sanitizer suppression file records a known report. "
+                + "Each line is a sweep row whose divergence is a known upstream bug (a LEDGER.md entry, a "
+                + "KNOWN-DEFECTS.md D-number or a named pending candidate) that no key above recognises, "
+                + "with the cause, a minimal witness and both engines' answers.\n"
+                + "WHY NOT A KEY: most keys above are tables of judged rows, so a fresh seed draws new rows of "
+                + "the same bug and the scheduled sweep goes red on known mechanisms. Three attempts to "
+                + "recognise them automatically on 2026-10-09 (every upstream-behaviour switch at once; "
+                + "re-recording with (*SKIP) made (*PRUNE); re-recording with the lazy repeat made greedy) "
+                + "would each also have claimed a port bug of the same shape "
+                + "(.claude/driver/triage-redseeds-2026-10-09.md). So the judgement stays with a person "
+                + "or an agent, and this entry only checks that nothing about the row has moved since.\n"
+                + "THE PREDICATE: the row's whole question (pattern, flags, subject, operation, partial, "
+                + "pos, endpos, template, count, named lists, default version) is a judged one, upstream's "
+                + "recorded answer is exactly the judged upstream answer, AND this port's answer is exactly "
+                + "the judged port answer, each compared as Describe() text. If this port's answer changes, "
+                + "the row is reported again; if upstream's changes, the row is reported and "
+                + "record-oracle.py --recheck names it, since every judged row is an example of this entry. "
+                + "The controls are JudgedDivergenceTests' three `..._is_not_accounted_for` tests.\n"
+                + "HOW ROWS ARE ADDED, the triage budget and the rule for giving a mechanism its own key: "
+                + "docs/VERIFICATION.md, \"Judging a red scheduled sweep\".",
+            PinnedBy: "JudgedDivergenceTests.Every_judged_row_is_accounted_for_by_the_judged_row_entry, "
+                + "which re-runs every judged row and requires this port's judged answer",
+            Example: JudgedDivergences.Example,
+            Applies: static (row, ours) => JudgedDivergences.Claims(row, ours)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
