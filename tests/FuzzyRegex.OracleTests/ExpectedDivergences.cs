@@ -3507,6 +3507,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The three rows of <c>lazy-start-skip-passes-a-verb-cut-run</c>, recorded 2026-10-10 by
+    /// <c>python tools/record-oracle.py --rows</c>: a (*PRUNE), a (*SKIP) and a reversed search. PCRE2
+    /// 10.47 gives this port's answer to the two forward rows, and upstream gives it to all three when
+    /// the pattern is spelt with a leading <c>x?</c>, which leaves no leading repeat to skip past.
+    /// </summary>
+    private const string _lazyStartSkipRows = """
+        {"generator": "rows", "pattern": ".*?(*PRUNE)b", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "a*?(*SKIP)(?:b|$)", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?r)b(*PRUNE).*?", "flags": 0, "namedLists": {}, "subject": "ba", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The four rows of <c>verb-unwinds-through-unfinished-groups</c>, recorded 2026-09-26: an atomic
     /// group, a (*SKIP) in one, a positive lookahead and a quantified atomic group. PCRE2 10.47 gives
     /// this port's answer to each.
@@ -8125,6 +8137,32 @@ internal static class ExpectedDivergences
                     ours,
                     OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
                 )
+        ),
+        new(
+            Id: "lazy-start-skip-passes-a-verb-cut-run",
+            Reason: "A FAILED ATTEMPT BUMPS ALONG HERE AFTER A LAZY LEADING REPEAT IN A PATTERN WITH A "
+                + "(*PRUNE) OR (*SKIP), AND SKIPS THE REPEAT'S WHOLE RUN UPSTREAM. D77, ledger entry 76; "
+                + "fixed 2026-10-10 under the owner's no-known-bugs rule and recorded as a deliberate "
+                + "divergence in `docs/DIVERGENCES.md`. Upstream's skip (`_regex.c:15705-15723`) is "
+                + "sound only when the attempt tried every length of the run, and a lazy repeat tries "
+                + "the short lengths first, so a verb can end the attempt before the starts inside the "
+                + "run were covered. pcre2pattern (\"Backtracking control\") bumps along after either "
+                + "verb there, and pcre2api turns its own leading-repeat shortcut "
+                + "(PCRE2_DOTSTAR_ANCHOR) off for any pattern with (*PRUNE) or (*SKIP).\n"
+                + "THE ROWS, measured 2026-10-10 on PCRE2 10.47 and upstream 2026.9.10: .*?(*PRUNE)b "
+                + "over 'ab' is (1, 2) in PCRE2 and None upstream; a*?(*SKIP)(?:b|$) over 'aab' is "
+                + "(2, 3) in PCRE2 and (3, 3) upstream. Upstream itself gives PCRE2's answer when the "
+                + "pattern starts with x?, which leaves no leading repeat to skip past.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamLazyStartSkip`, which sets "
+                + "`PatternObject.SkipsALazyRunDespiteAVerb` so the skip is taken as upstream takes it, "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
+                + "being judged. A row this port gets wrong for any other reason still diverges with "
+                + "upstream's skip and is reported.",
+            PinnedBy: "BacktrackingVerbTests.A_verb_after_a_lazy_leading_repeat_does_not_skip_the_starts_the_repeat_never_reached",
+            Example: _lazyStartSkipRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamLazyStartSkip(row))
         ),
         new(
             Id: "partial-group-before-a-repeat-tail",

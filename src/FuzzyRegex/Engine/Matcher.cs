@@ -17889,10 +17889,14 @@ internal static class Matcher
                     // ones; the starts inside the run were then never covered. PCRE2 bumps along
                     // after either verb here (pcre2pattern, "Backtracking control"). A greedy repeat
                     // tries the longest length first, so any start inside the run would reach the
-                    // same verb at the same place and fail the same way; it keeps the skip.
+                    // same verb at the same place and fail the same way; it keeps the skip. The
+                    // oracle's PatternObject.SkipsALazyRunDespiteAVerb restores upstream's skip.
                     if (
                         startNode.Op is Opcode.GreedyRepeatOne
-                        || (startNode.Op is Opcode.LazyRepeatOne && !pattern.HasBacktrackingVerb)
+                        || (
+                            startNode.Op is Opcode.LazyRepeatOne
+                            && (!pattern.HasBacktrackingVerb || pattern.SkipsALazyRunDespiteAVerb)
+                        )
                     )
                     {
                         // How many characters did the repeat actually match?
