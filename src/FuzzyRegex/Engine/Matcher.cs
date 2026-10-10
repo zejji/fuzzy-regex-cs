@@ -19042,6 +19042,22 @@ internal static class Matcher
         cost != bestCost ? cost < bestCost : errors < bestErrors;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D78: whether a BESTMATCH or ENHANCEMATCH run from <paramref name="start"/> must
+    /// advance. After an empty match the scan excludes only the empty match at its resume position
+    /// <paramref name="first"/>; upstream re-sets <c>must_advance</c> for every run, and each run's
+    /// <c>init_match</c> moves the search anchor to its own start (<c>_regex.c:15164</c>), so the
+    /// ban lands on every candidate's start and the scan skips positions.
+    /// <c>PatternObject.BansAnEmptyMatchAtEveryCandidate</c> restores that for the oracle.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mustAdvance">What the scan set for this step.</param>
+    /// <param name="start">Where this run starts.</param>
+    /// <param name="first">Where this scan step resumed.</param>
+    /// <returns>The value for <c>MatchState.MustAdvance</c>.</returns>
+    private static bool MustAdvanceAt(MatchState state, bool mustAdvance, int start, int first) =>
+        mustAdvance && (start == first || state.Pattern.BansAnEmptyMatchAtEveryCandidate);
+
+    /// <summary>
     /// Upstream <c>do_enhanced_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17862): find a
     /// fuzzy match, then keep re-running inside its own span with a tighter error budget until the
     /// fit stops improving.
@@ -19132,6 +19148,7 @@ internal static class Matcher
         int bestMatchPos = state.TextPos;
         int bestTextPos = 0;
         bool mustAdvance = state.MustAdvance;
+        int firstTextPos = state.TextPos;
 
         int sliceStart = state.SliceStart;
         int sliceEnd = state.SliceEnd;
@@ -19142,7 +19159,12 @@ internal static class Matcher
         {
             // If there's a better match, it won't start earlier in the string than the current best
             // match, so there's no need to start earlier than that match.
-            state.MustAdvance = mustAdvance;
+            //
+            // NOT UPSTREAM'S, D78: the ban on a second empty match is for the scan's resume position
+            // only. 'InitMatch' moves the search anchor to each run's start, so upstream's plain
+            // 'must_advance' here also bans the empty match where a refinement starts, and the
+            // better fit there is lost.
+            state.MustAdvance = MustAdvanceAt(state, mustAdvance, state.TextPos, firstTextPos);
 
             // Initialise the state.
             state.InitMatch();
@@ -19481,7 +19503,12 @@ internal static class Matcher
                 state.SliceEnd = callerSliceEnd;
 
                 state.TextPos = startPos;
-                state.MustAdvance = mustAdvance;
+
+                // NOT UPSTREAM'S, D78: the ban on a second empty match is for the scan's resume
+                // position only. 'InitMatch' moves the search anchor to each candidate's start, so
+                // upstream's plain 'must_advance' bans the empty match at EVERY candidate's start
+                // and the scan skips positions. The same rule at the second pass and the fallback.
+                state.MustAdvance = MustAdvanceAt(state, mustAdvance, startPos, firstStartPos);
 
                 // Initialise the state.
                 state.InitMatch();
@@ -19712,6 +19739,7 @@ internal static class Matcher
                     state.SliceEnd = callerSliceEnd;
 
                     state.TextPos = startPos;
+                    state.MustAdvance = MustAdvanceAt(state, mustAdvance, startPos, firstStartPos);
                     state.InitMatch();
                     status = BasicMatch(state, false);
 
@@ -19815,18 +19843,23 @@ internal static class Matcher
             // reverse and folded arms, which are still the Phase 7 deferral this file's header
             // records; deleting it as dead code was always wrong and is now visibly so.
             //
-            // S60b WAS ASKED TO PIN IT AND COULD NOT, and the reason is worth writing down rather
-            // than re-deriving. THE WHOLE BRANCH IS UNREACHED: instrumented on 2026-09-22 and run
-            // over all 6563 tests, this line was executed zero times. Reaching it needs
-            // 'bestGroups' to be null after the loop above, which needs every second-pass attempt at
-            // every entry and every offset to fail - and the first pass has just succeeded at
-            // 'entry.MatchPos' within 'errorLimit' errors against the same slice, so the only
-            // candidate mechanism left is the 'MaxCost' cap a cost equation adds. Settling that is a
-            // BESTMATCH question, not a prefilter one, and it is written up in the sittings notes.
+            // S60b WAS ASKED TO PIN IT AND COULD NOT: instrumented on 2026-09-22 over all 6563 tests
+            // of the time, this line ran zero times. THAT IS NO LONGER TRUE. Instrumented again on
+            // 2026-10-10 (D78), three tests reach the branch:
+            // 'FuzzyBestMatchTests.A_best_match_needing_more_errors_than_the_limit_falls_back_to_the_widened_slice',
+            // '.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end' and
+            // 'PartialEdgeReadTests.A_second_pass_success_that_read_nothing_to_come_is_refined_as_before'.
+            // In the first the run below succeeds and keeps entry 0's span, so the change list
+            // copied after it describes that match; in the other two the run fails and its copied
+            // list is never reported. Before D78
+            // the run could move, because the ban on an empty match landed at 'entry.MatchPos', and
+            // the copy then described the wrong match - upstream's (?b) finditer of '(?:\ ){d<=1}'
+            // over ' xyz' reports (3, 3) with a deletion at 2. This reset itself is still unpinned.
             state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;
             state.TextPos = entry.MatchPos;
+            state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.MatchPos, firstStartPos);
             state.InitMatch();
             status = BasicMatch(state, search);
 
@@ -20043,17 +20076,25 @@ internal static class Matcher
             return DoExactMatch(state, search);
         }
 
-        if ((pattern.Flags & RegexFlags.BestMatch) != 0)
+        if ((pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) == 0)
         {
-            return DoBestFuzzyMatch(state, search);
+            return DoSimpleFuzzyMatch(state, search);
         }
 
-        if ((pattern.Flags & RegexFlags.EnhanceMatch) != 0)
+        // NOT UPSTREAM'S, D78: the two functions now clear 'MustAdvance' for a re-run away from the
+        // resume position, and the partial fallback pass and 'DoMatch2LiftingTheAnchorBan' read it
+        // after this returns, so it goes back to what the caller set on every exit.
+        bool mustAdvance = state.MustAdvance;
+        try
         {
-            return DoEnhancedFuzzyMatch(state, search);
+            return (pattern.Flags & RegexFlags.BestMatch) != 0
+                ? DoBestFuzzyMatch(state, search)
+                : DoEnhancedFuzzyMatch(state, search);
         }
-
-        return DoSimpleFuzzyMatch(state, search);
+        finally
+        {
+            state.MustAdvance = mustAdvance;
+        }
     }
 
     /// <summary>

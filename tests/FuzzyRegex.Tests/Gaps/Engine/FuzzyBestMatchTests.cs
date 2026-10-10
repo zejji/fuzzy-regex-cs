@@ -581,7 +581,7 @@ public sealed class FuzzyBestMatchTests
         //
         // Upstream, measured the same day (tools/probes/upstream-bestmatch.py's sibling run):
         //   (?b)(?fi)(?:(?:b\W){e:0}){1i+2d+1s<=4} over 'B-\U0001D518'
-        //     -> [((0, 2), 'B-', (0, 0, 0)), ((2, 2), '', (0, 0, 2))]
+        //     -> [((0, 2), 'B-', (0, 0, 0)), ((2, 2), '', (0, 0, 2))]   (the D78 skip - see below)
         //     subf '<>' count=2 -> '<><>\U0001D518'
         // Those are CODEPOINT spans, and both happen to be below the astral character, so they are
         // also the UTF-16 ones. The port's answer with '+= 1' was '<>\uD835<>' - a lone high
@@ -591,7 +591,10 @@ public sealed class FuzzyBestMatchTests
 
         (int, int)[] spans = [.. pattern.Matches(subject).Select(static m => (m.Index, m.Index + m.Length))];
 
-        spans.Should().Equal((0, 2), (2, 2));
+        // D78 adds (4, 4), the empty match at the end that upstream's (?b) scan skips. Upstream on
+        // 2026-10-10 (regex 2026.9.10): plain finditer gives (0, 2), (2, 2), (3, 3) in codepoints,
+        // and the (?b) overlapped scan ends with the same (2, 2), (3, 3); codepoint 3 is UTF-16 4.
+        spans.Should().Equal((0, 2), (2, 2), (4, 4));
 
         // The output the wave actually compared, and the one that showed the lone surrogate.
         pattern.Replace(subject, "<>", 2).Should().Be("<><>\U0001D518");
@@ -1348,4 +1351,165 @@ public sealed class FuzzyBestMatchTests
         Match plain = new FuzzyRegex(pattern[4..]).Match(subject);
         (plain.Index, plain.Index + plain.Length).Should().Be((0, 1));
     }
+
+    // D78: AFTER AN EMPTY MATCH, A BESTMATCH SCAN EXCLUDES ONLY THE EMPTY MATCH AT THE RESUME
+    // POSITION. Upstream's ban on a second empty match (`_regex.c:15164`) compares with the search
+    // anchor, and every candidate re-run of `do_best_fuzzy_match` resets the anchor to its own start
+    // while keeping `must_advance`, so the ban becomes "no empty match at ANY candidate's start" and
+    // the scan skips positions. The expected answers are upstream's own plain and overlapped scans
+    // (regex 2026.9.10, 2026-10-10): at equal cost the flag only chooses the fit at each start, so
+    // the starts are plain finditer's. Upstream's (?b) answers are quoted beside each for contrast.
+
+    [Test]
+    public void A_bestmatch_scan_finds_an_empty_match_at_every_position_after_an_empty_match()
+    {
+        // Upstream (?b): (0,1), (1,1) d:1, (3,3) d:2 - position 2 skipped and a stale change list.
+        // Upstream plain and (?b) overlapped: the five below.
+        Scan(@"(?b)(?:\ ){d<=1}", " xyz")
+            .Should()
+            .Equal("(0,1) 0,0,0 d:", "(1,1) 0,0,1 d:1", "(2,2) 0,0,1 d:2", "(3,3) 0,0,1 d:3", "(4,4) 0,0,1 d:4");
+    }
+
+    [Test]
+    public void A_bestmatch_scan_of_a_pattern_that_only_matches_empty_finds_every_position()
+    {
+        // Upstream (?b): (0,0), (2,2) - every other position skipped. Plain and overlapped: four.
+        const string pattern = "(?b)(?:ab){d<=2}";
+        Scan(pattern, "xyz")
+            .Should()
+            .Equal("(0,0) 0,0,2 d:0,1", "(1,1) 0,0,2 d:1,2", "(2,2) 0,0,2 d:2,3", "(3,3) 0,0,2 d:3,4");
+
+        // Upstream (?b) findall: ['', '']; plain: four.
+        new FuzzyRegex(pattern)
+            .Matches("xyz")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("", "", "", "");
+    }
+
+    [Test]
+    public void A_reversed_bestmatch_scan_finds_an_empty_match_at_every_position_after_an_empty_match()
+    {
+        // Upstream (?br): (3,4), (3,3) d:3, (1,1) d:2. Plain (?r) and (?br) overlapped: the five below.
+        Scan(@"(?br)(?:\ ){d<=1}", "xyz ")
+            .Should()
+            .Equal("(3,4) 0,0,0 d:", "(3,3) 0,0,1 d:3", "(2,2) 0,0,1 d:2", "(1,1) 0,0,1 d:1", "(0,0) 0,0,1 d:0");
+
+        // Upstream (?br): (3,3), (1,1). Plain (?r) and overlapped: four.
+        Scan("(?br)(?:ab){d<=2}", "xyz")
+            .Should()
+            .Equal("(3,3) 0,0,2 d:3,4", "(2,2) 0,0,2 d:2,3", "(1,1) 0,0,2 d:1,2", "(0,0) 0,0,2 d:0,1");
+    }
+
+    [Test]
+    public void A_bestmatch_scan_keeps_the_best_fit_at_each_start_after_an_empty_match()
+    {
+        // The walk's first run finds (0,0) with three deletions ('abc'); its re-run from the same
+        // start finds one deletion ('d'). Upstream (?b): (0,0) d:0 and nothing more. (?b)
+        // overlapped: the three below. Plain gives the same starts with three deletions each.
+        Scan("(?b)(?:abc|d){d<=3}", "xy").Should().Equal("(0,0) 0,0,1 d:0", "(1,1) 0,0,1 d:1", "(2,2) 0,0,1 d:2");
+    }
+
+    [Test]
+    public void A_bestmatch_scan_reaches_the_end_after_an_empty_match_beside_an_optional_group()
+    {
+        // Upstream (?b): (0,0), (1,2), (2,2) - the empty match at 3 lost. Plain and overlapped: four.
+        Scan("(?b)(a)?(?:b){d<=1}", "xax")
+            .Should()
+            .Equal("(0,0) 0,0,1 d:0", "(1,2) 0,0,1 d:2", "(2,2) 0,0,1 d:2", "(3,3) 0,0,1 d:3");
+    }
+
+    [Test]
+    public void A_bestmatch_scan_reaches_the_end_after_an_empty_match_between_better_ones()
+    {
+        // Upstream (?b): (1,2), (3,4), (4,4) - the empty match at 5 lost. (?b) overlapped: four.
+        Scan("(?b)(?:abc){d<=3}", "xaybz")
+            .Should()
+            .Equal("(1,2) 0,0,2 d:2,3", "(3,4) 0,0,2 d:3,5", "(4,4) 0,0,3 d:4,5,6", "(5,5) 0,0,3 d:5,6,7");
+    }
+
+    [Test]
+    public void A_weighted_bestmatch_scan_finds_an_empty_match_at_every_position_after_an_empty_match()
+    {
+        // The cost walk (walk 0) re-runs candidates too. Upstream (?b) skips position 2, as above.
+        Scan(@"(?b)(?:\ ){s<=0,i<=0,1i+2d+1s<=2}", " xyz")
+            .Should()
+            .Equal("(0,1) 0,0,0 d:", "(1,1) 0,0,1 d:1", "(2,2) 0,0,1 d:2", "(3,3) 0,0,1 d:3", "(4,4) 0,0,1 d:4");
+    }
+
+    [Test]
+    public void A_partial_bestmatch_scan_finds_every_complete_match_before_the_partial()
+    {
+        // Upstream (?b) partial: (0,1), (1,1), (3,3), (4,4) partial. Plain partial: the six below.
+        Scan(@"(?b)(?:\ ){d<=1}", " xyz", partial: true)
+            .Should()
+            .Equal(
+                "(0,1) 0,0,0 d:",
+                "(1,1) 0,0,1 d:1",
+                "(2,2) 0,0,1 d:2",
+                "(3,3) 0,0,1 d:3",
+                "(4,4) 0,0,1 d:4",
+                "(4,4) 0,0,0 d: partial"
+            );
+    }
+
+    [Test]
+    public void A_bestmatch_replace_and_split_see_every_empty_match()
+    {
+        // Upstream (?b): sub '<>xy<>z', split ['', 'xy', 'z']. Plain: the two below.
+        FuzzyRegex pattern = new("(?b)(?:ab){d<=2}");
+
+        pattern.Replace("xyz", "<>").Should().Be("<>x<>y<>z<>");
+        pattern.Split("xyz").Should().Equal("", "x", "y", "z", "");
+    }
+
+    [Test]
+    public void A_bestmatch_scan_still_bans_a_second_empty_match_at_the_resume_position()
+    {
+        // Controls, green before and after D78: the one exclusion that stays. Upstream (?b), plain
+        // and overlapped agree on each; the partial form adds the partial at the end, as plain does.
+        Scan("(?b)(?:b){e<=1}", "xyz")
+            .Should()
+            .Equal("(0,1) 1,0,0 d:", "(1,2) 1,0,0 d:", "(2,3) 1,0,0 d:", "(3,3) 0,0,1 d:3");
+        Scan("(?b)(?:b){e<=1}", "xyz", partial: true)
+            .Should()
+            .Equal("(0,1) 1,0,0 d:", "(1,2) 1,0,0 d:", "(2,3) 1,0,0 d:", "(3,3) 0,0,1 d:3", "(3,3) 0,0,0 d: partial");
+        Scan("(?b)(?:ab){e<=2}", "xyz").Should().Equal("(0,2) 2,0,0 d:", "(2,3) 1,0,1 d:3", "(3,3) 0,0,2 d:3,4");
+        Scan("(?b)(?:cat){e<=1}", "cat dog bat").Should().Equal("(0,3) 0,0,0 d:", "(8,11) 1,0,0 d:");
+        Scan("(?b)(?:ab){e<=1}", "ab ab xb").Should().Equal("(0,2) 0,0,0 d:", "(3,5) 0,0,0 d:", "(6,8) 1,0,0 d:");
+    }
+
+    [Test]
+    public void An_overlapped_bestmatch_scan_has_no_exclusion_to_lose()
+    {
+        // Controls, green before and after D78: an overlapped scan clears must_advance, so its
+        // answers were never short. Upstream (?b) overlapped, each the same as plain overlapped.
+        Scan(@"(?b)(?:\ ){d<=1}", " xyz", overlapped: true)
+            .Should()
+            .Equal("(0,1) 0,0,0 d:", "(1,1) 0,0,1 d:1", "(2,2) 0,0,1 d:2", "(3,3) 0,0,1 d:3", "(4,4) 0,0,1 d:4");
+        Scan("(?b)(?:ab){d<=2}", "xyz", overlapped: true)
+            .Should()
+            .Equal("(0,0) 0,0,2 d:0,1", "(1,1) 0,0,2 d:1,2", "(2,2) 0,0,2 d:2,3", "(3,3) 0,0,2 d:3,4");
+        Scan(@"(?br)(?:\ ){d<=1}", "xyz ", overlapped: true)
+            .Should()
+            .Equal("(3,4) 0,0,0 d:", "(3,3) 0,0,1 d:3", "(2,2) 0,0,1 d:2", "(1,1) 0,0,1 d:1", "(0,0) 0,0,1 d:0");
+        Scan("(?br)(?:ab){d<=2}", "xyz", overlapped: true)
+            .Should()
+            .Equal("(3,3) 0,0,2 d:3,4", "(2,2) 0,0,2 d:2,3", "(1,1) 0,0,2 d:1,2", "(0,0) 0,0,2 d:0,1");
+    }
+
+    /// <summary>
+    /// A scan as one line per match: span, counts as substitutions, insertions, deletions, the
+    /// deletion positions, and "partial" when it is one.
+    /// </summary>
+    internal static string[] Scan(string pattern, string subject, bool overlapped = false, bool partial = false) =>
+        [
+            .. new FuzzyRegex(pattern)
+                .Matches(subject, overlapped: overlapped, partial: partial)
+                .Select(static m =>
+                    $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts.Substitutions},{m.FuzzyCounts.Insertions},"
+                    + $"{m.FuzzyCounts.Deletions} d:{string.Join(",", m.FuzzyChanges.Deletions)}"
+                    + (m.PartialMatch ? " partial" : "")
+                ),
+        ];
 }

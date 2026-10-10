@@ -1168,6 +1168,31 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with upstream's BESTMATCH and ENHANCEMATCH ban on an empty
+    /// match at every candidate run's start after an empty match.
+    /// </summary>
+    /// <remarks>
+    /// D78 confined the ban to the scan's resume position. Setting
+    /// <c>PatternObject.BansAnEmptyMatchAtEveryCandidate</c> restores upstream's ban, which each run's
+    /// <c>init_match</c> moves to that run's start (<c>_regex.c:15164</c>). The
+    /// <c>bestmatch-skips-after-an-empty-match</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's ban, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamBestMatchAdvance(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.BansAnEmptyMatchAtEveryCandidate = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with upstream's verb scope: a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> fails only the innermost atomic group, possessive repeat or lookaround it is in.
     /// </summary>

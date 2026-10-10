@@ -1588,6 +1588,43 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_bestmatch_advance_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `bestmatch-skips-after-an-empty-match` (D78), built like the lazy start
+        // skip's. Upstream's own answer is what this port gave before the fix, so accepting it would
+        // classify a revert of the fix as the fix; a lone empty match at 0, which neither upstream's
+        // flagged nor its plain scan gives on any of the rows, stands in for an unrelated defect;
+        // and this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "bestmatch-skips-after-an-empty-match", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        OracleRow[] rows = [.. OracleWave.ParseRows(entry.Example)];
+        rows.Should().HaveCount(4);
+
+        foreach (OracleRow row in rows)
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_lazy_start_skip_does_not_explain_is_not_accounted_for()
     {
         // The control for `lazy-start-skip-passes-a-verb-cut-run` (D77), built like the skip

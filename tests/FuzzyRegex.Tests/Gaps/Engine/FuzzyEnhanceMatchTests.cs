@@ -308,4 +308,25 @@ public sealed class FuzzyEnhanceMatchTests
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(1, 0, 0));
     }
+
+    [Test]
+    public void An_enhancematch_scan_improves_the_fit_at_the_resume_position_after_an_empty_match()
+    {
+        // D78, the ENHANCEMATCH sibling. After the empty match at 0 the scan resumes at 0 with
+        // must_advance set; the first run finds (1,1) with three deletions ('abc') and the
+        // improvement re-runs from 1, which reset the search anchor to 1 and so banned the empty
+        // match there - losing the one-deletion fit ('d'). Upstream (?e), regex 2026.9.10 on
+        // 2026-10-10: (0,0) d:0, (1,1) d:1,2,3, (2,2) d:2,3,4. Upstream (?e) overlapped: the three
+        // below, the fit the flag promises at each start.
+        FuzzyBestMatchTests
+            .Scan("(?e)(?:abc|d){d<=3}", "xy")
+            .Should()
+            .Equal("(0,0) 0,0,1 d:0", "(1,1) 0,0,1 d:1", "(2,2) 0,0,1 d:2");
+
+        // Upstream (?er): (2,2) d:2, (1,1) d:1,2,3, (0,0) d:0,1,2. Overlapped: the three below.
+        FuzzyBestMatchTests
+            .Scan("(?er)(?:abc|d){d<=3}", "xy")
+            .Should()
+            .Equal("(2,2) 0,0,1 d:2", "(1,1) 0,0,1 d:1", "(0,0) 0,0,1 d:0");
+    }
 }

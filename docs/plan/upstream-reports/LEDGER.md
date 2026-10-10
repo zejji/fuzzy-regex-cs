@@ -3471,6 +3471,14 @@ evidence that the reordering is a no-op under version 0.
 
 ## 23. `POSIX` adds a zero-width match the flagless engine does not make
 
+**WITHDRAWN 2026-10-10 (D78, entry 77).** The finding below is wrong and must not be filed. The
+flagless engine does make the second match: without POSIX, upstream 2026.9.10's plain `finditer`
+gives (2, 2), (3, 3) and `subn` 2, and its `(?b)` overlapped scan gives (2, 2), (3, 3) too. Only
+the non-overlapped `(?b)` scan gives one match, and that is entry 77's skip after an empty match,
+not POSIX. Upstream's POSIX answer of 2 is right; this port now gives 2, pinned by
+`FuzzyPosixTests.A_posix_bestmatch_scan_keeps_the_empty_match_the_flagless_engine_makes_at_the_end`,
+and the row left `posix-fuzzy-contradicts-its-own-flagless-answer`. The text is kept as written.
+
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
 
@@ -6401,3 +6409,39 @@ kept 50,080-row sweep waves (seeds 20261008 and 12093476) the change moves 4 row
 39087, 39997 and 12093476/39497), each to the `x?` spelling's answer; every other row keeps its verdict and entry (apart from the three rows A1's merged keys now claim).
 `PatternObject.SkipsALazyRunDespiteAVerb` restores upstream's skip for the oracle alone; the entry
 `lazy-start-skip-passes-a-verb-cut-run` keys on it. Pinned by `Gaps/Engine/BacktrackingVerbTests`.
+
+---
+
+## 77. After an empty match, a BESTMATCH scan skips positions and ENHANCEMATCH keeps a worse fit - DIVERGES HERE (D78, 2026-10-10)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D78. Draft report:
+`entry-77-bestmatch-scan-skips-after-an-empty-match.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-10:
+
+```
+finditer(r'(?b)(?:\ ){d<=1}', ' xyz')   -> (0,1), (1,1) d:1, (3,3) d:2
+                                             here (0,1), (1,1), (2,2), (3,3), (4,4), d at each start
+finditer(r'(?:\ ){d<=1}', ' xyz')       -> the five here, as the (?b) overlapped scan
+split(r'(?b)(?:ab){d<=2}', 'xyz')       -> ['', 'xy', 'z']     here ['', 'x', 'y', 'z', '']
+finditer(r'(?br)(?:\ ){d<=1}', 'xyz ')  -> (3,4), (3,3), (1,1)  here (3,4), (3,3), (2,2), (1,1), (0,0)
+finditer(r'(?e)(?:abc|d){d<=3}', 'xy')  -> (1,1) and (2,2) with 3 deletions   here 1 each
+```
+
+**Why the port differs.** After an empty match a non-overlapped scan sets `must_advance`, and the
+success test refuses an empty match that ends at `search_anchor` (`upstream/src/_regex.c:15164`).
+`do_best_fuzzy_match` and `do_enhanced_fuzzy_match` re-run the pattern from later starts, each
+run's `init_match` sets `search_anchor` to that run's start, and `must_advance` stays set. So the
+rule becomes "no empty match at any candidate's start", and the widened-slice fallback can slide to
+a later span while copying the first candidate's change list, which is how (3, 3) reports a deletion
+at 2. `ENHANCEMATCH` "will cause it to attempt to improve the fit ... of the match that it has found" and `BESTMATCH` "will make it search for the best match instead" (`upstream/README.rst:590-592`); upstream's own
+plain scan and its flagged overlapped scan give every position, and this port gives their answer.
+
+**This port.** `must_advance` holds only for a run that starts where the scan resumed
+(`Matcher.MustAdvanceAt`, at the walk's re-run, the second pass, the widened-slice fallback and the
+ENHANCEMATCH refinement), and `DoMatch2` restores it on exit. Gate seeds 7, 4242 and 20260927 stay
+green. This also withdraws entry 23: its "POSIX adds a match" was this skip in the POSIX-free
+question. `PatternObject.BansAnEmptyMatchAtEveryCandidate` restores upstream's ban for the oracle
+alone; the entry `bestmatch-skips-after-an-empty-match` keys on it. Pinned by
+`Gaps/Engine/FuzzyBestMatchTests` and `FuzzyEnhanceMatchTests`. `\G` under BESTMATCH, which reads
+the same anchor, is D79 and stays open.
