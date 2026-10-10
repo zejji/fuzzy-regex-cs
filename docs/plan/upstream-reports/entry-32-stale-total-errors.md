@@ -22,7 +22,9 @@ for re-verification against whatever release is current when that day comes. Do 
 
 The only difference between the two patterns is the inner `{s<=1}`, which cannot change what the
 pattern matches: the answer is the exact '2' either way. A constrained form hangs as well:
-`(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)` over `'2\n'`.
+`(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)` over `'2\n'`. So does one inside a negative
+lookahead, which uses memory fast (1.5 GB in 7 s): `regex.findall(r'(?b)(?!(?:x(?:a){s<=1}){s<=1})',
+'ab')`. Without either `{s<=1}`, or without `(?b)`, it returns `['', '', '']` at once.
 
 ENHANCEMATCH gives a worse answer instead of hanging:
 
