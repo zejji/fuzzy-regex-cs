@@ -3,7 +3,8 @@
 //
 // Input: a JSON-lines file of rows in the oracle's own shape (pattern, flags as upstream's int -
 // ignored here except that inline flags carry them - subject, operation, namedLists, pos, endpos,
-// partial). Output per row: span, fuzzy counts and group 1 captures, or the exception.
+// partial). Output per row: span, fuzzy counts and change positions, and every group's captures,
+// or the exception. `finditer` and `finditer-overlapped` print every match, separated by " | ".
 //
 // Run: dotnet run tools/probes/port-probe.cs -- rows.jsonl [timeout-seconds]
 using System.Globalization;
@@ -44,13 +45,21 @@ foreach (var line in File.ReadLines(args[0]))
     try
     {
         var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, timeout, lists);
-        Match m = op switch
+        answer = op switch
         {
-            "match" => regex.MatchAtStart(subject, pos, end - pos, partial),
-            "fullmatch" => regex.FullMatch(subject, pos, end - pos, partial),
-            _ => regex.Match(subject, pos, end - pos, partial),
+            "match" => Describe(regex.MatchAtStart(subject, pos, end - pos, partial)),
+            "fullmatch" => Describe(regex.FullMatch(subject, pos, end - pos, partial)),
+            "finditer" or "findall" or "finditer-overlapped" => DescribeAll(
+                regex.Matches(
+                    subject,
+                    pos,
+                    end - pos,
+                    overlapped: string.Equals(op, "finditer-overlapped", StringComparison.Ordinal),
+                    partial: partial
+                )
+            ),
+            _ => Describe(regex.Match(subject, pos, end - pos, partial)),
         };
-        answer = Describe(m);
     }
     catch (Exception e)
     {
@@ -69,15 +78,24 @@ static string Describe(Match m)
     }
 
     string partialMark = m.PartialMatch ? " partial" : "";
-    string group1 = "";
-    if (m.Groups.Count > 1)
-    {
-        group1 =
-            " g1=" + string.Join(",", m.Groups[1].Captures.Select(static c => $"({c.Index},{c.Index + c.Length})"));
-    }
+    FuzzyCounts counts = m.FuzzyCounts;
+    FuzzyChanges changes = m.FuzzyChanges;
+    string groups = string.Concat(
+        Enumerable
+            .Range(1, m.Groups.Count - 1)
+            .Select(i =>
+                $" g{i}="
+                + string.Join(",", m.Groups[i].Captures.Select(static c => $"({c.Index},{c.Index + c.Length})"))
+            )
+    );
 
-    return $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts}{partialMark}{group1}";
+    return $"({m.Index},{m.Index + m.Length}) ({counts.Substitutions},{counts.Insertions},{counts.Deletions})"
+        + $" s:{string.Join(",", changes.Substitutions)} i:{string.Join(",", changes.Insertions)}"
+        + $" d:{string.Join(",", changes.Deletions)}{partialMark}{groups}";
 }
+
+static string DescribeAll(MatchCollection matches) =>
+    matches.Count == 0 ? "[]" : string.Join(" | ", matches.Select(Describe));
 
 // A JSON string literal without the reflection-based serializer, so the probe stays trim-safe. The
 // relaxed encoder keeps < > + readable; the output goes to a terminal, never into HTML.
