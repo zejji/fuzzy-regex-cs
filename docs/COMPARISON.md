@@ -1693,6 +1693,24 @@ Console.WriteLine($"({n.Index}, {n.Index + n.Length})"); // (2, 3) - upstream: (
 A greedy leading repeat keeps the skip in both engines: it tries the longest length first, so a
 start inside its run would reach the same verb at the same place and fail the same way.
 
+### A BESTMATCH or ENHANCEMATCH scan does not skip positions after an empty match
+
+A scan that has just found an empty match must not find another at the same position, or it
+would never move on. `(?b)` and `(?e)` look for the best fit by re-running the pattern from
+several starts, and upstream applies that rule at the start of every re-run as well as where the
+scan resumed. So after an empty match upstream skips positions that plain matching finds, and
+`(?e)` can keep a worse fit. This library applies the rule only where the scan resumed, so the
+starts are the ones plain matching finds and the flag only chooses the fit at each.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// ' ' is one deletion away from the empty string, so every position after the space matches.
+var spans = new FuzzyRegex(@"(?b)(?:\ ){d<=1}").Matches(" xyz").Select(m => $"({m.Index}, {m.Index + m.Length})");
+Console.WriteLine(string.Join(" ", spans)); // (0, 1) (1, 1) (2, 2) (3, 3) (4, 4) - upstream: (0, 1) (1, 1) (3, 3)
+Console.WriteLine(new FuzzyRegex("(?b)(?:ab){d<=2}").Replace("xyz", "<>")); // <>x<>y<>z<> - upstream: <>xy<>z
+```
+
 ### A verb inside a lookbehind acts in right-to-left order
 
 A lookbehind such as `(?<=ab)` checks the text just before the current position. This library, like
