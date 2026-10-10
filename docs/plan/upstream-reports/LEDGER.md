@@ -178,6 +178,17 @@ No continuation of 'c' on the left makes `(?r)ab??` match: an anchored reversed 
 end the text with `a`, or with `ab`, and the text ends with 'c' whatever is added before it. The
 greedy twin and the forward mirror both answer None.
 
+**The string-tail arms have the same guard, and a search shows it too (2026-10-10).** The
+`STRING_REV`, `STRING_IGN_REV` and `STRING_FLD_REV` arms of `LAZY_REPEAT_ONE` (`:16803`, `:16916`,
+`:16973`) guard the same way. `regex.search(r'(?r)b(?:a)*?', 'x', partial=True)` is (0, 1) partial
+and over 'xa' (0, 2), where the greedy twin answers (0, 0); `regex.match(r'(?r)bc(?:a)*?', 'x',
+partial=True)` is (0, 1) partial. A build of `_regex.c` changed only at the `CHARACTER_REV` arm's
+guard (`:16664`), to report the partial only when the repeat can take the step, answers (0, 0)
+for the first two and None for `(?r)ab??` over 'c', and keeps 'a', 'ax' and 'aa' as partials; the
+unchanged `IGN` and string arms keep their wrong answers, which ties the fault to the arm. Found by
+a lead from the 2026-10-09 triage; blind review and patched build on 2026-10-10. Pinned by
+`PartialMatchingTests` (the second-door rows).
+
 **Measured over a grid, three sources against each other.** 48,960 rows (`match` and `fullmatch`,
 forward and reversed, six lazy quantifiers, three items, one- and two-character tails, with and
 without IGNORECASE, every subject of up to three characters from `acxb`), `regex` 2026.9.10:
