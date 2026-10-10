@@ -18,6 +18,12 @@ one-line descriptions come from the same sweep's report.txt, whose DIVERGE block
 answer and this port's, each as its Describe() text. The row must be a DIVERGE or FAULT block: a
 row a key already claims needs no judgement.
 
+The port line is pinned as this port's answer, so the report must come from the library being
+judged. run-oracle.ps1 ends every report with `port build: src <tree>`, git's tree id for src/;
+the tool refuses a report whose tree is not this checkout's, one made from uncommitted src/
+changes, and (unless `--allow-unstamped`) one with no stamp. On 2026-10-10 a report written before
+D78 gave a stale port answer that only Every_judged_row_is_accounted_for caught.
+
 A FAULT row is one upstream crashed on. This port must never reproduce an upstream crash: it
 answers correctly or refuses the pattern at compile time. The block's port line is pinned as for a
 DIVERGE row, upstream's answer is written as "<upstream crashed>", and `--crash` must give the
@@ -40,6 +46,7 @@ import argparse
 import datetime
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -109,6 +116,40 @@ def report_answers(report: str, row: int) -> tuple[str, str, bool]:
     return CRASHED_MARKER, port.group(1), True
 
 
+def src_build(root: Path) -> str:
+    """The library this checkout builds, as run-oracle.ps1 stamps it: git's tree id for src/ at
+    HEAD, with '-dirty' appended when src/ has uncommitted changes (untracked files included)."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+    tree = git("rev-parse", "HEAD:src")
+    return f"{tree}-dirty" if git("status", "--porcelain", "--", "src") else tree
+
+
+def stale_report_problem(report: str, current: str, allow_unstamped: bool) -> str | None:
+    """Why the report's port answers cannot be pinned against the current build, or None.
+
+    The port line is pinned as this port's answer, so it must come from the library being judged.
+    src/'s tree id changes exactly when the library's code does (a docs or test commit leaves it
+    alone), which is why it, rather than HEAD or the status stamp, is the build's identity."""
+    m = re.search(r"^port build: src (\S+)$", report.replace("\r\n", "\n"), re.M)
+    if not m:
+        if allow_unstamped:
+            return None
+        return ("the report records no port build, so its port answers may come from older code; "
+                "re-run the sweep with tools/run-oracle.ps1, or pass --allow-unstamped once you have "
+                "checked the row's port answer against the current build yourself")
+    stamped = m.group(1)
+    if stamped.endswith("-dirty"):
+        return f"the report was produced from uncommitted src/ changes ({stamped}); re-run the sweep on a committed tree"
+    if current.endswith("-dirty"):
+        return f"src/ has uncommitted changes ({current}); commit them, then re-run the sweep"
+    if stamped != current:
+        return (f"the report was produced from src tree {stamped} and this checkout builds {current}; "
+                "the port may answer differently now, so re-run the sweep")
+    return None
+
+
 def question_of(row: dict) -> str:
     return json.dumps({key: row.get(key) for key in QUESTION_KEYS}, sort_keys=True)
 
@@ -127,6 +168,9 @@ def main() -> int:
     parser.add_argument("--sweeps", type=Path, default=DEFAULT_SWEEPS)
     parser.add_argument("--file", type=Path, default=DEFAULT_FILE)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--allow-unstamped", action="store_true",
+                        help="accept a report that records no port build (one written before reports "
+                             "were stamped); a stamped report from another build is refused regardless")
     args = parser.parse_args()
 
     if not args.witness.strip():
@@ -137,6 +181,10 @@ def main() -> int:
         raise SystemExit("unknown cause: " + "; ".join(problems))
 
     sweep = args.sweeps / f"sweep-{args.seed}"
+    report = (sweep / "report.txt").read_text(encoding="utf-8")
+    stale = stale_report_problem(report, src_build(REPO_ROOT), args.allow_unstamped)
+    if stale:
+        raise SystemExit(stale)
     with open(sweep / "wave.jsonl", encoding="utf-8") as wave:
         for number, line in enumerate(wave):
             if number == 0 and json.loads(line).get("defaultVersion") != 8192:
@@ -148,7 +196,7 @@ def main() -> int:
         else:
             raise SystemExit(f"{sweep / 'wave.jsonl'} has no row {args.row}")
     row = json.loads(raw)
-    upstream, port, crashed = report_answers((sweep / "report.txt").read_text(encoding="utf-8"), args.row)
+    upstream, port, crashed = report_answers(report, args.row)
     if crashed != (args.crash is not None):
         raise SystemExit("--crash is required for a FAULT row (upstream crashed) and allowed only there")
     if crashed and f"exit {row['outcome']['exitCode']}" not in args.crash:
