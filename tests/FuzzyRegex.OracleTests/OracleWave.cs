@@ -36,7 +36,7 @@ internal static class OracleWave
     /// neither side ever needs to vary. Declared before the two paths that use it: static
     /// initialisers run in declaration order.
     /// </remarks>
-    private static readonly string _repoRoot = FindRepoRoot();
+    public static string RepoRoot { get; } = FindRepoRoot();
 
     /// <summary>The category of the tests that read a recorded wave (<see cref="Load"/>).</summary>
     /// <remarks>
@@ -59,7 +59,7 @@ internal static class OracleWave
     public static string WavePath { get; } =
         Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_WAVE_PATH") is { Length: > 0 } overridden
             ? overridden
-            : Path.Combine(_repoRoot, "TestResults", "oracle", "wave.jsonl");
+            : Path.Combine(RepoRoot, "TestResults", "oracle", "wave.jsonl");
 
     /// <summary>Where the run's verdict and every divergence block is written.</summary>
     /// <remarks>
@@ -73,7 +73,7 @@ internal static class OracleWave
     public static string ReportPath { get; } =
         Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_REPORT_PATH") is { Length: > 0 } overriddenReport
             ? overriddenReport
-            : Path.Combine(_repoRoot, "TestResults", "oracle", "report.txt");
+            : Path.Combine(RepoRoot, "TestResults", "oracle", "report.txt");
 
     private static string FindRepoRoot()
     {
