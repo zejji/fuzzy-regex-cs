@@ -102,7 +102,7 @@ python tools/judge-row.py --seed 187242955 --row 25286 --cause "ledger 11" --wit
 The line records upstream's answer as `<upstream crashed>` and pins the port's exact answer. The
 row is then accounted for only while upstream's recorded row is still a crash and the port's
 answer is still exactly the pinned one. The loader refuses a crash line whose pinned answer is an
-error raised while matching (that is a port bug to fix, not an answer to judge). It also refuses a
+error raised while matching, because that is a port bug to fix. It also refuses a
 line marked as a crash whose recorded row is not one, and a crash line whose evidence does not
 name the recorded exit code.
 
