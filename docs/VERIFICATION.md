@@ -60,6 +60,44 @@ design spec section 8 and amendments 9-10.
     argument with `file:line` that no witness can exist. "None found yet" is neither; it is an
     open item and the change is not done.
 
+## Judging a red scheduled sweep
+
+The scheduled oracle sweep runs fresh seeds, so it keeps drawing new rows of upstream bugs that
+have already been judged. Most keys in `ExpectedDivergences.cs` are tables of judged rows, and a
+new row of the same bug is not in the table, so the sweep goes red. A key that recognised such
+rows automatically would also claim a port bug of the same shape. On 2026-10-09, three attempts at
+one did exactly that (`.claude/driver/triage-redseeds-2026-10-09.md`). So the judgement is made by
+a person or an agent and written down as data, one line per row, in
+`tests/FuzzyRegex.OracleTests/JudgedDivergences.jsonl`.
+
+**How a row is judged.** Take the red row from the sweep's `report.txt`. Reduce it to a minimal
+witness and run that witness on both engines. Name the cause: a `LEDGER.md` entry, a
+`KNOWN-DEFECTS.md` D-number, or a pending candidate listed in the data file's header. A row whose
+cause cannot be named is a new finding, and it goes through the normal triage with a red test. Never guess a cause. Two mechanisms on one row are fine when both are named.
+
+**How it is recorded.** One command per row:
+
+```
+python tools/judge-row.py --seed 4242 --row 34781 --cause "ledger 2" --witness "ba??x over 'baa', match, partial: upstream partial (0,3), port no match"
+```
+
+The tool reads the question and upstream's answer from `TestResults/oracle/sweep-<seed>/wave.jsonl`
+and both answers' text from that sweep's `report.txt`. It refuses a row a key already claims, a
+question already judged, and a cause that names nothing. Use `--dry-run` to print the line without
+writing it, and `--sweeps` when the sweep folders are in another checkout. The `judged-row` entry
+then accounts for the row only while the question and both answers are exactly the recorded ones,
+so if either engine's answer changes, the row turns red again.
+
+**The triage budget is two hours per scheduled run.** Rows still unjudged when the two hours are up
+stay red in that run and are picked up by the next one. A red run with known rows in it is better
+than a hurried judgement.
+
+**When a mechanism gets its own key.** A mechanism that produces five or more judged rows in each
+of three consecutive scheduled runs may be given its own key in `ExpectedDivergences.cs`. The key
+needs a planted-bug control: a test showing that a port bug of the same shape is not claimed. If
+no key passes that control, the mechanism's rows stay in the data file. Once a key claims a row,
+delete its line from the data file; `Every_expected_divergence_still_diverges` fails until you do.
+
 ## Reviewer brief
 
 Paste into the review subagent's prompt, filling the three placeholders:
