@@ -23,11 +23,32 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// regression cannot hide behind an old judgement; if upstream's changes, the row is reported and
 /// <c>record-oracle.py --recheck</c> names it too, since the rows are this entry's examples.
 /// </para>
+/// <para>
+/// A row upstream CRASHED on is judged the same way, with <see cref="CrashedMarker"/> as its upstream
+/// answer and the crash evidence beside it. The owner's rule (2026-10-10) is that this port never
+/// reproduces an upstream crash: on such a pattern it answers correctly or refuses the pattern when
+/// compiling it. So a crash row pins this port's exact answer, and that answer may be a result or a
+/// compile-time refusal but never an error raised while matching; <see cref="Parse"/> refuses the
+/// line otherwise.
+/// </para>
 /// </remarks>
 internal static class JudgedDivergences
 {
     /// <summary>The manifest name the project file gives the data file.</summary>
     public const string ResourceName = "JudgedDivergences.jsonl";
+
+    /// <summary>
+    /// The upstream answer of a judged crash row. No <see cref="IOracleOutcome.Describe"/> text starts
+    /// with <c>&lt;</c>, so it cannot stand for any answer upstream gave; the exit code is on the
+    /// recorded row and in the crash evidence.
+    /// </summary>
+    public const string CrashedMarker = "<upstream crashed>";
+
+    /// <summary>
+    /// How every error this port raised while matching renders (<see cref="ErrorOutcome.Describe"/>),
+    /// which a crash row may not pin.
+    /// </summary>
+    private const string _errorWhileMatching = "error while matching ";
 
     /// <summary>The data file's text, as embedded.</summary>
     public static string Text { get; } = ReadText();
@@ -50,9 +71,18 @@ internal static class JudgedDivergences
     /// <param name="row">The row, carrying upstream's answer.</param>
     /// <param name="ours">This port's answer.</param>
     /// <returns><see langword="true"/> if the row is judged and neither answer has changed.</returns>
+    /// <remarks>
+    /// On a crash row upstream's recorded answer is the crash itself, so the row must be recorded as
+    /// one. No error raised while matching can equal the pinned port answer: <see cref="Parse"/> refuses
+    /// a crash line whose port text starts the way every such error renders.
+    /// </remarks>
     public static bool Claims(OracleRow row, IOracleOutcome ours) =>
         _byQuestion.TryGetValue(QuestionOf(row), out JudgedRow? judged)
-        && string.Equals(row.Expected.Describe(), judged.Upstream, StringComparison.Ordinal)
+        && (
+            judged.Crash is null
+                ? string.Equals(row.Expected.Describe(), judged.Upstream, StringComparison.Ordinal)
+                : row.Expected is CrashedOutcome
+        )
         && string.Equals(ours.Describe(), judged.Port, StringComparison.Ordinal);
 
     /// <summary>Everything a row asks, as one string.</summary>
@@ -100,7 +130,11 @@ internal static class JudgedDivergences
         return reader.ReadToEnd();
     }
 
-    private static List<JudgedRow> Parse(string text)
+    /// <summary>Reads the data file's lines, refusing a crash line that breaks the rules above.</summary>
+    /// <param name="text">The file's text.</param>
+    /// <returns>Every judged row, in file order.</returns>
+    /// <exception cref="InvalidDataException">A crash line is not a recorded crash, carries no evidence, or pins an error raised while matching.</exception>
+    internal static List<JudgedRow> Parse(string text)
     {
         var rows = new List<JudgedRow>();
         string[] lines = text.Split('\n');
@@ -115,22 +149,69 @@ internal static class JudgedDivergences
             using JsonDocument document = JsonDocument.Parse(line);
             JsonElement judged = document.RootElement;
             string rowLine = judged.GetProperty("row").GetRawText();
-            rows.Add(
-                new JudgedRow(
-                    i + 1,
-                    judged.GetProperty("cause").GetString()!,
-                    judged.GetProperty("upstream").GetString()!,
-                    judged.GetProperty("port").GetString()!,
-                    judged.GetProperty("witness").GetString()!,
-                    judged.GetProperty("judged").GetString()!,
-                    judged.GetProperty("source").GetString()!,
-                    rowLine,
-                    OracleWave.ParseRows(rowLine)[0]
-                )
+            var row = new JudgedRow(
+                i + 1,
+                judged.GetProperty("cause").GetString()!,
+                judged.GetProperty("upstream").GetString()!,
+                judged.GetProperty("port").GetString()!,
+                judged.GetProperty("witness").GetString()!,
+                judged.GetProperty("judged").GetString()!,
+                judged.GetProperty("source").GetString()!,
+                judged.TryGetProperty("crash", out JsonElement crash) ? crash.GetString() : null,
+                rowLine,
+                OracleWave.ParseRows(rowLine)[0]
             );
+            if (CrashProblem(row) is { } problem)
+            {
+                throw new InvalidDataException($"{ResourceName} line {row.Line} ({row.Source}): {problem}");
+            }
+
+            rows.Add(row);
         }
 
         return rows;
+    }
+
+    /// <summary>What is wrong with a line's crash fields, or <see langword="null"/> if nothing is.</summary>
+    /// <param name="judged">The line.</param>
+    /// <returns>The problem.</returns>
+    private static string? CrashProblem(JudgedRow judged)
+    {
+        bool marked = string.Equals(judged.Upstream, CrashedMarker, StringComparison.Ordinal);
+        bool recorded = judged.Row.Expected is CrashedOutcome;
+        if (!marked && judged.Crash is not null)
+        {
+            return "crash evidence on a line whose upstream is not " + CrashedMarker;
+        }
+
+        if (!marked)
+        {
+            return recorded ? $"the recorded row is a crash, so upstream must be {CrashedMarker}" : null;
+        }
+
+        if (judged.Row.Expected is not CrashedOutcome crashed)
+        {
+            return $"upstream is {CrashedMarker} but the recorded row is not a crash";
+        }
+
+        if (string.IsNullOrWhiteSpace(judged.Crash))
+        {
+            return "a crash line needs its crash evidence";
+        }
+
+        if (
+            !judged.Crash.Contains(
+                string.Create(CultureInfo.InvariantCulture, $"exit {crashed.ExitCode}"),
+                StringComparison.Ordinal
+            )
+        )
+        {
+            return $"the crash evidence does not name the recorded exit code {crashed.ExitCode}";
+        }
+
+        return judged.Port.StartsWith(_errorWhileMatching, StringComparison.Ordinal)
+            ? "a crash row pins an answer or a compile-time refusal, never an error raised while matching"
+            : null;
     }
 }
 
@@ -145,6 +226,9 @@ internal static class JudgedDivergences
 /// <param name="Witness">The mechanism's minimal pattern and subject, with both engines' answers.</param>
 /// <param name="Judged">The date of the judgement.</param>
 /// <param name="Source">The sweep's seed and row, <c>seed/row</c>.</param>
+/// <param name="Crash">
+/// On a crash row only: the exit code and, where known, where upstream crashed and how it was reproduced.
+/// </param>
 /// <param name="RowLine">The recorded row, byte for byte as the recorder wrote it.</param>
 /// <param name="Row">The recorded row, parsed.</param>
 internal sealed record JudgedRow(
@@ -155,6 +239,7 @@ internal sealed record JudgedRow(
     string Witness,
     string Judged,
     string Source,
+    string? Crash,
     string RowLine,
     OracleRow Row
 );

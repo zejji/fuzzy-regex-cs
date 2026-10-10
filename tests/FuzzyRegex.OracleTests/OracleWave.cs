@@ -593,16 +593,22 @@ internal static class OracleWave
 
     /// <summary>
     /// Renders one row upstream gave no usable answer to: it crashed, or the MSan screen found it
-    /// reading memory it never initialised. Nothing was asked of this port, so there is no port line;
-    /// the screen's finding takes its place.
+    /// reading memory it never initialised. The screen's finding follows upstream's line; on a plain
+    /// crash this port's answer comes between them, which is what <c>tools/judge-row.py</c> pins.
     /// </summary>
     /// <param name="row">The row.</param>
     /// <param name="heading"><c>FAULT</c>, or <c>UNDEFINED</c> and the defect it is known as.</param>
+    /// <param name="ours">This port's answer, where the row was put to it.</param>
     /// <returns>The rendered block.</returns>
-    public static string DescribeUnanswered(OracleRow row, string heading)
+    public static string DescribeUnanswered(OracleRow row, string heading, IOracleOutcome? ours = null)
     {
         StringBuilder block = DescribeQuestion(row, heading);
         block.AppendLine("  upstream " + row.Expected.Describe());
+        if (ours is not null)
+        {
+            block.AppendLine("  port     " + ours.Describe());
+        }
+
         if (row.UndefinedBehaviour is not { } found)
         {
             return block.Append("  screen   not screened - run tools/screen-undefined.py to attribute it").ToString();

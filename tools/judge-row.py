@@ -15,13 +15,21 @@ What it reads
 The row's question and upstream's answer come from the sweep's wave, line N of
 TestResults/oracle/sweep-S/wave.jsonl (line 0 is the header, so line N is row N). Both answers'
 one-line descriptions come from the same sweep's report.txt, whose DIVERGE block prints upstream's
-answer and this port's, each as its Describe() text. The row must be a DIVERGE block: a row a key
-already claims needs no judgement.
+answer and this port's, each as its Describe() text. The row must be a DIVERGE or FAULT block: a
+row a key already claims needs no judgement.
+
+A FAULT row is one upstream crashed on. This port must never reproduce an upstream crash: it
+answers correctly or refuses the pattern at compile time. The block's port line is pinned as for a
+DIVERGE row, upstream's answer is written as "<upstream crashed>", and `--crash` must give the
+evidence, naming the recorded exit code. A port line that is an error raised while matching is
+refused: that is a port bug to fix, not an answer to judge.
 
 Usage
 -----
     python tools/judge-row.py --seed 4242 --row 34781 --cause "ledger 2" \\
         --witness "ba??x over 'baa', match, partial: upstream (0,3)P, port no match"
+    python tools/judge-row.py --seed 187242955 --row 25286 --cause "ledger 11" --witness "..." \\
+        --crash "exit 3221225477 (access violation), reproduced alone; ..."
 
 `--cause` is one or more of `ledger N` (an entry of docs/plan/upstream-reports/LEDGER.md), `DNN`
 (a row of docs/KNOWN-DEFECTS.md) or a pending candidate named in the data file's header, joined
@@ -44,6 +52,9 @@ KNOWN_DEFECTS = REPO_ROOT / "docs" / "KNOWN-DEFECTS.md"
 # The fields a question is made of, matching JudgedDivergences.QuestionOf in the consumer.
 QUESTION_KEYS = ("pattern", "flags", "namedLists", "subject", "operation", "template", "count",
                  "partial", "pos", "endpos")
+
+# A crash row's upstream answer, matching JudgedDivergences.CrashedMarker in the consumer.
+CRASHED_MARKER = "<upstream crashed>"
 
 CODEPOINTS_SUFFIX = re.compile(r"   \[python codepoints -?\d+,-?\d+\]$")
 
@@ -74,18 +85,28 @@ def cause_problems(cause: str, pending: set[str]) -> list[str]:
     return problems
 
 
-def report_answers(report: str, row: int) -> tuple[str, str]:
-    """Upstream's and this port's Describe() text from the row's DIVERGE block."""
+def report_answers(report: str, row: int) -> tuple[str, str, bool]:
+    """Upstream's and this port's Describe() text from the row's DIVERGE or FAULT block, and
+    whether it is a FAULT (upstream crashed). A crash's upstream text is CRASHED_MARKER."""
     text = report.replace("\r\n", "\n")
-    m = re.search(rf"^(DIVERGE|EXPECTED [^\n]*?) row {row} \(.*?(?=\n\n|\Z)", text, re.M | re.S)
+    m = re.search(rf"^(DIVERGE|FAULT|EXPECTED [^\n]*?) row {row} \(.*?(?=\n\n|\Z)", text, re.M | re.S)
     if not m:
         raise SystemExit(f"report has no block for row {row}")
-    if m.group(1) != "DIVERGE":
+    if m.group(1).startswith("EXPECTED"):
         raise SystemExit(f"row {row} is already accounted for ({m.group(1)}); there is nothing to judge")
     block = m.group(0)
     upstream = re.search(r"^  upstream (.*)$", block, re.M).group(1)
-    port = re.search(r"^  port     (.*)$", block, re.M).group(1)
-    return CODEPOINTS_SUFFIX.sub("", upstream), port
+    port = re.search(r"^  port     (.*)$", block, re.M)
+    if m.group(1) == "DIVERGE":
+        return CODEPOINTS_SUFFIX.sub("", upstream), port.group(1), False
+    if not upstream.startswith("upstream crashed (exit "):
+        raise SystemExit(f"row {row} is a FAULT the MSan screen attributed, not a plain crash; judge it with the screen")
+    if not port:
+        raise SystemExit(f"row {row}'s FAULT block has no port line; re-run the sweep with a consumer that asks the port")
+    if port.group(1).startswith("error while matching "):
+        raise SystemExit(f"row {row}: this port raised an error while matching ({port.group(1)}); "
+                         "that is a port bug to fix, never a judged answer")
+    return CRASHED_MARKER, port.group(1), True
 
 
 def question_of(row: dict) -> str:
@@ -99,6 +120,9 @@ def main() -> int:
     parser.add_argument("--cause", required=True)
     parser.add_argument("--witness", required=True,
                         help="the mechanism's minimal pattern and subject with both engines' answers")
+    parser.add_argument("--crash", default=None,
+                        help="FAULT rows only: the crash evidence - the exit code, where upstream crashes "
+                             "if known, and how it was reproduced")
     parser.add_argument("--judged", default=datetime.date.today().isoformat())
     parser.add_argument("--sweeps", type=Path, default=DEFAULT_SWEEPS)
     parser.add_argument("--file", type=Path, default=DEFAULT_FILE)
@@ -124,7 +148,11 @@ def main() -> int:
         else:
             raise SystemExit(f"{sweep / 'wave.jsonl'} has no row {args.row}")
     row = json.loads(raw)
-    upstream, port = report_answers((sweep / "report.txt").read_text(encoding="utf-8"), args.row)
+    upstream, port, crashed = report_answers((sweep / "report.txt").read_text(encoding="utf-8"), args.row)
+    if crashed != (args.crash is not None):
+        raise SystemExit("--crash is required for a FAULT row (upstream crashed) and allowed only there")
+    if crashed and f"exit {row['outcome']['exitCode']}" not in args.crash:
+        raise SystemExit(f"--crash must name the recorded exit code: 'exit {row['outcome']['exitCode']}'")
 
     asked = question_of(row)
     for existing in data.splitlines():
@@ -135,6 +163,8 @@ def main() -> int:
     # re-ask upstream exactly the question the sweep asked.
     head = {"cause": args.cause, "upstream": upstream, "port": port, "witness": args.witness,
             "judged": args.judged, "source": f"{args.seed}/{args.row}"}
+    if crashed:
+        head["crash"] = args.crash
     entry = json.dumps(head, ensure_ascii=True)[:-1] + ', "row": ' + raw + "}"
     if args.dry_run:
         print(entry)
