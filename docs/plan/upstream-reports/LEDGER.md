@@ -6361,3 +6361,43 @@ and forbids a miss, so the fix is kept. The grid first run had a shell-mangled `
 in 5,288 rows and counted 36 and 1,202; the counts above are from the corrected grid. Pinned by
 `Gaps/Engine/PartialEdgeReadTests` (`A_reversed_dollar_can_stand_before_a_final_newline_in_the_text_to_come`,
 its controls, and `A_reversed_dollar_in_the_text_to_come_can_give_a_partial_no_text_completes`).
+
+## 76. A (*PRUNE) or (*SKIP) after a lazy leading repeat loses matches that start inside the repeat's run - DIVERGES HERE (D77, 2026-10-10)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D77. Draft report:
+`entry-76-lazy-start-skip-past-a-verb.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-10:
+
+```
+search(r'.*?(*PRUNE)b', 'ab')          -> None     here (1, 2)
+search(r'x?.*?(*PRUNE)b', 'ab')        -> (1, 2)   (no leading repeat, no skip)
+search(r'.*?(*SKIP)b', 'ab')           -> None     here (1, 2)
+search(r'a*?(*SKIP)(?:b|$)', 'aab')    -> (3, 3)   here (2, 3)
+search(r'.{0,3}?(*PRUNE)b', 'ab')      -> None     here (1, 2)
+search(r'.{0,2}?(*PRUNE)b', 'ab')      -> (1, 2)   here (1, 2): the run reaches the maximum, no skip
+search(r'(?r)b(*PRUNE).*?', 'ba')      -> None     here (0, 1)
+search(r'.*(*PRUNE)b', 'ab')           -> None     here None: a greedy start keeps the skip
+```
+
+**Why the port differs.** After a failed attempt, `do_match` moves the next start past the whole run
+the pattern's leading single-character repeat could match, when the run is shorter than the repeat's
+maximum (`upstream/src/_regex.c:15705-15723`). That is sound only if the attempt tried the rest of
+the pattern after every length of the run. A lazy repeat tries the short lengths first, so a
+`(*PRUNE)` or `(*SKIP)` that backtracking reaches ends the attempt before the long ones, and the
+starts inside the run are never tried. pcre2pattern 10.47, "Backtracking control": after `(*PRUNE)`
+the match advances to the next start, and a `(*SKIP)` at the attempt's own start is an ordinary
+advance. pcre2api turns its own `.*` shortcut (`PCRE2_DOTSTAR_ANCHOR`) off "if the pattern contains
+(*PRUNE) or (*SKIP)" (fetched 2026-10-10). PCRE2 10.47 (pip `pcre2` 0.7.1) gives this port's answer
+on every forward row; Perl 5.42.3 does too except on the two leading `.*?` rows, which it implicitly
+anchors.
+
+**This port.** The skip is withheld for a lazy start when the pattern holds a verb
+(`Matcher.cs`, `case Opcode.Failure`, `PatternObject.HasBacktrackingVerb`, set for every compiled
+`(*PRUNE)` and `(*SKIP)` node wherever it sits). A greedy start keeps it: the repeat tries the
+longest length first, so a start inside the run reaches the same verb at the same place and fails
+the same way. A verb-free lazy start keeps it too, and a Debug work-count test pins that. In the two
+kept 50,080-row sweep waves (seeds 20261008 and 12093476) the change moves 4 rows (20261008/38144,
+39087, 39997 and 12093476/39497), each to the `x?` spelling's answer; every other row keeps its verdict and entry (apart from the three rows A1's merged keys now claim).
+`PatternObject.SkipsALazyRunDespiteAVerb` restores upstream's skip for the oracle alone; the entry
+`lazy-start-skip-passes-a-verb-cut-run` keys on it. Pinned by `Gaps/Engine/BacktrackingVerbTests`.

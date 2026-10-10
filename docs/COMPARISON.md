@@ -1669,6 +1669,30 @@ Console.WriteLine(new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index); /
 A group called with `(?1)`, `(?&name)` or `(?R)` does not stop the verb, as in upstream, Perl and
 Boost; PCRE2 alone makes the call fail instead.
 
+### A verb after a lazy leading repeat does not hide the starts inside the repeat's run
+
+When an attempt fails, both engines may move the next start past the whole run that the pattern's
+leading repeat could match, such as the `.*?` in `.*?b`. That is safe when the attempt has already
+tried every length of the repeat, because any start inside the run would only repeat that work. A
+lazy repeat tries the short lengths first, so a `(*PRUNE)` or `(*SKIP)` can end the attempt before
+the long ones are tried. Upstream still skips the run and so never tries the starts inside it. This
+library moves on one character, as PCRE2 does: a lazy leading repeat in a pattern with either verb
+keeps no skip.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// At 0 '.*?' takes nothing, 'b' fails against 'a' and backtracking reaches (*PRUNE), so the
+// attempt ends. The next attempt starts at 1, where 'b' matches.
+var m = new FuzzyRegex(@".*?(*PRUNE)b").Match("ab");
+Console.WriteLine($"({m.Index}, {m.Index + m.Length})"); // (1, 2) - upstream: no match
+var n = new FuzzyRegex(@"a*?(*SKIP)(?:b|$)").Match("aab");
+Console.WriteLine($"({n.Index}, {n.Index + n.Length})"); // (2, 3) - upstream: (3, 3)
+```
+
+A greedy leading repeat keeps the skip in both engines: it tries the longest length first, so a
+start inside its run would reach the same verb at the same place and fail the same way.
+
 ### A verb inside a lookbehind acts in right-to-left order
 
 A lookbehind such as `(?<=ab)` checks the text just before the current position. This library, like

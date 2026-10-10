@@ -1124,6 +1124,31 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with upstream's skip past a lazy leading repeat's run,
+    /// which it takes even when the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>.
+    /// </summary>
+    /// <remarks>
+    /// D77 withheld that skip, because the verb can cut the attempt before the lazy repeat reaches
+    /// the starts the skip passes over. Setting <c>PatternObject.SkipsALazyRunDespiteAVerb</c>
+    /// restores upstream's skip (<c>_regex.c:15705-15723</c>). The
+    /// <c>lazy-start-skip-passes-a-verb-cut-run</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's skip, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamLazyStartSkip(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.SkipsALazyRunDespiteAVerb = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with upstream's verb scope: a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> fails only the innermost atomic group, possessive repeat or lookaround it is in.
     /// </summary>

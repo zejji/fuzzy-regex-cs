@@ -730,6 +730,13 @@ internal sealed class PatternObject
     internal bool VerbsAreConfinedToTheInnermostGroup;
 
     /// <summary>
+    /// Oracle-only: a failed attempt skips past the run of a lazy leading repeat even when the
+    /// pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, as upstream does (<c>_regex.c:15705-15723</c>),
+    /// instead of bumping along (D77). Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool SkipsALazyRunDespiteAVerb;
+
+    /// <summary>
     /// Oracle-only: a fuzzy section a <c>(*PRUNE)</c> or <c>(*SKIP)</c> cut through stays the open
     /// one, as upstream leaves <c>fuzzy_node</c> (D44, ledger entry 61). Set only by
     /// <c>OracleComparer</c>'s ablation; never by the library. See

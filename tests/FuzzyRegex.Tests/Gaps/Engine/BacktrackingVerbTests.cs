@@ -1277,4 +1277,110 @@ public sealed class BacktrackingVerbTests
 
         (m.Success, m.Index, m.Length).Should().Be((true, 2, 1));
     }
+
+    // DIVERGES FROM UPSTREAM, deliberately (D77). After a failed attempt, upstream skips the next
+    // start past the whole run its leading single-character repeat could match (_regex.c:15705-15723).
+    // For a LAZY repeat followed by (*PRUNE) or (*SKIP), the verb cut the attempt before the repeat
+    // tried the longer lengths, so the starts inside the run were never covered. pcre2pattern,
+    // "Backtracking control": (*PRUNE) bumps along, and a (*SKIP) at the attempt's own start is an
+    // ordinary bump-along. Upstream answers each row below as its 'x?'-prefixed spelling does (no
+    // leading repeat, no skip), and PCRE2 10.47 (pip pcre2 0.7.1) agrees; the plain spellings get
+    // None or the wrong span from upstream (.scratch probe, 2026-10-10). Perl 5.42.3 agrees on every
+    // row except the two leading '.*?' ones, which it implicitly anchors.
+    [Test]
+    [Arguments(@".*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@".*?(*SKIP)b", "ab", 1, 1)]
+    [Arguments(@"(?s).*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@".{0,3}?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@"[^x]*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@"a*?(*PRUNE)(?:b|$)", "aab", 2, 1)]
+    [Arguments(@"a*?(*SKIP)(?:b|$)", "aab", 2, 1)]
+    [Arguments(@"\w*?(*PRUNE)(?:b|$)", "ab", 1, 1)]
+    [Arguments(@"(?r)b(*PRUNE).*?", "ba", 0, 1)]
+    [Arguments(@"(?r)(?:b|c)(*PRUNE)a*?", "baa", 0, 1)]
+    public void A_verb_after_a_lazy_leading_repeat_does_not_skip_the_starts_the_repeat_never_reached(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, index, length));
+    }
+
+    [Test]
+    public void A_partial_search_with_a_verb_after_a_lazy_leading_repeat_finds_the_complete_match()
+    {
+        // Upstream: regex.search(r'x?.*?(*PRUNE)b', 'ab', partial=True) is (1, 2), complete. The
+        // plain spelling gives (0, 2) partial, because the skip left the complete match unreached.
+        Match m = new FuzzyRegex(@".*?(*PRUNE)b").Match("ab", partial: true);
+
+        (m.Success, m.Index, m.Length, m.PartialMatch).Should().Be((true, 1, 1, false));
+    }
+
+    [Test]
+    public void A_fuzzy_search_with_a_verb_after_a_lazy_leading_repeat_finds_the_later_start()
+    {
+        // Upstream: regex.search(r'x?.*?(*PRUNE)(?:bc){e<=1}', 'abd') is (1, 3) with fuzzy_counts
+        // (1, 0, 0); the plain spelling gives None.
+        Match m = new FuzzyRegex(@".*?(*PRUNE)(?:bc){e<=1}").Match("abd");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void A_scan_with_a_verb_after_a_lazy_leading_repeat_finds_the_later_start()
+    {
+        // Upstream: regex.findall(r'x?.*?(*PRUNE)b', 'ab') is ['b']; the plain spelling gives [].
+        new FuzzyRegex(@".*?(*PRUNE)b")
+            .Matches("ab")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("b");
+    }
+
+    // Controls for D77: the rows the fix must leave as upstream answers them (same probe). A greedy
+    // leading repeat tries the longest run first, so a verb it reaches cuts only lengths it has
+    // already tried; every start inside the run would reach the same verb at the same place. So
+    // '.*(*PRUNE)b' over 'ab' is None in upstream and PCRE2 10.47 alike: at 0 the '.*' takes 'ab',
+    // the (*PRUNE) runs at 2 and 'b' fails there, and a start at 1 would do just the same.
+    [Test]
+    [Arguments(@".*?b", "ab", true, 0, 2)]
+    [Arguments(@".*(*PRUNE)b", "ab", false, 0, 0)]
+    [Arguments(@"a*(*PRUNE)(?:b|$)", "aab", true, 0, 3)]
+    [Arguments(@".*?(*PRUNE)b", "a\nb", true, 2, 1)]
+    [Arguments(@".{0,2}?(*PRUNE)b", "ab", true, 1, 1)]
+    public void A_leading_repeat_that_needs_no_D77_guard_answers_as_upstream(
+        string pattern,
+        string subject,
+        bool success,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((success, index, length));
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_lazy_leading_repeat_without_a_verb_keeps_the_skip_past_its_run()
+    {
+        EngineWork.SkipUnlessCounting();
+
+        // The D77 guard withholds the skip only when the pattern has a verb. Without the skip, each
+        // of the 2000 starts walks the rest of the line, about two million steps.
+        var regex = new FuzzyRegex(".*?[xy]", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new('a', 2_000);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.IsMatch(subject).Should().BeFalse(),
+            20_000,
+            "a failed attempt skips past the run the leading lazy repeat could match"
+        );
+    }
 }
