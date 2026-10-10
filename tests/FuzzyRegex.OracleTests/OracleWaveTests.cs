@@ -904,6 +904,127 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_format_template_loses_only_the_fields_that_read_a_capture_list()
+    {
+        // The masked template of the D51 entry's format-substitution clause. Escaped braces and
+        // the fields that read a group's value stay; each `{group[index]}` field goes.
+        ExpectedDivergences.WithoutCaptureReads("{{}}{1[-2]}{0[-1]}}}").Should().Be("{{}}}}");
+        ExpectedDivergences.WithoutCaptureReads("{d}{1[-1]}{{}}{0[0]}").Should().Be("{d}{{}}");
+        ExpectedDivergences.WithoutCaptureReads("-{1[-1]}{0[0]}-").Should().Be("--");
+        ExpectedDivergences.WithoutCaptureReads("{g}{g}").Should().Be("{g}{g}");
+
+        // Refused rather than masked: removing an automatically numbered field renumbers the ones
+        // after it; anything but `name[integer]` is not a plain capture read; and a field with no
+        // closing brace is not a field.
+        ExpectedDivergences.WithoutCaptureReads("{[0]}{}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("{1[0]!s}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("{1[x]}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("a{1[0]").Should().BeNull();
+    }
+
+    [Test]
+    public void A_format_substitution_that_differs_by_more_than_a_missing_capture_is_not_accounted_for()
+    {
+        // The planted-bug controls for the D51 entry's format-substitution clause. Over 'aa}a{aa{'
+        // the template `{{}}{1[-2]}{0[-1]}}}` reads the capture before group 1's last: upstream's
+        // list for the first match is [(0,1), (1,1)], the call's capture included, and this port's
+        // is [(0,1)], so this port raises "capture index out of range" as Python's own IndexError
+        // does for a list that short. Each plant below changes one piece of evidence the clause
+        // reads, and each must be refused.
+        OracleRow row = ExampleRow("group-call-discards-its-captures-on-return", "([ab])(?1)").Row;
+        IOracleOutcome live = Live(row);
+        IOracleOutcome ablated = OracleComparer.RunWithTheUpstreamCallCaptures(row)!;
+        OracleRow masked = row with { Template = ExpectedDivergences.WithoutCaptureReads(row.Template!) };
+        OracleRow scan = ExpectedDivergences.ScanOf(row);
+        var liveMasked = (SubOutcome)Live(masked);
+        IOracleOutcome ablatedMasked = OracleComparer.RunWithTheUpstreamCallCaptures(masked)!;
+        var liveScan = (MatchesOutcome)Live(scan);
+        IOracleOutcome ablatedScan = OracleComparer.RunWithTheUpstreamCallCaptures(scan)!;
+        var upstreams = (SubOutcome)ablated;
+
+        live.Should().BeOfType<ErrorOutcome>().Which.Message.Should().StartWith("capture index out of range");
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, liveScan, ablatedScan)
+            .Should()
+            .BeTrue("this port's live answer is the family");
+        ExpectedDivergences.OnlyMissingCapturesAreRead(row, live, ablated).Should().BeTrue();
+
+        // Another error: a template field naming a group the pattern has not got.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                new ErrorOutcome(nameof(ArgumentException), "the pattern has no group '9'", WhileMatching: true),
+                ablated,
+                liveMasked,
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("an error other than a capture index out of range is not this family");
+
+        // A string with a replacement count that is not upstream's: the scan itself differs.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                new SubOutcome(upstreams.Text, upstreams.Count + 1),
+                ablated,
+                liveMasked,
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("a different count is not a missing capture");
+
+        // A difference outside the capture fields: with them masked the two answers still differ.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                live,
+                ablated,
+                liveMasked with
+                {
+                    Text = liveMasked.Text + "x",
+                },
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("a difference the masked template still shows is not in a capture field");
+
+        // A bug in the discard itself: the return kept the call's capture and dropped the caller's,
+        // so group 1's list no longer ends in its value.
+        MatchOutcome first = liveScan.Matches[0];
+        MatchesOutcome swapped = liveScan with
+        {
+            Matches =
+            [
+                first with
+                {
+                    Groups = [first.Groups[0], first.Groups[1] with { Captures = [new OracleSpan(1, 1)] }],
+                },
+                .. liveScan.Matches.Skip(1),
+            ],
+        };
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, swapped, ablatedScan)
+            .Should()
+            .BeFalse("a list that drops the caller's own capture is a bug in the discard");
+
+        // No capture missing at all: then nothing the discard did can explain a different answer.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, ablatedScan, ablatedScan)
+            .Should()
+            .BeFalse("identical capture lists cannot explain a different substitution");
+
+        // A plain substitution, or a split, reads only group values, which the discard never
+        // changes on a complete match, so no difference in one can be this family.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(row with { Operation = "sub" }, live, ablated)
+            .Should()
+            .BeFalse("a plain substitution reads no capture list");
+    }
+
+    [Test]
     public void A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for()
     {
         // The control for `group-call-in-a-discarded-lookaround-leaves-no-capture` (ledger entry 54,
@@ -1141,6 +1262,20 @@ public sealed class OracleWaveTests
                 .For(row, new ErrorOutcome(nameof(FuzzyRegexParseException), "unknown group"))
                 .Should()
                 .BeNull("another parse error over {0} is a defect, not this family", row.Pattern);
+
+            // Upstream rejecting the PATTERN is a different answer from this port's refusal, not
+            // the family: the refusal may sit beside an upstream error only when upstream
+            // compiled the pattern and raised later, as it does for a template it cannot use.
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new ErrorOutcome("error", "bad escape \\d", WhileMatching: false),
+                    },
+                    OracleComparer.Run(row, TimeSpan.FromSeconds(5))!
+                )
+                .Should()
+                .BeNull("a refusal beside upstream's parse error over {0} is not this family", row.Pattern);
         }
     }
 

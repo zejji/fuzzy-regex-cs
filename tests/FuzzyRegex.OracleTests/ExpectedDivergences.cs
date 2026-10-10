@@ -3666,7 +3666,11 @@ internal static class ExpectedDivergences
     /// (D62): the witness, two open calls, whole-pattern recursion, the path-dependent row, a
     /// reversed one, and two nested calls of one group (blind review of D62). The ruling's first witness, <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over
     /// 'ab', is not among them: the oracle does not compare the capture list of a group with no
-    /// value (<c>OracleGroup.Describe</c>), so it agrees there.
+    /// value (<c>OracleGroup.Describe</c>), so it agrees there. The last six are format
+    /// substitutions from the scheduled sweeps (seeds 20261008 row 31677, 210917045 row 31573,
+    /// 959901869 row 31469, 517861756 row 24933, 20261001 row 31429 and 20261005 row 30269), added
+    /// 2026-10-10: a call in a repeat, a numbered call, a DEFINE group, a call in a conditional's
+    /// lookbehind, and two that answer a different string rather than the error.
     /// </summary>
     private const string _callCaptureRows = """
         {"generator": "rows", "pattern": "(?<c>a)(?&c)b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}], "lastIndex": 1, "lastGroup": "c", "partial": false}}
@@ -3685,17 +3689,27 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "namedLists": {}, "subject": "ababa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[0, 2], [2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[0, 1], [2, 1], [4, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
         {"generator": "rows", "pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[2, 1], [0, 1]]}], "lastIndex": 1, "lastGroup": "o", "partial": true}, "searchOnlyPartial": false}
         {"generator": "rows", "pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[0, 1], [1, 1], [2, 1]]}], "lastIndex": 2, "lastGroup": "i", "partial": true}, "searchOnlyPartial": false}
+        {"generator": "recursion", "pattern": "(?<g>[ab])(?:(?&g))+", "flags": 8, "namedLists": {}, "subject": "(a(ab", "operation": "subf", "template": "<{1[-2]}{1[-2]}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "(a(<aa", "count": 1}}
+        {"generator": "recursion", "pattern": "([ab])(?1)", "flags": 0, "namedLists": {}, "subject": "aa}a{aa{", "operation": "subf", "template": "{{}}{1[-2]}{0[-1]}}}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "{}aaa}}a{{}aaa}{", "count": 2}}
+        {"generator": "recursion", "pattern": "(?(DEFINE)(?<d>[ab]+))(?&d)x?", "flags": 16386, "namedLists": {}, "subject": "\u00dfa(A(", "operation": "subf", "template": "{1[-1]}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u00dfa(A(", "count": 2}}
+        {"generator": "interactions", "pattern": "(?(?<=\\p{Ll})[[a-f]~~[d-k]])(?P<g1>[^a-f])(?:(?(1)(?<=(?P>g1))[^a]))+?\ufb03", "flags": 256, "namedLists": {}, "subject": "\ufb03\ufb03\u00df\ufb03\ufb03", "operation": "subf", "template": "{1[-2]}[ab", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb03[ab\ufb03", "count": 1}}
+        {"generator": "recursion", "pattern": "(?r)(?<g>\\w(?<=\\w))(?&g)", "flags": 16386, "namedLists": {}, "subject": "ab))bb", "operation": "subf", "template": "{1[0]}{g}{g}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "baa))bbb", "count": 2}}
+        {"generator": "recursion", "pattern": "^([ab])(?1)", "flags": 16386, "namedLists": {}, "subject": "aA)\ufb03A(\u00df", "operation": "subf", "template": "-{1[-1]}{0[0]}-", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "-AaA-)\ufb03A(\u00df", "count": 1}}
         """;
 
     /// <summary>
     /// The rows of <c>left-recursion-is-refused-at-compile-time</c>, each moved from another entry
     /// on 2026-10-08, when this port began to refuse them: two rows of D37's grid (recorded
-    /// 2026-09-30) and row 74947 of the seed 20260921 gate (<c>bestmatch-loses-a-partial</c>).
+    /// 2026-09-30) and row 74947 of the seed 20260921 gate (<c>bestmatch-loses-a-partial</c>). The
+    /// last two are rows 24356 and 25340 of the seed 37573352 sweep, added 2026-10-10: substitutions
+    /// whose template names a missing group, which upstream rejects after compiling the pattern.
     /// </summary>
     private const string _leftRecursionRows = """
         {"generator": "rows", "pattern": "(?:|b*(?R)(?:(?R)a*?(?R)?)*){s<=1}", "flags": 0, "namedLists": {}, "subject": "zx", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null]}
         {"generator": "rows", "pattern": "(?:|z?(?R)?a){e<=3}", "flags": 0, "namedLists": {}, "subject": "aaba", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 3, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [1, 2, 3], "deletions": []}}, "leakFreeFuzzy": [null]}
         {"generator": "interactions", "pattern": "(?b)(?r)(\\d*)+?(?P<g2>(?:\\p{ASCII}\ud801\udc28[[:alpha:]]{0,2}){e<=1}(?&g2)?)(?:(?:A\ud801\udc28(?:A){e<=2,s<=1}){e<=1}(*SKIP)\\p{Ll}|[[:alpha:]])", "flags": 8, "namedLists": {}, "subject": "\ud801\udc28\ud801\udc28", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "interactions", "pattern": "(?b)(?r)([^\\p{L}]{2,4})(?P<g2>(?:\ud801\udc28\ud835\udd18){e<=1:\\d}(?P>g2)?)(\\p{ASCII}+)", "flags": 2, "namedLists": {}, "subject": "\r\r\n\ud801\udc28\ud801\udc28\ud835\udd18\ud835\udd18\ud835\udd18", "operation": "sub", "template": "\\g<4>", "count": 3, "codepointSpan": null, "outcome": {"kind": "error", "exception": "error", "message": "invalid group reference", "whileMatching": true}}
+        {"generator": "interactions", "pattern": "(?b)(?e)^([[a-f]~~[d-k]]+)+(?P<g2>\\p{Nd}{3,3})(?:(?(2)(?<=(?P>g2))[\\w--[0-9]]))(?P<g4>(?:[^a]??(?P<g3>[^a]*)){e<=1}(?P>g4)?)", "flags": 258, "namedLists": {}, "subject": "\r\n\r\naa", "operation": "sub", "template": "\\g<g2>ab\\g<5>\\2", "count": 2, "codepointSpan": null, "outcome": {"kind": "error", "exception": "error", "message": "invalid group reference", "whileMatching": true}}
         """;
 
     private static readonly ExpectedDivergence[] _entries =
@@ -3715,6 +3729,13 @@ internal static class ExpectedDivergences
                 + "cycle.\n"
                 + "KEYED ON THE ERROR. A row belongs here when this port raised that "
                 + "FuzzyRegexParseException while compiling and upstream did not raise a parse error. "
+                + "Upstream may raise after compiling, which is the case for a substitution whose "
+                + "template names a group the pattern has not got: upstream compiles the template "
+                + "before it matches anything (upstream/src/_regex.c:21869, before the first do_match "
+                + "at :21896) and raises \"invalid group reference\", while this port refuses the "
+                + "pattern first and never reads the template. Measured on regex 2026.9.10, "
+                + "2026-10-10: on seed 37573352 row 24356 upstream's own search raises MemoryError "
+                + "and its sub raises the template error, with the real subject or an empty one. "
                 + "The control is `A_row_the_left_recursion_refusal_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "Gaps.Parsing.LeftRecursionRefusalTests",
             Example: _leftRecursionRows,
@@ -3726,7 +3747,7 @@ internal static class ExpectedDivergences
                         WhileMatching: false,
                     } refusal
                 && refusal.Message.EndsWith("can call itself without matching any text", StringComparison.Ordinal)
-                && row.Expected is not ErrorOutcome
+                && row.Expected is not ErrorOutcome { WhileMatching: false }
         ),
         // FIRST OF ALL, before entry 42: every other entry's ablation runs with the D51 fix off
         // too (OracleComparer.Run), so any of them would claim a row D51 alone explains. D51's own
@@ -3768,13 +3789,25 @@ internal static class ExpectedDivergences
                 + "(`A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence`). "
                 + "The residual risk is a port bug that drops a capture the caller made, other than "
                 + "its last, and changes nothing else. The control is "
-                + "`A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for`.",
+                + "`A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for`.\n"
+                + "A FORMAT SUBSTITUTION (subf) shows the discard when its template reads a capture "
+                + "list by index: `{1[-2]}` over `([ab])(?1)` and 'ab' gives 'a' upstream, where this "
+                + "port's list holds only the group's own capture and raises \"capture index out of "
+                + "range\", as Python's own IndexError does for a list that short. For a subf row the "
+                + "shape clause is `OnlyMissingCapturesAreRead`: this port answers upstream's count "
+                + "or that error; with every `{group[index]}` field removed from the template, both "
+                + "runs give the same string; and the same scan asked as a finditer differs only by "
+                + "captures missing from the lists, with at least one capture missing or a group "
+                + "with no value, whose list the harness does not record. A plain sub and a split read "
+                + "only group values, which the fix does not change, so they are never claimed. The "
+                + "controls are `A_format_substitution_that_differs_by_more_than_a_missing_capture_is_not_accounted_for` "
+                + "and `A_format_template_loses_only_the_fields_that_read_a_capture_list`.",
             PinnedBy: "Gaps.Engine.CallCaptureTests",
             Example: _callCaptureRows,
             Applies: static (row, ours) =>
                 OracleComparer.RunWithTheUpstreamCallCaptures(row) is { } ablated
                 && OnlyTheAblationExplainsIt(row, ours, ablated)
-                && OnlyCallCapturesAreMissing(ours, ablated)
+                && (OnlyCallCapturesAreMissing(ours, ablated) || OnlyMissingCapturesAreRead(row, ours, ablated))
                 && PartialIsTheFrameRestore(
                     ours,
                     IsPartial(ours) ? OracleComparer.RunWithTheFrameByFrameRestore(row) : null
@@ -8837,7 +8870,9 @@ internal static class ExpectedDivergences
     /// entries and never a value; and what it restores is .NET's Group contract, under which a
     /// group's value is its last capture. A discard that dropped the caller's capture and kept the
     /// callee's breaks the last clause. An outcome without capture lists (no match, an error, a
-    /// substitution, a split) is never this shape: nothing the fix changes reaches it. On a partial
+    /// substitution, a split) is never this shape: nothing the fix changes reaches it, except a
+    /// format substitution's capture reads, which have their own clause
+    /// (<see cref="OnlyMissingCapturesAreRead(OracleRow, IOracleOutcome, IOracleOutcome)"/>). On a partial
     /// result the group values may differ as well (D62, see <c>WithoutCaptures</c>).
     /// </remarks>
     /// <param name="ours">This port's answer.</param>
@@ -8852,6 +8887,208 @@ internal static class ExpectedDivergences
                     .All(static pair => OnlyCallCapturesAreMissing(pair.First, pair.Second)),
             _ => false,
         };
+
+    /// <summary>
+    /// The D51 shape clause for a format substitution (<c>subf</c>): whether this port's answer
+    /// differs from the ablated one only where the template reads a capture list the discard
+    /// shortened. Runs the four extra questions <see cref="OnlyMissingCapturesAreRead(IOracleOutcome, IOracleOutcome, IOracleOutcome?, IOracleOutcome?, IOracleOutcome?, IOracleOutcome?)"/>
+    /// reads.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>subf</c> can show the discard at all. A plain <c>sub</c> template and a
+    /// <c>split</c> read group values, and the fix never changes a value on a complete match (see
+    /// <see cref="OnlyCallCapturesAreMissing(IOracleOutcome, IOracleOutcome)"/>), so a difference
+    /// in either is something else, and is refused.
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="ablated">The answer with the D51 fix off.</param>
+    /// <returns><see langword="true"/> if only reads of missing captures differ.</returns>
+    internal static bool OnlyMissingCapturesAreRead(OracleRow row, IOracleOutcome ours, IOracleOutcome ablated)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        if (
+            !string.Equals(row.Operation, "subf", StringComparison.Ordinal)
+            || row.Template is null
+            || WithoutCaptureReads(row.Template) is not { } template
+            || string.Equals(template, row.Template, StringComparison.Ordinal)
+        )
+        {
+            return false;
+        }
+
+        OracleRow masked = row with { Template = template };
+        OracleRow scan = ScanOf(row);
+
+        return OnlyMissingCapturesAreRead(
+            ours,
+            ablated,
+            OracleComparer.Run(masked),
+            OracleComparer.RunWithTheUpstreamCallCaptures(masked),
+            OracleComparer.Run(scan),
+            OracleComparer.RunWithTheUpstreamCallCaptures(scan)
+        );
+    }
+
+    /// <summary>
+    /// The evidence half of the D51 format-substitution clause, on answers already computed, so a
+    /// test can plant a bug in any one of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Four things must hold. (1) Upstream's answer (the ablated one) is a string, and this port's
+    /// is a string with the same replacement count or the "capture index out of range" error
+    /// that a capture read past the end of a shortened list raises, as Python's own IndexError
+    /// does for a list that short. (2) With every capture-reading field removed from the template
+    /// (<see cref="WithoutCaptureReads"/>), the live and ablated runs give the same string and
+    /// upstream's count: the scan, the literals and the group values all agree, so the difference
+    /// is confined to the capture fields. (3) The same scan asked as a finditer differs between
+    /// the two runs only by captures missing from the lists, with each of this port's lists ending
+    /// in the group's value (<see cref="OnlyCallCapturesAreMissing(IOracleOutcome, IOracleOutcome)"/>),
+    /// which is what refuses a bug in the discard itself. (4) Some list did lose a capture, or the
+    /// discard cannot have changed what a field read. A group with no value counts: the harness
+    /// records no list for one, and upstream's DEFINE group filled only by a call is unset with a
+    /// capture (the D51 ruling's first witness), which a template can still read.
+    /// </para>
+    /// <para>
+    /// The residual risk is a port bug in reading a capture by index that shows only on the
+    /// shorter lists, since the ablated run uses the same reader and agrees with upstream.
+    /// </para>
+    /// </remarks>
+    /// <param name="ours">This port's answer.</param>
+    /// <param name="ablated">The answer with the D51 fix off.</param>
+    /// <param name="oursMasked">This port's answer with the capture fields removed.</param>
+    /// <param name="ablatedMasked">The ablated answer with the capture fields removed.</param>
+    /// <param name="oursScan">This port's answer to the same scan asked as a finditer.</param>
+    /// <param name="ablatedScan">The ablated answer to that finditer.</param>
+    /// <returns><see langword="true"/> if only reads of missing captures differ.</returns>
+    internal static bool OnlyMissingCapturesAreRead(
+        IOracleOutcome ours,
+        IOracleOutcome ablated,
+        IOracleOutcome? oursMasked,
+        IOracleOutcome? ablatedMasked,
+        IOracleOutcome? oursScan,
+        IOracleOutcome? ablatedScan
+    ) =>
+        ablated is SubOutcome upstreams
+        && ours switch
+        {
+            SubOutcome sub => sub.Count == upstreams.Count,
+            ErrorOutcome { Exception: nameof(ArgumentException), WhileMatching: true } error =>
+                error.Message.StartsWith("capture index out of range", StringComparison.Ordinal),
+            _ => false,
+        }
+        && oursMasked is SubOutcome liveMasked
+        && ablatedMasked is SubOutcome
+        && liveMasked.Count == upstreams.Count
+        && string.Equals(liveMasked.Describe(), ablatedMasked.Describe(), StringComparison.Ordinal)
+        && oursScan is MatchesOutcome liveScan
+        && ablatedScan is MatchesOutcome keptScan
+        && OnlyCallCapturesAreMissing(liveScan, keptScan)
+        // Some list the discard could have shortened: one that visibly lost a capture, or the list
+        // of a group with no value, which the harness does not record on either side
+        // (OracleComparer.DescribeGroups) - a DEFINE group filled only by a call is exactly that.
+        && liveScan
+            .Matches.Zip(keptScan.Matches)
+            .Any(static pair =>
+                pair.First.Groups.Zip(pair.Second.Groups)
+                    .Any(static g =>
+                        g.First.Captures.Count < g.Second.Captures.Count || (!g.First.Success && !g.Second.Success)
+                    )
+            );
+
+    /// <summary>
+    /// A format template with every field that reads a capture list by index
+    /// (<c>{group[index]}</c>) removed, and everything else left as written.
+    /// </summary>
+    /// <param name="template">The template.</param>
+    /// <returns>
+    /// The masked template, or <see langword="null"/> when it cannot be masked safely: a field with
+    /// automatic numbering (removing one renumbers the fields after it), a subscripted field that
+    /// is not plain <c>name[integer]</c>, or a <c>{</c> with no closing brace.
+    /// </returns>
+    /// <remarks>
+    /// Scans as <c>Substitution.ExpandFormat</c> does: <c>{{</c> and <c>}}</c> are literal braces,
+    /// and a field runs from <c>{</c> to the next <c>}</c>.
+    /// </remarks>
+    internal static string? WithoutCaptureReads(string template)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+
+        var masked = new System.Text.StringBuilder(template.Length);
+        int pos = 0;
+        while (pos < template.Length)
+        {
+            char c = template[pos];
+            if (c is '{' or '}' && pos + 1 < template.Length && template[pos + 1] == c)
+            {
+                masked.Append(c).Append(c);
+                pos += 2;
+                continue;
+            }
+
+            if (c != '{')
+            {
+                masked.Append(c);
+                pos++;
+                continue;
+            }
+
+            int close = template.IndexOf('}', pos + 1);
+            if (close < 0)
+            {
+                return null;
+            }
+
+            string field = template[(pos + 1)..close];
+            int bracket = field.IndexOf('[', StringComparison.Ordinal);
+            if (bracket == 0 || field.Length == 0 || (bracket < 0 && field[0] is '!' or ':'))
+            {
+                return null;
+            }
+
+            if (bracket < 0)
+            {
+                masked.Append(template, pos, close - pos + 1);
+            }
+            else if (
+                !field.EndsWith(']')
+                || !int.TryParse(
+                    field.AsSpan(bracket + 1, field.Length - bracket - 2),
+                    System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out _
+                )
+            )
+            {
+                return null;
+            }
+
+            pos = close + 1;
+        }
+
+        return masked.ToString();
+    }
+
+    /// <summary>
+    /// A substitution row's scan asked as a finditer: the same pattern, flags, subject and slice,
+    /// with every match listed.
+    /// </summary>
+    /// <param name="row">The substitution row.</param>
+    /// <returns>The finditer row.</returns>
+    internal static OracleRow ScanOf(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return row with
+        {
+            Operation = "finditer",
+            Template = null,
+            Count = 0,
+            Partial = false,
+        };
+    }
 
     /// <summary>Whether an answer is a partial match, or a finditer whose matches include one.</summary>
     /// <param name="outcome">The answer.</param>

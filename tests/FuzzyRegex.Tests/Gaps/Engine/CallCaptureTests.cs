@@ -215,4 +215,18 @@ public sealed class CallCaptureTests
 
         Render(m).Should().Be("(0,4) unset[] unset[]");
     }
+
+    [Test]
+    public void A_format_template_reads_only_the_captures_the_group_made_itself()
+    {
+        // Upstream 2026.9.10 lists group 1 as ['a', 'b'] here, the call's capture included, so
+        // subf gives 'b' for {1[-1]} (though the group's value is 'a') and 'a' for {1[-2]}.
+        // Here the list is ['a'] alone: {1[-1]} is the value, and {1[-2]} is out of range, as
+        // upstream's own IndexError is for '([ab])' with no call. Measured 2026-10-10.
+        FuzzyRegex.ReplaceFormat("ab", "([ab])(?1)", "{1[-1]}").Should().Be("a");
+
+        Action pastTheEnd = static () => FuzzyRegex.ReplaceFormat("ab", "([ab])(?1)", "{1[-2]}");
+
+        pastTheEnd.Should().Throw<ArgumentException>().WithMessage("capture index out of range*");
+    }
 }
