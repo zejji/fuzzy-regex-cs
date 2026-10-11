@@ -6545,3 +6545,27 @@ literal does. Upstream's GREEDY_REPEAT_ONE backtrack arm for a STRING_FLD tail
 `limit` and the search never runs. The greedy sibling of entry 38. This port answers every line
 right. Found by the confirmation sweep (seed 554621207,
 row 27187). Pinned by `Gaps/Engine/RepeatTests` and that judged row.
+
+## 81. A partial match's counts can break an enclosing fuzzy section's limits - DIVERGES HERE (D81, 2026-10-11)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D81 (fixed here). No draft report
+yet: the report needs a minimal witness where upstream's partial counts break an enclosing limit,
+written up the way entry 74's is.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-11, `match(..., partial=True)`:
+
+```
+(?:a(?:b){i<=1,s<=1}){s<=1}c over 'xy'  -> P(0,2) (0,1,0)   here None
+```
+
+The outer `{s<=1}` allows no insertion, and a second substitution would break it, so no path
+through 'xy' satisfies the outer section, and no continuation can change that: counts only grow.
+Upstream reports an insertion (and lists a substitution, entry 11). Oracle seed 4242 row 6365 is
+the same shape: upstream (2,0,0) under an outer `{e<=2,i<=1}`, which allows no substitution.
+
+**Why the port differs.** A run-out answers the partial before the enclosing sections close, and a
+section checks its limits only at its END_FUZZY. This port checks every open section's upper
+limits at the run-out (`Matcher.AnOpenSectionIsOverItsLimits`, owner decision 2026-10-11, option
+(b)) and backtracks to a legal path or None. `PatternObject.RunOutAsBeforeD81` restores upstream's
+behaviour for the oracle's ablations. Pinned by `Gaps/Engine/PartialEnclosingSectionLimitTests`
+and the judged rows 101045221/24643, 77181735/40114 and 1061489043/24385.
