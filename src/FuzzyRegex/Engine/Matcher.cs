@@ -859,7 +859,94 @@ internal static class Matcher
     /// <param name="node">The node.</param>
     /// <param name="ch">The codepoint at the text position.</param>
     /// <returns>What the node's predicate says, before <c>node-&gt;match</c> is applied.</returns>
-    private static bool MatchesOne(CaseEncoding encoding, Node node, uint ch) =>
+    /// <remarks>
+    /// An ASCII codepoint is answered from <see cref="Node.AsciiAnswers"/> where the node keeps
+    /// them, which <see cref="FillAsciiAnswers"/> computed with <see cref="MatchesOneUncached"/>.
+    /// </remarks>
+    private static bool MatchesOne(CaseEncoding encoding, Node node, uint ch)
+    {
+        if (ch < 128 && node.AsciiAnswers is { } answers)
+        {
+            bool answer = ((answers[(int)(ch >> 6)] >> (int)ch) & 1) != 0;
+            Debug.Assert(encoding == node.Encoding, "every caller passes the node's own encoding");
+            Debug.Assert(
+                answer == MatchesOneUncached(encoding, node, ch),
+                "the answers were computed by the predicate"
+            );
+            return answer;
+        }
+
+        return MatchesOneUncached(encoding, node, ch);
+    }
+
+    /// <summary>
+    /// Whether a node of <paramref name="op"/> keeps <see cref="Node.AsciiAnswers"/>: one whose
+    /// predicate costs more than a comparison or two, under an encoding whose answers are fixed.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="MatchesOneUncached"/> reads only the node and the codepoint: its arguments are the
+    /// encoding, which every caller takes from <see cref="Node.Encoding"/> (fixed when the node is
+    /// built), the node, whose opcode, values, status and set members the compiler finishes before
+    /// <see cref="FillAsciiAnswers"/> runs, and the codepoint. Case-insensitivity and full folding
+    /// are the opcode itself (<c>_IGN</c>), not match-time state. LOCALE is left out because its
+    /// answers belong to a locale rather than to the pattern. CHARACTER and RANGE are left out
+    /// because their predicate is already one or two comparisons.
+    /// </remarks>
+    /// <param name="op">The node's opcode.</param>
+    /// <param name="encoding">The node's encoding.</param>
+    /// <returns><see langword="true"/> if the node keeps them.</returns>
+    internal static bool HasAsciiAnswers(Opcode op, CaseEncoding encoding) =>
+        encoding != CaseEncoding.Locale
+        && op
+            is Opcode.CharacterIgn
+                or Opcode.CharacterIgnRev
+                or Opcode.Property
+                or Opcode.PropertyRev
+                or Opcode.PropertyIgn
+                or Opcode.PropertyIgnRev
+                or Opcode.RangeIgn
+                or Opcode.RangeIgnRev
+                or Opcode.SetDiff
+                or Opcode.SetDiffRev
+                or Opcode.SetDiffIgn
+                or Opcode.SetDiffIgnRev
+                or Opcode.SetInter
+                or Opcode.SetInterRev
+                or Opcode.SetInterIgn
+                or Opcode.SetInterIgnRev
+                or Opcode.SetSymDiff
+                or Opcode.SetSymDiffRev
+                or Opcode.SetSymDiffIgn
+                or Opcode.SetSymDiffIgnRev
+                or Opcode.SetUnion
+                or Opcode.SetUnionRev
+                or Opcode.SetUnionIgn
+                or Opcode.SetUnionIgnRev;
+
+    /// <summary>Fills <see cref="Node.AsciiAnswers"/> by asking the node's predicate about 0-127.</summary>
+    /// <param name="node">A node of a pattern whose compilation is otherwise complete.</param>
+    internal static void FillAsciiAnswers(Node node)
+    {
+        if (node.AsciiAnswers is not { } answers)
+        {
+            return;
+        }
+
+        for (uint ch = 0; ch < 128; ch++)
+        {
+            if (MatchesOneUncached(node.Encoding, node, ch))
+            {
+                answers[(int)(ch >> 6)] |= 1UL << (int)ch;
+            }
+        }
+    }
+
+    /// <summary><see cref="MatchesOne"/> without the ASCII answers: the predicate itself.</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="ch">The codepoint at the text position.</param>
+    /// <returns>What the node's predicate says, before <c>node-&gt;match</c> is applied.</returns>
+    internal static bool MatchesOneUncached(CaseEncoding encoding, Node node, uint ch) =>
         node.Op switch
         {
             Opcode.Character or Opcode.CharacterRev => MatchesCharacter(node, ch),

@@ -1269,6 +1269,13 @@ internal sealed class PatternObject
         // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
         BranchChain.Build(self.NodeList);
 
+        // NOT UPSTREAM'S (S62): last, so every node and every set member is final. See
+        // Node.AsciiAnswers.
+        foreach (Node node in self.NodeList)
+        {
+            Matcher.FillAsciiAnswers(node);
+        }
+
         return self;
     }
 

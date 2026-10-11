@@ -132,6 +132,17 @@ internal sealed class Node
     /// </summary>
     internal readonly uint[] Values;
 
+    /// <summary>
+    /// NOT UPSTREAM (S62): what <c>Matcher.MatchesOne</c> answers for each ASCII codepoint, bit
+    /// <c>ch &amp; 63</c> of element <c>ch &gt;&gt; 6</c>, or <see langword="null"/> for a node it is not
+    /// kept for (<see cref="Matcher.HasAsciiAnswers"/>). Allocated when the node is built and filled by
+    /// <see cref="Matcher.FillAsciiAnswers"/> as the last step of <see cref="PatternObject.Compile"/>,
+    /// by asking the node's own predicate, so the two cannot disagree; nothing writes it after.
+    /// The idea is .NET's <c>RegexCharClass</c> ASCII lookup, computed eagerly here because a
+    /// compiled pattern is never written while it matches.
+    /// </summary>
+    internal ulong[]? AsciiAnswers { get; init; }
+
     /// <summary>Upstream <c>status</c>: the <see cref="NodeStatus"/> bits.</summary>
     internal uint Status;
 
