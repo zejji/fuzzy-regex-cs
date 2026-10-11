@@ -1354,3 +1354,28 @@ machine is the orchestrator's step 2.
   `conf20/conf.jsonl` is 77 expected, 3 fault and 3 diverge, the rows still waiting on the owner (D81).
   `gate20/gate89.jsonl` is 89 of 89 expected, and `a1keys/red91w.jsonl` is 91 of 91 expected.
 - `tools/probes/surrogate-slice-sweep.cs`: 137,632 cases, 0 flagged, 0 hung.
+
+### 2026-10-11, later - the blind review's regression, fixed (9f97d71a)
+
+A blind review of aa8ecb44 found item 3 losing a partial match. The pattern needs a
+`LAZY_REPEAT_ONE` followed by a zero-width tail (`^`, `(?m)^`, `\A`, `\G`, `\m`) that fails
+where the held text ends. Item 3's `TryMatch` refused that tail, and the repeat's backtrack walk
+ends at its limit on a refusal. Main instead entered the tail, failed inside it, and backtracked
+into the repeat's next try, which takes a character of the text to come and runs out. For
+example, `(?m)[a\n]*?^b` over 'a' is P(0, 1) on main, completed by 'a\nb', and was None on the
+branch. The reviewer's differential found 666 such rows in 164,804. Upstream answers None to that
+example, so the oracle counted the branch as agreeing, which is why my oracle runs missed it.
+
+The fix: in a partial call, `TryMatch`'s zero-width arms answer as the default arm and enter the
+node, which is exactly what main does (`Matcher.cs`, the `IsPositionAssertion` arm). Ordinary
+calls keep the refusal. D11's `Undetermined` is produced only in partial calls, so the
+conversion added in e0905216 can no longer be reached; it is now a `Debug.Assert`.
+
+The witnesses are in `PartialMatchingTests.A_lazy_repeat_runs_out_at_the_edge_where_its_zero_width_tail_fails`.
+Its five rows were all red on aa8ecb44 and are green now. The oracle's `partial-edge-read` entry
+already classifies all five rows on main's answer. The `\G` and `\A` rows look like main
+overclaiming: no text completes `a*?\G` or `a*?\A` once an 'a' is taken. They are pinned as main
+answers them, and they are left for triage.
+
+After the fix the differential shows 0 differences from main at 90012058 over 164,804 rows. The
+three seeds and the three saved waves give main's tallies and port answers row for row.
