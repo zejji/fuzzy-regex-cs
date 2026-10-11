@@ -7354,16 +7354,26 @@ internal static class Matcher
         }
         else if (Optimiser.IsPositionAssertion(test.Op))
         {
-            status = TryMatchZeroWidth(state, test, textPos);
-
-            // NOT UPSTREAM'S, D11 M1: a test at the edge of a partial call's second pass that some
-            // continuations pass. The node is entered, not passed over, because its own arm in
-            // BasicMatch is what marks the path (PushTouchMark); every caller reads this as the
-            // pre-S60b default arm's success, which is what it was before.
-            if (status == MatchStatus.Undetermined)
+            // In a partial call the zero-width arms answer as the default arm (:7843) and enter
+            // the node, as they did before S60b. A refusal is not transparent there: the
+            // LAZY_REPEAT_ONE walk (BasicMatch's backtrack arm) ends at its limit on a refused
+            // tail, where a tail entered and failed leaves the repeat a try at the text to come,
+            // which runs out. `(?m)[a\n]*?^b` over 'a' is P(0, 1), completed by 'a\nb', and was
+            // None with the refusal (blind review of S60b, 2026-10-11; PartialMatchingTests).
+            if (state.PartialSide != MatchState.PartialNone)
             {
                 return MatchStatus.Success;
             }
+
+            status = TryMatchZeroWidth(state, test, textPos);
+
+            // D11 M1's Undetermined comes only from a partial call (WordTestAtEdge,
+            // GraphemeBoundaryAtEdge, ZeroWidthInsideTheTextToCome and the rest), which never
+            // reaches this line, so no caller sees it.
+            Debug.Assert(
+                status != MatchStatus.Undetermined,
+                "S60b: a zero-width test answers Undetermined only in a partial call"
+            );
         }
         else
         {

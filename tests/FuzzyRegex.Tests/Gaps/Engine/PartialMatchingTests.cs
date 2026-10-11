@@ -2194,4 +2194,45 @@ public sealed class PartialMatchingTests
             .FullMatch("\r\n", partial: true)
             .Success.Should()
             .BeFalse();
+
+    /// <summary>
+    /// A lazy repeat whose zero-width tail fails where the held text ends can still take a character
+    /// of the text to come, so the partial runs out there. Pins main's answers (79668f90, 2026-10-11)
+    /// against S60b item 3, whose full <c>try_match</c> refused the tail at the edge and ended the
+    /// repeat's walk before that run-out (blind review of aa8ecb44).
+    /// </summary>
+    /// <remarks>
+    /// The first four are completed by longer text: 'a\nb', 'a\n', 'a b' and 'xa\nb'. Upstream
+    /// answers None to the first (regex 2026.9.10). The <c>\G</c> row is main's answer too, pinned so
+    /// that S60b changes nothing; whether any text completes it is a separate question.
+    /// </remarks>
+    /// <param name="operation">match, fullmatch or search.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="start">The partial match's start.</param>
+    /// <param name="end">The partial match's end.</param>
+    [Test]
+    [Arguments("match", @"(?m)[a\n]*?^b", "a", 0, 1)]
+    [Arguments("fullmatch", @"(?ms).*?^", "a", 0, 1)]
+    [Arguments("match", @"[a ]*?\mb", "a", 0, 1)]
+    [Arguments("search", @"(?m)[a\n]*?^b", "xa", 1, 2)]
+    [Arguments("fullmatch", @"a*?\G", "a", 0, 1)]
+    public void A_lazy_repeat_runs_out_at_the_edge_where_its_zero_width_tail_fails(
+        string operation,
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = operation switch
+        {
+            "match" => regex.MatchAtStart(subject, partial: true),
+            "fullmatch" => regex.FullMatch(subject, partial: true),
+            _ => regex.Match(subject, partial: true),
+        };
+
+        (m.Success, m.Index, m.Index + m.Length, m.PartialMatch).Should().Be((true, start, end, true));
+    }
 }
