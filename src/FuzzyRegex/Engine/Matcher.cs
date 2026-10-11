@@ -12637,12 +12637,12 @@ internal static class Matcher
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
 
         // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
-        // start with. Withheld from a partial match, which can end part way through a literal, and
-        // from a pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        SearchValues<string>? leadingStrings =
-            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb
-                ? pattern.LeadingStrings
-                : null;
+        // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
+        // Withheld from a partial match, which can end part way through a literal, and from a
+        // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
+        SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
 
         Node node;
         int status;
@@ -12812,6 +12812,17 @@ internal static class Matcher
         if (leadingStrings is not null && foundPos <= state.SliceEnd)
         {
             int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            if (at < 0)
+            {
+                return MatchStatus.Failure;
+            }
+
+            foundPos += at;
+        }
+        else if (leadingUnits is not null && foundPos <= state.SliceEnd)
+        {
+            // Every match takes at least one character, which starts on one of the units.
+            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingUnits);
             if (at < 0)
             {
                 return MatchStatus.Failure;

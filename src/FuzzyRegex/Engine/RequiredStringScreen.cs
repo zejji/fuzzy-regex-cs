@@ -247,34 +247,8 @@ internal static class RequiredStringScreen
             return null;
         }
 
-        bool reverse = reqString.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
-        uint first = reqString.Values[reverse ? reqString.Values.Count - 1 : 0];
-        var codepoints = new HashSet<uint> { first };
-
-        if (reqString.Op != Opcode.StringRev)
-        {
-            Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
-            var pending = new Stack<uint>();
-            pending.Push(first);
-
-            while (pending.Count > 0)
-            {
-                int count = Encodings.AllCases(reqString.Encoding, pending.Pop(), cases);
-                for (int c = 0; c < count; c++)
-                {
-                    if (codepoints.Add(cases[c]))
-                    {
-                        pending.Push(cases[c]);
-                    }
-                }
-            }
-
-            CaseEncoding encoding = reqString.Encoding;
-            codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
-        }
-
         var units = new HashSet<char>();
-        foreach (uint codepoint in codepoints)
+        foreach (uint codepoint in FirstCodepoints(reqString))
         {
             if (codepoint is >= 0xD800 and <= 0xDFFF or > 0x10FFFF)
             {
@@ -294,6 +268,49 @@ internal static class RequiredStringScreen
         }
 
         return SearchValues.Create([.. units]);
+    }
+
+    /// <summary>
+    /// The subject characters that could take a literal node's first character in reading order:
+    /// the character itself for a case-sensitive node, otherwise its closure under
+    /// <see cref="Encodings.AllCases"/> plus the <see cref="Specials"/> with a case whose folding
+    /// holds it. <see cref="FirstUnits"/> and <c>PatternObject.FindLeadingStrings</c> share it.
+    /// </summary>
+    /// <param name="node">
+    /// A non-empty <c>String</c>, <c>Character</c>, <c>CharacterIgn</c> or a node <see cref="Covers"/>
+    /// accepts, whose encoding is not <c>LOCALE</c> if it ignores case.
+    /// </param>
+    /// <returns>The codepoints.</returns>
+    internal static HashSet<uint> FirstCodepoints(Node node)
+    {
+        bool reverse = node.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
+        uint first = node.Values[reverse ? node.Values.Count - 1 : 0];
+        var codepoints = new HashSet<uint> { first };
+
+        if (node.Op is Opcode.StringRev or Opcode.String or Opcode.Character)
+        {
+            return codepoints;
+        }
+
+        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        var pending = new Stack<uint>();
+        pending.Push(first);
+
+        while (pending.Count > 0)
+        {
+            int count = Encodings.AllCases(node.Encoding, pending.Pop(), cases);
+            for (int c = 0; c < count; c++)
+            {
+                if (codepoints.Add(cases[c]))
+                {
+                    pending.Push(cases[c]);
+                }
+            }
+        }
+
+        CaseEncoding encoding = node.Encoding;
+        codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
+        return codepoints;
     }
 
     /// <summary>

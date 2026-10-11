@@ -893,6 +893,8 @@ public sealed class ThreadSafetyTests
             // S60b added LeadingStrings, written once by Compile next to LeadingRepeat. SearchValues
             // is immutable and safe to search from many threads.
             "PatternObject.LeadingStrings",
+            // The fold-aware screen (2026-10-11) added LeadingUnits, written with LeadingStrings.
+            "PatternObject.LeadingUnits",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never
