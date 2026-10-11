@@ -2234,12 +2234,22 @@ internal sealed class MatchState : IDisposable
     /// "deliberately not ported" table in <c>docs/PORTMAP.md</c>. The fuzzy line read "waits for
     /// Phase 5" until S38 measured it.
     /// </remarks>
-    internal void ResetGuards()
+    /// <param name="keepFailureMemos">
+    /// Whether to leave the body guard lists of failure-memo repeats as they are. <b>Not
+    /// upstream</b>; see <see cref="PatternObject.KeepsFailureMemosAcrossAttempts"/>.
+    /// </param>
+    internal void ResetGuards(bool keepFailureMemos = false)
     {
         // Reset the guards for the repeats.
-        foreach (RepeatData repeat in Repeats)
+        for (int i = 0; i < Repeats.Length; i++)
         {
-            repeat.BodyGuardList.Reset();
+            RepeatData repeat = Repeats[i];
+
+            if (!keepFailureMemos || !Pattern.RepeatInfoAt(i).FailureMemo)
+            {
+                repeat.BodyGuardList.Reset();
+            }
+
             repeat.TailGuardList.Reset();
         }
 
