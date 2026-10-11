@@ -1,3 +1,4 @@
+using System.Buffers;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -582,6 +583,20 @@ internal sealed class PatternObject
     /// <see cref="Engine.FuzzyLiteralFilter"/>.
     /// </summary>
     internal FuzzyLiteralFilter? FuzzyLiteralFilter;
+
+    /// <summary>
+    /// The single-character repeat a search attempt starts with, or <see langword="null"/>: the
+    /// one whose run <c>Matcher.BasicMatch</c>'s <c>FAILURE</c> arm skips before the next attempt.
+    /// <b>Wider than upstream's</b> (S60b item 17); see <see cref="FindLeadingRepeat"/>.
+    /// </summary>
+    internal Node? LeadingRepeat;
+
+    /// <summary>
+    /// The literals a search attempt can start with when the pattern opens with an alternation
+    /// whose every branch opens with one, or <see langword="null"/>. <b>This port's own field</b>
+    /// (S60b item 14); see <see cref="FindLeadingStrings"/>.
+    /// </summary>
+    internal SearchValues<string>? LeadingStrings;
 
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
@@ -1247,7 +1262,159 @@ internal sealed class PatternObject
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
 
+        self.LeadingRepeat = FindLeadingRepeat(self);
+
+        self.LeadingStrings = FindLeadingStrings(self);
+
+        // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
+        BranchChain.Build(self.NodeList);
+
         return self;
+    }
+
+    /// <summary>
+    /// Finds <see cref="LeadingStrings"/>. Not upstream code: upstream has no fast search for a
+    /// pattern that opens with a branch, so it tries every position (S60b item 14).
+    /// sync-divergence: the search loop jumps to the earliest of these literals before each attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A match of <c>cat|dog</c> starts where <c>cat</c> or <c>dog</c> does, so no attempt anywhere
+    /// else can succeed, and the engine still chooses the branch. The walk follows each branch to
+    /// its first node, looking through capture groups, which record where they open and do not read
+    /// text, and nested branches. Every path must reach a case-sensitive forward literal. Anything
+    /// else, such as an empty branch, a class, a lookaround or an anchor, gives
+    /// <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// A literal holding a surrogate code point on its own is refused. A search for a lone low
+    /// surrogate could stop in the middle of a pair, a position the engine never starts at.
+    /// </para>
+    /// <para>
+    /// Not fuzzy, where an error can delete the literal, and not reversed. Partial matches and
+    /// <c>(*SKIP)</c> are refused at the call site in <c>Matcher.BasicMatch</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern.</param>
+    /// <returns>The literals, or <see langword="null"/>.</returns>
+    private static SearchValues<string>? FindLeadingStrings(PatternObject pattern)
+    {
+        if (pattern.IsFuzzy || (pattern.Flags & RegexFlags.Reverse) != 0)
+        {
+            return null;
+        }
+
+        var strings = new List<string>();
+        int branches = 0;
+
+        return Collect(pattern.StartNode) && branches > 0
+            ? SearchValues.Create([.. strings], StringComparison.Ordinal)
+            : null;
+
+        bool Collect(Node? node)
+        {
+            while (true)
+            {
+                switch (node?.Op)
+                {
+                    case Opcode.Branch when node.Next2.Node is not null:
+                        // The count bounds the recursion, which only a branch nested first in a
+                        // branch takes.
+                        if (++branches > _maxLeadingBranches || !Collect(node.Next1.Node))
+                        {
+                            return false;
+                        }
+
+                        node = node.Next2.Node;
+                        continue;
+                    case Opcode.Branch:
+                    case Opcode.StartGroup:
+                    // The zero-width first-set check the compiler puts in front of a branch
+                    // (ParseFunctions.CheckFirstset) reads nothing; it can only refuse a position.
+                    case Opcode.Character
+                    or Opcode.Range
+                    or Opcode.SetDiff
+                    or Opcode.SetInter
+                    or Opcode.SetSymDiff
+                    or Opcode.SetUnion when node.Step == 0:
+                        node = node.Next1.Node;
+                        continue;
+                    case Opcode.Character when node.Match && node.Step != 0:
+                    case Opcode.String:
+                        if (node.Values.Exists(static c => c is >= 0xD800 and <= 0xDFFF))
+                        {
+                            return false;
+                        }
+
+                        strings.Add(string.Concat(node.Values.Select(static c => char.ConvertFromUtf32((int)c))));
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        }
+    }
+
+    /// <summary>The most branches <see cref="FindLeadingStrings"/> walks before giving up.</summary>
+    private const int _maxLeadingBranches = 1000;
+
+    /// <summary>
+    /// Finds <see cref="LeadingRepeat"/>. Upstream takes the start node when it is a
+    /// <c>GREEDY_REPEAT_ONE</c> or <c>LAZY_REPEAT_ONE</c> (<c>upstream/src/_regex.c</c>:15719).
+    /// sync-divergence: this port also looks through the capture groups that open in front of a
+    /// greedy one, so <c>(\d+)x</c> skips the way <c>\d+x</c> does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The skip is sound for a bare repeat because an attempt that starts inside the run the
+    /// failed attempt's repeat matched can only reach end positions that attempt already tried,
+    /// and runs the rest of the pattern from each of them the same way. A capture group round the
+    /// repeat changes only what the group holds, so the argument still holds unless something
+    /// reads the group's text. So the look-through needs all of these:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>The repeat is greedy. The argument needs the failed attempt to have tried every end
+    /// position in the run, and a lazy repeat that meets <c>(*SKIP)</c> or <c>(*PRUNE)</c>, or a
+    /// partial match that runs out, stops short: regex 2026.9.10 finds <c>(?i)(a*?)(*SKIP)b</c>
+    /// over <c>aab</c> at (2, 3), and a skip would miss it. Upstream skips for a bare lazy repeat
+    /// all the same, and this keeps that.</item>
+    /// <item>No group is referenced: no backreference and no <c>(?(n)...)</c>, whose answer
+    /// depends on what the group holds or on where it started.</item>
+    /// <item>No group call. A call re-enters a group body, and keeping it out keeps the argument
+    /// above short.</item>
+    /// <item>Not fuzzy. This is the slice's own guard (<c>MaxErrors == 0</c>), kept as caution: a
+    /// differential sweep with it removed changed no answer (S60b sittings notes).</item>
+    /// <item>Not reversed. A reverse group opens with <c>END_GROUP</c>, so there is nothing to look
+    /// through, and saying so keeps this forward-only.</item>
+    /// </list>
+    /// <para>
+    /// regex 2026.9.10 is quadratic on <c>(?s)(.*)a\d</c> over a run of <c>a</c> (1,239 ms at
+    /// 8,000 characters, 2026-09-23) and linear without the group. Pinned by
+    /// <c>OptimiserTrapsTests.A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern.</param>
+    /// <returns>The leading repeat, or <see langword="null"/>.</returns>
+    private static Node? FindLeadingRepeat(PatternObject pattern)
+    {
+        Node node = pattern.StartNode!;
+        if (node.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne)
+        {
+            return node;
+        }
+
+        bool mayLookThroughGroups =
+            !pattern.IsFuzzy
+            && (pattern.Flags & RegexFlags.Reverse) == 0
+            && pattern.CallRefInfoList.Count == 0
+            && !pattern.GroupInfoList.Exists(static group => group.Referenced);
+
+        while (mayLookThroughGroups && node.Op == Opcode.StartGroup)
+        {
+            node = node.Next1.Node!;
+        }
+
+        return node.Op == Opcode.GreedyRepeatOne ? node : null;
     }
 
     /// <summary>

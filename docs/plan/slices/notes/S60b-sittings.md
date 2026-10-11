@@ -590,3 +590,895 @@ already exists: the "03:35" section above, one pass, no defects, 360,448 cases a
 eight lines are in the reverse zero-width scan and had their own pass ("05:35"). `SameCharIgn` is
 unchanged since the review, so it was not reviewed again: VERIFICATION.md allows one pass per
 unreviewed change. Nothing unreviewed is on the branch. Item 3 is next.
+
+## 2026-09-23, 23:10 - item 3 landed: `try_match` answers for every arm it has
+
+### What changed
+
+`Matcher.TryMatch` now answers the way upstream's `try_match` (`_regex.c:7671-7860`) does. Before,
+it reported every FAILURE as SUCCESS and only passed PARTIAL on. Now:
+
+- The one-character tests (`MatchOne`) and the zero-width position assertions
+  (`TryMatchZeroWidth`) answer for themselves. On success the matcher resumes at
+  `next.MatchNext`, one character on when the test is the node itself (`MatchStep`), where upstream
+  adds `match_step`. The step is `Step`, so it walks a surrogate pair as one character.
+- The six STRING arms go through `TryMatchString`, which was `IsStringTestPartial`. Running out
+  of text gives PARTIAL or FAILURE, a mismatch gives FAILURE, and a success resumes past the
+  string (`match_step == 0 ? start_pos : text_pos`, `:7383` onwards). The two full-fold arms also
+  fail when the string ends part-way through a character's folding (`:7473`, `:7546`).
+- A fuzzy test still answers SUCCESS. The SUCCESS arm (`:7832`) stays in the default arm, because
+  upstream's checks `match_all` against `text_start` (DECISIONS, 2026-09-12).
+
+All 12 callers already treated FAILURE as "do not enter", so nothing outside `TryMatch` changed
+except one poll, below.
+
+### One regression, caught by the suite
+
+The first full-suite run had one red test,
+`OptimiserTrapsTests.A_timeout_fires_inside_a_long_scan_rather_than_only_between_matches`, and it
+passed when run alone. Cause: `\b\B` over a megabyte. `try_match` now refuses `\B` itself, so
+`SearchStart`'s retry loop walked the whole subject without returning to the matching loop, and
+nothing polled the clock after the first check. Alone, a cold JIT had spent the 1 ms before that
+first check, so the test passed by luck. Fixes:
+
+- `SearchStart`'s retry loop polls on the same `Iterations` gate as `SimpleStringSearch`.
+- The test makes one warm-up call first. With the warm-up and without the poll it fails every
+  time ("no exception was thrown"). With the poll it passes.
+
+### Correctness evidence: the differential sweep
+
+Harness in `.scratch/tm-sweep/` (gitignored, so rebuild it from this description). It is a console
+project referencing the library, built twice: once against the working tree and once against a
+worktree of the base commit 8730ce4. Patterns are every prefix in `""`, `(?i)`, `(?fi)`, `(?r)`,
+`(?ri)`, `(?rfi)`, `(?m)`, `(?s)`, `(?w)`, `(?V1)(?i)` and `(?b)` joined to each of these 64
+bodies:
+
+```
+abc|abd  (?:ab|ac)d  (?:ab|AC)x?  (?:ss|ß)x  (?:ab|cd)  (?:a|b)*c  (?:ab)*c  (?:ab)+?c
+(?:ab){2,3}  (?:[ab]c)*  (?:\w\d)+  (?:^a|b)  (?:\bab|c)  (?:.b|c)*  (?:\p{L}x)*  (ab)*
+(ab|cd)*e  (?:a|ab)(?:c|bcd)  (?:x|xy)*z  (?:a.)*abc  .*?abc  (?:ab)*ab  (?:İ|x)  (?:ﬃ|y)z
+(?:😀a|b)  (?:ab|cd){e<=1}  (?:(?:ab){e<=1}|cd)x  (a|b)*?b  (?:$|a)b?  (?:\Z|b)  (?:\B|a)c
+(?:[^a]b|a)+  (?:SS|x)*  (?:ab|a)*?c  (?:abc)?abd  (?:ab)?(?:abc)+  (?:xy|x)+y  (a)|(ab)
+(?:\d|\s)+  (?:\X|a)b  (?:(?=a)|b)a  (?:(?<=a)b|c)  (?:a{2}|b)+  (?:ff|ﬀ)i  (?:K|k)+
+(?:ab)*+c  (?>ab|a)b  (?:ab|ac)*?(?:ad|ae)  (?:x|(ab))*d  (?:\m|\M)a  (?:ss)*ß  (?:[a-c]|z)+?
+(?:i̇|x)  (?:ı|I)+  (?:ff|x)  (?:xs|y)  (?:fi|x)y?  (?:sx|s)  (?:abc|abd)+  (?:😀😀|x)+
+(?:😀x|😀)  (?:(ff)|(f))+  (?:ffi|ff)i?  (?:is|s)
+```
+
+The subjects are `abcabdacd`, `ABab ACac`, `xyxyzxz`, `ßssSSxﬃz`, `😀a😀b`, `aab\nab cd`,
+`İiIı x`, `ab1 c2 d`, `ffiﬀiKk`, the empty string, `cdeabe`, `xßyﬃ` and `😀😀x😀`. One row per
+UTF-16 `(beginning, length)` slice, mid-pair included. Each row records ten calls: `Match`,
+`MatchAtStart`, `FullMatch`, `Matches` and overlapped `Matches`, each with and without `partial`.
+It prints the span, the partial flag and every group.
+
+**Result: 325,952 rows, byte-identical between the base and the final code** (the final code
+includes the poll). The first, narrower generator (244,728 rows, without the last ten bodies and
+the last two subjects) was also identical. The generator is exhaustive, so there is no seed to
+vary.
+
+The AtEnd guard in END_GREEDY_REPEAT's body test, which comments called unreachable, is reached on
+786 rows both before and after. `(?:ab)*c` over `ab` with `partial` reaches it; regex 2026.9.10
+answers `(0, 2)` partial for search, match and fullmatch, and so does the port. That is now pinned
+by `PartialMatchingTests.A_repeat_body_and_tail_that_both_run_out_are_partial_over_the_repeat`.
+
+### Negative controls
+
+Each control is one edit in `Matcher.cs` and a count of rows that differ from the base output. C, D
+and E were run against the 325,952-row generator. A and B were run against the 244,728-row one and
+were not re-run on the wider generator. All five ran before the poll was added. The poll changes
+no answer without a timeout, and the final sweep matches base exactly.
+
+- Control A, one-char step dropped. In `TryMatch`, change
+  `nextPosition = new Position(next.MatchNext!, Step(state, textPos, next.MatchStep));` to
+  `nextPosition = new Position(next.MatchNext!, textPos);`. **16,852 rows differ.**
+- Control B, string end inverted. In `TryMatchString`, change
+  `end = next.MatchStep == 0 ? textPos : pos;` to `end = next.MatchStep != 0 ? textPos : pos;`.
+  **6,218 rows differ.**
+- Control C, forward fold tail off. Below `// The string ended part-way through a character's
+  folding (:7473).`, change `if (foldedPos < foldedLen)` to
+  `if (foldedPos < foldedLen && foldedLen > 99)`. **54 rows differ**, for example `(?i)(?:ff|x)`
+  over `ﬃ`.
+- Control D, reverse fold tail off. Below `// (:7546.)`, the same change. **84 rows differ**, for
+  example `(?ri)(?:SS|x)*`.
+- Control E, zero-width arm always fails. Change
+  `status = TryMatchZeroWidth(state, test, textPos);` to `status = MatchStatus.Failure;`.
+  **12,082 rows differ.**
+
+C fired only after the generator was widened with the fold bodies and subjects (the first run gave
+0). It is the thinnest of the five.
+
+### Bytes, not time
+
+S89 was running beside this sitting, so no time is claimed. `ManyInputs`, `--job short
+--inProcess --memory`, after then before (the base from the 8730ce4 worktree):
+
+| Row | Allocated before | Allocated after |
+|---|---|---|
+| RedactDigits | 32,838,650 B | 32,838,650 B |
+| ParseLogLines | 44,800,456 B | 44,800,498 B |
+| FuzzyPhraseThreeNamedList | 0 | 0 |
+
+ParseLogLines differs by 42 B in 44.8 MB. `TryMatch` allocates nothing, so that is likely
+measurement noise. A `--job dry` run showed differences of about 300 B each way, which is the
+first-call noise a dry job carries. The short-job means (busy machine, not evidence) were 145 ms
+before and 156 ms after on the named-list row, and within a few per cent elsewhere.
+
+**Filters for the orchestrator's quiet run:** `ManyInputs` rows `ValidateEmails`, `ParseLogLines`,
+`RedactDigits` and `FuzzyPhraseThreeNamedList`, which run through branches and repeats whose body
+or tail is a one-character, zero-width or string test, and `CountStringMegabyte` as the floor check.
+Item 3 is an optimisation, so if the gate shows no gain the answer is to revert `TryMatch` to the
+S31 form, not to keep it for fidelity: the sweep shows either form gives the same answers.
+
+### Verification
+
+Suite 6777/6777, ratchet GREEN. Permanent files: PartialMatchingTests 55/55, BacktrackingVerbTests
+20/20, ReverseMatchingTests 40/40. Oracle GREEN at all three default seeds. AOT 6774 passed, 3
+skipped; AOT smoke GREEN, 6.69 MB.
+
+### Review
+
+One blind pass (Opus, the VERIFICATION.md brief, scope the uncommitted diff, the hunt list above):
+**No defects found.** It wrote its own sweeps rather than reusing ours. The first had 70 new
+bodies (lookbehind strings, `\K`, conditionals, recursion, group calls, atomic and possessive
+groups, `\G`, single-character repeats before string tails, surrogates, and the folds `ß`, `ﬃ`,
+`ﬆ`, `ẞ`, `ǰ`, `ΐ`, `İ` and the Kelvin sign) under 10 prefixes: 300,560 rows, 0 differ from base.
+The second had 17 fuzzy bodies under 7 prefixes, `(?b)` and `(?e)` included: 31,031 rows, 0 differ.
+It also ran 8 patterns over 2^21 `a`s through every public entry point with a 1 ms timeout and
+a cancelled token: the same exception type as base every time. Suite 6777/6777, oracle GREEN at
+three seeds. Nothing to reproduce, nothing fixed, no second pass needed.
+
+It reported one thing outside this diff, and base behaves the same: `\b\B` over 2^21 `a`s with a
+1 ms timeout returns False after about 120 ms. The subject has no boundary, so
+`SearchStartZeroWidth` scans the whole of it, and that loop has no poll. It is in STATE.md as a
+finding.
+
+## 2026-09-24, 00:50 - item 6 closed as never ported; item 17 landed
+
+### Item 6: neither encoding arm is ported, ever
+
+Both arms reproduce a known upstream bug, so porting them would add a bug the port does not have.
+Evidence from regex 2026.9.10 (`.scratch/item6.py`, 2026-09-23):
+
+- `same_char_ign_turkic`: `(?fi)fi` over `fı` matches `(0, 2)`, but `(?fi)(f)i` and `(?fi)i` give
+  None. The first answer comes from the Turkic comparison in `string_search_fld`; the other two
+  come from the matcher's own fold, and they disagree.
+- `*_has_property_ign` under ASCII: `(?ai)\p{Ll}*` over `KsKK` matches `(0, 0)` for both match and
+  search, but `(?ai)\p{Ll}+` gives `(0, 2)` for match and `(1, 2)` for search, and `(?ai)\p{Ll}`
+  over `A` gives `(0, 1)` for match and None for search. The search-start sweep and the matcher
+  answer differently.
+
+S22's three pins of these inconsistencies are now permanent under the owner rule of 2026-09-12. The
+comments in `Encodings.cs` and `Matcher.cs` say so, PORTMAP rows 131, 260 and 263 say "Never
+ported", the two OPTIMISATION-NOTES rows are gone, and DECISIONS has the 2026-09-23 entry. A later
+`string_search_fld` must compare with `SameCharIgn`. S22's three self-inconsistencies have no
+upstream-report ledger entry; that is in STATE.md as a finding.
+
+### Item 17: what it became
+
+The item asks for PCRE2's leading `.*` auto-anchoring. Upstream already has most of it: after a
+failed attempt, the FAILURE arm of `basic_match` (`_regex.c:15719`) skips the run of characters a
+leading single-character repeat matched. Under DOTALL that run is the rest of the subject, so
+`(?s).*a\d` is linear. But the arm tests `start_node` itself, and a capture group in front makes
+the start node a `START_GROUP`. So `(?s)(.*)a\d` retries from every position, in upstream and in
+the port:
+
+| Characters | regex 2026.9.10 | Port before | Port after |
+|---|---|---|---|
+| 2,000 | 75.8 ms | 175.8 ms | 1.10 ms |
+| 4,000 | 301.6 ms | 706 ms | 2.20 ms |
+| 8,000 | 1,239 ms | 2,643 ms | 4.30 ms |
+| 16,000 | | 10,388 ms | 8.83 ms |
+
+Stopwatch, Release, one warm-up call, over `'a' * n`, with another session running (probe
+`.scratch/ds/`; upstream from `.scratch/lr.py`). `(?:.*)` and `(?>.*)` were already fast in both.
+
+`PatternObject.FindLeadingRepeat` now looks through the capture groups in front of a greedy repeat,
+and the FAILURE arm uses the result (`PatternObject.LeadingRepeat`). The skip is sound when the
+failed attempt tried every end position in the run, because an attempt starting inside the run can
+only reach those same end positions. A greedy repeat tries them all. A lazy one need not: the
+blind review found that `(*SKIP)`, `(*PRUNE)` or a partial run-out can stop it short, so the lazy
+repeat is not looked through. A group round the repeat changes only what the group holds, so the
+look-through is also guarded on nothing reading it: no referenced group (backreference or
+`(?(n)...)`), no group call. It is off for fuzzy and reversed patterns. The fuzzy guard is the slice's own; control C below
+shows no row that needs it. Ledgered in SYNC-DIVERGENCE.
+
+Not done: a top-level alternation whose every branch starts with `.*`, which PCRE2 also anchors.
+The start node there is a branch, and no benchmark row has that shape.
+
+### Correctness evidence: the differential sweep
+
+Harness in `.scratch/lr-sweep/` (gitignored). A console project built against this tree and
+against a worktree of the base commit 52ba79b. Patterns are every prefix in `""`, `(?i)`, `(?s)`,
+`(?m)`, `(?r)`, `(?p)`, `(?b)`, `(?e)`, `(?w)`, `(?V1)` and `(?fi)` joined to each of these 93
+bodies:
+
+```
+(a*)b  (a+)b  (a*?)b  (a+?)b  (a{2,})b  (a{0,2})b  (a*)  (a+)  (a*)$  (a*)\b  ((a*))b
+(?<n>a*)b  ((a*)b)c  (a*b)c  (a*)(b)  (.*)b  (.*?)b  (.*)ab  (.+)b$  (\w*)\d  (\d+)x
+([ab]*)c  ([^b]*)b  (\s*)\w  (a*)(?=b)  (a*)(?!a)  (a*)(?<=a)b  (a*)\Gb  \G(a*)b  (a*)\Kb
+(a*)(*SKIP)b  (a*)(*PRUNE)b  (a*)(*COMMIT)b  (a*)(*FAIL)|b  (a*)b|c  (a*)b|(a*)c
+(a*)(?:b|ab)  (a*)a  (a*)aa  (a*)(a)  (a*+)b  (?>(a*))b  (a*)b(?1)  (a*)\1b  (a*)(?(1)b|c)
+(a*)b{e<=1}  (?:(a*)b){e<=1}  (😀*)x  (ß*)s  (a*)\B  (a*)^b  (a*)\Z  (a*)(?:)  ()a*b  (a)*b
+(?:a*)b  a*b  (?:(a*))b  (a*)b(a*)  (x*)y*z  (a|b*)c  (a*)(?r:b)  (a*)\X  (a{0,3})b
+(a{1,2})c  (a{0,1})b  (a{2})b  (.{0,2})x  (\d{0,2})x  (a{0,2}?)b  ((a{0,2}))b  (a{1,3})a
+([ab]{0,2})c  (\s{0,1})\w  (a{0,2})b{e<=1}  (a{0,2})\1b  (\w+) \1  (a*)b\1  ((a*))\2b
+(?<n>a*)(?P=n)b  (a+)\1  (\d*)x\1  (a*?)(*SKIP)b  (a*?)(*SKIP)  (a*?)(*PRUNE)b
+(a{0,2}?)(*SKIP)b  (a*?)\G  (a*?)\B  (a*?)(?<=aa)b  a*?(*SKIP)b  (a*)(*SKIP)  (a+?)(*PRUNE)
+```
+
+The subjects are `aaab`, `aaac aab`, `aabab`, `baaa`, `aaaa`, `abab\nab`, the empty string, `a`,
+`123 45x`, `  ab`, `😀😀x`, `ßssx`, `aAaB`, `xyyz xz`, `aaa\nb`, `aaaab ab` and `12x 123x`. One row
+per UTF-16 `(beginning, length)` slice. Each row records ten calls: `Match`, `MatchAtStart`,
+`FullMatch`, `Matches` and overlapped `Matches`, each with and without `partial`, with the span,
+the partial flag and every group.
+
+**Result: 400,411 rows, byte-identical between the base and the final code.** 11 patterns fail to
+compile in both. Narrower generators of 211,431, 325,611 and 356,411 rows were identical on the
+code before the review's fix too; the last ten bodies were added from the review's finding and
+catch it (control D). The generator is exhaustive, so there is no seed to vary.
+
+### Negative controls
+
+Each control is one edit, and a count of rows that differ from base. All four were re-run against
+the final code and the final 400,411-row generator.
+
+- Control A, reference guard off. In `PatternObject.FindLeadingRepeat`, change
+  `&& !pattern.GroupInfoList.Exists(static group => group.Referenced);` to
+  `&& !pattern.GroupInfoList.Exists(static group => group.Referenced && false);`. **2,420 rows
+  differ**, over five bodies: `(a*)\1b`, `(a{0,2})\1b`, `((a*))\2b` and `(?<n>a*)(?P=n)b` at 576
+  rows each, and `(a*)b\1` at 116. On the first generator it was 386 rows, all `(a*)\1b`. The
+  conditional `(a*)(?(1)b|c)` gives no row, because group 1 is always set once the pattern starts.
+- Control B, skip at the maximum. In `Matcher.BasicMatch`, FAILURE arm, change
+  `if (skipCount < leadingRepeat.Values[2])` to `if (skipCount <= leadingRepeat.Values[2])`.
+  **452 rows differ**, over six bounded bodies (`(a{0,2})b`, `((a{0,2}))b`, `(a{0,1})b`,
+  `(a{0,3})b`, `(.{0,2})x`, `([ab]{0,2})c`), and only under `(?i)` and `(?fi)`. Before the
+  review's fix it was 504, the extra 52 from the lazy `(a{0,2}?)b`.
+  Why the other prefixes give no row was not traced; a search-start prefilter that moves past the
+  run is the likely reason. On the first generator it was 22 rows over one body, which is why the
+  bounded bodies were added.
+- Control C, fuzzy guard off. In `FindLeadingRepeat`, delete the `!pattern.IsFuzzy` line and its
+  `&&`. **0 rows differ.** The guard is caution, not a proven need.
+- Control D, lazy look-through back. In `FindLeadingRepeat`, change
+  `return node.Op == Opcode.GreedyRepeatOne ? node : null;` to
+  `return node.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne ? node : null;`. **4,344 rows
+  differ**, over seven bodies: `(a*?)(*SKIP)` 1,552, `(a*?)\G` and `(a*?)\B` 924 each,
+  `(a*?)(*SKIP)b`, `(a*?)(*PRUNE)b` and `(a{0,2}?)(*SKIP)b` 288 each, `(a*?)(?<=aa)b` 80.
+
+### Verification
+
+After the review's fix: suite 6779/6779, ratchet GREEN (baseline 6668 to 6671 distinct ids). The
+first suite run failed
+`ThreadSafetyTests.Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted` on
+the new field; `LeadingRepeat` is now on its allowlist with the writer named. Permanent files:
+PartialMatchingTests 55/55, BacktrackingVerbTests 20/20, ReverseMatchingTests 40/40. Oracle GREEN
+at all three default seeds (7, 4242, 20260924; 0 diverge). AOT 6779 tests, 0 failed, on three
+runs; one earlier run after the fix exited 2 and the failing test's name was not captured, and it
+did not come back in three re-runs on a machine another session was loading. AOT smoke GREEN,
+6.69 MB. `tools/check-sync-divergence.ps1` GREEN.
+
+**Filters for the orchestrator's quiet run:** none of the `ManyInputs` rows opens with a capture
+group round a single-character repeat, so no existing row should move. Run `ValidateEmails`,
+`ParseLogLines` and `RedactDigits` as a no-regression check on the one extra null test per failed
+attempt. The gain itself is asymptotic and pinned by
+`OptimiserTrapsTests.A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one`.
+
+### Review
+
+Two blind passes (Opus, the VERIFICATION.md brief).
+
+**First pass, the whole diff: one finding, reproduced, fixed.** The look-through reached lazy
+repeats too, and that changed answers: `(?i)(a*?)(*SKIP)b` over `aab` gave None where base and
+regex 2026.9.10 give (2, 3), and `(a*?)(*SKIP)` over `aaab` gave two empty matches where both give
+five. Its own sweep of 225,438 rows differed on 40 patterns, every one a lazy leading repeat inside
+a group. I reproduced it with `.scratch/lazy.py` against upstream and the reviewer's harness, wrote
+the failing test `A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped`, and restricted the
+look-through to greedy repeats. The reviewer's sweep is then identical to base, and control D
+above catches the old code. The item 6 claims checked out against upstream.
+
+**Second pass, the fix only: no defects found.** Its sweep of 96 greedy-focused bodies under 8
+prefixes over 39 subjects, verbs, `\K`, `\G`, lookbehinds, bounds, folds and surrogates included,
+gave 672,808 rows and 0 differences. It removed the lazy guard and saw the new test fail, then put
+it back. Suite 6779/6779; Release build with analyzers, 0 warnings.
+
+It reported one bug outside this change, which base has too and I reproduced: `(?i).{0,2}x` (and
+`(.{0,2})x`) over `"😀x😀😀x"` with a slice that cuts a surrogate pair throws
+`IndexOutOfRangeException` from `MatchState.CharAt` at beginning 1, length 1, and `FullMatch` and
+`Matches` never end at beginning 4 or 6. Repro `.scratch/rv2/Program.cs`. It is in STATE.md.
+
+### The rest of S60b in one sitting
+
+Open: items 8, 9, 11, 12, 13, 14 and 16, each independent of the others. What worked for items 3
+and 17: a failing timing test first, then the change, then a base-vs-new sweep built from
+`.scratch/lr-sweep/Program.cs` with the item's bodies swapped in, then two or three controls
+re-run on the final code. Items 9 and 14 use the same `SearchValues<string>` machinery, so build
+it once for both. Items 11 and 16 both reject start positions before an attempt, at the same two
+call sites. To finish in one sitting, take them in the order 9+14, 16, 11, 12, 13, 8, sweep each,
+and leave the quiet-machine timings to the orchestrator as items 3 and 17 did. An item whose
+quiet-run gain is nil is reverted, not kept.
+
+## 2026-09-24, 01:40 - item 14 landed: an alternation of literals searched at once
+
+### What it is
+
+A single required literal is found with one vectorised `IndexOf`. A pattern that opens with an
+alternation had nothing: `search_start` turns the fast search off for a branch, and the zero-width
+first-set check the compiler puts in front of the branch screens one character. So `cat|dog` tried
+every position that holds a `c` or a `d`, and an alternation of many words tried nearly every
+position.
+
+`PatternObject.FindLeadingStrings` walks from the start node through capture groups, nested
+branches and the first-set check, and collects each branch's first literal. If every path ends in
+a case-sensitive `String` or `Character` node, the literals become one `SearchValues<string>`
+(Ordinal) at compile time. Before each search attempt `Matcher.BasicMatch` jumps to the earliest
+of them in the rest of the slice, or fails when there is none. The engine still picks the branch.
+
+Shapes the compiler already covers get nothing new: branches that share a prefix are split, so
+`abc|abd` starts with a `String`, and single characters become a set, so `a|b` has no leading
+strings.
+
+Guards, and why:
+
+- Search only, not partial: a partial match can end part way through a literal (control A).
+- A literal holding a surrogate code unit is refused: a search for a lone low surrogate can stop
+  inside a pair, where the engine never starts (control B). An astral literal such as `😀a` is a
+  code point above 0xFFFF and is kept.
+- No `(*SKIP)`, not fuzzy, not reversed: every start-position jump in the port leaves these alone.
+  Controls C and D show no row that needs the fuzzy or SKIP guard; a fuzzy section opens with a
+  `FUZZY` node, which the walk refuses anyway.
+- Case-folded literals are refused. `(?i)zebra|yak` is unchanged (23.3 ms before and after).
+
+`SearchValues` rather than item 10's one cached `IndexOf` per literal: that cache lives in one
+`basic_match` call, so a literal absent from the text would be rescanned on every match.
+
+### Timings
+
+Stopwatch probe `.scratch/ds/` against the base worktree's `.scratch/ds-base/`, Release, both with
+`<TieredCompilation>false</TieredCompilation>`, one megabyte of random English words, median of five
+`Matches(...).Count`, another session running (2026-09-24):
+
+| Pattern | Before | After |
+|---|---|---|
+| `straße\|café` | 14.88 ms | 0.12 ms |
+| `alpha\|bravo\|charlie\|delta\|echo` | 23.89 ms | 0.12 ms |
+| `zebra\|yak` | 14.08 ms | 0.12 ms |
+| `(?:zebra\|yak)\d` | 13.58 ms | 0.11 ms |
+| `(zebra\|yak)` | 14.16 ms | 0.12 ms |
+| `cat\w+\|dog\d` | 15.23 ms | 1.31 ms |
+| eight-word `amber\|basil\|...` | 33.06 ms | 0.11 ms |
+| `quick\|lazy\|woods` | 19.15 ms | 9.57 ms |
+| `fox\|dog` (28,926 matches) | 17.13 ms | 3.66 ms |
+| `(?:zebra\|yak\|)x` (14,570 matches) | 3.90 ms | 3.10 ms |
+| `(?i)zebra\|yak` (not covered) | 23.32 ms | 23.46 ms |
+
+Tiering matters here. With tiered compilation on, the first 100 ms or so of
+`SearchValues<string>.IndexOfAny` calls run tier-0 code at 300 to 500 ns a call against 8 to 13 ns
+warm, and the first probes showed false regressions on dense hits for that reason. A short-lived
+process that matches a dense alternation a few thousand times pays that start-up cost.
+
+regex 2026.9.10 takes 162 ms for the four-megabyte search in the new test
+`OptimiserTrapsTests.An_alternation_of_literals_searches_for_all_of_them_at_once`, which failed on
+the base code with `RegexMatchTimeoutException` at its 25 ms budget.
+
+### Correctness evidence: the differential sweep
+
+Harness `.scratch/ls-sweep/` (gitignored), `python run.py <base|new> <label>`, built against this
+tree and against the base worktree at 1182e76. Prefixes `""`, `(?i)`, `(?s)`, `(?m)`, `(?r)`,
+`(?p)`, `(?b)`, `(?e)`, `(?w)`, `(?V1)`, `(?f)`, joined to each of these bodies:
+
+```
+ab|cd  ab|bc  abc|bcd  ab|b  a|bc  x|yz  ab|cd|  ab|cd|e  (ab|cd)  (ab)|(cd)  (?:ab|cd)e
+(ab|cd)\1  (ab|cd)(?1)  (?:ab|cd)(?=c)  (?:ab|cd)(?!d)  (?<=a)(?:bc|cd)  (?:ab|cd)\b
+\b(?:ab|cd)  (?:ab|cd)$  (?:ab|cd)\Z  \G(?:ab|cd)  (?:ab|cd)\G  (?:ab|cd)\Kx
+(?:ab|cd)(*SKIP)x  (?:ab|cd)(*PRUNE)x  (?:ab|cd)(*COMMIT)x  (?:ab|cd)(*FAIL)|d
+(?:ab|cd)x{e<=1}  (?:ab|cd){e<=1}  (?:ab|cd)*  (?:ab|cd)+  (?:ab|cd)?x  (?>ab|abc)d
+(?:ab|abc)d  (?:foo|)bar  (?:a(?:b|c)|d)e  ((?:ab|cd))x  (?:ab|cd)|x+  a+|bc  [ab]c|de
+😀a|b😀  😀|x  \ud83d|a  \ude00|x  \ude00a|yz  (?:ß|ss)x  (ab|cd)(?(1)x|y)  (?:ab|cd)(?r:c)
+(?:ab|cd)\X  (?:aa|ab)*?b  (?:ba|ab)+b  (?:a|ab)(?:c|bcd)  (?|(ab)|(cd))x  (?P<n>ab|cd)(?P=n)
+(?:abc|bcd|cde|def)  (?:x|xy|xyz)z  (?:ab|cd)[^x]  (?:ab|cd).  (?:ab|cd)^x
+```
+
+Subjects `abcd`, `xcdab`, `bcdabc`, `abab cdcd`, the empty string, `a`, `yyzx`, `fobarbar`,
+`abde cde`, `😀ab😀`, `ßssx sx`, `abcdcx`, `aabab`, `abx cdx` and `"😀a"`, one row per
+UTF-16 `(beginning, length)` slice. Each row records `Match`, `MatchAtStart`, `FullMatch`,
+`Matches` and overlapped `Matches`, each with and without `partial`, plus `Split` and `Replace`.
+
+**Result: 246,917 rows, identical between base and the final code.** The generator is exhaustive,
+so there is no seed to vary.
+
+### Negative controls
+
+One edit each, then reverted; the count is rows that differ from base on the final generator.
+
+- Control A, partial guard off. In `Matcher.BasicMatch`, change
+  `search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb` to
+  `search && !pattern.HasSkipVerb`. **121,401 rows differ.**
+- Control B, surrogate guard off. In `PatternObject.FindLeadingStrings`, change
+  `if (node.Values.Exists(static c => c is >= 0xD800 and <= 0xDFFF))` to append `&& false`, and
+  replace `char.ConvertFromUtf32((int)c)` with
+  `c <= 0xFFFF ? ((char)c).ToString() : char.ConvertFromUtf32((int)c)` so that a lone surrogate
+  converts. **45 rows differ**, all `\ude00a|yz`, under nine prefixes.
+- Control C, fuzzy guard off. Delete `pattern.IsFuzzy ||` from the first line of
+  `FindLeadingStrings`. **0 rows.**
+- Control D, SKIP guard off. Change the condition in control A to
+  `search && state.PartialSide == MatchState.PartialNone`. **0 rows.**
+- Control E, walk accepts anything. In `FindLeadingStrings`, change `default: return false;` to
+  `default: return true;`. **4,959 rows differ**, among them `ab|cd|`, `(?i)(?:ab|cd)|x+` and
+  `(?i)ab|b`.
+
+### Verification
+
+Suite 6780/6780, ratchet GREEN (baseline 6671 to 6672 distinct ids), after adding
+`PatternObject.LeadingStrings` to the `ThreadSafetyTests` allowlist. Permanent files:
+BacktrackingVerbTests 20/20, PartialMatchingTests 55/55, ReverseMatchingTests 40/40. Oracle GREEN
+at all three default seeds. AOT smoke GREEN, 6.84 MB. AOT tests 6780, 0 failed, on two runs; the
+first run, made while the AOT smoke was publishing beside it, exited 2 and its failing test was not
+captured. A re-run under the same load was green. That is the second such unexplained exit on this
+slice (see item 17's notes). `tools/check-sync-divergence.ps1` GREEN.
+
+Item 14 had no `ponytail:` comment and no OPTIMISATION-NOTES row to delete.
+
+**Filters for the orchestrator's quiet run:** no `ManyInputs` row opens with an alternation of
+case-sensitive literals, so none should move. The gain is pinned by the new timing test.
+
+### Review
+
+One blind pass (Opus, the VERIFICATION.md brief): **no defects found**, so no second pass. It
+compiled each pattern twice and nulled `LeadingStrings` on one copy by reflection, which isolates
+the jump. A targeted sweep of 75 patterns over 19 subjects (32,150 rows, 25 patterns jumping) and a
+random fuzz at seeds 1, 2 and 3 (814, 2,205 and 2,162 jumping patterns) gave 0 differences. It
+covered empty branches, anchors, `\K`, `\G`, lookarounds, verbs, atomic groups, recursion,
+conditionals, scoped `(?i:...)`, full folds, `(?r)`, `(?V1)`, `(?w)`, astral literals, lone
+surrogates in the subject, every slice, overlapped and partial matching, `Split` and `Replace`.
+Suite 6780/6780, oracle tests 34/34, Release build 0 warnings. Its comparison with Python differed
+on 1,275 rows with the jump on and off alike, so none come from this change. I sorted them
+(`.scratch/ls-review/cmp2.py`): 519 are `Replace` rows given Python's `<$0>` syntax; the rest are
+slice labels (UTF-16 against code points), a compile error labelled differently where both
+engines refuse `(?:ab(*COMMIT)x|cd)` and `(?:ab(*ACCEPT)|cd)x`, and 508 `(?r)` partial rows
+where regex 2026.9.10 gives None (`.scratch/revp.py`), which is ledger entry 24, the upstream
+reverse-partial bug the port fixes on purpose. Probes in `.scratch/ls-review/` and
+`.scratch/ls-fuzz/`.
+
+## 2026-09-24, 02:45 - item 9 landed: long alternations and named lists indexed by first code units
+
+An alternation of n members compiles to n - 1 chained 2-way `BRANCH` nodes, and a named list is
+one of them. Upstream's `BRANCH` arm (`_regex.c:12079`) calls `try_match` on each alternative in
+turn, so a list of a thousand words costs a thousand tests at every position the list is tried.
+The slice spec suggested a per-list `SearchValues<string>` or trie. A trie would have to replace
+the branch walk and keep its order, captures and backtracking, which is a second matcher; the
+index below keeps upstream's walk and only skips the steps that cannot succeed.
+
+`Engine/BranchChain.cs` indexes each run of at least eight alternatives (`MinAlternatives`), when
+at most half of them have no key. An alternative's key is the first one or two UTF-16 code units
+of its test node, when that test is a non-fuzzy forward case-sensitive `STRING`, or a `CHARACTER`
+with `Match` set. On entering a chained branch node with `TextPos < SliceEnd`, the matcher jumps
+to the first alternative from there that can start with the text's next units, or to the run's
+tail. It uses the second unit only when that unit is inside the slice too. Why that is sound:
+`TryMatchOne` and `TryMatchString` fail on a mismatch inside the slice, and a failed `try_match`
+pushes nothing, so a skipped alternative is one upstream would have tried and dropped.
+
+First-unit keys alone were not enough. About forty of the thousand members share each first
+letter, and `\b\L<w>\b` over a megabyte went from 1,840 ms to only 269 ms. Keying on pairs took
+it to 54 ms.
+
+### Timings
+
+`.scratch/ds` list mode: a megabyte of words, Release, tiering off, 1,000 members.
+
+| Pattern | Before | First unit | Two units | regex 2026.9.10 |
+|---|---|---|---|---|
+| `\L<w>` | 135.9 ms | 25.2 ms | 10.6 ms | 3,523 ms |
+| `\b\L<w>\b` | 1,840 ms | 269 ms | 54.0 ms | 1,030 ms |
+| ` \L<w>` | 1,852 ms | 226 ms | 18.9 ms | 1,000 ms |
+| `\w+ \L<w>` | 6,282 ms | 825 ms | 167.6 ms | - |
+| `(?i)\L<w>` | 9,275 ms | not indexed | 9,426 ms | 4,637 ms |
+
+Ten members, against 1182e76 (before item 14, which also helps `\L<w>` at the top level):
+`\b\L<w>\b` 31.9 to 25.2 ms, ` \L<w>` 24.5 to 12.3 ms, `\w+ \L<w>` 195 to 140 ms. No short run
+got slower.
+
+Case-insensitive lists are the obvious next step and are not done: a folded key needs every
+case variant of the first code point, and full folding (`ß` against `ss`) breaks the "one test,
+one first unit" rule. Upstream is twice as fast as this port on `(?i)\L<w>`.
+
+### The timing test
+
+`A_long_named_list_tries_only_the_members_that_can_start_here` searches a megabyte for
+`\b\L<words>\b` with 1,001 members inside a 500 ms budget. It times out without the index (Build
+call commented out, run alone). Run alone it takes 80 ms; inside the full suite it took 700 ms,
+because the rest of the suite runs alongside it, so it is `[NotInParallel]`, which brought it back
+to 79 ms in the suite. The ten-member list beside it pins upstream's answers for one- and two-unit
+members, a shared first unit, an astral first character, `(*SKIP)`, an anchor, and a partial match
+whose second unit is past the slice.
+
+### Sweep and controls
+
+`.scratch/ls-sweep/Program.cs`, rewritten for item 9: 41 bodies, runs of eight or more
+alternatives and two named lists (`l` holds 16 members including the empty string, `😀x`, lone
+`\ud83d` and `\ude00`, `ß` and `ss`; `p` holds nine members sharing `a`), under 11 flag prefixes,
+over every slice of 23 subjects, each slice asked `Match`, `MatchAtStart`, `FullMatch`, `Matches`
+and overlapped `Matches` with and without partial, plus `Split` and `Replace`. Base is the
+worktree `.claude/worktrees/base-8dd746e` at 1182e76. **214,291 rows, 0 differ.**
+
+The sweep is exhaustive, so there is no seed to vary. Controls, applied one at a time by
+`.scratch/ctl9.py <letter>`, which edits the file, runs the sweep and restores it:
+
+- A, in `Matcher.BasicMatch`: `if (node.Chain is { } chain && state.TextPos < state.SliceEnd)`
+  to `... && state.TextPos < state.Text.Length)`. **0 rows.** No row reaches a branch past the
+  slice end, so this guard and the index bound agree on every row swept.
+- B, in `BranchChain.Skip`: `if (textPos + 1 < sliceEnd)` to `if (textPos + 1 < text.Length)`.
+  **2,295 rows.**
+- C, in `BranchChain.Prefix`: `!(test.Op == Opcode.String ||` to
+  `!(test.Op is Opcode.String or Opcode.StringIgn or Opcode.StringFld ||`. **230 rows.**
+- D, in `Prefix`: `(test.Op == Opcode.Character && test.Match)` to `test.Op == Opcode.Character`.
+  **3,132 rows.**
+- E, in `Skip`: `int next = Next(_unkeyed, from);` to `int next = int.MaxValue;`, so no unkeyed
+  alternative is tried. **15,980 rows.** (Before the review fix, when every list repeated the
+  unkeyed ones, the same fault was `=> [.. keyed.Concat(unkeyed).Order()]` to
+  `=> [.. keyed.Order()]` in `Index` and gave 7,157.)
+- F, in `Prefix`: `test is null\n            || (test.Status & NodeStatus.Fuzzy) != 0` to
+  `test is null`. **3,108 rows.**
+- G, in `Skip`: `if (_byFirstOnly.TryGetValue(first, out int[]? only))` to
+  `if (from < 0 && _byFirstOnly.TryGetValue(first, out int[]? only))`, so a one-unit member is
+  never tried when the next two units are in the slice. **3,683 rows.**
+
+Every number above is from the final code, after the review fix: A 0, B 2,295, C 230, D 3,132,
+E 15,980, F 3,108, G 3,683, and the unfaulted sweep 0 of 214,291.
+
+C and D found nothing on the first generator, which had no uppercase subject and no negated
+single-character alternative; the numbers above are after adding `ABcd AB`, `SSx ßX`, `xYZab`,
+`cabd` and three bodies.
+
+### The oracle wave
+
+The spec asks for an oracle wave over list-heavy patterns, and every existing generator draws
+two to four alternatives, below the threshold. New generator `long-alternation` in
+`tools/record-oracle.py`: eight to fourteen members of up to three characters from
+`a b c x y ß 😀`, as an alternation or a named list, in one of 14 settings under 8 flag prefixes,
+with partial matching and slices. It has no lone surrogate: the consumer's JSON reader refuses one
+("Cannot read incomplete UTF-16 JSON text as string with missing low surrogate"), so the sweep
+covers those.
+
+At 2,000 rows: seed 7 agree 1,998, expected 2, diverge 0; seed 4242 one divergence and seed
+20260924 two. The first run of seed 20260924 was misread as one; the blind review counted two.
+All three are `search` with `partial=True` and `(*SKIP)` and carry `searchOnlyPartial` true.
+Rows 1441 and 1065 are case-insensitive, which the index does not touch, and row 377 diverges
+the same with the Build call commented out:
+
+- seed 20260924 row 377: `(?:ac|yb|yb|ß|yy|yx|😀y|aab|cb|y|a|cb|ba)(*SKIP)b|c` over
+  `'x b😀😀a'`: upstream partial (2, 6) code points, port partial (7, 1) UTF-16, which is
+  upstream's own `pruneOutcome`.
+- seed 4242 row 1441: `(?i)(?:\L<words>)(*SKIP)b|c` over `'ß 😀b'`, words
+  `['', 'a', 'b', 'baa', 'by', 'b😀', 'cbx', 'xa', 'xa', 'ßy', '😀x', '😀y']`: upstream partial
+  (0, 4) code points, port partial (4, 1).
+- seed 20260924 row 1065: `(?i)(?:bx|b|c😀|😀a|😀ß|a|xb|cx)(*SKIP)b|c` over `'yabbßbayßx😀'`
+  sliced at UTF-16 [5, 12): upstream partial (5, 11) code points, port partial (10, 2).
+
+They look like the search-start family in `ExpectedDivergences.cs` (upstream's search reports a
+partial its own match denies), but that family is judged row by row, and a judged divergence
+needs the amendment-16 evidence and a verifier. So `long-alternation` stays off the default list,
+like `fuzzy-overhang`, with the three rows named in `tools/run-oracle.ps1`'s help. Judging them is
+open work for S60b.
+
+### Verification
+
+Suite 6781/6781, ratchet GREEN (baseline 6672 to 6673 distinct ids) after adding `Node.Chain` and
+`Node.ChainIndex` to the `ThreadSafetyTests` allowlist. BacktrackingVerbTests, PartialMatchingTests
+and ReverseMatchingTests pass inside that run. Oracle GREEN at all three default seeds.
+`tools/check-sync-divergence.ps1` GREEN with the new row. AOT: not run to the end.
+`tools/run-aot-tests.ps1` started at 02:26 on a machine with under 1 GB free, and its compiler
+(csc, PID 44916) sat at 64 CPU seconds from then on. It was left running, not killed. The AOT
+suite is still owed for item 9.
+
+Item 9 had no `ponytail:` comment and no OPTIMISATION-NOTES row of its own to delete.
+
+**Filters for the orchestrator's quiet run:** no `ManyInputs` row uses a named list or eight
+alternatives, so none should move. The gain is pinned by the timing test.
+
+### Review
+
+One blind pass (Opus) over item 9's whole diff. It compared every answer with the index on and
+off: 14,300 generated patterns, 6,063 of them indexed, 0 differences. It raised two findings, and
+both reproduced.
+
+1. **Quadratic memory.** `Index` copied the unkeyed alternatives into every key's list, and a
+   pair's list also copied its first unit's one-unit list. With half of n alternatives unkeyed and
+   the rest on distinct first units, that is about n^2/4 entries per dictionary. The reviewer's
+   probe measured a 494 MB build at 16,000 alternatives and 1,966 MB at 32,000. Reproduced with a
+   new test, `An_indexed_alternation_with_many_unkeyed_members_builds_in_linear_space`: 8,000
+   alternatives, the build asked to stay under 8 MB, and it allocated 131,338,720 bytes. Fixed.
+   Each list now holds only its own keyed alternatives, and `Skip` takes the nearest entry from up
+   to three lists (the pair or first-unit list, the one-unit list, the unkeyed list). The test
+   passes. The probe now gives 4 MB at 16,000 and 9 MB at 32,000, and whole-pattern compile went
+   from 8.3 s to 2.9 s at 32,000. The cost is one more lookup per chained branch. `.scratch/ds`
+   list mode at 1,000 members, on the same loaded machine: `\L<w>` 10.6 to 11.1 ms,
+   `\b\L<w>\b` 54 to 58 ms, ` \L<w>` 18.9 to 20.7 ms, `\w+ \L<w>` 168 to 180 ms. That is
+   still 17 to 30 times faster than before item 9. The sweep and controls above were re-run after
+   the fix.
+2. **Wrong count in `tools/run-oracle.ps1`'s help.** Seed 20260924 gives two divergences, not
+   one; the second, row 1065, is case-insensitive and so not indexed. Fixed in the help text and
+   in the oracle section above.
+
+The fix changed `BranchChain.Skip` and `Index`, so a second blind pass (Opus, same brief,
+told not to run the suite because memory was short) reviewed that delta only. It called `Skip`
+directly, 2,597,284 times over 1,751 indexed runs at every start index, text position and slice
+end, and compared each answer with a plain scan of the old merged lists. It also compared 900
+patterns (388 indexed) with the index on and off. It found 0 differences and 9 MB for the
+32,000-alternative build, and returned "No defects found."
+
+## 2026-09-24, 03:15 - the three `long-alternation` rows judged; the generator joins the default list
+
+The wave was re-run at 2,000 rows and gave the same three rows: seed 4242 row 1441 and seed
+20260924 rows 377 and 1065. `python tools/probes/gate-divergence-doors.py 4242 20260924` and
+`python tools/probes/upstream-partial-anchor-reachability.py
+tools/probes/s60b-long-alternation-partial-search-rows.jsonl` put the family's questions to each.
+
+| Row | Upstream | Port (codepoints) | Upstream's span in its own grid | `(*PRUNE)` | Verb deleted |
+|---|---|---|---|---|---|
+| 1441 | (0, 4) partial | (3, 4) partial | no | (3, 4) partial | (3, 4) complete |
+| 377 | (2, 6) partial | (5, 6) partial | no | (5, 6) partial | (5, 6) partial |
+| 1065 | (5, 11) partial | (10, 11) partial | no | (10, 11) partial | (10, 11) partial |
+
+On each, the port's span is in the grid and is the first anchor that answers. That is the
+standard rows 14 to 27 of `search-start-partial`'s second arm were judged by, so the three became
+its rows 28 to 30. Row 377's upstream span starts at 2, not 0, at the first character that
+can start a member (the subject is `x b😀😀a`), so like row 16 it is not the whole searched region.
+
+After the edit: `pwsh -File tools/run-oracle.ps1 -Generator long-alternation -Count 2000` GREEN at
+seeds 7, 4242 and 20260924 (expected 2, 3 and 4, diverge 0), and the default wave, now with
+`long-alternation`, GREEN at all three seeds.
+
+### Verifier and review
+
+The verifier (Opus, fresh) re-ran every claim with its own script against regex 2026.9.10: for each
+row, upstream's search answer, its absence from the grid, the port's span as the first answering
+anchor, the `(*PRUNE)` and verb-deleted answers, and the port's rendered answer through
+`run-oracle.ps1 -Rows`. 18 of 18 CONFIRMED. One blind review pass (Opus) re-ran both waves, checked
+that the embedded rows equal the probe file and that the two arrays line up (30 entries each), and
+ran the oracle suite, 34 of 34 including `Every_expected_divergence_still_diverges`. It returned
+"No defects found." No code changed after either, so no second pass.
+
+### Item 9's owed AOT run
+
+At 46314d8 (item 9's code unchanged since 4e8f887): `tools/run-aot-tests.ps1` GREEN, 6782 tests,
+6779 passed, 3 skipped by design, 0 failed. `tools/run-aot-smoke.ps1` GREEN, 7,244,800 bytes
+(6.91 MB), up from 6.84 MB after item 14 and 6,972,928 bytes at S60.
+
+### Item 16, mapped for the next sitting (not started: under an hour was left)
+
+- The site. `SearchStart` (`Matcher.cs:5676`) sends the `Character`, `Range`, `Property` and
+  `Set*` test arms (about `:5758-5781`) to `MatchMany` (`:5500`), which walks one position at a
+  time through `state.NextPos`/`PrevPos` and asks `MatchesMany` at each. That loop is what a
+  `SearchValues<char>` or bitmap scan replaces, forward and case-sensitive first. Astral
+  characters and the `_REV` arms need their own answer (a scan over UTF-16 units must not stop
+  inside a surrogate pair). Keep the per-position loop as the fallback.
+- Build once, at compile time, beside `StartTest` (`PatternObject.cs:87`, set at
+  `NodeCompiler.cs:165`) and beside item 14's `FindLeadingStrings` (`PatternObject.cs:564`).
+  A set qualifies when every member is a BMP code unit and it can be listed; negated and property
+  sets need the bitmap form or stay on the loop.
+- Gate. `HasSkipVerb` gates the other jumps at `Matcher.cs:5348`, `:6039` and `:6057`. The
+  `SearchStart` arms already run under `searchStartAllowed`, so check whether the new scan
+  inherits that gate or needs its own.
+- No `ponytail:` comment or OPTIMISATION-NOTES row names item 16. The row for the rest of
+  `SearchStart` is `OPTIMISATION-NOTES.md:24`.
+- Evidence to reuse: `.scratch/lr-sweep` and `.scratch/ls-sweep` for the base-vs-new sweep, and
+  `.claude/worktrees/base-8dd746e` as base (move it to 0a8f73d first).
+
+## 2026-10-11 - merged with main (perf plan step 1)
+
+The branch had not merged main since its base, 8730ce4d (2026-09-24). Main had moved about 17,600
+lines in `src` since then: the correctness work D1-D81. Two merges: e0905216 (main at dc4c24a6)
+and 2a483184 (main at 79668f90, D29 part 1, which conflicted only in generated files). No
+item was reverted. No timing was run, because the machine was shared; the per-item A/B on a quiet
+machine is the orchestrator's step 2.
+
+### Conflicts and how each was resolved
+
+- `TryMatch`: S86's `SUCCESS` arm (`Matcher.cs:7343`) sits ahead of item 3's arms. It answers as
+  upstream's arm does and enters the node: the `SUCCESS` opcode is what ends the match, so it is not
+  passed over. Item 3 had sent `SUCCESS` to the default arm; S86 needs the arm or `RepeatTests`'s
+  byte test goes red (DECISIONS 2026-09-24).
+- `TryMatch`, zero-width arm: D11 M1 added `MatchStatus.Undetermined`, a test at the edge of a
+  partial call's second pass that some continuations pass. Item 3 would have passed that status
+  up to callers that only expect success, failure or a negative code. `KeepTheAlternativeThatDidNotRunOut`'s
+  caller, for one, picks the body's position only when the body's status is `Success`. So
+  `Undetermined` now reads as success and enters the node (`Matcher.cs:7363`), which is what
+  main's default arm did. The node's own arm then marks the path (`PushTouchMark`, `Matcher.cs:14343`).
+  The only case where the difference is visible needs a body that reads `Undetermined` and a tail
+  that runs out at the same step. `TailMayMatch` turns that tail's run-out into success unless
+  the oracle's `TailRunOutAsBeforeD67` ablation is on, so no ordinary call reaches it. A file:line
+  argument, not a witness.
+- `TryMatchString`: main's `state.RunsOutRight` replaces the branch's `PartialSide == PartialRight`.
+  It adds the attempt inside the text to come (`InsideW`).
+- `END_GREEDY_REPEAT` body run-out: main's D11 handling taken whole. Item 3 had only reworded the
+  comment there.
+- `BasicMatch`'s `FAILURE` arm: item 17's `LeadingRepeat` is combined with D77's rule that a lazy
+  run is not skipped when the pattern has a backtracking verb (`Matcher.cs:18019`). `LeadingRepeat`
+  is lazy only when it is the start node itself (`PatternObject.cs:1365`), so D77's test is
+  unchanged.
+- The `LAZY_REPEAT_ONE` backtrack tail: main's `TailMayMatch` (D67) wraps item 3's `TryMatch`
+  (`Matcher.cs:18438`); the two sibling sites already had it.
+- `Node.cs`, `PatternObject.cs`: both sides' fields and methods were kept. They were new code on
+  each side, interleaved by the merge.
+- PORTMAP's `try_match` row: the branch's text, with the `SUCCESS` arm credited to S86.
+- `run-oracle.ps1` and `record-oracle.py`: both sides' generators were kept. The default list is
+  main's plus `long-alternation`.
+- STATE.md, STATUS.md, the status stamp and the parity baseline: main's versions, then the
+  ratchet regenerated the baseline (`-UpdateBaseline`, Debug).
+
+### Each item against today's engine
+
+- **Item 3, `try_match` in full** (`Matcher.cs:7319`). Kept. Every arm calls the function the
+  node's own opcode calls: `MatchOne`, `TryMatchZeroWidth`, or `TryMatchString` with main's run-out
+  test. So a refusal is a node that would fail at once, and a success that consumes is a node
+  whose non-fuzzy arm does nothing else on success. The `Any` arm at `Matcher.cs:12783` is the
+  pattern: it pushes only for a fuzzy node. Fuzzy test nodes are never consulted (`:7325`), so D61,
+  D14 and the exact-deletion machinery see the same nodes as before. A `PARTIAL` leaves
+  `nextPosition` at the exit's own node, so D67's `TailMayMatch` and D11's run-out rule enter the
+  node they did before. `\G` goes through `TryMatchZeroWidth`, which reads `OperationStart` (D79).
+  The `SearchStart` retry loop polls the `Iterations` gate (`:12237`).
+- **Item 9, the branch-run index** (`BranchChain.cs:94`, used at `Matcher.cs:13238`). Kept. An
+  alternative it passes over has a case-sensitive `CHARACTER` or `STRING` test whose code units
+  inside the slice differ from the text, so `TryMatch` would answer `FAILURE`. The branch then pushes nothing,
+  and so it opens no optional pass either (`OpenOptionalPass` runs only for an entered alternative).
+  The index uses the second code unit only inside the slice, and it never acts at or past
+  `SliceEnd` (`:13238`). That rules out the attempt from inside the text to come. A run-out
+  alternative is therefore never skipped, and D11's run-out rule sees the same alternatives.
+  Fuzzy tests are unkeyed (`BranchChain.cs:248`).
+- **Item 14, the leading literals** (`PatternObject.cs:1267`, `Matcher.cs:12474`, `:12644`).
+  Kept. It is withheld from partial calls, which covers D11 and the attempt inside the text to
+  come, and from `(*SKIP)`. The pattern must not be fuzzy, which covers D61 and D14, and must not
+  be reversed. It only skips starts where no literal begins, and no match can start there. It
+  never touches `ReqPos`, and a `STRING` arm that meets `ReqPos` still finds its string there. So
+  it composes with `RequiredStringScreen`. `\G`, anchors and lookarounds end the walk and give no
+  literals.
+- **Item 17, the leading repeat behind capture groups** (`PatternObject.cs:1365`, `Matcher.cs:18019`).
+  Kept, with D77 combined as above. The look-through needs a greedy repeat, no group calls, no
+  referenced group, a non-fuzzy pattern and a forward pattern. Main's new readers of group state
+  are the D17 memo groups, which come from `Referenced`, the call copies (D50), which need a group
+  call, and the optional passes, which need a fuzzy pattern. Each of them is excluded by one of
+  those conditions.
+- Item 6 (never ported) and item 16 (mapped) have no code.
+
+### Evidence
+
+- Release suite 8,560: 8,495 passed, 65 skipped (Debug-only), 0 failed. The ratchet is GREEN in
+  Debug at 8,560 of 8,560, with 8,452 distinct ids in the baseline. Inspections GREEN at both
+  merge commits. Doc examples and copy rules (83 of 83) GREEN.
+- The oracle at seeds 7, 4242 and 20260927 is GREEN. Each seed's wave was then replayed with
+  `-SkipRecord` through a detached main worktree at 79668f90 and through this branch. The tallies
+  are identical (7682/190/2/4/2, 7695/180/0/5/0, 7683/192/0/4/1 agree/expected/timeout/resource/undefined),
+  and so is every non-agreeing row with its port answer. The one diverge the first record
+  showed, row 7613 of `long-alternation` at seed 20260927, was screened UNDEFINED: upstream read
+  uninitialised memory from `new_position`, ledger 5. The port answers it P(3, 4) both ways.
+- The saved waves give the same answers through main and through this branch, row by row.
+  `conf20/conf.jsonl` is 77 expected, 3 fault and 3 diverge, the rows still waiting on the owner (D81).
+  `gate20/gate89.jsonl` is 89 of 89 expected, and `a1keys/red91w.jsonl` is 91 of 91 expected.
+- `tools/probes/surrogate-slice-sweep.cs`: 137,632 cases, 0 flagged, 0 hung.
+
+### 2026-10-11, later - the blind review's regression, fixed (9f97d71a)
+
+A blind review of aa8ecb44 found item 3 losing a partial match. The pattern needs a
+`LAZY_REPEAT_ONE` followed by a zero-width tail (`^`, `(?m)^`, `\A`, `\G`, `\m`) that fails
+where the held text ends. Item 3's `TryMatch` refused that tail, and the repeat's backtrack walk
+ends at its limit on a refusal. Main instead entered the tail, failed inside it, and backtracked
+into the repeat's next try, which takes a character of the text to come and runs out. For
+example, `(?m)[a\n]*?^b` over 'a' is P(0, 1) on main, completed by 'a\nb', and was None on the
+branch. The reviewer's differential found 666 such rows in 164,804. Upstream answers None to that
+example, so the oracle counted the branch as agreeing, which is why my oracle runs missed it.
+
+The fix: in a partial call, `TryMatch`'s zero-width arms answer as the default arm and enter the
+node, which is exactly what main does (`Matcher.cs`, the `IsPositionAssertion` arm). Ordinary
+calls keep the refusal. D11's `Undetermined` is produced only in partial calls, so the
+conversion added in e0905216 can no longer be reached; it is now a `Debug.Assert`.
+
+The witnesses are in `PartialMatchingTests.A_lazy_repeat_runs_out_at_the_edge_where_its_zero_width_tail_fails`.
+Its five rows were all red on aa8ecb44 and are green now. The oracle's `partial-edge-read` entry
+already classifies all five rows on main's answer. The `\G` and `\A` rows look like main
+overclaiming: no text completes `a*?\G` or `a*?\A` once an 'a' is taken. They are pinned as main
+answers them, and they are left for triage.
+
+After the fix the differential shows 0 differences from main at 90012058 over 164,804 rows. The
+three seeds and the three saved waves give main's tallies and port answers row for row.
+
+## 2026-10-11, 09:00-11:00 - merged with main again, and the quiet A/B per item
+
+Main at 1720695d merged in as 2de3a3cc. Only the generated files conflicted (STATUS.md, the
+parity baseline and the status stamp). Main's copies were taken and the ratchet regenerated them
+(Debug, `-UpdateBaseline`, 8,467 distinct ids, GREEN; the Release suite passed 8,510 with 65
+Debug-only skips).
+
+### Item 3 against the profiler's experiment
+
+The profiler's patch (`.scratch/perf-profile/exp-trymatch-zw.patch`) makes `TryMatch` refuse in
+three places: string tests through a three-way answer, one-character tests, and zero-width
+position assertions. The branch refuses in all three, with one difference. In a partial call the
+branch's zero-width arm answers success and enters the node, where the patch refuses. That is the
+fix in 9f97d71a: refusing there loses genuine partial matches (`(?m)[a\n]*?^b` over 'a' is P(0, 1)
+on main and was None with the refusal; `PartialMatchingTests`). Ordinary calls, which are all the
+gap rows, refuse as the patch does. The branch also does two things the patch does not: a
+successful test consumes what it tested and resumes at `match_next`, and a full-fold string test
+fails when the text ends inside a character's folding (upstream `:7473`, `:7546`).
+
+### Correctness after the merge
+
+- Differential against main 1720695d, `port-probe.cs` built Release on each side, never
+  `--no-build`. It used the review's `all.jsonl` (96,438 rows), `all2.jsonl` (40,074), `targ3`
+  (28,272) and `targ5` (20), plus fresh `gen.py` rows at seeds 11 and 12 (6,000 each). That is
+  176,804 rows, with **0 differences**.
+- The oracle at seeds 7, 4242 and 20260927 is GREEN. The agree/expected/timeout/resource/undefined
+  tallies are 7682/190/2/4/2, 7694/181/0/5/0 and 7686/189/0/4/1, with 0 diverge.
+- Saved waves: `gate20/gate89.jsonl` is 89 of 89 expected and `a1keys/red91w.jsonl` is 91 of 91
+  expected. `conf20/conf.jsonl` is 79 expected, 3 fault (rows 12, 16 and 60, verbs,
+  `finditer-overlapped`) and 1 diverge (row 79, `(?:x(?:.a){1i+2d+1s<=4}){d<=1}` over U+1D7EE followed by 'x'). On all
+  four of those rows the port answers the same on main and on the branch, so none of them comes
+  from this branch.
+
+### Timings
+
+Every run held the shared test lock, so nothing else built or timed alongside it. The harness is `.scratch/perf-profile/gap.cs`,
+extended with each item's rows, and run as `dotnet build -c Release` then the built exe. Each
+figure is the best single call, taking the minimum over three processes per side, with the sides
+alternating.
+
+Gap rows, main against the branch:
+
+| Row | Main | Branch | Branch / main |
+|---|---|---|---|
+| accented (`straße\|café`, full case, 100k lines) | 236.2 ms | 168.1 ms | 0.71 |
+| wordsend (`(\w+\s?)+$`) | 102.1 ms | 84.3 ms | 0.83 |
+| nested (`(a+)+c`) | 20.13 ms | 19.82 ms | 0.98 |
+| dense (`\w+` over 100 KB) | 3.24 ms | 3.04 ms | 0.94 |
+| toend (`\w+` over 1 MB) | 42.2 ms | 40.5 ms | 0.96 |
+| firsttwo | 41.9 ms | 40.8 ms | 0.97 |
+
+The answers match on both sides. So does the allocation per call, apart from 24 bytes on one
+toend run.
+
+Each item switched off in turn. The branch was built with that item reverted locally in a scratch
+worktree (not committed), and compared with the branch as it stands:
+
+| Item | Row | With | Without | Verdict |
+|---|---|---|---|---|
+| 3 | accented | 168.8 ms | 264.0 ms | keep |
+| 3 | wordsend | 86.4 ms | 108.5 ms | |
+| 3 | nested | 19.87 ms | 20.88 ms | |
+| 3 | dense / toend / firsttwo | 3.08 / 61.1 / 62.2 ms | 3.23 / 62.0 / 62.2 ms | |
+| 3 | `(a\|a)*b` over 18 a's | 158 ns | 158 ns | |
+| 9 | `\b\L<w>\b`, 1,001 members, 1 MB | 37.7 ms | 2,008 ms | keep |
+| 9 | `\L<w>` | 8.0 ms | 139.6 ms | |
+| 9 | ` \L<w>` | 18.6 ms | 1,981 ms | |
+| 9 | the same 1,001 words as an inline alternation in `\b(?:...)\b` | 36.5 ms | 1,977 ms | |
+| 14 | `alpha\|bravo\|charlie\|delta\|echo` | 0.078 ms | 20.6 ms | keep |
+| 14 | `fox\|dog` (28,926 matches) | 3.61 ms | 12.05 ms | |
+| 14 | `quick\|lazy\|woods` (43,310 matches) | 5.86 ms | 13.05 ms | |
+| 14 | `cat\w+\|dog\d` | 1.17 ms | 9.81 ms | |
+| 14 | `zebra\|yak` / eight words | 0.078 / 0.077 ms | 8.66 / 18.46 ms | |
+| 17 | `(?s)(.*)a\d` over 8,000 a's | 0.61 ms | 2,708 ms | keep |
+| 17 | `(?s).*a\d` (control, upstream's own skip) | 0.415 ms | 0.414 ms | |
+
+The two sides gave the same answer on every row. The `(a|a)*b` row is rejected before matching
+starts (the subject has no `b`), so item 3 cannot move it. BenchmarkDotNet's `BacktrackingPort`
+row agrees: 88.9 ns on main and 92.2 ns on the branch. In the item 3 run, toend and firsttwo
+read about 61 ms on both sides, against about 41 ms in the gap run. That run was slower overall,
+not one side.
+
+### BenchmarkDotNet, main against the branch
+
+The command was `tools/compare-benchmarks.ps1 -Job medium`, once per class (`WorkloadBenchmarks`,
+`ManyInputsBenchmarks`, `ReferenceBenchmarks` filtered to `*Port*`), alternating main and branch.
+Main's artifacts were recorded as a scratch baseline, and the branch's were compared against it
+at `-Threshold 1.13`.
+
+- **No row is slower beyond the 1.13 floor.**
+- Faster beyond the floor: CaseFoldAccented 0.69x, TestedGroupRepeat 0.71x,
+  PathologicalSameBranches 0.70x, PathologicalWordsToEnd 0.83x, ValidateEmails 0.83x,
+  ConditionalBesideBranch 0.83x, ConditionalPerToken 0.86x and PathologicalPrefixBranches 0.88x.
+  PathologicalNestedRepeat is unchanged (19.97 ms against 19.48 ms).
+- Allocation: CompileLargePattern allocates 7% more (971,208 bytes to 1,043,344) with its time
+  unchanged (242.5 µs against 255.6 µs, inside the floor). That pattern is a 300-way alternation
+  behind a shared `word` prefix, and the extra bytes are the compile-time indexes items 9 and 14
+  build. This is a declared trade: compile-time bytes for the match-time speed above. No other
+  row's allocation moved.
+
+All four items measure faster on their own workloads and none slows another row, so all four are
+kept. Scratch: `.scratch/s60b-ab/` (`notes.md`, `h/res-*.txt`, `cmp-*.log`).

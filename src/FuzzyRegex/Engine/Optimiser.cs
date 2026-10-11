@@ -137,7 +137,7 @@ internal static class Optimiser
     /// </remarks>
     /// <param name="op">The opcode.</param>
     /// <returns><see langword="true"/> if it is a position assertion.</returns>
-    private static bool IsPositionAssertion(Opcode op) =>
+    internal static bool IsPositionAssertion(Opcode op) =>
         op switch
         {
             Opcode.Boundary
@@ -811,9 +811,8 @@ internal static class Optimiser
     /// match anyway.
     /// </summary>
     /// <remarks>
-    /// The match loop's fast path that consults this is deferred to Phase 7 (DECISIONS
-    /// 2026-08-31). The marking is done now anyway, so the graph has upstream's shape and Phase 7
-    /// is a switch to flip rather than a re-plumb.
+    /// <c>Matcher.TryMatch</c> consults it, and <c>Matcher.SearchStart</c> reads the pattern's
+    /// first one.
     /// </remarks>
     /// <param name="next">The slot to fill in.</param>
     private static void SetTestNode(NextNode next)

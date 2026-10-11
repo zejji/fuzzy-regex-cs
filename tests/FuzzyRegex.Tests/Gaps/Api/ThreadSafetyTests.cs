@@ -887,6 +887,12 @@ public sealed class ThreadSafetyTests
             // for that one purpose.
             "PatternObject.CallMemoKeyOmitsPosition",
             "PatternObject.IsFuzzy",
+            // S60b added LeadingRepeat, written once by Compile after FuzzyLiteralFilter. It points
+            // at a node of the compiled graph and matching only reads it.
+            "PatternObject.LeadingRepeat",
+            // S60b added LeadingStrings, written once by Compile next to LeadingRepeat. SearchValues
+            // is immutable and safe to search from many threads.
+            "PatternObject.LeadingStrings",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never
@@ -915,6 +921,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.VisibleCaptureCount",
             // Node and NextNode: the opcode graph. Nodes are emitted before their successors exist,
             // so the links are patched up afterwards - upstream's own two-pass shape.
+            // S60b added Chain and ChainIndex, written once by BranchChain.Build during Compile.
+            // The chain's arrays and frozen dictionaries are never written after it is built.
+            "Node.Chain",
+            "Node.ChainIndex",
             "Node.Index",
             // Finding F-A: written by PatternObject.SetFuzzyRunLengths, which Compile calls once
             // the nodes are numbered.
