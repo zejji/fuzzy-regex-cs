@@ -442,32 +442,41 @@ public sealed class FuzzyMatchingTests
         // cannot be read past `sum(counts)` entries, so whether its own holds the same two is not
         // measurable from Python; what is measurable is that the one entry it does return is an
         // insertion its own counts deny.
-        Match m = new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a ba", partial: true);
+        //
+        // D81 (2026-10-11) took that answer away: the substitution is the inner section's, and its
+        // errors count against the outer `{i<=1}`, which allows no substitution, so the partial
+        // described a path no text completes. The port now answers None there, as on the two rows
+        // that followed it here, whose inner substitution the outer `{e<=2,i<=1}` forbids as well:
+        // fullmatch('(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}', 'a b') and
+        // match('(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}', 'eab'). The same shape with an outer section
+        // that allows the substitution:
+        //
+        // match(r'(?:a\w\w(?:b\w){e<=3}){i<=1,s<=1}', 'a ba', partial=True), regex 2026.9.10:
+        //   span=(0, 4) counts=(1, 0, 0) changes=([1], [], [])
+        // The outer section substituted the space at 1 and the inner one inserted the 'a' at 3 before
+        // its 'b' ran out, so (1, 1, 0) is the answer; upstream's counts leave out the inner
+        // section's insertion.
+        Match m = new FuzzyRegex(@"(?:a\w\w(?:b\w){e<=3}){i<=1,s<=1}").MatchAtStart("a ba", partial: true);
 
         m.Success.Should().BeTrue();
+        m.PartialMatch.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 4));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        m.FuzzyChanges.Substitutions.Should().Equal(3);
-        m.FuzzyChanges.Insertions.Should().Equal(1);
+        m.FuzzyChanges.Substitutions.Should().Equal(1);
+        m.FuzzyChanges.Insertions.Should().Equal(3);
         m.FuzzyChanges.Deletions.Should().BeEmpty();
 
-        // fullmatch(r'(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}', 'a b', partial=True):
-        //   upstream span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
-        Match costed = new FuzzyRegex(@"(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}").FullMatch("a b", partial: true);
+        new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a ba", partial: true).Success.Should().BeFalse();
+        new FuzzyRegex(@"(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}")
+            .FullMatch("a b", partial: true)
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex(@"(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}")
+            .MatchAtStart("eab", partial: true)
+            .Success.Should()
+            .BeFalse();
 
-        costed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        costed.FuzzyChanges.Insertions.Should().Equal(0);
-        costed.FuzzyChanges.Substitutions.Should().Equal(2);
-
-        // match(r'(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}', 'eab', partial=True):
-        //   upstream span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
-        Match boundary = new FuzzyRegex(@"(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}").MatchAtStart("eab", partial: true);
-
-        boundary.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        boundary.FuzzyChanges.Insertions.Should().Equal(0);
-        boundary.FuzzyChanges.Substitutions.Should().Equal(2);
-
-        // THE CONTROL, and it is what makes the three rows above a statement about the PARTIAL exit
+        // THE CONTROL, and it is what makes the rows above a statement about the PARTIAL exit
         // rather than about nesting. The same two nested sections and the same outer insertion, on a
         // subject the pattern COMPLETES on: END_FUZZY runs, merges the inner counts into the outer,
         // and the counter already holds the outer section's insertion with nothing here to
@@ -773,12 +782,12 @@ public sealed class FuzzyMatchingTests
         ChangesAgreeWithCounts(new FuzzyRegex("(?:[ab](*SKIP)[bc][wx]){e<=2}").Match("qab"));
         ChangesAgreeWithCounts(new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})$").Match("axc"));
         ChangesAgreeWithCounts(new FuzzyRegex("(?<=(?:abc){e<=2})$").Match("ac"));
-        ChangesAgreeWithCounts(new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a ba", partial: true));
+        // The nested-section partials: three rows here until D81 (2026-10-11) found their inner
+        // substitution forbidden by the outer section and answered None on each (see
+        // A_partial_match_inside_a_nested_fuzzy_section_counts_the_outer_sections_errors_too).
+        // Upstream contradicts itself on the legal spelling that replaces them.
         ChangesAgreeWithCounts(
-            new FuzzyRegex(@"(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}").FullMatch("a b", partial: true)
-        );
-        ChangesAgreeWithCounts(
-            new FuzzyRegex(@"(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}").MatchAtStart("eab", partial: true)
+            new FuzzyRegex(@"(?:a\w\w(?:b\w){e<=3}){i<=1,s<=1}").MatchAtStart("a ba", partial: true)
         );
     }
 

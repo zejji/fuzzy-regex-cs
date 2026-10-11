@@ -3059,7 +3059,6 @@ internal static class ExpectedDivergences
     /// </remarks>
     private const string _leakBesideTruncationRows = """
         {"generator": "interactions", "pattern": "(?e)(?>(?:([\\w\\s])(?:\\w){1<=e<=2}){e<=1:\\d})\\m$", "flags": 128, "namedLists": {}, "subject": "bB.a.", "operation": "search", "partial": true, "codepointSpan": [4, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [4]}}], "searchOnlyPartial": false, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "selfContradiction": ["fuzzy-counts-match-changes"]}
-        {"generator": "interactions", "pattern": "(?:(\\p{L})(?:([\\w\\s]*)){e<=2,i<=1}){2i+1d+1s<=2}\\B(?:(?:([[:alpha:]])‍([[:alpha:]]*?)){s<=1,i<=1,d<=1}(*PRUNE)\\p{ASCII}|[^a-f])$", "flags": 16394, "namedLists": {}, "subject": "🏻🏻‍‍", "operation": "search", "partial": true, "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 4, "captures": [[2, 4]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 2, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 4, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 3, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}], "searchOnlyPartial": false}
         """;
 
     /// <summary>
@@ -3081,13 +3080,6 @@ internal static class ExpectedDivergences
     private static readonly string[] _leakBesideTruncationOurs =
     [
         "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] last=1/- partial fuzzy=(1,0,0)[s:4][i:][d:]",
-        // Row 2 RE-JUDGED 2026-09-26 for ledger entry 44: a repeat's empty iteration no longer counts
-        // fuzzy edits since undone as progress, and the partial now starts at 0, (0, 6) with one
-        // substitution and one insertion, where it was (2, 4) with two substitutions. With entry
-        // 44's rule switched off the port gives the old answer again. What the row is here for
-        // holds either way: the changes it lists agree with its own counts, and upstream's do not.
-        // FuzzyCountsAndChangesTests.A_partial_lists_every_change_its_own_counts_claim pins it.
-        "match 0:(0,6)[(0,6)] 1:(0,2)[(0,2)] 2:unset 3:unset 4:unset last=1/- partial fuzzy=(1,1,0)[s:0][i:2][d:]",
     ];
 
     /// <summary>

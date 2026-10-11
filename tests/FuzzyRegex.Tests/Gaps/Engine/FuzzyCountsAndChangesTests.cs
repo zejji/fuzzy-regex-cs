@@ -572,12 +572,14 @@ public sealed class FuzzyCountsAndChangesTests
         // repeat's progress: the partial now starts at 0, where it was (2, 4) with (2, 0, 0) and
         // substitutions at 2 and 5. The point of the row, that the changes agree with the counts,
         // holds either way. D11 alone had moved it to (2, 4) with one substitution at 2; with both,
-        // entry 44's answer stands (measured on the merge, 2026-09-29).
+        // entry 44's answer stood (measured on the merge, 2026-09-29). D81 (2026-10-11) moved it
+        // back to (2, 4): the (0, 6) path's insertion and substitution cost 3 under the outer
+        // section's `{2i+1d+1s<=2}`, a limit no continuation can bring the count back under.
         astral.PartialMatch.Should().BeTrue();
-        (astral.Index, astral.Length).Should().Be((0, 6));
-        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        astral.FuzzyChanges.Substitutions.Should().Equal(0);
-        astral.FuzzyChanges.Insertions.Should().Equal(2);
+        (astral.Index, astral.Length).Should().Be((2, 4));
+        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        astral.FuzzyChanges.Substitutions.Should().Equal(2);
+        astral.FuzzyChanges.Insertions.Should().BeEmpty();
         AssertChangesAgreeWithCounts(astral);
     }
 
