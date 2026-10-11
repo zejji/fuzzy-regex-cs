@@ -1262,3 +1262,95 @@ At 46314d8 (item 9's code unchanged since 4e8f887): `tools/run-aot-tests.ps1` GR
   `SearchStart` is `OPTIMISATION-NOTES.md:24`.
 - Evidence to reuse: `.scratch/lr-sweep` and `.scratch/ls-sweep` for the base-vs-new sweep, and
   `.claude/worktrees/base-8dd746e` as base (move it to 0a8f73d first).
+
+## 2026-10-11 - merged with main (perf plan step 1)
+
+The branch had not merged main since its base, 8730ce4d (2026-09-24). Main had moved about 17,600
+lines in `src` since then: the correctness work D1-D81. Two merges: e0905216 (main at dc4c24a6)
+and 2a483184 (main at 79668f90, D29 part 1, which conflicted only in generated files). No
+item was reverted. No timing was run, because the machine was shared; the per-item A/B on a quiet
+machine is the orchestrator's step 2.
+
+### Conflicts and how each was resolved
+
+- `TryMatch`: S86's `SUCCESS` arm (`Matcher.cs:7343`) sits ahead of item 3's arms. It answers as
+  upstream's arm does and enters the node: the `SUCCESS` opcode is what ends the match, so it is not
+  passed over. Item 3 had sent `SUCCESS` to the default arm; S86 needs the arm or `RepeatTests`'s
+  byte test goes red (DECISIONS 2026-09-24).
+- `TryMatch`, zero-width arm: D11 M1 added `MatchStatus.Undetermined`, a test at the edge of a
+  partial call's second pass that some continuations pass. Item 3 would have passed that status
+  up to callers that only expect success, failure or a negative code. `KeepTheAlternativeThatDidNotRunOut`'s
+  caller, for one, picks the body's position only when the body's status is `Success`. So
+  `Undetermined` now reads as success and enters the node (`Matcher.cs:7363`), which is what
+  main's default arm did. The node's own arm then marks the path (`PushTouchMark`, `Matcher.cs:14343`).
+  The only case where the difference is visible needs a body that reads `Undetermined` and a tail
+  that runs out at the same step. `TailMayMatch` turns that tail's run-out into success unless
+  the oracle's `TailRunOutAsBeforeD67` ablation is on, so no ordinary call reaches it. A file:line
+  argument, not a witness.
+- `TryMatchString`: main's `state.RunsOutRight` replaces the branch's `PartialSide == PartialRight`.
+  It adds the attempt inside the text to come (`InsideW`).
+- `END_GREEDY_REPEAT` body run-out: main's D11 handling taken whole. Item 3 had only reworded the
+  comment there.
+- `BasicMatch`'s `FAILURE` arm: item 17's `LeadingRepeat` is combined with D77's rule that a lazy
+  run is not skipped when the pattern has a backtracking verb (`Matcher.cs:18019`). `LeadingRepeat`
+  is lazy only when it is the start node itself (`PatternObject.cs:1365`), so D77's test is
+  unchanged.
+- The `LAZY_REPEAT_ONE` backtrack tail: main's `TailMayMatch` (D67) wraps item 3's `TryMatch`
+  (`Matcher.cs:18438`); the two sibling sites already had it.
+- `Node.cs`, `PatternObject.cs`: both sides' fields and methods were kept. They were new code on
+  each side, interleaved by the merge.
+- PORTMAP's `try_match` row: the branch's text, with the `SUCCESS` arm credited to S86.
+- `run-oracle.ps1` and `record-oracle.py`: both sides' generators were kept. The default list is
+  main's plus `long-alternation`.
+- STATE.md, STATUS.md, the status stamp and the parity baseline: main's versions, then the
+  ratchet regenerated the baseline (`-UpdateBaseline`, Debug).
+
+### Each item against today's engine
+
+- **Item 3, `try_match` in full** (`Matcher.cs:7319`). Kept. Every arm calls the function the
+  node's own opcode calls: `MatchOne`, `TryMatchZeroWidth`, or `TryMatchString` with main's run-out
+  test. So a refusal is a node that would fail at once, and a success that consumes is a node
+  whose non-fuzzy arm does nothing else on success. The `Any` arm at `Matcher.cs:12783` is the
+  pattern: it pushes only for a fuzzy node. Fuzzy test nodes are never consulted (`:7325`), so D61,
+  D14 and the exact-deletion machinery see the same nodes as before. A `PARTIAL` leaves
+  `nextPosition` at the exit's own node, so D67's `TailMayMatch` and D11's run-out rule enter the
+  node they did before. `\G` goes through `TryMatchZeroWidth`, which reads `OperationStart` (D79).
+  The `SearchStart` retry loop polls the `Iterations` gate (`:12237`).
+- **Item 9, the branch-run index** (`BranchChain.cs:94`, used at `Matcher.cs:13238`). Kept. An
+  alternative it passes over has a case-sensitive `CHARACTER` or `STRING` test whose code units
+  inside the slice differ from the text, so `TryMatch` would answer `FAILURE`. The branch then pushes nothing,
+  and so it opens no optional pass either (`OpenOptionalPass` runs only for an entered alternative).
+  The index uses the second code unit only inside the slice, and it never acts at or past
+  `SliceEnd` (`:13238`). That rules out the attempt from inside the text to come. A run-out
+  alternative is therefore never skipped, and D11's run-out rule sees the same alternatives.
+  Fuzzy tests are unkeyed (`BranchChain.cs:248`).
+- **Item 14, the leading literals** (`PatternObject.cs:1267`, `Matcher.cs:12474`, `:12644`).
+  Kept. It is withheld from partial calls, which covers D11 and the attempt inside the text to
+  come, and from `(*SKIP)`. The pattern must not be fuzzy, which covers D61 and D14, and must not
+  be reversed. It only skips starts where no literal begins, and no match can start there. It
+  never touches `ReqPos`, and a `STRING` arm that meets `ReqPos` still finds its string there. So
+  it composes with `RequiredStringScreen`. `\G`, anchors and lookarounds end the walk and give no
+  literals.
+- **Item 17, the leading repeat behind capture groups** (`PatternObject.cs:1365`, `Matcher.cs:18019`).
+  Kept, with D77 combined as above. The look-through needs a greedy repeat, no group calls, no
+  referenced group, a non-fuzzy pattern and a forward pattern. Main's new readers of group state
+  are the D17 memo groups, which come from `Referenced`, the call copies (D50), which need a group
+  call, and the optional passes, which need a fuzzy pattern. Each of them is excluded by one of
+  those conditions.
+- Item 6 (never ported) and item 16 (mapped) have no code.
+
+### Evidence
+
+- Release suite 8,560: 8,495 passed, 65 skipped (Debug-only), 0 failed. The ratchet is GREEN in
+  Debug at 8,560 of 8,560, with 8,452 distinct ids in the baseline. Inspections GREEN at both
+  merge commits. Doc examples and copy rules (83 of 83) GREEN.
+- The oracle at seeds 7, 4242 and 20260927 is GREEN. Each seed's wave was then replayed with
+  `-SkipRecord` through a detached main worktree at 79668f90 and through this branch. The tallies
+  are identical (7682/190/2/4/2, 7695/180/0/5/0, 7683/192/0/4/1 agree/expected/timeout/resource/undefined),
+  and so is every non-agreeing row with its port answer. The one diverge the first record
+  showed, row 7613 of `long-alternation` at seed 20260927, was screened UNDEFINED: upstream read
+  uninitialised memory from `new_position`, ledger 5. The port answers it P(3, 4) both ways.
+- The saved waves give the same answers through main and through this branch, row by row.
+  `conf20/conf.jsonl` is 77 expected, 3 fault and 3 diverge, the rows still waiting on the owner (D81).
+  `gate20/gate89.jsonl` is 89 of 89 expected, and `a1keys/red91w.jsonl` is 91 of 91 expected.
+- `tools/probes/surrogate-slice-sweep.cs`: 137,632 cases, 0 flagged, 0 hung.
