@@ -716,4 +716,31 @@ public sealed class FuzzyLiteralPrefilterTests
 #pragma warning restore CA5394, S2245
         answered.Should().Be(300 * 40);
     }
+
+    /// <summary>
+    /// D29: building the filter for a literal whose characters do not expand under folding costs
+    /// no per-character arrays. Measured 2026-10-11 as compile allocation per extra literal
+    /// character, between a 10- and a 210-character <c>{e&lt;=1}</c> literal: 377 B with one
+    /// <c>uint[]</c> per character and two LINQ lists per node (since maint/fi-sharp-s, 58e57e5e),
+    /// 176 B without them.
+    /// </summary>
+    [Test]
+    [NotInParallel]
+    public void Compiling_a_fuzzy_literal_costs_no_array_per_character()
+    {
+        static long CompileBytes(int length)
+        {
+            string pattern = "(?:" + new string('q', length) + "){e<=1}";
+            _ = new FuzzyRegex(pattern);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            _ = new FuzzyRegex(pattern);
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        double perCharacter = (CompileBytes(210) - CompileBytes(10)) / 200.0;
+
+        perCharacter
+            .Should()
+            .BeLessThan(250, "the filter reads a non-expanding literal without a uint[] per character");
+    }
 }
