@@ -1193,7 +1193,8 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.BansAnEmptyMatchAtEveryCandidate = true,
-            upstreamCallCaptures: true
+            upstreamCallCaptures: true,
+            withoutTheFuzzySearchFixes: true
         );
     }
 
@@ -1218,7 +1219,8 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.AnchorsBackslashGAtEveryCandidate = true,
-            upstreamCallCaptures: true
+            upstreamCallCaptures: true,
+            withoutTheFuzzySearchFixes: true
         );
     }
 

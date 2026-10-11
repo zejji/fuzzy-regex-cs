@@ -320,7 +320,7 @@ internal sealed class FuzzyLiteralFilter
                 // A reverse chain is walked from the literal's end, though each node holds its own
                 // characters in reading order, so a reverse node goes in front of the ones before it.
                 Reverse = nodeIsReverse;
-                values.AddUnits([.. node.Values.Select(static v => new[] { v })], nodeIsReverse);
+                values.AddSingleUnits(node.Values, nodeIsReverse);
                 node = node.Next1.Node;
             }
 
@@ -513,6 +513,20 @@ internal sealed class FuzzyLiteralFilter
             copy.Values.AddRange(Values);
             copy.UnitStarts.AddRange(UnitStarts);
             return copy;
+        }
+
+        /// <summary>
+        /// Adds values that are each a unit of their own, at the end or at the front: what
+        /// <see cref="AddUnits"/> does with one single-value unit per value, without allocating those
+        /// arrays (D29).
+        /// </summary>
+        /// <param name="values">The values, in reading order.</param>
+        /// <param name="front">Whether they go in front of what is already here.</param>
+        internal void AddSingleUnits(List<uint> values, bool front)
+        {
+            int at = front ? 0 : Values.Count;
+            Values.InsertRange(at, values);
+            UnitStarts.InsertRange(at, Enumerable.Repeat(true, values.Count));
         }
 
         /// <summary>Adds units at the end, or at the front for a reverse chain.</summary>
