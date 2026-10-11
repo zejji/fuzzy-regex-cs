@@ -37,3 +37,7 @@
   the table at all, and above what measured win? Every such change taxes `sync-upstream` forever.
 - **AOT policy** - both JIT and `nativeaot` for every optimisation, or only JIT-dependent ones? And
   confirm `unsafe` stays off (`AllowUnsafeBlocks` is set nowhere) through 1.0.
+
+**Answered 2026-10-11 (DECISIONS):** AOT compatibility is required, with single-mode optimisations
+allowed; unsafe code is allowed for a significant measured gain when no safe .NET 10/11 equivalent
+exists; structural divergence is decided case by case, weighted by the measured gain.
