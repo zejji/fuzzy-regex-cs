@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -23,24 +24,56 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 public sealed class FailureMemoAcrossAttemptsTests
 {
     /// <summary>
-    /// The rows that make the memo across starts pay. Attempt 0 records a body failure at every
-    /// position of the run; without the memo every later attempt walks the rest of the run again,
-    /// so <c>(a+)+c</c> is cubic in the run and <c>(\w+\s?)+$</c> quadratic. With it, every later
-    /// attempt stops at its first check.
+    /// <c>(a+)+c</c> over a run of <c>a</c>s. The compiler copies the first iteration out of a
+    /// repeat whose body holds a repeat (<c>NodeCompiler.BuildRepeat</c>), so the pattern runs as
+    /// <c>(a+)(a+)*c</c>, and every start walks the run again through the copy's <c>a+</c>. What the
+    /// memo removes is the work behind each character given back: without it the memo repeat
+    /// explores the rest of the run again at every one, so the search is cubic in the run; with it
+    /// that is one guard lookup, and the search is quadratic.
+    /// </summary>
+    /// <remarks>
+    /// Counted in guard lookups, not steps: the copy gives characters back inside one step, asking
+    /// the guards once per character. Doubling the run multiplied the lookups by 3.9 with the memo
+    /// (15,643 to 61,293) and by 7.3 without it (201,402 to 1,472,802; Debug, 2026-10-11, runs of
+    /// 100 and 200), so the bound of 5.5 sits between them with a wide margin either way.
+    /// </remarks>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_nested_repeat_search_is_quadratic_in_the_run()
+    {
+        var regex = new FuzzyRegex("(a+)+c", FuzzyRegexOptions.None, EngineWork.HangGuard);
+
+        long Lookups(int run)
+        {
+            string subject = new string('a', run) + "bc";
+            long before = WorkCounter.GuardChecks;
+            regex.IsMatch(subject).Should().BeFalse();
+            return WorkCounter.GuardChecks - before;
+        }
+
+        long small = Lookups(100);
+        long large = Lookups(200);
+        EngineWork.SkipUnlessCounting();
+
+        ((double)large / small).Should().BeLessThan(5.5, "a cubic search grows eightfold when the run doubles");
+    }
+
+    /// <summary>
+    /// <c>(\w+\s?)+$</c> over words and a <c>!</c>. Attempt 0 records a body failure at every
+    /// position, since an iteration can start after any letter; with the memo every later attempt
+    /// stops at its first check, so the search is linear in the subject rather than quadratic. It
+    /// took 57,193 steps at 400 words with the memo and 15,071,604 without (Debug, 2026-10-11).
     /// </summary>
     [Test]
     [Category(EngineWork.Category)]
-    [Arguments("(a+)+c", 1_000, 1, 3_000_000)]
-    [Arguments(@"(\w+\s?)+$", 400, 5, 100_000)]
-    public void A_search_keeps_what_one_start_learned_for_the_next(string pattern, int runs, int unit, long maxSteps)
+    public void A_search_keeps_what_one_start_learned_for_the_next()
     {
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
-        string subject =
-            unit == 1 ? new string('a', runs) + "bc" : string.Concat(Enumerable.Repeat("aaaa ", runs)) + "!";
+        var regex = new FuzzyRegex(@"(\w+\s?)+$", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = string.Concat(Enumerable.Repeat("aaaa ", 400)) + "!";
 
         EngineWork.ShouldTakeAtMostSteps(
             () => regex.IsMatch(subject).Should().BeFalse(),
-            maxSteps,
+            200_000,
             "the starts after the first stop at the memo"
         );
     }

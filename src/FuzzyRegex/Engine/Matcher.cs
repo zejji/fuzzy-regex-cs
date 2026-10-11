@@ -12598,16 +12598,24 @@ internal static class Matcher
         // STRING_FLD or REF_GROUP_FLD item began, kept across a retry the way 'foldedPos' is. See
         // TakeBackFoldedComparison.
         int foldChangesStart = 0;
-        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
-        Span<uint> gfolded = stackalloc uint[UnicodeTables.MaxFolded];
+        // Inline arrays rather than stackalloc, which would keep the JIT from tiering this method:
+        // a method with loops and a localloc gets no on-stack replacement, so it is compiled once,
+        // with no profile data. See JitTieringTests.
+        ThreeUints foldedBuffer = default;
+        ThreeUints gfoldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+        Span<uint> gfolded = gfoldedBuffer;
 
         // The three scratch buffers FUZZY and END_FUZZY need, allocated here for the same reason
         // 'folded' is: a stackalloc inside either loop is not released until this method returns, so
         // one per backtrack step grows the stack without bound (CA2014). That analyzer does not see
         // a stackalloc nested inside a switch case, so this is the rule and not the tool.
-        Span<long> fuzzyOuterCounts = stackalloc long[FuzzyValue.Count];
-        Span<long> fuzzyTotalCounts = stackalloc long[FuzzyValue.Count];
-        Span<long> fuzzyInnerCounts = stackalloc long[FuzzyValue.Count];
+        ThreeLongs outerBuffer = default;
+        ThreeLongs totalBuffer = default;
+        ThreeLongs innerBuffer = default;
+        Span<long> fuzzyOuterCounts = outerBuffer;
+        Span<long> fuzzyTotalCounts = totalBuffer;
+        Span<long> fuzzyInnerCounts = innerBuffer;
 
         state.FewestErrors = state.MaxErrors;
 
@@ -20727,4 +20735,22 @@ internal static class Matcher
 
         return status;
     }
+}
+
+/// <summary>Three <see cref="uint"/>s on the stack, without a stackalloc; see <see cref="Matcher"/>'s main loop.</summary>
+[System.Runtime.CompilerServices.InlineArray(3)]
+internal struct ThreeUints
+{
+#pragma warning disable S1144 // The runtime reads the element through the InlineArray layout, not by name.
+    private uint _element;
+#pragma warning restore S1144
+}
+
+/// <summary>Three <see cref="long"/>s on the stack, without a stackalloc; see <see cref="Matcher"/>'s main loop.</summary>
+[System.Runtime.CompilerServices.InlineArray(3)]
+internal struct ThreeLongs
+{
+#pragma warning disable S1144 // The runtime reads the element through the InlineArray layout, not by name.
+    private long _element;
+#pragma warning restore S1144
 }

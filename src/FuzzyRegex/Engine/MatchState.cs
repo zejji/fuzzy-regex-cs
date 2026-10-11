@@ -2355,6 +2355,7 @@ internal sealed class MatchState : IDisposable
             return false;
         }
 
+        WorkCounter.GuardChecked();
         bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
         NoteSecondPassGuard(guarded);
 
