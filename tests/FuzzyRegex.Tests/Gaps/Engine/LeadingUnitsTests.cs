@@ -197,6 +197,24 @@ public sealed class LeadingUnitsTests
     }
 
     /// <summary>
+    /// Forty hits in a row make the screen stand down for the rest of the call; the matches after
+    /// them, one past a gap and one past more hits, are still found.
+    /// </summary>
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, finditer, 2026-10-11: (50, 54), (74, 80)")]
+    public void A_screen_that_stands_down_on_dense_hits_still_finds_every_match()
+    {
+        string subject =
+            string.Concat(Enumerable.Repeat("sS", 20)) + "xxxxxxxxxx" + "café" + new string('ſ', 20) + "Straße";
+
+        new FuzzyRegex("(?fi)straße|café")
+            .Matches(subject)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((50, 54), (74, 80));
+    }
+
+    /// <summary>
     /// A partial match can begin where no branch's first character is: at the end of the subject,
     /// as an empty prefix of every branch. The screen is withheld from partial matching.
     /// </summary>
