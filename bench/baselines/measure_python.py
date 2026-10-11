@@ -464,7 +464,7 @@ def prepare(directory: str) -> None:
     subprocess.run(base + ["usage-corpus", directory], check=True)
     for command, file in (("workload-answers", "workload-answers.txt"), ("usage-answers", "usage-answers.txt")):
         with open(os.path.join(directory, file), "w", encoding="utf-8", newline="\n") as out:
-            subprocess.run(base[:5] + ["--no-build", "--"] + [command], check=True, stdout=out)
+            subprocess.run(base[:6] + ["--no-build", "--"] + [command], check=True, stdout=out)
 
 
 def git_sha() -> str:
