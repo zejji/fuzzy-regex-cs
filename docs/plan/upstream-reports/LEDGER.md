@@ -6520,3 +6520,28 @@ allowance that is never used, even `{d<=0}`, should not change the captures. Ups
 traced yet. Found by the scheduled sweeps (seed 774958321, row 25315, judged-row cause "G10 + ledger
 5"); a blind review judged the unset answer right. Pinned by that judged row in
 `tests/FuzzyRegex.OracleTests/JudgedDivergences.jsonl`.
+
+## 80. A greedy repeat before a full-folded literal misses it when the text holds the expanding character - DIVERGES HERE (no defect row, 2026-10-11)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. Draft report: `entry-80-greedy-repeat-full-fold-tail.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-11:
+
+```
+fullmatch(r'(?fi)\w*ßa', 'ßa')          -> None     here (0,2)
+search(r'(?fi)\w*ßa', 'xxßa')           -> None     here (0,4)
+fullmatch(r'(?fi)\w*ffi', 'ﬃ')     -> None     here (0,1)
+fullmatch(r'(?fi)(?r)ßa\w*', 'ßa')      -> None     here (0,2)
+fullmatch(r'(?fi)ßa', 'ßa')             -> (0,2)    the same
+fullmatch(r'(?fi)\w*?ßa', 'ßa')         -> (0,2)    the same
+fullmatch(r'(?fi)\w*ßa', 'ssa')         -> (0,3)    the same
+```
+
+**Why the port differs.** `\w*` can match nothing, so the pattern matches wherever the bare
+literal does. Upstream's GREEDY_REPEAT_ONE backtrack arm for a STRING_FLD tail
+(`upstream/src/_regex.c:16118-16129`, reversed `:16066-16080`) uses the tail's folded length (3 for
+`ßa`) as a text offset, so over 'ßa', where the literal spans two positions, the start passes
+`limit` and the search never runs. The greedy sibling of entry 38. This port answers every line
+right. Found by the confirmation sweep (seed 554621207,
+row 27187). Pinned by `Gaps/Engine/RepeatTests` and that judged row.
