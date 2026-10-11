@@ -17,7 +17,8 @@
 
     EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
     joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14, 'fuzzy-anchored' in
-    S57e, 'fuzzy-literal' and 'fuzzy-alternation' in S60b and 'fuzzy-overhang' in S89.
+    S57e, 'fuzzy-literal', 'fuzzy-alternation' and 'long-alternation' in S60b and
+    'fuzzy-overhang' in S89.
 
     'fuzzy-overhang' is 'fuzzy' with a full-folded backreference whose group ends part-way into
     a subject folding, such as (s) against the first half of the ß in 'sß'. S84's and S85's
@@ -32,6 +33,15 @@
     filter refusing every subject changed one row in 4000 of 'fuzzy' and 'fuzzy-anchored' at seed 7
     (2026-09-23). 'fuzzy-alternation' is the same with two or three phrases, written as an
     alternation, a named list, or an alternation inside one phrase.
+
+    'long-alternation' is an alternation or named list of eight to fourteen short members, the
+    runs S60b item 9 indexes (Engine/BranchChain.cs); every other generator draws two to four.
+    At 2000 rows it gave 0, 1 and 2 divergences at seeds 7, 4242 and 20260924 (2026-09-24): rows
+    1441, 377 and 1065. All three are partial searches with (*SKIP) where upstream's search
+    reports a partial its own match denies (searchOnlyPartial). Two are case-insensitive, which
+    the index skips, and 377 diverges the same with the index turned off. S60b judged all three
+    into 'search-start-partial' in ExpectedDivergences.cs (rows 28 to 30), and the generator
+    joined the default list.
 
     'fuzzy-anchored' is 'fuzzy' with a zero-width assertion in front of the whole pattern. S57c
     added it because its negative control could not be made to fire on any other generator: the
@@ -307,7 +317,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,fuzzy-overhang,timeout',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,fuzzy-overhang,long-alternation,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

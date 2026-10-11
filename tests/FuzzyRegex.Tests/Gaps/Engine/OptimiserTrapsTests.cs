@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -322,7 +323,14 @@ public sealed class OptimiserTrapsTests
         // chunk (Matcher.StringSearch), which is what keeps the promise for a subject large enough
         // to matter; this test keeps its own half of the contract by using a pattern with no
         // literal, so it still measures the position-by-position scan.
+        //
+        // S60b: the warm-up call comes first because a cold run can spend the whole budget on JIT
+        // before the first poll, and then the test passes on a scan that never polls again. That
+        // hid a real regression for one run: once 'try_match' answered '\B' itself, search_start's
+        // retry loop walked the megabyte without returning to the matching loop, and the test
+        // passed alone and failed only in the full suite.
         var pattern = new FuzzyRegex(@"\b\B");
+        _ = pattern.IsMatch(_long);
 
         Action act = () => pattern.IsMatch(_long, timeout: TimeSpan.FromMilliseconds(1));
 
@@ -332,6 +340,216 @@ public sealed class OptimiserTrapsTests
         Action walk = () => _ = new FuzzyRegex(@"\w+").Matches(_long, timeout: TimeSpan.FromMilliseconds(1)).Count;
 
         walk.Should().Throw<RegexMatchTimeoutException>();
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, the answers only; upstream is quadratic here")]
+    public void A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one()
+    {
+        // When a search attempt that starts with a single-character repeat fails, upstream moves
+        // the next attempt past every character the repeat matched (the FAILURE arm, :15719). An
+        // attempt starting inside that run can only try a subset of the paths the failed one
+        // tried. Upstream looks only at the start node, so the same repeat inside a capture group
+        // gets no skip and the search is quadratic. regex 2026.9.10, 2026-09-23, over 'a' * n:
+        //
+        //   n       (?s).*a\d    (?s)(.*)a\d
+        //   2,000   0.20 ms      75.84 ms
+        //   4,000   0.09 ms      301.63 ms
+        //   8,000   0.18 ms      1,239.38 ms
+        //
+        // This port looked the same (2,643 ms at n = 8,000) until S60b item 17 looked through the
+        // group. The one-second budget is several hundred times what the skip needs.
+        var pattern = new FuzzyRegex(@"(?s)(.*)a\d");
+        string subject = new('a', 8_000);
+        _ = pattern.IsMatch("warm-up");
+
+        Action act = () => pattern.IsMatch(subject, timeout: TimeSpan.FromSeconds(1));
+
+        act.Should().NotThrow();
+        pattern.IsMatch(subject).Should().BeFalse();
+
+        // regex 2026.9.10: search(r'(?s)(.*)a\d', 'xa1ya2') -> (0, 6), group 1 (0, 4)
+        Match greedy = pattern.Match("xa1ya2");
+        (greedy.Index, greedy.Length, greedy.Groups[1].Index, greedy.Groups[1].Length).Should().Be((0, 6, 0, 4));
+
+        // regex 2026.9.10: finditer(r'(\d+)x', '123 45x') -> one match (4, 7), group 1 (4, 6)
+        Match digits = new FuzzyRegex(@"(\d+)x").Match("123 45x");
+        (digits.Index, digits.Length, digits.Groups[1].Index, digits.Groups[1].Length).Should().Be((4, 3, 4, 2));
+
+        // regex 2026.9.10: search(r'(a*)b', 'aaac aab') -> (5, 8), group 1 (5, 7)
+        Match run = new FuzzyRegex("(a*)b").Match("aaac aab");
+        (run.Index, run.Length, run.Groups[1].Index, run.Groups[1].Length).Should().Be((5, 3, 5, 2));
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24")]
+    public void A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped()
+    {
+        // The skip is sound only when the failed attempt tried every end position of the run. A
+        // greedy repeat does; a lazy one can be cut short by a verb, so the look-through stops at
+        // greedy repeats. Upstream skips for the bare lazy repeat but not the grouped one:
+        // finditer(r'a*?(*SKIP)', 'aaab') gives (0, 0), (4, 4), and the grouped form below gives
+        // every position.
+        // regex 2026.9.10: search(r'(?i)(a*?)(*SKIP)b', 'aab') -> (2, 3)
+        Match skip = new FuzzyRegex(@"(?i)(a*?)(*SKIP)b").Match("aab");
+        (skip.Success, skip.Index, skip.Length).Should().Be((true, 2, 1));
+
+        // regex 2026.9.10: finditer(r'(a*?)(*SKIP)', 'aaab') -> (0, 0), (1, 1), (2, 2), (3, 3), (4, 4)
+        new FuzzyRegex(@"(a*?)(*SKIP)")
+            .Matches("aaab")
+            .Select(static match => match.Index)
+            .Should()
+            .Equal(0, 1, 2, 3, 4);
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every position")]
+    public void An_alternation_of_literals_searches_for_all_of_them_at_once()
+    {
+        // A single literal is found with one vectorised search; an alternation of literals had
+        // none, so every position ran each alternative in turn. Over the four megabytes below
+        // this port took about 120 ms and upstream 162 ms; S60b item 14 searches for every
+        // alternative's first literal at once and lets the engine pick the branch. The budget is
+        // several times what the old scan needed and far more than the search takes.
+        // regex 2026.9.10: search(<this pattern>, <this subject>) -> (4194346, 4194352)
+        var pattern = new FuzzyRegex("amber|basil|cedar|delta|ember|flint|grove|heron|needle");
+        string subject = Pad("a needle in a haystack.", 4 * _megabyte);
+        _ = pattern.IsMatch("warm-up");
+
+        Action act = () => pattern.Match(subject, timeout: TimeSpan.FromMilliseconds(25));
+
+        act.Should().NotThrow();
+        Match found = pattern.Match(subject);
+        (found.Index, found.Length).Should().Be((4_194_346, 6));
+
+        // regex 2026.9.10, finditer, spans as (start, end): cat|dog over 'hotdog catalog' gives
+        // (3, 6) and (7, 10); (cat|dog)s over 'dogcats' gives (3, 7) with group 1 'cat'; x|yz
+        // over 'yyzx' gives (1, 3) and (3, 4); abc|bcd over 'abcd' gives (0, 3).
+        Spans("cat|dog", "hotdog catalog").Should().Equal((3, 3), (7, 3));
+        Spans("(cat|dog)s", "dogcats").Should().Equal((3, 4));
+        new FuzzyRegex("(cat|dog)s").Match("dogcats").Groups[1].Value.Should().Be("cat");
+        Spans("x|yz", "yyzx").Should().Equal((1, 2), (3, 1));
+        Spans("abc|bcd", "abcd").Should().Equal((0, 3));
+
+        // regex 2026.9.10: search('cat|dog', 'cat dog', pos=1) -> (4, 7); endpos=3 over 'xcatx' ->
+        // None, since the literal must end inside the slice; partial=True over 'xca' -> (1, 3),
+        // a partial match the literal search alone would not find.
+        new FuzzyRegex("cat|dog")
+            .Match("cat dog", 1)
+            .Index.Should()
+            .Be(4);
+        new FuzzyRegex("cat|dog").Match("xcatx", 0, 3).Success.Should().BeFalse();
+        Match partial = new FuzzyRegex("cat|dog").Match("xca", partial: true);
+        (partial.Success, partial.Index, partial.Length, partial.PartialMatch).Should().Be((true, 1, 2, true));
+
+        static List<(int, int)> Spans(string pattern, string subject) =>
+            [.. new FuzzyRegex(pattern).Matches(subject).Select(static match => (match.Index, match.Length))];
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every member")]
+    [NotInParallel]
+    public void A_long_named_list_tries_only_the_members_that_can_start_here()
+    {
+        // A named list compiles to one alternative per member, and every attempt used to try each
+        // alternative's first character in turn: a thousand members cost a thousand tests at every
+        // word boundary. S60b item 9 jumps straight to the members that start with the text's
+        // next one or two code units. Over the megabyte below this port took about 1,840 ms before
+        // and 80 ms after, and upstream 1,099 ms. The test runs on its own because the rest of the
+        // suite, running alongside, made the same search take 700 ms. The members come from a small LCG so the Python probe can
+        // rebuild them.
+        // regex 2026.9.10: search(r'\b\L<words>\b', <this subject>, words=<these members>) ->
+        // (1048610, 1048616)
+        List<string> members = [.. Enumerable.Range(0, 1000).Select(Member), "needle"];
+        var words = new Dictionary<string, IReadOnlyCollection<string>> { ["words"] = members };
+        var pattern = new FuzzyRegex(@"\b\L<words>\b", FuzzyRegexOptions.None, words);
+        string subject = Pad("a needle in a haystack.", _megabyte);
+        _ = pattern.IsMatch("warm-up");
+
+        Func<Match> act = () => pattern.Match(subject, timeout: TimeSpan.FromMilliseconds(500));
+
+        Match found = act.Should().NotThrow().Subject;
+        (found.Index, found.Length).Should().Be((1_048_610, 6));
+
+        // Ten members, enough to be indexed (BranchChain.MinAlternatives): one and two code units
+        // long, several sharing a first unit, and one with an astral first character. Upstream's
+        // answers, from regex 2026.9.10 finditer with w=['ab', 'abc', 'b', 'xyz', 'ac', 'cab',
+        // 'a', 'ba', '\U0001F600x', 'bb'], as (start, end) spans in code points: \L<w> over
+        // 'abcab xyz' gives (0, 3), (3, 5) and (6, 9). \L<w>c over 'abcc' gives (0, 4).
+        // (?:\L<w>)+?$ over 'abcab' gives (0, 5). x|\L<w>|y over 'yxab' gives (0, 1), (1, 2) and
+        // (2, 4). \L<w>(*SKIP)d|b over 'abcd abd' gives (0, 4) and (5, 8). \L<w> over
+        // '\U0001F600x\U0001F600ba' gives (0, 2) and (3, 5). \L<w>$ over 'zab' gives (1, 3). With
+        // partial=True, \L<w> over 'abcab xy' gives (0, 3), (3, 5) and the partial match (6, 8),
+        // whose second code unit is past the slice.
+        Spans(@"\L<w>", "abcab xyz").Should().Equal((0, 3), (3, 2), (6, 3));
+        Spans(@"\L<w>c", "abcc").Should().Equal((0, 4));
+        Spans(@"(?:\L<w>)+?$", "abcab").Should().Equal((0, 5));
+        Spans(@"x|\L<w>|y", "yxab").Should().Equal((0, 1), (1, 1), (2, 2));
+        Spans(@"\L<w>(*SKIP)d|b", "abcd abd").Should().Equal((0, 4), (5, 3));
+        Spans(@"\L<w>", "\U0001F600x\U0001F600ba").Should().Equal((0, 3), (5, 2));
+        Spans(@"\L<w>$", "zab").Should().Equal((1, 2));
+        Spans(@"\L<w>", "abcab xy", partial: true).Should().Equal((0, 3), (3, 2), (6, 2));
+
+        static string Member(int index)
+        {
+            uint state = unchecked(((uint)index * 2654435761u) + 1);
+            char[] letters = new char[5 + (index % 4)];
+            for (int i = 0; i < letters.Length; i++)
+            {
+                state = unchecked((state * 1103515245u) + 12345u);
+                letters[i] = (char)('a' + ((state >> 16) % 26));
+            }
+
+            return new string(letters);
+        }
+
+        static List<(int, int)> Spans(string pattern, string subject, bool partial = false)
+        {
+            var small = new Dictionary<string, IReadOnlyCollection<string>>
+            {
+                ["w"] = ["ab", "abc", "b", "xyz", "ac", "cab", "a", "ba", "\U0001F600x", "bb"],
+            };
+            return
+            [
+                .. new FuzzyRegex(pattern, FuzzyRegexOptions.None, small)
+                    .Matches(subject, 0, subject.Length, overlapped: false, partial)
+                    .Select(static match => (match.Index, match.Length)),
+            ];
+        }
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [NotInParallel]
+    public void An_indexed_alternation_with_many_unkeyed_members_builds_in_linear_space()
+    {
+        // Half of these 8,000 alternatives start with a character set, which the index cannot key,
+        // and the other half each start with a different character. The first version of
+        // BranchChain copied the unkeyed half into every key's list: 4,000 keys times 4,000
+        // entries, three times over, about 128 MB for this pattern and 2 GB at 32,000 alternatives
+        // (S60b item 9 review). Built once more on its own here, the index should cost a few
+        // entries per alternative.
+        string pattern = string.Join(
+            "|",
+            Enumerable
+                .Range(0, 8000)
+                .Select(static i => i % 2 == 0 ? $"{(char)(0x4E00 + i)}q" : $"[{(char)(0x4E00 + i)}z]q")
+        );
+        List<Node> nodes = new FuzzyRegex(pattern).PatternObject.NodeList;
+        nodes.Count(static node => node.Chain is not null).Should().Be(7999);
+        foreach (Node node in nodes)
+        {
+            node.Chain = null;
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        BranchChain.Build(nodes);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        allocated.Should().BeLessThan(8 * _megabyte);
+        var regex = new FuzzyRegex(pattern);
+        regex.Match($"x{(char)(0x4E00 + 7999)}q").Index.Should().Be(1);
+        regex.Match($"x{(char)(0x4E00 + 7998)}zq").Index.Should().Be(2);
     }
 
     [Test]

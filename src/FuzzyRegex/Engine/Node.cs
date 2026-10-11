@@ -151,6 +151,15 @@ internal sealed class Node
     internal bool Match;
 
     /// <summary>
+    /// The indexed run of branches this <c>BRANCH</c> node belongs to, or <see langword="null"/>.
+    /// Not an upstream field (S60b item 9); set once by <see cref="BranchChain.Build"/>.
+    /// </summary>
+    internal BranchChain? Chain;
+
+    /// <summary>This node's place in <see cref="Chain"/>.</summary>
+    internal int ChainIndex;
+
+    /// <summary>
     /// NOT UPSTREAM (finding F-A): how many items the fuzzy run starting at this node has, or 0 if
     /// this node does not start one. Set by <c>PatternObject.SetFuzzyRunLengths</c> when the
     /// pattern is compiled; read by <c>Matcher.ExactDeletionMayMatch</c>.

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -240,10 +241,10 @@ internal static class Seam
 /// See <see cref="LocateRequiredString"/>.
 /// </para>
 /// <para>
-/// <b>Still deferred to Phase 7</b>: <c>search_start</c>, the rest of the <c>string_search</c> family
-/// (<c>:5231-6918</c>), and the test-node fast path (<c>try_match</c>, <c>:7671</c>). Without them a
-/// search that the required string does not refuse outright still tries the pattern at every
-/// position.
+/// <b>Still deferred to Phase 7</b>: the rest of the <c>string_search</c> family
+/// (<c>:5231-6918</c>). <c>search_start</c> (<c>:8385</c>) and the test-node fast path
+/// (<c>try_match</c>, <c>:7671</c>) landed in S60b; see <see cref="SearchStart"/> and
+/// <see cref="TryMatch"/>.
 /// </para>
 /// <para>
 /// <b>Nor are they uniformly transparent.</b> They answer the same for the case-sensitive opcodes,
@@ -254,12 +255,9 @@ internal static class Seam
 /// already-folded values. In each, this port finds a match upstream's own search misses (or, for
 /// the first, the other way round). All three are pinned as known differences in
 /// <c>tests/FuzzyRegex.Tests/Gaps/Engine/CaseInsensitiveMatchingTests.cs</c>, with the
-/// <c>regex.match</c> output beside them; DECISIONS 2026-08-31 has the reasoning. <b>A Phase 7
-/// slice restoring any of the three is expected to change those tests, and should.</b>
-/// </para>
-/// <para>
-/// The test-node fast path (<c>try_match</c>, <c>:7671</c>) is deferred too, and S19 measured what
-/// that costs before putting it back: nothing it could find. See <see cref="TryMatch"/>.
+/// <c>regex.match</c> output beside them; DECISIONS 2026-08-31 has the reasoning. Under the owner's
+/// rule of 2026-09-12 those pins are permanent: the first two predicates are not ported (S60b item
+/// 6, DECISIONS 2026-09-23), and a later port of the retreat fast path must keep them green.
 /// </para>
 /// </remarks>
 internal static class Matcher
@@ -446,10 +444,10 @@ internal static class Matcher
     /// regex.search(r'(?ai)x?\p{Ll}', 'A') -> (0, 1)     # the prefilter no longer applies
     /// </code>
     /// <para>
-    /// The prefilter is <c>search_start</c>, which this port defers to Phase 7, so our
-    /// <c>search</c> agrees with upstream's <c>match</c> here and not with upstream's
-    /// <c>search</c>. That is the deferral showing through rather than a difference in this
-    /// predicate; DECISIONS 2026-08-31 records it and the gap tests pin both halves.
+    /// The prefilter is <c>search_start</c>. This port's (<see cref="SearchStart"/>, S60b) sweeps
+    /// with this predicate rather than the slot, so our <c>search</c> agrees with upstream's
+    /// <c>match</c> here and not with upstream's <c>search</c>. DECISIONS 2026-08-31 and
+    /// 2026-09-23 record it, and the gap tests pin both halves.
     /// </para>
     /// </remarks>
     /// <param name="encoding">The pattern's encoding.</param>
@@ -7378,39 +7376,34 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>try_match</c> (<c>upstream/src/_regex.c</c> line 7671), <b>reduced to its default
-    /// arm</b> (<c>:7843</c>).
+    /// Upstream <c>try_match</c> (<c>upstream/src/_regex.c</c> line 7671): before a branch or a
+    /// repeat's body or tail is entered, ask its first testable node whether there is any point.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Upstream looks at <c>next-&gt;test</c>, asks that node's <c>try_match_*</c> predicate whether
-    /// there is any point entering this branch or repeat body at all, and on success resumes at
-    /// <c>next-&gt;match_next</c> with the tested character already consumed. That is the test-node
-    /// fast path this port defers to Phase 7 (see the class remarks). Deferring it is semantically
-    /// transparent: the default arm reports success and leaves the position alone, so the branch is
-    /// entered and its first node is tested by the dispatch loop in the ordinary way. Where upstream
-    /// would have refused the branch, this port enters it and backtracks straight back out - slower,
-    /// same answer.
+    /// <c>next-&gt;test</c> is that node, found by <c>set_test_node</c> (<c>Optimiser.SetTestNode</c>).
+    /// On <c>FAILURE</c> the caller does not enter at all, so nothing is pushed for a branch that
+    /// cannot start. On success, when the test is the exit's own first node, matching resumes at
+    /// <c>match_next</c> with the tested character or string already consumed, so the dispatch loop
+    /// does not test it a second time. In <c>(?:ab)*c</c>, for example, the body is never entered
+    /// at a position where <c>ab</c> does not follow.
     /// </para>
     /// <para>
-    /// <b>S19 ported the full version and reverted it</b>, because the exponential blowup it was
-    /// meant to fix was not caused by this at all - see DECISIONS 2026-08-31. It measurably fixed
-    /// nothing, and Phase 7 is where an optimisation gets made behind a benchmark.
+    /// <b>Every arm here must answer what the node's own opcode would</b>, because the fast path
+    /// may only save work. The one-character arms are the functions the opcodes call
+    /// (<see cref="MatchOne"/>), the zero-width arms likewise (<see cref="TryMatchZeroWidth"/>),
+    /// and the string arms carry upstream's slice bounds, which S33 found are what upstream's
+    /// partial answers depend on (<see cref="TryMatchString"/>). The <c>SUCCESS</c> arm is S86's
+    /// (below), and it enters the node rather than passing over it.
     /// </para>
     /// <para>
-    /// <b>S31 found the one way the reduction is NOT transparent, and restored exactly that.</b>
-    /// Reporting <c>FAILURE</c> as <c>SUCCESS</c> costs a wasted branch and nothing else, because
-    /// the dispatch loop tests the same node a moment later and backtracks straight out. Reporting
-    /// <c>PARTIAL</c> as <c>SUCCESS</c> is a different answer: every caller below treats a negative
-    /// status as "stop here and report it", so upstream stops INSIDE the branch or repeat, where
-    /// this port carried on, entered it, and let the opcode raise the partial one step later - by
-    /// which time an enclosing group had closed again. Found by the S31 oracle wave, seed 31, rows
-    /// 214 and 518; minimised to <c>regex.search(r'(\D*?)z', 'a', partial=True)</c>, where upstream
-    /// leaves group 1 unset and this port had it as (0,1). So the test node is consulted, and only
-    /// a partial answer is propagated; <c>FAILURE</c> still reads as <c>SUCCESS</c> and the fast
-    /// path is still Phase 7's. Nothing outside partial matching can change, because
-    /// <see cref="TryMatchOne"/> and its siblings answer <c>PARTIAL</c> only when
-    /// <c>partial_side</c> is set, which no ordinary match sets.
+    /// <b>History.</b> S19 ported this in full and reverted it, because the exponential blowup it
+    /// was meant to fix was not caused by it (DECISIONS 2026-08-31). S31 then propagated the
+    /// <c>PARTIAL</c> answer alone, since upstream stops INSIDE a branch that runs out where
+    /// entering it let an enclosing group close again first:
+    /// <c>regex.search(r'(\D*?)z', 'a', partial=True)</c> leaves group 1 unset. S60b restored the
+    /// rest, measured answer-identical to the partial-only version over 325,952 slices of 64
+    /// patterns under 11 flag sets (notes, S60b sittings).
     /// </para>
     /// <para>
     /// <b>D67 (2026-10-08) undid this for a repeat's tail test, on purpose</b> (see
@@ -7447,26 +7440,69 @@ internal static class Matcher
             return MatchStatus.Success;
         }
 
+        int status;
         if (IsStringTest(test.Op))
         {
-            return IsStringTestPartial(state, test, textPos) ? MatchStatus.Partial : MatchStatus.Success;
+            // The six STRING arms return directly (:7811-7827).
+            status = TryMatchString(state, next, test, textPos, out int stringEnd);
+            if (status == MatchStatus.Success)
+            {
+                nextPosition = new Position(next.MatchNext!, stringEnd);
+            }
+
+            return status;
         }
 
         if (test.Op == Opcode.Success)
         {
-            // We want to match all of the slice (:7829).
+            // We want to match all of the slice (:7829). The SUCCESS node is entered, not passed
+            // over, as upstream's arm does: it is the opcode that ends the match.
             bool shortOfTheEnd = state.Reverse ? textPos != state.SliceStart : textPos != state.SliceEnd;
             return state.MatchAll && shortOfTheEnd ? MatchStatus.Failure : MatchStatus.Success;
         }
 
-        if (!IsOneCharacterTest(test.Op))
+        if (IsOneCharacterTest(test.Op))
         {
+            status = MatchOne(state, test, textPos);
+        }
+        else if (Optimiser.IsPositionAssertion(test.Op))
+        {
+            // In a partial call the zero-width arms answer as the default arm (:7843) and enter
+            // the node, as they did before S60b. A refusal is not transparent there: the
+            // LAZY_REPEAT_ONE walk (BasicMatch's backtrack arm) ends at its limit on a refused
+            // tail, where a tail entered and failed leaves the repeat a try at the text to come,
+            // which runs out. `(?m)[a\n]*?^b` over 'a' is P(0, 1), completed by 'a\nb', and was
+            // None with the refusal (blind review of S60b, 2026-10-11; PartialMatchingTests).
+            if (state.PartialSide != MatchState.PartialNone)
+            {
+                return MatchStatus.Success;
+            }
+
+            status = TryMatchZeroWidth(state, test, textPos);
+
+            // D11 M1's Undetermined comes only from a partial call (WordTestAtEdge,
+            // GraphemeBoundaryAtEdge, ZeroWidthInsideTheTextToCome and the rest), which never
+            // reaches this line, so no caller sees it.
+            Debug.Assert(
+                status != MatchStatus.Undetermined,
+                "S60b: a zero-width test answers Undetermined only in a partial call"
+            );
+        }
+        else
+        {
+            // The default arm (:7843).
             return MatchStatus.Success;
         }
 
-        int status = MatchOne(state, test, textPos);
+        if (status != MatchStatus.Success)
+        {
+            return status;
+        }
 
-        return status == MatchStatus.Partial ? status : MatchStatus.Success;
+        // A one-character or zero-width test moves at most one character, so 'match_step' is
+        // -1, 0 or 1 codepoints (:7852-7853).
+        nextPosition = new Position(next.MatchNext!, Step(state, textPos, next.MatchStep));
+        return MatchStatus.Success;
     }
 
     /// <summary>
@@ -7505,18 +7541,20 @@ internal static class Matcher
                 or Opcode.StringFldRev;
 
     /// <summary>
-    /// The partial-match answer of upstream's six <c>try_match_STRING*</c> arms:
-    /// <c>try_match_STRING</c> (<c>upstream/src/_regex.c:7383</c>), <c>_STRING_FLD</c> (<c>:7415</c>),
-    /// <c>_STRING_FLD_REV</c> (<c>:7488</c>), <c>_STRING_IGN</c> (<c>:7559</c>), <c>_STRING_IGN_REV</c>
-    /// (<c>:7598</c>) and <c>_STRING_REV</c> (<c>:7635</c>).
+    /// Upstream's six <c>try_match_STRING*</c> arms: <c>try_match_STRING</c>
+    /// (<c>upstream/src/_regex.c:7383</c>), <c>_STRING_FLD</c> (<c>:7415</c>), <c>_STRING_FLD_REV</c>
+    /// (<c>:7488</c>), <c>_STRING_IGN</c> (<c>:7559</c>), <c>_STRING_IGN_REV</c> (<c>:7598</c>) and
+    /// <c>_STRING_REV</c> (<c>:7635</c>).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Reduced the way <see cref="TryMatch"/> reduces the one-character tests: only a
-    /// <c>RE_ERROR_PARTIAL</c> answer is propagated, because reporting <c>FAILURE</c> as
-    /// <c>SUCCESS</c> costs a wasted branch and nothing else while reporting <c>PARTIAL</c> as
-    /// <c>SUCCESS</c> is a different answer. So this returns "would upstream have said partial",
-    /// which is "the string ran off the end of the SLICE before it mismatched".
+    /// Upstream writes <c>next_position</c> itself; here the caller does, from
+    /// <paramref name="end"/>. On success that is where the string ended, or
+    /// <paramref name="textPos"/> when <c>match_step</c> is 0 - the test sits past a group node, so
+    /// <c>match_next</c> is the branch's own first node and nothing may be consumed. Upstream spells
+    /// that as <c>text_pos + match_step</c> in the exact arms and as the <c>match_step == 0</c> test in
+    /// the folded ones; with positions counted in code units the walk is the only way to add a
+    /// string's length, so all six take the folded arms' form.
     /// </para>
     /// <para>
     /// <b>Slice, not subject, and that is the whole point (S33).</b> These six bound by
@@ -7535,11 +7573,14 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="next">The exit being tested, for its <c>match_step</c>.</param>
     /// <param name="test">The string test node.</param>
     /// <param name="textPos">The position to test at.</param>
-    /// <returns><see langword="true"/> if the answer is a partial match.</returns>
-    private static bool IsStringTestPartial(MatchState state, Node test, int textPos)
+    /// <param name="end">On success, where to continue from.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int TryMatchString(MatchState state, NextNode next, Node test, int textPos, out int end)
     {
+        end = textPos;
         int length = test.Values.Count;
         Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
         int pos = textPos;
@@ -7555,36 +7596,36 @@ internal static class Matcher
                 {
                     if (pos >= state.SliceEnd)
                     {
-                        return state.RunsOutRight;
+                        return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                     }
 
                     if (!SameStringChar(test, state.CharAt(pos), test.Values[sPos]))
                     {
-                        return false;
+                        return MatchStatus.Failure;
                     }
 
                     pos = state.NextPos(pos);
                 }
 
-                return false;
+                break;
             case Opcode.StringRev:
             case Opcode.StringIgnRev:
                 for (; sPos < length; sPos++)
                 {
                     if (pos <= state.SliceStart)
                     {
-                        return RanOutOnTheLeft(state, pos);
+                        return RanOutOnTheLeft(state, pos) ? MatchStatus.Partial : MatchStatus.Failure;
                     }
 
                     if (!SameStringChar(test, state.CharBefore(pos), test.Values[length - sPos - 1]))
                     {
-                        return false;
+                        return MatchStatus.Failure;
                     }
 
                     pos = state.PrevPos(pos);
                 }
 
-                return false;
+                break;
             case Opcode.StringFld:
                 while (sPos < length)
                 {
@@ -7592,7 +7633,7 @@ internal static class Matcher
                     {
                         if (pos >= state.SliceEnd)
                         {
-                            return state.RunsOutRight;
+                            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                         }
 
                         foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharAt(pos), folded);
@@ -7601,7 +7642,7 @@ internal static class Matcher
 
                     if (!SameCharIgn(test.Encoding, test.Values[sPos], folded[foldedPos]))
                     {
-                        return false;
+                        return MatchStatus.Failure;
                     }
 
                     ++sPos;
@@ -7613,7 +7654,13 @@ internal static class Matcher
                     }
                 }
 
-                return false;
+                // The string ended part-way through a character's folding (:7473).
+                if (foldedPos < foldedLen)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                break;
             default:
                 // StringFldRev.
                 while (sPos < length)
@@ -7622,7 +7669,7 @@ internal static class Matcher
                     {
                         if (pos <= state.SliceStart)
                         {
-                            return RanOutOnTheLeft(state, pos);
+                            return RanOutOnTheLeft(state, pos) ? MatchStatus.Partial : MatchStatus.Failure;
                         }
 
                         foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharBefore(pos), folded);
@@ -7631,7 +7678,7 @@ internal static class Matcher
 
                     if (!SameCharIgn(test.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
                     {
-                        return false;
+                        return MatchStatus.Failure;
                     }
 
                     ++sPos;
@@ -7643,8 +7690,17 @@ internal static class Matcher
                     }
                 }
 
-                return false;
+                // (:7546.)
+                if (foldedPos < foldedLen)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                break;
         }
+
+        end = next.MatchStep == 0 ? textPos : pos;
+        return MatchStatus.Success;
     }
 
     /// <summary>
@@ -7892,7 +7948,8 @@ internal static class Matcher
     /// So the token costs one predictable null test per 256 iterations of the matching or
     /// backtracking loop, on top of the <see cref="System.Diagnostics.Stopwatch"/> read that was
     /// already there. S60 added one more caller, <see cref="SimpleStringSearch"/>, on the same gate:
-    /// it is a character-at-a-time loop and it can run the length of a subject.
+    /// it is a character-at-a-time loop and it can run the length of a subject. S60b added
+    /// <see cref="SearchStart"/>'s retry loop, for the same reason.
     /// <see cref="StringSearch"/> deliberately has no poll - the reasoning, and the measurement
     /// behind it, are at the sweep itself.
     /// </remarks>
@@ -11980,8 +12037,8 @@ internal static class Matcher
     /// encoding where its matcher's does, so <c>regex.search(r'(?ai)\p{Ll}', 'A')</c> is None and
     /// <c>regex.match</c> of the same is (0, 1). <see cref="MatchMany"/> asks
     /// <see cref="MatchesOne"/>, which is what this port's matcher asks, so the prefilter cannot
-    /// disagree with the matcher it is screening for. That leaves the deferred encoding slot
-    /// deferred - <c>Unicode/Encodings.cs</c> - and it is why porting this arm does not reopen the
+    /// disagree with the matcher it is screening for. That is why the encoding slot is never ported
+    /// (<c>Unicode/Encodings.cs</c>, S60b item 6), and why porting this arm does not reopen the
     /// three differences S22 measured.
     /// </para>
     /// <para>
@@ -12296,6 +12353,17 @@ internal static class Matcher
                 break;
             }
 
+            // NOT UPSTREAM'S (S60b). Once 'try_match' refuses a position itself, this loop can walk
+            // the whole subject without returning to the matching loop and its poll: '\b\B' over a
+            // megabyte did, and OptimiserTrapsTests' timeout test caught it. So it polls on the
+            // same 'Iterations' gate, as SimpleStringSearch does.
+            state.Iterations = (ushort)(state.Iterations + 0x100);
+
+            if (state.Iterations == 0 && SafeCheckCancel(state))
+            {
+                return MatchStatus.Cancelled;
+            }
+
             // This position is refused after all, so try the next one.
             startPos = Step(state, startPos, state.Reverse ? -1 : 1);
 
@@ -12523,6 +12591,14 @@ internal static class Matcher
         FuzzyLiteralFilter? fuzzyFilter =
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
 
+        // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
+        // start with. Withheld from a partial match, which can end part way through a literal, and
+        // from a pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        SearchValues<string>? leadingStrings =
+            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb
+                ? pattern.LeadingStrings
+                : null;
+
         Node node;
         int status;
 
@@ -12683,6 +12759,20 @@ internal static class Matcher
                     foundPos = next;
                 }
             }
+        }
+
+        // NOT UPSTREAM'S (S60b item 14). Every match starts with one of the literals and ends
+        // inside the slice, so the next attempt starts at the earliest one that fits. One sweep
+        // with no poll, for the reasons StringSearch gives.
+        if (leadingStrings is not null && foundPos <= state.SliceEnd)
+        {
+            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            if (at < 0)
+            {
+                return MatchStatus.Failure;
+            }
+
+            foundPos += at;
         }
 
         if (search)
@@ -13265,6 +13355,18 @@ internal static class Matcher
                 }
                 case Opcode.Branch: // 2-way branch.
                 {
+                    // NOT UPSTREAM'S (S60b item 9): in a long run of branches, go straight to the
+                    // first alternative that can start with the character here. The ones passed
+                    // over would fail try_match and push nothing (BranchChain).
+                    if (node.Chain is { } chain && state.TextPos < state.SliceEnd)
+                    {
+                        node = chain.Skip(node.ChainIndex, state.Text.Span, state.TextPos, state.SliceEnd);
+                        if (node.Chain != chain)
+                        {
+                            break;
+                        }
+                    }
+
                     status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
                     if (status is < 0 and not MatchStatus.Partial)
                     {
@@ -18028,29 +18130,36 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Skip over any repeated leading characters. NOT UPSTREAM'S, D77: not after a lazy
-                    // repeat in a pattern with a (*PRUNE) or (*SKIP). The skip is sound only if the
-                    // attempt tried the continuation after every length of the run, and a lazy repeat
-                    // tries the short lengths first, so a verb can cut the attempt before the long
-                    // ones; the starts inside the run were then never covered. PCRE2 bumps along
-                    // after either verb here (pcre2pattern, "Backtracking control"). A greedy repeat
-                    // tries the longest length first, so any start inside the run would reach the
-                    // same verb at the same place and fail the same way; it keeps the skip. The
-                    // oracle's PatternObject.SkipsALazyRunDespiteAVerb restores upstream's skip.
+                    // Skip over any repeated leading characters. sync-divergence: upstream tests
+                    // 'start_node' itself; LeadingRepeat is that node, or (S60b item 17) the
+                    // greedy repeat behind the capture groups that open in front of it. See
+                    // FindLeadingRepeat.
+                    //
+                    // NOT UPSTREAM'S, D77: not after a lazy repeat in a pattern with a (*PRUNE) or
+                    // (*SKIP). The skip is sound only if the attempt tried the continuation after
+                    // every length of the run, and a lazy repeat tries the short lengths first, so a
+                    // verb can cut the attempt before the long ones; the starts inside the run were
+                    // then never covered. PCRE2 bumps along after either verb here (pcre2pattern,
+                    // "Backtracking control"). A greedy repeat tries the longest length first, so any
+                    // start inside the run would reach the same verb at the same place and fail the
+                    // same way; it keeps the skip. The oracle's PatternObject.SkipsALazyRunDespiteAVerb
+                    // restores upstream's skip. LeadingRepeat is lazy only when it is the start node
+                    // itself, so this is D77's test unchanged.
                     if (
-                        startNode.Op is Opcode.GreedyRepeatOne
-                        || (
-                            startNode.Op is Opcode.LazyRepeatOne
-                            && (!pattern.HasBacktrackingVerb || pattern.SkipsALazyRunDespiteAVerb)
+                        pattern.LeadingRepeat is Node leadingRepeat
+                        && (
+                            leadingRepeat.Op is Opcode.GreedyRepeatOne
+                            || !pattern.HasBacktrackingVerb
+                            || pattern.SkipsALazyRunDespiteAVerb
                         )
                     )
                     {
                         // How many characters did the repeat actually match?
                         long skipCount = CountOne(
                             state,
-                            startNode.Next2.Node!,
+                            leadingRepeat.Next2.Node!,
                             state.TextPos,
-                            startNode.Values[2],
+                            leadingRepeat.Values[2],
                             out bool _,
                             out int skipEnd
                         );
@@ -18058,9 +18167,9 @@ internal static class Matcher
                         // If it's fewer than the maximum then skip over those characters. Upstream's
                         // 'state->text_pos += (Py_ssize_t)count * pattern_step' is the position
                         // CountOne walked to: the pattern step and the repeated node's direction
-                        // agree here, because the repeat is the pattern's own start node, and
+                        // agree here, because the repeat is where the pattern starts, and
                         // CountOne throws for a reverse node in any case (S23).
-                        if (skipCount < startNode.Values[2])
+                        if (skipCount < leadingRepeat.Values[2])
                         {
                             state.TextPos = skipEnd;
                         }
@@ -18249,9 +18358,9 @@ internal static class Matcher
                     // for it can be a good optimisation when working with long strings". Only the
                     // default arm (:16271) is ported, for two reasons. The string arms are built on
                     // 'string_search_rev', which is the Phase 7 deferral (DECISIONS 2026-08-31); and
-                    // the character arms consult 'test' themselves, which is exactly the test-node
-                    // fast path this port already defers, so porting them here would half-deliver
-                    // it. The default arm retreats one character and re-enters the dispatch loop,
+                    // the character arms are this retreat's own scan for the tail's first character,
+                    // a separate optimisation from 'try_match' that Phase 7 has not measured. The
+                    // default arm retreats one character and re-enters the dispatch loop,
                     // which tests the tail node in the ordinary way and comes straight back here if
                     // it fails - slower, same answer.
                     //
@@ -18450,22 +18559,12 @@ internal static class Matcher
 
                         pos = Step(state, pos, step);
 
-                        // The tail's REAL answer, not TryMatch's transparent success. This is the
-                        // one call site where the reduction described on TryMatch is not
-                        // transparent even for a FAILURE, because the loop's exit condition is
-                        // exactly this status: a tail that reports success when it cannot match
-                        // ends the walk at the first position instead of carrying on to the next
-                        // one, where the guard above would have answered PARTIAL. Upstream's own
-                        // default arm calls try_match, which does test the node (:17037), and its
-                        // specialised arms compare the tail character inline (:16561) - so both
-                        // arms of upstream's switch get the real answer here and only this port did
-                        // not. Found by the S31 blind review: `regex.match('ba??x', 'baa',
-                        // partial=True)` is (0,3) partial upstream and was no match here.
-                        //
-                        // 'nextPosition' is discarded at this call site, so nothing depends on
-                        // upstream's fast-path rule that a successful try_match consumes the
-                        // character it tested - which is why asking the predicate here does not
-                        // reinstate the Phase 7 fast path S19 measured and reverted.
+                        // The loop's exit condition is exactly this status (:17037): a tail that
+                        // reported success when it cannot match would end the walk at the first
+                        // position instead of carrying on to the next one, where the guard above
+                        // answers PARTIAL. Found by the S31 blind review:
+                        // `regex.match('ba??x', 'baa', partial=True)` is (0,3) partial upstream and
+                        // was no match here. 'nextPosition' is not used.
                         status = TailMayMatch(state, TryMatch(state, node.Next1, pos, out _));
 
                         if (status < 0)
