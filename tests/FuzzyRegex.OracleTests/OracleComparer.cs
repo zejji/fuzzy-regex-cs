@@ -423,6 +423,11 @@ internal static class OracleComparer
         // dirty a pattern; the named ablations that pass `ablate` alone (skip timing, verb scope
         // and D11's second pass) ask for it with `upstreamCallCaptures`.
         bool callCapturesStacked = namedAblation;
+
+        // Every named ablation also has D81 off: upstream answers a run-out without checking the
+        // open sections' upper limits, so with the check on, taking another fix away cannot bring
+        // back upstream's answer on a partial row whose path breaks one.
+        compiled.PatternObject.RunOutAsBeforeD81 = namedAblation;
         compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
         compiled.PatternObject.DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation;
 

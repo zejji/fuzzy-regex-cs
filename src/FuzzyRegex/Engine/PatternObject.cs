@@ -409,6 +409,22 @@ internal sealed class PatternObject
     internal bool HasFuzzyMinimum;
 
     /// <summary>
+    /// NOT UPSTREAM (D81): whether one fuzzy section can be open inside another: the pattern has two
+    /// or more, or one and a group call, which can enter it again from inside itself. Only then can
+    /// a run-out find an enclosing section's limits broken (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
+    /// Set when the pattern is compiled.
+    /// </summary>
+    internal bool NestsFuzzySections;
+
+    /// <summary>
+    /// Whether the matcher keeps <c>MatchState.SectionFrame</c>, the link from each open fuzzy
+    /// section to the one around it: for a minimum (<see cref="HasFuzzyMinimum"/>) or for the
+    /// enclosing limits a run-out checks (<see cref="NestsFuzzySections"/>). A pattern with neither
+    /// pushes no link. Set when the pattern is compiled.
+    /// </summary>
+    internal bool KeepsSectionLinks;
+
+    /// <summary>
     /// NOT UPSTREAM (empty-iteration rule): whether the repeat memo runs (<c>Matcher.RepeatMemoHit</c>):
     /// for a fuzzy pattern whose tested groups, the groups a backreference or conditional reads,
     /// fit in <see cref="MemoGroups"/>. Set when the pattern is compiled.
@@ -865,6 +881,14 @@ internal sealed class PatternObject
     internal bool TailRunOutAsBeforeD67;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
+    /// open fuzzy sections' upper limits, as upstream's does (D81). The oracle sets it on a pattern
+    /// it compiled for an ablation, since upstream has none of this port's fixes. See
+    /// <c>Matcher.AnOpenSectionIsOverItsLimits</c>.
+    /// </summary>
+    internal bool RunOutAsBeforeD81;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether an item that matched exactly is never
     /// offered as a deletion, which is upstream's rule. The oracle sets it on a pattern it compiled
     /// for one call, to show that the ledger entry 42 fix is the whole of a divergence.
@@ -1097,9 +1121,14 @@ internal sealed class PatternObject
         // unreachable nodes from the list and the required-string node has been added to it.
         bool noNarrowing = false;
         bool hasPrune = false;
+        int sections = 0;
         for (int i = 0; i < self.NodeList.Count; i++)
         {
             self.NodeList[i].Index = i;
+            if (self.NodeList[i].Op == Opcode.Fuzzy)
+            {
+                ++sections;
+            }
 
             // NOT UPSTREAM'S (S60): note a '(*SKIP)' while we are walking the list anyway, so the
             // prefilter knows not to move the first attempt. See HasSkipVerb.
@@ -1160,6 +1189,10 @@ internal sealed class PatternObject
                 ++self.GroupCallSites;
             }
         }
+
+        // NOT UPSTREAM (D81): see NestsFuzzySections and KeepsSectionLinks.
+        self.NestsFuzzySections = sections > 1 || (sections == 1 && self.HasGroupCalls);
+        self.KeepsSectionLinks = self.HasFuzzyMinimum || self.NestsFuzzySections;
 
         // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
         Optimiser.FindAnchorBanLift(self);

@@ -6162,6 +6162,119 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D81: whether the counts so far break an upper limit of a fuzzy section still
+    /// open, the innermost or one around it, at a run-out. A run-out answers the partial before those
+    /// sections close, and a section checks its limits only at its END_FUZZY.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each section counts the errors of the sections open inside it, since END_FUZZY adds the inner
+    /// counts to the outer ones (<c>upstream/src/_regex.c</c>:12475-12481): its count is what it had
+    /// when the inner section was entered (<see cref="MatchState.TryOuterSection"/>) plus the inner
+    /// section's. Every check is one its END_FUZZY makes on those counts: the section's maximums and
+    /// cost limit (<see cref="WithinTheLimits"/>, the maximum half of
+    /// <see cref="FuzzyWithinConstraints"/>) and the whole match's error and cost limits (the forward
+    /// END_FUZZY's <c>state.TotalErrors &gt; state.MaxErrors || state.TotalCost &gt; state.MaxCost</c>).
+    /// Counts only grow with more text and no cost weight is negative, so a limit broken here is broken
+    /// at that END_FUZZY for every continuation: the path is impossible and failing it removes nothing
+    /// a continuation could complete. A minimum is not asked, because more text can still meet it.
+    /// </para>
+    /// <para>
+    /// Only the innermost section's limits are asked as each error is made
+    /// (<see cref="ThisErrorPermitted"/>), so only a pattern where sections nest can reach a broken
+    /// one here (<see cref="PatternObject.NestsFuzzySections"/>); <see cref="CloseTheBodysSection"/>
+    /// asks the same of a lookaround body's section that a run-out closes. `(?:(?:b){e&lt;=2}){i&lt;=1}x`
+    /// over 'c' answered P(0, 1) with a substitution the outer <c>{i&lt;=1}</c> forbids, where the
+    /// insertion path is legal and 'cbx' completes it.
+    /// </para>
+    /// <para>
+    /// Inside a lookaround's body or a condition's test, only the sections the body opened are
+    /// asked. Their END_FUZZY lies inside the body, before the body can succeed, so a broken one
+    /// fails the body's path for every continuation. A section around the lookaround closes after
+    /// it, and the body's success does not wait for it: `(?:(?!(?:b){e&lt;=2}x)c){i&lt;=1}` over 'cx'
+    /// is None in both engines, because the body's path through a substitution succeeds and makes
+    /// the negative lookahead fail although the outer <c>{i&lt;=1}</c> forbids that substitution.
+    /// Failing that path at a run-out would turn such a lookahead true. The sections around the
+    /// lookaround are asked when matching goes on after it (<see cref="CloseTheBodysSection"/>,
+    /// and this check at any later run-out). A section's frame lies above the structure-stack depth
+    /// the innermost lookaround or test parked exactly when the body opened it.
+    /// </para>
+    /// <para>
+    /// Cost: one step per open pruning mark above the innermost lookaround (atomic groups), then
+    /// one step per open section, each a fixed number of comparisons. Both walks only move down
+    /// their stacks, so both end.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, which keeps the section links for such a pattern.</param>
+    /// <returns><see langword="true"/> if some open section's upper limit is already broken.</returns>
+    private static bool AnOpenSectionIsOverItsLimits(MatchState state)
+    {
+        Debug.Assert(state.Pattern.KeepsSectionLinks, "D81: a pattern whose sections nest keeps their links");
+
+        // The enclosing sections' counts are read here and are not in the failed-call memo's key
+        // (FailedCallKey). That is exact because the memo is off in a partial call's passes
+        // (MatchState.InitCallMemo), and only those run out of text (MatchState.RunsOutRight).
+        Debug.Assert(state.CallMemoThreshold == long.MaxValue, "D81: no run-out while the failed-call memo is on");
+        if (state.FuzzyNode is not { } section)
+        {
+            return false;
+        }
+
+        // The structure-stack depth the innermost open lookaround or condition's test parked, or -1.
+        long bodyBase = -1;
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            int mark = (int)state.Pstack.SizeAt(offset);
+            if (mark > state.Bstack.Count || !state.Bstack.ReadUInt8Below(mark, out byte code))
+            {
+                break;
+            }
+
+            if ((Opcode)code is Opcode.Lookaround or Opcode.Conditional)
+            {
+                if (!state.Bstack.ReadSizeBelow(mark - 1, out bodyBase))
+                {
+                    bodyBase = -1;
+                }
+
+                break;
+            }
+
+            if ((Opcode)code != Opcode.Atomic)
+            {
+                break;
+            }
+        }
+
+        Span<long> counts = stackalloc long[FuzzyValue.Count];
+        state.FuzzyCounts.CopyTo(counts);
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+        int frame = state.SectionFrame;
+        while (frame > bodyBase)
+        {
+            long cost = TotalCost(counts, section);
+            if (!WithinTheLimits(counts, section) || TotalErrors(counts) > state.MaxErrors || cost > state.MaxCost)
+            {
+                return true;
+            }
+
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
+            {
+                return false;
+            }
+
+            for (int kind = 0; kind < FuzzyValue.Count; kind++)
+            {
+                counts[kind] += outerCounts[kind];
+            }
+
+            section = outer;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: <see cref="FuzzyWithinConstraints"/> without the minimums, for
     /// counts that may still grow (<see cref="CloseTheBodysSection"/>).
     /// </summary>
@@ -13410,7 +13523,7 @@ internal static class Matcher
                     // which the saved stack's top is back at. A REOPEN that restored a body's open
                     // section with a stale link would break it (MatchState.SectionFrame).
                     Debug.Assert(
-                        !pattern.HasFuzzyMinimum || state.SectionFrame == state.Sstack.Count,
+                        !pattern.KeepsSectionLinks || state.SectionFrame == state.Sstack.Count,
                         "D11 amendment 2, repair 2: the open-section link is the closing section's frame"
                     );
 
@@ -13442,7 +13555,7 @@ internal static class Matcher
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
                     long closedFrame = state.SectionFrame;
-                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
+                    if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -13500,7 +13613,7 @@ internal static class Matcher
                         state.TotalErrors = previousTotalErrors;
                         state.TotalCost = previousTotalCost;
 
-                        if (pattern.HasFuzzyMinimum)
+                        if (pattern.KeepsSectionLinks)
                         {
                             state.Sstack.PushSize(state.SectionFrame);
                         }
@@ -14385,7 +14498,7 @@ internal static class Matcher
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
                     // NOT UPSTREAM (empty-iteration rule): the link beneath the frame, see
                     // MatchState.SectionFrame.
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.KeepsSectionLinks)
                     {
                         state.Sstack.PushSize(state.SectionFrame);
                     }
@@ -14396,7 +14509,7 @@ internal static class Matcher
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
 
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.KeepsSectionLinks)
                     {
                         state.SectionFrame = state.Sstack.Count;
                     }
@@ -16985,6 +17098,13 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
+        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        {
+            state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
+            stringPos = -1;
+            goto backtrack;
+        }
+
         if (RunOutCanWaitForTheBody(state))
         {
             stringPos = -1;
@@ -17649,14 +17769,14 @@ internal static class Matcher
                     state.TotalCost = previousTotalCost;
 
                     // Save the outer fuzzy info.
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.KeepsSectionLinks)
                     {
                         state.Sstack.PushSize(state.SectionFrame);
                     }
 
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
-                    if (pattern.HasFuzzyMinimum)
+                    if (pattern.KeepsSectionLinks)
                     {
                         state.SectionFrame = state.Sstack.Count;
                     }
@@ -18100,7 +18220,7 @@ internal static class Matcher
                     state.FuzzyNode = outerFuzzyNode;
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
-                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
+                    if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
                     {
                         return MatchStatus.Illegal;
                     }

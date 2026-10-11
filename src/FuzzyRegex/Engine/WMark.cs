@@ -229,4 +229,10 @@ internal enum PartialEvent
     /// (<see cref="GreedyBodyRunOutKept"/>): limit C2 by that mechanism.
     /// </summary>
     RunOutAnsweredByGreedyBodyKept,
+
+    /// <summary>
+    /// D81: a run-out found the counts over an open fuzzy section's upper limits, and the path
+    /// failed (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
+    /// </summary>
+    RunOutOverASectionsLimits,
 }
