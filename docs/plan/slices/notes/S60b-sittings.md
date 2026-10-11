@@ -1379,3 +1379,106 @@ answers them, and they are left for triage.
 
 After the fix the differential shows 0 differences from main at 90012058 over 164,804 rows. The
 three seeds and the three saved waves give main's tallies and port answers row for row.
+
+## 2026-10-11, 09:00-11:00 - merged with main again, and the quiet A/B per item
+
+Main at 1720695d merged in as 2de3a3cc. Only the generated files conflicted (STATUS.md, the
+parity baseline and the status stamp). Main's copies were taken and the ratchet regenerated them
+(Debug, `-UpdateBaseline`, 8,467 distinct ids, GREEN; the Release suite passed 8,510 with 65
+Debug-only skips).
+
+### Item 3 against the profiler's experiment
+
+The profiler's patch (`.scratch/perf-profile/exp-trymatch-zw.patch`) makes `TryMatch` refuse in
+three places: string tests through a three-way answer, one-character tests, and zero-width
+position assertions. The branch refuses in all three, with one difference. In a partial call the
+branch's zero-width arm answers success and enters the node, where the patch refuses. That is the
+fix in 9f97d71a: refusing there loses genuine partial matches (`(?m)[a\n]*?^b` over 'a' is P(0, 1)
+on main and was None with the refusal; `PartialMatchingTests`). Ordinary calls, which are all the
+gap rows, refuse as the patch does. The branch also does two things the patch does not: a
+successful test consumes what it tested and resumes at `match_next`, and a full-fold string test
+fails when the text ends inside a character's folding (upstream `:7473`, `:7546`).
+
+### Correctness after the merge
+
+- Differential against main 1720695d, `port-probe.cs` built Release on each side, never
+  `--no-build`. It used the review's `all.jsonl` (96,438 rows), `all2.jsonl` (40,074), `targ3`
+  (28,272) and `targ5` (20), plus fresh `gen.py` rows at seeds 11 and 12 (6,000 each). That is
+  176,804 rows, with **0 differences**.
+- The oracle at seeds 7, 4242 and 20260927 is GREEN. The agree/expected/timeout/resource/undefined
+  tallies are 7682/190/2/4/2, 7694/181/0/5/0 and 7686/189/0/4/1, with 0 diverge.
+- Saved waves: `gate20/gate89.jsonl` is 89 of 89 expected and `a1keys/red91w.jsonl` is 91 of 91
+  expected. `conf20/conf.jsonl` is 79 expected, 3 fault (rows 12, 16 and 60, verbs,
+  `finditer-overlapped`) and 1 diverge (row 79, `(?:x(?:.a){1i+2d+1s<=4}){d<=1}` over U+1D7EE followed by 'x'). On all
+  four of those rows the port answers the same on main and on the branch, so none of them comes
+  from this branch.
+
+### Timings
+
+Every run held the shared test lock, so nothing else built or timed alongside it. The harness is `.scratch/perf-profile/gap.cs`,
+extended with each item's rows, and run as `dotnet build -c Release` then the built exe. Each
+figure is the best single call, taking the minimum over three processes per side, with the sides
+alternating.
+
+Gap rows, main against the branch:
+
+| Row | Main | Branch | Branch / main |
+|---|---|---|---|
+| accented (`straße\|café`, full case, 100k lines) | 236.2 ms | 168.1 ms | 0.71 |
+| wordsend (`(\w+\s?)+$`) | 102.1 ms | 84.3 ms | 0.83 |
+| nested (`(a+)+c`) | 20.13 ms | 19.82 ms | 0.98 |
+| dense (`\w+` over 100 KB) | 3.24 ms | 3.04 ms | 0.94 |
+| toend (`\w+` over 1 MB) | 42.2 ms | 40.5 ms | 0.96 |
+| firsttwo | 41.9 ms | 40.8 ms | 0.97 |
+
+The answers match on both sides. So does the allocation per call, apart from 24 bytes on one
+toend run.
+
+Each item switched off in turn. The branch was built with that item reverted locally in a scratch
+worktree (not committed), and compared with the branch as it stands:
+
+| Item | Row | With | Without | Verdict |
+|---|---|---|---|---|
+| 3 | accented | 168.8 ms | 264.0 ms | keep |
+| 3 | wordsend | 86.4 ms | 108.5 ms | |
+| 3 | nested | 19.87 ms | 20.88 ms | |
+| 3 | dense / toend / firsttwo | 3.08 / 61.1 / 62.2 ms | 3.23 / 62.0 / 62.2 ms | |
+| 3 | `(a\|a)*b` over 18 a's | 158 ns | 158 ns | |
+| 9 | `\b\L<w>\b`, 1,001 members, 1 MB | 37.7 ms | 2,008 ms | keep |
+| 9 | `\L<w>` | 8.0 ms | 139.6 ms | |
+| 9 | ` \L<w>` | 18.6 ms | 1,981 ms | |
+| 9 | the same 1,001 words as an inline alternation in `\b(?:...)\b` | 36.5 ms | 1,977 ms | |
+| 14 | `alpha\|bravo\|charlie\|delta\|echo` | 0.078 ms | 20.6 ms | keep |
+| 14 | `fox\|dog` (28,926 matches) | 3.61 ms | 12.05 ms | |
+| 14 | `quick\|lazy\|woods` (43,310 matches) | 5.86 ms | 13.05 ms | |
+| 14 | `cat\w+\|dog\d` | 1.17 ms | 9.81 ms | |
+| 14 | `zebra\|yak` / eight words | 0.078 / 0.077 ms | 8.66 / 18.46 ms | |
+| 17 | `(?s)(.*)a\d` over 8,000 a's | 0.61 ms | 2,708 ms | keep |
+| 17 | `(?s).*a\d` (control, upstream's own skip) | 0.415 ms | 0.414 ms | |
+
+The two sides gave the same answer on every row. The `(a|a)*b` row is rejected before matching
+starts (the subject has no `b`), so item 3 cannot move it. BenchmarkDotNet's `BacktrackingPort`
+row agrees: 88.9 ns on main and 92.2 ns on the branch. In the item 3 run, toend and firsttwo
+read about 61 ms on both sides, against about 41 ms in the gap run. That run was slower overall,
+not one side.
+
+### BenchmarkDotNet, main against the branch
+
+The command was `tools/compare-benchmarks.ps1 -Job medium`, once per class (`WorkloadBenchmarks`,
+`ManyInputsBenchmarks`, `ReferenceBenchmarks` filtered to `*Port*`), alternating main and branch.
+Main's artifacts were recorded as a scratch baseline, and the branch's were compared against it
+at `-Threshold 1.13`.
+
+- **No row is slower beyond the 1.13 floor.**
+- Faster beyond the floor: CaseFoldAccented 0.69x, TestedGroupRepeat 0.71x,
+  PathologicalSameBranches 0.70x, PathologicalWordsToEnd 0.83x, ValidateEmails 0.83x,
+  ConditionalBesideBranch 0.83x, ConditionalPerToken 0.86x and PathologicalPrefixBranches 0.88x.
+  PathologicalNestedRepeat is unchanged (19.97 ms against 19.48 ms).
+- Allocation: CompileLargePattern allocates 7% more (971,208 bytes to 1,043,344) with its time
+  unchanged (242.5 µs against 255.6 µs, inside the floor). That pattern is a 300-way alternation
+  behind a shared `word` prefix, and the extra bytes are the compile-time indexes items 9 and 14
+  build. This is a declared trade: compile-time bytes for the match-time speed above. No other
+  row's allocation moved.
+
+All four items measure faster on their own workloads and none slows another row, so all four are
+kept. Scratch: `.scratch/s60b-ab/` (`notes.md`, `h/res-*.txt`, `cmp-*.log`).
