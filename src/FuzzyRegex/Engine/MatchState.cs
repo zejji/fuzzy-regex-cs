@@ -182,6 +182,12 @@ internal sealed class GroupData
     /// <returns>The copies.</returns>
     internal static GroupData[] CopyGroups(GroupData[] groups, int groupCount)
     {
+        if (groupCount == 0)
+        {
+            // A pattern without groups gives every match the one shared empty array: 24 B a match.
+            return [];
+        }
+
         var copies = new GroupData[groupCount];
         for (int g = 0; g < groupCount; g++)
         {

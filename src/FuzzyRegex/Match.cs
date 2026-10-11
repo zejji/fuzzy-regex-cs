@@ -134,7 +134,13 @@ public sealed class Match : Group
     private readonly int _sliceStart;
     private readonly int _sliceEnd;
     private readonly bool _overlapped;
-    private readonly Engine.SubjectScan _scan;
+
+    // The three parts of NextMatch's Engine.SubjectScan, held apart rather than as the struct so the
+    // runtime packs them beside the fields above: as one 12-byte struct they cost 16 B per match,
+    // apart 8 (measured 2026-10-11, Matches of \w+).
+    private readonly int _scanCleanStart;
+    private readonly int _scanCleanEnd;
+    private readonly bool _scanFound;
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
 
     /// <summary>
@@ -218,7 +224,7 @@ public sealed class Match : Group
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
         _overlapped = overlapped;
-        _scan = scan;
+        (_scanCleanStart, _scanCleanEnd, _scanFound) = scan;
         _fuzzyChanges = fuzzyChanges ?? [];
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
@@ -532,7 +538,16 @@ public sealed class Match : Group
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     public Match NextMatch() =>
         Success
-            ? Engine.Iteration.Next(_regex, _subject, _start, _end, _sliceStart, _sliceEnd, _overlapped, _scan)
+            ? Engine.Iteration.Next(
+                _regex,
+                _subject,
+                _start,
+                _end,
+                _sliceStart,
+                _sliceEnd,
+                _overlapped,
+                new(_scanCleanStart, _scanCleanEnd, _scanFound)
+            )
             : _regex.NoMatch(_subject);
 
     /// <summary>

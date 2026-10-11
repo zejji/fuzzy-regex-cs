@@ -247,6 +247,36 @@ public sealed class AllocationTests
     }
 
     [Test]
+    public void A_match_of_a_pattern_without_groups_costs_no_more_than_its_match_object()
+    {
+        // The string walk builds a Match per match and nothing else. A pattern without groups shares
+        // one empty group array (24 B a match before), and D83's scan record sits in Match's own
+        // fields rather than a struct the runtime pads (16 B a match as a struct, 8 apart). The
+        // difference of two lengths is the part that grows with the matches. Measured 2026-10-11:
+        // 160 B on main, 176 with D83's struct, 128 with both changes.
+        long shorter = PerWalk(1_000);
+        long longer = PerWalk(2_000);
+
+        ((longer - shorter) / 1_000).Should().BeLessThanOrEqualTo(128);
+
+        static long PerWalk(int words)
+        {
+            string subject = string.Concat(Enumerable.Repeat("ab ", words));
+            int count = 0;
+
+            long allocated = AllocatedBy(() =>
+            {
+                FuzzyRegex regex = new(@"\w+");
+                _ = regex.EnumerateMatches(subject).Count();
+                return () => count = regex.EnumerateMatches(subject).Count();
+            });
+
+            count.Should().Be(words);
+            return allocated;
+        }
+    }
+
+    [Test]
     public void A_background_collection_that_pauses_the_measured_call_is_not_counted_as_its_allocation()
     {
         // The flake of 2026-09-25, on demand. A warm span walk under the parallel native-AOT run
