@@ -34,6 +34,7 @@ such test is a mistake: reopen it.
 
 | # | Defect | Repro (port vs expected) | Stage | Where |
 |---|---|---|---|---|
+| D83 | Performance: whole-subject work on every call. (1) `MatchState.Init` searched the whole subject for a high surrogate on every Match, IsMatch, search and lazy-walk start, so a short match on a long subject cost the subject's length. (2) `Substitution.Subx` counted every codepoint of the input on every non-fuzzy `Replace`, for its width shortcut. | `\w+`, `EnumerateMatches(s).Take(2)` over "a needle in a haystack." padded to 1 MB: 36.2 us on main, of which 30.5 us is the scan; Python 0.66 us. `Replace(1 MB, count: 1)` counted 1,048,576 codepoints. | Fixed on the branch: the state keeps a clean stretch it widens only as far as a query reaches (`MatchState.NoHighSurrogateIn`), capped questions are answered from the unit length (`Matcher.CountUpTo`), a step to the slice bound needs no question (`Matcher.StepBy`), and the width shortcut counts at most 2 x MinWidth units (`Substitution.HasFewerCodepointsThan`). Pinned by `Gaps/Engine/SubjectScanTests` (work-counter bounds, red on main) and the exhaustive `CharacterIndexTests.The_matchers_conversions_agree_with_the_walk_whatever_the_state_already_knows`. Left: an unbounded lazy repeat still counts to the slice end once per state (SHORTCUT in the lazy arm). | `perf/no-whole-subject-scan` |
 
 ## Completed
 
