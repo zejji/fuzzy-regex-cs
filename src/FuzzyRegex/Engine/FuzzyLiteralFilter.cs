@@ -386,7 +386,7 @@ internal sealed class FuzzyLiteralFilter
             int steps = 0;
             while (cur != after)
             {
-                if (cur is null || ++steps > 2 * packed.Values.Count + 2)
+                if (cur is null || ++steps > 2 * packed.Values.Length + 2)
                 {
                     return null;
                 }
@@ -523,11 +523,11 @@ internal sealed class FuzzyLiteralFilter
         /// </summary>
         /// <param name="values">The values, in reading order.</param>
         /// <param name="front">Whether they go in front of what is already here.</param>
-        internal void AddSingleUnits(List<uint> values, bool front)
+        internal void AddSingleUnits(uint[] values, bool front)
         {
             int at = front ? 0 : Values.Count;
             Values.InsertRange(at, values);
-            UnitStarts.InsertRange(at, Enumerable.Repeat(true, values.Count));
+            UnitStarts.InsertRange(at, Enumerable.Repeat(true, values.Length));
         }
 
         /// <summary>Adds units at the end, or at the front for a reverse chain.</summary>
@@ -550,7 +550,7 @@ internal sealed class FuzzyLiteralFilter
     /// </summary>
     /// <param name="values">The <c>FUZZY</c> node's values.</param>
     /// <returns><c>k</c>, or -1.</returns>
-    private static long MostErrors(List<uint> values)
+    private static long MostErrors(uint[] values)
     {
         long bound = values[FuzzyValue.MaxErr] >= RegexFlags.Unlimited ? long.MaxValue : values[FuzzyValue.MaxErr];
 

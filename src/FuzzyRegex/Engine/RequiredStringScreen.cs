@@ -242,13 +242,13 @@ internal static class RequiredStringScreen
     /// <returns>The code units, or <see langword="null"/> when the screen does not apply.</returns>
     internal static SearchValues<char>? FirstUnits(Node reqString)
     {
-        if (!Covers(reqString.Op) || reqString.Encoding == CaseEncoding.Locale || reqString.Values.Count == 0)
+        if (!Covers(reqString.Op) || reqString.Encoding == CaseEncoding.Locale || reqString.Values.Length == 0)
         {
             return null;
         }
 
         bool reverse = reqString.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
-        uint first = reqString.Values[reverse ? reqString.Values.Count - 1 : 0];
+        uint first = reqString.Values[reverse ? reqString.Values.Length - 1 : 0];
         var codepoints = new HashSet<uint> { first };
 
         if (reqString.Op != Opcode.StringRev)
@@ -465,8 +465,8 @@ internal static class RequiredStringScreen
     /// <returns><see langword="true"/> if an occurrence there cannot be ruled out.</returns>
     private static bool WindowMayMatch(MatchState state, Node reqString, int edge, bool reverse)
     {
-        List<uint> values = reqString.Values;
-        int length = values.Count;
+        uint[] values = reqString.Values;
+        int length = values.Length;
         bool exact = reqString.Op == Opcode.StringRev;
         int pos = edge;
 
@@ -517,8 +517,8 @@ internal static class RequiredStringScreen
     /// <returns><see langword="true"/> if an occurrence there cannot be ruled out.</returns>
     private static bool GeneralWindowMayMatch(MatchState state, Node reqString, int edge, bool reverse)
     {
-        List<uint> values = reqString.Values;
-        int length = values.Count;
+        uint[] values = reqString.Values;
+        int length = values.Length;
         CaseEncoding encoding = reqString.Encoding;
 
         // 'reached[i]': the first 'i' required characters, in reading order, can be consumed.
@@ -636,7 +636,7 @@ internal static class RequiredStringScreen
     /// <param name="encoding">The encoding in force.</param>
     /// <returns>The number of required characters consumed, or 0.</returns>
     private static int FoldedRun(
-        List<uint> values,
+        uint[] values,
         int start,
         ReadOnlySpan<uint> folded,
         int skip,
@@ -644,7 +644,7 @@ internal static class RequiredStringScreen
         CaseEncoding encoding
     )
     {
-        int length = values.Count;
+        int length = values.Length;
         int consumed = 0;
 
         for (int f = skip; f < folded.Length; f++)

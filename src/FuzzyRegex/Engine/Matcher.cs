@@ -5173,7 +5173,7 @@ internal static class Matcher
                 ins += outerCounts[FuzzyValue.Ins];
                 del += outerCounts[FuzzyValue.Del];
 
-                List<uint> values = outer.Values;
+                uint[] values = outer.Values;
                 key.Add(outer.Index);
                 key.Add(Math.Max(0, values[FuzzyValue.MinSub] - sub));
                 key.Add(Math.Max(0, values[FuzzyValue.MinIns] - ins));
@@ -6335,7 +6335,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if no maximum is exceeded.</returns>
     private static bool WithinTheLimits(ReadOnlySpan<long> counts, Node section)
     {
-        List<uint> values = section.Values;
+        uint[] values = section.Values;
         return counts[FuzzyValue.Del] <= values[FuzzyValue.MaxDel]
             && counts[FuzzyValue.Ins] <= values[FuzzyValue.MaxIns]
             && counts[FuzzyValue.Sub] <= values[FuzzyValue.MaxSub]
@@ -7633,7 +7633,7 @@ internal static class Matcher
     private static int TryMatchString(MatchState state, NextNode next, Node test, int textPos, out int end)
     {
         end = textPos;
-        int length = test.Values.Count;
+        int length = test.Values.Length;
         FoldBuffer foldedBuffer = default;
         Span<uint> folded = foldedBuffer;
         int pos = textPos;
@@ -8127,7 +8127,7 @@ internal static class Matcher
     /// <returns>What those errors cost under that node's equation.</returns>
     private static long TotalCost(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
     {
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
 
         return (fuzzyCounts[FuzzyValue.Del] * values[FuzzyValue.DelCost])
             + (fuzzyCounts[FuzzyValue.Ins] * values[FuzzyValue.InsCost])
@@ -8151,7 +8151,7 @@ internal static class Matcher
         // and a copy runs only from a call inside a section. D40 was a copy that broke this.
         Debug.Assert(state.FuzzyNode is not null, "A fuzzy item ran with no fuzzy section in force.");
         Node fuzzyNode = state.FuzzyNode;
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
         return cost <= values[FuzzyValue.MaxCost]
@@ -8172,7 +8172,7 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
         Node fuzzyNode = state.FuzzyNode!;
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long errorCount = TotalErrors(fuzzyCounts);
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
@@ -8195,7 +8195,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if one more insertion fits.</returns>
     private static bool InsertionPermitted(MatchState state, Node fuzzyNode, ReadOnlySpan<long> fuzzyCounts)
     {
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long errorCount = TotalErrors(fuzzyCounts);
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
@@ -8221,7 +8221,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the counts satisfy every constraint the section declares.</returns>
     private static bool FuzzyWithinConstraints(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode, long maxErrors)
     {
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long delCount = fuzzyCounts[FuzzyValue.Del];
         long insCount = fuzzyCounts[FuzzyValue.Ins];
         long subCount = fuzzyCounts[FuzzyValue.Sub];
@@ -8282,7 +8282,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if trailing insertions can make the section legal.</returns>
     private static bool InsertionsCanMeetMinimum(MatchState state, ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
     {
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long needed = Math.Max(
             values[FuzzyValue.MinIns] - fuzzyCounts[FuzzyValue.Ins],
             values[FuzzyValue.MinErr] - TotalErrors(fuzzyCounts)
@@ -8319,7 +8319,7 @@ internal static class Matcher
                 raised[kind] += outerCounts[kind];
             }
 
-            List<uint> outerValues = outer.Values;
+            uint[] outerValues = outer.Values;
             if (
                 raised[FuzzyValue.Ins] > outerValues[FuzzyValue.MaxIns]
                 || TotalErrors(raised) > outerValues[FuzzyValue.MaxErr]
@@ -9028,7 +9028,7 @@ internal static class Matcher
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
         {
-            List<uint> values = section.Values;
+            uint[] values = section.Values;
             if (
                 (edits[FuzzyValue.Sub] > 0 && sub < values[FuzzyValue.MinSub])
                 || (edits[FuzzyValue.Ins] > 0 && ins < values[FuzzyValue.MinIns])
@@ -9075,7 +9075,7 @@ internal static class Matcher
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
         {
-            List<uint> values = section.Values;
+            uint[] values = section.Values;
             if (
                 sub < values[FuzzyValue.MinSub]
                 || ins < values[FuzzyValue.MinIns]
@@ -9333,7 +9333,7 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
         Node fuzzyNode = state.FuzzyNode!;
-        List<uint> values = fuzzyNode.Values;
+        uint[] values = fuzzyNode.Values;
         long errorCount = TotalErrors(fuzzyCounts);
         long room = Math.Min(
             values[FuzzyValue.MaxBase + FuzzyValue.Del] - fuzzyCounts[FuzzyValue.Del],
@@ -9467,7 +9467,7 @@ internal static class Matcher
         }
         else
         {
-            int remaining = step > 0 ? node.Values.Count - stringPos : stringPos;
+            int remaining = step > 0 ? node.Values.Length - stringPos : stringPos;
             mayMatch = ExactDeletionMayMatch(state, remaining, node.Next1.Node);
         }
 
@@ -10408,7 +10408,7 @@ internal static class Matcher
 
         int next = step > 0 ? stringPos + 1 : stringPos - 2;
 
-        if (next < 0 || next >= node.Values.Count)
+        if (next < 0 || next >= node.Values.Length)
         {
             return false;
         }
@@ -10428,7 +10428,7 @@ internal static class Matcher
             return false;
         }
 
-        List<uint> values = state.FuzzyNode!.Values;
+        uint[] values = state.FuzzyNode!.Values;
 
         return values[FuzzyValue.MinSub] == 0
             && values[FuzzyValue.MinIns] == 0
@@ -10721,7 +10721,7 @@ internal static class Matcher
         data.NewFoldedPos = foldedPos;
         data.FoldedLen = foldedLen;
         data.Step = step;
-        data.ValuesRanOut = step > 0 ? stringPos >= node.Values.Count : stringPos <= 0;
+        data.ValuesRanOut = step > 0 ? stringPos >= node.Values.Length : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
@@ -10852,7 +10852,7 @@ internal static class Matcher
         data.Step = step;
         data.NewStringPos = stringPos;
         data.NewFoldedPos = currFoldedPos;
-        data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
+        data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Length : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
@@ -11559,7 +11559,7 @@ internal static class Matcher
         isPartial = false;
         cancelled = false;
 
-        int length = node.Values.Count;
+        int length = node.Values.Length;
         uint checkChar = node.Values[0];
 
         int pos = textPos;
@@ -11822,7 +11822,7 @@ internal static class Matcher
                     // same bound is that many NextPos steps: adding would stop an astral needle
                     // one code unit short of itself and refuse a subject that holds it.
                     limit = state.SliceStart;
-                    for (long i = 0; i < pattern.ReqOffset + reqString.Values.Count && limit < state.SliceEnd; ++i)
+                    for (long i = 0; i < pattern.ReqOffset + reqString.Values.Length && limit < state.SliceEnd; ++i)
                     {
                         limit = state.NextPos(limit);
                     }
@@ -11860,7 +11860,7 @@ internal static class Matcher
                     // is a character count; the needle's code-unit length is the same number of
                     // characters and is what actually matched.
                     state.ReqPos = foundPos;
-                    state.ReqEnd = foundPos + (pattern.ReqStringText?.Length ?? reqString.Values.Count);
+                    state.ReqEnd = foundPos + (pattern.ReqStringText?.Length ?? reqString.Values.Length);
                 }
 
                 if (useOffset)
@@ -11946,7 +11946,7 @@ internal static class Matcher
     /// <param name="second">The other.</param>
     /// <returns><see langword="true"/> if the two value lists are equal.</returns>
     private static bool SameValues(Node first, Node second) =>
-        first.Values.Count == second.Values.Count && first.Values.SequenceEqual(second.Values);
+        first.Values.Length == second.Values.Length && first.Values.SequenceEqual(second.Values);
 
     /// <summary>
     /// Upstream's <c>match_many_*</c> family (<c>upstream/src/_regex.c</c> lines 3537-4990): steps
@@ -16369,7 +16369,7 @@ internal static class Matcher
                     }
                     else
                     {
-                        int length = node.Values.Count;
+                        int length = node.Values.Length;
 
                         if (stringPos < 0)
                         {
@@ -16456,7 +16456,7 @@ internal static class Matcher
                     }
                     else
                     {
-                        int length = node.Values.Count;
+                        int length = node.Values.Length;
 
                         if (stringPos < 0)
                         {
@@ -16651,7 +16651,7 @@ internal static class Matcher
                     }
                     else
                     {
-                        int length = node.Values.Count;
+                        int length = node.Values.Length;
 
                         if (stringPos < 0)
                         {
@@ -16735,7 +16735,7 @@ internal static class Matcher
                     {
                         if (stringPos < 0)
                         {
-                            stringPos = node.Values.Count;
+                            stringPos = node.Values.Length;
                         }
 
                         // Try comparing.
@@ -16811,7 +16811,7 @@ internal static class Matcher
                     {
                         if (stringPos < 0)
                         {
-                            stringPos = node.Values.Count;
+                            stringPos = node.Values.Length;
                         }
 
                         // Try comparing.
@@ -16895,7 +16895,7 @@ internal static class Matcher
                     }
                     else
                     {
-                        int length = node.Values.Count;
+                        int length = node.Values.Length;
 
                         if (stringPos < 0)
                         {
