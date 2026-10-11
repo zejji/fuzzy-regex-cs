@@ -333,7 +333,8 @@ internal static class Matcher
             return (ch1 ^ ch2) == 0x20 && (ch1 | 0x20) - 'a' <= 'z' - 'a';
         }
 
-        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
         int count = Encodings.AllCases(encoding, ch1, cases);
 
         // From 1: 'cases[0]' is 'ch1' itself, which the equality above already rejected.
@@ -356,7 +357,8 @@ internal static class Matcher
     /// <returns><see langword="true"/> if any case of the codepoint is in the range.</returns>
     internal static bool InRangeIgn(CaseEncoding encoding, uint lower, uint upper, uint ch)
     {
-        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
         int count = Encodings.AllCases(encoding, ch, cases);
 
         for (int i = 0; i < count; i++)
@@ -833,7 +835,8 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the codepoint is in the set, ignoring case.</returns>
     internal static bool MatchesSetIgn(CaseEncoding encoding, Node node, uint ch)
     {
-        Span<uint> allCases = stackalloc uint[UnicodeTables.MaxCases];
+        CaseBuffer allCasesBuffer = default;
+        Span<uint> allCases = allCasesBuffer;
         int caseCount = Encodings.AllCases(encoding, ch, allCases);
         ReadOnlySpan<uint> cases = allCases[..caseCount];
 
@@ -5162,7 +5165,8 @@ internal static class Matcher
             long ins = counts[FuzzyValue.Ins];
             long del = counts[FuzzyValue.Del];
             int frame = state.SectionFrame;
-            Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+            FuzzyCountBuffer outerCountsBuffer = default;
+            Span<long> outerCounts = outerCountsBuffer;
             while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
             {
                 sub += outerCounts[FuzzyValue.Sub];
@@ -6174,7 +6178,8 @@ internal static class Matcher
         /* bstack: ... fuzzy_counts change_count capture_change sstack LOOKAROUND | CONDITIONAL */
 
         int countsAt = lookMark - 1 - (3 * sizeof(long)) - (FuzzyValue.Count * sizeof(long));
-        Span<long> merged = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer mergedBuffer = default;
+        Span<long> merged = mergedBuffer;
         for (int kind = 0; kind < FuzzyValue.Count; kind++)
         {
             merged[kind] = state.Bstack.SizeAt(countsAt + (kind * sizeof(long))) + state.FuzzyCounts[kind];
@@ -6291,9 +6296,11 @@ internal static class Matcher
             }
         }
 
-        Span<long> counts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer countsBuffer = default;
+        Span<long> counts = countsBuffer;
         state.FuzzyCounts.CopyTo(counts);
-        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
         int frame = state.SectionFrame;
         while (frame > bodyBase)
         {
@@ -7627,7 +7634,8 @@ internal static class Matcher
     {
         end = textPos;
         int length = test.Values.Count;
-        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
         int pos = textPos;
         int sPos = 0;
         int foldedPos = 0;
@@ -8080,7 +8088,8 @@ internal static class Matcher
             "a match never ends inside a fuzzy section"
         );
 
-        Span<long> kinds = stackalloc long[3];
+        FuzzyCountBuffer kindsBuffer = default;
+        Span<long> kinds = kindsBuffer;
         foreach (FuzzyChange change in state.FuzzyChanges)
         {
             ++kinds[change.Type];
@@ -8283,7 +8292,8 @@ internal static class Matcher
             return false;
         }
 
-        Span<long> raised = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer raisedBuffer = default;
+        Span<long> raised = raisedBuffer;
         fuzzyCounts.CopyTo(raised);
         raised[FuzzyValue.Ins] += needed;
         if (!FuzzyWithinConstraints(raised, fuzzyNode, state.MaxErrors))
@@ -8298,7 +8308,8 @@ internal static class Matcher
             return true;
         }
 
-        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
 
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
@@ -8723,7 +8734,8 @@ internal static class Matcher
 
         // The iteration's edits by kind. Most are deletions, but a lookaround in the body can
         // substitute or insert and still leave the position where the iteration began.
-        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer editsBuffer = default;
+        Span<long> edits = editsBuffer;
         List<FuzzyChange> changes = state.FuzzyChanges;
         for (int i = IterationChanges(rpData); i < changes.Count; i++)
         {
@@ -8883,7 +8895,8 @@ internal static class Matcher
             return true;
         }
 
-        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer editsBuffer = default;
+        Span<long> edits = editsBuffer;
         for (int i = pass.Changes; i < changes.Count; i++)
         {
             edits[changes[i].Type]++;
@@ -9009,7 +9022,8 @@ internal static class Matcher
         long ins = counts[FuzzyValue.Ins] - (taken * edits[FuzzyValue.Ins]);
         long del = counts[FuzzyValue.Del] - (taken * edits[FuzzyValue.Del]);
         int frame = state.SectionFrame;
-        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
 
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
@@ -9055,7 +9069,8 @@ internal static class Matcher
         long ins = counts[FuzzyValue.Ins];
         long del = counts[FuzzyValue.Del];
         int frame = state.SectionFrame;
-        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
 
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
@@ -11099,7 +11114,8 @@ internal static class Matcher
     /// <returns>That character.</returns>
     private static uint FoldedCharAt(MatchState state, CaseEncoding encoding, int pos, int foldedPos)
     {
-        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
 
         _ = Encodings.FullCaseFold(encoding, state.CharAt(pos), folded);
 
@@ -12601,8 +12617,8 @@ internal static class Matcher
         // Inline arrays rather than stackalloc, which would keep the JIT from tiering this method:
         // a method with loops and a localloc gets no on-stack replacement, so it is compiled once,
         // with no profile data. See JitTieringTests.
-        ThreeUints foldedBuffer = default;
-        ThreeUints gfoldedBuffer = default;
+        FoldBuffer foldedBuffer = default;
+        FoldBuffer gfoldedBuffer = default;
         Span<uint> folded = foldedBuffer;
         Span<uint> gfolded = gfoldedBuffer;
 
@@ -12610,9 +12626,9 @@ internal static class Matcher
         // 'folded' is: a stackalloc inside either loop is not released until this method returns, so
         // one per backtrack step grows the stack without bound (CA2014). That analyzer does not see
         // a stackalloc nested inside a switch case, so this is the rule and not the tool.
-        ThreeLongs outerBuffer = default;
-        ThreeLongs totalBuffer = default;
-        ThreeLongs innerBuffer = default;
+        FuzzyCountBuffer outerBuffer = default;
+        FuzzyCountBuffer totalBuffer = default;
+        FuzzyCountBuffer innerBuffer = default;
         Span<long> fuzzyOuterCounts = outerBuffer;
         Span<long> fuzzyTotalCounts = totalBuffer;
         Span<long> fuzzyInnerCounts = innerBuffer;
@@ -19430,7 +19446,8 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int DoEnhancedFuzzyMatch(MatchState state, bool search)
     {
-        Span<long> bestFuzzyCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer bestFuzzyCountsBuffer = default;
+        Span<long> bestFuzzyCounts = bestFuzzyCountsBuffer;
         List<FuzzyChange> bestFuzzyChanges = [];
 
         // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length. Upstream
@@ -20010,7 +20027,8 @@ internal static class Matcher
             state.MaxCost = lowestCost;
         }
 
-        Span<long> bestFuzzyCounts = stackalloc long[FuzzyValue.Count];
+        FuzzyCountBuffer bestFuzzyCountsBuffer = default;
+        Span<long> bestFuzzyCounts = bestFuzzyCountsBuffer;
         List<FuzzyChange> bestFuzzyChanges = [];
         GroupData[]? bestGroups = null;
         int bestMatchPos = 0;
@@ -20726,22 +20744,4 @@ internal static class Matcher
 
         return status;
     }
-}
-
-/// <summary>Three <see cref="uint"/>s on the stack, without a stackalloc; see <see cref="Matcher"/>'s main loop.</summary>
-[System.Runtime.CompilerServices.InlineArray(3)]
-internal struct ThreeUints
-{
-#pragma warning disable S1144 // The runtime reads the element through the InlineArray layout, not by name.
-    private uint _element;
-#pragma warning restore S1144
-}
-
-/// <summary>Three <see cref="long"/>s on the stack, without a stackalloc; see <see cref="Matcher"/>'s main loop.</summary>
-[System.Runtime.CompilerServices.InlineArray(3)]
-internal struct ThreeLongs
-{
-#pragma warning disable S1144 // The runtime reads the element through the InlineArray layout, not by name.
-    private long _element;
-#pragma warning restore S1144
 }

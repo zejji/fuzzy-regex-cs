@@ -253,7 +253,8 @@ internal static class RequiredStringScreen
 
         if (reqString.Op != Opcode.StringRev)
         {
-            Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+            CaseBuffer casesBuffer = default;
+            Span<uint> cases = casesBuffer;
             var pending = new Stack<uint>();
             pending.Push(first);
 
@@ -421,8 +422,10 @@ internal static class RequiredStringScreen
     /// <returns><see langword="true"/> if it does.</returns>
     private static bool FoldingHolds(CaseEncoding encoding, uint ch, uint want)
     {
-        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
-        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
         int count = Encodings.AllCases(encoding, ch, cases);
 
         for (int c = 0; c < count; c++)
@@ -521,9 +524,12 @@ internal static class RequiredStringScreen
         // 'reached[i]': the first 'i' required characters, in reading order, can be consumed.
         Span<bool> reached = length < 128 ? stackalloc bool[length + 1] : new bool[length + 1];
         Span<bool> next = length < 128 ? stackalloc bool[length + 1] : new bool[length + 1];
-        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
-        Span<uint> folded = stackalloc uint[UnicodeTables.MaxCases * UnicodeTables.MaxFolded];
-        Span<int> foldedLengths = stackalloc int[UnicodeTables.MaxCases];
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
+        CaseFoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+        CaseLengthBuffer foldedLengthsBuffer = default;
+        Span<int> foldedLengths = foldedLengthsBuffer;
 
         reached.Clear();
         reached[0] = true;

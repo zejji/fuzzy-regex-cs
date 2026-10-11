@@ -1,3 +1,4 @@
+using Fuzzy.Text.RegularExpressions.Engine;
 using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Unicode;
@@ -262,7 +263,8 @@ internal static class Encodings
 
         if (prop == UnicodeTables.PropScx)
         {
-            Span<byte> scripts = stackalloc byte[UnicodeTables.MaxScx];
+            ScriptBuffer scriptsBuffer = default;
+            Span<byte> scripts = scriptsBuffer;
             int count = UnicodeTables.GetScriptExtensions(ch, scripts);
 
             for (int i = 0; i < count; i++)

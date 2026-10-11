@@ -379,7 +379,8 @@ internal sealed class FuzzyLiteralFilter
             var units = new List<uint[]>();
             bool seen = TheSearchSeesAsTheEngineDoes(packed);
             Node? cur = branch.Next2.Node;
-            Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+            FoldBuffer foldedBuffer = default;
+            Span<uint> folded = foldedBuffer;
 
             // Each step reads at least one unit, and there are no more units than packed values.
             int steps = 0;
