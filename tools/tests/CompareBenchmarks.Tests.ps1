@@ -48,9 +48,9 @@ BeforeAll {
     }
 
     function New-Baseline {
-        param([string]$Path, [double]$MedianNs, [long]$Bytes, [string]$Job = 'medium')
+        param([string]$Path, [double]$MedianNs, [long]$Bytes, [string]$Job = 'medium', [string]$Cores = '')
 
-        [ordered]@{
+        $fields = [ordered]@{
             machine    = [ordered]@{ id = 'test'; processor = 'Test CPU'; os = 'Windows 11' }
             takenUtc   = '2026-09-19T00:00:00Z'
             job        = $Job
@@ -59,7 +59,10 @@ BeforeAll {
             benchmarks = [ordered]@{
                 $script:Name = [ordered]@{ medianNs = $MedianNs; minNs = $MedianNs; allocatedBytes = $Bytes }
             }
-        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Path -Encoding utf8
+        }
+        # Baselines from before 2026-10-11 have no cores field; an empty -Cores writes one like that.
+        if ($Cores) { $fields.cores = $Cores }
+        $fields | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Path -Encoding utf8
     }
 }
 
@@ -280,5 +283,68 @@ Describe 'compare-benchmarks.ps1 job recording' {
             -BaselinePath $written -UpdateBaseline -Job medium 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 0
         (Get-Content -LiteralPath $written -Raw | ConvertFrom-Json).job | Should -Be 'medium'
+    }
+
+    It 'warns when the run used other cores than the baseline did' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000 -Cores all
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
+
+        # On a hybrid processor an efficiency core runs this code about 1.6x slower than a
+        # performance core (measured 2026-10-11), so a run pinned to one kind and a baseline taken
+        # on whatever cores Windows chose differ before any code changes.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Cores performance 2>&1 | Out-String
+        $report | Should -Match 'CAUTION: the baseline ran on all cores and this run on performance cores'
+    }
+
+    It 'warns about a baseline that does not say which cores it ran on' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
+
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Cores performance 2>&1 | Out-String
+        $report | Should -Match 'CAUTION: the baseline ran on unrecorded cores and this run on performance cores'
+    }
+
+    It 'is quiet about the cores when the two match' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000 -Cores performance
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
+
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Cores performance 2>&1 | Out-String
+        $report | Should -Match 'Cores:\s+baseline performance, this run performance'
+        $report | Should -Not -Match 'CAUTION: the baseline ran on'
+    }
+
+    It 'records the cores in a baseline it writes, so a later run can check them' {
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
+        $written = Join-Path $Artifacts 'written.json'
+
+        & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $written -UpdateBaseline -Cores all 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0
+        (Get-Content -LiteralPath $written -Raw | ConvertFrom-Json).cores | Should -Be 'all'
+    }
+}
+
+Describe 'compare-benchmarks.ps1 performance-core mask' {
+    BeforeAll {
+        # The function under test, loaded without running the script: the script's own text up to
+        # its parameter block is documentation, so the function is read out by name.
+        $source = Get-Content -LiteralPath $ScriptPath -Raw
+        $start = $source.IndexOf('function Get-PerformanceCoreMask')
+        $start | Should -BeGreaterThan 0
+        $end = $source.IndexOf("`n}", $start) + 2
+        Invoke-Expression $source.Substring($start, $end - $start)
+    }
+
+    It 'keeps only the logical processors of the highest efficiency class' {
+        # Two performance cores with two threads each (class 1), then two efficiency cores (class 0).
+        $classes = @(1, 1, 1, 1, 0, 0)
+        Get-PerformanceCoreMask -EfficiencyClasses $classes | Should -Be 15
+    }
+
+    It 'gives no mask when every core is of one kind, so nothing is pinned' {
+        Get-PerformanceCoreMask -EfficiencyClasses @(0, 0, 0, 0) | Should -Be 0
     }
 }
