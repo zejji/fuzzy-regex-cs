@@ -24,9 +24,10 @@ internal static class Program
         }
 
         // `usage-corpus <dir>` writes ManyInputsBenchmarks' inputs for the Python side of the gate,
-        // so both engines are timed on identical lines. `usage-answers` prints each of those
-        // workloads' results once, untimed: the "same answer" check the gate needs before a time
-        // means anything, and the way to see the data is what it claims to be.
+        // so both engines are timed on identical lines. `usage-answers` and `workload-answers` print
+        // each row's result once, untimed, with the full answer behind it (AnswerText.cs): the
+        // "same answer" check the gate needs before a time means anything, which
+        // bench/baselines/measure_python.py reads.
         if (args is ["usage-corpus", string directory])
         {
             UsageCorpus.Emit(directory);
@@ -35,17 +36,13 @@ internal static class Program
 
         if (args is ["usage-answers"])
         {
-            var benchmarks = new ManyInputsBenchmarks();
-            foreach (
-                var method in typeof(ManyInputsBenchmarks)
-                    .GetMethods()
-                    .Where(static m =>
-                        m.IsDefined(typeof(BenchmarkDotNet.Attributes.BenchmarkAttribute), inherit: false)
-                    )
-            )
-            {
-                Console.WriteLine(method.Name.PadRight(44) + " " + method.Invoke(benchmarks, null));
-            }
+            AnswerText.Print(new ManyInputsBenchmarks(), ManyInputsBenchmarks.AnswerDetails);
+            return;
+        }
+
+        if (args is ["workload-answers"])
+        {
+            AnswerText.Print(new WorkloadBenchmarks(), WorkloadBenchmarks.AnswerDetails);
             return;
         }
 
