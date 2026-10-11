@@ -1,0 +1,8 @@
+{"pattern":"(?:a){1<=e<=2}b","flags":0,"subject":"aab","operation":"match"}
+{"pattern":"(?:a){1<=e<=2}b","flags":0,"subject":"aab","operation":"search"}
+{"pattern":"(?:a){2<=i<=2}b","flags":0,"subject":"aaab","operation":"match"}
+{"pattern":"(?:a){1<=e<=2}","flags":0,"subject":"aa","operation":"fullmatch"}
+{"pattern":"(?:(?:a){1<=e<=1}b){e<=1}","flags":0,"subject":"aab","operation":"match"}
+{"pattern":"(a)(?:\\1){1<=e<=2}b","flags":0,"subject":"aaab","operation":"match"}
+{"pattern":"(?r)b(?:a){1<=e<=2}","flags":0,"subject":"baa","operation":"match"}
+{"pattern":"(?b)(?:a){1<=e<=2}b","flags":0,"subject":"aab","operation":"search"}

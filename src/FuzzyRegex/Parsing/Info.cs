@@ -44,10 +44,25 @@ internal sealed class Info
             );
         InlineLocale = false;
         Kwargs = kwargs;
+        OuterEncodings = Flags & RegexFlags.AllEncodings;
     }
 
     /// <summary>The flags in force at the current point in the parse. Upstream <c>info.flags</c>.</summary>
     internal int Flags { get; set; }
+
+    /// <summary>
+    /// How many groups that restore <see cref="Flags"/> when they close enclose the current point.
+    /// Not upstream state: positional flags use it to tell a clash that the group's close will
+    /// discard from one that reaches the whole pattern.
+    /// </summary>
+    internal int FlagScopeDepth { get; set; }
+
+    /// <summary>
+    /// The encoding flags in force outside every group. Not upstream state (S91): an encoding named
+    /// there reaches the whole pattern, because outside a group encodings accumulate and a clash is
+    /// rejected, so a node parsed under exactly these encodings needs no encoding of its own.
+    /// </summary>
+    internal int OuterEncodings { get; set; }
 
     /// <summary>The global flags accumulated so far. Upstream <c>info.global_flags</c>.</summary>
     internal int GlobalFlags { get; set; }
@@ -64,6 +79,61 @@ internal sealed class Info
     /// <c>_main._compile</c> (<c>upstream/regex/_main.py</c> lines 520-523).
     /// </summary>
     internal int GuessEncoding { get; set; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether <c>\X</c> compiles backwards in
+    /// upstream's order, testing the boundary before the characters. The oracle sets it to show
+    /// that the ledger entry 43 fix is the whole of a divergence; see <see cref="Grapheme"/>.
+    /// </summary>
+    internal bool UpstreamReverseGrapheme { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy full-case-folded run compiles
+    /// to its folding alone, as upstream's does, without the character-by-character reading of
+    /// ledger entry 49. The oracle sets it to show that the fix is the whole of a divergence; see
+    /// <see cref="String.UpstreamFoldingOnly"/>.
+    /// </summary>
+    internal bool UpstreamFoldedRuns { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the compiler decides that the pattern
+    /// as a whole is a fuzzy section before optimising, as upstream does, so that a <c>(?R)</c> in
+    /// <c>(?:z(?R)|){e&lt;=1}</c> gets no <c>CALL_REF</c> (known defect D37, ledger entry 55). The
+    /// oracle sets it to show that the fix is the whole of a divergence.
+    /// </summary>
+    internal bool UpstreamWholePatternCall { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether each group call gets the direction and
+    /// fuzziness upstream gives it. A copy's calls keep the references resolved for where they are
+    /// written (D40), a lookaround's calls take the caller's fuzziness (D42), and a conditional's
+    /// test takes the caller's direction (D43). The oracle sets it to show that those fixes are the
+    /// whole of a divergence; see <see cref="ParseFunctions.ResolveCallsInCopy"/>.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a conditional's lookaround test is
+    /// compiled with the enclosing fuzzy section's fuzziness, as upstream's is, rather than exact
+    /// like a plain lookaround's body (D52, ledger entry 64). The oracle sets it to show that the
+    /// fix is the whole of a divergence; see <see cref="LookAroundConditional.UpstreamFuzzyTest"/>.
+    /// </summary>
+    internal bool UpstreamFuzzyConditionTest { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a called group's copy is compiled from
+    /// the group as parsed, as upstream compiles it, rather than prepared as the group written out at
+    /// the call would be (D50). The oracle sets it to show that the fix is the whole of a divergence;
+    /// see <see cref="ParseFunctions.PrepareCopy"/>.
+    /// </summary>
+    internal bool UpstreamCallCopies { get; init; }
+
+    /// <summary>
+    /// NOT UPSTREAM (D50): the parsed pattern, which the optimiser never touches when the pattern
+    /// has a group call, so that a copy of the whole pattern can be prepared from it. Null until
+    /// then, and in a pattern with no call.
+    /// </summary>
+    internal RegexBase? PatternAsWritten { get; set; }
 
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
@@ -97,6 +167,13 @@ internal sealed class Info
 
     /// <summary>The group calls found in the pattern. Upstream <c>info.group_calls</c>.</summary>
     internal List<(RegexBase Call, bool Reverse, bool Fuzzy)> GroupCalls { get; } = [];
+
+    /// <summary>
+    /// Whether the parser has built a group call. Not in upstream: <see cref="GroupCalls"/> is only
+    /// filled in by <c>FixGroups</c>, and <see cref="PatternCompiler"/> needs the answer before it,
+    /// to know whether a call could carry a fuzzy budget into a section that allows no errors.
+    /// </summary>
+    internal bool HasGroupCall { get; set; }
 
     /// <summary>
     /// Negative alias to real group number, for a named group nested inside itself. Upstream

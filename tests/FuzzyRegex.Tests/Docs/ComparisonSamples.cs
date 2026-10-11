@@ -55,8 +55,12 @@ public sealed class ComparisonSamples
         Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection){0<e<5}");
         (fuzzy.Index, fuzzy.Length).Should().Be((0, 16));
 
+        // Not an exact match: the one error can be the last letter left out, so an exact
+        // occurrence answers (0, 16) with one deletion. Upstream answers None here, which is
+        // finding F-A (docs/DIVERGENCES.md); it finds the same match over 'service detectio'.
         Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}");
-        exact.Success.Should().BeFalse();
+        (exact.Index, exact.Length).Should().Be((0, 16));
+        exact.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     /// <summary>"`{e&lt;=n:[set]}`: constrain which characters an edit may touch".</summary>
@@ -148,8 +152,9 @@ public sealed class ComparisonSamples
         // The doc's own comment notes that (a|a)* with a tail that can never hold is exponential
         // here as in upstream, that (a+)+b would not demonstrate a timeout because this engine's
         // repeat guards answer it fast, and that since S60 a literal tail would not either -
-        // the required-string prefilter refuses the subject before the engine runs.
-        var pattern = new FuzzyRegex(@"(a|a)*\b\B");
+        // the required-string prefilter refuses the subject before the engine runs. The '\1'
+        // is there because a pattern without a backreference now gets a failure memo.
+        var pattern = new FuzzyRegex(@"(a|a)*\1\b\B");
 
         Action act = () => pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));
 
@@ -306,6 +311,55 @@ public sealed class ComparisonSamples
         m.Success.Should().BeFalse();
     }
 
+    /// <summary>"A case-insensitive cased property under ASCII means the 52 ASCII letters".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_under_ascii_means_the_ascii_letters()
+    {
+        FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success.Should().BeFalse();
+        FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success.Should().BeTrue();
+    }
+
+    /// <summary>"A scope that names no encoding keeps the one around it".</summary>
+    [Test]
+    public void A_scope_that_names_no_encoding_keeps_the_one_around_it() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?s:\w))").Success.Should().BeFalse();
+
+    /// <summary>"A POSIX class takes the scope's encoding".</summary>
+    [Test]
+    public void A_posix_class_takes_the_scopes_encoding() =>
+        FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success.Should().BeFalse();
+
+    /// <summary>"A case-insensitive cased property answers the same bare and in a set".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_answers_the_same_bare_and_in_a_set()
+    {
+        FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success.Should().BeTrue();
+        FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success.Should().BeFalse();
+    }
+
+    /// <summary>"A case-insensitive set matches each member first, then combines them".</summary>
+    [Test]
+    public void A_case_insensitive_set_matches_each_member_first_then_combines_them()
+    {
+        FuzzyRegex.FullMatch("\u00B5", @"(?i)[\p{Greek}x]").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("a", @"(?i)[x[\w--\p{Lu}]]").Success.Should().BeFalse();
+    }
+
+    /// <summary>"An encoding named by positional flags inside a group replaces the one in force".</summary>
+    [Test]
+    public void An_encoding_named_by_positional_flags_inside_a_group_replaces_the_one_in_force() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success.Should().BeTrue();
+
+    /// <summary>
+    /// "A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern".
+    /// </summary>
+    [Test]
+    public void A_scoped_encoding_answers_exactly_as_the_same_encoding_set_for_the_whole_pattern()
+    {
+        FuzzyRegex.FullMatch("\u212A", "(?i)(?a:k)").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("\u212A", "(?ai)(?u:k)").Success.Should().BeTrue();
+    }
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()
@@ -349,15 +403,47 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
+    /// "A group that can call itself before it has matched any text is refused when the pattern is
+    /// compiled".
+    /// </summary>
+    [Test]
+    public void A_group_that_can_call_itself_before_matching_text_is_refused_when_compiled()
+    {
+        Action compile = static () => _ = new FuzzyRegex(@"(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$");
+
+        compile
+            .Should()
+            .Throw<FuzzyRegexParseException>()
+            .WithMessage("group 'list' can call itself without matching any text");
+        FuzzyRegex.IsMatch("a,b,c", @"(?(DEFINE)(?<list>\w+(?:,(?&list))?))^(?&list)$").Should().BeTrue();
+    }
+
+    /// <summary>
     /// "A group call that would re-enter the same group at the same text position fails that
     /// PATH".
     /// </summary>
     [Test]
     public void A_group_call_that_would_reenter_the_same_group_fails_that_path()
     {
-        Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
+        Match m = FuzzyRegex.Match("((a)(b)", @"(?:\((?:[^()]|(?R))*\)){d<=2}");
 
-        (m.Index, m.Length).Should().Be((0, 4));
+        (m.Index, m.Length, m.FuzzyCounts.Deletions).Should().Be((0, 7, 1));
+    }
+
+    /// <summary>
+    /// "A fuzzy recursive pattern whose calls fail is matched in milliseconds, but some shapes stay
+    /// exponential, and `MatchTimeout` is their bound".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_recursive_pattern_whose_calls_fail_is_matched_in_milliseconds()
+    {
+        var regex = new FuzzyRegex(
+            "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        );
+
+        regex.Match("baxbax").Success.Should().BeFalse();
     }
 
     /// <summary>
@@ -393,5 +479,138 @@ public sealed class ComparisonSamples
         Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
 
         (m.Success ? m.Value : "no match").Should().Be("xabc");
+    }
+
+    /// <summary>"A literal under a scoped `(?i:...)` is found in text that holds only its full case folding".</summary>
+    [Test]
+    public void A_literal_under_a_scoped_ignorecase_is_found_in_text_that_holds_only_its_full_case_folding() =>
+        FuzzyRegex.Match("\u00DF", "(?i:ss)").Success.Should().BeTrue();
+
+    /// <summary>"A lazy repeat finds a full-folded literal that starts at the repeat's last position".</summary>
+    [Test]
+    public void A_lazy_repeat_finds_a_full_folded_literal_that_starts_at_the_repeats_last_position()
+    {
+        FuzzyRegex.Match("ass", "(?i)[^k]??ss").Index.Should().Be(0);
+        FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// "A fuzzy constraint that allows no errors limits the errors made inside it, whichever way it
+    /// is written".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_constraint_that_allows_no_errors_limits_the_errors_made_inside_it()
+    {
+        var inner = new FuzzyRegex("(?:c(?:ab){e<=0}){e<=1}");
+
+        inner.MatchAtStart("cax").Success.Should().BeFalse();
+        inner.MatchAtStart("xab").Success.Should().BeTrue();
+    }
+
+    /// <summary>"The WORD flag's word boundary is Unicode's default one".</summary>
+    [Test]
+    public void The_WORD_flags_word_boundary_is_Unicodes_default_one()
+    {
+        var boundary = new FuzzyRegex(@"(?w)\b");
+
+        boundary.Matches("a:\u0308a").Select(static m => m.Index).Should().Equal(0, 4);
+        new FuzzyRegex(@"(?w)a\b").Match("a:\u0308a").Index.Should().Be(3);
+    }
+
+    /// <summary>"`\X` matches the same grapheme cluster backwards as forwards".</summary>
+    [Test]
+    public void Grapheme_matches_the_same_cluster_backwards_as_forwards()
+    {
+        var backwards = new FuzzyRegex(@"(?r)\X");
+
+        backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
+        new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
+    }
+
+    /// <summary>
+    /// "A fuzzy item that matched exactly can still be deleted, and that choice comes before any
+    /// earlier one".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_item_that_matched_exactly_can_still_be_deleted()
+    {
+        Match m = FuzzyRegex.MatchAtStart("a", "(?:a){d<=1}a");
+        (m.Index, m.Length, m.FuzzyCounts.Deletions).Should().Be((0, 1, 1));
+
+        Match first = FuzzyRegex.Match("abxabb", "(?:ab){d<=1}b");
+        (first.Index, first.Length).Should().Be((0, 2));
+
+        Match branch = FuzzyRegex.Match("ab", "(?:(?:a){d<=1}ab|a)");
+        (branch.Index, branch.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
+    /// "A lookaround that fails inside a fuzzy section can be passed by inserting a text character in
+    /// front of it".
+    /// </summary>
+    [Test]
+    public void A_failing_lookaround_in_a_fuzzy_section_can_be_passed_by_an_insertion()
+    {
+        Match m = FuzzyRegex.Match("bxc", "(?:b(?=c)){i<=1}");
+        (m.Index, m.Length, m.FuzzyCounts.Insertions).Should().Be((0, 2, 1));
+
+        Match e = FuzzyRegex.Match("bxc", "(?:b(?=c)){e<=1}");
+        (e.Index, e.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
+    /// "A fuzzy section's minimum error count can be met by a text character inserted after its
+    /// last item".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_minimum_can_be_met_by_a_trailing_insertion()
+    {
+        Match m = FuzzyRegex.MatchAtStart("aab", "(?:a){1<=e<=2}b");
+        (m.Index, m.Length, m.FuzzyCounts.Insertions).Should().Be((0, 3, 1));
+
+        Match s = FuzzyRegex.Match("aab", "(?:a){1<=e<=2}b");
+        (s.Index, s.Length).Should().Be((0, 3));
+    }
+
+    /// <summary>
+    /// "A fuzzy repeat takes an iteration that matches no text by deleting only when something
+    /// needs it".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_repeat_takes_an_empty_deleting_iteration_only_when_something_needs_it()
+    {
+        FuzzyRegex.Match("42kg", "(?:[0-9]+){d<=2}").FuzzyCounts.Deletions.Should().Be(0);
+
+        Match needed = FuzzyRegex.Match("42", "(?:[0-9]+){1<=d<=2}");
+        (needed.Index, needed.Length, needed.FuzzyCounts.Deletions).Should().Be((0, 2, 1));
+
+        FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y").FuzzyCounts.Deletions.Should().Be(1);
+    }
+
+    /// <summary>"A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start".</summary>
+    [Test]
+    public void Skip_acts_when_backtracking_reaches_it()
+    {
+        new FuzzyRegex(@"aa(*SKIP)x(*PRUNE)y|a").Match("aaxz").Index.Should().Be(1);
+        new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index.Should().Be(1);
+        new FuzzyRegex(@"aa(*SKIP)x|a").Match("aab").Success.Should().BeFalse();
+    }
+
+    /// <summary>"A verb, branch, group call or fuzzy section that starts every alternative stays in each one".</summary>
+    [Test]
+    public void A_verb_that_starts_every_alternative_stays_in_each_one()
+    {
+        Match m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 3));
+    }
+
+    /// <summary>"A verb that backtracking reaches inside an unfinished atomic group or positive lookaround ends the attempt".</summary>
+    [Test]
+    public void A_verb_reached_inside_an_unfinished_group_ends_the_attempt()
+    {
+        new FuzzyRegex(@"(?>a(*PRUNE)b)|a").Match("ac").Success.Should().BeFalse();
+        new FuzzyRegex(@"(?>aa(*SKIP)b)|a").Match("aaca").Index.Should().Be(3);
+        new FuzzyRegex(@"(?!(?>a(*PRUNE)b)|a)a").Match("ac").Index.Should().Be(0);
     }
 }

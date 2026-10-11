@@ -29,8 +29,14 @@ public sealed class RepeatTests
     /// before the engine runs - which is a Phase 7 prefilter this port has not got, so a
     /// <c>'b'</c>-free subject would be testing the deferral rather than the engine, and the test
     /// would silently stop timing out the day Phase 7 lands.
+    /// <para>
+    /// Since 2026-09-26 the pattern carries a <c>\1</c>. The failure memo
+    /// (<c>RepeatInfo.FailureMemo</c>) makes <c>(a|a)*b</c> itself fail in linear time here, which
+    /// is faster than upstream and changes no answer, but it is then no longer a pattern the guards
+    /// cannot tame. A pattern with a backreference gets no memo, so this one still is.
+    /// </para>
     /// </remarks>
-    private const string _catastrophicPattern = "(a|a)*b";
+    private const string _catastrophicPattern = @"(a|a)*\1b";
 
     [Test]
     public void A_catastrophic_pattern_raises_the_match_timeout_rather_than_running_to_completion()
@@ -215,7 +221,103 @@ public sealed class RepeatTests
         FuzzyRegex.MatchAtStart("aaab", "a{2,3}?b").Length.Should().Be(4);
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A lazy repeat of one character finds a full-folded literal that starts where the repeat
+    /// reaches its maximum. Ledger entry 38.
+    /// </summary>
+    /// <remarks>
+    /// When the repeat takes one more character, upstream's LAZY_REPEAT_ONE arm looks ahead for
+    /// the literal that follows. Its STRING arm reads up to <c>limit + length</c>
+    /// (<c>upstream/src/_regex.c:16709</c>); its STRING_FLD arm passes <c>limit</c> alone
+    /// (<c>:16764</c>), which <c>string_search_fld</c> treats as the end of the text
+    /// (<c>:6674</c>). <c>limit</c> is the last position the repeat may reach, so a literal that
+    /// starts there is never read to its end. The reversed twin is at <c>:16808</c> and
+    /// <c>:16819</c>. It is not a search skip: <c>regex.match(r'(?V1)(?i)[^k]??ss', 'ass')</c> is
+    /// None too. CPython's re gives (0, 3) for <c>(?i)[^k]??ss</c> over 'ass' and (0, 4) for
+    /// <c>(?i)a{0,2}?ss</c> over 'aass'; Perl 5.42.3 gives those and (0, 2) over U+00E9 U+1E9E 'S'
+    /// and over U+00E9 U+FB01. Measured 2026-09-26 by
+    /// <c>python tools/probes/upstream-lazy-repeat-full-fold-tail.py</c>.
+    /// </remarks>
     [Test]
+    public void A_lazy_repeat_finds_a_full_folded_literal_at_its_maximum()
+    {
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??ss', '\xe9\u1e9eS') -> (1, 2)
+        Search("(?V1)(?i)[^k]??ss", "\u00E9\u1E9ES").Should().Be("(0,2)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??ss', 'ass') -> (1, 3)
+        Search("(?V1)(?i)[^k]??ss", "ass").Should().Be("(0,3)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)a{0,2}?ss', 'aass') -> None
+        Search("(?V1)(?i)a{0,2}?ss", "aass").Should().Be("(0,4)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)(?:a{0,2}?ss|q)', 'aass') -> (2, 4)
+        Search("(?V1)(?i)(?:a{0,2}?ss|q)", "aass").Should().Be("(0,4)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??fi', '\xe9\ufb01') -> (1, 2)
+        Search("(?V1)(?i)[^k]??fi", "\u00E9\uFB01").Should().Be("(0,2)");
+
+        // regex 2026.9.10: search(r'(?V0)(?fi)[^k]??ss', 'ass') -> (1, 3)
+        Search("(?V0)(?fi)[^k]??ss", "ass").Should().Be("(0,3)");
+
+        // regex 2026.9.10: search(r'(?r)(?V1)(?i)ss[^k]??', 'ssa') -> (0, 2)
+        Search("(?r)(?V1)(?i)ss[^k]??", "ssa").Should().Be("(0,3)");
+
+        // The controls, on which the two engines agree: greedy, simple folding and no folding.
+        // regex 2026.9.10 gives (0, 3) for all three over 'ass'.
+        Search("(?V1)(?i)[^k]?ss", "ass").Should().Be("(0,3)");
+        Search("(?V0)(?i)[^k]??ss", "ass").Should().Be("(0,3)");
+        Search("(?V1)[^k]??ss", "ass").Should().Be("(0,3)");
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A greedy repeat of one character gives back to a full-folded literal whose text holds the
+    /// expanding character itself. Ledger entry 80, the greedy sibling of entry 38.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's GREEDY_REPEAT_ONE backtrack arm for a STRING_FLD tail adds up the tail's FOLDED
+    /// length (3 for <c>ßa</c>, which folds to 'ssa') and uses it as a text offset:
+    /// <c>pos = max(pos + 1, slice_start + folded_length)</c>, then
+    /// <c>string_search_fld(..., pos - folded_length, limit, ...)</c>
+    /// (<c>upstream/src/_regex.c:16118-16129</c>; the reversed twin is at <c>:16066-16080</c>).
+    /// Over 'ßa' the literal spans two text positions, so the start overshoots <c>limit</c> and the
+    /// search never runs. The bare literal, the lazy repeat and the folded subject 'ssa' all match.
+    /// Measured 2026-10-11 against regex 2026.9.10 (confirmation sweep, seed 554621207 row 27187).
+    /// </remarks>
+    [Test]
+    public void A_greedy_repeat_gives_back_to_a_full_folded_literal_whose_text_is_shorter_than_its_folding()
+    {
+        // regex 2026.9.10: fullmatch(r'(?fi)\w*ßa', 'ßa') -> None
+        new FuzzyRegex(@"(?fi)\w*ßa")
+            .FullMatch("ßa")
+            .Length.Should()
+            .Be(2);
+
+        // regex 2026.9.10: search(r'(?fi)\w*ßa', 'xxßa') -> None
+        Search(@"(?fi)\w*ßa", "xxßa").Should().Be("(0,4)");
+
+        // regex 2026.9.10: fullmatch(r'(?fi)\w*ffi', 'ﬃ') -> None
+        new FuzzyRegex(@"(?fi)\w*ffi")
+            .FullMatch("ﬃ")
+            .Length.Should()
+            .Be(1);
+
+        // regex 2026.9.10: fullmatch(r'(?fi)(?r)ßa\w*', 'ßa') -> None (the reversed twin)
+        new FuzzyRegex(@"(?fi)(?r)ßa\w*")
+            .FullMatch("ßa")
+            .Length.Should()
+            .Be(2);
+
+        // The controls, on which the two engines agree: the bare literal, the lazy repeat and the
+        // folded subject. regex 2026.9.10 gives (0, 2), (0, 2) and (0, 3).
+        Search("(?fi)ßa", "ßa").Should().Be("(0,2)");
+        Search(@"(?fi)\w*?ßa", "ßa").Should().Be("(0,2)");
+        Search(@"(?fi)\w*ßa", "ssa").Should().Be("(0,3)");
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
     {
         // The complexity guard for LAZY_REPEAT_ONE and GREEDY_REPEAT_ONE. Both backtrack arms
@@ -226,18 +328,26 @@ public sealed class RepeatTests
         // n^2 + n^2/2 in each direction, which is the shape this test exists to refuse.
         //
         // The subject is four times upstream's test_bug_418626#3, so a quadratic scan costs sixteen
-        // times what it costs there and a linear one four times. The engine's own timeout is what
-        // enforces the ceiling, so a regression fails in twenty seconds instead of hanging the suite
-        // for an hour.
+        // times what it costs there and a linear one four times. What is bounded is the walk itself,
+        // counted one character at a time, rather than the time it takes: until 2026-09-28 this was
+        // a twenty-second match timeout, and a busy machine is not a slow engine (D13). The match
+        // walks 400,000 characters (Debug, 2026-09-28), five for every three of the subject; a
+        // quadratic walk is about n^2, and the bound stops it there. The timeout is left for Release.
         string subject = string.Concat(Enumerable.Repeat("abc", 80000)) + "de";
-        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
-
-        Match m = pattern.MatchAtStart(subject);
-
-        (m.Index + m.Length).Should().Be(240001);
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        EngineWork.ShouldWalkAtMostCharacters(
+            () =>
+            {
+                Match m = pattern.MatchAtStart(subject);
+                (m.Index + m.Length).Should().Be(240001);
+            },
+            4L * subject.Length,
+            "a linear scan walks each character a few times"
+        );
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_astral_subject_costs_time_proportional_to_its_length()
     {
         // The same guard for a subject whose characters do not each occupy one UTF-16 code unit, so
@@ -249,11 +359,18 @@ public sealed class RepeatTests
         string subject = string.Concat(Enumerable.Repeat("x\U0001F600y", 60000)) + "cd";
         subject.Should().HaveLength(240002, "180,002 characters, of which 60,000 take two code units");
 
-        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
-
-        Match m = pattern.MatchAtStart(subject);
-
-        (m.Index + m.Length).Should().Be(240002);
+        // Counted as in the test above: 8,730,005 characters walked (Debug, 2026-09-28), which is
+        // the index's stride of 32 at most per conversion, against 3n^2 without it.
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        EngineWork.ShouldWalkAtMostCharacters(
+            () =>
+            {
+                Match m = pattern.MatchAtStart(subject);
+                (m.Index + m.Length).Should().Be(240002);
+            },
+            200L * subject.Length,
+            "the index bounds each conversion's walk"
+        );
     }
 
     /// <summary>
@@ -280,7 +397,9 @@ public sealed class RepeatTests
         List<string> withFuzzyTail = [];
         int repeatOnes = 0;
 
-        foreach (CompileRow row in Corpus.Compiles())
+        foreach (
+            CompileRow row in Corpus.Compiles().Where(static r => !Corpus.RefusedAsLeftRecursive.Contains(r.Pattern))
+        )
         {
             PatternObject pattern = PatternObject.Compile(
                 PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion),
@@ -303,8 +422,9 @@ public sealed class RepeatTests
             }
         }
 
-        // Measured 2026-09-13 over the 1,534 compile-parity patterns.
-        repeatOnes.Should().Be(639, "the corpus is fixed, so a change here means the optimiser moved");
+        // Measured 2026-09-13 over the 1,534 compile-parity patterns: 639. One was in '\0?(?0){e}',
+        // which D4's left-recursion check now refuses (2026-10-08).
+        repeatOnes.Should().Be(638, "the corpus is fixed, so a change here means the optimiser moved");
         withFuzzyTail.Should().BeEmpty();
     }
 
@@ -341,5 +461,46 @@ public sealed class RepeatTests
             .And.NotContain(Opcode.GreedyRepeatOne, "sequence_matches_one refuses a fuzzy body");
     }
 
+    [Test]
+    [Arguments("(ab)*", 82_055)]
+    [Arguments("(?:ab)*", 46_055)]
+    public void A_full_match_of_a_repeat_leaves_upstreams_bytes_on_the_backtrack_stack(string pattern, int bytes)
+    {
+        // Ledger entry 18. Upstream's figure is the peak of state->bstack for
+        // fullmatch(pattern, 'ab' * 1000), read from an instrumented /Od build of regex 2026.9.10
+        // by `python tools/probes/upstream-repeat-bytes.py 1000` (2026-09-24). Per repetition
+        // END_GREEDY_REPEAT pushes BODY_END (32 + 1 B) and BODY_START (4 + 8 + 1 B), and the group
+        // adds its END_GROUP record (32 B) and four flag bytes: 46 and 82 B a repetition. It pushes
+        // no MATCH_TAIL record, because try_match's SUCCESS arm (_regex.c:7828) fails the tail
+        // short of the end of a full match. Before S86 this port pushed that record, and pushed
+        // every RE_CODE and the group record's two indexes 8 bytes wide: 107 and 151 B.
+        FuzzyRegex regex = new(pattern);
+        string subject = string.Concat(Enumerable.Repeat("ab", 1_000));
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: true,
+            regex.PatternLimits
+        );
+
+        Matcher.DoMatch(state, search: false).Should().Be(MatchStatus.Success);
+        state.Bstack.Count.Should().Be(bytes);
+    }
+
     private static readonly Dictionary<string, IReadOnlyList<string>> _noNamedLists = new(StringComparer.Ordinal);
+
+    /// <summary>Formats the first match of a pattern as the probe prints its span.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <returns><c>(start,end)</c>, or <c>None</c> when there is no match.</returns>
+    private static string Search(string pattern, string subject)
+    {
+        Match match = new FuzzyRegex(pattern).Match(subject);
+        return match.Success ? $"({match.Index},{match.Index + match.Length})" : "None";
+    }
 }

@@ -1,0 +1,6 @@
+{"pattern":"(?b)(?fi)(f)(?:(?:\\1)){e<=3}","flags":0,"subject":"fxf","operation":"fullmatch"}
+{"pattern":"(?b)(?fi)(f)(?:\\d+a00(?:\\1)){e<=3}","flags":0,"subject":"f767ax00ﬂ","operation":"fullmatch"}
+{"pattern":"(?b)(?e)(?fi)(?r)(?:fine){e<=7}","flags":0,"subject":"oelFin becf","operation":"fullmatch"}
+{"pattern":"(?b)(?r)(?:\\L<phrases>){e<=3}","flags":0,"namedLists":{"phrases":["","amber lantern"]},"subject":"znz","operation":"fullmatch"}
+{"pattern":"(?b)(?:){e<=3}","flags":0,"subject":"znz","operation":"fullmatch"}
+{"pattern":"(?b)(?r)\\m(?:😀\\d😀){e:[a-z]}","flags":0,"subject":"b😀😀","operation":"subf","template":"<>"}

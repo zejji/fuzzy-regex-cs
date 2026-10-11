@@ -48,17 +48,25 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import importlib.util
 import json
 import os
 import random
 import re
+import unicodedata
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = REPO_ROOT / "TestResults" / "oracle" / "wave.jsonl"
+
+# .scratch/, not TestResults/oracle/wave.jsonl: that path is what tools/run-oracle.ps1 has a
+# running oracle read while it compares (via FUZZYREGEX_ORACLE_WAVE_PATH), and a bare, ad hoc
+# invocation of this recorder used to write straight into it - replacing a running oracle's wave
+# out from under its own consumer (D20, docs/KNOWN-DEFECTS.md). Point an ad hoc recording at a
+# specific file with --output when it needs to feed a consumer.
+DEFAULT_OUTPUT = REPO_ROOT / ".scratch" / "oracle" / "wave.jsonl"
 
 # Upstream never published the pinned release to PyPI, so a dev machine's `pip install regex`
 # gives the previous one. The changelog delta between them is the single line "Support Python
@@ -102,6 +110,8 @@ SUB_OPERATIONS = ("sub", "subf")
 # on every individual match. `split` carries a limit in the same field and the same convention as a
 # substitution's `count`, where 0 means "no limit"; the consumer translates it.
 ITER_OPERATIONS = ("finditer", "finditer-overlapped", "split")
+# The two scan shapes that take a slice and `partial` (2026-10-01); `split` takes neither.
+FINDITER_OPERATIONS = ("finditer", "finditer-overlapped")
 LIMIT_OPERATIONS = SUB_OPERATIONS + ("split",)
 ALL_OPERATIONS = OPERATIONS + SUB_OPERATIONS + ITER_OPERATIONS
 
@@ -208,6 +218,10 @@ def _check_version(installed: str) -> str:
 
 
 def _upstream_commit() -> str:
+    # Set by tools/screen-undefined.py, which records inside a container where a worktree's
+    # submodule `.git` points at a host path git cannot follow; measured on the host instead.
+    if os.environ.get("ORACLE_UPSTREAM_COMMIT"):
+        return os.environ["ORACLE_UPSTREAM_COMMIT"]
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT / "upstream"), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True,
@@ -461,6 +475,117 @@ def _with_prune_instead_of_skip(row: dict, pattern: str, flags: int) -> dict | N
     """
     del flags
     return {**row, "pattern": pattern.replace(_SKIP_VERB, _PRUNE_VERB)} if _SKIP_VERB in pattern else None
+
+
+_DOTLESS_I = "ı"
+_DOTTED_I = "İ"
+_KRA = "ĸ"
+
+
+def _row_texts(row: dict) -> list[str]:
+    """Every text a row puts to the engine: pattern, subject, template, and named-list keys and entries."""
+    texts = [row["pattern"], row["subject"], row.get("template") or ""]
+    for name, entries in (row.get("namedLists") or {}).items():
+        texts.append(name)
+        texts.extend(entries)
+    return texts
+
+
+# A pattern or template escape that NAMES a codepoint - `\u0131`, `\x{138}`, `\N{...}`, an octal
+# escape - can say the dotless i or kra without the literal the swap replaces. Each is decoded, and
+# one naming any non-ASCII codepoint, or one that will not decode, refuses the row: `\x41` is an A.
+_CODEPOINT_ESCAPE = re.compile(
+    r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2})|x\{([0-9a-fA-F]+)\}|N\{([^}]*)\}|(0[0-7]{0,2}|[1-7][0-7]{2})|([uUxN]))"
+)
+
+
+def _names_dotless_or_kra(text: str) -> bool:
+    """Whether a codepoint escape in ``text`` names a non-ASCII codepoint, or cannot be decoded."""
+    for m in _CODEPOINT_ESCAPE.finditer(text):
+        hex4, hex8, hex2, hexn, name, octal, bare = m.groups()
+        if bare is not None:
+            return True
+        try:
+            if name is not None:
+                codepoint = ord(unicodedata.lookup(name))
+            elif octal is not None:
+                codepoint = int(octal, 8)
+            else:
+                codepoint = int(hex4 or hex8 or hex2 or hexn, 16)
+        except (KeyError, ValueError):
+            return True
+        # Any non-ASCII codepoint, not only the two letters: escaped endpoints put a range running
+        # from U+0130 to U+0137 round one letter and not the other (the blind review, 2026-09-25).
+        if codepoint > 0x7F:
+            return True
+    return False
+
+# A class range with a non-ASCII endpoint, where swapping one letter for the other can move a
+# character in or out of the range: `[a-\u0131]` holds U+0131 and not U+0138.
+_NON_ASCII_RANGE = re.compile(r"[^\x00-\x7f]-|-[^\x00-\x7f]")
+
+# Every property the pattern names, as a pattern of its own: `\p{...}`, `\P{...}`, `\pL`, and the
+# POSIX `[:name:]` forms. Each is asked of upstream for both letters before the swap is trusted.
+_PROPERTY_TOKEN = re.compile(r"\\[pP](?:\{[^}]*\}|[A-Za-z])|\[:\^?[A-Za-z_]+:\]")
+
+_LOCALE_FLAG = 0x4
+
+
+def _with_dotless_i_as_kra(regex, row: dict) -> dict | None:
+    """The same row with every U+0131 made U+0138, or ``None`` where the swap would not be clean.
+
+    THE CONTROL `turkic-default-folding-without-spans` WAS JUDGED BY HAND ON EVERY ROW, and this is
+    the same control recorded instead. Upstream's default tables carry CaseFolding.txt's two `T`
+    rows (ledger entry 7), so its dotless i (U+0131) pairs with I under case-insensitive matching.
+    Kra (U+0138) is a lowercase letter in the same block with no entry in CaseFolding.txt 16.0, so
+    under the DEFAULT tables the two letters match the same way: this port answers 6,468 grid rows
+    (search, sub, split, finditer; V0 and V1; IGNORECASE with and without FULLCASE, ASCII and
+    MULTILINE) identically with either letter, up to the swap (measured 2026-09-25).
+
+    THEY ARE NOT THE SAME LETTER EVERYWHERE, and the row is refused wherever the difference could
+    show (the 2026-09-25 blind review found each door): U+0131 upper-cases to I and U+0138 does
+    not, so a case-mapping property such as `\\p{CWU}` or `\\p{CWCM}` tells them apart; an escape
+    can name either codepoint without the literal the swap replaces; a class range can hold one and
+    not the other; and LOCALE reads a different table. Each property the pattern names is asked of
+    upstream for both letters, with and without IGNORECASE, and any disagreement refuses the row.
+
+    NOT FOR U+0130. The dotted capital is the only capital letter in CaseFolding.txt with a full
+    folding and no simple one, and its lowercase is a plain `i`, so no letter can stand in for it.
+    A row holding one records no key, and stays judged by hand. Nor where U+0138 is already in the
+    row, where the swap could not be undone.
+    """
+    texts = _row_texts(row)
+    if not any(_DOTLESS_I in t for t in texts) or any(_DOTTED_I in t or _KRA in t for t in texts):
+        return None
+    flags = int(row.get("flags", 0))
+    pattern = row["pattern"]
+    if flags & _LOCALE_FLAG or "(?L" in pattern:
+        return None
+    if _names_dotless_or_kra(pattern) or _names_dotless_or_kra(row.get("template") or ""):
+        return None
+    if _NON_ASCII_RANGE.search(pattern):
+        return None
+    for token in set(_PROPERTY_TOKEN.findall(pattern)):
+        single = f"[{token}]" if token.startswith("[:") else token
+        # Every encoding the token could be read under, not only the row's: a scoped `(?u:...)` in
+        # an ASCII row reads the property with the Unicode tables (the blind review, 2026-09-25).
+        for extra in (0, regex.IGNORECASE):
+            for encoding in (regex.ASCII, regex.UNICODE):
+                try:
+                    token_flags = (flags & ~(regex.ASCII | regex.UNICODE | _LOCALE_FLAG)) | encoding | extra
+                    answers = {bool(regex.fullmatch(single, letter, token_flags)) for letter in (_DOTLESS_I, _KRA)}
+                except Exception:
+                    return None
+                if len(answers) != 1:
+                    return None
+
+    def swap(text):
+        return text.replace(_DOTLESS_I, _KRA) if isinstance(text, str) else text
+
+    swapped = {key: swap(value) for key, value in row.items()}
+    if row.get("namedLists"):
+        swapped["namedLists"] = {swap(n): [swap(e) for e in entries] for n, entries in row["namedLists"].items()}
+    return swapped
 
 
 # Each control's recorded key, and how to take its construct away. Every one is A SECOND FACT
@@ -788,6 +913,14 @@ def _record_row_and_its_control_answers(regex, row: dict) -> dict:
             recorded[key] = free
 
     violations += _control_violations(recorded)
+
+    # Recorded AFTER the invariants and outside `_CONTROLS`, because the swap changes the question:
+    # a twin that answers where the row faulted is not the row contradicting itself.
+    swapped = _with_dotless_i_as_kra(regex, row)
+    if swapped is not None:
+        free = _record_row(regex, swapped)["outcome"]
+        if free["kind"] in _ANSWERED:
+            recorded["dotlessFreeOutcome"] = free
     if violations:
         # Sorted and de-duplicated: a scan whose every match breaks one invariant is ONE candidate
         # to triage, not forty, and the field is a set of ids by contract. The detail a triage needs
@@ -892,15 +1025,20 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
         recorded["count"] = int(row.get("count", 0))
 
     # Part of the QUESTION, not of the answer: the same pattern and subject give different results
-    # with it and without it, so it is recorded on the row and the consumer reads it back. Only the
-    # three single-match operations take it - upstream's findall refuses it outright ("unused keyword
-    # argument 'partial'", measured 2026-09-12) and this recorder has no finditer-partial row shape.
+    # with it and without it, so it is recorded on the row and the consumer reads it back. The
+    # three single-match operations take it, and so do the two `finditer` shapes since 2026-10-01:
+    # upstream's `finditer` accepts `partial` (its docstring does not list it, but
+    # `compile(r'aa(*SKIP)x').finditer('axaa', partial=True)` answers (4, 4) partial, measured
+    # 2026-10-01), and the complete matrix had to judge such rows outside the oracle (check C1x).
+    # Upstream's findall refuses it outright ("unused keyword argument 'partial'", measured
+    # 2026-09-12), and split has no partial.
+    _PARTIAL_OPERATIONS = OPERATIONS + FINDITER_OPERATIONS
     partial = bool(row.get("partial", False))
     if partial:
-        if operation not in OPERATIONS:
+        if operation not in _PARTIAL_OPERATIONS:
             raise SystemExit(
                 f"operation {operation!r} cannot be asked with partial=True (pattern {pattern!r}); "
-                f"only {OPERATIONS} take it."
+                f"only {_PARTIAL_OPERATIONS} take it."
             )
         recorded["partial"] = True
 
@@ -946,9 +1084,9 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
     # `sub` and `subf` joined the three single-match operations in S53b, when `Replace` and
     # `ReplaceFormat` gained a `beginning`/`length` pair. `split` still cannot take one, because
     # upstream's `pattern_split` has no pos/endpos at all - its kwlist is string, maxsplit,
-    # concurrent, timeout - and neither do the `finditer` shapes, which this recorder asks through
-    # `findall`-shaped calls.
-    _SLICEABLE = OPERATIONS + SUB_OPERATIONS
+    # concurrent, timeout. The two `finditer` shapes joined on 2026-10-01: upstream's `finditer`
+    # takes (string, pos, endpos, overlapped, ...) and the port's `Matches` a `beginning`/`length`.
+    _SLICEABLE = OPERATIONS + SUB_OPERATIONS + FINDITER_OPERATIONS
     if pos is not None or endpos is not None:
         if operation not in _SLICEABLE:
             raise SystemExit(
@@ -1146,7 +1284,14 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
                 parts = compiled.split(subject, maxsplit=recorded["count"], timeout=deadline)
             else:
                 overlapped = operation == "finditer-overlapped"
-                found = list(compiled.finditer(subject, overlapped=overlapped, timeout=deadline))
+                # In CODEPOINTS, as for `sub` above; absent means the whole subject.
+                scan_slice = () if pos is None else (pos, endpos)
+                scan_partial = {"partial": True} if partial else {}
+                found = list(
+                    compiled.finditer(
+                        subject, *scan_slice, overlapped=overlapped, timeout=deadline, **scan_partial
+                    )
+                )
         except TimeoutError:
             return timed_out()
         except Exception as e:  # noqa: BLE001
@@ -1186,8 +1331,12 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
             # question the scanner asks, so a recorded answer would be a third opinion rather than a
             # second one. See its docstring.
             reverse = (compiled.flags & _REVERSE_FLAG) != 0
+            # Not on a sliced or partial scan either: the walk asks whole-subject, non-partial
+            # questions, so it would answer a different scan from the one recorded.
             if (
                 overlapped
+                and pos is None
+                and not partial
                 and "(*SKIP)" in pattern
                 and not (reverse and _reads_the_end_of_the_subject(pattern))
             ):
@@ -1747,6 +1896,7 @@ GENERATORS = (
     "fuzzy-literal",
     "fuzzy-alternation",
     "long-alternation",
+    "matrix",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -6475,16 +6625,26 @@ REVERSE = 0x400
 # text - and the ambiguity has to survive compilation: `(?:ab|a)+$` and `(?:[ab]|a)+$` are both fast.
 # So is `(?i)(a|A)+$`, and so is the reversed `(?r)(a|a)+^`. This family is narrower than it looks,
 # which is why widening it means re-running the probe rather than editing the table.
+#
+# SEVEN SHAPES ARE BOUNDED, AND THAT IS THE PORT'S DOING (2026-09-26). Since the failure memo
+# (`RepeatInfo.FailureMemo`), this port fails `(a|a)+$`, `(a|a)*$`, `(?:a|aa)+$`,
+# `(?:a|aa|aaa)+$`, `((a)|(a))+$`, `(a|a)+\b\d` and `(a|a)+x` in linear time, so rows of those shapes
+# would answer here and time out upstream. Each is now written with a `{0,999}` or `{1,999}`
+# maximum instead, far above any subject the generator draws, which gives the same answers and keeps
+# the memo off (a repeat with a maximum gets none). Both halves of `timeout-row-margin` put all ten
+# still running at twenty times the budget on the day of the change. The other three keep their
+# old spelling because the memo does not reach them: a nested repeat, a repeat inside a lookahead,
+# and a pattern with a backreference.
 TIMEOUT_SHAPES = (
-    ("alt-same", r"(a|a)+$"),
-    ("alt-same-star", r"(a|a)*$"),
-    ("alt-prefix", r"(?:a|aa)+$"),
-    ("alt-prefix-3", r"(?:a|aa|aaa)+$"),
-    ("alt-groups", r"((a)|(a))+$"),
+    ("alt-same-bounded", r"(a|a){1,999}$"),
+    ("alt-same-star-bounded", r"(a|a){0,999}$"),
+    ("alt-prefix-bounded", r"(?:a|aa){1,999}$"),
+    ("alt-prefix-3-bounded", r"(?:a|aa|aaa){1,999}$"),
+    ("alt-groups-bounded", r"((a)|(a)){1,999}$"),
     ("alt-nested", r"(?:(?:a|a)+)+$"),
-    ("alt-same-word", r"(a|a)+\b\d"),
+    ("alt-same-word-bounded", r"(a|a){1,999}\b\d"),
     ("alt-same-lookahead", r"(?=(a|a)+$)a"),
-    ("alt-same-atomic-free", r"(a|a)+x"),
+    ("alt-same-atomic-free-bounded", r"(a|a){1,999}x"),
     ("alt-backref", r"(a|a)+(\1)$"),
 )
 
@@ -6598,6 +6758,122 @@ def _generate_long(name: str, rng: random.Random, count: int):
         yield row
 
 
+# --------------------------------------------------------------------------------------------
+# The feature-interaction generator (2026-09-27)
+# --------------------------------------------------------------------------------------------
+
+# Each construct wraps an inner fragment. A row nests two or three of them, drawn uniformly, so
+# every pair of constructs meets in both nesting orders instead of only where some generator
+# happened to combine them. `tools/interaction-matrix.py --generator matrix` counts the rows per
+# pair and fails on a zero. Before this generator, 90 of 630 construct pairs had no row in any wave
+# (seeds 7, 4242, 20260927 at 1000 rows a generator); branch reset was never drawn at all and
+# `\G` met no lookaround, verb or fuzzy section.
+MATRIX_ATOMS = ("a", "b", ".", "[ab]", "ab", "a?", "")
+MATRIX_SUBJECT_ALPHABET = "aab"
+MAX_MATRIX_SUBJECT_LENGTH = 6
+MATRIX_FUZZY_CONSTRAINTS = (
+    "{e<=1}", "{e<=2}", "{i<=1}", "{d<=1}", "{s<=1}", "{i<=1,d<=1}", "{1<=e<=2}", "{2i+1d+1s<=2}", "{1<=e<=2,2i+1d+1s<=3}",
+)
+MATRIX_INLINE_FLAGS = ("b", "e", "r", "i", "fi", "w", "p", "V1")
+MATRIX_NAMED_LIST = ["a", "ab", "ba"]
+MATRIX_PARTIAL_PROBABILITY = 0.15
+MATRIX_SLICE_PROBABILITY = 0.15
+
+
+def _matrix_wrap(rng: random.Random, construct: str, inner: str, groups: list) -> str:
+    """``inner`` wrapped in ``construct``; ``groups`` holds the number of the last group opened."""
+    other = rng.choice(MATRIX_ATOMS[:5])
+    if construct == "fuzzy":
+        return f"(?:{inner}){rng.choice(MATRIX_FUZZY_CONSTRAINTS)}"
+    if construct == "capture":
+        groups[0] += 1
+        return f"({inner})"
+    if construct == "call":
+        groups[0] += 1
+        n = groups[0]
+        return rng.choice((f"({inner})(?{n})", f"(?:{inner}|{other}(?R))", f"({inner}(?{n})?)"))
+    if construct == "backref":
+        groups[0] += 1
+        return rf"({inner})\{groups[0]}"
+    if construct == "conditional":
+        groups[0] += 1
+        n = groups[0]
+        return f"(?:({other})|)(?({n}){inner}|{rng.choice(MATRIX_ATOMS[:5])})"
+    if construct == "branch-reset":
+        groups[0] += 1
+        return f"(?|({inner})|({other}))"
+    if construct in ("lookahead", "neg-lookahead", "lookbehind", "neg-lookbehind"):
+        opener = {"lookahead": "(?=", "neg-lookahead": "(?!", "lookbehind": "(?<=",
+                  "neg-lookbehind": "(?<!"}[construct]
+        body = f"{opener}{inner})"
+        return rng.choice((body + other, other + body, body))
+    if construct == "atomic":
+        return f"(?>{inner}){rng.choice(('', other))}"
+    if construct == "possessive":
+        return f"(?:{inner}){rng.choice(('*+', '++', '?+', '{0,2}+'))}"
+    if construct == "lazy":
+        return f"(?:{inner}){rng.choice(('*?', '+?', '??', '{1,2}?'))}"
+    if construct == "repeat":
+        return f"(?:{inner}){rng.choice(('*', '+', '?', '{0,2}'))}"
+    if construct == "verb":
+        verb = rng.choice(("(*PRUNE)", "(*SKIP)", "(*FAIL)"))
+        return rng.choice((f"(?:{inner}{verb}{other}|{other})", f"{inner}{verb}", f"(?:{verb}{inner}|{other})"))
+    if construct == "search-anchor":
+        return rng.choice((rf"\G{inner}", rf"{inner}\G", rf"(?:{other}|\G){inner}"))
+    if construct == "alternation":
+        return rng.choice((f"(?:{inner}|{other})", f"(?:{other}|{inner})"))
+    if construct == "anchor":
+        return rng.choice((rf"^{inner}", rf"{inner}$", rf"{inner}\Z", rf"\A{inner}"))
+    if construct == "word-boundary":
+        return rng.choice((rf"\b{inner}", rf"{inner}\b", rf"\B{inner}"))
+    if construct == "named-list":
+        return rng.choice((rf"(?:{inner}\L<w>)", rf"(?:\L<w>|{inner})"))
+    raise ValueError(construct)
+
+
+MATRIX_CONSTRUCTS = (
+    "fuzzy", "capture", "call", "backref", "conditional", "branch-reset", "lookahead", "neg-lookahead",
+    "lookbehind", "neg-lookbehind", "atomic", "possessive", "lazy", "repeat", "verb", "search-anchor",
+    "alternation", "anchor", "word-boundary", "named-list",
+)
+
+
+def _generate_matrix(rng: random.Random, count: int):
+    """Two or three constructs nested at random, under up to two inline flags. See MATRIX_ATOMS."""
+    for i in range(count):
+        groups = [0]
+        fragment = rng.choice(MATRIX_ATOMS)
+        chosen = rng.sample(MATRIX_CONSTRUCTS, rng.choice((2, 2, 3)))
+        for construct in chosen:
+            fragment = _matrix_wrap(rng, construct, fragment, groups)
+            if rng.random() < 0.3:
+                fragment = rng.choice(("", rng.choice(MATRIX_ATOMS[:5]))) + fragment + rng.choice(("", "b"))
+
+        flags = rng.sample(MATRIX_INLINE_FLAGS, rng.choice((0, 1, 1, 2)))
+        if "b" in flags and "e" in flags:
+            flags.remove("e")
+        if _has_weighted_cost(fragment):
+            flags = [f for f in flags if f not in ("b", "e")]
+        pattern = "".join(f"(?{f})" for f in flags) + fragment
+
+        length = rng.randrange(MAX_MATRIX_SUBJECT_LENGTH + 1)
+        subject = "".join(rng.choice(MATRIX_SUBJECT_ALPHABET) for _ in range(length))
+        row = {
+            "generator": "matrix",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {"w": list(MATRIX_NAMED_LIST)} if r"\L<w>" in pattern else {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+        if rng.random() < MATRIX_PARTIAL_PROBABILITY:
+            row["partial"] = True
+        if subject and rng.random() < MATRIX_SLICE_PROBABILITY:
+            row["pos"] = rng.randrange(len(subject) + 1)
+            row["endpos"] = rng.randrange(row["pos"], len(subject) + 1)
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -6614,6 +6890,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "timeout":
         yield from _generate_timeout(rng, count)
+        return
+
+    if name == "matrix":
+        yield from _generate_matrix(rng, count)
         return
 
     if name == "classes":
@@ -6823,7 +7103,7 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
             for row in _generate(name, random.Random(f"{seed}:{name}"), count)
         ]
 
-    recorded = [_record_row_and_its_control_answers(regex, row) for row in unrecorded]
+    recorded = _record_supervised(unrecorded)
 
     header = {
         "kind": "header",
@@ -6839,6 +7119,263 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
         "rowCount": len(recorded),
     }
     return header, recorded
+
+
+# --------------------------------------------------------------------------------------------
+# Crash supervision
+# --------------------------------------------------------------------------------------------
+#
+# UPSTREAM CAN KILL THE INTERPRETER, and a killed recorder used to write no wave at all: one row
+# out of fifty thousand took the whole seed with it, and the 2026-09-24 scheduled sweep died on its
+# first seed with nothing to say but "the recorder failed". The row was ledger entry 5's carried
+# slice reaching an uninitialised `RE_Position new_position` in `basic_match` (`_regex.c:11820`),
+# whose garbage `text_pos` gcc -O1 and above turn into a read about 4 GB past the subject. MSVC's
+# build happens to leave a small value there, so the same row answers - wrongly - on Windows.
+#
+# So the rows are recorded by a WORKER PROCESS that writes each finished row as it goes, and this
+# side supervises it. When the worker dies the row it died on is the one after the last it wrote;
+# that row is re-run ALONE in a fresh worker to learn whether it crashes by itself, recorded as
+# `crashed` either way, and a new worker carries on from the row after it. The wave is the same
+# bytes as an in-process recording whenever nothing crashes, which `--verify-determinism` checks.
+#
+# The pattern is the fork server's and libFuzzer's `-fork` mode: the tested code runs in a process
+# the harness can lose. One worker per wave, not one per row - a process per row measured about
+# 250 ms each on Windows, which is 3.5 hours a seed.
+#
+# A crashed row is never compared: it has no answer. The consumer counts and lists it, and the MSan
+# screen (tools/screen-undefined.py) is what decides whether it is a known defect or a new one.
+
+# TEST-ONLY FAULT INJECTION for `_supervisor_failures`. A worker that meets a row whose pattern is
+# this variable's value faults itself - after at least one other row, if the second is set.
+_FAULT_PATTERN_ENV = "ORACLE_SELF_CHECK_FAULT_PATTERN"
+_FAULT_AFTER_OTHERS_ENV = "ORACLE_SELF_CHECK_FAULT_AFTER_OTHERS"
+
+
+def _died(returncode: int) -> bool:
+    """Whether a worker's exit status means the interpreter was killed rather than exited.
+
+    Measured 2026-09-25, CPython 3.12 and 3.14: a POSIX signal is a negative returncode; on Windows
+    an access violation is 0xC0000005 and `abort()` 0xC0000409 (NTSTATUS codes, all 0xC0000000 and
+    up), and a C-runtime `raise(SIGSEGV)` - what `faulthandler._sigsegv()` does there - exits 3. A
+    SystemExit, the way this recorder refuses a row, exits 1, and nothing here exits 3 by choice.
+    """
+    if returncode < 0:
+        return True
+    return os.name == "nt" and (returncode == 3 or returncode >= 0xC0000000)
+
+
+def _run_worker(inputs: Path, start: int, output: Path) -> tuple[int, str]:
+    process = subprocess.run(
+        [sys.executable, "-X", "faulthandler", str(Path(__file__).resolve()),
+         "--worker-rows", str(inputs), "--worker-start", str(start), "--worker-output", str(output)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+    # tools/screen-undefined.py reads every worker's stderr, where MemorySanitizer reports.
+    if os.environ.get("ORACLE_WORKER_LOG"):
+        with open(os.environ["ORACLE_WORKER_LOG"], "a", encoding="utf-8", errors="replace") as log:
+            log.write(process.stderr)
+    return process.returncode, process.stderr
+
+
+def _finished_rows(output: Path) -> list[dict]:
+    # Only complete lines: a worker killed part-way through writing one has not finished that row.
+    if not output.exists():
+        return []
+    text = output.read_text(encoding="ascii")
+    return [json.loads(line) for line in text.split("\n")[:-1] if line]
+
+
+def _record_supervised(rows: list[dict]) -> list[dict]:
+    recorded: list[dict] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        inputs = Path(tmp) / "rows.jsonl"
+        inputs.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="ascii", newline="")
+        output = Path(tmp) / "recorded.jsonl"
+        while len(recorded) < len(rows):
+            output.unlink(missing_ok=True)
+            returncode, stderr = _run_worker(inputs, len(recorded), output)
+            finished = _finished_rows(output)
+            recorded.extend(finished)
+            if returncode == 0:
+                if len(recorded) < len(rows):
+                    # Never a retry: a worker that exits cleanly short of its rows would do the same
+                    # again, and a supervisor that restarted it would loop for ever.
+                    raise SystemExit(f"the recording worker exited 0 after {len(recorded)} of "
+                                     f"{len(rows)} rows:\n{stderr.strip()}")
+                continue
+            if not _died(returncode):
+                # A refused row or a harness bug: the worker's own message, and the run stops.
+                raise SystemExit(stderr.strip() or f"the recording worker exited {returncode}")
+
+            index = len(recorded)
+            row = rows[index]
+            alone_inputs = Path(tmp) / "alone.jsonl"
+            alone_inputs.write_text(json.dumps(row) + "\n", encoding="ascii", newline="")
+            alone_code, alone_stderr = _run_worker(alone_inputs, 0, Path(tmp) / "alone-out.jsonl")
+            if alone_code != 0 and not _died(alone_code):
+                raise SystemExit(alone_stderr.strip() or f"the recording worker exited {alone_code}")
+            reproduced = _died(alone_code)
+
+            print(f"UPSTREAM CRASHED on row {index + 1} ({row.get('generator')}, "
+                  f"{row.get('operation')}), exit {returncode:#x}; "
+                  f"{'crashes again alone' if reproduced else 'does NOT crash alone'} - "
+                  "recorded as `crashed`, never compared", file=sys.stderr)
+            print("  pattern " + json.dumps(row.get("pattern")) + "  subject "
+                  + json.dumps(row.get("subject")), file=sys.stderr)
+            # The shape every unanswered row has - see `exhausted` in `_record_row` - so the consumer
+            # reads it without a special case: no span, and an outcome naming what happened.
+            recorded.append({**row, "codepointSpan": None, "outcome": {
+                "kind": "crashed", "exitCode": returncode, "reproducedAlone": reproduced}})
+    return recorded
+
+
+def _worker(inputs: Path, start: int, output: Path) -> int:
+    import regex
+
+    rows = [json.loads(line) for line in inputs.read_text(encoding="ascii").splitlines()]
+    fault = os.environ.get(_FAULT_PATTERN_ENV)
+    after_others = os.environ.get(_FAULT_AFTER_OTHERS_ENV) == "1"
+    tag = os.environ.get("ORACLE_TAG_ROWS") == "1"
+    with open(output, "w", encoding="ascii", newline="") as f:
+        for index in range(start, len(rows)):
+            row = rows[index]
+            if tag:
+                # So tools/screen-undefined.py can tie each MemorySanitizer report to its row.
+                sys.stderr.write(f"@@SCREEN {row.get('_screenKey', index)}\n")
+                sys.stderr.flush()
+            if fault is not None and row.get("pattern") == fault and (not after_others or index > start):
+                import faulthandler
+                faulthandler._sigsegv()
+            f.write(json.dumps(_record_row_and_its_control_answers(regex, row)) + "\n")
+            f.flush()
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
+# Re-checking known-divergence examples against the live upstream
+# --------------------------------------------------------------------------------------------
+#
+# EVERY ExpectedDivergences ENTRY CARRIES AN EXAMPLE ROW WITH UPSTREAM'S ANSWER FROZEN INTO IT.
+# `Every_expected_divergence_still_diverges` re-asks the PORT on each; nothing re-asked UPSTREAM,
+# so if a later release fixed the bug an entry describes, the stored answer would go on showing
+# the bug and every check would stay green. That is the known-failure problem pytest's
+# `xfail(strict=True)` and rustc's `known-bug` tests solve by re-checking on every run rather than
+# on a version bump, and it is solved the same way here: run-oracle.ps1 hands this recorder the
+# consumer's export of every example (`--recheck`), and any answer upstream no longer gives fails
+# the run and says what to do. 260 rows, about 20 seconds; all 260 reproduced byte for byte on
+# 2026-09-25.
+
+# What a recorded row reads as its QUESTION - everything else on it is an answer. Complete by
+# `_recheck_failures`: every generator's rows, stripped to these and recorded again, come back
+# identical. `oracle` is not here because it is derived from `generator`.
+ROW_INPUT_KEYS = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "template",
+                  "count", "partial", "pos", "endpos", "timeout", "codepointSlice")
+
+
+def _question_of(row: dict) -> dict:
+    return {key: row[key] for key in ROW_INPUT_KEYS if key in row}
+
+
+def _answer_changes(stored: dict, fresh: dict) -> list[str]:
+    # Only the answers the stored row HAS: an example recorded before a field existed (S44 found
+    # three without `anchoredScan`) is not stale for lacking it.
+    return sorted(key for key in stored if key not in ROW_INPUT_KEYS and fresh.get(key) != stored[key])
+
+
+def recheck(paths: list[Path]) -> int:
+    """Re-records every stored example and fails if upstream no longer gives its stored answer.
+
+    Each file is JSONL of {"entry", "row"}: the consumer's export of every ExpectedDivergences
+    example, and docs/plan/upstream-reports/ledger-reproductions.jsonl, one row per open ledger
+    entry that no example covers.
+    """
+    import regex
+
+    _check_version(regex.__version__)
+    exported = []
+    for path in paths:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("//")]
+        if not rows:
+            raise SystemExit(f"{path} holds no examples; whatever writes it did not run")
+        exported.extend(rows)
+    fresh = _record_supervised([_question_of(e["row"]) for e in exported])
+
+    stale = []
+    for entry, again in zip(exported, fresh):
+        changes = _answer_changes(entry["row"], again)
+        if changes:
+            stale.append((entry, again, changes))
+
+    commit = _upstream_commit()
+
+    # A CHANGED ANSWER ON A ROW WHERE UPSTREAM READS UNINITIALISED MEMORY IS NOT A CHANGE OF UPSTREAM.
+    # 38 of the 278 stored examples read ledger 5's `new_position`, so their stored answer is what
+    # MSVC's build happened to leave in that stack slot: on 2026-09-25 the same pinned upstream
+    # built by gcc crashed on 8 of them and answered 24 differently, every one MSan-flagged. Those
+    # rows are screened, and a known origin excuses them - the registry's `--reverify` is what
+    # notices upstream fixing that defect. Anything else still fails.
+    excused = []
+    if stale:
+        excused, stale = _excuse_undefined(stale)
+    for entry, _, changes in excused:
+        print(f"recheck: {entry['entry']}'s stored answer differs in {', '.join(changes)}, on a row "
+              "where upstream reads uninitialised memory from a known origin - build-dependent, not "
+              "a change of upstream", file=sys.stderr)
+
+    if stale:
+        for entry, again, changes in stale:
+            print(f"UPSTREAM CHANGED ITS ANSWER on an example of {entry['entry']} "
+                  f"(upstream {commit[:12]}), in {', '.join(changes)}", file=sys.stderr)
+            print("  pattern " + json.dumps(entry["row"]["pattern"]) + "  subject "
+                  + json.dumps(entry["row"]["subject"]), file=sys.stderr)
+            for key in changes:
+                print(f"  {key}\n    stored {json.dumps(entry['row'].get(key))[:300]}\n"
+                      f"    now    {json.dumps(again.get(key))[:300]}", file=sys.stderr)
+        print("  Re-judge before trusting any wave: if upstream fixed the bug, delete the entry, keep "
+              "its PinnedBy test as a regression test and update the ledger entry; if the shape "
+              "moved, re-minimise and replace the Example with the row recorded now. See "
+              ".claude/skills/sync-upstream/SKILL.md.", file=sys.stderr)
+        return 1
+
+    print(f"recheck: all {len(exported) - len(excused)} known-defect examples still get their "
+          f"stored answer from upstream {commit[:12]}"
+          + (f"; {len(excused)} more read uninitialised memory and were not compared" if excused else ""))
+    return 0
+
+
+def _screen_module():
+    spec = importlib.util.spec_from_file_location("screen_undefined", REPO_ROOT / "tools" / "screen-undefined.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _excuse_undefined(stale: list, screen_rows=None) -> tuple[list, list]:
+    """Splits changed examples into (excused, still failing) by screening them under MSan.
+
+    A row is excused only when MSan finds it reading uninitialised memory AND the registry names
+    every origin; one with no finding, or an unknown origin, still fails. Without Docker nothing is
+    excused, so the run fails with the changes listed, as it would have before the screen existed.
+    `screen_rows` is injectable for `_recheck_failures`.
+    """
+    screen = _screen_module()
+    if screen_rows is None:
+        if not screen._docker_available():
+            print("recheck: stored answers changed and Docker is not available to screen them under "
+                  "MSan, so none is excused", file=sys.stderr)
+            return [], stale
+        registry = screen._load_registry()
+        screen._check_registry_current(registry)
+        screen_rows = screen.screen_rows
+    else:
+        registry = {"defects": [{"origin": "new_position in basic_match", "ledger": "ledger 5"}]}
+    findings = screen_rows([{**_question_of(entry["row"]), "_screenKey": str(i)}
+                            for i, (entry, _, _) in enumerate(stale)])
+    excused, failing = [], []
+    for i, item in enumerate(stale):
+        origins = findings.get(str(i))
+        (excused if origins and screen.attribute(origins, registry) else failing).append(item)
+    return excused, failing
 
 
 # --------------------------------------------------------------------------------------------
@@ -6897,10 +7434,6 @@ def _self_check() -> int:
     for name, unrecordable, why in (
         ("a named list colliding with regex.compile's own parameters",
          row(pattern="\\L<flags>", namedLists={"flags": ["ab"]}), "collides with a parameter"),
-        # 2000 nested groups against CPython's own recursion limit. Not a pattern any generator
-        # emits today; the guard is for the generators later slices add.
-        ("an interpreter limit rather than a judgement about the pattern",
-         row(pattern="(" * 2000 + "a" + ")" * 2000), "limit of the interpreter"),
         # Added in S24. Without it a hand-written minimisation row that forgot its template would
         # record the untouched subject as upstream's answer, which every port trivially agrees with.
         ("a substitution row with no template",
@@ -6916,6 +7449,16 @@ def _self_check() -> int:
             failures.append(f"{name}: raised {type(e).__name__} instead of refusing the row")
         else:
             failures.append(f"{name}: was recorded as if it were upstream's answer")
+
+    # AN INTERPRETER LIMIT IS RECORDED AS `resource`, never as upstream's judgement about the
+    # pattern and never as a reason to stop the run. 2000 nested groups against CPython's own
+    # recursion limit - `RecursionError` on 3.12 and 3.14, measured 2026-09-25. Until then this
+    # guard still demanded S14's refusal, which S43 replaced with `resource` (see `exhausted` in
+    # `_record_row`) without updating it, so --self-check had failed on every platform since
+    # 2026-09-13 and CI had never run far enough to say so.
+    deep = _record_row(regex, row(pattern="(" * 2000 + "a" + ")" * 2000))
+    if deep["outcome"] != {"kind": "resource", "exception": "RecursionError"}:
+        failures.append(f"an interpreter limit was recorded as {deep['outcome']}, not as `resource`")
 
     # The seed the header prints beside a generator must reproduce that generator's rows on its
     # own, whatever else was recorded alongside it. Recorded with a *second* generator present,
@@ -7079,6 +7622,31 @@ def _self_check() -> int:
     if "no-fault-where-a-twin-answers" not in real_twin:
         failures.append("a substitution twin that DID replace no longer counts as an answer")
 
+    # The dotless-i twin swaps every text the row puts to the engine, named lists included, and
+    # refuses a row it could not swap back: one holding U+0130, which kra cannot stand in for, or
+    # one already holding kra.
+    dotless = {"generator": "rows", "pattern": "\u0131\\L<w>", "flags": 2, "namedLists": {"w\u0131": ["\u0131"]},
+               "subject": "a\u0131", "operation": "sub", "template": "\u0131"}
+    swapped = _with_dotless_i_as_kra(regex, dotless)
+    if swapped is None or any(_DOTLESS_I in text for text in _row_texts(swapped)):
+        failures.append(f"the dotless-i twin left a dotless i behind: {swapped}")
+    for blocker in (_DOTTED_I, _KRA):
+        if _with_dotless_i_as_kra(regex, {**dotless, "subject": "a\u0131" + blocker}) is not None:
+            failures.append(f"the dotless-i twin swapped a row holding {blocker!a}")
+    if _with_dotless_i_as_kra(regex, {**dotless, "pattern": "a", "subject": "a", "template": "x", "namedLists": {}}) is not None:
+        failures.append("the dotless-i twin was recorded for a row with no dotless i")
+    # ...and refuses every door the 2026-09-25 blind review found, where the two letters are not the
+    # same question: a case-mapping property, a codepoint escape, a non-ASCII range, LOCALE.
+    for door in ({"pattern": r"\p{CWU}"}, {"pattern": r"(?i)\p{CWCM}"}, {"pattern": r"\u0131"},
+                 {"pattern": r"\N{LATIN SMALL LETTER DOTLESS I}"}, {"pattern": "[a-\u0131]"},
+                 {"pattern": "[\u0131-z]"}, {"template": r"\x{131}"}, {"template": r"\461"}, {"pattern": r"\U00000138"}, {"pattern": r"[\u0130-\u0137]"}, {"pattern": r"(?u:\p{CWU})", "flags": 130}, {"flags": 4}):
+        if _with_dotless_i_as_kra(regex, {**dotless, **door}) is not None:
+            failures.append(f"the dotless-i twin swapped a row it cannot swap cleanly: {door!a}")
+    if _with_dotless_i_as_kra(regex, {**dotless, "pattern": "(?i)\\p{Lu}\u0131[[:alpha:]]"}) is None:
+        failures.append("the dotless-i twin refused a property both letters answer the same way")
+    if _with_dotless_i_as_kra(regex, {**dotless, "template": r"\x41\101"}) is None:
+        failures.append("the dotless-i twin refused a template whose escapes name only an A")
+
     # POSIX BUYS LENGTH WITH ERRORS, so its cost limb needs the same SPAN and not merely the same
     # start - `(?p)(?:abc){e<=2}` over 'abxxyc' is (0, 4) at a cost of 2 where the flagless engine's
     # (0, 3) costs 1, and that is leftmost-longest working. Raised by S52c's blind review on a shape
@@ -7131,6 +7699,9 @@ def _self_check() -> int:
     if "captures-are-the-texts-of-spans" not in lying:
         failures.append("the captures check no longer fires on a capture text that is not its span")
 
+    failures.extend(_supervisor_failures())
+    failures.extend(_recheck_failures())
+
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
     if failures:
@@ -7138,9 +7709,124 @@ def _self_check() -> int:
 
     print(
         "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation, "
-        "slice-round-trip and metamorphic-checker guards all fire"
+        "slice-round-trip, metamorphic-checker and crash-supervisor guards all fire"
     )
     return 0
+
+
+def _recheck_failures() -> list[str]:
+    """`--recheck` must ask the stored question again and notice a changed answer.
+
+    Two ways it could be silently wrong, and both happened by hand on 2026-09-25 before this
+    existed: a re-record that drops one of a row's inputs asks a DIFFERENT question (a hand-rolled
+    check dropped `codepointSlice` and reported four false changes), and one that keeps a stale
+    answer field in the row it re-records can never see that field change.
+    """
+    failures = []
+    import regex
+
+    # ROW_INPUT_KEYS IS COMPLETE: every generator's rows, stripped to their inputs and recorded
+    # again, come back identical. A missing input changes the question and so, in general, the row.
+    for name in GENERATORS:
+        for original in (_record_row_and_its_control_answers(regex, r)
+                         for r in _generate(name, random.Random(f"recheck:{name}"), 6)):
+            again = _record_row_and_its_control_answers(regex, _question_of(original))
+            if again != original:
+                changed = sorted(k for k in set(original) | set(again) if original.get(k) != again.get(k))
+                failures.append(f"a {name} row stripped to ROW_INPUT_KEYS records differently: {changed}")
+                break
+
+    # A CHANGED ANSWER IS REPORTED: a stored example whose answer upstream no longer gives.
+    stored = _record_row_and_its_control_answers(regex, {
+        "generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "xa",
+        "operation": "search"})
+    tampered = {**stored, "outcome": {"kind": "nomatch"}}
+    changes = _answer_changes(tampered, _record_row_and_its_control_answers(regex, _question_of(tampered)))
+    if changes != ["outcome"]:
+        failures.append(f"a stored answer upstream no longer gives was reported as {changes}")
+    if _answer_changes(stored, _record_row_and_its_control_answers(regex, _question_of(stored))):
+        failures.append("a stored answer upstream still gives was reported as changed")
+
+    # A CHANGE IS EXCUSED ONLY ON A ROW MSAN FLAGS FROM A KNOWN ORIGIN - never on a clean row, and
+    # never on one with an unknown origin. Screened by a stub, so the rule is checked without Docker.
+    stale = [({"entry": name, "row": {"pattern": name, "subject": ""}}, {}, ["outcome"])
+             for name in ("known", "unknown", "clean")]
+    stub = {"0": ["new_position in basic_match"], "1": ["heap allocation in try_match"]}
+    excused, failing = _excuse_undefined(stale, screen_rows=lambda rows: stub)
+    if [e["entry"] for e, _, _ in excused] != ["known"] or [e["entry"] for e, _, _ in failing] != ["unknown", "clean"]:
+        failures.append(f"recheck excused {[e['entry'] for e, _, _ in excused]} and failed "
+                        f"{[e['entry'] for e, _, _ in failing]}, expected known / unknown, clean")
+
+    return failures
+
+
+def _supervisor_failures() -> list[str]:
+    """The crash supervisor must turn a row that kills the interpreter into a `crashed` row.
+
+    A REAL CRASH, NOT A RAISED EXCEPTION: `faulthandler._sigsegv()` faults the process the way
+    upstream's C engine does (SIGSEGV on Linux, 0xC0000005 on Windows), so the guard exercises the
+    same exit path as the 2026-09-24 CI failure rather than a Python-level imitation of it.
+    """
+    failures = []
+    fault = "(?#the self-check fault row)"
+    rows = [
+        {"pattern": "a", "subject": "xa", "operation": "search"},
+        {"pattern": fault, "subject": "x", "operation": "search"},
+        {"pattern": "b", "subject": "xb", "operation": "search"},
+    ]
+
+    def supervised(extra_env: dict[str, str], cases: list[dict]) -> list[dict]:
+        saved = {key: os.environ.get(key) for key in extra_env}
+        os.environ.update(extra_env)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "rows.jsonl"
+                path.write_text("".join(json.dumps(r) + "\n" for r in cases), encoding="ascii")
+                return record([], 0, 0, path)[1]
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    # A row that crashes wherever it runs: recorded as `crashed`, confirmed alone, and the rows
+    # either side of it still recorded - in order, none lost, none duplicated.
+    got = supervised({_FAULT_PATTERN_ENV: fault}, rows)
+    if [r["pattern"] for r in got] != [r["pattern"] for r in rows]:
+        failures.append(f"a crash lost or reordered rows: {[r['pattern'] for r in got]}")
+    else:
+        crashed = got[1]["outcome"]
+        if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not True:
+            failures.append(f"a row that crashes alone was recorded as {crashed}")
+        # Every recorded row carries `codepointSpan`, and the consumer reads it unconditionally; a
+        # crashed row without it made the first wave containing one unloadable.
+        if "codepointSpan" not in got[1] or got[1]["codepointSpan"] is not None:
+            failures.append(f"a crashed row's codepointSpan is {got[1].get('codepointSpan', 'missing')}")
+        for survivor in (got[0], got[2]):
+            if survivor["outcome"].get("kind") != "match":
+                failures.append(f"a row beside a crash was recorded as {survivor['outcome']}")
+
+    # A row that crashes only after other rows ran in the same process: still `crashed`, because
+    # the answer it gives alone is not the answer it gave in the wave, and nothing says which of
+    # the two a garbage read produced - but marked as not reproducing alone.
+    got = supervised({_FAULT_PATTERN_ENV: fault, _FAULT_AFTER_OTHERS_ENV: "1"}, rows)
+    crashed = got[1]["outcome"] if len(got) == 3 else {}
+    if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not False:
+        failures.append(f"a row that crashes only after others was recorded as {crashed}")
+
+    # A HARNESS REFUSAL IS NOT A CRASH. A worker that exits through SystemExit - here the
+    # substitution with no template the first guard above refuses - must still stop the run with
+    # its own message, or a supervisor would launder every harness bug into a `crashed` row.
+    try:
+        supervised({}, [{"pattern": "a", "subject": "a", "operation": "sub"}])
+    except SystemExit as e:
+        if "needs a 'template'" not in str(e):
+            failures.append(f"a refused row stopped the supervised run with the wrong message: {e}")
+    else:
+        failures.append("a refused row inside a supervised run was recorded instead of stopping it")
+
+    return failures
 
 
 # --------------------------------------------------------------------------------------------
@@ -7160,7 +7846,20 @@ def main(argv=None) -> int:
                         help="record one seed twice in fresh interpreters and require identical bytes")
     parser.add_argument("--self-check", action="store_true",
                         help="require the recorder's four guards to fire")
+    parser.add_argument("--recheck", type=Path, nargs="+", default=None,
+                        help="re-record stored known-defect examples (JSONL of entry and row) and "
+                             "fail if upstream no longer gives their stored answers")
+    # The crash supervisor's worker half - see `_record_supervised`. Not for use by hand.
+    parser.add_argument("--worker-rows", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-start", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-output", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.worker_rows is not None:
+        return _worker(args.worker_rows, args.worker_start, args.worker_output)
+
+    if args.recheck is not None:
+        return recheck(args.recheck)
 
     if args.verify_determinism:
         return _verify_determinism()

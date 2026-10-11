@@ -1,0 +1,29 @@
+{
+  "comment": "Upstream reads of uninitialised memory that a ledger entry accounts for. Read by tools/screen-undefined.py; each entry's reproductions are re-screened by --reverify whenever the upstream submodule moves, and verifiedAtUpstreamCommit records the last commit they reproduced on.",
+  "verifiedAtUpstreamCommit": "7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33",
+  "defects": [
+    {
+      "origin": "new_position in basic_match",
+      "ledger": "ledger 5",
+      "summary": "search_start returns success from its tail (_regex.c:9199) without writing new_position, declared uninitialised at :11820, when (*SKIP) has moved the slice and a later search inherits the move; :11835 copies it into state->text_pos.",
+      "reproductions": [
+        {
+          "generator": "verbs",
+          "pattern": "(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\\d]",
+          "flags": 0,
+          "namedLists": {},
+          "subject": "bba\naAA\r",
+          "operation": "finditer-overlapped"
+        },
+        {
+          "generator": "verbs",
+          "pattern": "(?:\\S(*SKIP)){1,3}",
+          "flags": 0,
+          "namedLists": {},
+          "subject": "\u00dfAA\u00df\ud801\udc00a\ud801\udc00",
+          "operation": "finditer-overlapped"
+        }
+      ]
+    }
+  ]
+}

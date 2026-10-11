@@ -119,6 +119,9 @@ public sealed class MatchStateCacheTests
     [Test]
     [Arguments("(?:(a)b)+(?:bc){e<=1}", "ababx")]
     [Arguments(@"(?r)(?:(\w)x)+(?1)", "x\U0001F600axbx")]
+    [Arguments("(?:(a|)b)+(?:bc){e<=1}", "ababx")]
+    // A fuzzy literal, whose filter keeps what it learns about the subject on the state (D14).
+    [Arguments("(?:amber lantern works){e<=2}", "amber lantxrn works")]
     public void A_reused_state_forgets_every_field_its_last_call_set(string pattern, string subject)
     {
         // The wave above dirties what real matches dirty, which is not every field: a match that
@@ -167,6 +170,76 @@ public sealed class MatchStateCacheTests
         reused.Should().BeSameAs(first);
         Describe(reused).Should().Equal(Describe(fresh));
         cache.Return(reused);
+    }
+
+    [Test]
+    [Arguments(20, false)]
+    [Arguments(2_000, true)]
+    public void A_returned_state_lets_go_of_the_empty_iteration_states_its_call_recorded(int length, bool dropped)
+    {
+        // D17. One state per position is recorded, so the longer subject passes the 1,024 above
+        // which the set itself is dropped rather than kept on the cached state.
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$");
+        string subject = new string('a', length) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Count.Should().BeGreaterThan(length / 2);
+
+        cache.Return(state);
+
+        if (dropped)
+        {
+            state.EmptyIterationStates.Should().BeNull();
+        }
+        else
+        {
+            state.EmptyIterationStates.Should().NotBeNull().And.BeEmpty();
+        }
+    }
+
+    [Test]
+    public void A_returned_state_lets_go_of_a_large_set_that_a_later_start_position_emptied()
+    {
+        // D17, review round 2. Start position 0 records about 1,200 states and fails; each later
+        // start clears the set and fails at once on the anchor, and 'b' matches at the last one.
+        // So the call ends with no states in a set still sized for 1,200, which a check of the
+        // count kept (capacity 1,931).
+        FuzzyRegex regex = new(@"^(?:(?=(a))|a)*\1?$|b");
+        string subject = new string('a', 1_200) + "b";
+        var cache = new MatchStateCache();
+        MatchState state = cache.Rent(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        _ = Matcher.DoMatch(state, search: true);
+        state.EmptyIterationStates.Should().NotBeNull();
+        state.EmptyIterationStates.Capacity.Should().BeGreaterThan(1_024);
+        state.EmptyIterationStates.Count.Should().BeLessThan(1_024);
+
+        cache.Return(state);
+
+        state.EmptyIterationStates.Should().BeNull();
     }
 
     [Test]
@@ -220,6 +293,29 @@ public sealed class MatchStateCacheTests
         )
         {
             if (string.Equals(field.Name, nameof(MatchState.Pattern), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // MatchState.FilterMemory is null exactly when the pattern has no fuzzy-literal filter,
+            // and readonly, so no call can set it. MatchState.PartialEventCounts is null exactly in
+            // a Release build (D11). MatchState.EmptyIterationScratch is the same, null exactly when
+            // the pattern tests no group; otherwise it is an array, which the long[] rule below
+            // scribbles, and a reused state must clear it.
+            if (
+                (
+                    string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.PartialEventCounts), StringComparison.Ordinal)
+                    || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
+                ) && field.GetValue(state) is null
+            )
+            {
+                continue;
+            }
+
+            // An empty array holds nothing to carry over: the groups and repeats of a pattern with
+            // none, such as the fuzzy literal, which may have no group and keep its filter.
+            if (field.GetValue(state) is Array { Length: 0 })
             {
                 continue;
             }
@@ -281,12 +377,16 @@ public sealed class MatchStateCacheTests
                 }
 
                 break;
+            case OptionalPassStart[] passes:
+                Array.Fill(passes, new OptionalPassStart(7, 7, 7, 7));
+                break;
             case RepeatData[] repeats:
                 foreach (RepeatData repeat in repeats)
                 {
                     repeat.Count = 7;
                     repeat.Start = 7;
                     repeat.CaptureChange = 7;
+                    repeat.RunId = 7;
                     ScribbleGuards(repeat.BodyGuardList);
                     ScribbleGuards(repeat.TailGuardList);
                 }
@@ -295,14 +395,55 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 stack.Push(7);
                 break;
-            case HashSet<long> set:
-                set.Add(7);
+            case FuzzyLiteralFilter.ScanMemory memory:
+                Array.Fill(memory.From, 7);
+                Array.Fill(memory.Found, 7);
+                Array.Fill(memory.AbsentBelow, 7);
+                memory.SliceEnd = 7;
+                memory.SliceStart = 7;
+                memory.WitnessEnd = 7;
+                _ = memory.IsAscii("scribbled", 3, 5);
+                break;
+            case HashSet<(long Key, int Reach)> set:
+                set.Add((7, 7));
+                break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                counts.Add((7, 7), 7);
+                break;
+            case CaptureTextIds ids:
+                ids.Reset("scribbled".AsMemory());
+                _ = ids.IdOf(1, 2);
+                break;
+            case HashSet<EmptyIterationState> states:
+                states.Add(new EmptyIterationState(7, [7]));
+                break;
+            case null when field.FieldType == typeof(HashSet<EmptyIterationState>):
+                field.SetValue(state, new HashSet<EmptyIterationState> { new(7, [7]) });
                 break;
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int SstackDepth)> calls:
-                calls.Add((7, 7));
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
+                calls.Add((7, 7, 7, null));
+                break;
+            case List<long> numbers:
+                numbers.Add(7);
+                break;
+            case List<int> numbers:
+                numbers.Add(7);
+                break;
+            case null when field.FieldType == typeof(HashSet<long[]>):
+                field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
+                break;
+            case List<WMark> marks:
+                marks.Add(new WMark(7, WMarkKind.Touch));
+                break;
+            case List<LookaroundSuccess> successes:
+                successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
+                break;
+            case null when field.FieldType == typeof(PartialEvent?):
+                // D11's Debug-only run-out cause (MatchState.NoteRunOutCause).
+                field.SetValue(state, PartialEvent.RunOutAnswered);
                 break;
             case null when field.FieldType == typeof(Node):
                 field.SetValue(state, state.Pattern.NodeList[0]);
@@ -312,6 +453,10 @@ public sealed class MatchStateCacheTests
                 break;
             case null when field.FieldType == typeof(CharacterIndex):
                 _ = state.GetCharacterIndex();
+                break;
+            case null when field.FieldType == typeof(Matcher.AnchorBanSnapshot):
+                // D61's rule H' keeps one snapshot per state; a reused state must drop it.
+                field.SetValue(state, new Matcher.AnchorBanSnapshot { MatchPos = 7 });
                 break;
             default:
                 throw new InvalidOperationException(
@@ -380,7 +525,7 @@ public sealed class MatchStateCacheTests
                 RenderItems($"{path}.Captures", group.Captures.Take(group.Count), lines);
                 break;
             case RepeatData repeat:
-                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange})");
+                lines.Add($"{path}=({repeat.Count},{repeat.Start},{repeat.CaptureChange},{repeat.RunId})");
                 Render($"{path}.Body", repeat.BodyGuardList, lines);
                 Render($"{path}.Tail", repeat.TailGuardList, lines);
                 break;
@@ -390,8 +535,33 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
                 break;
-            case HashSet<long> set:
+            case FuzzyLiteralFilter.ScanMemory memory:
+                RenderItems($"{path}.From", memory.From, lines);
+                RenderItems($"{path}.Found", memory.Found, lines);
+                RenderItems($"{path}.AbsentBelow", memory.AbsentBelow, lines);
+                lines.Add(
+                    $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd})"
+                );
+                break;
+            case HashSet<(long Key, int Reach)> set:
                 RenderItems(path, set.Order(), lines);
+                break;
+            case Dictionary<(long Key, int Reach), int> counts:
+                RenderItems(path, counts.Select(static entry => entry.ToString()).Order(StringComparer.Ordinal), lines);
+                break;
+            case CaptureTextIds ids:
+                lines.Add($"{path}=({ids.Count},{(ReadOnlyMemory<char>)Private(ids, "_text")})");
+                break;
+            case HashSet<EmptyIterationState> states:
+                // Allocated on first use and then kept, so an empty one is the same as none.
+                lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
+                break;
+            case HashSet<long[]> keys:
+                RenderItems(
+                    path,
+                    keys.Select(static key => string.Join(" ", key)).Order(StringComparer.Ordinal),
+                    lines
+                );
                 break;
             case Array array and (long[] or GroupData[] or RepeatData[]):
                 int index = 0;
@@ -404,6 +574,9 @@ public sealed class MatchStateCacheTests
                 break;
             case IList list:
                 RenderItems(path, list.Cast<object>(), lines);
+                break;
+            case Matcher.AnchorBanSnapshot snapshot:
+                lines.Add($"{path}=snapshot({snapshot.MatchPos},{snapshot.TextPos})");
                 break;
             default:
                 throw new InvalidOperationException(

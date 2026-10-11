@@ -1,0 +1,4 @@
+{"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:b){i<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?r)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}$", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "match"}

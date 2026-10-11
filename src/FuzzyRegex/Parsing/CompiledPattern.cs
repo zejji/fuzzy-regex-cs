@@ -57,4 +57,12 @@ internal sealed record CompiledPattern(
     IReadOnlyList<int> ReqChars,
     int ReqFlags,
     int GroupCount
-);
+)
+{
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the offsets in <see cref="Code"/> of the
+    /// <c>NEXT</c> words <see cref="Branch.OptionalPassEndWord"/> marks, in ascending order. Not
+    /// part of upstream's tuple, which is why the bytecode itself carries no mark.
+    /// </summary>
+    internal IReadOnlyList<int> OptionalPassEnds { get; init; } = [];
+}

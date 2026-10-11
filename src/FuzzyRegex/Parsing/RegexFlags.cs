@@ -103,6 +103,12 @@ internal static class RegexFlags
     internal const int UnicodeEncoding = 2;
 
     /// <summary>
+    /// The encodings a case-insensitive node's case flags can carry: the scope's, when it differs
+    /// from the pattern's. Not upstream's (S91); see <see cref="CaseFlagsCombination"/>.
+    /// </summary>
+    internal const int CaseEncodings = Ascii | Unicode;
+
+    /// <summary>
     /// Upstream <c>UNLIMITED</c> (line 190), the repeat count that means infinity:
     /// <c>(1 &lt;&lt; BITS_PER_CODE) - 1</c> where <c>BITS_PER_CODE</c> is
     /// <c>_regex.get_code_size() * 8</c>. Measured against the built oracle on 2026-08-30:
@@ -185,14 +191,30 @@ internal static class RegexFlags
     /// particular collapsing a lone <c>FULLCASE</c> (which means nothing without
     /// <c>IGNORECASE</c>) to <c>NOCASE</c>.
     /// </summary>
-    /// <param name="caseFlags">The case flags to normalise; only <see cref="CaseFlags"/> bits are valid.</param>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately (S91): a case-insensitive node may also carry one of
+    /// <see cref="CaseEncodings"/>, the encoding of the scope it was parsed in when that differs
+    /// from the pattern's, and keeps it; a case-sensitive one drops it, because only folding reads
+    /// it. Upstream folds every character, string, range, set and backreference with the
+    /// pattern's encoding, so <c>(?i)(?a:k)</c> matched U+212A KELVIN SIGN where <c>(?ai)k</c>
+    /// refuses it (regex 2026.9.10; CPython re 3.14 and Perl 5.42's <c>(?aa:...)</c> refuse both,
+    /// 2026-09-25). Carrying it here rather than beside the case flags means every place that
+    /// already keeps apart nodes with different case flags - equality, set reduction, character
+    /// packing, the named-list key - keeps apart different encodings too.
+    /// </remarks>
+    /// <param name="caseFlags">
+    /// The case flags to normalise; only <see cref="CaseFlags"/> and <see cref="CaseEncodings"/>
+    /// bits are valid.
+    /// </param>
     /// <returns>The normalised case flags.</returns>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="caseFlags"/> carries a bit outside <see cref="CaseFlags"/>. Upstream's
-    /// dictionary lookup raises <c>KeyError</c> in the same situation.
+    /// <paramref name="caseFlags"/> carries a bit outside <see cref="CaseFlags"/> and
+    /// <see cref="CaseEncodings"/>. Upstream's dictionary lookup raises <c>KeyError</c> in the same
+    /// situation.
     /// </exception>
-    internal static int CaseFlagsCombination(int caseFlags) =>
-        caseFlags switch
+    internal static int CaseFlagsCombination(int caseFlags)
+    {
+        int normalised = (caseFlags & ~CaseEncodings) switch
         {
             NoCase => NoCase,
             FullCase => NoCase,
@@ -200,6 +222,33 @@ internal static class RegexFlags
             FullIgnoreCase => FullIgnoreCase,
             _ => throw new ArgumentOutOfRangeException(nameof(caseFlags), caseFlags, "not a case-flag combination"),
         };
+
+        return (normalised & IgnoreCase) != 0 ? normalised | (caseFlags & CaseEncodings) : normalised;
+    }
+
+    /// <summary>The encoding tag a node's case flags carry into its code word (S91).</summary>
+    /// <param name="caseFlags">Normalised case flags.</param>
+    /// <returns><see cref="AsciiEncoding"/>, <see cref="UnicodeEncoding"/> or 0 for the pattern's.</returns>
+    internal static uint CaseEncodingTag(int caseFlags)
+    {
+        if ((caseFlags & Ascii) != 0)
+        {
+            return AsciiEncoding;
+        }
+
+        return (caseFlags & Unicode) != 0 ? UnicodeEncoding : 0u;
+    }
+
+    /// <summary>
+    /// Whether a case-insensitive node folds fully: it asks for <see cref="FullCase"/> and folds
+    /// with the Unicode encoding, its scope's if it carries one and the pattern's otherwise.
+    /// </summary>
+    /// <param name="patternFlags">The pattern's resolved flags.</param>
+    /// <param name="caseFlags">The node's normalised case flags.</param>
+    /// <returns><see langword="true"/> if full case folding applies.</returns>
+    internal static bool FoldsFully(int patternFlags, int caseFlags) =>
+        (caseFlags & FullIgnoreCase) == FullIgnoreCase
+        && ((caseFlags & CaseEncodings) != 0 ? caseFlags & Unicode : patternFlags & Unicode) != 0;
 
     /// <summary>
     /// Upstream <c>ALPHA</c> (line 175): Python's <c>string.ascii_letters</c>, so ASCII only.

@@ -19,8 +19,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </para>
 /// <para>
 /// <b>Every assertion here is an invariant of this port's own answer, not a comparison with
-/// upstream.</b> Both engines agree on C and D, so no oracle wave can see either: a bug both
-/// engines share reports as agreement. What can see it is the pair of attributes contradicting each
+/// upstream.</b> Both engines agreed on C and D when these were written, so no oracle wave could see
+/// either: a bug both engines share reports as agreement. (Since S48b fixed both here, the oracle
+/// does see them - <c>lookaround-change-left-by-a-lazy-retreat</c> is D reached without <c>(?e)</c>.) What can
+/// see it is the pair of attributes contradicting each
 /// other, which is what
 /// <c>OracleWaveTests.Our_own_answers_never_contradict_themselves</c> asserts over a
 /// whole wave and what these rows assert one at a time.
@@ -177,6 +179,54 @@ public sealed class FuzzyCountsAndChangesTests
     /// upstream's drawn answer, not with this one.
     /// </para>
     /// </remarks>
+    // DIVERGES FROM UPSTREAM, and this test pins OUR answer: upstream's own greedy twin.
+    [Test]
+    public void A_fuzzy_lookaround_beside_a_lazy_repeat_reports_the_change_where_the_winning_path_made_it()
+    {
+        // Ledger entry 11 mechanism D without `(?e)`, from seed 335764881 row 24519 of the 2026-09-24
+        // sweep. The lookahead's substitution is made against 'a' at 1 on the path that wins; upstream
+        // reports it at 0, where the abandoned attempt tried the lookahead before `c??` took the 'c'.
+        // Measured 2026-09-25 on regex 2026.9.10:
+        //   search('c??(?=b{s<=1})a', 'ca')   (0, 2) (1, 0, 0) substitutions [0]
+        //   search('c?(?=b{s<=1})a',  'ca')   (0, 2) (1, 0, 0) substitutions [1]
+        //   search('c(?=b{s<=1})a',   'ca')   (0, 2) (1, 0, 0) substitutions [1]
+        foreach (string pattern in new[] { "c??(?=b{s<=1})a", "c?(?=b{s<=1})a", "c(?=b{s<=1})a" })
+        {
+            Match m = new FuzzyRegex(pattern).Match("ca");
+
+            (m.Index, m.Length).Should().Be((0, 2), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0), pattern);
+            m.FuzzyChanges.Substitutions.Should().Equal([1], pattern);
+        }
+
+        // Reversed, the lookbehind's twin: upstream answers 2 with `c??` and 1 with `c` and `c?`.
+        Match reversed = new FuzzyRegex("(?r)a(?<=b{s<=1})c??").Match("ac");
+
+        (reversed.Index, reversed.Length).Should().Be((0, 2));
+        reversed.FuzzyChanges.Substitutions.Should().Equal(1);
+    }
+
+    // DIVERGES FROM UPSTREAM, and this test pins OUR answer: upstream's own cut-free twin.
+    [Test]
+    public void A_lazy_repeat_before_an_atomic_fuzzy_group_reports_the_deletion_the_cut_free_pattern_reports()
+    {
+        // Mechanism E again, at its smallest: seed 335764881 row 24799 of the 2026-09-24 sweep,
+        // shrunk to one fuzzy item over one character. `.*?` has consumed the 'b', so the deleted 'a'
+        // sits at 1; upstream reports 0, where the first try (`.*?` empty, 'a' deleted, `$` failing)
+        // left it inside the atomic group, which a backtrack does not re-enter. Measured 2026-09-25
+        // on regex 2026.9.10:
+        //   search('.*?(?>a{d<=1})$', 'b')   (0, 1) (0, 0, 1) deletions [0]
+        //   search('.*?(?:a{d<=1})$', 'b')   (0, 1) (0, 0, 1) deletions [1]
+        foreach (string pattern in new[] { ".*?(?>a{d<=1})$", ".*?(?:a{d<=1})$" })
+        {
+            Match m = new FuzzyRegex(pattern).Match("b");
+
+            (m.Index, m.Length).Should().Be((0, 1), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1), pattern);
+            m.FuzzyChanges.Deletions.Should().Equal([1], pattern);
+        }
+    }
+
     [Test]
     public void An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports()
     {
@@ -492,11 +542,17 @@ public sealed class FuzzyCountsAndChangesTests
             FuzzyRegexOptions.Ascii
         ).Match("bB.a.", partial: true);
 
+        // D11 moved this row from (4, 5) with counts (0, 1, 1) to the attempt at 3, whose path
+        // passes `\m` and `$` at the end as undetermined and so reaches the end of the pattern.
+        // Neither answer is a true partial: `\m$` holds for no text, so the brute-force judge
+        // (tools/probes/d11-brute-judge.py, 2026-09-29) answers None. It is the design's limit C3,
+        // two reads of the text to come that no single continuation satisfies together, which the
+        // partial contract allows (was known defect D18). What this test holds is that the change
+        // list agrees with the counts.
         forward.PartialMatch.Should().BeTrue();
-        (forward.Index, forward.Length).Should().Be((4, 1));
-        forward.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 1));
-        forward.FuzzyChanges.Insertions.Should().Equal(4);
-        forward.FuzzyChanges.Deletions.Should().Equal(4);
+        (forward.Index, forward.Length).Should().Be((3, 2));
+        forward.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        forward.FuzzyChanges.Substitutions.Should().Equal(4);
         AssertChangesAgreeWithCounts(forward);
 
         // The second row. Its pattern spells its own verb `(*PRUNE)`, so the verb moves no bound
@@ -512,10 +568,16 @@ public sealed class FuzzyCountsAndChangesTests
             FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline
         ).Match(subject, partial: true);
 
+        // Moved by the empty-iteration rule (2026-09-26), which no longer counts undone edits as a
+        // repeat's progress: the partial now starts at 0, where it was (2, 4) with (2, 0, 0) and
+        // substitutions at 2 and 5. The point of the row, that the changes agree with the counts,
+        // holds either way. D11 alone had moved it to (2, 4) with one substitution at 2; with both,
+        // entry 44's answer stands (measured on the merge, 2026-09-29).
         astral.PartialMatch.Should().BeTrue();
-        (astral.Index, astral.Length).Should().Be((2, 4));
-        astral.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
-        astral.FuzzyChanges.Substitutions.Should().Equal(2, 5);
+        (astral.Index, astral.Length).Should().Be((0, 6));
+        astral.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        astral.FuzzyChanges.Substitutions.Should().Equal(0);
+        astral.FuzzyChanges.Insertions.Should().Equal(2);
         AssertChangesAgreeWithCounts(astral);
     }
 

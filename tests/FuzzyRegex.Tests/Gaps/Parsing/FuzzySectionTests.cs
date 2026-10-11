@@ -11,7 +11,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 public sealed class FuzzySectionTests
 {
     /// <summary>
-    /// A call to the pattern as a whole, from inside a pattern that <i>is</i> a fuzzy section.
+    /// A call to the pattern as a whole, from inside a pattern that <i>is</i> a fuzzy section: no
+    /// extra copy of the pattern, and a <c>CALL_REF</c> around it, which upstream leaves out.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -23,14 +24,24 @@ public sealed class FuzzySectionTests
     /// spurious 26-word <c>CALL_REF</c> copy of the pattern appended to the code.
     /// </para>
     /// <para>
-    /// No corpus row covers it: upstream's own suite never writes a group call inside a fuzzy
-    /// section. Captured by intercepting <c>regex._regex.compile</c>:
+    /// DIVERGES FROM UPSTREAM (known defect D37). Upstream asks at <c>_main.py:577</c> BEFORE
+    /// optimising, when the pattern is a one-item Sequence holding the Fuzzy, and at <c>:4436</c>
+    /// after, when it is the Fuzzy. So it adds no copy AND no wrapper, and the call refers to a
+    /// <c>CALL_REF 0</c> that is never defined - captured by intercepting
+    /// <c>regex._regex.compile</c>:
     /// </para>
     /// <code>
     /// '(?:a(?0)?){e&lt;=1}'
     ///    code = [27, 0, 0, 4294967295, 0, 4294967295, 0, 4294967295, 0, 1, 1, 1, 1, 1,
     ///            12, 5, 97, 29, 0, 1, 31, 0, 20, 20, 1]
     /// </code>
+    /// <para>
+    /// The call then jumps to the start node, which has no <c>GROUP_RETURN</c> at its end, and runs
+    /// to <c>SUCCESS</c> with the call and the outer section still open. This port asks both
+    /// questions of the optimised pattern, so it adds the whole-pattern wrapper the control below
+    /// has, <c>CALL_REF 0</c> first and one more <c>END</c> before <c>SUCCESS</c>. The answers are in
+    /// <c>Gaps.Engine.FuzzyRecursionCountsTests</c>; upstream raises <c>MemoryError</c> on them.
+    /// </para>
     /// </remarks>
     [Test]
     public void A_call_to_group_zero_inside_a_fuzzy_pattern_adds_no_extra_copy() =>
@@ -38,7 +49,9 @@ public sealed class FuzzySectionTests
             .Compile("(?:a(?0)?){e<=1}")
             .Code.Should()
             .Equal(
-                27u,
+                11u,
+                0,
+                27,
                 0,
                 0,
                 4294967295,
@@ -60,6 +73,7 @@ public sealed class FuzzySectionTests
                 1,
                 31,
                 0,
+                20,
                 20,
                 20,
                 1

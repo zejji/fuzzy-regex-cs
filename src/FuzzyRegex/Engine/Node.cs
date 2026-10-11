@@ -70,6 +70,46 @@ internal sealed class Node
     /// <summary>Upstream <c>nonstring.true_node</c>: used by a <c>CONDITIONAL</c> node.</summary>
     internal Node? TrueNode;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: for a lookaround or a condition's test, the node that ends its body, where
+    /// a partial call's second pass goes when the body runs out of text
+    /// (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// </summary>
+    internal Node? LookaroundEnd;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, its body, which a
+    /// run-out inside it reads (<c>Matcher.MarkTheBodysCapturesUnknown</c>, assert A10). Set by
+    /// <c>PatternObject.SetLookaroundBodies</c> when the pattern is compiled.
+    /// </summary>
+    internal Body? BodyInfo;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a node inside a lookaround body or condition test, the
+    /// capture groups whose start or end the innermost such body can still reach from it: the groups
+    /// a run-out at this node leaves unknown (<c>Matcher.MarkTheBodysCapturesUnknown</c>). A group
+    /// the body closed before it and cannot reach again keeps the span the held text gave it. Set
+    /// by <c>PatternObject.SetRunOutGroups</c>, only for a pattern that reads captures while it
+    /// matches and has no group calls, the patterns whose run-outs make captures unknown.
+    /// </summary>
+    internal (int Private, int Public)[]? RunOutGroups;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, the fuzzy section it
+    /// lies in, or <see langword="null"/> for none; the section a run-out in its body closes back to
+    /// (<c>Matcher.CloseTheBodysSection</c>). Set by <c>PatternObject.SetEnclosingSections</c>, only
+    /// for a pattern with a fuzzy section inside a body (<c>PatternObject.HasFuzzyInABody</c>).
+    /// </summary>
+    internal Node? EnclosingSection;
+
+    /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
+    /// <param name="Nodes">The indices of every node from the test's first body node up to its end
+    /// node, sorted.</param>
+    /// <param name="Groups">The capturing groups whose start or end is among them.</param>
+    /// <param name="HasVerbOrCall">Whether a <c>(*PRUNE)</c>, <c>(*SKIP)</c> or group call is among
+    /// them (a call can reach a verb in the group it calls).</param>
+    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups, bool HasVerbOrCall);
+
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
 
@@ -96,6 +136,15 @@ internal sealed class Node
     internal Opcode Op;
 
     /// <summary>
+    /// The encoding this node folds, classifies and finds line and word breaks with: its own
+    /// <see cref="NodeStatus.EncodingKind(Node)"/> if it has one, otherwise the pattern's. Not an upstream
+    /// field (S91): upstream resolves <c>ENCODING_KIND</c> per call, and only for properties; this
+    /// is resolved once, when the node is built, so every node the scope's encoding reaches reads
+    /// it for the same cost as reading the pattern's.
+    /// </summary>
+    internal Unicode.CaseEncoding Encoding { get; init; }
+
+    /// <summary>
     /// Upstream <c>match</c>: whether the node matches or rejects what it describes - a negated
     /// set, a negative lookaround.
     /// </summary>
@@ -109,6 +158,36 @@ internal sealed class Node
 
     /// <summary>This node's place in <see cref="Chain"/>.</summary>
     internal int ChainIndex;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): how many items the fuzzy run starting at this node has, or 0 if
+    /// this node does not start one. Set by <c>PatternObject.SetFuzzyRunLengths</c> when the
+    /// pattern is compiled; read by <c>Matcher.ExactDeletionMayMatch</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A run is a chain, by <see cref="Next1"/>, of fuzzy one-character items and fuzzy
+    /// <c>STRING</c> and <c>STRING_IGN</c> nodes, either way round: items that each consume exactly
+    /// one subject character per pattern character when they match. Anything else ends the run.
+    /// </para>
+    /// <para>
+    /// The run's exit is kept on the pattern (<c>PatternObject.FuzzyRunExits</c>), not here: this
+    /// field and <see cref="HasEarlierDeletionTwin"/> fit in the padding a node already has, where
+    /// a reference would add 8 bytes to every node of every pattern.
+    /// </para>
+    /// </remarks>
+    internal int FuzzyRunLength;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): whether this node is a fuzzy one-character item that is a whole
+    /// alternative of an alternation, after an earlier alternative of the same alternation that is
+    /// one too. Both go on to the alternation's join, so deleting either leaves the same state. Set
+    /// by <c>NodeCompiler.BuildBranch</c>, where the alternatives are known: read back from the
+    /// compiled graph, an empty alternative or one that starts with a group looks like another
+    /// link of the chain (blind review of 6a39732). Read by
+    /// <c>Matcher.DeletionRepeatsAnEarlierAlternative</c>.
+    /// </summary>
+    internal bool HasEarlierDeletionTwin;
 
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
@@ -232,7 +311,12 @@ internal static class NodeStatus
     /// <summary>Upstream <c>ENCODING_KIND</c> (line 167).</summary>
     /// <param name="node">The node.</param>
     /// <returns>0 for "whatever the pattern uses", otherwise <see cref="AsciiEncoding"/> or <see cref="UnicodeEncoding"/>.</returns>
-    internal static uint EncodingKind(Node node) => (node.Status >> EncodingShift) & 0x3;
+    internal static uint EncodingKind(Node node) => EncodingKind(node.Status);
+
+    /// <summary><see cref="EncodingKind(Node)"/> of a status word.</summary>
+    /// <param name="status">The status word.</param>
+    /// <returns>0 for "whatever the pattern uses", otherwise <see cref="AsciiEncoding"/> or <see cref="UnicodeEncoding"/>.</returns>
+    internal static uint EncodingKind(uint status) => (status >> EncodingShift) & 0x3;
 
     /// <summary>Upstream <c>RE_STATUS_ALL_ATOMIC</c>.</summary>
     internal const uint AllAtomic = 0x40000;

@@ -232,14 +232,66 @@ public sealed class FuzzyRegex
     /// The version the pattern gets when neither the flags nor an inline <c>(?V0)</c> /
     /// <c>(?V1)</c> pick one, as a <see cref="Parsing.RegexFlags"/> bit.
     /// </param>
+    /// <param name="upstreamReverseGrapheme">
+    /// NOT UPSTREAM, and never set by this library: compile a backwards <c>\X</c> in upstream's
+    /// order. The oracle sets it to show that ledger entry 43 is the whole of a divergence; see
+    /// <see cref="Parsing.Info.UpstreamReverseGrapheme"/>.
+    /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// NOT UPSTREAM, and never set by this library: compile a fuzzy full-case-folded run to its
+    /// folding alone, as upstream does. The oracle sets it to show that ledger entry 49 is the whole
+    /// of a divergence; see <see cref="Parsing.Info.UpstreamFoldedRuns"/>.
+    /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// NOT UPSTREAM, and never set by this library: decide whether the pattern as a whole is a fuzzy
+    /// section before optimising, as upstream does. The oracle sets it to show that known defect
+    /// D37 (ledger entry 55) is the whole of a divergence; see
+    /// <see cref="Parsing.Info.UpstreamWholePatternCall"/>.
+    /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// NOT UPSTREAM, and never set by this library: give each group call the direction and
+    /// fuzziness upstream gives it. The oracle sets it to show that D40, D42 and D43 are the whole
+    /// of a divergence; see <see cref="Parsing.Info.UpstreamCallFeatures"/>.
+    /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// NOT UPSTREAM, and never set by this library: compile a conditional's lookaround test with
+    /// the enclosing fuzzy section's fuzziness, as upstream does. The oracle sets it to show that
+    /// known defect D52 (ledger entry 64) is the whole of a divergence; see
+    /// <see cref="Parsing.Info.UpstreamFuzzyConditionTest"/>.
+    /// </param>
+    /// <param name="upstreamCallCopies">
+    /// NOT UPSTREAM, and never set by this library: compile a called group's copy from the group as
+    /// parsed, as upstream does. The oracle sets it to show that D50 is the whole of a divergence;
+    /// see <see cref="Parsing.Info.UpstreamCallCopies"/>.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(
         string pattern,
         FuzzyRegexOptions options,
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
-        int defaultVersion
-    ) => new(pattern, options, matchTimeout, namedLists, defaultVersion, DefaultMaxCompiledNodes);
+        int defaultVersion,
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
+    ) =>
+        new(
+            pattern,
+            options,
+            matchTimeout,
+            namedLists,
+            defaultVersion,
+            DefaultMaxCompiledNodes,
+            upstreamReverseGrapheme,
+            upstreamFoldedRuns,
+            upstreamWholePatternCall,
+            upstreamCallFeatures,
+            upstreamFuzzyConditionTest,
+            upstreamCallCopies
+        );
 
     /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
     /// <param name="pattern">The pattern to compile.</param>
@@ -251,13 +303,25 @@ public sealed class FuzzyRegex
     /// <c>(?V1)</c> pick one, as a <see cref="Parsing.RegexFlags"/> bit.
     /// </param>
     /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
+    /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamWholePatternCall">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFuzzyConditionTest">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallCopies">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
         int defaultVersion,
-        int maxCompiledNodes
+        int maxCompiledNodes,
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
@@ -273,7 +337,13 @@ public sealed class FuzzyRegex
             pattern,
             (int)options,
             ToCompilerNamedLists(namedLists),
-            defaultVersion
+            defaultVersion,
+            upstreamReverseGrapheme,
+            upstreamFoldedRuns,
+            upstreamWholePatternCall,
+            upstreamCallFeatures,
+            upstreamFuzzyConditionTest,
+            upstreamCallCopies
         );
 
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
@@ -339,6 +409,16 @@ public sealed class FuzzyRegex
     /// <summary>
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
     /// </summary>
+    /// <remarks>
+    /// Set one when a pattern mixes fuzzy sections with recursion (<c>(?R)</c>, <c>(?1)</c>,
+    /// <c>(?&amp;name)</c>). The engine remembers recursive calls that failed, which keeps most such
+    /// patterns fast, but a call that succeeds and whose caller then fails is tried again under
+    /// every way of reaching it, and some patterns of that shape take time exponential in the
+    /// length of the text. The timeout is their bound: a call that runs out of time throws
+    /// <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> and never returns a
+    /// wrong answer. Upstream raises <c>MemoryError</c> on these patterns. See the fuzzy recursion
+    /// row of <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
     public TimeSpan MatchTimeout { get; }
 
     /// <summary>
@@ -1009,7 +1089,8 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="partial">
     /// Whether to report a partial match when the subject runs out before the pattern can succeed
-    /// or fail. Upstream's <c>partial=True</c>; see <c>Match.PartialMatch</c>.
+    /// or fail. Upstream's <c>partial=True</c>. A partial promises only that more text may complete
+    /// the match; sometimes no text can. See <c>Match.PartialMatch</c>.
     /// </param>
     /// <param name="timeout">
     /// How long this call may run, or <see langword="null"/> to use the pattern's
@@ -1036,6 +1117,15 @@ public sealed class FuzzyRegex
     /// reports a partial at <paramref name="beginning"/> - upstream answers no match on some
     /// shapes there instead. Nothing else about <paramref name="beginning"/> moves: an anchor
     /// or a lookbehind still sees it as the edge of the text.
+    /// </para>
+    /// <para>
+    /// <b>BestMatch and EnhanceMatch rank complete matches only.</b> With either flag and
+    /// <paramref name="partial"/>: <see langword="true"/>, a partial match starts at the leftmost
+    /// position whose match was still open when the subject ran out, with the first fit found
+    /// there, as upstream answers. It is not the start the flagged search would report once the
+    /// subject is complete: <c>(?e)(dog){e&lt;=1}</c> over <c>"cat and d"</c> is a partial at
+    /// (7, 9) with one insertion, while over <c>"cat and dog"</c> it is (8, 11) with no errors. A
+    /// partial match has no final error count to rank by, only a lower bound.
     /// </para>
     /// </remarks>
     public Match Match(
@@ -1114,7 +1204,9 @@ public sealed class FuzzyRegex
     /// <param name="partial">
     /// Whether the scan may end with a partial match. Upstream's <c>finditer(partial=True)</c>
     /// (<c>_main.py:351</c>, <c>pattern_scanner</c>'s <c>kwlist</c> at <c>:21089</c>): the partial
-    /// is yielded like any other match and is always the last one.
+    /// is yielded like any other match and is always the last one. Under BestMatch or
+    /// EnhanceMatch it starts at the leftmost position some continuation could match from; see
+    /// <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks.
     /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
@@ -1174,7 +1266,9 @@ public sealed class FuzzyRegex
     /// <param name="overlapped">Whether matches may overlap. Upstream's <c>overlapped=True</c>.</param>
     /// <param name="partial">
     /// Whether the walk may end with a partial match. Upstream's <c>finditer(partial=True)</c>:
-    /// the partial is yielded like any other match and is always the last one.
+    /// the partial is yielded like any other match and is always the last one. Under BestMatch or
+    /// EnhanceMatch it starts at the leftmost position some continuation could match from; see
+    /// <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks.
     /// </param>
     /// <param name="timeout">
     /// How long ONE step may run, or <see langword="null"/> for the pattern's budget. See the

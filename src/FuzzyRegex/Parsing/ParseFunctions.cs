@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -78,6 +79,25 @@ internal static class ParseFunctions
         return RegexModule.GetAllCases(info.Flags, (uint)ch).Length > 1;
     }
 
+    /// <summary>
+    /// <see cref="IsCasedI(Info, int)"/> under the encoding a node's case flags carry, when they
+    /// carry one (S91): <c>(?ai)(?u:\xe9)</c> must not drop the case flags of a letter that ASCII
+    /// thinks caseless.
+    /// </summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="caseFlags">The case flags of the run the character joins.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the character has other cases under that encoding.</returns>
+    internal static bool IsCasedI(Info info, int caseFlags, int ch)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        int encoding = caseFlags & RegexFlags.CaseEncodings;
+        int flags = encoding == 0 ? info.Flags : (info.Flags & ~RegexFlags.AllEncodings) | encoding;
+
+        return RegexModule.GetAllCases(flags, (uint)ch).Length > 1;
+    }
+
     /// <summary>Upstream <c>make_case_flags</c> (lines 419-427).</summary>
     /// <param name="info">The parse state.</param>
     /// <returns>The case flags a node built here should carry.</returns>
@@ -91,8 +111,30 @@ internal static class ParseFunctions
             flags &= ~RegexFlags.FullCase;
         }
 
+        // DIVERGES FROM UPSTREAM, deliberately (S91): the node folds with its scope's encoding,
+        // which RegexFlags.CaseFlagsCombination says why.
+        if ((flags & RegexFlags.IgnoreCase) != 0 && ScopedEncoding(info) != 0)
+        {
+            flags |= info.Flags & RegexFlags.CaseEncodings;
+        }
+
         return flags;
     }
+
+    /// <summary>
+    /// The encoding tag a node gets from its scope when that differs from the pattern's: one of
+    /// <see cref="RegexFlags.AsciiEncoding"/> and <see cref="RegexFlags.UnicodeEncoding"/>, or 0 for
+    /// "whatever the pattern uses". Not upstream's (S91).
+    /// </summary>
+    /// <remarks>
+    /// An encoding named outside every group is the pattern's own (<see cref="Info.OuterEncodings"/>),
+    /// so a node under it answers 0 and compiles to exactly upstream's code word. Only a scoped
+    /// <c>(?a:...)</c> or <c>(?u:...)</c> that changes the encoding puts a tag on the node.
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The encoding tag.</returns>
+    internal static int ScopedEncoding(Info info) =>
+        (info.Flags & RegexFlags.AllEncodings) == info.OuterEncodings ? 0 : PropertyEncoding(info);
 
     /// <summary>Upstream <c>make_character</c> (lines 429-435).</summary>
     /// <param name="info">The parse state.</param>
@@ -206,7 +248,31 @@ internal static class ParseFunctions
             return branches[0];
         }
 
-        return new Branch(branches);
+        return new Branch(branches, WrittenEmpty(branches));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): which alternatives the parser read as nothing at
+    /// all. <see cref="ParseSequence"/> returns a sequence of the items it read, so these are the
+    /// empty ones; an empty group or a zero repeat is an item.
+    /// </summary>
+    /// <param name="branches">The alternatives as parsed.</param>
+    /// <returns>
+    /// One flag per alternative, or <see langword="null"/> when none is empty, which is most
+    /// alternations and costs nothing.
+    /// </returns>
+    private static bool[]? WrittenEmpty(List<RegexBase> branches)
+    {
+        bool[]? empty = null;
+        for (int i = 0; i < branches.Count; i++)
+        {
+            if (branches[i] is Sequence { Items.Count: 0 })
+            {
+                (empty ??= new bool[branches.Count])[i] = true;
+            }
+        }
+
+        return empty;
     }
 
     /// <summary>Upstream <c>parse_sequence</c> (lines 462-546).</summary>
@@ -262,7 +328,7 @@ internal static class ParseFunctions
                         }
                         else if ((info.Flags & RegexFlags.Word) != 0)
                         {
-                            sequence.Add(new AnyU());
+                            sequence.Add(new AnyU(ScopedEncoding(info)));
                         }
                         else
                         {
@@ -280,7 +346,11 @@ internal static class ParseFunctions
                         // The start of a line or the string.
                         if ((info.Flags & RegexFlags.Multiline) != 0)
                         {
-                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new StartOfLineU() : new StartOfLine());
+                            sequence.Add(
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new StartOfLineU(ScopedEncoding(info))
+                                    : new StartOfLine()
+                            );
                         }
                         else
                         {
@@ -293,12 +363,18 @@ internal static class ParseFunctions
                         // The end of a line or the string.
                         if ((info.Flags & RegexFlags.Multiline) != 0)
                         {
-                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new EndOfLineU() : new EndOfLine());
+                            sequence.Add(
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new EndOfLineU(ScopedEncoding(info))
+                                    : new EndOfLine()
+                            );
                         }
                         else
                         {
                             sequence.Add(
-                                (info.Flags & RegexFlags.Word) != 0 ? new EndOfStringLineU() : new EndOfStringLine()
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new EndOfStringLineU(ScopedEncoding(info))
+                                    : new EndOfStringLine()
                             );
                         }
 
@@ -328,6 +404,15 @@ internal static class ParseFunctions
                                 {
                                     ApplyConstraint(source, info, constraints, caseFlags, savedPos, sequence);
                                     sequence.Add(null);
+                                }
+                                else if (sequence.Count > 0 && sequence[^1] is not null)
+                                {
+                                    // DIVERGES FROM UPSTREAM, which drops a constraint that allows no
+                                    // errors here, so it no longer limits a fuzzy section beside it
+                                    // (Fuzzy.IsExact). Upstream checks nothing before dropping it, so
+                                    // with nothing to apply it to it is still ignored, and no marker
+                                    // is added: `a{e<=0}*` and `{e<=0}` parse as they do upstream.
+                                    ApplyConstraint(source, info, constraints, caseFlags, savedPos, sequence);
                                 }
                             }
                             else
@@ -849,7 +934,7 @@ internal static class ParseFunctions
                         return new AnyAll();
                     }
 
-                    return (info.Flags & RegexFlags.Word) != 0 ? new AnyU() : new Any();
+                    return (info.Flags & RegexFlags.Word) != 0 ? new AnyU(ScopedEncoding(info)) : new Any();
 
                 case '[':
                     // A character set.
@@ -996,6 +1081,7 @@ internal static class ParseFunctions
         source.Pos = savedPos;
         int group = info.OpenGroup();
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1005,6 +1091,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1053,6 +1140,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseLookaround(Source source, Info info, bool behind, bool positive)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1062,10 +1150,11 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
-        return new LookAround(behind, positive, subpattern);
+        return new LookAround(behind, positive, subpattern) { UpstreamCallFeatures = info.UpstreamCallFeatures };
     }
 
     /// <summary>Upstream <c>parse_conditional</c> (lines 1007-1048).</summary>
@@ -1106,6 +1195,10 @@ internal static class ParseFunctions
         RegexBase yesBranch;
         RegexBase noBranch;
         string group;
+
+        // Counted here, not with savedFlags: the lookaround spellings above return without
+        // reaching the finally below.
+        info.FlagScopeDepth++;
         try
         {
             group = ParseName(source, allowNumeric: true);
@@ -1118,6 +1211,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1138,6 +1232,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseLookaroundConditional(Source source, Info info, bool behind, bool positive)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1147,6 +1242,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1155,7 +1251,11 @@ internal static class ParseFunctions
 
         source.Expect(")");
 
-        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch);
+        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
+        {
+            UpstreamCallFeatures = info.UpstreamCallFeatures,
+            UpstreamFuzzyTest = info.UpstreamFuzzyConditionTest,
+        };
     }
 
     /// <summary>Upstream <c>parse_atomic</c> (lines 1070-1080).</summary>
@@ -1165,6 +1265,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseAtomic(Source source, Info info)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1174,6 +1275,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1452,7 +1554,7 @@ internal static class ParseFunctions
         info.GroupCount = finalGroupCount;
         source.Expect(")");
 
-        return branches.Count == 1 ? branches[0] : new Branch(branches);
+        return branches.Count == 1 ? branches[0] : new Branch(branches, WrittenEmpty(branches));
     }
 
     /// <summary>Upstream <c>parse_call_group</c> (lines 1100-1109).</summary>
@@ -1620,10 +1722,16 @@ internal static class ParseFunctions
     internal static RegexBase ParseSubpattern(Source source, Info info, int flagsOn, int flagsOff)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         info.Flags = (info.Flags | flagsOn) & ~flagsOff;
 
-        // Ensure that there aren't multiple encoding flags set.
-        if ((info.Flags & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
+        // Ensure that there aren't multiple encoding flags set: a scope that names an encoding
+        // replaces the one in force. DIVERGES FROM UPSTREAM, deliberately: upstream tests the
+        // combined flags (`info.flags & (ASCII | LOCALE | UNICODE)`, _regex_core.py:1172), so an
+        // outer `(?a:` alone triggers the reset and an inner scope that names no encoding wipes
+        // it - `(?a:(?s:\w))` matched '\xe9' where CPython's re, which documents scoped `(?a:...)`,
+        // refuses it (measured 2026-09-25). Testing the NEW flags is what the comment asks for.
+        if ((flagsOn & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
         {
             info.Flags = (info.Flags & ~RegexFlags.AllEncodings) | flagsOn;
         }
@@ -1638,6 +1746,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
     }
@@ -1699,6 +1808,21 @@ internal static class ParseFunctions
     internal static void ParsePositionalFlags(Source source, Info info, int flagsOn, int flagsOff)
     {
         info.Flags = (info.Flags | flagsOn) & ~flagsOff;
+
+        // DIVERGES FROM UPSTREAM, deliberately, for the reason ParseSubpattern gives: inside a
+        // group, a flag that names an encoding replaces the one in force. Upstream ORs it in, so
+        // `(?a:(?u)\w)` held ASCII and UNICODE both, ASCII won, and it refused '\xe9' where
+        // `(?a:(?u:\w))` matches (the blind review of ledger 35, 2026-09-25). Outside every group
+        // the OR stays, so a clash with the pattern's own encoding still reaches the "mutually
+        // incompatible" check, as upstream's does; inside one, the group's close discards it.
+        if (info.FlagScopeDepth > 0 && (flagsOn & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
+        {
+            info.Flags = (info.Flags & ~RegexFlags.AllEncodings) | flagsOn;
+        }
+        else if (info.FlagScopeDepth == 0)
+        {
+            info.OuterEncodings = info.Flags & RegexFlags.AllEncodings;
+        }
         source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
     }
 
@@ -1857,7 +1981,7 @@ internal static class ParseFunctions
         if (ch == 'X' && !inSet)
         {
             // A grapheme cluster.
-            return new Grapheme();
+            return new Grapheme(ScopedEncoding(info), info.UpstreamReverseGrapheme);
         }
 
         if (RegexFlags.IsAlpha(ch))
@@ -1931,11 +2055,11 @@ internal static class ParseFunctions
         return ch switch
         {
             'A' => new StartOfString(),
-            'b' => word ? new DefaultBoundary() : new Boundary(true, encoding),
-            'B' => word ? new DefaultBoundary(false) : new Boundary(false, encoding),
+            'b' => word ? new DefaultBoundary(true, ScopedEncoding(info)) : new Boundary(true, encoding),
+            'B' => word ? new DefaultBoundary(false, ScopedEncoding(info)) : new Boundary(false, encoding),
             'K' => new Keep(),
-            'm' => word ? new DefaultStartOfWord() : new StartOfWord(encoding),
-            'M' => word ? new DefaultEndOfWord() : new EndOfWord(encoding),
+            'm' => word ? new DefaultStartOfWord(ScopedEncoding(info)) : new StartOfWord(encoding),
+            'M' => word ? new DefaultEndOfWord(ScopedEncoding(info)) : new EndOfWord(encoding),
             'Z' or 'z' => new EndOfString(),
             _ => (RegexBase?)null,
         };
@@ -2461,16 +2585,21 @@ internal static class ParseFunctions
 
     /// <summary>Upstream <c>parse_posix_class</c> (lines 1679-1686).</summary>
     /// <param name="source">The scanner.</param>
-    /// <param name="info">The parse state; upstream takes it and does not use it.</param>
+    /// <param name="info">The parse state, for the encoding in force.</param>
     /// <returns>The property the class stands for.</returns>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately: the class takes the scope's encoding, as a <c>\p{...}</c>
+    /// does (<see cref="PropertyEncoding"/>). Upstream passes none, so <c>(?a:[[:alpha:]])</c> in a
+    /// Unicode pattern answered with the Unicode tables and matched '\xe9' - although the README
+    /// says a POSIX class is "an alternative form of <c>\p{...}</c>" and <c>(?a:\p{L})</c> refuses it
+    /// (measured 2026-09-25 on regex 2026.9.10).
+    /// </remarks>
     /// <exception cref="ParseErrorException">
     /// This is not a POSIX class after all, which <see cref="ParseSetItem"/> catches. An unknown
     /// class name raises <see cref="FuzzyRegexParseException"/> instead, which it does not.
     /// </exception>
     internal static Property ParsePosixClass(Source source, Info info)
     {
-        _ = info;
-
         bool negate = source.MatchText("^");
         (string? propName, string name) = ParsePropertyName(source);
         if (!source.MatchText(":]"))
@@ -2478,7 +2607,7 @@ internal static class ParseFunctions
             throw new ParseErrorException();
         }
 
-        return LookupProperty(propName, name, !negate, source, posix: true);
+        return LookupProperty(propName, name, !negate, source, posix: true, encoding: PropertyEncoding(info));
     }
 
     /// <summary>Upstream <c>float_to_rational</c> (lines 1688-1697).</summary>
@@ -3033,7 +3162,20 @@ internal static class ParseFunctions
             members.Add(item.WithFlags(caseFlags: RegexFlags.NoCase));
         }
 
-        if (caseFlags == RegexFlags.FullIgnoreCase)
+        if ((caseFlags & RegexFlags.CaseFlags) == RegexFlags.FullIgnoreCase)
+        {
+            return null;
+        }
+
+        // S91: one set folds with one encoding, so members that fold with different ones - a
+        // scoped (?a:...) beside the pattern's own - get no firstset rather than a wrong one.
+        if (
+            (caseFlags & RegexFlags.CaseEncodings) != 0
+            && fs.Any(i =>
+                (i!.CaseFlags & RegexFlags.IgnoreCase) != 0
+                && (i.CaseFlags & RegexFlags.CaseEncodings) != (caseFlags & RegexFlags.CaseEncodings)
+            )
+        )
         {
             return null;
         }
@@ -3064,9 +3206,16 @@ internal static class ParseFunctions
     }
 
     /// <summary>Upstream <c>_check_group_features</c> (lines 4421-4458).</summary>
+    /// <remarks>
+    /// NOT UPSTREAM (D40): the calls inside each copy are then resolved for the copy's own
+    /// features (<see cref="ResolveCallsInCopy"/>), here and before anything is compiled, so that a
+    /// reference whose features are the group's own is carried by the group as written, as every
+    /// other reference is, rather than by a copy.
+    /// </remarks>
     /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, for the copies' walk.</param>
     /// <param name="parsed">The parsed pattern.</param>
-    internal static void CheckGroupFeatures(Info info, RegexBase parsed)
+    internal static void CheckGroupFeatures(Info info, string pattern, RegexBase parsed)
     {
         Dictionary<(int Group, bool Reverse, bool Fuzzy), int> callRefs = [];
         List<(RegexBase Group, bool Reverse, bool Fuzzy)> additionalGroups = [];
@@ -3090,7 +3239,9 @@ internal static class ParseFunctions
                     {
                         // The pattern as a whole doesn't have the features we want, so we'll need
                         // to make a copy of it with the desired features.
-                        additionalGroups.Add((new CallRef(callRefs.Count, parsed), reverse, fuzzy));
+                        additionalGroups.Add(
+                            (CopyOfPattern(info, parsed, callRefs.Count, reverse, fuzzy), reverse, fuzzy)
+                        );
                     }
                 }
                 else
@@ -3101,7 +3252,7 @@ internal static class ParseFunctions
                     {
                         // The group doesn't have the features we want, so we'll need to make a copy
                         // of it with the desired features.
-                        additionalGroups.Add((group, reverse, fuzzy));
+                        additionalGroups.Add((PrepareCopy(info, group, reverse, fuzzy), reverse, fuzzy));
                     }
                 }
 
@@ -3114,17 +3265,257 @@ internal static class ParseFunctions
 
         info.CallRefs = callRefs;
         info.AdditionalGroups = additionalGroups;
+
+        if (info.UpstreamCallFeatures)
+        {
+            return;
+        }
+
+        // The copies' walks re-point the call nodes they share with the pattern as written, so the
+        // pattern's own references are put back afterwards; each copy's are set again just before
+        // it compiles. The list grows while this runs, and each (group, direction, fuzziness) is
+        // added once, so it ends.
+        (CallGroup Call, int Reference)[] written =
+        [
+            .. info.GroupCalls.Select(static entry => ((CallGroup)entry.Call, ((CallGroup)entry.Call).CallRefIndex)),
+        ];
+        for (int i = 0; i < additionalGroups.Count; i++)
+        {
+            (RegexBase copy, bool copyReverse, bool copyFuzzy) = additionalGroups[i];
+            ResolveCallsInCopy(info, pattern, parsed, copy, copyReverse, copyFuzzy);
+        }
+
+        foreach ((CallGroup call, int reference) in written)
+        {
+            call.CallRefIndex = reference;
+        }
+    }
+
+    /// <summary>
+    /// Points the calls inside one additional copy at the references for the copy's own direction
+    /// and fuzziness: once before the pattern compiles, to find them, and again just before the copy
+    /// compiles. Not in upstream (D40).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A copy shares its call nodes with the group as written, and <see cref="CheckGroupFeatures"/>
+    /// resolved each of those for where it is written. Upstream compiles the copy with them as they
+    /// are, so an exact copy of a group in a fuzzy section calls the fuzzy compile of the next
+    /// group, whose items then fail with no section in force: upstream segfaults and this port read
+    /// a null section, on <c>(?&amp;g4)(?:(?P&lt;g4&gt;(?&amp;g3))){s&lt;=1}(?P&lt;g3&gt;a)</c> over
+    /// 'ba'. A fuzzy copy likewise called the exact compile and lost matches.
+    /// </para>
+    /// <para>
+    /// This walks the copy with <see cref="RegexBase.FixGroups"/>, the walk that gave every other
+    /// call its features, from the copy's features, and sets each call's reference for this compile.
+    /// Setting it in place is sound because the code is compiled one copy at a time and a call node
+    /// reads its reference only when compiled. The walk also records each group it passes, and that
+    /// record is put back: it says where a group is written, and later copies are made from it.
+    /// </para>
+    /// <para>
+    /// A reference first needed here gets a copy only where the group as written has other
+    /// features, as <see cref="CheckGroupFeatures"/> decides for the pattern's own calls; it runs
+    /// this for every copy before anything compiles, so the group as written then carries the
+    /// reference. New copies are appended to <see cref="Info.AdditionalGroups"/> and reached in
+    /// turn. It ends: each (group, direction, fuzziness) is added once.
+    /// </para>
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="pattern">The pattern text, which the walk needs for its errors (none can arise: the pattern's own walk passed).</param>
+    /// <param name="parsed">The parsed pattern, for a copy of the whole pattern.</param>
+    /// <param name="copy">The copy about to be compiled.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    internal static void ResolveCallsInCopy(
+        Info info,
+        string pattern,
+        RegexBase parsed,
+        RegexBase copy,
+        bool reverse,
+        bool fuzzy
+    )
+    {
+        int firstCall = info.GroupCalls.Count;
+        KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)>[] definitions = [.. info.DefinedGroups];
+
+        copy.FixGroups(pattern, reverse, fuzzy);
+
+        info.DefinedGroups.Clear();
+        foreach (KeyValuePair<int, (Group Group, bool Reverse, bool Fuzzy)> definition in definitions)
+        {
+            info.DefinedGroups.Add(definition.Key, definition.Value);
+        }
+
+        for (int i = firstCall; i < info.GroupCalls.Count; i++)
+        {
+            (RegexBase call, bool callReverse, bool callFuzzy) = info.GroupCalls[i];
+            var callGroup = (CallGroup)call;
+            (int, bool, bool) key = (callGroup.GroupNumber, callReverse, callFuzzy);
+            if (!info.CallRefs.TryGetValue(key, out int reference))
+            {
+                reference = info.CallRefs.Count;
+                info.CallRefs[key] = reference;
+
+                // As CheckGroupFeatures decides for the pattern's own calls: a copy only where the
+                // group as written has other features.
+                bool written =
+                    callGroup.GroupNumber == 0
+                        ? (callReverse, callFuzzy) == ((info.Flags & RegexFlags.Reverse) != 0, parsed is Fuzzy)
+                        : (callReverse, callFuzzy)
+                            == (
+                                info.DefinedGroups[callGroup.GroupNumber].Reverse,
+                                info.DefinedGroups[callGroup.GroupNumber].Fuzzy
+                            );
+                if (!written)
+                {
+                    info.AdditionalGroups.Add(
+                        (
+                            callGroup.GroupNumber == 0
+                                ? CopyOfPattern(info, parsed, reference, callReverse, callFuzzy)
+                                : PrepareCopy(
+                                    info,
+                                    info.DefinedGroups[callGroup.GroupNumber].Group,
+                                    callReverse,
+                                    callFuzzy
+                                ),
+                            callReverse,
+                            callFuzzy
+                        )
+                    );
+                }
+            }
+
+            callGroup.CallRefIndex = reference;
+        }
+
+        info.GroupCalls.RemoveRange(firstCall, info.GroupCalls.Count - firstCall);
+    }
+
+    /// <summary>
+    /// Prepares a called group's copy as the group would be if it were written out at the call: the
+    /// group as parsed, optimised in the copy's own direction unless the copy is fuzzy, then packed.
+    /// Not in upstream (D50, ledger entry 66), which compiles the group as parsed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>Group.optimise</c> returns a new group (<c>upstream/regex/_regex_core.py</c>:3073),
+    /// so <c>defined_groups</c> keeps the one the parser built, and a copy compiled from it
+    /// (<c>_main.py</c>:637) is never packed. Packing is more than speed: a run of characters under
+    /// full case folding only meets a folded subject character once it is a string, so
+    /// <c>(?fi)(?(DEFINE)(?P&lt;g1&gt;SS))(?&lt;=(?&amp;g1))</c> found nothing in 'ß' where
+    /// <c>(?fi)(?&lt;=(?:SS))</c> matches at 1.
+    /// </para>
+    /// <para>
+    /// A fuzzy copy is not optimised because a group written out in a fuzzy section is not:
+    /// <see cref="Fuzzy"/> has no <c>Optimise</c>, upstream's either, and the optimiser's rewrites
+    /// need not keep a fuzzy section's answers. An exact copy is optimised in its own direction,
+    /// because the prefix or suffix it factors out and the first-character check it adds before an
+    /// alternation (<see cref="Branch"/>) are read in that direction. Nothing the optimiser builds
+    /// depends on where the copy sits in the pattern: the pattern's first set and required string
+    /// are read from the pattern's own tree, and the copies are compiled after its SUCCESS.
+    /// </para>
+    /// <para>
+    /// An exact call in a lookaround inside a fuzzy section gets an optimised copy where the body
+    /// written out there would not be optimised. Optimising an exact item is meant to keep its
+    /// answers, and the D50 grid found no row where it did not; the copy is not keyed on where the
+    /// call sits, only on its features, so the two cannot be told apart here.
+    /// </para>
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="group">The group as parsed, or the whole pattern as parsed.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    /// <returns>The copy to compile.</returns>
+    internal static RegexBase PrepareCopy(Info info, RegexBase group, bool reverse, bool fuzzy)
+    {
+        if (info.UpstreamCallCopies)
+        {
+            return group;
+        }
+
+        Debug.Assert(
+            info.PatternAsWritten is not null,
+            "MayNeedCopies said no copy, so the pattern's own pass rewrote the tree this copy is made from"
+        );
+
+        // A copy of the tree, because both passes rewrite parts of the tree they are given in place,
+        // and one group can be copied for more than one call.
+        RegexBase copy = group.Clone();
+        if (!fuzzy)
+        {
+            copy = copy.Optimise(info, reverse);
+        }
+
+        return copy.PackCharacters(info);
+    }
+
+    /// <summary>
+    /// Whether <see cref="CheckGroupFeatures"/> can make a copy for any of the pattern's calls, read
+    /// before the pattern is optimised. Not in upstream (D50).
+    /// </summary>
+    /// <remarks>
+    /// A call to a numbered group needs a copy when its direction or fuzziness differs from where the
+    /// group is written, the test <see cref="CheckGroupFeatures"/> makes. A call to the whole pattern
+    /// always says yes: whether the pattern is a fuzzy section is read after optimising (D37). A copy
+    /// found only inside another copy (<see cref="ResolveCallsInCopy"/>) needs that copy first.
+    /// <see cref="PrepareCopy"/> asserts the answer was yes.
+    /// </remarks>
+    /// <param name="info">The parse state, after <see cref="RegexBase.FixGroups"/>.</param>
+    /// <returns><see langword="true"/> if a copy may be made.</returns>
+    internal static bool MayNeedCopies(Info info) =>
+        info.GroupCalls.Exists(entry =>
+        {
+            int group = ((CallGroup)entry.Call).GroupNumber;
+            if (group == 0)
+            {
+                return true;
+            }
+
+            (Group _, bool definedReverse, bool definedFuzzy) = info.DefinedGroups[group];
+            return (definedReverse, definedFuzzy) != (entry.Reverse, entry.Fuzzy);
+        });
+
+    /// <summary>
+    /// The copy of the whole pattern for a call to it with other features than the pattern's own.
+    /// </summary>
+    /// <remarks>
+    /// Upstream copies the pattern as optimised in the pattern's own direction (the
+    /// <paramref name="parsed"/> passed here); this port prepares it from the pattern as parsed, as
+    /// <see cref="PrepareCopy"/> prepares a group (D50).
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <param name="parsed">The pattern as optimised.</param>
+    /// <param name="reference">The call reference the copy answers.</param>
+    /// <param name="reverse">The copy's direction.</param>
+    /// <param name="fuzzy">The copy's fuzziness.</param>
+    /// <returns>The copy to compile.</returns>
+    private static CallRef CopyOfPattern(Info info, RegexBase parsed, int reference, bool reverse, bool fuzzy)
+    {
+        if (info.UpstreamCallCopies)
+        {
+            return new CallRef(reference, parsed);
+        }
+
+        Debug.Assert(info.PatternAsWritten is not null, "a pattern with a call keeps its parsed tree");
+        return new CallRef(reference, PrepareCopy(info, info.PatternAsWritten, reverse, fuzzy));
     }
 
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>
     /// <param name="parsed">The parsed pattern.</param>
     /// <param name="flags">The resolved flags.</param>
+    /// <param name="upstreamCallFeatures">Mark the run for every exact compile, as upstream does (D48); for the oracle alone.</param>
     /// <returns>The required string's offset, characters and case flags.</returns>
-    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(RegexBase parsed, int flags)
+    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(
+        RegexBase parsed,
+        int flags,
+        bool upstreamCallFeatures = false
+    )
     {
         (long reqOffset, RegexBase? required) = parsed.GetRequiredString((flags & RegexFlags.Reverse) != 0);
 
-        if (required is null)
+        // S91: a required string that folds with a scoped encoding is not offered to the engine,
+        // which builds its required-string node with the pattern's encoding.
+        if (required is null || (required.CaseFlags & RegexFlags.CaseEncodings) != 0)
         {
             return (0, [], 0);
         }
@@ -3134,6 +3525,8 @@ internal static class ParseFunctions
         if (required is String requiredString)
         {
             requiredString.Required = true;
+            requiredString.RequiredReverse = (flags & RegexFlags.Reverse) != 0;
+            requiredString.RequiredInEveryDirection = upstreamCallFeatures;
         }
 
         if (reqOffset >= RegexFlags.Unlimited)
@@ -3170,6 +3563,7 @@ internal static class ParseFunctions
         int group = info.OpenGroup(name);
         source.Expect(">");
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -3179,6 +3573,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 

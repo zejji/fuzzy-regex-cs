@@ -81,6 +81,15 @@ jobs:
         shell: pwsh
         run: ./tools/check-ratchet.ps1 -Configuration Release
 
+      - name: Work-counter bounds hold in Debug
+        # The WorkCounter bounds (D13) exist in a Debug build only; in the Release run above those
+        # tests skip themselves, and the ratchet accepts that skip. This runs exactly them again in
+        # Debug, where a bound that no longer holds fails the build.
+        shell: pwsh
+        run: |
+          dotnet run --project tests/FuzzyRegex.Tests --configuration Debug -- --treenode-filter '/*/*/*/*[Category=WorkCounter]'
+          if ($LASTEXITCODE -ne 0) { throw 'A work-counter bound failed in Debug.' }
+
       - name: Documentation examples must compile and print what they claim
         # Every ```csharp block in README.md and docs/COMPARISON.md is built against the library
         # and run; its trailing `// ` lines are the expected output. Phase 8's convention test.

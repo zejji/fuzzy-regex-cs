@@ -70,6 +70,28 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// </summary>
     internal void Reset() => Count = 0;
 
+    /// <summary>
+    /// Upstream's caching of the stack's storage in <c>state_fini</c> (line 18684): empties the
+    /// stack and keeps its buffer for the next call, unless the buffer is larger than
+    /// <paramref name="limit"/> bytes, when it goes back to the pool.
+    /// </summary>
+    /// <remarks>
+    /// Upstream shrinks an oversized buffer to the limit and keeps that; a pool buffer cannot be
+    /// shrunk, so an oversized one is returned instead and the next call rents afresh.
+    /// </remarks>
+    /// <param name="limit">The largest buffer worth keeping, in bytes.</param>
+    internal void KeepUpTo(int limit)
+    {
+        if (_storage.Length > limit)
+        {
+            Dispose();
+        }
+        else
+        {
+            Count = 0;
+        }
+    }
+
     /// <summary>Upstream <c>ByteStack_fini</c> (line 2292).</summary>
     public void Dispose()
     {
@@ -118,6 +140,25 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
 
         block.CopyTo(_storage.AsSpan(Count));
         Count = newCount;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: moves the top <paramref name="length"/> bytes of this stack
+    /// onto <paramref name="target"/>, in the same order, without an intermediate buffer.
+    /// </summary>
+    /// <param name="target">The stack that receives the bytes.</param>
+    /// <param name="length">How many bytes to move.</param>
+    /// <returns><see langword="false"/> if this stack holds fewer bytes than that.</returns>
+    internal bool MoveTopTo(ByteStack target, int length)
+    {
+        if (length < 0 || length > Count)
+        {
+            return false;
+        }
+
+        target.PushBlock(_storage.AsSpan(Count - length, length));
+        Count -= length;
+        return true;
     }
 
     /// <summary>Upstream <c>ByteStack_pop</c> (line 2372).</summary>
@@ -191,6 +232,68 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S: reads the bytes that sit just below <paramref name="top"/>, as a pop would if
+    /// the stack were <paramref name="top"/> bytes deep, without touching <see cref="Count"/>.
+    /// </summary>
+    /// <remarks>
+    /// Upstream reads a pruning mark by setting the count to the mark, popping and setting it back.
+    /// This port routes every change of the backtracking stack's count through
+    /// <c>MatchState.SetBstackCount</c>, which asserts the D11 w-marks (A7), and a read that lowers
+    /// the count for a moment is not a truncation, so it reads in place instead.
+    /// </remarks>
+    /// <param name="top">The depth to read below; at most <see cref="Count"/>.</param>
+    /// <param name="block">Receives the bytes.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool ReadBlockBelow(int top, Span<byte> block)
+    {
+        if (top > Count || block.Length > top)
+        {
+            return false;
+        }
+
+        _storage.AsSpan(top - block.Length, block.Length).CopyTo(block);
+        return true;
+    }
+
+    /// <summary>The byte <see cref="ReadBlockBelow"/> reads just below <paramref name="top"/>.</summary>
+    /// <param name="top">The depth to read below.</param>
+    /// <param name="item">Receives the byte.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or 0.</returns>
+    internal bool ReadUInt8Below(int top, out byte item)
+    {
+        item = 0;
+        return ReadBlockBelow(top, new Span<byte>(ref item));
+    }
+
+    /// <summary>The size <see cref="ReadBlockBelow"/> reads just below <paramref name="top"/>.</summary>
+    /// <param name="top">The depth to read below.</param>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool ReadSizeBelow(int top, out long item)
+    {
+        item = 0;
+        return ReadBlockBelow(top, MemoryMarshal.AsBytes(new Span<long>(ref item)));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2: overwrites the size just below <paramref name="top"/>, the
+    /// one <see cref="ReadSizeBelow"/> reads.
+    /// </summary>
+    /// <param name="top">The depth to write below.</param>
+    /// <param name="item">The value.</param>
+    /// <returns><see langword="false"/> if <paramref name="top"/> is out of range or too shallow.</returns>
+    internal bool WriteSizeBelow(int top, long item)
+    {
+        if (top < sizeof(long) || top > Count)
+        {
+            return false;
+        }
+
+        MemoryMarshal.Write(_storage.AsSpan(top - sizeof(long), sizeof(long)), in item);
+        return true;
+    }
+
     /// <summary>Upstream <c>push_uint8</c> (line 2440).</summary>
     /// <param name="item">The value to push.</param>
     internal void PushUInt8(byte item) => Push(item);
@@ -247,6 +350,23 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         return PopBlock(MemoryMarshal.AsBytes(new Span<long>(ref item)));
     }
 
+    /// <summary>
+    /// Upstream <c>push_code</c> (line 2463). An <c>RE_CODE</c> is 32 bits, so this is 4 bytes where
+    /// <see cref="PushSize"/> is 8; a repeat pushes one per iteration, which is why the width
+    /// matters (ledger entry 18).
+    /// </summary>
+    /// <param name="item">The value to push.</param>
+    internal void PushCode(uint item) => PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<uint>(in item)));
+
+    /// <summary>Upstream <c>pop_code</c> (line 2635).</summary>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopCode(out uint item)
+    {
+        item = 0;
+        return PopBlock(MemoryMarshal.AsBytes(new Span<uint>(ref item)));
+    }
+
     /// <summary>Upstream <c>drop_ssize</c> (line 2785).</summary>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool DropSize() => DropBlock(sizeof(long));
@@ -266,6 +386,24 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// </summary>
     /// <param name="node">The node to push, or <see langword="null"/> for upstream's <c>NULL</c>.</param>
     internal void PushNode(Node? node) => PushSize(node?.Index ?? _nullNode);
+
+    /// <summary>
+    /// NOT UPSTREAM: the value <see cref="PushSize"/> wrote at <paramref name="offset"/>, read in
+    /// place. The caller must know a value was pushed there; see <c>MatchState.TryOuterSection</c>.
+    /// </summary>
+    /// <param name="offset">The byte offset of the value, below <see cref="Count"/>.</param>
+    /// <returns>The value.</returns>
+    internal long SizeAt(int offset) => MemoryMarshal.Read<long>(_storage.AsSpan(offset, sizeof(long)));
+
+    /// <summary>NOT UPSTREAM: the node <see cref="PushNode"/> wrote at <paramref name="offset"/>.</summary>
+    /// <param name="pattern">The pattern whose nodes the index is into.</param>
+    /// <param name="offset">The byte offset of the value, below <see cref="Count"/>.</param>
+    /// <returns>The node, or <see langword="null"/>.</returns>
+    internal Node? NodeAt(PatternObject pattern, int offset)
+    {
+        long index = SizeAt(offset);
+        return index == _nullNode ? null : pattern.NodeList[(int)index];
+    }
 
     /// <summary>Upstream <c>pop_pointer</c> (line 2645), for a node.</summary>
     /// <param name="pattern">The pattern whose <see cref="PatternObject.NodeList"/> the index is into.</param>

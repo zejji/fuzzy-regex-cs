@@ -54,6 +54,12 @@ public sealed class NodeGraphTests
     {
         ArgumentNullException.ThrowIfNull(row);
 
+        // No bytecode, so no graph: CompileParityTests checks the refusal.
+        if (Corpus.RefusedAsLeftRecursive.Contains(row.Pattern))
+        {
+            return;
+        }
+
         CompiledPattern compiled = PatternCompiler.Compile(
             row.Pattern,
             row.Flags,

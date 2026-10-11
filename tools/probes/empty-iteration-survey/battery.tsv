@@ -1,0 +1,14 @@
+# id	pattern	subject	posix_pattern	posix_group	what it distinguishes
+c01	(?:(b|))*	bba	(b|)*	1	extra empty iteration after text (A) or not (B)
+c02	(?:(b|))*	bb	(b|)*	1	same, text exhausted
+c03	(?:(b|))*		(b|)*	1	no text at all, min 0
+c04	(?:(b|))+	bba	(b|)+	1	min 1, extra empty iteration after text
+c05	(?:(b|))+		(b|)+	1	min 1, the one required iteration is empty
+c06	^(b|)+$	bb	^(b|)+$	1	fullmatch form
+c07	(?:(a)|b|)*	ab	((a)|b|)*	2	capture persistence across later iterations
+c08	^(a|)*?$	a	^(a|)*?$	1	lazy loop
+c09	(?:(b|)){2,}	b	(b|){2,}	1	one empty iteration needed to reach min
+c10	(?:(b|)){3,}	b	(b|){3,}	1	two empty iterations needed to reach min
+c11	(?:(b|)){2}		(b|){2}	1	exact count, every iteration empty
+c12	(|a)*	aa	(|a)*	1	empty alternative first, min 0
+c13	(|a)+	aa	(|a)+	1	empty alternative first, min 1

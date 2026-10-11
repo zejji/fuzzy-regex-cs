@@ -143,10 +143,11 @@ public sealed class FuzzyLiteralPrefilterTests
     public void Text_the_branches_share_is_part_of_every_branch_s_literal()
     {
         // The optimiser moves a common prefix out of the branches, and a branch can sit inside the
-        // literal; either way each whole literal is cut, not the branch alone.
+        // literal; either way each whole literal is cut, not the branch alone. A piece two literals
+        // share, 'amber ' here, is searched for once.
         Build("(?:amber lantern works|amber stone archive){e<=2}")
             .FuzzyLiteralFilter!.Pieces.Should()
-            .Equal("amber ", "lanter", "n works", "amber ", "stone ", "archive");
+            .Equal("amber ", "lanter", "n works", "stone ", "archive");
         Build("(?:amber (?:lantern|stone) works){e<=1}")
             .FuzzyLiteralFilter!.Pieces.Should()
             .Equal("amber lan", "tern works", "amber st", "one works");
@@ -174,7 +175,120 @@ public sealed class FuzzyLiteralPrefilterTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
+    public void A_fuzzy_run_holding_a_sharp_s_keeps_its_filter()
+    {
+        // Ledger entry 49 gives the run a second arm that reads the 'ß' as one character. Both arms
+        // are the one literal 'strasse lane', cut only between pattern characters, so never inside
+        // the 'ss' that is the 'ß'.
+        FuzzyLiteralFilter? filter = Build("(?fi)(?:straße lane){e<=1}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter.Pieces.Should().Equal("strass", "e lane");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_run_of_many_expanding_characters_is_one_literal_cut_between_them()
+    {
+        // Enumerating each 'ß's choice of itself or its folding gave 2^8 + 1 literals, more pieces
+        // than MaxPieces, and the filter went off from four on (the blind review of 251afa0). Eight
+        // characters, k = 2: three pieces of 2, 3 and 3 characters, never half an 'ss'.
+        FuzzyLiteralFilter? filter = Build("(?fi)(?:ßßßßßßßß){e<=2}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter.Pieces.Should().Equal("ssss", "ssssss");
+        filter.Offsets.Should().Equal(0, 10);
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
+    [Property("Upstream", "none - gap test")]
+    public void A_search_for_a_run_of_many_expanding_characters_through_ascii_text_stays_fast()
+    {
+        // 6,165 ms without the filter on Release, 1.7 ms before ledger entry 49 (the blind review
+        // of 251afa0). Counted in engine steps rather than timed, because a busy machine is not a
+        // slow engine (D13): the filter refuses every position, so the matching loop takes no
+        // steps at all (Debug, 2026-09-28), and without it every position is a fuzzy attempt.
+        var regex = new FuzzyRegex("(?fi)(?:ßßßßßßßß){e<=2}", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = string.Concat(Enumerable.Repeat("die strasse haus ", 12_000));
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Matches(subject).Count.Should().Be(0),
+            100_000,
+            "the filter, not the matcher, rules out the positions"
+        );
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    // Ledger entry 49; the expected values are this port's, argued there. Upstream: None for the
+    // first three, and (0, 12) with one substitution for the last, regex 2026.9.10, 2026-09-28.
+    // The whole 'ß' substituted, next to a piece the search finds.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "straxe lane", "(0,11) 1,0,0")]
+    // The whole 'ß' deleted.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "strae lane", "(0,10) 0,0,1")]
+    // The only untouched piece is on the one-character path, and it is not the one holding 'ß'.
+    [Arguments("(?fi)(?:straße lane){e<=1}", "a strae lane", "(2,12) 0,0,1")]
+    [Arguments("(?fi)(?:straße lane){e<=1}", "xtrasse lane", "(0,12) 1,0,0")]
+    public void A_sharp_s_edited_as_one_character_is_found_through_the_filter(
+        string pattern,
+        string subject,
+        string expected
+    )
+    {
+        Build(pattern).FuzzyLiteralFilter.Should().NotBeNull();
+        Search(pattern, subject).Should().Be(expected);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    // Ledger entry 52; the expected values are this port's, argued there. Upstream: None for all
+    // three, regex 2026.9.10, 2026-09-28. A subject character edited whole is one character, so it
+    // damages one piece at most, as any other edit does; the subject is not ASCII, so the filter
+    // stops at it. A differential over 55,080 such searches, 10,320 of them answered differently by
+    // the whole-character edits, found no answer the filter changes (2026-09-28).
+    // The whole ǰ substituted for an s.
+    [Arguments("(?fi)(?:strasse lane){e<=1}", "straǰse lane", "(0,12) 1,0,0")]
+    // The whole ǰ inserted.
+    [Arguments("(?fi)(?:strasse lane){i<=1}", "strasǰse lane", "(0,13) 0,1,0")]
+    // A match after an ASCII stretch the filter searched.
+    [Arguments("(?fi)(?:strasse lane){s<=1}", "xx sﬁrasse lane", "(3,15) 1,0,0")]
+    public void An_expanding_subject_character_edited_whole_is_found_through_the_filter(
+        string pattern,
+        string subject,
+        string expected
+    )
+    {
+        // The pattern that answers is the one whose filter was checked.
+        var regex = new FuzzyRegex(pattern);
+        regex.PatternObject.FuzzyLiteralFilter.Should().NotBeNull();
+
+        Match m = regex.Match(subject);
+
+        m.Success.Should().BeTrue();
+        $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts.Substitutions},{m.FuzzyCounts.Insertions},{m.FuzzyCounts.Deletions}"
+            .Should()
+            .Be(expected);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_lone_character_an_ascii_letter_equals_ignoring_case_switches_the_filter_off()
+    {
+        // Full case folding cuts 'oak strassK' after its 'ss', so KELVIN SIGN is a CHARACTER_IGN node
+        // of its own, and the engine pairs it with 'k'. The only piece the subject holds untouched is
+        // 'trassK', which an ordinal search does not see in 'trassk', so a filter would refuse the
+        // subject. Upstream: regex.search('(?i)(?:oak strassK){e<=1}', 'xak strassk', V1) ->
+        // span=(0, 11) counts=(1, 0, 0), regex 2026.9.10, 2026-09-28. 'é', which no ASCII letter
+        // equals, keeps the filter.
+        Build("(?i)(?:oak strassK){e<=1}").FuzzyLiteralFilter.Should().BeNull();
+        Search("(?i)(?:oak strassK){e<=1}", "xak strassk").Should().Be("(0,11) 1,0,0");
+        Build("(?i)(?:oak strassé){e<=1}").FuzzyLiteralFilter.Should().NotBeNull();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
     [Arguments("(?:café au lait){e<=1}")] // a literal that is not ASCII
+    [Arguments("(?i)(?:oak strass😀){e<=1}")] // a lone character outside the BMP is two code units
     [Arguments("(?:abcdef){e<=3}")] // pieces too short to be worth searching for
     [Arguments("(?:abcdefghijkl){i}")] // no bound on the errors at all
     [Arguments("(?:abcdefghijkl){2i+0d<=4}")] // a free deletion leaves the budget unbounded
@@ -398,5 +512,208 @@ public sealed class FuzzyLiteralPrefilterTests
     {
         // regex.search(r'(?V1i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}', 'copper field studio, violet stone archive', pos=3) -> span=(19, 41) counts=(0, 2, 0)
         Search(_three, "copper field studio, violet stone archive", beginning: 3).Should().Be("(19,41) 0,2,0");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // D14: what the filter learns in one step of a scan it keeps for the next, on the scan's
+    // MatchState. A piece with no occurrence left is not searched for again, and text already known
+    // to be ASCII is not read again, so a Matches walk is linear in the subject, not quadratic.
+    // ---------------------------------------------------------------------------------------
+
+    [Test]
+    [Category(EngineWork.Category)]
+    [Property("Upstream", "none - gap test")]
+    // ' works' never occurs, so the piece search ran to the end of the subject on every step of
+    // the walk. Release, 1,000,000 characters: 2,303 ms before D14, 234 ms after.
+    [Arguments("(?:amber lantern works){e<=2}", "amber lantern wxrks ...... ")]
+    // The second branch never occurs. Release: 4,951 ms before D14, 30 ms after.
+    [Arguments("(?:amber lantern works|violet stone archive){e<=2}", "amber lantern works ...... ")]
+    public void A_matches_walk_over_a_long_subject_is_linear_when_a_piece_never_occurs(string pattern, string unit)
+    {
+        // Counted, not timed (D13): the characters the filter hands to its searches, which is the
+        // quantity D14 made linear. Until 2026-09-28 this was a ratio of two timings, which needed
+        // [NotInParallel], warm-up and three runs, and still moved from 15x to 21x beside a CPU
+        // burner. Over 99,981 characters the two rows search 625,807 and 325,864 characters
+        // (Debug, 2026-09-28), a few per character of the subject; the filter before D14 searches
+        // the rest of the subject on every step, about n^2 / 27.
+        string subject = string.Concat(Enumerable.Repeat(unit, 100_000 / unit.Length));
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
+    [Property("Upstream", "none - gap test")]
+    public void A_reverse_walk_over_a_long_subject_does_not_search_again_what_it_has_searched()
+    {
+        // Counted, not timed (D13), as in the forward test above: the reverse filter's calls read
+        // the whole subject before each position before D14 (4,416 ms of a 4.4 s Release walk over a
+        // million characters, 293 ms after). Now 399,924 characters searched over 99,981, the whole
+        // reverse walk included (Debug, 2026-09-28). Until 2026-09-28 this was a 500 ms budget on
+        // the filter's own calls, marked as waiting for this counter.
+        const string unit = "amber lantern works ...... ";
+        string subject = string.Concat(Enumerable.Repeat(unit, 100_000 / unit.Length));
+        var regex = new FuzzyRegex(
+            "(?r)(?:violet stone archive|amber lantern works){e<=2}",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+        EngineWork.ShouldSearchAtMostCharacters(
+            () => regex.Matches(subject).Count.Should().Be(subject.Length / unit.Length),
+            20L * subject.Length,
+            "each stretch is searched once per scan"
+        );
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_remembered_piece_is_searched_again_when_the_scan_moves_back_before_its_search()
+    {
+        // 'abcd' searched from 5 is found at 12, which says nothing about 0-4. BESTMATCH's second
+        // pass goes back like this. From 0 'abcd' is at 0, so the bound is 0; the stale 12 gave 11.
+        FuzzyLiteralFilter filter = Build("(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "abcdefgh zz abcdefgh";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.NextStart(text, 5, text.Length, memory).Should().Be(11);
+        filter.NextStart(text, 0, text.Length, memory).Should().Be(0);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_remembered_piece_is_searched_again_when_the_scan_moves_past_it()
+    {
+        // From 0 both pieces are found at once; from 5 neither is left.
+        FuzzyLiteralFilter filter = Build("(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "abcdefgh zzzzzzzz";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.NextStart(text, 0, text.Length, memory).Should().Be(0);
+        filter.NextStart(text, 5, text.Length, memory).Should().Be(FuzzyLiteralFilter.NoMatch);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_piece_remembered_as_absent_is_searched_again_when_the_slice_grows()
+    {
+        // Absent before 10 is not absent before 20: BESTMATCH narrows and restores the slice.
+        FuzzyLiteralFilter filter = Build("(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "abcdefgh zz abcdefgh";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.NextStart(text, 5, 10, memory).Should().Be(FuzzyLiteralFilter.NoMatch);
+        filter.NextStart(text, 5, text.Length, memory).Should().Be(11);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void Text_known_to_be_ascii_is_only_trusted_where_it_joins_the_query_without_a_gap()
+    {
+        // The 'é' at 2 stops the first call. From 3 the rest is ASCII, and a stretch that began at
+        // 0 must not be stretched over the 'é' to cover it; from 0 again the answer is still that
+        // the filter cannot tell.
+        FuzzyLiteralFilter filter = Build("(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "zzézz abcdefgh";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.NextStart(text, 0, text.Length, memory).Should().Be(FuzzyLiteralFilter.CannotTell);
+        filter.NextStart(text, 3, text.Length, memory).Should().Be(5);
+        filter.NextStart(text, 0, text.Length, memory).Should().Be(FuzzyLiteralFilter.CannotTell);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_reverse_witness_holds_only_for_the_slice_start_and_the_stretch_it_was_found_in()
+    {
+        FuzzyLiteralFilter filter = Build("(?r)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "abcdzzzzzzzzzzzzzzzzzzzz";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        // 'abcd' at 0 is a witness for any stretch from 0 that holds it...
+        filter.MayMatchBefore(text, 0, 20, memory).Should().BeTrue();
+        // ...but not for a stretch that ends before the piece does,
+        filter.MayMatchBefore(text, 0, 3, memory).Should().BeFalse();
+        // nor for a slice that starts after it.
+        filter.MayMatchBefore(text, 5, 20, memory).Should().BeFalse();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_piece_remembered_as_absent_in_reverse_is_searched_again_over_a_longer_stretch()
+    {
+        FuzzyLiteralFilter filter = Build("(?r)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "zzzzzzzzzzzzabcdzzzz";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.MayMatchBefore(text, 0, 10, memory).Should().BeFalse();
+        filter.MayMatchBefore(text, 0, 20, memory).Should().BeTrue();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_non_ascii_character_is_a_reverse_witness_only_for_a_stretch_holding_it()
+    {
+        FuzzyLiteralFilter filter = Build("(?r)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        const string text = "zzzzzézzzzzz";
+        FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+
+        filter.MayMatchBefore(text, 0, 10, memory).Should().BeTrue();
+        filter.MayMatchBefore(text, 0, 6, memory).Should().BeTrue();
+        filter.MayMatchBefore(text, 0, 5, memory).Should().BeFalse();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [Arguments("(?:abcdefgh){e<=1}")]
+    [Arguments("(?i)(?:abcdefgh|ijklmnop){e<=1}")]
+    [Arguments("(?r)(?:abcdefgh){e<=1}")]
+    [Arguments("(?ri)(?:abcdefgh|ijklmnop){e<=1}")]
+    public void A_scan_s_memory_never_changes_an_answer(string pattern)
+    {
+        // Every guard at once: random subjects, random query orders - mostly the steps of a walk,
+        // sometimes a jump back or a new slice - each answered with the scan's memory and again with
+        // none. The answer is a function of the subject and the positions alone.
+#pragma warning disable CA5394, S2245 // A seeded sequence, so a failure replays; nothing here is a secret.
+        FuzzyLiteralFilter filter = Build(pattern).FuzzyLiteralFilter!;
+        string[] chunks = ["abcd", "efgh", "ijkl", "mnop", "ABCD", "abcdefgh", "z", "zz", "é", "  "];
+        var random = new Random(20260928);
+        int answered = 0;
+        for (int round = 0; round < 300; round++)
+        {
+            string text = string.Concat(
+                Enumerable.Range(0, random.Next(1, 12)).Select(_ => chunks[random.Next(chunks.Length)])
+            );
+            FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+            int sliceStart = 0;
+            int sliceEnd = text.Length;
+            int pos = filter.Reverse ? text.Length : 0;
+            for (int step = 0; step < 40; step++)
+            {
+                if (random.Next(8) == 0)
+                {
+                    sliceStart = random.Next(text.Length + 1);
+                    sliceEnd = random.Next(sliceStart, text.Length + 1);
+                }
+
+                int stride = filter.Reverse ? -random.Next(4) : random.Next(4);
+                pos = random.Next(4) == 0 ? random.Next(text.Length + 1) : Math.Clamp(pos + stride, 0, text.Length);
+                int at = Math.Clamp(pos, sliceStart, sliceEnd);
+                object remembered = filter.Reverse
+                    ? filter.MayMatchBefore(text, sliceStart, at, memory)
+                    : filter.NextStart(text, at, sliceEnd, memory);
+                object fresh = filter.Reverse
+                    ? filter.MayMatchBefore(text, sliceStart, at, filter.NewScanMemory())
+                    : filter.NextStart(text, at, sliceEnd, filter.NewScanMemory());
+                remembered.Should().Be(fresh, $"'{text}' [{sliceStart}, {sliceEnd}) at {at}, step {step}");
+                answered++;
+            }
+        }
+
+#pragma warning restore CA5394, S2245
+        answered.Should().Be(300 * 40);
     }
 }

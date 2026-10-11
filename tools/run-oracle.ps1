@@ -15,17 +15,18 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES AND
-    'fuzzy-overhang'. 'partial-sliced' joined the list in S33, 'verbs' in S34, 'timeout' in S52
-    sitting 14, 'fuzzy-anchored' in S57e and 'fuzzy-literal', 'fuzzy-alternation' and
-    'long-alternation' in S60b.
+    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
+    joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14, 'fuzzy-anchored' in
+    S57e, 'fuzzy-literal', 'fuzzy-alternation' and 'long-alternation' in S60b and
+    'fuzzy-overhang' in S89.
 
     'fuzzy-overhang' is 'fuzzy' with a full-folded backreference whose group ends part-way into
     a subject folding, such as (s) against the first half of the ß in 'sß'. S84's and S85's
     rules act only there, and the plain 'fuzzy' generator reaches that shape too rarely for their
-    controls to fire. S85 added it and left it off the default list: under BESTMATCH or
-    ENHANCEMATCH a few of its rows differ from upstream in a way no fold-fix ablation explains
-    (docs/plan/slices/notes/S85-sittings.md). It joins the list once a slice accounts for them.
+    controls to fire. S85 held it back over a few BESTMATCH rows no fold-fix ablation explained;
+    S89 showed they need upstream's doubled insertion guard (ledger entry 12) as well. At 2000
+    rows a seed it still draws two partial rows no ablation explains, handed to S90
+    (docs/plan/slices/S90-partial-fold-rows.md).
 
     'fuzzy-literal' is a bare fuzzy phrase in a longer noisy subject, the one shape the port's
     fuzzy prefilter (Engine/FuzzyLiteralFilter.cs) accepts. 'fuzzy' almost never draws it: a
@@ -257,9 +258,10 @@
 
     So a Debug default makes the row timeout measure the build instead of the engine, and a slice
     triages the result as a correctness bug - which is exactly what S52's sitting 4 did, and what
-    sitting 5 spent 45 minutes undoing. Nothing in src/ is conditioned on DEBUG (no Debug.Assert, no
-    #if DEBUG), so the two configurations differ in speed alone and a Release wave answers the same
-    questions.
+    sitting 5 spent 45 minutes undoing. A Release wave answers the same questions; what it does not
+    do is check the engine's Debug.Assert invariants (Matcher.AssertMatchIsClosed and others, added
+    from D34 on), so a wave in Release cannot see an assert failure. check-ratchet.ps1 runs this
+    project's tests in Debug for that reason.
 
     Pass -Configuration Debug to get a debugger-friendly consumer when minimising one row; do not
     read a timeout it produces as a divergence.
@@ -271,7 +273,40 @@
     Record these explicit rows (JSONL) instead of generating any - the minimisation path.
 
 .PARAMETER SkipRecord
-    Re-run the consumer against the wave already on disk, without recording a new one.
+    Re-run the consumer against the wave already on disk, without recording a new one. Reads
+    -WavePath if given, otherwise TestResults/oracle/wave.jsonl - the fixed name a normal
+    (recording) run no longer writes to, so point this at a specific file: the archived
+    TestResults/oracle/wave-<seed>.jsonl from an earlier run, for instance.
+
+.PARAMETER WavePath
+    Where to record to (or, with -SkipRecord, where to read from) instead of the default. A normal
+    recording run's default is a per-run file under TestResults/oracle/ - named with this
+    process's PID and, when recording from a seed, the seed too - so that two overlapping runs in
+    the same worktree, or an ad hoc `record-oracle.py` run, cannot replace each other's wave while
+    the consumer is reading it (D20, docs/KNOWN-DEFECTS.md). Deleted after a GREEN run; a RED run
+    keeps it, alongside the unconditional TestResults/oracle/wave-<seed>.jsonl archive copy below.
+
+.PARAMETER Screen
+    Auto (the default) screens, under MemorySanitizer, every row whose verdict rests on upstream's
+    answer - fault, diverge and expected - whenever Docker is available, and re-runs the consumer if
+    the screen annotated any. Never skips it. See tools/screen-undefined.py for why, and for the
+    upstream-commit gate that stops the run when the known-defect registry is stale.
+
+.NOTES
+    The report, like the wave (see -WavePath), is per-run by default: TestResults/oracle/report-run-
+    <pid>-<seed>.txt, read and written through FUZZYREGEX_ORACLE_REPORT_PATH. Two overlapping runs
+    used to share TestResults/oracle/report.txt, so whichever consumer finished last silently
+    overwrote the other's evidence before its own report-<seed>.txt archive copy was taken - found
+    by running two seeds over the same wall-clock window in one worktree and diffing their archived
+    reports (D20, docs/KNOWN-DEFECTS.md). The fixed report.txt name is still refreshed at the end of
+    every seed, for tools/sweep-seeds.ps1's and a human's `Get-Content -Wait` - both read it only
+    after a single run-oracle.ps1 invocation has finished, never mid-run, so the fixed name racing
+    between two *separate* run-oracle.ps1 processes is not the failure this fixes.
+
+    The report ends with a `port build: src <tree>` line: git's tree id for src/ at HEAD, the
+    library the consumer built, with `-dirty` appended when src/ had uncommitted changes.
+    tools/judge-row.py refuses to pin a port answer from a report whose tree is not the current
+    one, because the port may answer that row differently now.
 
 .EXAMPLE
     tools/run-oracle.ps1
@@ -282,20 +317,24 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,long-alternation,timeout',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,fuzzy-overhang,long-alternation,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
-    [switch]$SkipRecord
+    [switch]$SkipRecord,
+    [string]$WavePath,
+    [ValidateSet('Auto', 'Never')][string]$Screen = 'Auto'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$wavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
-$reportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
+$legacyWavePath = Join-Path $repoRoot 'TestResults/oracle/wave.jsonl'
+# The fixed name: refreshed at the end of every seed below for tools/sweep-seeds.ps1 and a human
+# tailing it, never read from mid-run any more - see .NOTES above (D20).
+$legacyReportPath = Join-Path $repoRoot 'TestResults/oracle/report.txt'
 
 # A run of explicit rows, and a re-run of the wave already on disk, are both a single wave by
 # construction: neither has a seed to vary, and -1 stands for "this run has no seed". Everything
@@ -319,16 +358,54 @@ $runs = @(
 )
 
 $failed = @()
+$recheckDone = $false
+$recheckFailed = $false
 
+# try/finally, not a bare loop: every early exit below (a failed recorder, a missing wave) used to
+# skip the env var restore after the loop, and so did Ctrl+C - PowerShell unwinds a terminating
+# `exit` or a same-console Ctrl+C through an enclosing finally the same way (confirmed 2026-09-28:
+# `exit` inside a try still runs its finally), so this is the one place that guarantees
+# FUZZYREGEX_ORACLE_WAVE_PATH/REPORT_PATH never leak into the caller's shell whichever way this
+# script stops (D20/D21 repair round 1).
+try {
 foreach ($seed in $runs) {
     if ($seed -ge 0) {
         Write-Host ''
         Write-Host "===== seed $seed =====" -ForegroundColor Cyan
     }
 
+    # Per-run by default (D20, docs/KNOWN-DEFECTS.md): two overlapping run-oracle.ps1 invocations
+    # in the same worktree, or an ad hoc `record-oracle.py` run, must not be able to replace the
+    # wave THIS run is mid-comparison against. -WavePath overrides it explicitly. -SkipRecord with
+    # no -WavePath falls back to the legacy fixed name, since nothing records there by default any
+    # more and this path has to name a wave that already exists.
+    # `-run-` rather than a bare PID: the archives below this loop are named wave-<seed>.jsonl, no
+    # PID, and a PID that happens to equal an already-archived seed used to overwrite that archive -
+    # then the GREEN cleanup deleted it as scratch (D20/D21 repair round 2).
+    $ownsWavePath = -not $WavePath
+    $runWavePath =
+        if ($WavePath) { $WavePath }
+        elseif ($SkipRecord) { $legacyWavePath }
+        elseif ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/wave-run-$PID-$seed.jsonl" }
+        else { Join-Path $repoRoot "TestResults/oracle/wave-run-$PID.jsonl" }
+
+    # Read by tests/FuzzyRegex.OracleTests/OracleWave.cs's WavePath property; the consumer below
+    # compares against this run's own file even while another run's consumer reads its own.
+    $env:FUZZYREGEX_ORACLE_WAVE_PATH = $runWavePath
+
+    # Same reasoning, for the report: a fixed report.txt used to mean two overlapping runs' consumers
+    # could overwrite each other's verdict before either archived it (D20, docs/KNOWN-DEFECTS.md).
+    # ScreenCandidatesPath is derived FROM ReportPath in OracleWave.cs, so setting this alone also
+    # makes the MSan screen's candidate list per-run - see screen-undefined.py's --candidates below.
+    $reportPath =
+        if ($seed -ge 0) { Join-Path $repoRoot "TestResults/oracle/report-run-$PID-$seed.txt" }
+        else { Join-Path $repoRoot "TestResults/oracle/report-run-$PID.txt" }
+    $candidatesPath = Join-Path (Split-Path -Parent $reportPath) ((Split-Path -LeafBase $reportPath) + '.screen-candidates.txt')
+    $env:FUZZYREGEX_ORACLE_REPORT_PATH = $reportPath
+
     if (-not $SkipRecord) {
         Write-Host 'Recording a wave from upstream...' -ForegroundColor Cyan
-        $recorderArgs = @((Join-Path $PSScriptRoot 'record-oracle.py'), '--output', $wavePath)
+        $recorderArgs = @((Join-Path $PSScriptRoot 'record-oracle.py'), '--output', $runWavePath)
         if ($Rows) {
             $recorderArgs += @('--rows', $Rows)
         }
@@ -338,15 +415,20 @@ foreach ($seed in $runs) {
 
         python @recorderArgs
         if ($LASTEXITCODE -ne 0) {
-            # A wave that did not record is not a wave that agreed. The most likely cause by far is
-            # the version policy: `pip install regex` on a dev machine, or a stale submodule.
-            Write-Host 'Oracle: RED - the recorder failed, so nothing was compared.' -ForegroundColor Red
+            # A wave that did not record is not a wave that agreed. The recorder's own message is
+            # above; the exit code says which kind of failure it was. Since 2026-09-25 a row that
+            # crashes upstream no longer ends here - the recorder supervises its worker and records
+            # the row as `crashed` - so a crash exit now means the supervisor itself died.
+            Write-Host "Oracle: RED - the recorder failed (exit $LASTEXITCODE), so nothing was compared." -ForegroundColor Red
+            Write-Host '  Exit 1 is a refusal with its own message above - most often the version policy:' -ForegroundColor Yellow
+            Write-Host '  `pip install regex` on a dev machine, or a stale submodule. A signal (139 is SIGSEGV)' -ForegroundColor Yellow
+            Write-Host '  or 0xC0000005 means the recording process itself was killed.' -ForegroundColor Yellow
             exit 1
         }
     }
 
-    if (-not (Test-Path -LiteralPath $wavePath)) {
-        Write-Host "Oracle: RED - there is no wave at $wavePath." -ForegroundColor Red
+    if (-not (Test-Path -LiteralPath $runWavePath)) {
+        Write-Host "Oracle: RED - there is no wave at $runWavePath." -ForegroundColor Red
         exit 1
     }
 
@@ -355,26 +437,79 @@ foreach ($seed in $runs) {
     # Deleted first, so a consumer that fails before it writes one - a malformed wave, a build error -
     # cannot leave the previous run's report on screen as if it described this one.
     if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+    # The library the consumer is about to build, stamped on the report below for
+    # tools/judge-row.py (see .NOTES). Taken before the build, so an edit made during the run
+    # cannot be stamped as if this run had tested it.
+    $srcTree = (git -C $repoRoot rev-parse 'HEAD:src') -join ''
+    $portBuild = if (git -C $repoRoot status --porcelain -- src) { "$srcTree-dirty" } else { $srcTree }
     # A non-zero exit means a row diverged, or the harness's own tests failed. Either way the report
     # below is what says which, so the exit code is captured rather than thrown on.
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
         --configuration $Configuration
     $consumerExit = $LASTEXITCODE
 
+    # Upstream's half of every known-divergence example, asked again: the consumer exported them,
+    # and an answer upstream no longer gives means a bug an entry describes may have been fixed. The
+    # examples do not depend on the wave, so once per invocation is enough. Named from $reportPath,
+    # the same as $candidatesPath below, not the fixed expected-examples.jsonl this used to be: two
+    # overlapping runs used to share that name (D20/D21 repair round 1, tests/.../OracleWave.cs's
+    # ExpectedExamplesPath).
+    $examples = Join-Path (Split-Path -Parent $reportPath) ((Split-Path -LeafBase $reportPath) + '.expected-examples.jsonl')
+    if (-not $recheckDone -and (Test-Path -LiteralPath $examples)) {
+        Write-Host ''
+        Write-Host "Re-asking upstream every known-divergence example..." -ForegroundColor Cyan
+        python (Join-Path $PSScriptRoot 'record-oracle.py') --recheck $examples `
+            (Join-Path $repoRoot 'docs/plan/upstream-reports/ledger-reproductions.jsonl')
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Oracle: RED - upstream no longer gives a stored example answer; see the message above.' -ForegroundColor Red
+            $recheckFailed = $true
+        }
+        $recheckDone = $true
+    }
+    # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
+    # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
+    # again only if it did, so a wave with nothing to screen costs nothing extra. Per-run, the same as
+    # $reportPath it is named from - a fixed candidates file let one run's row NUMBERS be screened
+    # against another run's wave, since a bare integer means nothing without knowing which wave it
+    # indexes (D20, docs/KNOWN-DEFECTS.md).
+    $screenFailed = $false
+    if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidatesPath) -and (Get-Item -LiteralPath $candidatesPath).Length -gt 0) {
+        Write-Host ''
+        Write-Host 'Screening the unsettled rows under MemorySanitizer...' -ForegroundColor Cyan
+        $before = (Get-FileHash -LiteralPath $runWavePath).Hash
+        python (Join-Path $PSScriptRoot 'screen-undefined.py') --wave $runWavePath --candidates $candidatesPath --if-available
+        if ($LASTEXITCODE -ne 0) {
+            # Most often the upstream-commit gate: its message above says what to run.
+            Write-Host "Oracle: RED - the MSan screen failed (exit $LASTEXITCODE); see its message above." -ForegroundColor Red
+            $screenFailed = $true
+        }
+        elseif ((Get-FileHash -LiteralPath $runWavePath).Hash -ne $before) {
+            Write-Host ''
+            Write-Host 'The screen annotated rows; running the consumer again...' -ForegroundColor Cyan
+            if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+            dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
+                --configuration $Configuration
+            $consumerExit = $LASTEXITCODE
+        }
+    }
+
     Write-Host ''
     if (Test-Path -LiteralPath $reportPath) {
+        Add-Content -LiteralPath $reportPath -Value "`nport build: src $portBuild"
         Get-Content -LiteralPath $reportPath | Write-Host
     }
     else {
         Write-Host "No report at $reportPath - the consumer did not get as far as the wave." -ForegroundColor Yellow
     }
 
-    if ($consumerExit -ne 0) {
+    # Three verdicts, kept apart until here: a consumer re-run after the screen must not overwrite a
+    # failed recheck or a failed screen (found by the 2026-09-25 blind review).
+    if ($consumerExit -ne 0 -or $recheckFailed -or $screenFailed) {
         $failed += $seed
     }
 
-    # The next seed overwrites both files, so this run's evidence is kept under its own seed or it
-    # is gone by the time the summary prints.
+    # report-<seed>.txt is the archive of THIS run's own report (now a per-run file - see .NOTES
+    # above), so this copy is race-free even while another seed's run-oracle.ps1 is mid-run.
     #
     # S57: this copy is UNCONDITIONAL, and it used to happen only on a red seed. That made
     # report-<seed>.txt mean "the last time this seed was red" rather than "what this seed did",
@@ -385,11 +520,47 @@ foreach ($seed in $runs) {
     # keeps the evidence (a green report is a record too, and a truthful one) while making a
     # DIVERGE line in report-<seed>.txt mean this run.
     if ($seed -ge 0) {
-        Copy-Item -LiteralPath $wavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
+        Copy-Item -LiteralPath $runWavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
         if (Test-Path -LiteralPath $reportPath) {
             Copy-Item -LiteralPath $reportPath -Destination (Join-Path $repoRoot "TestResults/oracle/report-$seed.txt") -Force
         }
     }
+
+    # The fixed name, refreshed last so tools/sweep-seeds.ps1 and a human tailing report.txt still see
+    # this seed's report the moment this invocation finishes - see .NOTES above (D20).
+    if (Test-Path -LiteralPath $reportPath) {
+        Copy-Item -LiteralPath $reportPath -Destination $legacyReportPath -Force
+    }
+
+    # D20: a per-run wave and report this invocation both named and wrote are scratch once a seeded
+    # run has archived them above (wave-<seed>.jsonl/report-<seed>.txt already hold the identical
+    # bytes) - so, seeded, they are deleted unconditionally, RED included (D21 repair round 1: a RED
+    # seeded run used to keep this exact duplicate of wave-<seed>.jsonl beside it for no reason).
+    # Unseeded (-Rows/-SkipRecord with no seed to archive under), there is no other copy, so the
+    # GREEN-only rule still applies: a RED run's only evidence is this file, and it stays.
+    if ($ownsWavePath -and -not $SkipRecord -and (Test-Path -LiteralPath $runWavePath) -and ($seed -ge 0 -or ($failed -notcontains $seed))) {
+        Remove-Item -LiteralPath $runWavePath -Force
+    }
+    if ((Test-Path -LiteralPath $reportPath) -and ($seed -ge 0 -or ($failed -notcontains $seed))) {
+        Remove-Item -LiteralPath $reportPath -Force
+    }
+    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $candidatesPath)) {
+        Remove-Item -LiteralPath $candidatesPath -Force
+    }
+    # Per-run since OracleWave.cs's ExpectedExamplesPath fix above; scratch the same way as
+    # $candidatesPath, since nothing archives a copy of it under the seed's own name.
+    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $examples)) {
+        Remove-Item -LiteralPath $examples -Force
+    }
+}
+}
+finally {
+    # Always, whichever way the loop above stopped - normal completion, a recorder/consumer `exit 1`,
+    # or a same-console Ctrl+C (D20/D21 repair round 1, item 4: these two used to leak into the
+    # caller's shell on every early exit, so a later plain `run-oracle.ps1` inside the same session
+    # silently read/wrote the last seed's per-run paths instead of its own).
+    Remove-Item Env:FUZZYREGEX_ORACLE_REPORT_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:FUZZYREGEX_ORACLE_WAVE_PATH -ErrorAction SilentlyContinue
 }
 
 Write-Host ''

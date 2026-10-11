@@ -10,7 +10,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </summary>
 /// <remarks>
 /// Every expected value below was probed against <c>regex</c> 2026.7.19 on 2026-09-11 and is quoted
-/// beside the assertion as Python spells it.
+/// beside the assertion as Python spells it. Since D51 (2026-09-30, ledger entry 63) a call keeps
+/// none of its captures, where upstream keeps them all on the list; a test whose claim was read
+/// through the call's captures reads them through <see cref="WithUpstreamCallCaptures"/>, the
+/// oracle's ablation, and asserts this port's own list beside it.
 /// </remarks>
 public sealed class GroupCallTests
 {
@@ -20,13 +23,26 @@ public sealed class GroupCallTests
     /// </summary>
     private static readonly TimeSpan _budget = TimeSpan.FromSeconds(30);
 
-    [Test]
-    public void A_call_leaves_its_capture_behind_but_restores_the_callers_current_span()
+    /// <summary>
+    /// The pattern compiled with <c>PatternObject.KeepCallCaptures</c> set, so a
+    /// call's captures stay on the list as upstream leaves them. A fresh compile, never the cache.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The compiled pattern.</returns>
+    internal static FuzzyRegex WithUpstreamCallCaptures(string pattern)
     {
-        // This is the split GROUP_RETURN creates and nothing else in the engine does: 'pop_groups'
-        // (upstream/src/_regex.c:2662) restores each group's 'current' from the caller's saved copy
-        // and never touches its 'count', so a called group's capture stays on the list while the
-        // span the group reports goes back to whatever the caller had.
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget);
+        regex.PatternObject.KeepCallCaptures = true;
+        return regex;
+    }
+
+    [Test]
+    public void A_call_restores_the_callers_span_and_capture_list()
+    {
+        // DIVERGES FROM UPSTREAM since D51. Upstream's 'pop_groups' (upstream/src/_regex.c:2662)
+        // restores each group's 'current' from the caller's saved copy and never touches its
+        // 'count', so a called group's capture stays on the list while the span the group reports
+        // goes back to whatever the caller had. Here the list goes back too, as in Perl and PCRE2.
         //
         // Measured: for m = regex.search(r'(?<x>a)(?&x)*', 'aaa'),
         // m.span() == (0, 3), m.group('x') == 'a', m.captures('x') == ['a', 'a', 'a'].
@@ -34,17 +50,23 @@ public sealed class GroupCallTests
 
         (m.Index, m.Length).Should().Be((0, 3));
         m.Groups["x"].Value.Should().Be("a");
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "a", "a");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a");
+
+        // The oracle's ablation gives upstream's list, and it is the only thing it changes.
+        Match kept = WithUpstreamCallCaptures("(?<x>a)(?&x)*").Match("aaa");
+        (kept.Index, kept.Length, kept.Groups["x"].Value).Should().Be((0, 3, "a"));
+        kept.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "a", "a");
     }
 
     [Test]
-    public void A_group_that_only_ever_ran_inside_a_call_reports_no_span_but_keeps_its_captures()
+    public void A_group_that_only_ever_ran_inside_a_call_reports_no_span_and_no_captures()
     {
-        // The same split seen from the other side, and without a '(?(DEFINE)...)' wrapper: the
+        // The same rule seen from the other side, and without a '(?(DEFINE)...)' wrapper: the
         // group is called before it is reached, the call captures, and then the optional group
-        // itself never runs - so 'current' is back to -1 while the capture list holds one entry.
-        // Upstream reports the two separately, because 'match_get_group_by_index' (:18847) consults
-        // 'current' where 'match_get_captures_by_index' (:19137) walks 'count'.
+        // itself never runs. DIVERGES FROM UPSTREAM since D51: upstream reports 'current' back at
+        // -1 while the list holds the call's capture, because 'match_get_group_by_index' (:18847)
+        // consults 'current' where 'match_get_captures_by_index' (:19137) walks 'count' - a group
+        // with no value and one capture, which .NET's Group contract has no room for.
         //
         // Measured: for m = regex.search(r'(?&x)(?<x>a)?', 'a'),
         // m.group('x') is None and m.captures('x') == ['a'].
@@ -52,7 +74,13 @@ public sealed class GroupCallTests
 
         m.Success.Should().BeTrue();
         m.Groups["x"].Success.Should().BeFalse();
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a");
+        m.Groups["x"].Captures.Should().BeEmpty();
+        WithUpstreamCallCaptures("(?&x)(?<x>a)?")
+            .Match("a")
+            .Groups["x"]
+            .Captures.Select(static c => c.Value)
+            .Should()
+            .Equal("a");
     }
 
     [Test]
@@ -67,7 +95,15 @@ public sealed class GroupCallTests
         Match m = FuzzyRegex.Match("aaa", "(?<x>a*)(?&x)");
 
         (m.Index, m.Length).Should().Be((0, 3));
-        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("aaa", "");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("aaa");
+
+        // The call's own capture shows where it ran only under the ablation (D51).
+        WithUpstreamCallCaptures("(?<x>a*)(?&x)")
+            .Match("aaa")
+            .Groups["x"]
+            .Captures.Select(static c => (c.Index, c.Length))
+            .Should()
+            .Equal((0, 3), (3, 0));
     }
 
     [Test]
@@ -88,21 +124,30 @@ public sealed class GroupCallTests
     }
 
     [Test]
-    public void A_group_called_from_inside_a_lookbehind_agrees_with_upstream_where_the_call_is_wider_than_the_text()
+    public void A_group_called_from_inside_a_lookbehind_matches_a_text_only_as_wide_as_the_pattern()
     {
-        // Upstream issue 614's area: a group reached through a call from inside a lookbehind. Both
-        // of these fail to match upstream and fail here, so the port reproduces them.
-        //
-        // Measured: both are None under upstream.
-        //   regex.search(r'(?(DEFINE)(?<ab>ab))..(?<=(?&ab))', 'ab')
-        //   regex.search(r'(?<x>ab)(?<=(?&x))', 'ab')
-        FuzzyRegex.Match("ab", "(?(DEFINE)(?<ab>ab))..(?<=(?&ab))").Success.Should().BeFalse();
-        FuzzyRegex.Match("ab", "(?<x>ab)(?<=(?&x))").Success.Should().BeFalse();
+        // Upstream issue 614's area: a group reached through a call from inside a lookbehind.
+        // DIVERGES FROM UPSTREAM since D49. Both of these are None upstream, because it adds the
+        // width of the call's backwards copy to the pattern's minimum width, although a lookbehind
+        // consumes nothing; with the call written out both are (0, 2) upstream (regex 2026.9.10,
+        // 2026-09-30):
+        //   regex.search(r'(?(DEFINE)(?<ab>ab))..(?<=(?&ab))', 'ab')   None; '..(?<=ab)' (0, 2)
+        //   regex.search(r'(?<x>ab)(?<=(?&x))', 'ab')                  None; '(?<x>ab)(?<=ab)' (0, 2)
+        Match defined = FuzzyRegex.Match("ab", "(?(DEFINE)(?<ab>ab))..(?<=(?&ab))");
+        (defined.Success, defined.Index, defined.Length).Should().Be((true, 0, 2));
+        Match named = FuzzyRegex.Match("ab", "(?<x>ab)(?<=(?&x))");
+        (named.Success, named.Index, named.Length).Should().Be((true, 0, 2));
 
         // And where the lookbehind is the whole pattern, both engines match:
-        // regex.match(r'(?(DEFINE)(?<func>.)).(?<=(?&func))', 'abc').captures('func') == ['a'].
+        // regex.match(r'(?(DEFINE)(?<func>.)).(?<=(?&func))', 'abc').captures('func') == ['a'],
+        // which is this port's list under the ablation; its own is empty (D51).
         FuzzyRegex
             .MatchAtStart("abc", "(?(DEFINE)(?<func>.)).(?<=(?&func))")
+            .Groups["func"]
+            .Captures.Should()
+            .BeEmpty();
+        WithUpstreamCallCaptures("(?(DEFINE)(?<func>.)).(?<=(?&func))")
+            .MatchAtStart("abc")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
             .Should()
@@ -190,7 +235,10 @@ public sealed class GroupCallTests
         // answers below have not moved since S34 - upstream's came to meet them. The test stays,
         // because a test that pins the right answer is worth having whoever else agrees with it;
         // the version numbers quoted above are history now, not a live divergence.
-        Match reversed = new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
+        //
+        // Since D51 a call keeps none of its captures, so the call's span is read through the
+        // oracle's ablation, which keeps them as upstream does; the port's own list is g's alone.
+        Match reversed = WithUpstreamCallCaptures("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
 
         (reversed.Index, reversed.Index + reversed.Length).Should().Be((0, 3));
         reversed
@@ -199,6 +247,12 @@ public sealed class GroupCallTests
             .Should()
             // The call's capture is the forward '[ab]+' upstream's own inline copy also finds.
             .Equal((2, 5), (0, 2));
+        new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b")
+            .Match("abbaa")
+            .Groups["g"]
+            .Captures.Select(static c => (c.Index, c.Index + c.Length))
+            .Should()
+            .Equal((0, 2));
 
         // The same pattern with the call written out, which upstream and this port agree on. Without
         // it the assertion above would be this port marking its own homework.
@@ -209,13 +263,13 @@ public sealed class GroupCallTests
 
         // And the shapes upstream gets right through the call, so this is a statement about the
         // variable repeat and not about group calls under '(?r)' in general.
-        new FuzzyRegex("(?r)(?<g>[ab]{2})(?=(?&g))b")
+        WithUpstreamCallCaptures("(?r)(?<g>[ab]{2})(?=(?&g))b")
             .Match("abbaa")
             .Groups["g"]
             .Captures.Select(static c => (c.Index, c.Index + c.Length))
             .Should()
             .Equal((2, 4), (0, 2));
-        new FuzzyRegex("(?r)(?<g>[ab])(?=(?&g))b")
+        WithUpstreamCallCaptures("(?r)(?<g>[ab])(?=(?&g))b")
             .Match("abb")
             .Groups["g"]
             .Captures.Select(static c => (c.Index, c.Index + c.Length))
@@ -247,7 +301,10 @@ public sealed class GroupCallTests
         // codepoint table with 2 and raised IndexError, so one upstream bug failed a whole 2000-row
         // wave; it now extends the index instead, and tools/record-oracle.py's `_utf16_index` says
         // why.
-        MatchCollection matches = new FuzzyRegex("(?P<g1>A*)(?<=(?&g1))").Matches("A");
+        //
+        // Since D51 the call's captures are read through the oracle's ablation, which keeps them as
+        // upstream does; this port's own lists hold only g1's captures.
+        MatchCollection matches = WithUpstreamCallCaptures("(?P<g1>A*)(?<=(?&g1))").Matches("A");
 
         matches.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1), (1, 0));
         matches
@@ -255,6 +312,11 @@ public sealed class GroupCallTests
             .Should()
             // Every capture inside the one-character subject, which is the whole claim.
             .Equal((0, 1), (0, 1), (1, 0), (0, 1));
+        new FuzzyRegex("(?P<g1>A*)(?<=(?&g1))")
+            .Matches("A")
+            .SelectMany(static m => m.Groups["g1"].Captures.Select(static c => (c.Index, c.Length)))
+            .Should()
+            .Equal((0, 1), (1, 0));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
@@ -389,12 +451,11 @@ public sealed class GroupCallTests
         minimal.Success.Should().BeTrue("upstream answers None to this and (1, 3) with the call written out");
         (minimal.Index, minimal.Length).Should().Be((1, 2));
 
-        // The mask itself, stated as an assertion rather than as prose: one character shorter and
-        // both engines answer nothing, for the unrelated reason above.
-        new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W")
-            .Match("a ")
-            .Success.Should()
-            .BeFalse();
+        // The mask, gone since D49: one character shorter, upstream still answers nothing for the
+        // reason above, and this port answers what upstream gives with the call written out,
+        // regex.search(r'(?P<g1>\w)(?<=\w)\W', 'a ') == (0, 2).
+        Match mask = new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("a ");
+        (mask.Success, mask.Index, mask.Length).Should().Be((true, 0, 2));
 
         // The isolation, in the two directions that matter. A call inside a lookaround running the
         // SAME way as the pattern is unaffected on both engines, which is what makes the title's
@@ -423,10 +484,15 @@ public sealed class GroupCallTests
     // memory-hungry test already has a home, or give ByteStack an injectable limit so the same
     // assertion costs a kilobyte.
 
-    // AGREES WITH UPSTREAM. S40c closed the verdict S40a left open, and it went the other way from
-    // both of that slice's readings: there is no group-call defect here at all.
+    // DIVERGES FROM UPSTREAM SINCE D49 (ledger entry 60). The history below is S40c's, when this
+    // port reproduced upstream's minimum width; the assertions are now the other way round. What
+    // upstream counts is not the call at all but the backwards COPY of the called group that the
+    // call needs, compiled after the pattern's SUCCESS (`build_CALL_REF`, `_regex.c:24560`). The
+    // width counts only where a call reaches the copy, and a lookbehind consumes nothing, so the
+    // copy's width is no part of what the pattern needs. Every called row below now answers what
+    // the same row with the call written out answers, in both engines.
     [Test]
-    public void A_group_call_counts_towards_min_width_even_inside_a_zero_width_lookaround()
+    public void A_group_call_inside_a_zero_width_lookaround_adds_nothing_to_min_width()
     {
         // S40a, rows 98956 (`partial`) and 103926 (`partial-sliced`) of a 6000-row seed-7 wave,
         // minimised by hand. It shares the two tests above's precondition - a group reached by a
@@ -477,15 +543,15 @@ public sealed class GroupCallTests
 
         forward.Success.Should().BeTrue();
         (forward.Index, forward.Length).Should().Be((0, 2));
-        forward.PartialMatch.Should().BeTrue("min_width is 2 and one character is available");
+        forward.PartialMatch.Should().BeFalse("the lookbehind adds nothing to min_width, as written out");
         forward.Groups["g1"].Success.Should().BeTrue();
 
         Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
 
         reversed.Success.Should().BeTrue();
         (reversed.Index, reversed.Length).Should().Be((0, 2));
-        reversed.PartialMatch.Should().BeTrue("the same early-out, through a lookahead under (?r)");
-        reversed.Groups["g1"].Success.Should().BeFalse("upstream drops g1 when the partial pass answers");
+        reversed.PartialMatch.Should().BeFalse("the same, through a lookahead under (?r)");
+        reversed.Groups["g1"].Success.Should().BeTrue("the non-partial pass answers, and sets g1");
 
         // THE CONTROL THAT ISOLATES THE CALL, and it is the one S40a read as evidence of a
         // group-call defect. Write the call out as the body it calls and upstream's partial goes
@@ -502,14 +568,17 @@ public sealed class GroupCallTests
         // The ASCII spellings, which agreed all along and still do. They are here because they are
         // what a regression would break first: the fix changed a character count, so the rows with
         // no astral character in them must not move at all.
+        // Written out, upstream answers both complete: search(r'(?P<g1>A)(?:(?<=A)\w)?', 'A',
+        // partial=True) and fullmatch(r'(?r)(?P<g1>\w+)(?:(?!\w+)\s)?', 'a', partial=True) are
+        // (0, 1) with partial False (regex 2026.9.10, 2026-09-30).
         new FuzzyRegex(@"(?P<g1>A)(?:(?<=(?P>g1))\w)?")
             .Match("A", partial: true)
             .PartialMatch.Should()
-            .BeTrue();
+            .BeFalse();
         new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?")
             .FullMatch("a", partial: true)
             .PartialMatch.Should()
-            .BeTrue();
+            .BeFalse();
 
         // A REQUIRED tail is a partial in both engines whatever min_width does, because the tail
         // itself asks for a character past the end. These rows never depended on the early-out and
@@ -526,71 +595,6 @@ public sealed class GroupCallTests
     }
 
     [Test]
-    public void A_call_re_entered_at_the_position_it_is_already_at_fails_instead_of_recursing_for_ever()
-    {
-        // S47's guard, and the shapes are PCRE2's own - `tools/probes/pcre2-bounds-an-unbounded-
-        // recursion.py`, pcre2 0.7.1 over libpcre2 10.47, which answers every one of them with
-        // `PCRE2_ERROR_RECURSELOOP`, "nested recursion at the same subject position", in
-        // microseconds. Upstream answers every one of them with `MemoryError` in 0.62s to 1.06s
-        // (`python tools/probes/upstream-same-position-reentry.py`, regex 2026.9.10, 2026-09-14),
-        // so there is no upstream answer to diverge from: the pattern has no match it can reach.
-        //
-        // The port's guard FAILS THE PATH rather than raising PCRE2's error, which is the one
-        // deliberate difference. A call that re-enters group g at text position p while a call of
-        // g at p is still open cannot consume anything before it gets back to where it started, so
-        // that path is infinite and no answer is lost by refusing it - but the OTHER paths are not
-        // lost either, and every shape below reaches its match through one of them. PCRE2 abandons
-        // the whole match instead, which is why `(?P<g1>(?:ab)?(?&g1)?)` is an error there and
-        // (0, 4) here.
-        (string Pattern, string Subject, int Index, int Length)[] answered =
-        [
-            (@"(?P<g1>(?:a?)(?&g1)?)", "aaaa", 0, 4),
-            (@"(?P<g1>(?:a*)(?&g1)?)", "aaaa", 0, 4),
-            (@"(?P<g1>(?:ab)?(?&g1)?)", "abab", 0, 4),
-        ];
-
-        foreach ((string pattern, string subject, int index, int length) in answered)
-        {
-            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
-
-            m.Success.Should().BeTrue(pattern);
-            (m.Index, m.Length).Should().Be((index, length), pattern);
-        }
-
-        // The degenerate one: a pattern whose only content is a call to itself has an empty
-        // language, so refusing the re-entry leaves nothing to match and the answer is no match.
-        new FuzzyRegex("(?:(?R))", FuzzyRegexOptions.None, _budget)
-            .Match("ab")
-            .Success.Should()
-            .BeFalse();
-
-        // The three shapes where a POSITIONAL guard and a progress proof could differ, which is the
-        // one thing about PCRE2's design that is not obviously right: left recursion, a lazy body
-        // that tries the empty branch first, and a call in both branches of an alternation. Each
-        // reaches its re-entry through a different route, and upstream MemoryErrors on all three.
-        //
-        // All three answer, and the first is the one worth reading twice: refusing the re-entry
-        // does NOT cost left recursion its match, it gives it the one-step unrolling the grammar
-        // means. `(?&g)` at 0 is allowed, because the top-level `g` is being matched where it was
-        // written rather than called and so has no open call; its own `(?&g)` at 0 is the one
-        // refused, which drops it to the `b` branch, and the outer `a` then matches.
-        (string Pattern, string Subject, int Index, int Length)[] ambiguous =
-        [
-            (@"(?P<g>(?&g)a|b)", "ba", 0, 2),
-            (@"(?P<g1>(?:ab)??(?&g1)?)", "abab", 0, 0),
-            (@"(?P<g1>x(?&g1)?|(?&g1)?y)", "xxy", 0, 3),
-        ];
-
-        foreach ((string pattern, string subject, int index, int length) in ambiguous)
-        {
-            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
-
-            m.Success.Should().BeTrue(pattern);
-            (m.Index, m.Length).Should().Be((index, length), pattern);
-        }
-    }
-
-    [Test]
     public void A_verb_that_cuts_the_backtracking_inside_a_call_does_not_leave_the_call_open()
     {
         // Found by S47's blind review, and the reason the guard's state rides the SSTACK rather
@@ -601,16 +605,30 @@ public sealed class GroupCallTests
         // arm runs. Anything the guard keyed on that call is then stale for the rest of the
         // attempt, and the next legitimate call of the same group at the same position is refused.
         //
-        // Upstream answers (0, 2) on all four in 0.00s (regex 2026.9.10, 2026-09-14):
+        // Upstream answers (0, 2) on all of these in 0.00s (regex 2026.9.10, 2026-09-14):
         //   regex.search(r'(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))', 'aa')
-        // The first row is the control - no wrapper, so nothing discards the frame - and it passed
-        // before the fix as well as after. The other three each wrap the leak site in one of the
-        // three constructs that restore `Sstack.Count`.
+        // and so does PCRE2 10.47 (NO_START_OPTIMIZE, 2026-09-26). The first row is the control - no
+        // wrapper, so nothing discards the frame - and it passed before the fix as well as after.
+        // The others wrap the leak site in a construct that restores `Sstack.Count`.
+        //
+        // Ledger entry 47 changed which constructs those are. S47 used `(?>(?&g))?` and
+        // `(?:(?=(?&g))|)`, but an atomic group or positive lookahead that has not finished no
+        // longer stops a verb: it ends the attempt, and those rows now answer None (pinned in
+        // VerbScopeTests). A negative lookahead and a conditional test still stop it, and the third
+        // row has the verb cross an atomic group on its way to the negative lookahead, so the
+        // unwind that skips the atomic group's own arm must leave the call closed too.
         const string Body = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))";
         const string SkipBody = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*SKIP)(?P=cap)))";
 
         foreach (
-            string pattern in new[] { Body, "(?>(?&g))?" + Body, "(?:(?=(?&g))|)" + Body, "(?>(?&g))?" + SkipBody }
+            string pattern in new[]
+            {
+                Body,
+                "(?!(?&g))" + Body,
+                "(?!(?>(?&g)))" + Body,
+                "(?(?=(?&g))|)" + Body,
+                "(?!(?>(?&g)))" + SkipBody,
+            }
         )
         {
             Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match("aa");

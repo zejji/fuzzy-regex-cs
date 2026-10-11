@@ -154,7 +154,9 @@ limit; `sub`'s output equals the subject with the template applied at exactly th
 
 **Calibration.** None directly - but **ledger 23 was caught only because the recorder writes the
 replacement count down**: both of its answers rendered identical text and the count was the single
-field that differed. This invariant is that field promoted to a rule.
+field that differed. This invariant is that field promoted to a rule. (Ledger 23 itself was
+withdrawn on 2026-10-10: the count it caught was real, but the cause was D78's BESTMATCH skip
+after an empty match, ledger 77.)
 
 ---
 
@@ -232,7 +234,8 @@ match span - **for rows whose pattern contains no `\K` and no lookaround**.
 
 - **`\K`** resets the reported match start, so a group before it legitimately lies outside the span:
   `(a)\Kb` over `'ab'` is match `(1, 2)` with group 1 at `(0, 1)`. `\K` is in the wave's alphabet -
-  ledger 23's own pattern is `...\g<1>\K$`.
+  ledger 23's own pattern is `...\g<1>\K$` (ledger 23 was withdrawn on 2026-10-10 as D78; the
+  pattern is still a valid `\K` example).
 - **A lookaround** consumes nothing, so a group inside one matches text the match never covered:
   `a(?=(b))` over `'ab'` is match `(0, 1)` with group 1 at `(1, 2)`, and `(?:(?=(bc))b)` over `'bc'`
   is match `(0, 1)` with group 1 at `(0, 2)`. **This file's first draft did not have this
@@ -306,6 +309,17 @@ over the same slice by the same call without `partial`.
 
 **Ground.** The looser budget's acceptable-edit set is a superset of the tighter one's. Every match
 of the tighter is a match of the looser.
+
+**NARROWED 2026-09-26: the ground is false where an atomic group or a possessive repeat sits inside
+the fuzzy section.** An atomic group fails as a whole once it has matched (README.rst:830), and a
+possessive repeat is one (`x++` is `(?>(?:x)+)`, :837). A looser budget can let the group commit to
+a path the tighter budget never reached, and it cannot give that path back, so the match the
+tighter budget found is lost. Both engines agree: `match('(?:x++y){e<=0}', 'xy')` is (0, 2),
+`{e<=1}` is None, and `{e<=2}` is (0, 2) with a substitution and a deletion (regex 2026.9.10 and
+this port, 2026-09-26, pinned by `FuzzyZeroBudgetTests`). The same happens with no fuzzy matching:
+`(?>x{0,1})x` finds nothing in 'x' where `(?>x{0,0})x` matches it. So the invariant applies only to
+a fuzzy section with no atomic group and no possessive repeat inside it; a violation in a section
+that has one is by design. No checker implements it yet.
 
 **Calibration.** Ledger 20 (upstream issue 564, which is this property named as a bug report), 19
 (`\m` before a fuzzy section does not match at position 0 - upstream issue 563).
@@ -382,11 +396,12 @@ is the longest.
 
 **Ground.** Quoted in ledger 23: *"`POSIX` is documented as leftmost-longest matching - it chooses
 among the matches the ordinary engine can already make."* Limb (a) is "chooses among", limb (b) is
-"longest".
+"longest". (Ledger 23 is withdrawn, 2026-10-10; the quoted sentence still states the contract.)
 
 **Calibration.** Ledger 16 (a `POSIX` overlapped scan of a `BESTMATCH` fuzzy pattern drops its
 longest match - limb (b)), 23 (`POSIX` adds a zero-width match the flagless engine does not make -
-limb (a)), 9 (a `POSIX` search of a fuzzy pattern charges a span more errors than its own flagless
+limb (a); WITHDRAWN 2026-10-10 - the missing match in its POSIX-free answer was D78's BESTMATCH
+skip after an empty match, ledger 77, so limb (a) has no calibration from it), 9 (a `POSIX` search of a fuzzy pattern charges a span more errors than its own flagless
 engine needs, and crashes the C engine).
 
 **This is the highest-yield invariant in the file** and it is cheap: the recorder already records a

@@ -36,14 +36,44 @@ internal static class OracleWave
     /// neither side ever needs to vary. Declared before the two paths that use it: static
     /// initialisers run in declaration order.
     /// </remarks>
-    private static readonly string _repoRoot = FindRepoRoot();
+    public static string RepoRoot { get; } = FindRepoRoot();
+
+    /// <summary>The category of the tests that read a recorded wave (<see cref="Load"/>).</summary>
+    /// <remarks>
+    /// Only <c>tools/run-oracle.ps1</c> records a wave, so <c>tools/check-ratchet.ps1</c> runs this project
+    /// without these tests: CI's merge gate records none (design amendment 7), and a local run would
+    /// otherwise judge whatever git-ignored <c>TestResults/oracle/wave.jsonl</c> an earlier run left
+    /// behind (CI was red from 3def5eba while a 2026-09-27 wave kept the local ratchet green).
+    /// </remarks>
+    public const string NeedsARecordedWave = "NeedsARecordedWave";
 
     /// <summary>Where the recorder writes the wave and where this consumer reads it.</summary>
-    public static string WavePath { get; } = Path.Combine(_repoRoot, "TestResults", "oracle", "wave.jsonl");
+    /// <remarks>
+    /// <c>FUZZYREGEX_ORACLE_WAVE_PATH</c> overrides the fixed default when set. <c>tools/run-oracle.ps1</c>
+    /// sets it to a per-run file (<c>TestResults/oracle/wave-run-&lt;pid&gt;-&lt;seed&gt;.jsonl</c>) so that
+    /// a second recording in the same worktree - an ad hoc <c>tools/record-oracle.py</c> run, or an
+    /// overlapping <c>run-oracle.ps1</c> - cannot replace the wave this run is mid-comparison against
+    /// (D20, docs/KNOWN-DEFECTS.md). The <c>-run-</c> infix keeps this scratch name out of the
+    /// <c>wave-&lt;seed&gt;.jsonl</c> archive namespace (D20/D21 repair round 2).
+    /// </remarks>
+    public static string WavePath { get; } =
+        Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_WAVE_PATH") is { Length: > 0 } overridden
+            ? overridden
+            : Path.Combine(RepoRoot, "TestResults", "oracle", "wave.jsonl");
 
     /// <summary>Where the run's verdict and every divergence block is written.</summary>
-    /// <remarks>Under <c>TestResults/</c>, which is what oracle.yml uploads as an artifact.</remarks>
-    public static string ReportPath { get; } = Path.Combine(_repoRoot, "TestResults", "oracle", "report.txt");
+    /// <remarks>
+    /// Under <c>TestResults/</c>, which is what oracle.yml uploads as an artifact.
+    /// <c>FUZZYREGEX_ORACLE_REPORT_PATH</c> overrides the fixed default when set, the same way
+    /// <see cref="WavePath"/>'s override works. <c>tools/run-oracle.ps1</c> sets it to a per-run file
+    /// so that two overlapping runs in the same worktree cannot overwrite each other's evidence
+    /// before either reads it back - found from <see cref="ScreenCandidatesPath"/>'s row numbers
+    /// answering for the wrong wave when this path was still shared (D20, docs/KNOWN-DEFECTS.md).
+    /// </remarks>
+    public static string ReportPath { get; } =
+        Environment.GetEnvironmentVariable("FUZZYREGEX_ORACLE_REPORT_PATH") is { Length: > 0 } overriddenReport
+            ? overriddenReport
+            : Path.Combine(RepoRoot, "TestResults", "oracle", "report.txt");
 
     private static string FindRepoRoot()
     {
@@ -214,7 +244,28 @@ internal static class OracleWave
         )
         {
             SelfContradiction = ReadSelfContradiction(row),
+            UndefinedBehaviour = ReadUndefinedBehaviour(row),
+            DotlessFree = row.TryGetProperty("dotlessFreeOutcome", out JsonElement dotlessFree)
+                ? ReadOutcome(dotlessFree)
+                : null,
         };
+    }
+
+    /// <summary>What the MSan screen found this row doing, if it screened the row and found anything.</summary>
+    /// <param name="row">The recorded row.</param>
+    /// <returns>The finding tools/screen-undefined.py wrote, or <see langword="null"/>.</returns>
+    private static UndefinedBehaviour? ReadUndefinedBehaviour(JsonElement row)
+    {
+        if (!row.TryGetProperty("undefinedBehaviour", out JsonElement found))
+        {
+            return null;
+        }
+
+        JsonElement known = found.GetProperty("known");
+        return new UndefinedBehaviour(
+            [.. found.GetProperty("origins").EnumerateArray().Select(static origin => origin.GetString()!)],
+            known.ValueKind == JsonValueKind.Null ? null : known.GetString()
+        );
     }
 
     /// <summary>
@@ -280,6 +331,12 @@ internal static class OracleWave
             // S43, and the same "no ground truth" case by a different route: upstream hit a limit
             // of the interpreter rather than finishing or rejecting.
             "resource" => new ResourceOutcome(outcome.GetProperty("exception").GetString()!),
+            // 2026-09-25, and no ground truth a third way: upstream killed the interpreter, so the
+            // recorder's crash supervisor recorded the row instead of an answer to it.
+            "crashed" => new CrashedOutcome(
+                outcome.GetProperty("exitCode").GetInt64(),
+                outcome.GetProperty("reproducedAlone").GetBoolean()
+            ),
             // 'whileMatching' is optional and defaults to false, which is what every wave recorded
             // before S24 means: until substitution landed, upstream's only recorded rejections came
             // out of regex.compile. A hand-written minimisation row need not carry it either.
@@ -377,24 +434,25 @@ internal static class OracleWave
     /// One rendered block per row <see cref="ExpectedDivergences"/> accounted for. Printed rather
     /// than dropped: an expected divergence nobody can see in the report is a hidden one.
     /// </param>
+    /// <param name="faults">
+    /// One rendered block per row upstream gave no usable answer to that no known defect explains.
+    /// Printed first, because each fails the run.
+    /// </param>
+    /// <param name="undefined">
+    /// One rendered block per row the MSan screen attributed to a known defect. Printed last.
+    /// </param>
     /// <returns>The single-line summary, which is also the first line of the report.</returns>
     public static string WriteReport(
         OracleHeader header,
         int rowCount,
         IReadOnlyDictionary<OracleVerdict, int> tally,
         IReadOnlyList<string> divergences,
-        IReadOnlyList<string>? expected = null
+        IReadOnlyList<string>? expected = null,
+        IReadOnlyList<string>? faults = null,
+        IReadOnlyList<string>? undefined = null
     )
     {
-        string summary = string.Create(
-            CultureInfo.InvariantCulture,
-            $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
-                + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
-                + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
-                + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
-                + $"resource {tally.GetValueOrDefault(OracleVerdict.Resource)}  "
-                + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
-        );
+        string summary = Summary(rowCount, tally);
 
         var report = new StringBuilder();
         report.AppendLine(summary);
@@ -407,13 +465,9 @@ internal static class OracleWave
             )
         );
         report.AppendLine("waves: " + header.Waves);
-        foreach (string divergence in divergences)
-        {
-            report.AppendLine();
-            report.AppendLine(divergence);
-        }
 
-        foreach (string block in expected ?? [])
+        // Faults first: each fails the run, and none of them is a question of which engine is right.
+        foreach (string block in (faults ?? []).Concat(divergences).Concat(expected ?? []).Concat(undefined ?? []))
         {
             report.AppendLine();
             report.AppendLine(block);
@@ -423,6 +477,94 @@ internal static class OracleWave
         File.WriteAllText(ReportPath, report.ToString());
         return summary;
     }
+
+    /// <summary>Where the consumer exports every expected divergence's example rows for <c>record-oracle.py --recheck</c>.</summary>
+    /// <remarks>
+    /// Named from <see cref="ReportPath"/>'s own filename, the same as <see cref="ScreenCandidatesPath"/>
+    /// below, rather than the fixed <c>expected-examples.jsonl</c> this used to be: two overlapping
+    /// runs' consumers used to write the same sibling file, so whichever finished last could hand
+    /// <c>record-oracle.py --recheck</c> the other run's rows (D20/D21 repair round 1; the content is
+    /// the same fixed ledger for every run, so the only cost of this is one identical copy per run
+    /// rather than a shared name to race on).
+    /// </remarks>
+    public static string ExpectedExamplesPath =>
+        Path.Combine(
+            Path.GetDirectoryName(ReportPath)!,
+            Path.GetFileNameWithoutExtension(ReportPath) + ".expected-examples.jsonl"
+        );
+
+    /// <summary>
+    /// Every example row of every entry, one JSON object per line: the entry's id and the row as the
+    /// entry stores it, upstream's answer included. <c>record-oracle.py --recheck</c> asks upstream
+    /// each row's question again and fails if it no longer gives that answer, which is what stops a
+    /// fixed upstream bug staying "expected" for ever.
+    /// </summary>
+    /// <param name="entries">The entries.</param>
+    /// <returns>The JSONL text.</returns>
+    public static string RenderExpectedExamples(IEnumerable<ExpectedDivergence> entries) =>
+        string.Concat(
+            entries.SelectMany(static entry =>
+                entry
+                    .Example.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(line => "{\"entry\": " + JsonSerializer.Serialize(entry.Id) + ", \"row\": " + line + "}\n")
+            )
+        );
+
+    /// <summary>Writes <see cref="RenderExpectedExamples"/> to <see cref="ExpectedExamplesPath"/>.</summary>
+    /// <param name="entries">The entries.</param>
+    public static void WriteExpectedExamples(IEnumerable<ExpectedDivergence> entries)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ExpectedExamplesPath)!);
+        File.WriteAllText(ExpectedExamplesPath, RenderExpectedExamples(entries));
+    }
+
+    /// <summary>Where the consumer lists the rows tools/screen-undefined.py should screen.</summary>
+    /// <remarks>
+    /// Named from <see cref="ReportPath"/>'s own filename rather than a fixed sibling name, so that
+    /// two overlapping runs - each with its own <c>FUZZYREGEX_ORACLE_REPORT_PATH</c> - never share
+    /// this file either: a shared list of row NUMBERS is meaningless once it might be answering for
+    /// the other run's wave, not this run's (D20, docs/KNOWN-DEFECTS.md).
+    /// </remarks>
+    public static string ScreenCandidatesPath =>
+        Path.Combine(
+            Path.GetDirectoryName(ReportPath)!,
+            Path.GetFileNameWithoutExtension(ReportPath) + ".screen-candidates.txt"
+        );
+
+    /// <summary>
+    /// Writes the numbers of the rows whose verdict rests on upstream's answer, one per line, for
+    /// tools/screen-undefined.py. Written on every run, empty when there are none, so a stale list
+    /// from an earlier wave can never be screened against this one.
+    /// </summary>
+    /// <param name="numbers">The row numbers.</param>
+    public static void WriteScreenCandidates(IEnumerable<int> numbers)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ScreenCandidatesPath)!);
+        File.WriteAllText(
+            ScreenCandidatesPath,
+            string.Concat(numbers.Select(static n => n.ToString(CultureInfo.InvariantCulture) + "\n"))
+        );
+    }
+
+    /// <summary>
+    /// The one-line tally: the report's first line, and what <c>tools/sweep-seeds.ps1</c> reads with
+    /// <c>^agree \d</c> and <c>diverge (\d+)</c>.
+    /// </summary>
+    /// <param name="rowCount">How many rows the wave held.</param>
+    /// <param name="tally">How many rows fell into each verdict.</param>
+    /// <returns>The line.</returns>
+    public static string Summary(int rowCount, IReadOnlyDictionary<OracleVerdict, int> tally) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
+                + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
+                + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
+                + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
+                + $"resource {tally.GetValueOrDefault(OracleVerdict.Resource)}  "
+                + $"undefined {tally.GetValueOrDefault(OracleVerdict.Undefined)}  "
+                + $"fault {tally.GetValueOrDefault(OracleVerdict.Fault)}  "
+                + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
+        );
 
     /// <summary>Renders one diverging row: what was asked, what upstream said, what we said.</summary>
     /// <param name="row">The row that diverged.</param>
@@ -435,11 +577,59 @@ internal static class OracleWave
     /// <returns>The rendered block.</returns>
     public static string Describe(OracleRow row, IOracleOutcome? actual, ExpectedDivergence? accounted = null)
     {
+        StringBuilder block = DescribeQuestion(row, accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id);
+        string codepoints = row.CodepointSpan is { } span
+            ? string.Create(CultureInfo.InvariantCulture, $"   [python codepoints {span.Start},{span.End}]")
+            : "";
+        block.AppendLine("  upstream " + row.Expected.Describe() + codepoints);
+        block.Append("  port     " + (actual?.Describe() ?? "unsupported"));
+        if (actual is ErrorOutcome { Detail: { } detail })
+        {
+            block.AppendLine().Append("  " + detail.Replace("\n", "\n  ", StringComparison.Ordinal));
+        }
+
+        return block.ToString();
+    }
+
+    /// <summary>
+    /// Renders one row upstream gave no usable answer to: it crashed, or the MSan screen found it
+    /// reading memory it never initialised. The screen's finding follows upstream's line; on a plain
+    /// crash this port's answer comes between them, which is what <c>tools/judge-row.py</c> pins.
+    /// </summary>
+    /// <param name="row">The row.</param>
+    /// <param name="heading"><c>FAULT</c>, or <c>UNDEFINED</c> and the defect it is known as.</param>
+    /// <param name="ours">This port's answer, where the row was put to it.</param>
+    /// <returns>The rendered block.</returns>
+    public static string DescribeUnanswered(OracleRow row, string heading, IOracleOutcome? ours = null)
+    {
+        StringBuilder block = DescribeQuestion(row, heading);
+        block.AppendLine("  upstream " + row.Expected.Describe());
+        if (ours is not null)
+        {
+            block.AppendLine("  port     " + ours.Describe());
+        }
+
+        if (row.UndefinedBehaviour is not { } found)
+        {
+            return block.Append("  screen   not screened - run tools/screen-undefined.py to attribute it").ToString();
+        }
+
+        block.Append("  screen   uninitialised memory from " + string.Join(", ", found.Origins));
+        if (found.Known is null)
+        {
+            block.Append(" - NO KNOWN DEFECT, a new one for the ledger");
+        }
+
+        return block.ToString();
+    }
+
+    private static StringBuilder DescribeQuestion(OracleRow row, string heading)
+    {
         var block = new StringBuilder();
         block.AppendLine(
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{(accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id)} row {row.Number} "
+                $"{heading} row {row.Number} "
                     + $"({row.Generator}) {row.Operation} flags=0x{row.Flags:x} "
                     // Which version a pattern naming none was resolved under, because since S50b
                     // the recorder's default and this port's are different questions.
@@ -483,17 +673,7 @@ internal static class OracleWave
             );
         }
 
-        string codepoints = row.CodepointSpan is { } span
-            ? string.Create(CultureInfo.InvariantCulture, $"   [python codepoints {span.Start},{span.End}]")
-            : "";
-        block.AppendLine("  upstream " + row.Expected.Describe() + codepoints);
-        block.Append("  port     " + (actual?.Describe() ?? "unsupported"));
-        if (actual is ErrorOutcome { Detail: { } detail })
-        {
-            block.AppendLine().Append("  " + detail.Replace("\n", "\n  ", StringComparison.Ordinal));
-        }
-
-        return block.ToString();
+        return block;
     }
 
     /// <summary>
@@ -536,10 +716,26 @@ internal sealed record OracleWaveFile(OracleHeader Header, IReadOnlyList<OracleR
 /// One rendered block per row <see cref="ExpectedDivergences"/> accounted for, in wave order. These
 /// do not fail the run and are printed anyway.
 /// </param>
+/// <param name="Faults">
+/// One rendered block per row upstream crashed on, or read uninitialised memory on, that no known
+/// defect accounts for. Each fails the run.
+/// </param>
+/// <param name="Undefined">
+/// One rendered block per row the MSan screen attributed to a known upstream defect. Not compared,
+/// not failing, printed anyway.
+/// </param>
+/// <param name="ScreenCandidates">
+/// The numbers of the rows whose verdict rests on upstream's answer - fault, diverge and expected -
+/// that the MSan screen has not yet annotated. What <see cref="OracleWave.WriteScreenCandidates"/>
+/// hands tools/screen-undefined.py.
+/// </param>
 internal sealed record OracleRunSummary(
     IReadOnlyDictionary<OracleVerdict, int> Tally,
     IReadOnlyList<string> Divergences,
-    IReadOnlyList<string> Expected
+    IReadOnlyList<string> Expected,
+    IReadOnlyList<string> Faults,
+    IReadOnlyList<string> Undefined,
+    IReadOnlyList<int> ScreenCandidates
 );
 
 /// <summary>Which oracle produced a wave, and how it was generated.</summary>
@@ -726,6 +922,19 @@ internal sealed record OracleHeader(
 /// What reads it is <see cref="SelfConsistency"/>'s consumer, to tell a port that breaks an
 /// invariant on its own from a port reproducing a contradiction upstream already has.
 /// </param>
+/// <param name="UndefinedBehaviour">
+/// What the MSan screen found this row doing, from the recorder's <c>undefinedBehaviour</c> field:
+/// reading memory upstream never initialised, and the ledger entry that accounts for it if any.
+/// Absent on a row the screen did not run on or found clean. Outranks <see cref="Expected"/>, which on
+/// such a row is whatever that memory held.
+/// </param>
+/// <param name="DotlessFree">
+/// Upstream's answer to the same row with every U+0131 (dotless i) made U+0138 (kra), from the
+/// recorder's <c>dotlessFreeOutcome</c>: the same question with nothing for upstream's Turkic `T` case
+/// rows to act on. Recorded only where the row holds a dotless i and neither U+0130 nor U+0138, and
+/// only when that twin answered. A SECOND FACT ABOUT UPSTREAM, read by
+/// <c>turkic-default-folding-without-spans</c>.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -753,7 +962,9 @@ internal sealed record OracleRow(
     IOracleOutcome? CutSubject = null,
     double? Timeout = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0,
-    IReadOnlyList<string>? SelfContradiction = null
+    IReadOnlyList<string>? SelfContradiction = null,
+    UndefinedBehaviour? UndefinedBehaviour = null,
+    IOracleOutcome? DotlessFree = null
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -829,6 +1040,30 @@ internal sealed record ResourceOutcome(string Exception) : IOracleOutcome
     /// <inheritdoc />
     public string Describe() => $"upstream ran out of resources ({Exception})";
 }
+
+/// <summary>Upstream killed the interpreter on this row, so the recorder's supervisor recorded the row instead.</summary>
+/// <remarks>
+/// 2026-09-25. The third "no ground truth" case, after <see cref="TimeoutOutcome"/> and
+/// <see cref="ResourceOutcome"/>, and unlike them it fails the run unless the MSan screen attributes
+/// it to a known defect: a crash is memory unsafety in upstream's C engine, and one nobody has
+/// explained may be a new defect. See <c>_record_supervised</c> in <c>tools/record-oracle.py</c>.
+/// </remarks>
+/// <param name="ExitCode">The dead worker's exit status: a negative signal number on POSIX, an NTSTATUS on Windows.</param>
+/// <param name="ReproducedAlone">Whether the row crashed again in a fresh process on its own.</param>
+internal sealed record CrashedOutcome(long ExitCode, bool ReproducedAlone) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"upstream crashed (exit {ExitCode}), {(ReproducedAlone ? "again when run alone" : "but NOT when run alone")}"
+        );
+}
+
+/// <summary>What the MSan screen found a row doing: reading memory upstream never initialised.</summary>
+/// <param name="Origins">Where each uninitialised value was created, as MSan reports it - a local and its function.</param>
+/// <param name="Known">The ledger entry that accounts for every origin, or <see langword="null"/> if none does.</param>
+internal sealed record UndefinedBehaviour(IReadOnlyList<string> Origins, string? Known);
 
 /// <summary>This port compiled the pattern, and cannot match yet.</summary>
 /// <remarks>
@@ -1113,4 +1348,19 @@ internal enum OracleVerdict
     /// generator has started drawing rows upstream cannot answer.
     /// </summary>
     Resource,
+
+    /// <summary>
+    /// The MSan screen found upstream reading memory it never initialised on this row, from an
+    /// origin a ledger entry already accounts for. Upstream's answer is whatever that memory held,
+    /// so it is not compared; counted and listed, and does not fail the run.
+    /// </summary>
+    Undefined,
+
+    /// <summary>
+    /// Upstream crashed on this row with no screen finding to explain it, or the screen found
+    /// uninitialised memory from an origin no ledger entry accounts for. Not compared - there is no
+    /// answer - and it FAILS THE RUN, because an unattributed upstream fault is a new defect until
+    /// someone has judged it.
+    /// </summary>
+    Fault,
 }

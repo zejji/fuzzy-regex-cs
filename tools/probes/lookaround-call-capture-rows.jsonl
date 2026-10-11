@@ -1,0 +1,8 @@
+{"pattern":"(a)(?:(?!.(?1))|.)+?b","flags":0,"subject":"aaab","operation":"search"}
+{"pattern":"(a)(?:(?=.(?1))x|.)+?b","flags":0,"subject":"aaab","operation":"search"}
+{"pattern":"(a)(?:(?<!(?1)).|.)+?b","flags":0,"subject":"aaab","operation":"search"}
+{"pattern":"(a)(?:(?<=(?1))x|.)+?b","flags":0,"subject":"aaab","operation":"search"}
+{"pattern":"(?<n>a)(?:(?!.(?&n))|.)+?b","flags":0,"subject":"aaab","operation":"search"}
+{"pattern":"(a)(?:(?!.(?1))|.)+?bc","flags":0,"subject":"aaab","operation":"search","partial":true}
+{"pattern":"(a)(?:(?!.(?:(?1)){e<=1})|.)+?b","flags":0,"subject":"aaxb","operation":"search"}
+{"pattern":"(a?)(?:(?(1)(?!(?1))b|.)){0,2}","flags":0,"subject":"aab","operation":"finditer"}

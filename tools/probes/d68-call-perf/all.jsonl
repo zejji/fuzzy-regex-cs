@@ -1,0 +1,11 @@
+{"pattern": "(?fi)(?:(?P<g1>(?P>g3)(?:(?:ab|ac))*)){e<=1}(?&g2)(?P<g2>(?(?<!(?P>g3))ss|(?P<g3>.*ff)))", "inline": "(?fi)(?:(?P<g1>(?:.*ff)(?:(?:ab|ac))*)){e<=1}(?:(?(?<!(?:.*ff))ss|(?:.*ff)))(?P<g2>(?(?<!(?:.*ff))ss|(?P<g3>.*ff)))", "subject": "\ufb00b\ufb00ft", "kinds": ["cond-call", "fuzzy-call", "nested-call"]}
+{"pattern": "(?fi)(?:(?P<g1>(?P>g2)(?(?<!(?P>g2))ff|a{1,2}))){i<=1}(?P<g2>(?:ff){1,2})", "inline": "(?fi)(?:(?P<g1>(?:(?:ff){1,2})(?(?<!(?:(?:ff){1,2}))ff|a{1,2}))){i<=1}(?P<g2>(?:ff){1,2})", "subject": "\ufb00S\ufb00\ufb00S", "kinds": ["cond-call", "fuzzy-call", "nested-call"]}
+{"pattern": "(?fi)(?:(?P<g1>(?&g2).)){e<=1}(?P>g2)(?P<g2>(?:ss|st))(?:.)*", "inline": "(?fi)(?:(?P<g1>(?:(?:ss|st)).)){e<=1}(?:(?:ss|st))(?P<g2>(?:ss|st))(?:.)*", "subject": "\ufb06x\ufb06ts", "kinds": ["fuzzy-call", "nested-call"]}
+{"pattern": "(?i)(?:(?P<g1>(?&g2))){e<=1}(?=(?P>g2)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>ss)", "inline": "(?i)(?:(?P<g1>(?:ss))){e<=1}(?=(?:ss)(?>(?:(?:ab|ac).*){d<=1}))(?P<g2>ss)", "subject": "s\u00dfs\ufb06bb", "kinds": ["fuzzy-call", "lookahead-call", "nested-call"]}
+{"pattern": "(?i)(?:(?P<g1>(?&g2)(?:SS){e<=1})){e<=1}(?P<g2>(?:ss|st))", "inline": "(?i)(?:(?P<g1>(?:(?:ss|st))(?:SS){e<=1})){e<=1}(?P<g2>(?:ss|st))", "subject": "\ufb06f\ufb00\u00dfxfx", "kinds": ["fuzzy-call", "nested-call"]}
+{"pattern": "(?fi)(?:(?P<g1>(?P>g2)(?<!(?P>g2)st))){s<=1}(?P<g2>(?:(?:a|b)){e<=1}(?:ss|st))", "inline": "(?fi)(?:(?P<g1>(?:(?:(?:a|b)){e<=1}(?:ss|st))(?<!(?:(?:(?:a|b)){e<=1}(?:ss|st))st))){s<=1}(?P<g2>(?:(?:a|b)){e<=1}(?:ss|st))", "subject": "f\ufb00sat\ufb00\ufb06", "kinds": ["fuzzy-call", "lookbehind-call", "nested-call"]}
+{"pattern":"(?fi)(?:(?&g2)){i<=1}(?P<g2>(?:ff){1,2})","inline":"(?fi)(?:(?:(?:ff){1,2})){i<=1}(?P<g2>(?:ff){1,2})","subject":"ﬀSﬀﬀS"}
+{"pattern":"(?fi)(?:(?&g2)){i<=1}(?P<g2>ff)","inline":"(?fi)(?:(?:ff)){i<=1}(?P<g2>ff)","subject":"ﬀSﬀﬀS"}
+{"pattern":"(?fi)(?:(?&g2)){i<=1}(?P<g2>ss)","inline":"(?fi)(?:(?:ss)){i<=1}(?P<g2>ss)","subject":"xyzxyzq"}
+{"pattern":"(?fi)(?:(?&g2)){i<=1}x(?P<g2>ss)","inline":"(?fi)(?:(?:ss)){i<=1}x(?P<g2>ss)","subject":"xyzxyzq"}
+{"pattern":"(?fi)(?:(?&g2)){s<=1}(?P<g2>ss)","inline":"(?fi)(?:(?:ss)){s<=1}(?P<g2>ss)","subject":"xyzxyzq"}

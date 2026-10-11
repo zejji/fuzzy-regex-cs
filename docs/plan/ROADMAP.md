@@ -520,7 +520,7 @@ before building the sample. Estimate 16-21 becomes 17-22.
 
 **S52d fixes ledger 24 on the owner's ruling (2026-09-15, Option B of
 `docs/plan/upstream-reports/ledger-24-briefing.md`).** A reversed match with `partial=True` runs
-out of text at the slice start and reports a partial there; `^`, `\A`, `` and lookbehind keep
+out of text at the slice start and reports a partial there; `^`, `\A`, `\b` and lookbehind keep
 Python `re`'s whole-string view of `pos`. Upstream holds both rules and picks one by optimisation
 path; the port inherited both. Amendment 16 outcome (c): fixed here at the nine partial run-out
 sites through one shared helper, proven over the wave with S52c's invariant checker, pinned

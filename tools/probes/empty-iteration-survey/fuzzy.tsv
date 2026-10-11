@@ -1,0 +1,10 @@
+# id	item (ERE form; the mrab form is (?:item){d<=N})	subject	N = max deletions	what it distinguishes
+f01	b+	bb	1	deleted extra iteration beyond the text (min 1)
+f02	ac+	a	2	(?:ac+) over a: the one required c must be deleted
+f03	b*	bb	2	min 0, text exhausted
+f04	b*	bba	2	min 0, a non-matching character follows
+f05	b{3}	b	2	deletions forced by the minimum
+f06	b{0,3}	b	2	optional iterations: may they be deleted?
+f07	(ab)+	ab	2	a whole deleted iteration costs 2
+f08	cats|cat	cat	1	README.rst:609, first branch with a deletion
+f09	(b|c)+	bb	1	empty iteration via deletion of a class-like item

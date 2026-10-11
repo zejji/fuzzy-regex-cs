@@ -1,0 +1,16 @@
+{"pattern":"(?<c>a)(?&c)b","flags":0,"subject":"aab","operation":"search"}
+{"pattern":"(?P<g1>a)(?1)","flags":0,"subject":"aa","operation":"fullmatch"}
+{"pattern":"\\((?<p>[^()]|(?R))*\\)","flags":0,"subject":"(a(b)c)","operation":"search"}
+{"pattern":"(?:(?<c>[ab])(?&c))+","flags":0,"subject":"abba","operation":"search"}
+{"pattern":"(?=(?<c>a)(?&c))","flags":0,"subject":"aa","operation":"search"}
+{"pattern":"(?<c>ab)(?:(?&c)){s<=1}","flags":0,"subject":"abxb","operation":"search"}
+{"pattern":"(?r)b(?&c)(?<c>a)","flags":0,"subject":"baa","operation":"search"}
+{"pattern":"(?<c>a)(?&c)b","flags":0,"subject":"aa","operation":"search","partial":true}
+{"pattern":"(?<c>a)(?&c)","flags":0,"subject":"aaaa","operation":"finditer"}
+{"pattern":"(?<o>x(?<i>y)?)(?&o)\\2","flags":0,"subject":"xyxyy","operation":"search"}
+{"pattern": "(?<o>(?<i>a)b)(?&o)", "flags": 0, "subject": "aba", "operation": "search", "partial": true}
+{"pattern": "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", "flags": 0, "subject": "cebcebc", "operation": "search", "partial": true}
+{"pattern": "a(?<g>b)(?R)?c", "flags": 0, "subject": "abab", "operation": "search", "partial": true}
+{"pattern": "^(?:(?&o)c|(?<o>(?<i>a)b))+$", "flags": 0, "subject": "ababa", "operation": "search", "partial": true}
+{"pattern": "(?r)(?&o)(?<o>b(?<i>a))", "flags": 0, "subject": "aba", "operation": "search", "partial": true}
+{"pattern": "(?<o>(?<i>a)(?&o)?b)", "flags": 0, "subject": "aaa", "operation": "search", "partial": true}

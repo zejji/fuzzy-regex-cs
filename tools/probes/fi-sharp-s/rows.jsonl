@@ -1,0 +1,5 @@
+{"pattern":"(?fi)(?:ßx){s<=1}","flags":0,"subject":"ax","operation":"search"}
+{"pattern":"(?fi)(?:ßx){d<=1}","flags":0,"subject":"x","operation":"search"}
+{"pattern":"(?rfi)(?:ßx){s<=1}","flags":0,"subject":"ax","operation":"search"}
+{"pattern":"(?bfi)(?:ßx){e<=2}","flags":0,"subject":"ax","operation":"search"}
+{"pattern":"(?fi)(?:ﬁx){s<=1}","flags":0,"subject":"ax","operation":"search"}

@@ -41,8 +41,15 @@ public sealed class TimeoutAndCancellationTests
     /// is false everywhere, and it keeps the exponential failure while giving no literal for any
     /// prefilter to key on. Deliberately not a literal or a character set: the rest of Phase 7
     /// (a start-code bitmap, a rarity gate) would defeat those in turn.
+    /// <para>
+    /// The <c>\1</c> was added on 2026-09-26, for a reason of the same kind. The failure memo
+    /// (<c>RepeatInfo.FailureMemo</c>) remembers where a repeat's body has already failed, which
+    /// makes <c>(a|a)*\b\B</c> fail in linear time. A pattern with a backreference gets no memo,
+    /// because what follows a repeat can then depend on the captures as well as the position, so
+    /// this one is still exponential.
+    /// </para>
     /// </remarks>
-    private const string _slowPattern = @"(a|a)*\b\B";
+    private const string _slowPattern = @"(a|a)*\1\b\B";
 
     /// <summary>A subject the pattern cannot match, long enough to make the search exponential.</summary>
     private static readonly string _slowSubject = new('a', 26);
@@ -317,8 +324,14 @@ public sealed class TimeoutAndCancellationTests
         // start time, so without a clock restart per step the caller's own work between two
         // matches would time the walk out. The built-in Regex times each match of a lazy walk
         // (tools/probes/bcl-lazy-walk-timeout.cs), and DIVERGENCES keeps this port there.
+        //
+        // Half a second, not 50 ms, since 2026-09-28: beside a CPU burner the 50 ms version failed
+        // one run in twenty, because a step that takes microseconds can still wait longer than
+        // 50 ms for the processor (D13). Each spin is 1.2 budgets, so one spin alone already
+        // exceeds the budget, and the four together are nearly five budgets of caller time that a
+        // walk charging them to itself could not survive.
         FuzzyRegex pattern = new(@"\w+");
-        TimeSpan budget = TimeSpan.FromMilliseconds(50);
+        TimeSpan budget = TimeSpan.FromMilliseconds(500);
         IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
             ? pattern.EnumerateMatches("a b c d", timeout: budget)
             : pattern.EnumerateSplits("a b c d", timeout: budget);
@@ -330,7 +343,7 @@ public sealed class TimeoutAndCancellationTests
             {
                 steps++;
                 long started = Stopwatch.GetTimestamp();
-                while (Stopwatch.GetElapsedTime(started) < budget * 3)
+                while (Stopwatch.GetElapsedTime(started) < budget * 1.2)
                 {
                     Thread.SpinWait(1_000);
                 }

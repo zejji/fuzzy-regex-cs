@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -53,8 +54,40 @@ internal sealed class GuardList
     /// <summary>Upstream <c>count</c>: how many of <see cref="_spans"/> are live.</summary>
     internal int Count;
 
+    /// <summary>
+    /// NOT UPSTREAM (D35), counted in Debug only: how many times the list has been guarded, reset
+    /// or popped, so <c>Matcher.CheckKeptGuards</c> can tell that nothing touched it in between.
+    /// </summary>
+    internal long Edits;
+
     /// <summary>Upstream <c>reset_guard_list</c> (<c>upstream/src/_regex.c</c> line 3363).</summary>
-    internal void Reset() => Count = 0;
+    internal void Reset()
+    {
+        NoteEdit();
+        Count = 0;
+    }
+
+    /// <summary>Counts one edit in <see cref="Edits"/>, in Debug only.</summary>
+    [Conditional("DEBUG")]
+    private void NoteEdit() => Edits++;
+
+    /// <summary>
+    /// NOT UPSTREAM (D35), for a Debug assertion: whether every live span blocks matching, that is,
+    /// the list records failures and no success mark.
+    /// </summary>
+    /// <returns><see langword="true"/> if no live span is unprotected.</returns>
+    internal bool HoldsFailuresOnly()
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            if (!_spans[i].Protect)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many.</summary>
     /// <param name="stack">The stack to push onto.</param>
@@ -74,6 +107,7 @@ internal sealed class GuardList
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopFrom(ByteStack stack)
     {
+        NoteEdit();
         if (!stack.PopSize(out long count))
         {
             return false;
@@ -164,6 +198,7 @@ internal sealed class GuardList
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
     internal void Guard(int textPos, bool protect)
     {
+        NoteEdit();
         GuardSpan[] spans = _spans;
         int count = Count;
         int below;
@@ -255,6 +290,7 @@ internal sealed class GuardList
     /// <returns>One past the highest position now guarded.</returns>
     internal int GuardRange(int loPos, int hiPos, bool protect)
     {
+        NoteEdit();
         GuardSpan[] spans = _spans;
         int count = Count;
 
@@ -355,4 +391,124 @@ internal sealed class RepeatData
 
     /// <summary>Upstream <c>capture_change</c>: the state's counter when this iteration started.</summary>
     internal long CaptureChange;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): how many fuzzy edits the path had made
+    /// (<c>MatchState.FuzzyChanges</c>) when this iteration started, so the end of the iteration
+    /// can tell whether it spent any. The list is exact along the path, because every backtrack over
+    /// an edit unrecords it, where upstream's <c>capture_change</c> also counts edits since undone.
+    /// The high 32 bits hold how many verbs had been crossed (<c>Matcher.IterationStart</c>).
+    /// </summary>
+    internal long ChangesAtStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the repeat memo, the states that iterations of the
+    /// current run of this repeat have already led to. See <c>Matcher.RepeatMemoHit</c>.
+    /// </summary>
+    /// <remarks>
+    /// A run is one entry into the repeat, with its fixed continuation. The memo is emptied on
+    /// entry and whenever an outer backtrack restores the repeat's saved state, since those entries
+    /// belong to a different run; emptying is always safe, it only drops pruning.
+    /// </remarks>
+    internal HashSet<RepeatMemoKey>? Memo;
+
+    /// <summary>Empties <see cref="Memo"/>, dropping a large one rather than clearing it.</summary>
+    internal void ClearMemo()
+    {
+        if (Memo is not { Count: > 0 })
+        {
+            return;
+        }
+
+        // Clear costs the table's capacity, so a memo that grew large once would tax every later
+        // entry into the repeat; a fresh one is allocated on demand instead.
+        if (Memo.Count > 4096)
+        {
+            Memo = null;
+        }
+        else
+        {
+            Memo.Clear();
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D17): which run of this repeat is under way, one entry into it with its fixed
+    /// continuation, so that the states one run records are never read by another. Numbered from
+    /// <c>MatchState.NextRunId</c>, and only when the pattern tests a group. See
+    /// <c>Matcher.RevisitsEmptyIterationState</c>.
+    /// </summary>
+    internal long RunId;
 }
+
+/// <summary>
+/// NOT UPSTREAM (D17): the state an empty iteration of a repeat led to, which is everything the rest
+/// of the match can depend on within one run of the repeat. See
+/// <c>Matcher.RevisitsEmptyIterationState</c>.
+/// </summary>
+/// <remarks>
+/// The values sit in an array because the number of tested groups is the pattern's. A lookup
+/// wraps the state's scratch array (<c>MatchState.EmptyIterationScratch</c>), so it allocates
+/// nothing; only a new state is stored, with a <see cref="Copy"/> of its values.
+/// </remarks>
+internal readonly struct EmptyIterationState : IEquatable<EmptyIterationState>
+{
+    private readonly long _runId;
+    private readonly long[] _values;
+    private readonly int _hash;
+
+    /// <summary>Wraps <paramref name="values"/> without copying them.</summary>
+    /// <param name="runId">The run of the repeat.</param>
+    /// <param name="values">The position, the count and the rest of the state, in a fixed order.</param>
+    internal EmptyIterationState(long runId, long[] values)
+    {
+        _runId = runId;
+        _values = values;
+
+        var hash = new HashCode();
+        hash.Add(runId);
+        foreach (long value in values)
+        {
+            hash.Add(value);
+        }
+
+        _hash = hash.ToHashCode();
+    }
+
+    /// <summary>The same state over its own copy of the values, for storing.</summary>
+    /// <returns>The copy.</returns>
+    internal EmptyIterationState Copy() => new(_runId, [.. _values]);
+
+    /// <inheritdoc/>
+    public bool Equals(EmptyIterationState other) =>
+        _hash == other._hash && _runId == other._runId && _values.AsSpan().SequenceEqual(other._values);
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is EmptyIterationState other && Equals(other);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => _hash;
+}
+
+/// <summary>
+/// NOT UPSTREAM (empty-iteration rule): the state after an iteration of a fuzzy repeat, which is
+/// everything the rest of the match can depend on within one run of the repeat. See
+/// <c>Matcher.RepeatMemoHit</c>.
+/// </summary>
+/// <param name="TextPos">The text position.</param>
+/// <param name="Count">The repeat count, clipped to the minimum when the repeat has no maximum.</param>
+/// <param name="Sub">The open section's substitutions.</param>
+/// <param name="Ins">The open section's insertions.</param>
+/// <param name="Del">The open section's deletions.</param>
+/// <param name="Group1">The span of the first tested group, packed, or 0.</param>
+/// <param name="Group2">The span of the second tested group, packed, or 0.</param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct RepeatMemoKey(
+    int TextPos,
+    long Count,
+    long Sub,
+    long Ins,
+    long Del,
+    long Group1,
+    long Group2
+);

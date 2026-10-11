@@ -160,34 +160,32 @@ public sealed class FuzzyRecursionTests
     {
         // A section whose only content is the recursion matches empty at ANY budget, so every one
         // of these blows up UPSTREAM - with a base case, without one, and for an error kind that
-        // cannot delete anything. Here they are all cut at the position the call re-enters:
+        // cannot delete anything:
         //   (?:(?R)){e<=1}       over 'ab'   -> MemoryError in 0.48s
         //   (?:a(?R)?b){e<=1}    over 'aabb' -> MemoryError in 0.87s
         //   a(?:(?0)){e<=1}b     over 'aabb' -> MemoryError in 0.96s
         //   (?:(?R)){s<=1}       over 'ab'   -> MemoryError in 0.48s
         //   (?=(?:(?R)){e<=1})a  over 'ab'   -> MemoryError in 0.69s
-        (string Pattern, string Subject)[] cases =
-        [
-            ("(?:(?R)){e<=1}", "ab"),
-            ("(?:a(?R)?b){e<=1}", "aabb"),
-            ("a(?:(?0)){e<=1}b", "aabb"),
-            ("(?:(?R)){s<=1}", "ab"),
-            ("(?=(?:(?R)){e<=1})a", "ab"),
-        ];
-
-        // What each one answers once the re-entry is refused, measured 2026-09-14 and reasoned
-        // about rather than merely recorded, because there is no upstream answer to check against:
         //
-        //   (?:(?R)){e<=1}       'ab'   -> None    the pattern's only content is a call to itself,
-        //   (?:(?R)){s<=1}       'ab'   -> None    so its language is empty however the budget is
-        //                                          spent - a section of one un-deletable item
+        // Three call themselves before any text, judged with no errors, so they are refused when
+        // compiled (D4, D72; LeftRecursionRefusalTests). Before that, the re-entry guard cut each
+        // at the re-entered position and answered None.
+        foreach (string refused in (string[])["(?:(?R)){e<=1}", "(?:(?R)){s<=1}", "(?=(?:(?R)){e<=1})a"])
+        {
+            Action compile = () => _ = new FuzzyRegex(refused, FuzzyRegexOptions.None, _budget);
+            compile.Should().Throw<FuzzyRegexParseException>(refused);
+        }
+
+        // The other two read text first, so they compile and the guard still cuts them. Measured
+        // 2026-09-14 and reasoned about rather than merely recorded, because there is no upstream
+        // answer to check against:
+        //
         //   a(?:(?0)){e<=1}b     'aabb' -> None    a REQUIRED recursion with no base case: every
         //                                          level demands another, so nothing terminates it
-        //   (?=(?:(?R)){e<=1})a  'ab'   -> None    the first row inside a lookahead, so the
-        //                                          lookahead cannot succeed either
         //   (?:a(?R)?b){e<=1}    'aabb' -> (0, 4)  the one with a base case, and it answers exactly
         //                                          what the same recursion without the section does
-        (int Index, int Length)?[] expected = [null, (0, 4), null, null, null];
+        (string Pattern, string Subject)[] cases = [("(?:a(?R)?b){e<=1}", "aabb"), ("a(?:(?0)){e<=1}b", "aabb")];
+        (int Index, int Length)?[] expected = [(0, 4), null];
 
         foreach (((string pattern, string subject), (int Index, int Length)? want) in cases.Zip(expected))
         {
@@ -270,12 +268,23 @@ public sealed class FuzzyRecursionTests
         // infinite budget would turn "the bound stopped being reachable" from a red test into a
         // hung suite. Five minutes is about five times the slowest throw ever measured here, and it
         // still fails LOUDLY if the bound goes away.
+        // The empty-iteration rule (2026-09-26) answers that row at once now: its lazy repeat's empty
+        // iterations no longer count the fuzzy section's undone edits as progress, and it finds
+        // (0, 2) with one deletion. So the bound is reached by depth instead: a capturing repeat
+        // pushes a frame per iteration, and 20 million iterations pass the 1 GB limit (ledger entry
+        // 18 measured 6 million as just under it). 4.8 s to throw, measured 2026-09-26.
+        Match row = new FuzzyRegex(@"(?P<g1>\p{L}*)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _budget).Match("bb.a\r.");
+        row.Success.Should().BeTrue();
+        (row.Index, row.Length, row.FuzzyCounts.Deletions).Should().Be((0, 2, 1));
+
         Action blows = static () =>
-            new FuzzyRegex(@"(?P<g1>\p{L}*)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _blowupBudget).Match("bb.a\r.");
+            new FuzzyRegex("(ab)*", FuzzyRegexOptions.None, _blowupBudget).FullMatch(
+                string.Concat(Enumerable.Repeat("ab", 20_000_000))
+            );
 
         blows
             .Should()
-            .Throw<InvalidOperationException>("a fuzzy section under a lazy repeat of an empty-matching body")
+            .Throw<InvalidOperationException>("twenty million iterations of a capturing repeat")
             .WithMessage("*backtracking stack exceeded its 1GB limit*");
 
         // The control the record-oracle note carries: make the body consume and the same row

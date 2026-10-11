@@ -1,7 +1,7 @@
 {
   "comment": "GENERATED FILE - do not edit by hand. Written by tools/record-compile-corpus.py from a run of upstream's own test suite with regex._regex.compile intercepted. Regenerate: python tools/record-compile-corpus.py",
-  "regexVersion": "2026.7.19",
-  "upstreamCommit": "1760a20647f1c2ddcc025128407fe6f7edb905a1",
+  "regexVersion": "2026.9.10",
+  "upstreamCommit": "7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33",
   "defaultVersion": 8192,
   "compiles": [
     {"pattern": "", "flags": 0, "namedLists": {}, "resolvedFlags": 8224, "code": [1], "groupIndex": {}, "compiledNamedLists": {}, "namedListIndexes": [], "reqOffset": 0, "reqChars": [], "reqFlags": 0, "groupCount": 0},

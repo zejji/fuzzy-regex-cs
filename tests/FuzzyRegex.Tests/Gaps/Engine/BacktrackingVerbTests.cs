@@ -126,14 +126,17 @@ public sealed class BacktrackingVerbTests
             .Should()
             .Equal((0, 4), (1, 3), (2, 2), (3, 1));
 
+        // DIVERGES FROM UPSTREAM, deliberately (ledger entry 47). Upstream's
         // [m.span() for m in regex.finditer(r'(?>abc(*SKIP)d)|abc', 'ABCABC', regex.I)] is
-        // [(0, 3), (3, 6)]: the SKIP is never reached, because 'd' fails inside the atomic group,
-        // and the fallback branch matches at both positions.
+        // [(0, 3), (3, 6)]: 'd' fails inside the atomic group, backtracking reaches the SKIP, and
+        // upstream fails only the group, so the fallback branch matches at both positions. The
+        // group has not finished, so here the SKIP ends the attempt and the next one starts at 3,
+        // where the same happens: no match, as PCRE2 10.47 and Perl 5.42.3 answer to
+        // (?i)(?>abc(*SKIP)d)|abc over 'ABCABC' (2026-09-26).
         new FuzzyRegex("(?>abc(*SKIP)d)|abc", FuzzyRegexOptions.IgnoreCase)
             .Matches("ABCABC")
-            .Select(static m => (m.Index, m.Length))
             .Should()
-            .Equal((0, 3), (3, 3));
+            .BeEmpty();
 
         // And reversed: regex.search(r'(?r)(?>[a-z]+(*SKIP))abc', 'abcabc', regex.I) spans (0, 6).
         // Under (?r) the verb moves slice_end rather than slice_start (:14553).
@@ -449,6 +452,52 @@ public sealed class BacktrackingVerbTests
         scan.Select(static m => m.Groups["g1"].Index + m.Groups["g1"].Length <= m.Index + m.Length)
             .Should()
             .AllSatisfy(static inside => inside.Should().BeTrue());
+    }
+
+    // DIVERGES FROM UPSTREAM, which has no single answer here to diverge from.
+    [Test]
+    public void An_overlapped_scan_where_upstream_reads_an_uninitialised_position_answers_its_own_stepwise_walk()
+    {
+        // The 2026-09-24 CI failure, and ledger entry 5 at its most severe. When a (*SKIP) has moved
+        // the slice and a later search inherits the move, upstream's `search_start` returns success
+        // from its tail (`_regex.c:9199`) without writing `new_position`, which `basic_match` declares
+        // uninitialised (`:11820`); `:11835` copies the garbage into `state->text_pos`. So upstream's
+        // answer is whatever that stack slot held: measured 2026-09-24/25 on regex 2026.9.10, gcc -O1
+        // and above crash (a read 4 GB past the subject), gcc -O0 and MSVC answer, and the answers
+        // differ between builds. MemorySanitizer names both lines; tools/screen-undefined.py records
+        // every such wave row as `undefined` (tools/msan/known-undefined.json).
+        //
+        // What upstream CAN answer cleanly is its own stepwise walk - `match` anchored at each start,
+        // run under Valgrind with 0 errors - and that is this port's overlapped answer on all three.
+        //
+        // ONE: the minimised row. Upstream's walk, anchored at each end: (4, 8) (4, 7) (4, 6) (2, 4)
+        // (1, 3) (0, 2); its overlapped scan crashed 20 of 20 times on one Linux build and answered
+        // five or six spans on others.
+        new FuzzyRegex(@"(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\d]")
+            .Matches("bba\naAA\r", overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((4, 8), (4, 7), (4, 6), (2, 4), (1, 3), (0, 2));
+
+        // TWO: the CI row itself, seed 335764881 row 40857, with its astral subject. Upstream's walk
+        // in codepoints is (4, 6) (2, 4) (1, 3) (0, 2); Windows' scan answers (1, 2) for the last one,
+        // which is the uninitialised read. In UTF-16 each U+10400 is two units, so (0, 2) is (0, 4).
+        string deseret = char.ConvertFromUtf32(0x10400);
+        new FuzzyRegex(@"(?r)(?:[a]*+(*SKIP)" + deseret + @"|a)(?>.*?(*SKIP)[^\d])", FuzzyRegexOptions.Multiline)
+            .Matches(deseret + deseret + "a\naAA\r", overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((6, 8), (4, 6), (2, 5), (0, 4));
+
+        // THREE: forwards, which the reversed-only shapes above could suggest is safe. Seed 335764881
+        // row 39247; MSan flags it for the same `new_position`. Upstream's walk in codepoints is
+        // (0, 3) (1, 4) (2, 5) (3, 6) (4, 7) (5, 7) (6, 7); its Windows scan answered (1, 4) then
+        // (2, 4) (3, 4) (4, 7) (5, 7) (6, 7) and its MSan build (1, 5) (2, 7) (3, 7) (4, 7).
+        new FuzzyRegex(@"(?:\S(*SKIP)){1,3}")
+            .Matches("ßAAß" + deseret + "a" + deseret, overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 3), (1, 4), (2, 6), (3, 7), (4, 9), (6, 9), (7, 9));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
@@ -1137,5 +1186,201 @@ public sealed class BacktrackingVerbTests
 
         pruned.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
         pruned[1].FuzzyChanges.Substitutions.Should().Equal(5);
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately (ledger entry 45). A verb acts when backtracking reaches
+    // it, not when it runs: pcre2pattern, "Verbs that act after backtracking", and "More than one
+    // backtracking verb": "the one that is backtracked onto first acts". A (*PRUNE) that runs after
+    // a (*SKIP) is backtracked onto first, so the next attempt starts one character on and the
+    // (*SKIP) never acts. Upstream moves the slice start the moment (*SKIP) runs (_regex.c:14544)
+    // and answers None on every row. PCRE2 10.47 (NO_START_OPTIMIZE) and Perl 5.42.3 give the
+    // spans below; tools/probes/skip-then-prune-perl-pcre2.py, measured 2026-09-26.
+    [Test]
+    [Arguments(@"aa(*SKIP)x(*PRUNE)y|a", "aaxz", 1, 1)]
+    [Arguments(@"aa(*SKIP)b(*PRUNE)(*F)|a", "aab", 1, 1)]
+    [Arguments(@"(?:aa(*SKIP)b(*PRUNE)(*F)b|a)?a", "aaaab", 3, 1)]
+    [Arguments(@"aa(*SKIP)(*PRUNE)x|a", "aaz", 1, 1)]
+    [Arguments(@"(aa(*SKIP)x)(*PRUNE)y|a", "aaxz", 1, 1)]
+    [Arguments(@"(?:aa(*SKIP)x(*PRUNE)y|a)+", "aaxzaa", 1, 1)]
+    public void A_prune_reached_after_a_skip_decides_the_next_start(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+    }
+
+    [Test]
+    [Arguments(@"aa(*SKIP)x|a", "aab")]
+    [Arguments(@"(?:aa(*SKIP)x|a)b", "aab")]
+    [Arguments(@"(?r)x(*SKIP)aa|a", "baa")]
+    public void A_skip_that_backtracking_reaches_starts_the_next_attempt_where_it_was_reached(
+        string pattern,
+        string subject
+    )
+    {
+        // Moving the verb's effect to the backtrack arm must not lose it. At 0, 'aa' reaches the
+        // (*SKIP) at 2 and 'x' fails, so the next attempt starts at 2 and position 1, where 'a'
+        // would match, is never tried. PCRE2 10.47 and Perl 5.42.3 answer None to the two forward
+        // rows; the third is their mirror image under (?r). Upstream answers None to all three.
+        new FuzzyRegex(pattern)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+    }
+
+    [Test]
+    public void A_skip_that_backtracking_reaches_is_not_undercut_by_the_required_string()
+    {
+        // Ledger entry 1's row: PCRE2 10.47 gives (2, 6) with and without NO_START_OPTIMIZE.
+        Match m = new FuzzyRegex(@"..(*SKIP)xx").Match("cd xxx");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 4));
+    }
+
+    [Test]
+    public void A_skip_that_backtracking_never_reaches_does_not_move_the_next_start()
+    {
+        // The (*SKIP) sits in an atomic group that finished, so nothing backtracks onto it and the
+        // failure of 'x' bumps along by one: pcre2pattern, "its effect is confined to that group".
+        // PCRE2 10.47 and Perl 5.42.3 give (1, 4); upstream gives None, because the slice start
+        // moved to 2 when the verb ran.
+        Match m = new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 3));
+    }
+
+    [Test]
+    public void A_reversed_prune_reached_after_a_skip_decides_the_next_start()
+    {
+        // The mirror of 'aa(*SKIP)x(*PRUNE)y|a' over 'aaxz', which PCRE2 and Perl answer (1, 2).
+        // Searching backwards from 4, 'aa' takes 2-4, the (*SKIP) is at 2 and the (*PRUNE) at 1,
+        // 'y' fails against 'z', and backtracking reaches the (*PRUNE) first: the next start is 3,
+        // where the second branch takes (2, 3). Upstream moves the slice end to 2 and answers None.
+        Match m = new FuzzyRegex(@"(?r)y(*PRUNE)x(*SKIP)aa|a").Match("zxaa");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 1));
+    }
+
+    [Test]
+    public void A_fuzzy_prune_reached_after_a_skip_decides_the_next_start()
+    {
+        // The row ledger entry 44's review raised. Spelt without fuzzy matching (the probe's part
+        // 1), PCRE2 10.47 and Perl 5.42.3 both give (2, 3). A guard rather than a red test here:
+        // until entry 44 refuses the empty deleting iteration this row reaches (2, 3) that way too.
+        Match m = new FuzzyRegex(@"(?:(?:(*SKIP)a*(*PRUNE)){1<=s<=1,d<=2})*?b").Match("aab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 1));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately (D77). After a failed attempt, upstream skips the next
+    // start past the whole run its leading single-character repeat could match (_regex.c:15705-15723).
+    // For a LAZY repeat followed by (*PRUNE) or (*SKIP), the verb cut the attempt before the repeat
+    // tried the longer lengths, so the starts inside the run were never covered. pcre2pattern,
+    // "Backtracking control": (*PRUNE) bumps along, and a (*SKIP) at the attempt's own start is an
+    // ordinary bump-along. Upstream answers each row below as its 'x?'-prefixed spelling does (no
+    // leading repeat, no skip), and PCRE2 10.47 (pip pcre2 0.7.1) agrees; the plain spellings get
+    // None or the wrong span from upstream (.scratch probe, 2026-10-10). Perl 5.42.3 agrees on every
+    // row except the two leading '.*?' ones, which it implicitly anchors.
+    [Test]
+    [Arguments(@".*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@".*?(*SKIP)b", "ab", 1, 1)]
+    [Arguments(@"(?s).*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@".{0,3}?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@"[^x]*?(*PRUNE)b", "ab", 1, 1)]
+    [Arguments(@"a*?(*PRUNE)(?:b|$)", "aab", 2, 1)]
+    [Arguments(@"a*?(*SKIP)(?:b|$)", "aab", 2, 1)]
+    [Arguments(@"\w*?(*PRUNE)(?:b|$)", "ab", 1, 1)]
+    [Arguments(@"(?r)b(*PRUNE).*?", "ba", 0, 1)]
+    [Arguments(@"(?r)(?:b|c)(*PRUNE)a*?", "baa", 0, 1)]
+    public void A_verb_after_a_lazy_leading_repeat_does_not_skip_the_starts_the_repeat_never_reached(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, index, length));
+    }
+
+    [Test]
+    public void A_partial_search_with_a_verb_after_a_lazy_leading_repeat_finds_the_complete_match()
+    {
+        // Upstream: regex.search(r'x?.*?(*PRUNE)b', 'ab', partial=True) is (1, 2), complete. The
+        // plain spelling gives (0, 2) partial, because the skip left the complete match unreached.
+        Match m = new FuzzyRegex(@".*?(*PRUNE)b").Match("ab", partial: true);
+
+        (m.Success, m.Index, m.Length, m.PartialMatch).Should().Be((true, 1, 1, false));
+    }
+
+    [Test]
+    public void A_fuzzy_search_with_a_verb_after_a_lazy_leading_repeat_finds_the_later_start()
+    {
+        // Upstream: regex.search(r'x?.*?(*PRUNE)(?:bc){e<=1}', 'abd') is (1, 3) with fuzzy_counts
+        // (1, 0, 0); the plain spelling gives None.
+        Match m = new FuzzyRegex(@".*?(*PRUNE)(?:bc){e<=1}").Match("abd");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void A_scan_with_a_verb_after_a_lazy_leading_repeat_finds_the_later_start()
+    {
+        // Upstream: regex.findall(r'x?.*?(*PRUNE)b', 'ab') is ['b']; the plain spelling gives [].
+        new FuzzyRegex(@".*?(*PRUNE)b")
+            .Matches("ab")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("b");
+    }
+
+    // Controls for D77: the rows the fix must leave as upstream answers them (same probe). A greedy
+    // leading repeat tries the longest run first, so a verb it reaches cuts only lengths it has
+    // already tried; every start inside the run would reach the same verb at the same place. So
+    // '.*(*PRUNE)b' over 'ab' is None in upstream and PCRE2 10.47 alike: at 0 the '.*' takes 'ab',
+    // the (*PRUNE) runs at 2 and 'b' fails there, and a start at 1 would do just the same.
+    [Test]
+    [Arguments(@".*?b", "ab", true, 0, 2)]
+    [Arguments(@".*(*PRUNE)b", "ab", false, 0, 0)]
+    [Arguments(@"a*(*PRUNE)(?:b|$)", "aab", true, 0, 3)]
+    [Arguments(@".*?(*PRUNE)b", "a\nb", true, 2, 1)]
+    [Arguments(@".{0,2}?(*PRUNE)b", "ab", true, 1, 1)]
+    public void A_leading_repeat_that_needs_no_D77_guard_answers_as_upstream(
+        string pattern,
+        string subject,
+        bool success,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((success, index, length));
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_lazy_leading_repeat_without_a_verb_keeps_the_skip_past_its_run()
+    {
+        EngineWork.SkipUnlessCounting();
+
+        // The D77 guard withholds the skip only when the pattern has a verb. Without the skip, each
+        // of the 2000 starts walks the rest of the line, about two million steps.
+        var regex = new FuzzyRegex(".*?[xy]", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new('a', 2_000);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.IsMatch(subject).Should().BeFalse(),
+            20_000,
+            "a failed attempt skips past the run the leading lazy repeat could match"
+        );
     }
 }

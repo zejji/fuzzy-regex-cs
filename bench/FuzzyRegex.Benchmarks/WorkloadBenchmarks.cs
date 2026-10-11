@@ -66,6 +66,79 @@ public class WorkloadBenchmarks
     /// </summary>
     private static readonly FuzzyRegex _best = new("(?b)(?:haystack){e<=3}");
 
+    /// <summary>
+    /// The pathological group: failing searches that backtrack heavily. The first two are
+    /// exponential in upstream and were here until the failure memo (<c>RepeatInfo.FailureMemo</c>,
+    /// 2026-09-26); the other two are polynomial, a nested repeat and a repeat of a word and an
+    /// optional space. Each subject ends in a <c>c</c> or an <c>!</c> the pattern cannot pass, and
+    /// holds every literal the pattern needs, so the required-string screen cannot answer first.
+    /// The lengths keep one call on upstream regex 2026.9.10 under 160 ms (measured 2026-09-26:
+    /// 156, 35, 13 and 68 ms, best of five).
+    /// </summary>
+    private static readonly FuzzyRegex _sameBranches = new("(?:a|a)+c");
+
+    /// <summary>Overlapping branches of different lengths; see <see cref="_sameBranches"/>.</summary>
+    private static readonly FuzzyRegex _prefixBranches = new("(a|aa)+c");
+
+    /// <summary>A repeat of a repeat; see <see cref="_sameBranches"/>.</summary>
+    private static readonly FuzzyRegex _nestedRepeat = new("(a+)+c");
+
+    /// <summary>Words with optional spaces between them, anchored at the end.</summary>
+    private static readonly FuzzyRegex _wordsToEnd = new(@"(\w+\s?)+$");
+
+    /// <summary>
+    /// D17: a repeat whose body tests a group, failing, with no empty iteration, so the state
+    /// record is never consulted. The subject ends in <c>d</c>, which the pattern cannot pass.
+    /// </summary>
+    private static readonly FuzzyRegex _testedGroupRepeat = new(@"(a)(?:\1|b)*c");
+
+    /// <summary>
+    /// D17: an empty iteration that sets a tested group at every position, so every iteration of
+    /// the run is looked up in the state record and the failing search records one state each.
+    /// </summary>
+    private static readonly FuzzyRegex _emptyIterationRecord = new(@"^(?:(?=(a))|a)*\1?$");
+
+    /// <summary>
+    /// D35: a conditional beside a plain alternative in a repeat, failing at the start. Before D35
+    /// each conditional's restore deleted the guards the repeat had recorded after the test, so
+    /// the plain alternative explored the same failing rest again, 2^n; upstream regex 2026.9.10
+    /// is exponential here too (89 ms at eighteen <c>a</c>s, measured 2026-09-29).
+    /// </summary>
+    private static readonly FuzzyRegex _conditionalBesideBranch = new("(?:(?(?=a)a|a)|a)*b");
+
+    /// <summary>
+    /// D35: one conditional per word or space, in a repeat that keeps its guards, failing at every
+    /// start but the end, where it matches nothing. The arms are disjoint, so nothing is explored
+    /// twice; what this measures is the save and restore each conditional costs. Upstream regex
+    /// 2026.9.10 takes 131 ms over <see cref="_wordsThenBang"/>, and 119 ms for
+    /// <see cref="_conditionalPerTokenNoMemo"/> (measured 2026-09-29).
+    /// </summary>
+    private static readonly FuzzyRegex _conditionalPerToken = new(@"(?:(?(?=\w)\w+|\s))*$");
+
+    /// <summary>
+    /// The same with a backreference, which switches the failure memo off, so every repeat keeps
+    /// upstream's full save: the path D35 must leave as it was.
+    /// </summary>
+    private static readonly FuzzyRegex _conditionalPerTokenNoMemo = new(@"(\w)(?:(?(?=\w)\w+|\s))*\1$");
+
+    /// <summary>Sixteen <c>a</c>s and <c>cb</c>.</summary>
+    private static readonly string _sixteenAsCb = new string('a', 16) + "cb";
+
+    /// <summary><c>a</c>, then two hundred <c>ab</c>s, then <c>d</c>.</summary>
+    private static readonly string _abRunThenD = "a" + string.Concat(Enumerable.Repeat("ab", 200)) + "d";
+
+    /// <summary>Twenty <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twentyAs = new string('a', 20) + "bc";
+
+    /// <summary>Twenty-four <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twentyFourAs = new string('a', 24) + "bc";
+
+    /// <summary>Two hundred <c>a</c>s and <c>bc</c>.</summary>
+    private static readonly string _twoHundredAs = new string('a', 200) + "bc";
+
+    /// <summary>Two hundred four-letter words, each followed by a space, then <c>!</c>.</summary>
+    private static readonly string _wordsThenBang = string.Concat(Enumerable.Repeat("aaaa ", 200)) + "!";
+
     /// <summary>Full scan of a megabyte for a literal that occurs once, at the end.</summary>
     /// <returns>Where it was found.</returns>
     [Benchmark]
@@ -196,6 +269,51 @@ public class WorkloadBenchmarks
     /// <returns>How many errors the answer carries, which is 1 rather than 3.</returns>
     [Benchmark]
     public int BestMatch() => _best.Match(Corpus.Fuzzy).FuzzyCounts.Total;
+
+    /// <summary><c>(?:a|a)+c</c> failing over twenty <c>a</c>s: two identical ways to take each one.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalSameBranches() => _sameBranches.IsMatch(_twentyAs);
+
+    /// <summary><c>(a|aa)+c</c> failing over twenty-four <c>a</c>s: every split of the run into ones and twos.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalPrefixBranches() => _prefixBranches.IsMatch(_twentyFourAs);
+
+    /// <summary><c>(a+)+c</c> failing over two hundred <c>a</c>s.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalNestedRepeat() => _nestedRepeat.IsMatch(_twoHundredAs);
+
+    /// <summary><c>(\w+\s?)+$</c> failing over two hundred words and a <c>!</c>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool PathologicalWordsToEnd() => _wordsToEnd.IsMatch(_wordsThenBang);
+
+    /// <summary><c>(a)(?:\1|b)*c</c> failing over <see cref="_abRunThenD"/>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool TestedGroupRepeat() => _testedGroupRepeat.IsMatch(_abRunThenD);
+
+    /// <summary><c>^(?:(?=(a))|a)*\1?$</c> failing over two hundred <c>a</c>s and <c>bc</c>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool EmptyIterationRecord() => _emptyIterationRecord.IsMatch(_twoHundredAs);
+
+    /// <summary><c>(?:(?(?=a)a|a)|a)*b</c> failing at the start of sixteen <c>a</c>s and <c>cb</c>.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool ConditionalBesideBranch() => _conditionalBesideBranch.IsMatchAtStart(_sixteenAsCb);
+
+    /// <summary><c>(?:(?(?=\w)\w+|\s))*$</c> over two hundred words and a <c>!</c>.</summary>
+    /// <returns>Whether it matched, which it does, empty, at the end.</returns>
+    [Benchmark]
+    public bool ConditionalPerToken() => _conditionalPerToken.IsMatch(_wordsThenBang);
+
+    /// <summary><c>(\w)(?:(?(?=\w)\w+|\s))*\1$</c> failing over the same subject.</summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool ConditionalPerTokenNoMemo() => _conditionalPerTokenNoMemo.IsMatch(_wordsThenBang);
 
     /// <summary>Compiles a large pattern from source, which is parser and compiler work only.</summary>
     /// <returns>How many capture groups it has, so the result cannot be discarded.</returns>

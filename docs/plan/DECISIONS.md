@@ -483,7 +483,7 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-15 (S52, sitting 13): **the first seed sweep is RED at all eight seeds with 37 diverging rows, so S52 as written can never close and the owner is asked to SPLIT it.** `pwsh -File tools/sweep-seeds.ps1 -SeedCount 8 -Count 2000 -MasterSeed 20260915`, 336,000 rows: interactions 21, verbs 5, fuzzy 4, partial 4, partial-sliced 2, conditionals 1, tallies in `TestResults/oracle/sweep.jsonl` and a kept wave per seed under `sweep-<seed>/`. The slice's done-criterion is that no divergence is left unjudged and a sweep at fresh seeds is precisely the instrument for producing new ones, so the criterion and the deliverable fight each other. Recommended: close S52 on the hardening tooling and generators, and give the sweep's triage its own slice. The same measurement says `oracle.yml`'s weekly six-seed cron will be red every Thursday with something like 28 unjudged rows - 4.6 a seed measured over eight, times the job's six - none judgeable inside a week - a weekly red nobody can clear stops being read, so that job needs a verdict rule that tells "a new seed drew a known family" from "a new seed drew something nobody has seen".
 - 2026-09-15 (S52, sitting 13): **a judgement measured only from `.scratch/` is not evidence, and the cost of learning that is a whole sitting.** Sitting 11 judged three gate rows from scratch scripts it never committed and was killed before it committed anything; sitting 13 had to re-derive every cell before it could keep any of them. The measurements all reproduced, so the finding is about the workflow rather than the rows: the controls are now `tools/probes/upstream-gate-drawn-skip-rows.py` with its rows in `gate-drawn-skip-rows.jsonl` beside it, and `port-gate-drawn-skip-rows.ps1` for the port half, all cited from the two entries and the ledger. A rows file rather than the wave, so the probe needs no ten-minute gate run and a later run cannot overwrite its input.
 - 2026-09-15 (S52, sitting 13): **an entry that says "re-recordable in full" from a rows file has to keep that file in step with the entry, and `bestmatch-walk-truncated-by-a-skip` had stopped.** Sitting 11 grew it from five rows to seven and left `tools/probes/bestmatch-walk-truncated-rows.jsonl` at six, so following the entry's own instruction would have re-recorded five of seven and found nothing wrong. The two drawn rows now sit at positions 6 and 7 so the file's order IS the entry's order, and the whole file replays `agree 1, expected 7, diverge 0 of 8` - which is the stronger check of the two new rows, because it re-records their upstream answers instead of reading the `Example` copy.
-- 2026-09-15 **Ledger 24 ruled: a reversed partial runs out of text at the slice start (owner, Option B of `docs/plan/upstream-reports/ledger-24-briefing.md`); S52d authored.** Grounds, in order of weight: a partial means the pattern needs characters and the matchable text has run out, and a reversed match cannot consume text before `pos` (measured on 2026.9.10); upstream's own comment, optimiser and reversed string helpers already say the slice edge is the edge, and its changelog repaired partial reporting seven times without ever treating a lost partial as intended; the greedy/lazy and minimum-width invariants hold only this way; symmetry with the forward `endpos`; Boost.Regex, .NET's substring overload and PCRE2 all treat a caller-imposed bound as the end of the text. `^`, `\A`, `` and lookbehind are untouched. Outcome (c), fixed here, not filed. S52d runs after S52c so the invariant checker proves it over the wave.
+- 2026-09-15 **Ledger 24 ruled: a reversed partial runs out of text at the slice start (owner, Option B of `docs/plan/upstream-reports/ledger-24-briefing.md`); S52d authored.** Grounds, in order of weight: a partial means the pattern needs characters and the matchable text has run out, and a reversed match cannot consume text before `pos` (measured on 2026.9.10); upstream's own comment, optimiser and reversed string helpers already say the slice edge is the edge, and its changelog repaired partial reporting seven times without ever treating a lost partial as intended; the greedy/lazy and minimum-width invariants hold only this way; symmetry with the forward `endpos`; Boost.Regex, .NET's substring overload and PCRE2 all treat a caller-imposed bound as the end of the text. `^`, `\A`, `\b` and lookbehind are untouched. Outcome (c), fixed here, not filed. S52d runs after S52c so the invariant checker proves it over the wave.
 
 - 2026-09-15 (S52, sitting 14): **a recorded `timeout` is comparable ONLY where the row carries its own budget, and the licence is a measured margin rather than the deadline's existence.** The blanket ten seconds S40a added is a fact about the recording machine - a row needing eleven and a row needing nine record differently on two runs - which is why the consumer skips those and must go on skipping them. A row from the new `timeout` generator carries a `timeout` field instead, drawn from ten shapes measured still running after TWENTY TIMES that budget on both engines (80 of 80 shape-by-operation cells each, 160 of 160 across the two), and on those rows "the call raised rather than running past its budget" is a property of the engine. `OracleRow.Timeout` is the whole discriminator: present, the row is compared and a `RegexMatchTimeoutException` raised while matching is the agreement; absent, the old skip stands. A port that ANSWERS one is a divergence on purpose - Phase 7 optimisation reddening a row here is the signal to redraw the family, not to soften the rule.
 - 2026-09-15 (S52, sitting 14): **upstream is not vulnerable to the textbook catastrophic patterns, and a timeout generator built from them would have tested nothing.** Measured on regex 2026.9.10: `(a+)+$`, `(a*)*$`, `(.*,)*z`, `(a+)+\1$` and `(?=(a+)+$)a` all answer in milliseconds at every length tried, because a nested repeat over a single-character body collapses. What blows up is an AMBIGUOUS ALTERNATION under a repeat, and the ambiguity must survive compilation - `(?:ab|a)+$` and `(?:[ab]|a)+$` are fast, and so are `(?i)(a|A)+$` and the reversed `(?r)(a|a)+^`, so the generator draws no flags at all. The nine rejected shapes live in `tools/probes/timeout-row-margin.py` as runnable data rather than as prose, and the probe exits 1 if one of them ever becomes catastrophic.
@@ -1316,3 +1316,349 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-24 (S60b): the three `long-alternation` rows (seed 4242 row 1441, seed 20260924 rows
   377 and 1065) are `search-start-partial` rows 28 to 30, judged by the reachability grid and the
   `(*PRUNE)` door, and `long-alternation` is on `run-oracle.ps1`'s default list.
+- 2026-09-23 (S89): a BESTMATCH row that needs upstream's doubled insertion guard (ledger 12) AND a
+  fold defect (ledger 29 or 30) is pinned by an ablation arm on the fold entry that sets both
+  flags; a row that needs ledger 12 alone is added as a judged row to `bestmatch-loses-a-candidate`,
+  per the owner's 2026-09-14 ruling. No new BESTMATCH/ENHANCEMATCH generator: the five `fuzzy-*`
+  generators already put `(?b)` and `(?e)` on about 30% of their rows each. `fuzzy-overhang` joins
+  the default wave.
+- 2026-09-24 (S86): `TryMatch` has a `SUCCESS` arm (`_regex.c:7828`) that fails under a full match
+  short of the slice end, with the SUCCESS opcode's own bounds rather than upstream's `text_start`.
+  Entering the SUCCESS node and failing there gives the same answer, but a repeat parks a 57-byte
+  `MATCH_TAIL` record each time round first. S60b's rewrite of `TryMatch` sends SUCCESS to the
+  default arm; whichever merges second keeps this arm, or ledger 18 returns and
+  `RepeatTests.A_full_match_of_a_repeat_leaves_upstreams_bytes_on_the_backtrack_stack` goes red.
+- 2026-09-24 (S86): byte-stack records use upstream's field widths: `RE_CODE` is 4 bytes
+  (`ByteStack.PushCode`), and the group record is 32 bytes. The width is behaviour here, because the
+  1GB bound turns bytes per repetition into the longest subject a repeat can match.
+- 2026-09-24 (S86): OPEN, for the owner. O(1) backtracking state per repetition for a repeat body
+  with no alternative (`(ab)*`), which stdlib `re` manages and upstream does not. Now at parity:
+  82 B a repetition for `(ab)*` and 46 for `(?:ab)*`, so `fullmatch` tops out between 6,000,000 and
+  10,000,000 repetitions, as upstream's does; stdlib `re` still matches at 10,000,000. It would be a
+  deliberate divergence from upstream in memory, not in answers. No code until the owner decides.
+- 2026-09-24 (S90): when no single oracle entry claims a row, try composing two port-right
+  divergences before calling it new. S90's three partial rows were a fold repair (ledger 28, 29 or
+  30) plus ledger 11 mechanism B. The entry `full-fold-fix-behind-an-innermost-count` runs each
+  fold ablation and hands the result to `UpstreamCountedOnlyTheInnermostSection`, not to exact
+  agreement. Mechanism B needs no folding: `(?:x(?:ab){s<=1}){s<=1}` over 'yc', partial.
+- 2026-09-24 (owner): a clear optimisation beyond upstream, in speed or memory, is always taken and
+  is never parked as a question for the owner. Answers must still match upstream (oracle green).
+  Optimisation continues until realistic candidates run out: it stops only at diminishing returns,
+  or where a change would make the code much harder to maintain, and that call is recorded in
+  `docs/plan/OPTIMISATION-NOTES.md`. S86's open question is answered yes: O(1) backtracking state per
+  repetition for a repeat body with no alternative, as stdlib `re` manages.
+- 2026-09-25 (owner-approved plan): an upstream crash no longer loses a wave, and a known upstream
+  defect is re-checked, never remembered. The recorder supervises a worker process and records a
+  crashing row as `crashed`. Rows whose verdict rests on upstream's answer are screened under
+  MemorySanitizer (tools/screen-undefined.py), and rows reading uninitialised memory are
+  `undefined` when tools/msan/known-undefined.json names the origin, `fault` (red) when it does not.
+  That registry is pinned to an upstream commit and refuses to attribute anything after the pin
+  moves until `--reverify` passes. Every ExpectedDivergences example and every row in
+  docs/plan/upstream-reports/ledger-reproductions.jsonl is re-asked of upstream on every run
+  (`record-oracle.py --recheck`). Screening every row was rejected on measurement: 5-12x the
+  time, 15.2 GB peak.
+- 2026-09-25 (owner: "don't assume upstream is correct; corroborate"): **a lazy repeat before a
+  one-character tail no longer reports a partial it cannot reach**, reversing S31's pin of
+  `([^a-f]{3,}?)x` over '__AAb'. Upstream's CHARACTER arms guard one step ahead of the repeat
+  (`pos + 1 >= text_end`), so they answer a partial when the item refuses the last character.
+  Judged on a 48,960-row grid against the README's definition (tried exhaustively with CPython's
+  `re`), PCRE2 10.47 and upstream's own greedy twins: upstream is wrong on 3,756 rows and this port,
+  after the fix, on none. `Matcher.IsTailPartial` guards at the repeat's position for every tail.
+  Ledger entry 2.
+- 2026-09-25: **`(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)` over 'zzzz' is port-right**: one deletion
+  at (0, 0), where upstream keeps four substitutions. Upstream's once-only, lazy and `{1,3}` twins
+  all improve; its improvement re-run meets ledger entry 33's endless repeat. Pinned as a judged row
+  of `enhancematch-loses-a-candidate` (ledger 25).
+- 2026-09-25: **the full-fold entries' doubled-guard arms no longer claim a row the doubled guard
+  explains alone.** Switching a fold repair off does nothing on a row without a full-folded
+  backreference, so those arms were tallying plain ledger 12 rows under a full-fold name. Such rows
+  now show red until judged into `bestmatch-loses-a-candidate`, per the owner's 2026-09-14 ruling.
+- 2026-09-25: **a fresh Turkic `sub`/`split` row over the dotless i is classified by a recorded
+  control, not by hand.** The recorder asks upstream the row again with U+0131 made U+0138 (kra),
+  which matches like it under the default tables (neither is in CaseFolding.txt), so nothing is
+  left for upstream's `T` rows to act on (`dotlessFreeOutcome`). It refuses a row where the two
+  letters could differ another way: a property upstream answers differently for them (U+0131
+  upper-cases to I, so `\p{CWU}` does), a codepoint escape, a non-ASCII range, LOCALE. `turkic-default-folding-without-spans` takes the row when this port's
+  answer is that twin swapped back. It checks the right answer, not only that a Turkic letter is
+  involved, so S52's fabricated-failure row stays red. It classifies all 18 dotless-only rows that
+  had been judged by hand. U+0130 has no stand-in (the only capital with a full folding and no
+  simple one), so those rows stay hand-judged.
+- 2026-09-25 (owner: resolve every possible bug before optimising; research outside upstream):
+  **under ASCII|IGNORECASE a cased property means the 52 ASCII letters** (ledger entry 34).
+  Upstream gave three answers to one question: `match` also accepted non-ASCII letters, `search`
+  refused 'a', and the set form gave the ASCII letters. Perl 5.42 (`/ai`) and PCRE2 10.47 without
+  UCP give the ASCII letters for `[[:upper:]]`/`[[:lower:]]` and Python's `re` documents it for
+  `[A-Z]` (both engines read `\p{...}` as always-Unicode, so for `\p` the rule is this module's
+  own design); UTS #18 allows it under either reading. `Matcher.MatchesPropertyIgn` clamps the character to the
+  encoding before the case collapse. Recorded as `ascii-ignorecase-cased-property`.
+- 2026-09-25: **the dotless-i control refuses every row where the two letters could differ another
+  way** (blind review): a property upstream answers differently for them, an escape naming any
+  non-ASCII codepoint, a class range with a non-ASCII endpoint, LOCALE. The review's 18 breaking
+  rows record no twin; all 18 hand-judged dotless rows still classify.
+- 2026-09-25: **GUIDE.md's span-walk sample runs.** S61 left it as a fragment, so
+  `check-doc-examples.ps1`, a CI gate, failed on unpushed main; it would have gone red on push.
+- 2026-09-25 (ledger entry 35, from the blind review of entry 34): **scoped encodings hold and a
+  case-insensitive property answers by one rule however it is spelt.** An inner scope keeps an
+  outer encoding (CPython's documented behaviour); a POSIX class takes the scope's encoding, as
+  `\p{...}` does; bare properties and set members share `Matcher.HasPropertyIgn`, the cased-letter
+  rule that upstream's bare form, Perl 5.42 and .NET 10's `Regex` use (upstream's sets used case
+  closure, so brackets, `x?` or an alternation changed the answer); `\p{Upper=No}` is the
+  complement. UTS #18 RL1.5 leaves the closure choice to the implementation, provided it is
+  declared; DIVERGENCES.md and COMPARISON.md declare it. This settles the owner question STATE.md
+  raised earlier the same day, on the owner's instruction to resolve ambiguities by research.
+- 2026-09-25 (ledger entry 35 E to G, from the blind review of its fix): **a case-insensitive set
+  matches each member first, then combines them.** A property member asks the case-insensitive
+  property of the character itself and a nested set recurses case-insensitively, as Perl 5.42's
+  extended sets and .NET 10's set subtraction answer. It moves one judged row's control:
+  `[a\p{ASCII}]` no longer reaches U+212A or U+017F, so `turkic-default-folding-read-by-a-lookaround`
+  keeps its row with 30 agreeing grid cells instead of 36. A set's full-folding expansions follow
+  the same rule (F, upstream's under V1 too), and an encoding named by positional flags
+  inside a group replaces the one in force (G; at the top level a clash still raises).
+- 2026-09-26 (S91, ledger entry 36): **a scoped `(?a:...)` or `(?u:...)` answers exactly as the
+  same encoding set for the whole pattern**, for every node whose answer depends on the encoding,
+  as CPython's `re` documents and Perl 5.42's `(?aa:...)` answers. The encoding rides in the case
+  flags only when a node ignores case and the scope differs from the pattern, so an unscoped
+  pattern compiles exactly as upstream's. Two things are recorded rather than changed: a fuzzy
+  constraint written outside a scoped backreference tests an inserted character with its own
+  encoding (a constraint is a set, and its scope decides; the form has no global twin), and a
+  scoped `(?u:[...])` holding U+00DF in an `(?a)` pattern compiles one 'ss' alternative where the
+  global form has three, with equal answers.
+- 2026-09-26 (ledger entries 37 and 38): **two upstream defects this port does not share are pinned
+  as port-right.** A scoped `(?i:...)` literal loses full folding in upstream's required-string
+  search, and a lazy repeat of one character misses a full-folded literal starting at its last
+  position. Perl 5.42.3 agrees with this port on both and CPython's `re` on the second. Drafts in
+  `docs/plan/upstream-reports/`, not filed.
+- 2026-09-26 (ledger entry 39): **a fuzzy constraint that allows no errors is kept wherever it can
+  matter.** Upstream drops `{e<=0}`, `{e<1}` and `{s<=0,i<=0,d<=0}` at parse time but keeps the
+  same budget spelt `{d<=0}` or `{1s+1i+1d<=0}`, so the first three neither cap a nested section's
+  errors nor protect their text from an enclosing budget, which defeats upstream issue 306. Found by
+  the overnight sweep; inherited, so fixed under the no-known-bugs rule. A zero section is removed
+  from the tree only when nothing inside it can make errors, so a pattern with no other fuzzy
+  section compiles exactly as upstream's. Two choices: `a{e<=0}{e<=1}` now applies the second
+  constraint to the zero section, as `(?:a{d<=0}){e<=1}` does, while `a{e<=1}{e<=0}` still ignores
+  the zero one, so every pattern upstream accepts still parses; and a pattern holding a group call
+  and any error budget keeps every zero section (`(ab){e<=0}x(?:(?1)){e<=1}` lost the cap on the
+  called copy otherwise), which costs speed on such patterns but never an answer. The sweep's
+  atomic-group case (`(?:x++y){e<=1}` over 'xy' has no match though `{e<=0}` has one) is upstream's
+  documented atomic semantics and is pinned as agreed, with the budget-monotone invariant narrowed.
+- 2026-09-26 (ledger entry 40): **the WORD flag's word boundary follows UAX #29 revision 47, the
+  Unicode 17.0.0 rules, and passes all 1,944 lines of `WordBreakTest.txt`**, where upstream and
+  this port both failed 268. Upstream's README promises "a default Unicode word boundary", its
+  tables are 17.0.0, and the conformance file is Unicode's own statement of the rules, so it is the
+  reference; inherited, so fixed under the no-known-bugs rule, and pinned as a divergence. Three
+  changes in `Matcher.AtDefaultBoundary`: WB4 on both sides (the characters two away skip Extend,
+  Format and ZWJ, and a run of them after the start of the text or a line break stands alone);
+  WB15/WB16 only before a regional indicator; and upstream's WB5a removed. The last is a judgement
+  on evidence: WB5a came in with upstream's Hg issue 219 in 2016, it is not a default rule, the
+  tailoring UAX #29 offers in its place breaks where upstream's joins, and keeping it would leave
+  12 lines of the file failing. It reverses the 2026-08-31 entry on `is_unicode_vowel`, whose test
+  now pins the break. The grapheme rules are unchanged. Not vendored: the file is 1,944 lines of
+  data under Unicode's terms of use, so the test pins 15 rows (12 from the file, with line numbers)
+  and the full-file count was measured with a scratch driver; vendoring it would be the upgrade if
+  the rules are touched again.
+- 2026-09-26 (ledger entry 43): **a backwards `\X` takes a whole grapheme cluster, so `(?r)\X` and
+  a lookbehind holding `\X` find the same clusters as forward `\X`**, where upstream and this port
+  both stopped after one codepoint and failed 465 of the 766 lines of `GraphemeBreakTest.txt`
+  17.0.0 in reverse. The README says `\X` conforms to UAX #29 and upstream's own comment on the node
+  says the match is the same in both directions, so the conformance file, read last cluster first,
+  is the reference; inherited, so fixed under the no-known-bugs rule and pinned as a divergence.
+  The change is the order of two items in `Grapheme.CompileCore` when compiling backwards; forward
+  code, and so compile parity, is unchanged. The oracle claims the rows it draws of this shape only
+  when compiling in upstream's order reproduces upstream's answer, which needed a compile-time
+  switch (`Info.UpstreamReverseGrapheme`, threaded from `FuzzyRegex.WithDefaultVersion`) because
+  the existing ablations act on a compiled pattern and this fix changes the code itself. Not
+  vendored, as for ledger entry 40: the test pins nine rows of the file, one per rule, and the
+  full-file count was measured with a scratch driver.
+- 2026-09-26 (not a divergence): **a case-insensitive or reversed required string gets a screen
+  of this port's own, not upstream's locator arms.** The sweep found `(?i)(?:ss|ß)+x` over 25
+  U+00DF timing out at 3 s where upstream answers in microseconds: upstream refuses the subject in
+  `locate_required_string`'s `STRING_FLD` arm (`_regex.c:11143-11365`), which this port had never
+  ported, so it ran the exponential search. Upstream's arms are not transparent (entry of
+  2026-08-31: `string_search_fld` compares with `same_char_ign_turkic`, and the arms hand the
+  matcher a `req_pos` it skips without comparing), so `Engine.RequiredStringScreen` does not copy
+  them. It refuses a subject only when no window could hold the string under a rule looser than any
+  the matcher applies (a case of the subject character equal ignoring case, or the full folding of
+  a case spelling the next required characters, cut short at either end), jumps the start only at
+  offset 0, where the string is the first consuming item, never sets `req_pos`, and stands aside for
+  partial matching. On 90,000 generated rows (folded literals, all five opcodes, captures, fuzzy,
+  lookarounds, partial, overlapped, slices, `BESTMATCH`/`ENHANCEMATCH`) every answer equals the one
+  before it wherever the old code answered. Beyond upstream, `STRING_REV` is screened too.
+- 2026-09-26: **a `beginning` between the two halves of a surrogate pair cuts the pair into two
+  lone surrogates, and no step or read joins them again.** A grid found `(?:.)*x` fully matched
+  against `"\U00010428xc"` at (1, 3) running until its timeout, and `(?:.)*` at (1, 7) of
+  `"😀😁x😂\na"` never stopping at all, because its tail never reads the clock. Forwards the slice
+  opened with a lone low surrogate; backwards `PrevPos` joined that low half to the high half
+  before the slice and stepped from 2 to 0, one below the slice start, so a greedy repeat
+  retreating to its limit, which it tests for equality, walked past it and on. The same mismatch
+  gave answers outside the slice, for example `(?r).` at (1, 1) of `"\U00010428xc"` answered (0, 2),
+  and an index exception in a reversed fuzzy full match. The rule mirrors the 2026-09-01 one for
+  a `length` that cuts a pair, and it has an oracle: a Python `str` can hold the two halves as
+  separate codepoints, a codepoint `pos` can fall between them, and that is exactly the text a cut
+  pair denotes. `CharAt`, `NextPos` and `PrevPos` refuse to pair across `InitialSliceStart`, the
+  caller's slice start, not `SliceStart`, which lookarounds and verbs move during a match. Pinned
+  by `SliceSplitsSurrogatePairTests`, with a mutation of each of the three guards turning it red.
+  `tools/probes/surrogate-slice-sweep.cs` runs 92 patterns forwards and reversed over every slice
+  of seven subjects whose start or end splits a pair, under eleven calls. On main: 860 timeouts,
+  12 hangs no timeout stopped, 4 exceptions, and wrong or out-of-slice answers on every pattern.
+  With the fix: none, every answer equals the one for the same subject with the cut-off half
+  replaced by U+0001, and `tools/probes/surrogate-slice-oracle.py` finds upstream, over the cut
+  string, differing only where it also differs on the U+0001 text (ledger 4 and the partial
+  rules), so no remaining difference is about the cut. S52d's pin of the overrun changes answer:
+  `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
+  `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
+  no match.
+- 2026-09-26 (ledger entry 42): **a fuzzy item that matched exactly is offered as a deletion at the
+  moment it matches, so the search is complete and ordered.** Upstream tries errors on an item only
+  when it fails to match, so `(?:a){d<=1}a` finds nothing in 'a' (finding F-A, inherited, fixed
+  under the no-known-bugs rule). The first design, a second pass at a start whose first pass failed
+  (branch `spike/fuzzy-deletion-retry`), was reversed: it tried these deletions only after every
+  other path at the start, so `(?:(?:a){d<=1}ab|a)` over 'ab' took the later branch, and a
+  `(*SKIP)` reached through a deletion was ignored. Owner's direction: the reference semantics are
+  a complete, ordered depth-first search, graded by `tools/probes/fuzzy-reference-matcher.py`.
+  Answers upstream gets by skipping paths change to the ordered ones, for example
+  `(?:ab){e<=2}b` over 'bb' now has (1, 0, 1). The cost is kept near main's by leaving the choice
+  out where an exchange argument proves it holds no new match (run length, the node after the run,
+  minimums met, an item before a repeat of itself); every narrowing was graded to change no answer.
+- 2026-09-26 (ledger entry 44): **the "needed" rule for fuzzy empty iterations, with a repeat memo,
+  replaces entry 33's stop.** An iteration of a repeat that consumed no text and spent errors stands
+  only when the repeat's minimum, an unmet `d` or `e` minimum it raises, or a tested group needs it;
+  error-free empty iterations keep upstream's rule; a per-run memo of the state after each iteration
+  drops duplicate paths. Chosen by the owner after four blind reviews of
+  `docs/plan/2026-09-26-empty-iteration-survey.md`, over upstream's rule (inflated and
+  position-dependent counts, MemoryError), Perl's rule A and rule B (both lose matches, 426 and
+  1,801 in the sweeps) and minimum cost (changes the default mode's meaning). Sections with a
+  minimum error count still differ from the reference where upstream's END_FUZZY checks a minimum
+  before trying a trailing insertion (finding F-D, queued separately).
+- 2026-09-26: **the body guard of a safe repeat is a failure memo, so `(?:a|a)+c` and `(a|aa)+c`
+  fail in linear time per attempt instead of exponential.** Option A of
+  `docs/plan/2026-09-26-backtrack-memoisation-design.md`. Upstream already records a failure when
+  the engine backtracks past the start of a repeat's body, but `END_GREEDY_REPEAT` and
+  `END_LAZY_REPEAT` first mark every position where the body matched, and a marked position is
+  never recorded again, so the failure memo never forms. For a repeat marked
+  `RepeatInfo.FailureMemo` the success mark is skipped, and the existing guards do the rest. The
+  mark is skipped only where nothing after the body can see how the engine got there: no maximum
+  and a minimum of at most 1; not inside another repeat, an atomic group, a possessive repeat, a
+  lookaround, a conditional's lookaround test, a called group or a fuzzy section (the compiler, in
+  `BuildRepeat`); no backreference, group-exists conditional, group call, `(*PRUNE)`, `(*SKIP)`,
+  fuzzy matching or POSIX matching anywhere in the pattern (`Optimiser.KeepFailureMemosSound`);
+  and not a partial match (`MatchState.KeepsFailureMemo`). Three of those conditions have a
+  witness, an answer that changes when the condition is deleted, pinned in `FailureMemoTests`
+  and each shown red by the deletion: `(?:(a)|a)+(?(1)c|b)` over `aab` answers (0, 3), not
+  (1, 3); `a(?:.|(a)){1,}\1c` over `aabac` answers (0, 5), not no match; `^(?:a|ab|b){0,3}c`
+  over `abbbc` answers (0, 5), not no match. The rest have none: two differential grids against
+  main, 3.2 and 4.4 million rows over 12 calls each (1,607 and 2,000 patterns built around
+  overlapping branches, captures, conditionals, backreferences, nesting, lookarounds, atomic
+  groups, verbs, group calls and fuzzy sections, every subject over `abc` up to length 6 plus
+  long ones), found no answer change with any one of them deleted, and the reasons are written
+  on `RepeatInfo.FailureMemo`. They stay anyway, because each is a place where the rest of the
+  match can read more than the position and none of the arguments is a proof. With every
+  condition in place both grids have 0 answer differences from main (answers, spans, groups,
+  every capture, the partial flag; only timeouts differ). Measured, Release, best of three,
+  searching `'a' * n + 'bc'`: `(?:a|a)+c` at n=24 from 2,981 ms to 0.32 ms, and at n=40 from
+  over 20 s to 0.82 ms; `(a|aa)+c` at n=24 from 54 ms to 0.07 ms. Guards are still reset at every
+  start position, so a failing search is quadratic in the subject (54 ms at n=1000) and nested
+  repeats stay polynomial, `(a+)+c` at n=1000 from 6,235 ms to 2,186 ms. That is Option B's
+  ground. Every test and demo that needed a runaway pattern used one of these shapes, so each now
+  carries a backreference, `(a|a)*\1\b\B`, or a maximum, `^(a|aa){1,99}$`, which keeps it slow;
+  the oracle's `timeout` generator swaps seven shapes for bounded twins for the same reason, both
+  halves of `timeout-row-margin` putting all ten still running at twenty times the budget.
+- 2026-09-26: **a `\K` inside an atomic group, possessive repeat, lookaround or conditional's test
+  withdraws the failure memo from the whole pattern.** A blind review of the entry above found
+  answers the memo changed: `(?:(?=\K)b|)+.c` over `aabc` is (3, 4) upstream and was (2, 4) with
+  the memo, and `(?:(?>\K)b|)+.c` over `abc` (2, 3) against (1, 3). `\K` moves the reported start
+  and pushes an entry that moves it back if the path fails, but one of those constructs throws
+  its body's entries away as soon as it succeeds, so the moved start outlives the failing path
+  that moved it. A failing path with a lasting effect breaks the memo's premise that skipping it
+  loses nothing. It is the only such effect: every other entry a succeeding construct discards
+  restores captures, the capture-change counter or fuzzy counts, which the construct saved on
+  entry and restores itself when the engine backtracks past it, or belongs to a repeat, a group
+  call or a fuzzy section, which the memo already excludes. The rule is pattern-wide
+  (`PatternObject.KeepInSubmatch`, set by the compiler, read by `KeepFailureMemosSound`) rather
+  than limited to constructs in or after a memoised body, because the narrower rule needs
+  positions the compiler does not track and buys almost nothing. Four rows from the review are
+  witnesses in `FailureMemoTests`, red with the rule deleted. A grid of 2,419 patterns built to put
+  `\K` inside and around those constructs (5.3 million rows, 81 patterns that time out on main
+  dropped first) found 5,165 answer changes in 45 patterns on the first commit, every one with a
+  `\K` inside such a construct, and none with the rule; a second of 2,496 patterns with captures
+  but no `\K` inside them, where the memo stays on (5.5 million rows), found none. The earlier
+  grids are still clean. Two oracle wave tests also needed the treatment the entry above
+  describes: their never-finishing rows are now `(a|a)*\1b` and `(a|a){1,999}$`.
+- 2026-09-26 (ledger entry 45): **a `(*SKIP)` moves the start of the next attempt when
+  backtracking reaches it, not when it runs**, so a `(*PRUNE)` or `(*SKIP)` that runs later, and is
+  therefore backtracked onto first, decides the next start, and a `(*SKIP)` inside an atomic group
+  or lookaround that has finished does nothing. pcre2pattern ("Verbs that act after backtracking",
+  "More than one backtracking verb") and perlre define the verbs that way, and PCRE2 10.47 and Perl
+  5.42.3 agree on every pinned row; upstream moves the slice as the verb runs
+  (`_regex.c:14551-14555`), which also contradicts its README's "won't affect the enclosing
+  pattern" for the atomic-group case. Inherited, so fixed under the no-known-bugs rule and pinned as
+  a divergence. The verb's arm now pushes its position above the pruned point and a new backtrack
+  arm moves the slice, so every rule judged earlier stands: the per-match slice reset (ledger 5,
+  S40a), the partial pass's slice restore (S40b), the `HasSkipVerb` narrowings of the prefilters
+  (S60, S60b) and the issue-613 clamp are untouched, and a verb inside an unfinished atomic group,
+  lookaround or condition is still confined to it, as upstream's README documents. Two 10,000-row
+  grids against PCRE2 (`tools/probes/skip-timing-grid.py`) moved 26 rows, 24 to PCRE2's answer and
+  none away. The same grids show two families this entry does not touch, both shared with
+  upstream: that confinement, where PCRE2 fails the whole attempt instead, and a verb that leads two
+  alternatives being compiled as one verb in front of the branch. The first needs a ruling, since
+  upstream documents it; the second is a candidate bug. The suite had no test that a reached
+  `(*SKIP)` changes an answer (deleting the verb's slice move left all 7,025 green), so three such
+  rows are pinned too.
+- 2026-09-26 (ledger entry 46): **a backtracking verb, nested branch, group call or fuzzy section
+  that starts (or, reversed, ends) every alternative is no longer moved out of them**, so
+  `(*SKIP)[ab]+|(*SKIP)\b` over 'ccb' is (2, 3) as in PCRE2 and Perl, not upstream's (0, 0).
+  Upstream's `can_be_affix` lets these through and the rewrite to `X(?:A|B)` then changes when a
+  verb is reached or the order in which the paths are tried; inherited, so fixed under the
+  no-known-bugs rule and pinned as a divergence. PCRE2 and Perl are the reference for the verbs,
+  branches and group calls; for fuzzy sections, which they lack, the reference is the pattern as
+  written, which is also what upstream answers when the two sections differ in any way. The fix is
+  five `CanBeAffix` overrides returning false. Upstream's delegation in `Atomic`, `LookAround` and
+  the conditionals is kept, so an atomic group or lookaround holding a branch is no longer moved
+  out either: a lost optimisation, not a changed answer, and rare. A differential over 12,000 rows
+  changed only the 272 answers in the half built from the four kinds; the half without them is
+  unchanged.
+- 2026-09-26 (ledger entry 47): **a `(*PRUNE)` or `(*SKIP)` that backtracking reaches inside an
+  atomic group, possessive repeat or positive lookaround that has not finished ends the attempt**,
+  instead of failing only that group; it unwinds to the innermost negative lookaround (true) or
+  conditional test (false if positive, true if negative), and to the attempt when there is none.
+  This is PCRE2 10.47's documented model (pcre2pattern, "Verbs that act after backtracking",
+  "Backtracking verbs in assertions"); Perl agrees in the atomic, possessive and positive-lookaround
+  cells, and no surveyed engine confines as upstream's `top_bstack` does
+  (`docs/plan/2026-09-26-verb-confinement-survey.md`, 123 rows). It completes ledger 45, which
+  adopted "a verb acts when backtracked onto" on the same authority. Called groups stay transparent,
+  as in Perl, Boost and upstream: PCRE2 alone scopes them, and the agreement of three engines was
+  preferred to PCRE2's single rule (so `(?>(?1))|a|(a(*PRUNE)b)` over 'ac' is None here and in
+  Perl, (0, 1) in PCRE2 and upstream). The group kind is read from the stacks when the verb runs,
+  because a call pushes no mark, so it cannot be fixed at compile time. Lookbehinds are judged in
+  this port's right-to-left direction (b09r becomes None). Upstream's `test_hg_bugs` rows 189 and
+  203 change from 'd' to None and are pinned as a divergence. Grids: 302 rows moved over two seeds,
+  300 to PCRE2 and none away; 20,000 verb-free rows unchanged; verb-free timings within noise.
+- 2026-09-30 **A capture made inside a group call is discarded when the call returns, as in Perl and PCRE2 (owner ruling on D51; reverses the 2026-09-11 entry on `current` and the capture list).** Measured 2026-09-30: over 'ab', `(?(DEFINE)(?<c>a))(?&c)b` leaves c unset in PCRE2 10.47 and Perl 5.42.3, while upstream 2026.9.10 reports span (-1, -1) with captures `['a']`. Over 'aab', `(?<c>a)(?&c)b` gives c = (0, 1) in both engines, and upstream gives (0, 1) with captures `['a', 'a']`. Copying upstream broke .NET's `Group` contract: Success false with a capture listed, and a Value that is not the last capture. Rejected: (b), which keeps the callee's captures and makes Success and Value follow them. No engine reports that, and over 'aab' it moves Value to @1, away from both reference engines. Upstream-style captures can return later as a separate opt-in API if anyone needs them. Also recorded 2026-09-30: the owner confirmed D4 Amendment 5 option (d). The D4 branch accepts the slow rows until chunk C2b, and D4 does not merge before then.
+- 2026-09-30 **The three OPEN questions of the complete-matrix answer key are ruled by the owner, each on the answer most correct by regex principles (evidence and reasoning in `docs/plan/2026-09-30-open-questions.md`; engines measured the same day: upstream 2026.9.10, PCRE2 10.47, Perl 5.42.3, Boost.Regex a640597, the .NET 10 BCL).** (1) A `(*PRUNE)` or `(*SKIP)` inside a called group ends the whole attempt, not only the call. These verbs speak about the attempt's starting position, which a call does not change, so a call stays transparent, as the 2026-09-26 ruling (ledger 47) already says. Upstream and Boost agree on every surveyed row. PCRE2 scopes the verbs to the call by a documented special rule. Perl is inconsistent: it scopes them in `(?:(?&g)x|abc)(?<g>a(*PRUNE)b)?` over 'abc' but not in the `(?(DEFINE)...)` form. No change is needed. (2) When a conditional's negative lookahead test fails, the captures its body made are kept for the `no` branch, as PCRE2 documents and Perl and Boost measure. Only backtracking undoes a capture, and `(?(?!X)A|B)` must answer as `(?(?=X)B|A)`. The port and upstream drop them: known defect D54, to be fixed and pinned as a divergence from upstream. (3) In a branch reset whose alternatives put a name at different positions, keep option 3 (the 2026-09-22 ruling). It is the repaired form of upstream's documented rule that a name keeps one number, and different names get different numbers; upstream's own README example of it makes two groups in one alternative share a number and lose a capture. PCRE2 refuses such patterns, and Perl and Boost number them by position. Refusing was rejected: it would reject a construct upstream documents as supported. Standard practice is to reject input with no defined meaning and warn about valid input that is often a mistake, and .NET's regex APIs have no warning channel. So users get documentation instead: a GUIDE section and a doc comment on branch reset, with the rewrite that answers the same in every engine measured, `(?:(?P<bug>xxx)(?P<bang>!)|(?P<bang>!)(?P<bug>BUG))` (PCRE2 needs `(?J)`). A Roslyn analyzer is noted as the later upgrade path for warnings. Also found: calls take the flags where the group is defined, not those of the call site (`(abc)(?i:(?-1))` over 'abcABC' is None in upstream, PCRE2 and Perl), so the written-out equivalence used by D40 and matrix check C2 keeps the definition's flags.
+- 2026-09-30 **ENHANCEMATCH improves the fit wherever a better fit exists, including a fuzzy section inside a repeat, and the port's answer stands (owner ruling on D59, option (a)).** `(?e)(?P<g1>(?:a+(?:ab|a)){d<=1}){1,2}` over 'xaaabaxa' is (1,5) exact here, while upstream returns its plain search's (1,6) with two deletions. The README says ENHANCEMATCH "will cause it to attempt to improve the fit (i.e. reduce the number of errors)", and its `(?e)(dog){e<=1}` example shows the improved match may cover a different span. Upstream reaches the exact fit on the same pattern with the budget outside the repeat or the repeat lazy, and on every simpler form tried. Rejected: (b) copying upstream's unexplained limitation, and (c) restricting ENHANCEMATCH to the plain match's span, which the README's own example contradicts. To be pinned as a divergence once upstream's cause is traced. Also recorded: D58 is not a new question but ledger 9's known POSIX mechanism, already fixed here.
+- 2026-09-30 **Under partial matching, BESTMATCH and ENHANCEMATCH choose among complete matches only; a partial result is the leftmost start from which some continuation matches, with the first fit found there (owner ruling, option A).** This is upstream's behaviour and the port's already. Witness: `(?e)(dog){e<=1}` over 'cat and d' partial is P(7,9) with one insertion in both engines, while the completed 'cat and dog' gives (8,11) exact, so no continuation makes the flagged search report 7. The flags rank by a match's total error count, and a partial match has no total yet, only a lower bound, so there is nothing sound to rank. Rejected: (B) report the start the flagged search would give for some continuation, which needs reasoning over every continuation and is not computable in general (the same class as D19); (C) rank partial candidates by errors so far, which can be wrong in both directions; (D) refuse the combination, which breaks upstream compatibility. No surveyed engine has both features. Follow-up: the matrix's C4 judges use the leftmost-live reading under `(?b)` and `(?e)` (rows 5168, 5888, 7088), tests pin the witness, and the GUIDE and the partial overloads' doc comments state the rule, with a `SHORTCUT:` note naming (B).
+- 2026-09-30 **The search-anchor insertion ban stays, and a position assertion that holds at the search anchor lifts it wherever the assertion is written (owner ruling, option B; known defect D61).** Upstream refuses a fuzzy insertion at the position a search began (`permit_insertion = !search || text_pos != search_anchor`, `_regex.c:10214`). That rule does real work: finditer restarts each search where the last match ended, usually on a separator, so `(?:dog){e<=1}` over 'dog dog dog' gives three exact 'dog' matches rather than gluing the space to the next one. The port already lifts the ban where an assertion before the fuzzy section pins the match (DIVERGENCES.md, ledger 19/20), because starting one character later cannot give the same match when the assertion fails there. The same reason holds when the assertion is inside the section or in an alternation, where both engines now refuse: `(?:^a){i<=1}` over 'xa' is None while `^(?:a){i<=1}` is (0,2). Rejected: (A) keep it, which leaves equivalent patterns disagreeing; (C) drop the ban, which an ablation showed moves 33 oracle rows and would put separators on finditer word matches. B only permits insertions the port refuses today, so no single search loses a match. The overlapped-finditer start the ban removes (`(?i)(?:stone field|fine works){i<=2,d<=1}` skips start 13) is a separate question.
+- 2026-09-30 **An expected-divergence entry may be keyed on a rule rather than on listed rows once upstream's mechanism is reproduced to the line and a planted-bug test proves the rule does not hide a port bug of the same shape (owner ruling, amends the 2026-09-14 S47b ruling).** The 2026-09-14 ruling narrowed `bestmatch-loses-a-candidate` to listed rows because upstream's cause was then unknown. Track B (`maint/oracle-keys-and-pins`) added an arm that counts a row only when its flagless answer equals upstream's and a deliberate reproduction of ledger 12's doubled insertion guard gives upstream's answer exactly; the blind review made the port ignore `(?b)` and the arm did not swallow it. The same conditions apply to the widened POSIX (ledger 9) and change-position-leak arms. The residual risk is a port bug that happens to produce exactly the answer the reproduced upstream bug does.
+- 2026-09-30 **A partial result reports, for each group, what every completion of the path the partial took would report for the text consumed so far, so a group call that has not returned is treated as returned (D62; the owner delegated the ruling; the orchestrator's decision, option (b)).** `(?<o>(?<i>a)b)(?&o)` over 'aba' partial gives i = (0,1) with one capture and o = (0,2), as the written-out `(?<o>(?<i>a)b)(?:(?:a)b)` does; the port and upstream gave i = (2,3) with two captures. Any completion returns from the call, and the return restores the caller's groups (D51), so the leaked value is one no completion reports. For a call-free pattern the groups closed before the edge already keep their values in every completion; this extends that to calls. Evidence: upstream reports groups on partial matches and the port follows it; PCRE2 documents them as undefined ("the values in the rest of the ovector are undefined", pcre2partial), and Perl has no partial matching, so no engine contradicts the rule. A blind refutation review (2026-09-30) found the decision stands: on upstream every completed subject restores the called groups (nested calls, (?R), calls in lookaheads, repeats and alternations, backreferences, a fuzzy call), and upstream has no (*ACCEPT), so no completion ends inside an unreturned call. Its strongest objection, that a partial's groups depend on the path (`^(?:(?&o)c|(?<o>(?<i>a)b))+$` over 'ababa'), holds without calls too, so the rule is stated per path. Groups still open at the edge are already reported unset (`(?<a>x)(?<b>y(?<c>z)w)` over 'xyz': b unset, c (2,3)), so a partial's groups show only what is settled. D62 depends on D51. Rejected: (d) no groups on partial matches, as PCRE2 leaves them undefined, which breaks upstream compatibility for call-free patterns; (a) document the leak, which makes a partial's groups depend on where the text ran out; (c) keep them on purpose, which contradicts every completion.
+- 2026-09-30 **D61 refined: a position assertion lifts the search-anchor insertion ban only where it dominates the insertion, meaning every path from the pattern start to that insertion passes it at the anchor before anything is consumed (orchestrator's decision under the owner's delegation; refines ruling B).** A blind refutation review showed the first build's per-path pin wrong: `(?:\M|)(?:dog){e<=1}` and `(?:\M)?(?:dog){e<=1}` finditer over 'dog dog' gave (3,7) with the space glued on, where upstream and the equivalent `(?:dog){e<=1}` give (4,7) exact; and `(?:^|x)(?:ab){i<=1}` over 'xab' took an insertion where the exact (0,3) exists (both confirmed on the d61 build, Release). Ruling B's reason, that starting one character later cannot give the same match, holds only when no path from A+1 skips the assertion, and dominance is exactly that condition. Lookarounds whose body reads no path state (no capture reads, backreferences, conditionals, calls, verbs, `\K` or fuzzy sections) pin under the same rule, answered once per attempt at A+1 in a fresh state, with a Partial there counted as not failed; S57c's exclusion of lookarounds ("a character test wearing an assertion's clothes") rested on a cost argument against a per-frame pin, which dominance does not need. Pinning every lookaround, with state isolation, is the SHORTCUT upgrade path.
+- 2026-09-30 **D61 replaced: the search-anchor insertion ban is lifted exactly when upstream's search would return no match that starts inside the candidate (rule H'; orchestrator's decision under the owner's delegation; supersedes the dominance entry above and the shipped ledger 19/20 exemption).** Rule, at search anchor A: let u be upstream's answer from A (with the ban). If u starts at A, return u. Otherwise let c be the attempt at A without the ban; return c if c exists and (u is None or u.start >= c.end), else u. Under BESTMATCH c must also cost no more than u (a tie goes to the earlier). ENHANCEMATCH, partial (upstream's own preference of a full match over a partial one applies through u), reversed (mirror image), pos/endpos and overlapped follow from computing u with upstream's rules. The reason: the ban exists so a match never swallows text where a later match could start; u is by definition the leftmost later start, so c is kept exactly when no later start lies inside it. Gate: patterns with no position-dependent construct (assertion, lookaround, \G, backreference, conditional, group call, verb, atomic group, possessive quantifier) and no fuzzy lower bound (`{1<=e<=2}`) keep the plain ban at zero cost, because removing a match's leading insertions then leaves a valid match from a later start, so upstream's ban already gives this answer.
+  Evidence. Refuted before this: the per-path pin, the dominance rule (builder grid of 2,500 rows: M1, an assertion inside the section passed after insertions, `(?:(?!x)stone|abc){e<=2}` over 'stone xstone'; M2, another branch, `(?:\Ma|a){i<=2}` over 'a-xa.'), and the shipped exemption itself (`\b(?:dog){e<=2}` finditer over 'dog  dog' gives (3,8) with 2 insertions on main 9fff2ae4, where upstream gives (5,8)). Draft rule G (check only the k inserted positions) was refuted by a blind review: lower bounds are not monotone (`(?:ab){1<=i<=1}` over 'xab'), the range glues (`(?<!\s)(?:dog){e<=1}`), and the first unbanned path can cost more than upstream's at the same start (`(?:^ab|^xab){i<=1}` over 'xab'). Rule H then survived a second, fresh refutation review (about 50k random patterns simulated on regex 2026.9.10), which added atomic and possessive constructs to the gate (`(?>a?)(?:a){i<=1}` over ' a'), BESTMATCH cost (`(?b)(?<=x)(?:ab){i<=1}` over 'xyab xab' with pos=1 gives (6,8)), and the full-over-partial preference, and derived H' as its equivalent. Upstream already lifts the ban when the search can start at only one position (`^(?:a){i<=1}` over 'xa' gives (0,2)), which is a special case of H'. Steelmanned alternative: keep upstream's ban with no exemption. It loses real matches (`(?:^a){i<=1}` over 'xa'), and the shipped exemption already went beyond it. Known effects, not defects: an extra match can move the next finditer anchor (`(?:\ma){i<=2}` over 'ba  aba': upstream [(2,5)], H' [(0,2),(3,5)]); the attempt's own first-found choice is unchanged (`(?:\bab?){i<=2}` over 'b ba bb' with pos=2). Reviews: .claude/driver/d61-draft-rule-G-2026-09-30.md and d61-draft-rule-H-2026-09-30.md.
+  Clarified 2026-10-01 after the blind review of the first H' build (review-d61-hprime-2026-09-30.md): (1) the
+  answer is always u or c, never a third match, and u is this port's answer with the ban as on main, including main's
+  fix for upstream issue 564; a build that changes how u is computed (the review's witness: `(?b)(?:dog){1<=e<=2}(?=\s|$)`
+  search pos=5 over '\ndog\n\nzdog\n' gave (6,10), where u = (7,11) and c = (5,10) with 2 insertions loses) breaks
+  the rule. (2) "Cost" is this port's BESTMATCH ranking (the weighted cost, walk 0), not the error count; ties go to the
+  earlier match. (3) The rule applies once per pass, so under partial a full c beats a later partial u, as the
+  full-over-partial preference already requires. (4) The gate: a search with partial on is gated in (removing
+  leading insertions can leave a partial match that starts later, `(?:a){i<=1}` partial over 'x' gives u = (1,1) and
+  c = (0,1), so H' gives c); a pattern whose fuzzy sections permit no insertion is gated out.
+  Scope cut 2026-10-01 after the re-review (review-d61-fixes-2026-10-01.md): BESTMATCH keeps main's code path unchanged
+  for now, including the shipped ledger 19/20 exemption and main's fix for upstream issue 564. H' applies to plain
+  and ENHANCEMATCH searches. The reason: BESTMATCH's walk re-searches from each candidate's start, and applying H' there
+  lifted the ban at every re-search, giving answers that are neither u nor c (`(?b)(?:\mdog){1<=e<=2}` finditer over
+  'do; xdog-dog' gave [(0,3),(4,8),(9,11)], where main and upstream give [(0,3),(8,12)]; 15 (?b) grid rows lost or
+  changed a main match). What H' means inside a best-match walk is a separate semantic question, to be researched and
+  refutation-reviewed before it is built; the gate marks it with a SHORTCUT.
+- 2026-10-03 **A fuzzy constraint written after a group belongs to the group, so a call to that group runs it fuzzily, with a fresh budget each time it is entered (D63, option A; the orchestrator's decision under the owner's delegation, after a blind refutation review found that A holds).** The parser moves the constraint inside the group (`apply_constraint`, `upstream/regex/_regex_core.py:596-600`, ported as `ParseFunctions.ApplyConstraint`), so `(ab){e<=1}` is the same tree as `((?:ab){e<=1})`, and the D40 rule (a call answers as the group written out at the call site) gives `(?:ab){e<=1}` at the call. A group that sits inside a section without owning it is still called exactly from outside: `(?:(ab)){e<=1}(?1)` over 'abxb' is None. Probes (regex 2026.9.10 and this port agree, 2026-10-03): `(ab){e<=1}(?1)` over 'abxb' is (0, 4) with (1, 0, 0) and over 'xbxb' (0, 4) with (2, 0, 0); `(?1)(ab){e<=1}` over 'xbab' is (0, 4) with (1, 0, 0). A grid of 4,800 rows (10 shapes; no flag and `(?r)`, `(?b)`, `(?e)`; partial on and off) found the call answering as that written-out form on every row in both engines, and the port differing from upstream only where it already differs on the written-out form. D63's witness, `(?<o>(?<i>a)b){e<=1}(?&o)` over 'abx', is (0, 2) with two deletions here and None upstream for that reason: upstream misses the same match with no call, in `(ab){e<=1}(?:ab){e<=1}` over 'ab', because it never deletes an item that matched exactly (DIVERGENCES.md "A fuzzy item that matched exactly can still be deleted", ledgers 42 and 44). The strongest objection is the analogy with quantifiers: `{...}` is written after the group, and in `(ab){2}(?1)` PCRE2 and Perl call `ab` once, so `{e<=1}` could equally apply from outside. It fails for three reasons. A quantifier repeats a group, while a constraint changes how the group's own items match, so its errors fall inside the group's capture. Both engines parse the two spellings into one tree, so reading it the other way would need the parser to track where the constraint was written. And no engine with both fuzzy matching and group calls reads it the other way, while the reading taken here agrees with upstream on every measured row. Pinned by `ConstrainedGroupCallTests`: a temporary ablation that applied the constraint from outside failed 12 of its 16 rows. Design note: `docs/plan/2026-10-03-d63-call-into-fuzzy-group.md`.
+- 2026-10-03 **D54 built: when a conditional's negative test fails, its no branch keeps the test's whole block, the captures and the errors of a fuzzy section inside the test, exactly as the positive arm keeps them for the yes branch (orchestrator's decision under the owner's delegation, after the blind review `.claude/driver/review-d52-d54-2026-10-03.md` refuted the builder's captures-only scope; implements the 2026-09-30 ruling on OPEN-2).** So `(?(?!X)A|B)` answers as `(?(?=X)B|A)` in span, groups and fuzzy counts. The first build kept the captures but restored the fuzzy counts, and `(?(?!((?:ab){e<=1}))b|\1)` over 'ax' reported (0, 2) with 0 errors and group 1 = 'ax'. That claims an exact match that does not exist: the same pattern without the budget, `(?(?!((?:ab)))b|\1)`, has no match over 'ax' (upstream 2026.9.10, probed 2026-10-03), while the positive twin `(?(?=((?:ab){e<=1}))\1|b)` gives (0, 2) with one substitution, here and upstream. With captures only, 151 of the review's 800 twin pairs with a fuzzy section in the test disagreed, spans included (`(?b)(?:(?:(?(?!((?:a|b){s<=1}))|))+?){i<=1,d<=1}b` fullmatch 'b' matched while its twin did not); keeping the whole block makes them agree. The strongest objection was D45 (ledger entry 32), whose pinned test asserted that a failed negative condition's section errors are thrown away (`(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})` over 'cdcx' gave (1, 3) with no error). It fails because a conditional's test is not thrown away: its result chooses the branch and its captures stay, so its cost stays with them, as a positive test's already does. That "exact" (1, 3) was not exact either: the budget-free `(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'. The row now gives (0, 1) with one deletion, upstream's answer and the positive twin's. D45 stands where a test's work really is discarded: plain lookarounds, atomic groups and verbs, and a conditional (positive or negative) whose branch fails so that the match backtracks out of the whole conditional (witnesses `(?b)(?:(?!(?:q){e<=1})|c)` over 'c', `(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx', and `(?b)(?:(?(?!(?:q){e<=1})|y)|c)` over 'c', which is (0, 0) upstream and (0, 1) here). D54 covers only a failed negative test whose conditional goes on to match: that keeps its block.
+- 2026-10-10 **The scan contract under BESTMATCH and ENHANCEMATCH (D78, owner-approved fix; ledger 77).** Each step of a non-overlapped `(?b)` or `(?e)` scan returns the best match among those starting at or after the resume position p. After an empty match the only exclusion is the empty match at p itself. Overlapped scans have no exclusion. At equal cost a `(?b)` finditer gives plain finditer's match starts, and the fit at each start may differ (fewest errors at that start). Upstream turns the exclusion into "no empty match at any candidate's start", because each candidate re-run moves `search_anchor` while `must_advance` stays set (`upstream/src/_regex.c:15164`). This port sets `MustAdvance` only for a run that starts at p (`Matcher.MustAdvanceAt`, four sites) and `DoMatch2` restores it on exit. `SearchAnchor` itself is unchanged: `\G` under BESTMATCH is D79 and needs its own sizing, because moving the anchor also moves the insertion rule D61/H' leaves to the ledger 19/20 exemption. Consequence: ledger 23 ("POSIX adds a match") is withdrawn, because its POSIX-free count was this skip.
+- 2026-10-10 **`\G` reads the operation start; insertion keeps the candidate start (D79, owner-approved fix; ledger 78).** `\G` holds only where the matching operation began: a scan step's resume position, `pos` for a search, or the edge for the partial attempt from inside the text to come. Upstream's `\G` reads `search_anchor`, which each BESTMATCH and ENHANCEMATCH candidate re-run moves to its own start (`upstream/src/_regex.c:3410`, `:7288`). This port adds `MatchState.OperationStart`, set once on entry to `DoMatch2`, and `\G` and its prefilter read that. The rule against an insertion where a search began keeps reading each candidate's start (`SearchAnchor`), as D61's scope cut and ledger 19/20 decided ("the candidate walk restarts with the anchor at the match start"). The two readers split because they answer different questions: `\G` is a promise about where a match may start, and the insertion rule is a heuristic about a redundant leading insertion at the candidate being tried. Consequence: the failed-call memo's per-pass witness moved from a `\G` row to an error-limit row (`FailedCallMemoTests.Each_best_match_pass_has_its_own_set_of_failed_calls`).

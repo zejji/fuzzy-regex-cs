@@ -185,11 +185,18 @@ public sealed class PartialMatchingTests
         //   compile('(?=ab)(?=cd)').match('', partial=True)   -> (0,0) partial True
         //   compile('(?=ab)(?=cd)').match('a')                -> None
         //   compile(r'(?=\d*[02468]$)(?=\d*[13579]$)\d+').match('1234', partial=True) -> (0,4) True
+        //
+        // D11 build chunk 6 moved the 'a' row, which is not issue 367's case: the held 'a' already
+        // fails the second lookahead's 'c', whatever follows, so no continuation completes it (the
+        // brute-force judge, tools/probes/d11-brute-judge.py, 2026-09-29: None), the reasoning of
+        // design row L2 (docs/plan/2026-09-28-partial-boundary-design.md). The first lookahead's
+        // run-out no longer ends the attempt, so the second is asked. DIVERGES FROM UPSTREAM,
+        // deliberately, which answers (0, 1) partial. The empty subject and the even prime are the
+        // issue's case, two lookaheads that each run out: they stay partial (D11's limit C3,
+        // which the partial contract allows: PartialContractTests).
         var impossible = new FuzzyRegex("(?=ab)(?=cd)");
 
-        Match m = impossible.MatchAtStart("a", partial: true);
-        m.PartialMatch.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        impossible.MatchAtStart("a", partial: true).Success.Should().BeFalse();
 
         Match empty = impossible.MatchAtStart("", partial: true);
         empty.PartialMatch.Should().BeTrue();
@@ -204,12 +211,14 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
-    public void A_partial_raised_inside_a_lazy_repeat_leaves_the_enclosing_group_as_it_was()
+    public void A_partial_raised_at_a_lazy_repeats_tail_reports_the_group_its_path_closed()
     {
         // The S31 oracle wave's first finding, seed 31, rows 214 and 518, minimised. A lazy repeat
-        // inside a capture group runs out of text while extending: upstream stops inside the repeat
-        // and the group keeps whatever it had, where this port entered the tail, re-closed the group
-        // and reported it as the whole match. The fix is in Matcher.TryMatch - see its remarks.
+        // inside a capture group has taken the 'a', and its tail's test runs out of text. Upstream
+        // answers the partial at the test, so the group is unset; S31 copied that (Matcher.TryMatch's
+        // remarks). D67 (2026-10-08) enters the tail instead, so the group closes before the `z`
+        // runs out, and reports (0, 1), which every completion of that path gives ('az', 'azb'):
+        // D62's rule. DIVERGES FROM UPSTREAM deliberately, ledger entry 74.
         //
         // Measured 2026-09-12, .scratch/min-214.py:
         //   compile(r'(\D*?)z').search('a', partial=True)   -> (0,1) partial True, group 1 (-1,-1)
@@ -219,13 +228,13 @@ public sealed class PartialMatchingTests
 
         lazy.PartialMatch.Should().BeTrue();
         (lazy.Index, lazy.Index + lazy.Length).Should().Be((0, 1));
-        lazy.Groups[1].Success.Should().BeFalse();
-        lazy.LastGroupNumber.Should().Be(-1);
+        (lazy.Groups[1].Success, lazy.Groups[1].Index, lazy.Groups[1].Length).Should().Be((true, 0, 1));
+        lazy.LastGroupNumber.Should().Be(1);
 
         Match reversed = new FuzzyRegex(@"(?r)z(a*?)").Match("a", partial: true);
 
         reversed.PartialMatch.Should().BeTrue();
-        reversed.Groups[1].Success.Should().BeFalse();
+        (reversed.Groups[1].Success, reversed.Groups[1].Index, reversed.Groups[1].Length).Should().Be((true, 0, 1));
 
         // The lazy quantifier that takes zero FIRST does close its group, and keeps it: the partial
         // arrives after the group closed rather than while the repeat was extending.
@@ -235,26 +244,54 @@ public sealed class PartialMatchingTests
         (zeroFirst.Groups[1].Index, zeroFirst.Groups[1].Length).Should().Be((0, 0));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_lazy_repeat_that_cannot_extend_at_all_is_still_a_partial_match()
+    public void A_lazy_repeat_that_cannot_take_the_last_character_is_no_partial_match()
     {
-        // The wave's second finding, seed 7, row 581, minimised. '[^a-f]' matches the first four
-        // characters of '__AAb' and refuses the 'b', so the repeat cannot reach the six the tail
-        // would need. Upstream answers a partial anyway, because its specialised tail arms ask
-        // partial_side BEFORE trying to extend; this port asked MatchOne first, was refused, and
-        // reported no match at all. The fix is Matcher.IsTailPartial - see its remarks.
+        // '[^a-f]' matches the first four characters of '__AAb' and refuses the 'b', so neither the
+        // repeat nor the tail can ever get past it, and no continuation of the text completes the
+        // match. Upstream answers a partial anyway: its CHARACTER tail arms guard one step ahead
+        // (pos + 1 >= text_end, :16546) before anything checks that the repeat can take that step.
+        // S31 (seed 7, row 581) copied upstream's answer here; it was ledger entry 2's defect all
+        // along, and Matcher.IsTailPartial now guards where the repeat stands.
         //
-        // Measured 2026-09-12, .scratch/bisect7.jsonl through tools/run-oracle.ps1:
-        //   compile(r'([^a-f]{3,}?)x').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
-        //   compile(r'([^a-f]{3,}?)_').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
-        //   compile(r'(.{3,}?)x').match('abcde', partial=True)      -> (0,5) partial True, 1 unset
-        foreach (string pattern in new[] { @"([^a-f]{3,}?)x", @"([^a-f]{3,}?)_", @"([^a-f]{3,}?)_\1" })
+        // Measured 2026-09-25, regex 2026.9.10 against the README's definition of a partial (checked
+        // by trying every continuation with CPython's own `re`) and PCRE2 10.47 (PCRE2_PARTIAL_SOFT):
+        //   ([^a-f]{3,}?)x    '__AAb'   upstream (0,5) partial   truth none      PCRE2 none
+        //   (?r)ab??          'c'       upstream (0,1) partial   truth none      PCRE2 none (mirror b??a)
+        //   (.{3,}?)x         'abcde'   upstream (0,5) partial   truth partial   PCRE2 partial
+        //   (?r)ab??          'b'       upstream (0,1) partial   truth partial   PCRE2 partial
+        // Upstream's own greedy twins answer none on every row of the first kind. Over 48,960 grid
+        // rows of this shape upstream reports 3,756 such partials and misses none.
+        foreach (
+            (string pattern, string subject) in new[]
+            {
+                (@"([^a-f]{3,}?)x", "__AAb"),
+                (@"([^a-f]{3,}?)_", "__AAb"),
+                (@"([^a-f]{3,}?)_\1", "__AAb"),
+                (@"(?r)ab??", "c"),
+                (@"(?ir)Xa*?", "c"),
+                (@"(?r)b(?:a)*?", "xa"),
+                (@"(?r)bc(?:a)*?", "x"),
+                (@"[^c]??x", "c"),
+            }
+        )
         {
-            Match m = new FuzzyRegex(pattern).MatchAtStart("__AAb", partial: true);
+            new FuzzyRegex(pattern)
+                .MatchAtStart(subject, partial: true)
+                .Success.Should()
+                .BeFalse($"no continuation of {subject} matches {pattern}; upstream answers a partial");
+        }
+
+        // Where the repeat CAN take the last character, the partial stays.
+        foreach (
+            (string pattern, string subject) in new[] { (@"(.{3,}?)x", "abcde"), (@"(?r)ab??", "b"), ("ba??x", "ba") }
+        )
+        {
+            Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);
 
             m.PartialMatch.Should().BeTrue(pattern);
-            (m.Index, m.Index + m.Length).Should().Be((0, 5), pattern);
-            m.Groups[1].Success.Should().BeFalse(pattern);
+            (m.Index, m.Index + m.Length).Should().Be((0, subject.Length), pattern);
         }
     }
 
@@ -340,75 +377,62 @@ public sealed class PartialMatchingTests
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
         );
 
-        narrowed.Match(" \r", partial: true).Success.Should().BeFalse("upstream answers (0, 2) partial");
+        // D11 (2026-09-29) moved this row from None to (2, 2). ' \r' + '\n ' matches at 3, so
+        // the truth is the partial at the edge (tools/probes/d11-brute-judge.py: P(2, 2), witness
+        // '\n '). Only a start inside the text to come completes it, which is the attempt the
+        // second pass makes from there (Matcher.MatchFromInsideTheTextToCome). Upstream answers
+        // (0, 2), the span its own match denies.
+        Match narrowedMatch = narrowed.Match(" \r", partial: true);
 
-        // The greedy twin, which is the control: both engines answer nothing.
-        new FuzzyRegex(
+        (narrowedMatch.PartialMatch, narrowedMatch.Index, narrowedMatch.Length).Should().Be((true, 2, 0));
+
+        // The greedy twin, the control: upstream answers nothing, and the judge the same (2, 2), so
+        // the lazy repeat is what upstream's (0, 2) is about.
+        Match greedy = new FuzzyRegex(
             @"^([^a-f]?)([\ ])$",
             FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
-        )
-            .Match(" \r", partial: true)
-            .Success.Should()
-            .BeFalse();
+        ).Match(" \r", partial: true);
+
+        (greedy.PartialMatch, greedy.Index, greedy.Length).Should().Be((true, 2, 0));
     }
 
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    // DIVERGES FROM UPSTREAM on the match door, deliberately, and this test pins OUR answer.
     [Test]
-    public void A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_finds_no_partial_here()
+    public void A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_reports_the_partial_a_word_character_completes()
     {
-        // The wave's third finding, and the only one S31 did not fix: it is upstream's `search_start`
-        // prefilter (upstream/src/_regex.c:8385), which this port does not implement and Phase 7
-        // owns. Every `search_start_*` arm can report RE_ERROR_PARTIAL of its own (:8662-:8960); the
-        // slow path this port runs has no such arm, and upstream's slow path does not either - which
-        // is why upstream's own two doors disagree at the same position:
+        // D11 inverted this pin, which had been marked PERMANENT (design
+        // docs/plan/2026-09-28-partial-boundary-design.md, rows P1 and P2 and decision 1). A partial
+        // asks whether a longer text could make this a match (upstream/README.rst:270). Reversed, the
+        // longer text goes on the left, and '1' + '' has a word boundary at its end, so `(?r)\b$`
+        // matches it: a partial on search and match. A full match would need the text on the left
+        // to be empty, which is the complete match the first pass already refused, so fullmatch
+        // answers None. The brute-force judge (tools/probes/d11-brute-judge.py, regex 2026.9.10,
+        // 2026-09-29) answers P(0, 0) with witness '1' on search and None on fullmatch.
+        //
+        // Upstream agrees on search, through its `search_start` prefilter, and answers None on match
+        // and fullmatch (measured 2026-09-12, .scratch/probe-searchstart2.py):
         //
         //   compile(r'(?r)\b$').search('', partial=True)    -> (0, 0), partial True
         //   compile(r'(?r)\b$').match('', partial=True)     -> None
         //   compile(r'(?r)\b$').fullmatch('', partial=True) -> None
         //
-        // Measured 2026-09-12, .scratch/probe-searchstart2.py. The patterns `(?r)\m$`, `(?r)a\b$`
-        // and `(?r)([abz]{1})\b$` all behave the same way, and `(?r)$` - no boundary, so no such
-        // start test - agrees on all three doors. Same mechanism as S29's four `verbs` rows: see
-        // the Generator note in tools/run-oracle.ps1, and DECISIONS 2026-09-12.
-        //
-        // PERMANENT, decided 2026-09-12, RE-JUDGED and upheld by S57d on 2026-09-21 on different
-        // reasoning: the port is right, upstream is internally inconsistent, and this test does NOT
-        // invert when `search_start` lands - a Phase 7 slice that turns it red has ported the bug.
-        // See docs/plan/2026-09-12-divergence-research.md.
-        //
-        // Two of the three reasons first given here have since been measured and do not hold. The
-        // maintainer's own argument from upstream issue 589, that `\b` is evaluated against the real
-        // string and the empty string holds no word character to be partial about, is the argument
-        // ledger entry 21 rejects and S57d now departs from: this port answers a partial for a
-        // boundary decided at the end of the available text. And PCRE2's partial here was put down
-        // to a rule of PCRE2's own, `pcre2partial`'s "the next pattern item must be one that
-        // inspects a character" test. It is not: a bare `\b` has no next pattern item and PCRE2
-        // still answers a partial, `\b\b` likewise, and PCRE2_NO_START_OPTIMIZE changes neither
-        // (tools/probes/pcre2-hitend-partial-span.py section E, PCRE2 10.47, 2026-09-21). PCRE2 is
-        // answering on the boundary, which is the same question, so it is a second opinion after
-        // all - and it is against us on this row.
-        //
-        // What upholds the pin is the first reason, now with upstream's rule behind it. Upstream
-        // reports a partial when a node runs out of TEXT and at no other time
-        // (tools/probes/upstream-partial-needs-text-exhaustion.py, regex 2026.9.10, 2026-09-21).
-        // Nothing in `(?r)\b$` over '' asks for a character, so upstream's own rule says None here,
-        // its `match` and `fullmatch` doors say None, and only the door that consults `search_start`
-        // says otherwise. S57d's rule reaches the same answer from the other side: the attempt that
-        // reached the boundary had consumed nothing, and a zero-width partial at the truncation
-        // point is the one case where this port stops short of PCRE2. So both engines' stated rules
-        // agree on None and one door of one engine dissents.
-        //
-        // The `partial` and `partial-sliced` generators ARE on the default oracle list from S33, with
-        // these rows classified as `search-start-partial` in
-        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        // The pin used to answer None on all three doors, on upstream's rule that a partial needs a
+        // node to run out of text and on S57d's "the attempt consumed nothing" narrowing. Both
+        // resolve the boundary against text the caller has said is truncated, which is the false
+        // negative ledger entry 21 rules out. PCRE2 10.47 answers a partial for a bare `\b` over ''
+        // (tools/probes/pcre2-hitend-partial-span.py section E, 2026-09-21).
         var pattern = new FuzzyRegex(@"(?r)\b$");
 
-        pattern.Match("", partial: true).Success.Should().BeFalse("search_start is not ported");
-        pattern.MatchAtStart("", partial: true).Success.Should().BeFalse("upstream agrees here");
+        foreach (Match m in new[] { pattern.Match("", partial: true), pattern.MatchAtStart("", partial: true) })
+        {
+            m.PartialMatch.Should().BeTrue();
+            (m.Index, m.Length).Should().Be((0, 0));
+        }
+
         pattern.FullMatch("", partial: true).Success.Should().BeFalse("upstream agrees here");
 
-        // Without the boundary there is no start test for the prefilter to run, and all three doors
-        // agree with upstream on a complete zero-width match.
+        // Without the boundary nothing reads the text to come, and all three doors agree with
+        // upstream on a complete zero-width match.
         Match anchored = new FuzzyRegex("(?r)$").Match("", partial: true);
 
         anchored.Success.Should().BeTrue();
@@ -713,87 +737,45 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
-    public void The_width_early_out_that_skips_the_non_partial_pass_counts_characters_not_code_units()
+    public void A_call_in_a_lookbehind_no_longer_makes_a_narrow_subject_a_partial()
     {
-        // S40c. A partial request is answered in TWO passes: `do_match` runs a NON-PARTIAL pass
-        // first and only falls back to a partial one if that FAILS (`upstream/src/_regex.c:18142`,
-        // and `Matcher.DoMatch`). `do_exact_match` (`:18064`) opens with a width early-out - fewer
-        // characters available than `min_width`, fail without matching at all - and that early-out
-        // is guarded by `partial_side == RE_PARTIAL_NONE`, so it fires on the FIRST pass only.
+        // S40c pinned two things here. A partial request is answered in two passes, non-partial
+        // first (`upstream/src/_regex.c:18142`, `Matcher.DoMatch`), and `do_exact_match`'s width
+        // early-out (`:18064`), guarded by `partial_side == RE_PARTIAL_NONE`, fires on the first
+        // pass only, so a subject narrower than `min_width` skips straight to the partial pass.
+        // S40c made that early-out count characters rather than UTF-16 code units, and the rows
+        // below showed it, because upstream's `min_width` counted a call inside a lookbehind at the
+        // width of the group it calls.
         //
-        // So on a subject too narrow for `min_width` the non-partial pass never runs, the partial
-        // pass does, and the answer is a PARTIAL of a span the first pass would have called
-        // complete. That is upstream's design, not an accident: the early-out is the ONLY thing
-        // standing between the two passes.
-        //
-        // THE DEFECT THIS PINS. `available` was a UTF-16 code-unit subtraction, and `min_width` is a
-        // CHARACTER count. One astral character is two code units, so `available` read 2 where
-        // upstream reads 1, the early-out did not fire, the non-partial pass ran and SUCCEEDED, and
-        // the partial retry upstream performs never happened. The comment that stood here claimed
-        // the mismatch was safe because "the engine simply does the work and fails in the dispatch
-        // loop instead - the same answer". It is not the same answer: a pass that SUCCEEDS is not a
-        // pass that fails, and the fallback is what it suppresses.
-        //
-        // WHAT MAKES A ONE-CHARACTER SUBJECT TOO NARROW AT ALL is a separate upstream oddity, and it
-        // is what the family that found this is made of: `min_width` counts a group CALL at the
-        // width of the group it calls even inside a LOOKAROUND, which is zero-width. So
-        // `(?P<g1>A)(?:(?<=(?P>g1))\w)?` has min_width 2 where the same lookbehind written out has
-        // 1. Not fixed here - upstream's answer is reproduced, and the divergence was ours.
+        // D49 (ledger entry 60) removed that inflation: the width was the called group's backwards
+        // copy, compiled after the pattern's SUCCESS, and a call reached from a lookbehind consumes
+        // nothing. `min_width` is now a true lower bound, so the early-out can no longer change an
+        // answer, and the character count S40c fixed is no longer visible from outside. The rows
+        // now answer what upstream gives with the call written out: a complete match (regex
+        // 2026.9.10, 2026-09-30, `\w*(?P<g1>A)(?:(?<=A)\w)?` over 'A' and `\w*(?P<g1>ABC)(?:(?<=ABC)\w)?`
+        // over 'ABC', both partial False).
         string astral = char.ConvertFromUtf32(0x10400);
 
-        // regex.search(r'(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?', '\U00010400', partial=True)
-        //   -> span (0, 1) codepoints, g1 (0, 1), partial True. Two code units here.
         Match forward = new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?").Match(astral, partial: true);
 
-        forward.Success.Should().BeTrue();
-        (forward.Index, forward.Length).Should().Be((0, 2));
-        forward.PartialMatch.Should().BeTrue("one character is available and min_width is 2");
-        (forward.Groups["g1"].Index, forward.Groups["g1"].Length).Should().Be((0, 2));
+        (forward.Success, forward.Index, forward.Length, forward.PartialMatch).Should().Be((true, 0, 2, false));
 
-        // regex.fullmatch(r'(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?', '\U00010400', partial=True)
-        //   -> span (0, 1) codepoints, g1 UNSET, partial True.
-        Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
-
-        reversed.Success.Should().BeTrue();
-        (reversed.Index, reversed.Length).Should().Be((0, 2));
-        reversed.PartialMatch.Should().BeTrue("the same early-out, through a lookahead under (?r)");
-        reversed.Groups["g1"].Success.Should().BeFalse("upstream drops g1 when the partial pass answers");
-
-        // THE THRESHOLD MOVES WITH THE CALLEE'S WIDTH, which is what says the early-out is the
-        // mechanism rather than the call. Every row below keeps the tail past the end of the subject
-        // - a `\w*` prefix soaks up the spare characters - so the ONLY thing that varies is how many
-        // characters the early-out counts. All measured on regex 2026.7.19 and re-run unchanged on
-        // 2026.9.10: `python tools/probes/upstream-min-width-partial-retry.py`.
-        //
-        //   \w*(?P<g1>A)(?:(?<=(?P>g1))\w)?     'A'       partial   min_width 2, 1 available
-        //   \w*(?P<g1>A)(?:(?<=(?P>g1))\w)?     'BA'      complete  min_width 2, 2 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'ABC'     partial   min_width 6, 3 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'XXABC'   partial   min_width 6, 5 available
-        //   \w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?   'XXXABC'  complete  min_width 6, 6 available
-        //   \w*(?P<g1>A)(?:(?<=A)\w)?           'A'       complete  min_width 1, never fires
-        //   \w*(?P<g1>ABC)(?:(?<=ABC)\w)?       'ABC'     complete  min_width 3, never fires
         var narrow = new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=(?P>g1))\w)?");
-        narrow.Match("A", partial: true).PartialMatch.Should().BeTrue();
+        narrow.Match("A", partial: true).PartialMatch.Should().BeFalse();
         narrow.Match("BA", partial: true).PartialMatch.Should().BeFalse();
 
         var wide = new FuzzyRegex(@"\w*(?P<g1>ABC)(?:(?<=(?P>g1))\w)?");
-        wide.Match("ABC", partial: true).PartialMatch.Should().BeTrue();
-        wide.Match("XXABC", partial: true).PartialMatch.Should().BeTrue();
-        wide.Match("XXXABC", partial: true).PartialMatch.Should().BeFalse();
+        wide.Match("ABC", partial: true).PartialMatch.Should().BeFalse();
+        wide.Match("XXABC", partial: true).PartialMatch.Should().BeFalse();
 
-        // The same lookarounds written out, where min_width is the body's own width and the
-        // early-out never fires. Both engines answer a complete match.
-        new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=A)\w)?")
-            .Match("A", partial: true)
+        new FuzzyRegex(@"\w*(?P<g1>A)(?:(?<=A)\w)?").Match("A", partial: true).PartialMatch.Should().BeFalse();
+
+        // A REQUIRED tail is still a partial, in both engines: the tail itself asks for a character
+        // past the end.
+        new FuzzyRegex(@"\w*(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)")
+            .Match(astral, partial: true)
             .PartialMatch.Should()
-            .BeFalse();
-        new FuzzyRegex(@"\w*(?P<g1>ABC)(?:(?<=ABC)\w)?").Match("ABC", partial: true).PartialMatch.Should().BeFalse();
-
-        // And the astral pair from the probe, which is the row that used to answer by character
-        // width: one astral character is too narrow, one astral character behind a spare one is not.
-        var astralNarrow = new FuzzyRegex(@"\w*(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?");
-        astralNarrow.Match(astral, partial: true).PartialMatch.Should().BeTrue();
-        astralNarrow.Match("B" + astral, partial: true).PartialMatch.Should().BeFalse();
+            .BeTrue();
     }
 
     [Test]
@@ -888,6 +870,17 @@ public sealed class PartialMatchingTests
         );
         pruned.PartialMatch.Should().BeTrue();
         (pruned.Index, pruned.Length).Should().Be((0, 1));
+
+        // The smallest row of this shape, minimised on 2026-09-25 from seed 335764881 rows 32325
+        // and 32703 of the 2026-09-24 sweep. Upstream answers (0, 0); its `(*PRUNE)` spelling, its
+        // verb-free spelling and its own `match(0, 1, partial=True)` all answer (0, 1).
+        foreach (string verb in new[] { "(*SKIP)", "(*PRUNE)", "" })
+        {
+            Match m = new FuzzyRegex("(?r)x(?:a" + verb + "b|c)").Match("bx", partial: true);
+
+            m.PartialMatch.Should().BeTrue(verb);
+            (m.Index, m.Length).Should().Be((0, 1), verb);
+        }
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
@@ -1072,6 +1065,112 @@ public sealed class PartialMatchingTests
             .Match(subject)
             .Success.Should()
             .BeFalse();
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_skip_in_the_first_pass_does_not_move_where_the_partial_pass_starts_or_ends()
+    {
+        // The seed-11 `partial-long` rows 8508 and 8556 (2026-09-25), minimised: the same carried
+        // bound as the two tests above, costing the START of the partial here. Upstream's first,
+        // non-partial pass reaches the verb and moves the slice bound; its partial pass then
+        // searches from the moved bound. Measured 2026-09-25 on regex 2026.9.10:
+        //
+        //   search('A(*SKIP)b', 'QQA', partial=True)        (3, 3)   upstream
+        //   ... spelt (*PRUNE), which moves no bound         (2, 3)   upstream, this port
+        //   match at 2                                       (2, 3)   upstream
+        //   PCRE2 10.47, PCRE2_PARTIAL_SOFT                  (2, 3)
+        //
+        //   search('(?r)(?:a(*SKIP)\W|Z)(a)', '.aab', partial=True)   (0, 0)            upstream
+        //   ... spelt (*PRUNE)                                       (0, 2), g1 (1, 2) upstream
+        //   match with endpos 2, the highest that matches            (0, 2), g1 (1, 2) upstream
+        //
+        // A forward search owes the leftmost start that can still complete ('A' at 2 then 'b'), and
+        // a reversed one the rightmost end.
+        foreach (string verb in new[] { "(*SKIP)", "(*PRUNE)" })
+        {
+            Match forward = new FuzzyRegex("A" + verb + "b").Match("QQA", partial: true);
+
+            forward.PartialMatch.Should().BeTrue(verb);
+            (forward.Index, forward.Length).Should().Be((2, 1), verb);
+
+            Match reversed = new FuzzyRegex(@"(?r)(?:a" + verb + @"\W|Z)(a)").Match(".aab", partial: true);
+
+            reversed.PartialMatch.Should().BeTrue(verb);
+            (reversed.Index, reversed.Length).Should().Be((0, 2), verb);
+            (reversed.Groups[1].Index, reversed.Groups[1].Length).Should().Be((1, 1), verb);
+        }
+    }
+
+    [Test]
+    [Arguments("(?e)")]
+    [Arguments("(?b)")]
+    public void A_ranking_flag_leaves_a_partial_search_at_the_leftmost_live_start(string flag)
+    {
+        // Owner ruling 2026-09-30, option A (DECISIONS): BESTMATCH and ENHANCEMATCH rank complete
+        // matches only, so a partial search still answers the least start from which some
+        // continuation matches, with the first fit found there. Measured 2026-09-30 on upstream
+        // regex 2026.9.10 and this port, both flags:
+        //
+        //   (dog){e<=1}   'cat and d'   partial   P(7, 9), one insertion
+        //   (dog){e<=1}   'cat and dog'           (8, 11), no errors
+        //
+        // 'cat and dog' matches from 7 with one insertion, so 7 is live; nothing earlier is. The
+        // completed search moves to 8 because the flag prefers the exact fit, which a partial match,
+        // with only a lower bound on its errors, cannot be ranked against.
+        var dog = new FuzzyRegex(flag + "(dog){e<=1}");
+
+        Match partial = dog.Match("cat and d", partial: true);
+        (partial.Index, partial.Index + partial.Length, partial.PartialMatch).Should().Be((7, 9, true));
+        partial.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+        Match complete = dog.Match("cat and dog");
+        (complete.Index, complete.Index + complete.Length, complete.PartialMatch).Should().Be((8, 11, false));
+        complete.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void A_skip_the_complete_pass_ran_does_not_move_the_partial_start_past_a_live_one()
+    {
+        // PORT RIGHT, KNOWN DEFECT D57, the smallest row of the door below (complete-matrix row
+        // 12240's shape, 2026-09-30). The complete pass tries 2, runs the verb at 4 and fails at the
+        // end of the text; the verb has set `slice_start` to 4 (upstream/src/_regex.c:14555), and
+        // the partial pass restores only `text_pos` (do_match, :18159-18170), so upstream's partial
+        // search can start no earlier than 4. The least start from which some continuation matches
+        // is 2 ('axaax' matches at 2), which is the partial rule (answer key A2).
+        //
+        // Measured 2026-10-01 on regex 2026.9.10:
+        //
+        //   aa(*SKIP)x   search 'axaa' partial      (4, 4) partial   <- upstream
+        //   aa(*PRUNE)x  search 'axaa' partial      (2, 4) partial   <- this port
+        //   aax          search 'axaa' partial      (2, 4) partial
+        //   aa(*SKIP)x   match('axaa', 2, partial)  (2, 4) partial
+        //   aa(*SKIP)x   search 'axaa'              None             <- both engines
+        //
+        // Classified as `partial-retry-carried-slice-forward`.
+        var regex = new FuzzyRegex("aa(*SKIP)x");
+
+        Match partial = regex.Match("axaa", partial: true);
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((2, 2), "upstream reports the zero-width partial at 4");
+
+        // Near variants: the verb that moves no bound, the verb-free pattern, the anchored door, the
+        // completed subject, and no partial asked for.
+        Match pruned = new FuzzyRegex("aa(*PRUNE)x").Match("axaa", partial: true);
+        (pruned.Index, pruned.Length, pruned.PartialMatch).Should().Be((2, 2, true));
+        Match plain = new FuzzyRegex("aax").Match("axaa", partial: true);
+        (plain.Index, plain.Length, plain.PartialMatch).Should().Be((2, 2, true));
+        Match anchored = regex.MatchAtStart("axaa", beginning: 2, partial: true);
+        (anchored.Index, anchored.Length, anchored.PartialMatch).Should().Be((2, 2, true));
+        Match completed = regex.Match("axaax");
+        (completed.Index, completed.Length, completed.PartialMatch).Should().Be((2, 3, false));
+        regex.Match("axaa").Success.Should().BeFalse();
+
+        // Row 12240 itself, the scan form: upstream's finditer gives one partial at (4, 4), and its
+        // `(*PRUNE)` spelling (2, 4), measured 2026-10-01.
+        MatchCollection scan = new FuzzyRegex(@"aa(*SKIP)x(?:.\w){s<=1}").Matches("axaa", partial: true);
+        scan.Should().ContainSingle();
+        (scan[0].Index, scan[0].Length, scan[0].PartialMatch).Should().Be((2, 2, true));
     }
 
     [Test]
@@ -1751,7 +1850,15 @@ public sealed class PartialMatchingTests
     /// here, where upstream reports nothing at all.
     /// </summary>
     /// <remarks>
-    /// The deliberate divergence S57d adds, and the rule behind it is upstream's rather than this
+    /// <para>
+    /// D11 (design section 5) answers these through the second pass, which takes the boundary at
+    /// the edge as undetermined, in place of S57d's escalation, which build chunk 9 deleted. A full
+    /// match of the first four rows would have to end where the text does, and the text to come is
+    /// not empty, so fullmatch answers None there (the brute-force judge and the port's own,
+    /// 2026-10-03; S57d answered a partial). The history below is S57d's.
+    /// </para>
+    /// <para>
+    /// The deliberate divergence S57d added, and the rule behind it is upstream's rather than this
     /// port's: upstream reports a partial when a node runs out of TEXT, never when a boundary runs
     /// out of CONTEXT. <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> is the
     /// measurement, on regex 2026.9.10, 2026-09-21, and its decisive pair is
@@ -1759,6 +1866,7 @@ public sealed class PartialMatchingTests
     /// both fail there, and only the one whose repeat can ask for a third character answers a
     /// partial. So upstream is not making a judgement about the boundary here; the boundary plays
     /// no part in its answer.
+    /// </para>
     /// <para>
     /// Ledger entry 21 is the case for changing that, and PCRE2 is the second engine that already
     /// has: <c>pcre2partial(3)</c> names <c>\z</c>, <c>\Z</c>, <c>\b</c>, <c>\B</c> and <c>$</c> as
@@ -1773,68 +1881,67 @@ public sealed class PartialMatchingTests
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
     // A boundary that fails at the end of the text, with the attempt having consumed the whole span.
-    [Arguments(@"aa\B", "aa", 2)]
-    [Arguments(@"a{2}\B", "aa", 2)]
-    [Arguments(@"True\B", "True", 4)]
-    [Arguments(@"a?\B", "a", 1)]
+    [Arguments(@"aa\B", "aa", 2, false)]
+    [Arguments(@"a{2}\B", "aa", 2, false)]
+    [Arguments(@"True\B", "True", 4, false)]
+    [Arguments(@"a?\B", "a", 1, false)]
     // A boundary that SUCCEEDS at the end of the text, where what fails is the construct around it.
     // Both rows need this: entry 21's own row is a lookahead whose inner `\b` succeeded, and `\X`
-    // ends at a grapheme boundary that more text could move.
-    [Arguments(@"(?!(True|False)\b)(.*)", "True", 4)]
-    [Arguments(@"\X(?<!a)", "a", 1)]
+    // ends at a grapheme boundary that more text could move ('a' + U+0301 is one cluster).
+    [Arguments(@"(?!(True|False)\b)(.*)", "True", 4, true)]
+    [Arguments(@"\X(?<!a)", "a", 1, true)]
     public void A_boundary_decided_at_the_end_of_the_text_reports_a_partial_upstream_denies(
         string pattern,
         string subject,
-        int expectedLength
+        int expectedLength,
+        bool fullmatchToo
     )
     {
         // Upstream answers None to every row here on both of these doors. The probe prints, for
         // example, 'aa\B' 'aa' match=None fullmatch=None and 'True\B' 'True' match=None
         // fullmatch=None.
         var compiled = new FuzzyRegex(pattern);
+        Match m = compiled.MatchAtStart(subject, partial: true);
 
-        foreach (
-            Match m in new[]
-            {
-                compiled.MatchAtStart(subject, partial: true),
-                compiled.FullMatch(subject, partial: true),
-            }
-        )
-        {
-            m.PartialMatch.Should().BeTrue();
+        m.PartialMatch.Should().BeTrue();
 
-            // The span runs from the start of the attempt that reached the end of the text to the
-            // end of the text, which is PCRE2's answer for the same rows:
-            // tools/probes/pcre2-hitend-partial-span.py, PCRE2 10.47, 2026-09-21.
-            (m.Index, m.Length)
-                .Should()
-                .Be((0, expectedLength));
-        }
+        // The span runs from the start of the attempt that reached the end of the text to the end
+        // of the text, which is PCRE2's answer for the same rows:
+        // tools/probes/pcre2-hitend-partial-span.py, PCRE2 10.47, 2026-09-21.
+        (m.Index, m.Length)
+            .Should()
+            .Be((0, expectedLength));
+
+        Match full = compiled.FullMatch(subject, partial: true);
+        (full.PartialMatch, full.Index, full.Length)
+            .Should()
+            .Be(fullmatchToo ? (true, 0, expectedLength) : (false, 0, 0));
     }
 
     /// <summary>
-    /// The search door usually agrees with upstream anyway, because a search that can retry at the
-    /// end of the subject finds upstream's own partial there first.
+    /// A search reports the leftmost start that some longer text completes, even where a later
+    /// start runs out of text the ordinary way.
     /// </summary>
     /// <remarks>
-    /// This is why the divergence above is nearly invisible to the differential oracle, whose
-    /// generators mostly search. Over 'aa' the attempt at 0 reaches <c>\B</c> at the end and fails,
-    /// but the search then retries at 1, where the second <c>a</c> runs out of text and both engines
-    /// report the ordinary partial (1, 2). A start anchor removes the retry, and then the two
-    /// engines differ: upstream measured None for <c>^a\B</c> over 'a' by
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-21.
+    /// Over 'aa' the attempt at 0 matches both letters and reaches <c>\B</c> at the end, which 'a'
+    /// to come would satisfy ('aaa' matches at 0), so that attempt is the partial (0, 2) (D11 design
+    /// rule 3, row <c>aa\B</c> of the M3 witnesses; the brute-force judge
+    /// <c>tools/probes/d11-brute-judge.py</c> agrees). Upstream decides <c>\B</c> against the held
+    /// text, fails at 0, retries at 1 and reports the second <c>a</c> running out, (1, 2). With a
+    /// start anchor there is no retry, and upstream answers None for <c>^a\B</c> over 'a'
+    /// (<c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-21).
     /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_partial_found_the_ordinary_way_is_kept_in_place_of_the_boundary_one()
+    public void A_search_reports_the_leftmost_start_a_longer_text_completes()
     {
         // regex.compile(r'aa\B').search('aa', partial=True) -> (1, 2), partial True
-        Match ordinary = new FuzzyRegex(@"aa\B").Match("aa", partial: true);
+        Match leftmost = new FuzzyRegex(@"aa\B").Match("aa", partial: true);
 
-        ordinary.PartialMatch.Should().BeTrue();
-        (ordinary.Index, ordinary.Length).Should().Be((1, 1));
+        leftmost.PartialMatch.Should().BeTrue();
+        (leftmost.Index, leftmost.Length).Should().Be((0, 2));
 
-        // DIVERGES FROM UPSTREAM, deliberately: with `^` there is no later start to retry from, so
-        // nothing runs out of text and only the boundary is left to answer.
+        // With `^` there is no later start to retry from, and only the boundary is left to answer.
         Match anchored = new FuzzyRegex(@"^a\B").Match("a", partial: true);
 
         anchored.PartialMatch.Should().BeTrue();
@@ -1842,42 +1949,31 @@ public sealed class PartialMatchingTests
     }
 
     /// <summary>
-    /// A partial derived from a boundary reports no groups, even for a group that had closed before
-    /// the boundary was reached.
+    /// A partial whose path passed a boundary at the end of the text reports the groups of that
+    /// path.
     /// </summary>
     /// <remarks>
-    /// PCRE2 defines none: on a partial match "the first two elements in the ovector point to the
-    /// portion of the subject that was matched" and "the values in the rest of the ovector are
-    /// undefined" (<c>pcre2partial(3)</c>, read 2026-09-21 at
-    /// <see href="https://www.pcre.org/current/doc/html/pcre2partial.html"/>). Measured, that is
-    /// uninitialised memory: <c>tools/probes/pcre2-hitend-partial-span.py</c> section C printed
-    /// <c>(8819262122025316210,4981658938864334708)</c> for the two groups of <c>(a)(b)\B</c> on
-    /// 2026-09-21 and a different pair of large integers on the next run, which is the point - the
-    /// numbers are not spans and do not repeat. So there is nothing to copy, and reporting a group
-    /// whose span the model does not define would be inventing an answer. Upstream reports None for
-    /// this row altogether.
-    /// <para>
-    /// A partial found the ordinary way is unaffected and still carries its groups, which
-    /// <see cref="A_partial_match_keeps_the_groups_that_had_already_closed"/> pins.
-    /// </para>
+    /// D11 (design section 4.3, and section 5's row for this test): the second pass takes the
+    /// boundary as passed for the continuations that pass it, so the path reaches the end of the
+    /// pattern and its groups are the ones a complete match of 'ab' + 'a' would report. Before D11
+    /// the partial came from S57d's escalation after the whole match had failed, when no path had
+    /// completed, so it reported no groups, as PCRE2 defines none (<c>pcre2partial(3)</c>). Upstream
+    /// answers None to both rows; the brute-force judge (<c>tools/probes/d11-brute-judge.py</c>,
+    /// 2026-09-29) answers P(0, 2) to both. The <c>(*SKIP)</c> row is kept because it is the row on
+    /// which a verb prunes the unwinding, which is where stale groups would show.
     /// </remarks>
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    // The `(*SKIP)` row is the one that makes the clearing load-bearing, and it took a negative
-    // control to find: without `(*SKIP)` the backtracking unwinds every group on the way out, so a
-    // port that never cleared them would pass anyway. The verb prunes that unwind and group 1
-    // survives the failure at (0, 1) with `lastindex` 1. Measured with `state.ClearGroups()`
-    // removed, 2026-09-21. Upstream answers None to both rows.
     [Arguments(@"(a)(b)\B")]
     [Arguments(@"(a)(*SKIP)(b)\B")]
-    public void A_boundary_partial_reports_no_groups(string pattern)
+    public void A_boundary_partial_reports_the_groups_of_its_path(string pattern)
     {
         Match m = new FuzzyRegex(pattern).MatchAtStart("ab", partial: true);
 
         m.PartialMatch.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 2));
-        m.Groups[1].Success.Should().BeFalse();
-        m.Groups[2].Success.Should().BeFalse();
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 1));
+        (m.Groups[2].Index, m.Groups[2].Length).Should().Be((1, 1));
     }
 
     /// <summary>
@@ -1914,32 +2010,48 @@ public sealed class PartialMatchingTests
     }
 
     /// <summary>
-    /// A boundary that fails without the attempt having consumed anything reports no partial, and
-    /// this is where the port stops short of PCRE2.
+    /// A boundary at the end of the text that a word character to come would satisfy reports a
+    /// partial even when the attempt has consumed nothing.
     /// </summary>
     /// <remarks>
-    /// PCRE2 escalates these: <c>\b</c> over '' is <c>PARTIAL (0,0)</c> there, with or without
-    /// <c>PCRE2_NO_START_OPTIMIZE</c> (<c>tools/probes/pcre2-hitend-partial-span.py</c> sections D
-    /// and E, PCRE2 10.47, 2026-09-21). This port follows upstream instead, for two reasons. A
-    /// zero-width partial at the truncation point tells a caller nothing it did not already know -
-    /// there is always more text that might match - and the port already pins upstream's own
-    /// zero-width answer as wrong in <c>docs/DIVERGENCES.md</c> under <c>search-start-partial</c>,
-    /// so producing one here would contradict that. Measured against upstream, which agrees on
-    /// every row below: they are the last three rows of
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-22.
+    /// D11 inverted this test (design rows P3, section 5 and decision 1). <c>\b</c> over '' + '1'
+    /// matches at 0, so a longer text completes the match, and refusing it is the false negative
+    /// ledger entry 21 rules out. PCRE2 10.47 agrees on search and match: <c>\b</c> over '' is
+    /// <c>PARTIAL (0,0)</c>, with or without <c>PCRE2_NO_START_OPTIMIZE</c>
+    /// (<c>tools/probes/pcre2-hitend-partial-span.py</c> sections D and E, 2026-09-21). A full
+    /// match would need the text to come to be empty, which the complete match already judged, so
+    /// fullmatch answers None. <c>\B</c> over 'a' fails at 0 on held text and a search finds the
+    /// partial at 1. The brute-force judge (<c>tools/probes/d11-brute-judge.py</c>, 2026-09-29)
+    /// gives the same answers on every door. Upstream answers None on every door
+    /// (<c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-22).
+    /// S57d had narrowed its own escalation to attempts that consumed something, to stay in step
+    /// with upstream and with the <c>search-start-partial</c> pin, which D11 inverts too.
     /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
     // Nothing to consume, so the boundary is the whole pattern and the attempt is empty.
-    [Arguments(@"\b", "")]
-    [Arguments(@"\b\b", "")]
-    // `\B` fails at 1, the end of 'a', with the attempt there having started at 1 as well.
-    [Arguments(@"\B", "a")]
-    public void A_boundary_that_consumed_nothing_reports_no_partial(string pattern, string subject)
+    [Arguments(@"\b", "", 0, true)]
+    [Arguments(@"\b\b", "", 0, true)]
+    // `\B` fails at 0 before the 'a' whatever follows, and holds at 1 for a word character to come.
+    [Arguments(@"\B", "a", 1, false)]
+    public void A_boundary_that_consumed_nothing_reports_the_partial_a_word_character_completes(
+        string pattern,
+        string subject,
+        int start,
+        bool anchoredToo
+    )
     {
         var compiled = new FuzzyRegex(pattern);
 
-        compiled.Match(subject, partial: true).Success.Should().BeFalse();
-        compiled.MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+        Match searched = compiled.Match(subject, partial: true);
+
+        searched.PartialMatch.Should().BeTrue();
+        (searched.Index, searched.Length).Should().Be((start, 0));
+
+        Match anchored = compiled.MatchAtStart(subject, partial: true);
+
+        anchored.Success.Should().Be(anchoredToo);
+        anchored.PartialMatch.Should().Be(anchoredToo);
         compiled.FullMatch(subject, partial: true).Success.Should().BeFalse();
     }
 
@@ -1952,10 +2064,10 @@ public sealed class PartialMatchingTests
     /// all three are this rule reaching a pattern nobody would write by hand: a conditional whose
     /// condition fails so the whole group matches empty, a fuzzy section whose budget goes unused, a
     /// reversed lookbehind. Each reduces to a boundary that runs out of context after the attempt
-    /// has consumed text. They are pinned here whole rather than minimised, so that the
-    /// <c>boundary-at-the-end-of-the-text</c> entry in
-    /// <c>tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs</c> has tests carrying its own examples
-    /// and a later engine change cannot quietly move them. Upstream answers no match to all three,
+    /// has consumed text. They are pinned here whole rather than minimised, so that a later engine
+    /// change cannot quietly move them. They were the examples of the
+    /// <c>boundary-at-the-end-of-the-text</c> oracle entry, which D11 build chunk 9 removed with
+    /// S57d's escalation: the fullmatch rows left now agree with upstream or are a phantom of limit C2 (D19). Upstream answers no match to all three,
     /// which is what the wave recorded from regex 2026.9.10.
     /// <para>
     /// Each row carries the flag word the wave recorded it under, because that is part of the
@@ -1965,29 +2077,32 @@ public sealed class PartialMatchingTests
     /// default is version 1 (<c>OracleWave.OracleRow.DefaultVersion</c>, S50b).
     /// </para>
     /// </remarks>
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    // DIVERGES FROM UPSTREAM on the first row, as the documented partial contract allows: it is a
+    // partial no text completes, limit C2 (was known defect D19; `(?:a\B)+` fullmatch 'a' is the
+    // same shape, PartialContractTests). Both
+    // judges answer None (2026-10-03): a full match must end with the text, where `\B` after a word
+    // character is false. The second pass runs the greedy `[ab]+` out of text at the edge, and
+    // after a run-out the rest is presumed to match. Upstream answers None here (and P(0, 2) to the
+    // exact `(?fi)[ab]+\B`, the same phantom). A partial promises only that more text may
+    // complete the match (owner decision 2026-10-08), so this is the contract's answer. D11 build
+    // chunk 9 moved the seed-20260921 row to upstream's None, the
+    // judge's answer: its pattern ends at `b\B`, so a full match would have to end with the text,
+    // and S57d's escalation, which answered P(0, 1), is deleted (design section 5).
+    // D11 moved the seed-7 row, `^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$` searched over two astral
+    // uppercase letters, to None, where upstream is: `\m` after a word character at the end of the
+    // text is false whatever follows (design row B1), and the brute-force judge answers None. It is
+    // pinned in A_word_start_after_a_word_character_at_the_end_is_decided_false.
     [Test]
-    // Seed 7, `partial` row 4867, search, flags 0x400a. `\m` is a word start, and there is none at
-    // the end of the subject, which is two astral uppercase letters.
-    [Arguments(
-        @"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$",
-        "\U00010400\U0001D518",
-        "search",
-        4,
-        FuzzyRegexOptions.IgnoreCase
-            | FuzzyRegexOptions.Multiline
-            | FuzzyRegexOptions.FullCase
-            | FuzzyRegexOptions.Version0
-    )]
-    // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent.
+    // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent. P(0, 2)
+    // is the C2 phantom described above, not a right answer.
     [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2, FuzzyRegexOptions.Version0)]
     // Seed 20260921, `partial` row 4830, fullmatch, flags 0x2. The lookbehind condition is false
-    // after 'b', so the conditional contributes nothing and the pattern is `b\B`.
+    // after 'b', so the conditional contributes nothing and the pattern is `b\B`. Now None.
     [Arguments(
         @"b\B(?(?<![\w\s])\p{Ll})",
         "b",
         "fullmatch",
-        1,
+        -1,
         FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0
     )]
     public void A_boundary_partial_is_what_the_oracle_waves_found(
@@ -2002,6 +2117,12 @@ public sealed class PartialMatchingTests
         Match m = string.Equals(door, "search", StringComparison.Ordinal)
             ? compiled.Match(subject, partial: true)
             : compiled.FullMatch(subject, partial: true);
+
+        if (expectedLength < 0)
+        {
+            m.Success.Should().BeFalse();
+            return;
+        }
 
         m.PartialMatch.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, expectedLength));
@@ -2024,19 +2145,21 @@ public sealed class PartialMatchingTests
     /// </code>
     /// Both consume the 'a' backwards and then ask <c>\B</c> at 0. Only <c>a+</c> can ask for a
     /// character before the text and be told it has run out, so only <c>a+</c> gets a partial from
-    /// upstream. This port answers a partial to both.
+    /// upstream. This port answers a partial to both on match, where a word character before the
+    /// text completes <c>\Ba</c>. A full match of <c>\Ba</c> covers one character, so no longer
+    /// text can be matched in full and fullmatch answers None, as upstream does (D11 design
+    /// section 5; S57d's escalation answered P(0, 1) until build chunk 9 deleted it).
     /// </remarks>
     [Test]
     public void A_reversed_boundary_at_the_start_of_the_text_reports_a_partial_upstream_denies()
     {
-        // DIVERGES FROM UPSTREAM, deliberately. Upstream answers None on both anchored doors.
+        // DIVERGES FROM UPSTREAM, deliberately, on match. Upstream answers None on both anchored doors.
         var denied = new FuzzyRegex(@"(?r)\Ba");
 
-        foreach (Match m in new[] { denied.MatchAtStart("a", partial: true), denied.FullMatch("a", partial: true) })
-        {
-            m.PartialMatch.Should().BeTrue();
-            (m.Index, m.Length).Should().Be((0, 1));
-        }
+        Match matched = denied.MatchAtStart("a", partial: true);
+        matched.PartialMatch.Should().BeTrue();
+        (matched.Index, matched.Length).Should().Be((0, 1));
+        denied.FullMatch("a", partial: true).Success.Should().BeFalse();
 
         // The twin, where upstream agrees, so the test above is about the boundary rather than about
         // reversed partials in general.
@@ -2059,21 +2182,16 @@ public sealed class PartialMatchingTests
     /// the conditional's else branch, and then asks <c>\b</c> at position 0, where '\r' is not a word
     /// character and the boundary fails. Upstream answers no match on this door, which is what the
     /// wave recorded from regex 2026.9.10 and what row 13 of
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> re-measures.
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> re-measures. S57d's escalation
+    /// answered P(0, 1) with no groups; D11 build chunk 9 deleted it, and the answer is now
+    /// upstream's: a full match must cover the whole text, and the pattern consumes two
+    /// characters, which the held '\r\n' already are, so no longer text can be matched in full
+    /// (the port's own judge, 2026-10-03; design section 5).
     /// </remarks>
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_reversed_boundary_partial_is_what_the_gate_wave_found()
-    {
-        Match m = new FuzzyRegex(
-            @"(?r)\b(?(?!\p{L}).|[^a])\K(\s)",
-            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1
-        ).FullMatch("\r\n", partial: true);
-
-        m.PartialMatch.Should().BeTrue();
-        (m.Index, m.Length).Should().Be((0, 1));
-
-        // No capture group survives the escalation, `\K` or no `\K`.
-        m.Groups[1].Success.Should().BeFalse();
-    }
+    public void A_reversed_boundary_partial_is_what_the_gate_wave_found() =>
+        new FuzzyRegex(@"(?r)\b(?(?!\p{L}).|[^a])\K(\s)", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
+            .FullMatch("\r\n", partial: true)
+            .Success.Should()
+            .BeFalse();
 }

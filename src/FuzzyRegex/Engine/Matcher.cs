@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -87,6 +90,12 @@ internal struct FuzzyData
     internal int GfoldedLen;
 
     /// <summary>
+    /// NOT UPSTREAM (S91): the encoding the group reference folds the subject with, which the fuzzy
+    /// constraint's test must see the same folding in. See <c>Matcher.FuzzyExtMatchGroupFld</c>.
+    /// </summary>
+    internal CaseEncoding FoldEncoding;
+
+    /// <summary>
     /// NOT UPSTREAM (S85): whether a full-case-folded string's values have all been used, so a
     /// deletion has none left to delete. See <c>Matcher.TakeBackFoldedComparison</c>.
     /// </summary>
@@ -132,6 +141,14 @@ internal static class MatchStatus
 
     /// <summary>Upstream <c>RE_ERROR_PARTIAL</c>.</summary>
     internal const int Partial = -13;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: a zero-width test at the edge of a partial call's second pass that
+    /// some continuations of the text pass and others fail. Only <c>Matcher.TryMatchZeroWidth</c>
+    /// returns it, and each of its callers says what it means there
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    internal const int Undetermined = 2;
 
     /// <summary>Upstream <c>bool_as_status</c> (<c>upstream/src/_regex.c</c> line 2225).</summary>
     /// <param name="matched">Whether the thing matched.</param>
@@ -219,7 +236,8 @@ internal static class Seam
 /// reason upstream answers <c>'(a|a)*b'</c> against a subject holding no <c>'b'</c> instantly, where
 /// this port ran the exponential search until S60 - so it was never only a speed matter. It is
 /// deliberately less than upstream's: the start-position JUMP is withheld from any pattern holding a
-/// <c>(*SKIP)</c>, and the reverse, folded and ignore-case arms of the locator are still to come.
+/// <c>(*SKIP)</c>, and the reverse, folded and ignore-case arms are not upstream's but
+/// <see cref="RequiredStringScreen"/>, which only refuses and jumps where it cannot change an answer.
 /// See <see cref="LocateRequiredString"/>.
 /// </para>
 /// <para>
@@ -381,8 +399,14 @@ internal static class Matcher
     /// <param name="encoding">The pattern's encoding.</param>
     /// <param name="node">The node.</param>
     /// <returns>The encoding to answer this node's property lookups in.</returns>
-    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, Node node) =>
-        NodeStatus.EncodingKind(node) switch
+    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, Node node) => NodeEncoding(encoding, node.Status);
+
+    /// <summary><see cref="NodeEncoding(CaseEncoding, Node)"/> of a status word.</summary>
+    /// <param name="encoding">The pattern's encoding.</param>
+    /// <param name="status">The node's status word.</param>
+    /// <returns>The encoding the node answers in.</returns>
+    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, uint status) =>
+        NodeStatus.EncodingKind(status) switch
         {
             NodeStatus.AsciiEncoding => CaseEncoding.Ascii,
             NodeStatus.UnicodeEncoding => CaseEncoding.Unicode,
@@ -430,13 +454,48 @@ internal static class Matcher
     /// <param name="node">The <c>PROPERTY_IGN</c> node.</param>
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
-    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch)
+    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch) =>
+        HasPropertyIgn(NodeEncoding(encoding, node), node.Values[0], ch);
+
+    /// <summary>
+    /// Whether a codepoint has a property, ignoring case, under an encoding: the one predicate a
+    /// bare <c>\p{...}</c> and the same property inside a set both answer through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Under IGNORECASE <c>\p{Lu}</c>, <c>\p{Ll}</c> and <c>\p{Lt}</c> mean any cased letter, and
+    /// <c>\p{Uppercase}</c> and <c>\p{Lowercase}</c> mean Cased. That is upstream's bare-property
+    /// rule and the rule Perl 5.42 and .NET 10's <c>Regex</c> apply to a bare property and a set
+    /// alike (measured 2026-09-25). UTS #18 RL1.5 lets an implementation choose, provided it says.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM in two places, deliberately. Upstream's set members check each case
+    /// variant with the plain property instead (<c>matches_member_ign</c>, <c>:3085</c>), so
+    /// <c>(?i)\p{Lu}</c> matched U+0138 and <c>(?i)[\p{Lu}x]</c> did not, and a rewrite that
+    /// turned an alternation into a set changed the answer (<c>(?i)\p{Lt}|z</c> refused 'a' where
+    /// <c>(?i)\p{Lt}</c> matched it). And upstream collapses Uppercase and Lowercase whatever the
+    /// value asked for (<c>:2981</c>), so <c>(?i)\p{Upper=No}</c> answered as <c>\p{Upper}</c>;
+    /// here the value 0, "No", is the complement, as <c>\P{Upper}</c> is and as Perl answers.
+    /// </para>
+    /// </remarks>
+    /// <param name="encoding">The encoding that applies to the node or member.</param>
+    /// <param name="property">The packed property code.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
+    internal static bool HasPropertyIgn(CaseEncoding encoding, uint property, uint ch)
     {
-        uint property = node.Values[0];
         uint prop = property >> 16;
 
-        // Upstream's Unicode and ASCII arms are the same three tests; only the fall-through
-        // differs, and Encodings.HasProperty is where that difference already lives.
+        // DIVERGES FROM UPSTREAM, deliberately: under ASCII the character is clamped BEFORE the
+        // collapse below. Upstream's ASCII arm of matches_PROPERTY_IGN (:2972) runs the collapse
+        // on the raw character, so `regex.match(r'(?ai)\p{Lu}', '\xc9')` matches, although the
+        // case-sensitive `(?a)\p{Lu}` refuses both 'É' and 'é' and upstream's own search screen
+        // (ascii_has_property_ign, :832) refuses it too. Under ASCII|IGNORECASE a cased property
+        // means the 52 ASCII letters: so Perl 5.42 answers for `[[:upper:]]` under /ai, PCRE2
+        // 10.47 without UCP under CASELESS, and Python's re documents the same rule for [A-Z]
+        // under ASCII|IGNORECASE (measured 2026-09-25; ledger entry 34).
+        ch = Encodings.ClampToEncoding(encoding, ch);
+
         if (property is Encodings.PropGcLu or Encodings.PropGcLl or Encodings.PropGcLt)
         {
             uint value = UnicodeTables.GetGeneralCategory(ch);
@@ -446,11 +505,13 @@ internal static class Matcher
 
         if (prop is UnicodeTables.PropUppercase or UnicodeTables.PropLowercase)
         {
-            return UnicodeTables.GetCased(ch) != 0;
+            bool cased = UnicodeTables.GetCased(ch) != 0;
+
+            return (property & 0xFFFF) != 0 ? cased : !cased;
         }
 
         // The property is case-insensitive.
-        return Encodings.HasProperty(NodeEncoding(encoding, node), property, ch);
+        return Encodings.HasProperty(encoding, property, ch);
     }
 
     /// <summary>Upstream <c>matches_member</c> (line 3025).</summary>
@@ -589,25 +650,48 @@ internal static class Matcher
     /// <remarks>
     /// <para>
     /// The case set is computed once by <see cref="MatchesSetIgn"/> and threaded down, so a nested
-    /// set is tested against each case of the subject character rather than re-folding at every
-    /// level. That is upstream's shape, <c>case_count</c> and <c>cases</c> and all.
+    /// set is not re-folded at every level. That is upstream's shape, <c>case_count</c> and
+    /// <c>cases</c> and all.
     /// </para>
     /// <para>
-    /// Three deliberate differences from <see cref="MatchesMember"/>, all upstream's:
-    /// <c>ANY_ALL</c> has no arm and falls to the default; the default answers
-    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>; and
-    /// the <c>PROPERTY</c> arm calls the encoding's plain <c>has_property</c> without the
-    /// <c>ENCODING_KIND(member)</c> switch, so a scoped <c>(?a:...)</c> inside a
-    /// case-insensitive set is not honoured here. The nested <c>SET_*</c> arms likewise recurse
-    /// into the case-*sensitive* <c>in_set_*</c> with one case at a time.
+    /// Two deliberate differences from <see cref="MatchesMember"/>, both upstream's:
+    /// <c>ANY_ALL</c> has no arm and falls to the default, and the default answers
+    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM, deliberately: each member answers case-insensitively on its own,
+    /// and only then does the enclosing set combine the answers. A character, range or string
+    /// matches if any case of the subject does; a property asks <see cref="HasPropertyIgn"/> of the
+    /// subject itself, as a bare property does; a nested set recurses into the case-insensitive
+    /// <c>in_set_*_ign</c>. Upstream tests every case against the property and recurses into the
+    /// case-SENSITIVE <c>in_set_*</c> one case at a time, so nesting a member changed its answer:
+    /// <c>(?i)[\p{Lu}]</c> refused U+0345 and <c>(?i)[[\p{Lu}]x]</c> matched it, and
+    /// <c>(?i)[\p{Greek}x]</c> matched U+00B5 where <c>(?i)\p{Greek}</c> refused it (regex
+    /// 2026.9.10, V1). Perl 5.42's <c>(?[ ... ])</c> and .NET 10's set subtraction answer
+    /// member-first under <c>/i</c>, as here (measured 2026-09-25).
     /// </para>
     /// </remarks>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="member">The member node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
-    /// <returns><see langword="true"/> if any case of the character matches the member.</returns>
-    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, ReadOnlySpan<uint> cases)
+    /// <returns><see langword="true"/> if the character matches the member, ignoring case.</returns>
+    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, uint ch, ReadOnlySpan<uint> cases)
     {
+        switch (member.Op)
+        {
+            case Opcode.Property:
+                return HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], ch);
+            case Opcode.SetDiff:
+                return InSetDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetInter:
+                return InSetInterIgn(encoding, member, ch, cases);
+            case Opcode.SetSymDiff:
+                return InSetSymDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetUnion:
+                return InSetUnionIgn(encoding, member, ch, cases);
+        }
+
         for (int i = 0; i < cases.Length; i++)
         {
             switch (member.Op)
@@ -619,43 +703,8 @@ internal static class Matcher
                     }
 
                     break;
-                case Opcode.Property:
-                    if (Encodings.HasProperty(encoding, member.Values[0], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
                 case Opcode.Range:
                     if (InRange(member.Values[0], member.Values[1], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetDiff:
-                    if (InSetDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetInter:
-                    if (InSetInter(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetSymDiff:
-                    if (InSetSymDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetUnion:
-                    if (InSetUnion(encoding, member, cases[i]))
                     {
                         return true;
                     }
@@ -680,13 +729,14 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3177).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in the difference, ignoring case.</returns>
-    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
-        if (MatchesMemberIgn(encoding, member!, cases) != member!.Match)
+        if (MatchesMemberIgn(encoding, member!, ch, cases) != member!.Match)
         {
             return false;
         }
@@ -695,7 +745,7 @@ internal static class Matcher
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return false;
             }
@@ -709,15 +759,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_inter_ign</c> (<c>upstream/src/_regex.c</c> line 3218).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in every member, ignoring case.</returns>
-    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) != member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) != member.Match)
             {
                 return false;
             }
@@ -731,16 +782,17 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_sym_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3257).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in an odd number of members.</returns>
-    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
         bool result = false;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 result = !result;
             }
@@ -754,15 +806,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_union_ign</c> (<c>upstream/src/_regex.c</c> line 3295).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in any member, ignoring case.</returns>
-    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return true;
             }
@@ -786,10 +839,10 @@ internal static class Matcher
 
         return node.Op switch
         {
-            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, cases),
-            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, cases),
-            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, cases),
-            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, cases),
+            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, ch, cases),
+            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, ch, cases),
+            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, ch, cases),
+            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, ch, cases),
             _ => false,
         };
     }
@@ -873,8 +926,8 @@ internal static class Matcher
         {
             Opcode.Any or Opcode.AnyRev => MatchesAny(ch),
             Opcode.AnyAll or Opcode.AnyAllRev => true,
-            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(state.Encoding, ch),
-            _ => MatchesOne(state.Encoding, node, ch) == node.Match,
+            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(node.Encoding, ch),
+            _ => MatchesOne(node.Encoding, node, ch) == node.Match,
         };
     }
 
@@ -1008,7 +1061,7 @@ internal static class Matcher
         // slice (2, 3), which splits the pair.
         isPartial = reverse
             ? count < maxCount && pos == state.SliceStart && RanOutOnTheLeft(state, pos)
-            : pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
+            : pos == state.TextEnd && count < maxCount && state.RunsOutRight;
 
         return count;
     }
@@ -1095,9 +1148,10 @@ internal static class Matcher
     /// <see cref="Encodings"/>.
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding, whose line separators apply.</param>
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a line starts there.</returns>
-    internal static bool AtLineStart(MatchState state, int textPos)
+    internal static bool AtLineStart(MatchState state, CaseEncoding encoding, int textPos)
     {
         if (textPos <= state.TextStart)
         {
@@ -1117,16 +1171,17 @@ internal static class Matcher
             return state.CharAt(textPos) != 0x0A;
         }
 
-        return Encodings.IsLineSep(state.Encoding, ch);
+        return Encodings.IsLineSep(encoding, ch);
     }
 
     /// <summary>
     /// Upstream <c>ascii_at_line_end</c> / <c>unicode_at_line_end</c> (lines 919 and 1963).
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding, whose line separators apply.</param>
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a line ends there.</returns>
-    internal static bool AtLineEnd(MatchState state, int textPos)
+    internal static bool AtLineEnd(MatchState state, CaseEncoding encoding, int textPos)
     {
         if (textPos >= state.TextEnd)
         {
@@ -1146,7 +1201,7 @@ internal static class Matcher
             return state.CharBefore(textPos) != 0x0D;
         }
 
-        return Encodings.IsLineSep(state.Encoding, ch);
+        return Encodings.IsLineSep(encoding, ch);
     }
 
     /// <summary>
@@ -1257,6 +1312,24 @@ internal static class Matcher
     /// </summary>
     /// <remarks>
     /// <para>
+    /// DIVERGES FROM UPSTREAM, deliberately (2026-09-26, ledger entry 40): this follows UAX #29
+    /// revision 47, the Unicode 17.0.0 version the tables are, and passes all 1,944 lines of its
+    /// <c>WordBreakTest.txt</c>, where upstream fails 268. Upstream's README promises "a default
+    /// Unicode word boundary" (<c>upstream/README.rst:1011</c>). Three differences:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>WB4, "Ignore Format and Extend characters, except after sot, CR, LF, and Newline",
+    /// applies on both sides. Upstream skipped them only for the character to the left, so WB6,
+    /// WB7, WB7b, WB7c, WB11, WB12 and WB15/WB16 read an ignored character as the neighbour two away,
+    /// and a run of them at the start of the text joined what followed instead of standing alone:
+    /// <c>(?w)\b</c> over 'a:' U+0308 'a' broke after the 'a'.</item>
+    /// <item>WB15/WB16 keep regional indicators together only before another one, as
+    /// <c>sot (RI RI)* RI × RI</c> says. Upstream kept an odd run together with whatever followed.</item>
+    /// <item>Upstream's WB5a, which kept an apostrophe with a following vowel, is gone. It is not a
+    /// default rule; UAX #29 offers "apostrophe ÷ vowels" only as a tailoring for French and Italian,
+    /// and that breaks where upstream joined.</item>
+    /// </list>
+    /// <para>
     /// Upstream's <c>left_pos</c> is inclusive - the index of the character to the left - and its
     /// <c>left_pos - 1</c> and <c>right_pos + 1</c> are the characters beyond those, which in UTF-16
     /// are <see cref="MatchState.PrevPos"/> and <see cref="MatchState.NextPos"/> rather than
@@ -1273,6 +1346,369 @@ internal static class Matcher
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a default word boundary is there.</returns>
     internal static bool AtDefaultBoundary(MatchState state, int textPos)
+    {
+        // The oracle's ablation for ledger entry 40; never set by the library.
+        if (state.Pattern.UpstreamDefaultBoundary)
+        {
+            return AtUpstreamDefaultBoundary(state, textPos);
+        }
+
+        // Break at the start and end of text, unless the text is empty.
+        // WB1 and WB2
+        if (textPos <= state.TextStart || textPos >= state.TextEnd)
+        {
+            return state.TextEnd > state.TextStart;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        uint rightChar = state.CharAt(textPos);
+        uint rightProp = UnicodeTables.GetWordBreak(rightChar);
+        int near = DefaultBoundaryNear(UnicodeTables.GetWordBreak(state.CharAt(leftPos)), rightProp, rightChar);
+
+        if (near != _boundaryNotDecided)
+        {
+            return near == _boundaryBreak;
+        }
+
+        // From here on every rule sees the text with the ignored characters taken out: each one
+        // belongs to the character before it, unless that is the start of the text or a line
+        // break, and then it stands alone and matches no rule below. The same goes for the
+        // characters two away that WB6, WB7, WB7b, WB7c, WB11 and WB12 look at.
+        leftPos = SkipIgnoredLeft(state, leftPos);
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+
+        int leftLeftPos = SkipIgnoredLeft(state, state.PrevPos(leftPos));
+        uint leftLeftProp =
+            leftLeftPos >= state.TextStart && leftPos > state.TextStart
+                ? UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos))
+                : 0;
+
+        int rightRightPos = SkipIgnoredRight(state, state.NextPos(textPos));
+        uint rightRightProp =
+            rightRightPos < state.TextEnd ? UnicodeTables.GetWordBreak(state.CharAt(rightRightPos)) : 0;
+
+        return DefaultBoundaryFar(
+            leftProp,
+            leftLeftProp,
+            rightProp,
+            rightRightProp,
+            rightProp == UnicodeTables.WbreakRegionalindicator
+                && CountRegionalIndicatorsLeftIgnoring(state, leftPos) % 2 == 1
+        );
+    }
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when WB3 to WB4 decide a break.</summary>
+    private const int _boundaryBreak = 1;
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when WB3 to WB4 decide no break.</summary>
+    private const int _boundaryNoBreak = 0;
+
+    /// <summary>The value of <see cref="DefaultBoundaryNear"/> when the later rules decide.</summary>
+    private const int _boundaryNotDecided = -1;
+
+    /// <summary>
+    /// WB3 to WB4 of <see cref="AtDefaultBoundary"/>, which read only the two characters beside the
+    /// position, before WB4 takes the ignored characters out. Split from the text so that a partial
+    /// call can ask it about a character the text does not hold (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The Word_Break value of the character to the left.</param>
+    /// <param name="rightProp">The Word_Break value of the character to the right.</param>
+    /// <param name="rightChar">The character to the right, for WB3c's Extended_Pictographic.</param>
+    /// <returns><see cref="_boundaryBreak"/>, <see cref="_boundaryNoBreak"/> or <see cref="_boundaryNotDecided"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DefaultBoundaryNear(uint leftProp, uint rightProp, uint rightChar)
+    {
+        // Do not break within CRLF.
+        // WB3
+        if (leftProp == UnicodeTables.WbreakCr && rightProp == UnicodeTables.WbreakLf)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Otherwise break before and after Newlines (including CR and LF).
+        // WB3a
+        if (IsWordBreakNewline(leftProp))
+        {
+            return _boundaryBreak;
+        }
+
+        // WB3b
+        if (IsWordBreakNewline(rightProp))
+        {
+            return _boundaryBreak;
+        }
+
+        // Do not break within emoji zwj sequences.
+        // WB3c
+        if (leftProp == UnicodeTables.WbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Keep horizontal whitespace together.
+        // WB3d
+        if (leftProp == UnicodeTables.WbreakWsegspace && rightProp == UnicodeTables.WbreakWsegspace)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Ignore Format and Extend characters, except after sot, CR, LF, and Newline. This also has
+        // the effect of: Any x (Format || Extend || ZWJ)
+        // WB4
+        if (IsWordBreakIgnored(rightProp))
+        {
+            return _boundaryNoBreak;
+        }
+
+        return _boundaryNotDecided;
+    }
+
+    /// <summary>
+    /// WB5 to WB999 of <see cref="AtDefaultBoundary"/>, over the Word_Break values the rules read
+    /// once WB4 has taken the ignored characters out. Split from the text so that a partial call
+    /// can ask it about values the text does not hold (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The character to the left, after WB4.</param>
+    /// <param name="leftLeftProp">The character before that, after WB4, or 0 (Other) at the start.</param>
+    /// <param name="rightProp">The character to the right, which WB4 does not ignore.</param>
+    /// <param name="rightRightProp">The character after that, after WB4, or 0 (Other) at the end.</param>
+    /// <param name="oddRegionalIndicators">
+    /// Whether an odd number of regional indicators run leftwards from the left character (WB15/WB16);
+    /// read only when the right character is one.
+    /// </param>
+    /// <returns><see langword="true"/> for a break.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool DefaultBoundaryFar(
+        uint leftProp,
+        uint leftLeftProp,
+        uint rightProp,
+        uint rightRightProp,
+        bool oddRegionalIndicators
+    )
+    {
+        // Do not break between most letters.
+        // WB5
+        if (IsAhLetter(leftProp) && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Do not break letters across certain punctuation.
+        // WB6
+        if (
+            IsAhLetter(leftProp)
+            && (rightProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(rightProp))
+            && IsAhLetter(rightRightProp)
+        )
+        {
+            return false;
+        }
+
+        // WB7
+        if (
+            IsAhLetter(leftLeftProp)
+            && (leftProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(leftProp))
+            && IsAhLetter(rightProp)
+        )
+        {
+            return false;
+        }
+
+        // WB7a
+        if (leftProp == UnicodeTables.WbreakHebrewletter && rightProp == UnicodeTables.WbreakSinglequote)
+        {
+            return false;
+        }
+
+        // WB7b
+        if (
+            leftProp == UnicodeTables.WbreakHebrewletter
+            && rightProp == UnicodeTables.WbreakDoublequote
+            && rightRightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // WB7c
+        if (
+            leftLeftProp == UnicodeTables.WbreakHebrewletter
+            && leftProp == UnicodeTables.WbreakDoublequote
+            && rightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // Do not break within sequences of digits, or digits adjacent to letters ("3a", or "A3").
+        // WB8
+        if (leftProp == UnicodeTables.WbreakNumeric && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB9
+        if (IsAhLetter(leftProp) && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB10
+        if (leftProp == UnicodeTables.WbreakNumeric && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Do not break within sequences, such as "3.2" or "3,456.789".
+        // WB11
+        if (
+            leftLeftProp == UnicodeTables.WbreakNumeric
+            && (leftProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(leftProp))
+            && rightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // WB12
+        if (
+            leftProp == UnicodeTables.WbreakNumeric
+            && (rightProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(rightProp))
+            && rightRightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // Do not break between Katakana.
+        // WB13
+        if (leftProp == UnicodeTables.WbreakKatakana && rightProp == UnicodeTables.WbreakKatakana)
+        {
+            return false;
+        }
+
+        // Do not break from extenders.
+        // WB13a
+        if (
+            (
+                IsAhLetter(leftProp)
+                || leftProp
+                    is UnicodeTables.WbreakNumeric
+                        or UnicodeTables.WbreakKatakana
+                        or UnicodeTables.WbreakExtendnumlet
+            )
+            && rightProp == UnicodeTables.WbreakExtendnumlet
+        )
+        {
+            return false;
+        }
+
+        // WB13b
+        if (
+            leftProp == UnicodeTables.WbreakExtendnumlet
+            && (IsAhLetter(rightProp) || rightProp is UnicodeTables.WbreakNumeric or UnicodeTables.WbreakKatakana)
+        )
+        {
+            return false;
+        }
+
+        // Do not break within emoji flag sequences. That is, do not break between regional indicator
+        // (RI) symbols if there is an odd number of RI characters before the break point.
+        // WB15 and WB16
+        if (rightProp == UnicodeTables.WbreakRegionalindicator && oddRegionalIndicators)
+        {
+            return false;
+        }
+
+        // Otherwise, break everywhere (including around ideographs).
+        // WB999
+        return true;
+    }
+
+    /// <summary>Whether a word-break property is one of UAX #29's Newline, CR and LF.</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for a line break.</returns>
+    private static bool IsWordBreakNewline(uint v) =>
+        v is UnicodeTables.WbreakNewline or UnicodeTables.WbreakCr or UnicodeTables.WbreakLf;
+
+    /// <summary>Whether a word-break property is one WB4 ignores: Extend, Format or ZWJ.</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for an ignored character.</returns>
+    private static bool IsWordBreakIgnored(uint v) =>
+        v is UnicodeTables.WbreakExtend or UnicodeTables.WbreakFormat or UnicodeTables.WbreakZwj;
+
+    /// <summary>
+    /// UAX #29 WB4 read leftwards: the character that the ignored ones ending at
+    /// <paramref name="pos"/> belong to. A run with nothing but the start of the text or a line
+    /// break before it belongs to nothing, and then its last character stands for itself.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">A character's position, which may be before the start of the text.</param>
+    /// <returns>The position of the character to use.</returns>
+    private static int SkipIgnoredLeft(MatchState state, int pos)
+    {
+        int at = pos;
+
+        while (at >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(at))))
+        {
+            at = state.PrevPos(at);
+        }
+
+        return at < state.TextStart || IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(at))) ? pos : at;
+    }
+
+    /// <summary>
+    /// UAX #29 WB4 read rightwards: the first character at or after <paramref name="pos"/> that
+    /// WB4 does not ignore, or the end of the text.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">A position.</param>
+    /// <returns>That character's position, or <see cref="MatchState.TextEnd"/>.</returns>
+    private static int SkipIgnoredRight(MatchState state, int pos)
+    {
+        int at = pos;
+
+        while (at < state.TextEnd && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(at))))
+        {
+            at = state.NextPos(at);
+        }
+
+        return at;
+    }
+
+    /// <summary>
+    /// WB15/WB16's count: how many regional indicators run leftwards from
+    /// <paramref name="leftPos"/>, with the characters WB4 ignores taken out.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="leftPos">The character to the left of the break, after WB4.</param>
+    /// <returns>The number of regional indicators.</returns>
+    private static long CountRegionalIndicatorsLeftIgnoring(MatchState state, int leftPos)
+    {
+        long count = 0;
+        int pos = leftPos;
+
+        while (
+            pos >= state.TextStart
+            && UnicodeTables.GetWordBreak(state.CharAt(pos)) == UnicodeTables.WbreakRegionalindicator
+        )
+        {
+            ++count;
+            pos = SkipIgnoredLeft(state, state.PrevPos(pos));
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Upstream <c>unicode_at_default_boundary</c> (<c>upstream/src/_regex.c</c> lines 1531-1749) as
+    /// upstream writes it, kept only for the oracle's ablation: see
+    /// <see cref="PatternObject.UpstreamDefaultBoundary"/>. The library never reaches it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if upstream's default word boundary is there.</returns>
+    private static bool AtUpstreamDefaultBoundary(MatchState state, int textPos)
     {
         // Break at the start and end of text, unless the text is empty.
         // WB1 and WB2
@@ -1520,8 +1956,10 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream's regional-indicator walk, which WB15/WB16 (line 1737) and GB12/GB13 (line 1919)
-    /// write out identically bar the property they read.
+    /// Upstream's regional-indicator walk, which GB12/GB13 (line 1919) and WB15/WB16 (line 1737) write
+    /// out identically bar the property they read. This port's word rule uses
+    /// <see cref="CountRegionalIndicatorsLeftIgnoring"/> instead, which skips what WB4 ignores; this
+    /// walk serves it only in <see cref="AtUpstreamDefaultBoundary"/>.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="leftPos">The index of the character to the left of the position being tested.</param>
@@ -1594,76 +2032,13 @@ internal static class Matcher
         uint leftChar = state.CharAt(leftPos);
         uint rightChar = state.CharAt(rightPos);
 
-        // Do not break between a CR and LF. Otherwise, break before and after controls.
-        // GB3
         uint leftProp = UnicodeTables.GetGraphemeClusterBreak(leftChar);
         uint rightProp = UnicodeTables.GetGraphemeClusterBreak(rightChar);
+        int near = GraphemeBoundaryNear(leftProp, rightProp);
 
-        if (leftProp == UnicodeTables.GbreakCr && rightProp == UnicodeTables.GbreakLf)
+        if (near != _boundaryNotDecided)
         {
-            return false;
-        }
-
-        // GB4
-        if (leftProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
-        {
-            return true;
-        }
-
-        // GB5
-        if (rightProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
-        {
-            return true;
-        }
-
-        // Do not break Hangul syllable sequences.
-        // GB6
-        if (
-            leftProp == UnicodeTables.GbreakL
-            && rightProp
-                is UnicodeTables.GbreakL
-                    or UnicodeTables.GbreakV
-                    or UnicodeTables.GbreakLv
-                    or UnicodeTables.GbreakLvt
-        )
-        {
-            return false;
-        }
-
-        // GB7
-        if (
-            leftProp is UnicodeTables.GbreakLv or UnicodeTables.GbreakV
-            && rightProp is UnicodeTables.GbreakV or UnicodeTables.GbreakT
-        )
-        {
-            return false;
-        }
-
-        // GB8
-        if (leftProp is UnicodeTables.GbreakLvt or UnicodeTables.GbreakT && rightProp == UnicodeTables.GbreakT)
-        {
-            return false;
-        }
-
-        // Do not break before extending characters or ZWJ.
-        // GB9
-        if (rightProp is UnicodeTables.GbreakExtend or UnicodeTables.GbreakZwj)
-        {
-            return false;
-        }
-
-        // The GB9a and GB9b rules only apply to extended grapheme clusters: Do not break before
-        // SpacingMarks, or after Prepend characters.
-        // GB9a
-        if (rightProp == UnicodeTables.GbreakSpacingmark)
-        {
-            return false;
-        }
-
-        // GB9b
-        if (leftProp == UnicodeTables.GbreakPrepend)
-        {
-            return false;
+            return near == _boundaryBreak;
         }
 
         // The GB9c rule only applies to extended grapheme clusters: Do not break within certain
@@ -1751,6 +2126,89 @@ internal static class Matcher
         return true;
     }
 
+    /// <summary>
+    /// GB3 to GB9b of <see cref="AtGraphemeBoundary"/>, which read only the two characters beside
+    /// the position. Split from the text so that a partial call can tell these rules, which the
+    /// held text decides, from the ones that look further left (D11 M1, build chunk 10).
+    /// </summary>
+    /// <param name="leftProp">The Grapheme_Cluster_Break value of the character to the left.</param>
+    /// <param name="rightProp">The Grapheme_Cluster_Break value of the character to the right.</param>
+    /// <returns><see cref="_boundaryBreak"/>, <see cref="_boundaryNoBreak"/> or <see cref="_boundaryNotDecided"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GraphemeBoundaryNear(uint leftProp, uint rightProp)
+    {
+        // Do not break between a CR and LF. Otherwise, break before and after controls.
+        // GB3
+        if (leftProp == UnicodeTables.GbreakCr && rightProp == UnicodeTables.GbreakLf)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB4
+        if (leftProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return _boundaryBreak;
+        }
+
+        // GB5
+        if (rightProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return _boundaryBreak;
+        }
+
+        // Do not break Hangul syllable sequences.
+        // GB6
+        if (
+            leftProp == UnicodeTables.GbreakL
+            && rightProp
+                is UnicodeTables.GbreakL
+                    or UnicodeTables.GbreakV
+                    or UnicodeTables.GbreakLv
+                    or UnicodeTables.GbreakLvt
+        )
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB7
+        if (
+            leftProp is UnicodeTables.GbreakLv or UnicodeTables.GbreakV
+            && rightProp is UnicodeTables.GbreakV or UnicodeTables.GbreakT
+        )
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB8
+        if (leftProp is UnicodeTables.GbreakLvt or UnicodeTables.GbreakT && rightProp == UnicodeTables.GbreakT)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // Do not break before extending characters or ZWJ.
+        // GB9
+        if (rightProp is UnicodeTables.GbreakExtend or UnicodeTables.GbreakZwj)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // The GB9a and GB9b rules only apply to extended grapheme clusters: Do not break before
+        // SpacingMarks, or after Prepend characters.
+        // GB9a
+        if (rightProp == UnicodeTables.GbreakSpacingmark)
+        {
+            return _boundaryNoBreak;
+        }
+
+        // GB9b
+        if (leftProp == UnicodeTables.GbreakPrepend)
+        {
+            return _boundaryNoBreak;
+        }
+
+        return _boundaryNotDecided;
+    }
+
     /// <summary>Upstream <c>try_match_ANY</c> (<c>upstream/src/_regex.c</c> line 6919).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
@@ -1759,7 +2217,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(textPos < state.SliceEnd && MatchesAny(state.CharAt(textPos)));
@@ -1773,7 +2231,7 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(textPos < state.SliceEnd);
@@ -1781,16 +2239,17 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_ANY_U</c> (line 6978).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchAnyU(MatchState state, int textPos)
+    internal static int TryMatchAnyU(MatchState state, Node node, int textPos)
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
-        return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(state.Encoding, state.CharAt(textPos)));
+        return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(node.Encoding, state.CharAt(textPos)));
     }
 
     /// <summary>Upstream <c>try_match_ANY_REV</c> (line 6962).</summary>
@@ -1823,63 +2282,17 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_ANY_U_REV</c> (line 6995).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchAnyURev(MatchState state, int textPos)
+    internal static int TryMatchAnyURev(MatchState state, Node node, int textPos)
     {
         if (RanOutOnTheLeft(state, textPos))
         {
             return MatchStatus.Partial;
         }
 
-        return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(state.Encoding, state.CharBefore(textPos)));
-    }
-
-    /// <summary>
-    /// Records that a word or grapheme boundary has been decided at the truncation point of a
-    /// partial match, so that a match which then fails outright can be reported as a partial rather
-    /// than as no match at all. S57d; no upstream counterpart, and see
-    /// <see cref="MatchState.HitEnd"/> for why the port has one.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The verdict itself is not touched. The caller goes on to answer exactly what it answered
-    /// before, and <see cref="DoMatch"/> reads the flag only after the whole match has failed, so
-    /// backtracking is never cut short. <b>The flag is set whichever way the boundary answers</b>,
-    /// which ledger entry 21's own row needs: in <c>(?!(True|False)\b)(.*)</c> over 'True' the
-    /// <c>\b</c> SUCCEEDS at the end of the text and it is the enclosing negative lookahead that
-    /// fails, so a flag set only on a failing boundary would never fire there.
-    /// </para>
-    /// <para>
-    /// <b>The attempt must have consumed something</b>, and this clause is a DELIBERATE DEPARTURE
-    /// from the PCRE2 model the rest of this follows. PCRE2 escalates a boundary that has consumed
-    /// nothing: <c>\b</c> over <c>''</c> is <c>PARTIAL (0,0)</c> under both partial options, with
-    /// the start optimisations off and with no following pattern item to explain it
-    /// (<c>tools/probes/pcre2-hitend-partial-span.py</c> sections D and E, 2026-09-21). This port
-    /// does not, for two reasons of its own. A zero-width partial at the truncation point is the
-    /// answer <c>search-start-partial</c> already pins as wrong, and without the clause S50
-    /// measured a default three-seed 6300-row wave going from 0 divergences to 8, 5 and 5, every
-    /// one of the eight at seed 7 being that shape.
-    /// </para>
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <param name="textPos">The position the boundary was asked about.</param>
-    private static void NoteBoundaryAtTruncationPoint(MatchState state, int textPos)
-    {
-        bool atTruncationPoint = state.PartialSide switch
-        {
-            // The same two edges the node handlers use: 'text_end' forward, and 'slice_start'
-            // rather than 'text_start' on the left - see 'RanOutOnTheLeft' for why they differ.
-            MatchState.PartialRight => textPos >= state.TextEnd && textPos > state.MatchPos,
-            MatchState.PartialLeft => textPos <= state.SliceStart && textPos < state.MatchPos,
-            _ => false,
-        };
-
-        if (atTruncationPoint && !state.HitEnd)
-        {
-            state.HitEnd = true;
-            state.HitEndMatchPos = state.MatchPos;
-        }
+        return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(node.Encoding, state.CharBefore(textPos)));
     }
 
     /// <summary>Upstream <c>try_match_BOUNDARY</c> (line 7010).</summary>
@@ -1887,11 +2300,154 @@ internal static class Matcher
     /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchBoundary(MatchState state, Node node, int textPos)
-    {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+    internal static int TryMatchBoundary(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtBoundary(state, node.Encoding, textPos) == node.Match);
 
-        return MatchStatus.From(AtBoundary(state, NodeEncoding(state.Encoding, node), textPos) == node.Match);
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: <c>\b</c>, <c>\B</c>, <c>\m</c> and <c>\M</c> in a partial call, kept
+    /// out of line so that a call without partial runs the three predicates as they were.
+    /// </summary>
+    /// <remarks>
+    /// The first pass reads the text as ending at the edge, as upstream does; the second decides
+    /// the test at the edge for the text to come (M1). Off the edge the answer is the held text's in
+    /// both passes.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>Boundary</c>, <c>StartOfWord</c> or <c>EndOfWord</c> node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int WordTestInAPartialCall(MatchState state, Node node, int textPos)
+    {
+        if (AtContinuationEdge(state, textPos))
+        {
+            return WordTestAtEdge(state, node, textPos);
+        }
+
+        return MatchStatus.From(
+            WordTest(node, WordLeft(state, node.Encoding, textPos), WordRight(state, node.Encoding, textPos))
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: whether a zero-width test at <paramref name="textPos"/> reads the
+    /// text to come in a partial call's second pass. Forward that is a position at or past
+    /// <see cref="MatchState.TextEnd"/>; reversed, at or before <see cref="MatchState.TextStart"/>,
+    /// because the predicates read the whole string to the left of the slice (ledger entry 24)
+    /// where a consuming item runs out at the slice start.
+    /// </summary>
+    /// <remarks>Only called with <see cref="MatchState.PartialSide"/> set.</remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position the test asks about.</param>
+    /// <returns><see langword="true"/> if one side of the position is the text to come.</returns>
+    private static bool AtContinuationEdge(MatchState state, int textPos) =>
+        state.PartialSide == MatchState.PartialRight ? textPos >= state.TextEnd : textPos <= state.TextStart;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: <c>\b</c>, <c>\B</c>, <c>\m</c> or <c>\M</c> at the edge of a partial
+    /// call's second pass (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    /// <remarks>
+    /// The side beyond the edge is the first character of the text to come, and that is a word
+    /// character for some continuations and not for others. The test is therefore worked out for
+    /// both, which is the whole of the enumeration for these four: when the two answers agree the
+    /// test is decided, and the first pass, which reads the edge as a non-word side, answered the
+    /// same (A4). <c>\m</c> after a word character and <c>\M</c> after a non-word character are
+    /// decided false. When the answers differ the test is undetermined (A3 holds by construction).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The edge.</param>
+    /// <returns><see cref="MatchStatus.Success"/>, <see cref="MatchStatus.Failure"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int WordTestAtEdge(MatchState state, Node node, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+        bool known = forward ? WordLeft(state, node.Encoding, textPos) : WordRight(state, node.Encoding, textPos);
+        bool ifWord = forward ? WordTest(node, known, true) : WordTest(node, true, known);
+        bool ifNotWord = forward ? WordTest(node, known, false) : WordTest(node, false, known);
+
+        if (ifWord == ifNotWord)
+        {
+            Debug.Assert(
+                ifNotWord
+                    == WordTest(
+                        node,
+                        WordLeft(state, node.Encoding, textPos),
+                        WordRight(state, node.Encoding, textPos)
+                    ),
+                "D11 A4: a decided word test answers what the first pass answered"
+            );
+
+            return MatchStatus.From(ifWord);
+        }
+
+        return UndeterminedRead(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: <see cref="AtBoundary"/>, <see cref="AtWordStart"/> and
+    /// <see cref="AtWordEnd"/> over the two sides' word classes rather than over the text, so that
+    /// <see cref="WordTestAtEdge"/> can ask them about a side the text does not hold.
+    /// </summary>
+    /// <param name="node">A <c>Boundary</c>, <c>StartOfWord</c> or <c>EndOfWord</c> node.</param>
+    /// <param name="wordLeft">Whether a word character lies to the left.</param>
+    /// <param name="wordRight">Whether a word character lies to the right.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool WordTest(Node node, bool wordLeft, bool wordRight) =>
+        node.Op switch
+        {
+            Opcode.Boundary or Opcode.DefaultBoundary => node.Match ? wordLeft != wordRight : wordLeft == wordRight,
+            Opcode.StartOfWord or Opcode.DefaultStartOfWord => !wordLeft && wordRight,
+            _ => wordLeft && !wordRight,
+        };
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: the answer of a test at the edge that some continuations pass and
+    /// others fail, counted for the port grid.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int UndeterminedRead(MatchState state)
+    {
+        state.AttemptTouchedTheTextToCome = true;
+        state.NotePartialEvent(PartialEvent.UndeterminedRead);
+
+        return MatchStatus.Undetermined;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: records that the path has read the text to come, as a one-byte
+    /// <see cref="Opcode.WTouch"/> entry and a touch mark at its position (design section 4.2).
+    /// Backtracking onto the entry drops the mark.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void PushTouchMark(MatchState state)
+    {
+        int position = state.Bstack.Count;
+        state.Bstack.PushUInt8((byte)Opcode.WTouch);
+
+        /* bstack: WTOUCH */
+
+        state.AddWMark(position, WMarkKind.Touch);
+        state.NotePartialEvent(PartialEvent.TouchPushed);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: the answer of a test at the edge that every non-empty continuation
+    /// fails where the first pass, reading the text as ending there, passed it: <c>\Z</c> and
+    /// <c>$</c> at the end or at a final newline, and a reversed <c>\A</c> at the start. No mark is
+    /// needed, because the answer holds whatever the continuation is.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Failure"/>.</returns>
+    private static int DecidedFalseAtEdge(MatchState state)
+    {
+        state.AttemptTouchedTheTextToCome = true;
+        state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+
+        return MatchStatus.Failure;
     }
 
     /// <summary>
@@ -1909,11 +2465,14 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchDefaultBoundary(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
 
         return MatchStatus.From(
             (
-                state.Encoding == CaseEncoding.Ascii
+                node.Encoding == CaseEncoding.Ascii
                     ? AtBoundary(state, CaseEncoding.Ascii, textPos)
                     : AtDefaultBoundary(state, textPos)
             ) == node.Match
@@ -1922,14 +2481,18 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_DEFAULT_END_OF_WORD</c> (line 7094).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchDefaultEndOfWord(MatchState state, int textPos)
+    internal static int TryMatchDefaultEndOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
 
         return MatchStatus.From(
-            state.Encoding == CaseEncoding.Ascii
+            node.Encoding == CaseEncoding.Ascii
                 ? AtWordEnd(state, CaseEncoding.Ascii, textPos)
                 : AtDefaultWordStartOrEnd(state, textPos, false)
         );
@@ -1937,40 +2500,698 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_DEFAULT_START_OF_WORD</c> (line 7101).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchDefaultStartOfWord(MatchState state, int textPos)
+    internal static int TryMatchDefaultStartOfWord(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return DefaultWordTestInAPartialCall(state, node, textPos);
+        }
 
         return MatchStatus.From(
-            state.Encoding == CaseEncoding.Ascii
+            node.Encoding == CaseEncoding.Ascii
                 ? AtWordStart(state, CaseEncoding.Ascii, textPos)
                 : AtDefaultWordStartOrEnd(state, textPos, true)
         );
     }
 
-    /// <summary>Upstream <c>try_match_END_OF_WORD</c> (line 7141).</summary>
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): one character for each combination of
+    /// Word_Break value, Extended_Pictographic and Unicode <c>\w</c> that a character can have, the
+    /// three things the default word rules read about a character beside a position. Unicode
+    /// 17.0.0, the tables' version, has 27 combinations;
+    /// <c>PartialWindowReadTests.Every_character_class_the_default_word_rules_read_has_a_representative</c>
+    /// scans every code point and fails when the tables change the set. The classes that most
+    /// often split a test come first (a line break, an extending mark, a letter, a space, a digit),
+    /// so that an undetermined test stops after a few.
+    /// </summary>
+    internal static readonly uint[] DefaultWordRepresentatives =
+    [
+        0x000A,
+        0x0300,
+        0x0041,
+        0x0020,
+        0x0030,
+        0x0000,
+        0x0E01,
+        0x00A9,
+        0x000B,
+        0x000D,
+        0x0022,
+        0x0027,
+        0x002C,
+        0x002E,
+        0x0600,
+        0x003A,
+        0x00B8,
+        0x2139,
+        0x202F,
+        0x005F,
+        0x00AD,
+        0x1F3FB,
+        0x05D0,
+        0x200D,
+        0x309B,
+        0x3031,
+        0x1F1E6,
+    ];
+
+    /// <summary>The Word_Break value of each of <see cref="DefaultWordRepresentatives"/>.</summary>
+    private static readonly uint[] _representativeWordBreak =
+    [
+        .. DefaultWordRepresentatives.Select(static c => UnicodeTables.GetWordBreak(c)),
+    ];
+
+    /// <summary>Whether each of <see cref="DefaultWordRepresentatives"/> is a word character.</summary>
+    private static readonly bool[] _representativeIsWord = [.. DefaultWordRepresentatives.Select(IsUnicodeWord)];
+
+    /// <summary>
+    /// The Word_Break values a character can have, as a mask with one bit per value: Other (0) to
+    /// Regional_Indicator. The emoji values above it are not assigned to any character since
+    /// Unicode 11 (the representatives' scan checks it).
+    /// </summary>
+    private const uint _wordBreakValues = (1u << (UnicodeTables.WbreakRegionalindicator + 1)) - 1;
+
+    /// <summary>The Word_Break values the left walk of WB4 can stop at: none it ignores, no line break.</summary>
+    private const uint _wordBreakAttachable =
+        _wordBreakValues
+        & ~(
+            (1u << UnicodeTables.WbreakExtend)
+            | (1u << UnicodeTables.WbreakFormat)
+            | (1u << UnicodeTables.WbreakZwj)
+            | (1u << UnicodeTables.WbreakNewline)
+            | (1u << UnicodeTables.WbreakCr)
+            | (1u << UnicodeTables.WbreakLf)
+        );
+
+    /// <summary>
+    /// The Word_Break values whose rules read a second character beyond the position: WB6, WB7,
+    /// WB7b, WB7c, WB11 and WB12 look past MidLetter, MidNumLet, Single_Quote, Double_Quote and
+    /// MidNum, and no other rule reads that far.
+    /// </summary>
+    private const uint _wordBreakLookingFurther =
+        (1u << UnicodeTables.WbreakMidletter)
+        | (1u << UnicodeTables.WbreakMidnumlet)
+        | (1u << UnicodeTables.WbreakSinglequote)
+        | (1u << UnicodeTables.WbreakDoublequote)
+        | (1u << UnicodeTables.WbreakMidnum);
+
+    /// <summary>An outcome mask bit: some continuation passes the test.</summary>
+    private const int _somePass = 1;
+
+    /// <summary>An outcome mask bit: some continuation fails the test.</summary>
+    private const int _someFail = 2;
+
+    /// <summary>A parity mask bit: an even number of regional indicators.</summary>
+    private const int _evenRegionalIndicators = 1;
+
+    /// <summary>A parity mask bit: an odd number of regional indicators.</summary>
+    private const int _oddRegionalIndicators = 2;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): <c>(?w)</c>'s <c>\b</c>, <c>\B</c>, <c>\m</c> and
+    /// <c>\M</c> in a partial call, kept out of line so that a call without partial runs them as
+    /// they were.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The UAX #29 window of a position reaches beyond its two neighbours: WB6, WB7b and WB12 read
+    /// the character after the right one, WB7, WB7c and WB11 the one before the left one, WB4 skips
+    /// any run of Extend, Format and ZWJ to find them, and WB15/WB16 count regional indicators
+    /// leftwards. So a test can read the text to come without standing at the edge: <c>(?w)a\B</c>
+    /// over 'a:' reads it at 1, because 'a:a' keeps the colon inside a word (row W1). The first pass
+    /// reads the end of the text as the character class Other (0) and the edge as WB2's break, as
+    /// upstream does.
+    /// </para>
+    /// <para>
+    /// Here the unknown places are enumerated (design section 4.1): the character beside the edge
+    /// over <see cref="DefaultWordRepresentatives"/>, a place further out over the Word_Break values
+    /// it can have. The test is decided where every combination gives the same answer, and
+    /// undetermined otherwise. The places are independent: any value at one can come with any value
+    /// at another, because each is a different character of the text to come, or the end of it.
+    /// A decided answer is the first pass's except over an empty text, where the first pass found no
+    /// boundary (WB1 and WB2 give none in an empty text) and every continuation makes the position
+    /// the start (forward) or the end (reversed) of a non-empty one, which is a break.
+    /// </para>
+    /// <para>
+    /// Under <c>(?a)</c> the three tests are the plain word tests, as in upstream's encoding tables,
+    /// and take their M1. The oracle's ledger-40 ablation answers against the held text, as
+    /// upstream, which has no M1.
+    /// </para>
+    /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>DefaultBoundary</c>, <c>DefaultStartOfWord</c> or <c>DefaultEndOfWord</c> node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfWord(MatchState state, int textPos)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int DefaultWordTestInAPartialCall(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (node.Encoding == CaseEncoding.Ascii)
+        {
+            return WordTestInAPartialCall(state, node, textPos);
+        }
 
-        return MatchStatus.From(AtWordEnd(state, state.Encoding, textPos));
+        if (state.Pattern.UpstreamDefaultBoundary || !WindowCanReachTheEdge(state, textPos))
+        {
+            return MatchStatus.From(DefaultWordTestOnTheHeldText(state, node, textPos));
+        }
+
+        int outcomes = DefaultWordTestOutcomes(state, node, textPos);
+        if (outcomes == 0)
+        {
+            return MatchStatus.From(DefaultWordTestOnTheHeldText(state, node, textPos));
+        }
+
+        if (outcomes == (_somePass | _someFail))
+        {
+            return UndeterminedRead(state);
+        }
+
+        bool decided = outcomes == _somePass;
+        if (decided != DefaultWordTestOnTheHeldText(state, node, textPos))
+        {
+            Debug.Assert(
+                state.TextStart == state.TextEnd,
+                "D11 A4: a decided default word test answers what the first pass answered, but over an empty text"
+            );
+            state.AttemptTouchedTheTextToCome = true;
+            state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+        }
+
+        return MatchStatus.From(decided);
     }
+
+    /// <summary>
+    /// A quick bound on <see cref="DefaultWordTestOutcomes"/>: whether the position lies close
+    /// enough to the edge for its window to reach it. Forward the window reaches at most the
+    /// character after the right neighbour, past any characters WB4 ignores; reversed, the
+    /// character before the left neighbour, past ignored characters, or a run of regional
+    /// indicators. Two characters WB4 keeps between the position and the edge, and on the left no
+    /// regional indicator next to the position, put the edge out of reach.
+    /// </summary>
+    /// <param name="state">The match state, in a partial call's second pass.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="false"/> if the held text alone decides the test.</returns>
+    private static bool WindowCanReachTheEdge(MatchState state, int textPos)
+    {
+        if (state.PartialSide == MatchState.PartialRight)
+        {
+            if (textPos >= state.TextEnd)
+            {
+                return true;
+            }
+
+            int next = state.NextPos(textPos);
+            return next >= state.TextEnd || IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(next)));
+        }
+
+        if (textPos <= state.TextStart)
+        {
+            return true;
+        }
+
+        int left = state.PrevPos(textPos);
+        if (left <= state.TextStart)
+        {
+            return true;
+        }
+
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+        return IsWordBreakIgnored(leftProp)
+            || leftProp == UnicodeTables.WbreakRegionalindicator
+            || IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(state.PrevPos(left))));
+    }
+
+    /// <summary>A default word test as the first pass asks it, against the held text.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool DefaultWordTestOnTheHeldText(MatchState state, Node node, int textPos) =>
+        node.Op switch
+        {
+            Opcode.DefaultBoundary => AtDefaultBoundary(state, textPos) == node.Match,
+            Opcode.DefaultStartOfWord => AtDefaultWordStartOrEnd(state, textPos, true),
+            _ => AtDefaultWordStartOrEnd(state, textPos, false),
+        };
+
+    /// <summary>
+    /// A default word test's answer from its boundary and the word classes of the two characters
+    /// beside it, as <see cref="AtDefaultWordStartOrEnd"/> combines them.
+    /// </summary>
+    /// <param name="node">The test.</param>
+    /// <param name="boundary">Whether a default word boundary is there.</param>
+    /// <param name="wordLeft">Whether the character to the left is a word character.</param>
+    /// <param name="wordRight">Whether the character to the right is a word character.</param>
+    /// <returns>The test's answer.</returns>
+    private static bool DefaultWordTest(Node node, bool boundary, bool wordLeft, bool wordRight) =>
+        node.Op switch
+        {
+            Opcode.DefaultBoundary => boundary == node.Match,
+            Opcode.DefaultStartOfWord => boundary && !wordLeft && wordRight,
+            _ => boundary && wordLeft && !wordRight,
+        };
+
+    /// <summary>Whether a character is a Unicode word character (<c>\w</c>).</summary>
+    /// <param name="ch">The character.</param>
+    /// <returns><see langword="true"/> for a word character.</returns>
+    private static bool IsUnicodeWord(uint ch) =>
+        Encodings.HasProperty(CaseEncoding.Unicode, UnicodeTables.PropWord, ch);
+
+    /// <summary>
+    /// Which answers the continuations give a default word test whose window reaches the text to
+    /// come, or 0 when it does not reach it and the held text decides.
+    /// </summary>
+    /// <param name="state">The match state, in a partial call's second pass.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordTestOutcomes(MatchState state, Node node, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+        int start = state.TextStart;
+        int end = state.TextEnd;
+
+        if (start == end)
+        {
+            // The position is the start of a non-empty text forward (WB1) and its end reversed
+            // (WB2): a break. Only the far side's word class depends on the continuation.
+            int seen = 0;
+            foreach (bool word in _representativeIsWord)
+            {
+                seen |= Outcome(DefaultWordTest(node, true, !forward && word, forward && word));
+                if (seen == (_somePass | _someFail))
+                {
+                    break;
+                }
+            }
+
+            return seen;
+        }
+
+        // \m needs a non-word character before and a word character after, \M the reverse; the
+        // side the held text holds can already make the test false for every continuation, which
+        // the held text's answer is too.
+        if (node.Op != Opcode.DefaultBoundary)
+        {
+            bool known = forward
+                ? WordLeft(state, CaseEncoding.Unicode, textPos)
+                : WordRight(state, CaseEncoding.Unicode, textPos);
+            bool atStart = node.Op == Opcode.DefaultStartOfWord;
+            if (known == (forward ? atStart : !atStart))
+            {
+                return 0;
+            }
+        }
+
+        return forward
+            ? DefaultWordOutcomesForward(state, node, textPos)
+            : DefaultWordOutcomesReversed(state, node, textPos);
+    }
+
+    /// <summary><see cref="DefaultWordTestOutcomes"/> with the text to come on the right.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position, in a non-empty text.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomesForward(MatchState state, Node node, int textPos)
+    {
+        // WB1 at the start of the held text, which is the start of the whole text.
+        if (textPos <= state.TextStart)
+        {
+            return 0;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        uint leftRaw = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+        bool wordLeft = WordLeft(state, CaseEncoding.Unicode, textPos);
+        uint rightChar;
+        uint rightRaw;
+
+        if (textPos < state.TextEnd)
+        {
+            // Inside the held text only the character two to the right can lie in the text to
+            // come, and only WB6, WB7b and WB12 read it, after a right character WB4 keeps.
+            rightChar = state.CharAt(textPos);
+            rightRaw = UnicodeTables.GetWordBreak(rightChar);
+            if (
+                DefaultBoundaryNear(leftRaw, rightRaw, rightChar) != _boundaryNotDecided
+                || (_wordBreakLookingFurther & (1u << (int)rightRaw)) == 0
+                || SkipIgnoredRight(state, state.NextPos(textPos)) < state.TextEnd
+            )
+            {
+                return 0;
+            }
+        }
+        else
+        {
+            rightChar = 0;
+            rightRaw = 0;
+        }
+
+        // Every place on the left lies in the held text.
+        int left = SkipIgnoredLeft(state, leftPos);
+        uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+        int leftLeftPos = SkipIgnoredLeft(state, state.PrevPos(left));
+        uint leftLeftProp =
+            leftLeftPos >= state.TextStart && left > state.TextStart
+                ? UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos))
+                : 0;
+        int parity =
+            CountRegionalIndicatorsLeftIgnoring(state, left) % 2 == 1
+                ? _oddRegionalIndicators
+                : _evenRegionalIndicators;
+
+        if (textPos < state.TextEnd)
+        {
+            return DefaultWordOutcomes(
+                node,
+                leftRaw,
+                rightRaw,
+                rightChar,
+                1u << (int)leftProp,
+                1u << (int)leftLeftProp,
+                parity,
+                _wordBreakValues,
+                wordLeft,
+                WordRight(state, CaseEncoding.Unicode, textPos)
+            );
+        }
+
+        // At the edge the right character is the continuation's first, and the one after it any
+        // value WB4 can stop at, or the end of the text (0, Other).
+        int seen = 0;
+        for (int i = 0; i < DefaultWordRepresentatives.Length; i++)
+        {
+            seen |= DefaultWordOutcomes(
+                node,
+                leftRaw,
+                _representativeWordBreak[i],
+                DefaultWordRepresentatives[i],
+                1u << (int)leftProp,
+                1u << (int)leftLeftProp,
+                parity,
+                _wordBreakValues,
+                wordLeft,
+                _representativeIsWord[i]
+            );
+            if (seen == (_somePass | _someFail))
+            {
+                break;
+            }
+        }
+
+        return seen;
+    }
+
+    /// <summary>
+    /// <see cref="DefaultWordTestOutcomes"/> with the text to come on the left, where the rules
+    /// that look leftwards (WB4's skip, WB7, WB7c, WB11, WB15/WB16) can walk into it from any
+    /// position whose left side runs back to the edge.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The test.</param>
+    /// <param name="textPos">The position, in a non-empty text.</param>
+    /// <returns>0, or a mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomesReversed(MatchState state, Node node, int textPos)
+    {
+        // WB2 at the end of the held text, which is the end of the whole text.
+        if (textPos >= state.TextEnd)
+        {
+            return 0;
+        }
+
+        uint rightChar = state.CharAt(textPos);
+        uint rightRaw = UnicodeTables.GetWordBreak(rightChar);
+        bool wordRight = WordRight(state, CaseEncoding.Unicode, textPos);
+        int rightRightPos = SkipIgnoredRight(state, state.NextPos(textPos));
+        uint rightRights =
+            1u << (int)(rightRightPos < state.TextEnd ? UnicodeTables.GetWordBreak(state.CharAt(rightRightPos)) : 0);
+
+        if (textPos <= state.TextStart)
+        {
+            // At the edge the left character is the continuation's last. Ignored by WB4, it
+            // belongs to a character further into the continuation, or stands alone after a
+            // line break or at the start; the places beyond are any value, and a regional
+            // indicator there can be one of any number.
+            int seen = 0;
+            for (int i = 0; i < DefaultWordRepresentatives.Length; i++)
+            {
+                uint leftRaw = _representativeWordBreak[i];
+                seen |= DefaultWordOutcomes(
+                    node,
+                    leftRaw,
+                    rightRaw,
+                    rightChar,
+                    IsWordBreakIgnored(leftRaw) ? (1u << (int)leftRaw) | _wordBreakAttachable : 1u << (int)leftRaw,
+                    _wordBreakValues,
+                    _evenRegionalIndicators | _oddRegionalIndicators,
+                    rightRights,
+                    _representativeIsWord[i],
+                    wordRight
+                );
+                if (seen == (_somePass | _someFail))
+                {
+                    break;
+                }
+            }
+
+            return seen;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        uint leftRawKnown = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+        if (DefaultBoundaryNear(leftRawKnown, rightRaw, rightChar) != _boundaryNotDecided)
+        {
+            return 0;
+        }
+
+        uint lefts = WalkLeftOverIgnored(state, leftPos, out int left);
+        uint leftLefts = 1u;
+        int parity = _evenRegionalIndicators;
+        if (left >= 0)
+        {
+            uint leftProp = UnicodeTables.GetWordBreak(state.CharAt(left));
+            if ((_wordBreakLookingFurther & (1u << (int)leftProp)) != 0)
+            {
+                leftLefts = WalkLeftOverIgnored(state, state.PrevPos(left), out _);
+            }
+
+            if (rightRaw == UnicodeTables.WbreakRegionalindicator)
+            {
+                parity = RegionalIndicatorParityLeft(state, left);
+            }
+        }
+        else
+        {
+            leftLefts = _wordBreakValues;
+            parity = _evenRegionalIndicators | _oddRegionalIndicators;
+        }
+
+        bool open =
+            !IsSingleBit(lefts)
+            || ((lefts & _wordBreakLookingFurther) != 0 && !IsSingleBit(leftLefts))
+            || (
+                rightRaw == UnicodeTables.WbreakRegionalindicator
+                && (lefts & (1u << UnicodeTables.WbreakRegionalindicator)) != 0
+                && parity == (_evenRegionalIndicators | _oddRegionalIndicators)
+            );
+
+        return open
+            ? DefaultWordOutcomes(
+                node,
+                leftRawKnown,
+                rightRaw,
+                rightChar,
+                lefts,
+                leftLefts,
+                parity,
+                rightRights,
+                WordLeft(state, CaseEncoding.Unicode, textPos),
+                wordRight
+            )
+            : 0;
+    }
+
+    /// <summary>Whether a mask has exactly one bit set.</summary>
+    /// <param name="mask">The mask.</param>
+    /// <returns><see langword="true"/> for a single value.</returns>
+    private static bool IsSingleBit(uint mask) => mask != 0 && (mask & (mask - 1)) == 0;
+
+    /// <summary>
+    /// <see cref="SkipIgnoredLeft"/> with the text to come on the left: the Word_Break values the
+    /// walk can stop at. One value when it stops in the held text; when it walks into the text to
+    /// come, any value WB4 can stop at, or the character it started from when a line break or the
+    /// start of the whole text comes first.
+    /// </summary>
+    /// <param name="state">The match state, reversed.</param>
+    /// <param name="pos">Where the walk starts, which may lie in the text to come.</param>
+    /// <param name="at">The position the walk stops at in the held text, or -1.</param>
+    /// <returns>A mask of Word_Break values.</returns>
+    private static uint WalkLeftOverIgnored(MatchState state, int pos, out int at)
+    {
+        at = -1;
+        if (pos < state.TextStart)
+        {
+            return _wordBreakValues;
+        }
+
+        int walk = pos;
+        while (walk >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(walk))))
+        {
+            walk = state.PrevPos(walk);
+        }
+
+        uint own = UnicodeTables.GetWordBreak(state.CharAt(pos));
+        if (walk < state.TextStart)
+        {
+            return (1u << (int)own) | _wordBreakAttachable;
+        }
+
+        at = IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(walk))) ? pos : walk;
+
+        return 1u << (int)UnicodeTables.GetWordBreak(state.CharAt(at));
+    }
+
+    /// <summary>
+    /// <see cref="CountRegionalIndicatorsLeftIgnoring"/>'s parity with the text to come on the left:
+    /// both parities when the run of regional indicators, or the ignored characters between them,
+    /// reaches the edge, because the continuation can end in any number more.
+    /// </summary>
+    /// <param name="state">The match state, reversed.</param>
+    /// <param name="leftPos">The character to the left of the break, after WB4, in the held text.</param>
+    /// <returns>A mask of <see cref="_evenRegionalIndicators"/> and <see cref="_oddRegionalIndicators"/>.</returns>
+    private static int RegionalIndicatorParityLeft(MatchState state, int leftPos)
+    {
+        long count = 0;
+        int pos = leftPos;
+        while (true)
+        {
+            if (UnicodeTables.GetWordBreak(state.CharAt(pos)) != UnicodeTables.WbreakRegionalindicator)
+            {
+                return count % 2 == 1 ? _oddRegionalIndicators : _evenRegionalIndicators;
+            }
+
+            ++count;
+            int previous = state.PrevPos(pos);
+            int walk = previous;
+            while (walk >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(walk))))
+            {
+                walk = state.PrevPos(walk);
+            }
+
+            if (walk < state.TextStart)
+            {
+                return _evenRegionalIndicators | _oddRegionalIndicators;
+            }
+
+            pos = IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(walk))) ? previous : walk;
+        }
+    }
+
+    /// <summary>An outcome mask's bit for one answer.</summary>
+    /// <param name="answer">The answer.</param>
+    /// <returns><see cref="_somePass"/> or <see cref="_someFail"/>.</returns>
+    private static int Outcome(bool answer) => answer ? _somePass : _someFail;
+
+    /// <summary>
+    /// The answers a default word test gives over every combination of the values its unknown
+    /// places can take. A place read by no rule for a combination is not enumerated there.
+    /// </summary>
+    /// <param name="node">The test.</param>
+    /// <param name="leftRaw">The Word_Break value of the character to the left, before WB4.</param>
+    /// <param name="rightRaw">The Word_Break value of the character to the right.</param>
+    /// <param name="rightChar">The character to the right.</param>
+    /// <param name="lefts">The values the left character can have after WB4.</param>
+    /// <param name="leftLefts">The values the character before it can have.</param>
+    /// <param name="parity">The parities the regional indicators running left from a regional indicator on the left can have.</param>
+    /// <param name="rightRights">The values the character after the right one can have.</param>
+    /// <param name="wordLeft">Whether the character to the left is a word character.</param>
+    /// <param name="wordRight">Whether the character to the right is a word character.</param>
+    /// <returns>A mask of <see cref="_somePass"/> and <see cref="_someFail"/>.</returns>
+    private static int DefaultWordOutcomes(
+        Node node,
+        uint leftRaw,
+        uint rightRaw,
+        uint rightChar,
+        uint lefts,
+        uint leftLefts,
+        int parity,
+        uint rightRights,
+        bool wordLeft,
+        bool wordRight
+    )
+    {
+        int near = DefaultBoundaryNear(leftRaw, rightRaw, rightChar);
+        if (near != _boundaryNotDecided)
+        {
+            return Outcome(DefaultWordTest(node, near == _boundaryBreak, wordLeft, wordRight));
+        }
+
+        uint rights = (_wordBreakLookingFurther & (1u << (int)rightRaw)) != 0 ? rightRights : 1u;
+        int seen = 0;
+        for (uint ls = lefts; ls != 0; ls &= ls - 1)
+        {
+            uint left = (uint)System.Numerics.BitOperations.TrailingZeroCount(ls);
+            uint lls = (_wordBreakLookingFurther & (1u << (int)left)) != 0 ? leftLefts : 1u;
+            int parities =
+                left == UnicodeTables.WbreakRegionalindicator && rightRaw == UnicodeTables.WbreakRegionalindicator
+                    ? parity
+                    : _evenRegionalIndicators;
+            for (uint a = lls; a != 0; a &= a - 1)
+            {
+                for (uint b = rights; b != 0; b &= b - 1)
+                {
+                    for (int p = parities; p != 0; p &= p - 1)
+                    {
+                        bool boundary = DefaultBoundaryFar(
+                            left,
+                            (uint)System.Numerics.BitOperations.TrailingZeroCount(a),
+                            rightRaw,
+                            (uint)System.Numerics.BitOperations.TrailingZeroCount(b),
+                            (p & -p) == _oddRegionalIndicators
+                        );
+                        seen |= Outcome(DefaultWordTest(node, boundary, wordLeft, wordRight));
+                        if (seen == (_somePass | _someFail))
+                        {
+                            return seen;
+                        }
+                    }
+                }
+            }
+        }
+
+        return seen;
+    }
+
+    /// <summary>Upstream <c>try_match_END_OF_WORD</c> (line 7141).</summary>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately (S91): the node's own encoding decides, as it does for
+    /// <c>\b</c>. Upstream compiles <c>\M</c>'s encoding into the code word and then reads the
+    /// pattern's, so <c>(?a:x\M)</c> refused 'x\xe9' where <c>(?a)x\M</c> matches it (regex
+    /// 2026.9.10, 2026-09-25).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchEndOfWord(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtWordEnd(state, node.Encoding, textPos));
 
     /// <summary>Upstream <c>try_match_START_OF_WORD</c> (line 7376).</summary>
+    /// <remarks>The node's own encoding decides; see <see cref="TryMatchEndOfWord"/>.</remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfWord(MatchState state, int textPos)
-    {
-        NoteBoundaryAtTruncationPoint(state, textPos);
-
-        return MatchStatus.From(AtWordStart(state, state.Encoding, textPos));
-    }
+    internal static int TryMatchStartOfWord(MatchState state, Node node, int textPos) =>
+        state.PartialSide != MatchState.PartialNone
+            ? WordTestInAPartialCall(state, node, textPos)
+            : MatchStatus.From(AtWordStart(state, node.Encoding, textPos));
 
     /// <summary>
     /// Upstream <c>try_match_GRAPHEME_BOUNDARY</c> (line 7147). The ASCII and locale encodings have
@@ -1978,13 +3199,268 @@ internal static class Matcher
     /// 1348), which answers <see langword="true"/> everywhere.
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchGraphemeBoundary(MatchState state, int textPos)
+    internal static int TryMatchGraphemeBoundary(MatchState state, Node node, int textPos)
     {
-        NoteBoundaryAtTruncationPoint(state, textPos);
+        if (state.PartialSide != MatchState.PartialNone)
+        {
+            return GraphemeBoundaryInAPartialCall(state, node, textPos);
+        }
 
-        return MatchStatus.From(state.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+        return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether a zero-width character test that has reached the edge lets the
+    /// path through instead of running out there.
+    /// </summary>
+    /// <remarks>
+    /// A consuming opcode compiled with a step of 0 is a test, not an item: the first set put in
+    /// front of a pattern whose start is not simple (upstream <c>_check_firstset</c>,
+    /// <c>_regex_core.py</c>:380-409, compiled with <c>zerowidth=True</c>) or a branch's precheck
+    /// (<c>_add_precheck</c>, :2178-2191). Each holds only where a later item reads the same
+    /// character, so at the edge it decides nothing: that item runs out there itself, in its own
+    /// place, which may be a lookaround's body (chunk 8's run-out rule). Answering the run-out at
+    /// the test answered the partial before any such body was open: <c>(?=b)(*FAIL)</c> over ''
+    /// was P(0, 0) where every continuation fails. The path is marked as having read the text to
+    /// come, so a success after it is a partial. A fuzzy test, which the compiler does not make,
+    /// and the oracle's pre-D11 ablation keep the run-out.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A consuming character test with a step of 0, at the edge.</param>
+    /// <returns><see langword="true"/> to go on at the test's next node.</returns>
+    private static bool ZeroWidthTestDefersAtTheEdge(MatchState state, Node node)
+    {
+        Debug.Assert(node.Step == 0, "only a zero-width test defers");
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial call runs out at the edge");
+        if ((node.Status & NodeStatus.Fuzzy) != 0 || state.Pattern.SecondPassAsBeforeD11)
+        {
+            return false;
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        state.NotePartialEvent(PartialEvent.ZeroWidthTestDeferred);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the grapheme boundary <c>\X</c> ends on, in a partial call's second pass.
+    /// Kept out of line so that a call without partial runs the test as it was.
+    /// </summary>
+    /// <remarks>
+    /// Brought forward from build chunk 10 for chunk 4, because without it no <c>\X</c> ever reads
+    /// the text to come and the cut rule has nothing to block (row C3). Off the edge the answer is
+    /// the held text's, except under <c>(?r)</c>, where GB9c, GB11 and GB12/GB13 look left through
+    /// a run that can reach the edge (build chunk 10, <see cref="ReversedGraphemeBoundaryReadsTheTextToCome"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">A <c>GraphemeBoundary</c> node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int GraphemeBoundaryInAPartialCall(MatchState state, Node node, int textPos)
+    {
+        if (node.Encoding == CaseEncoding.Ascii)
+        {
+            return MatchStatus.Success;
+        }
+
+        if (AtContinuationEdge(state, textPos))
+        {
+            return GraphemeBoundaryAtEdge(state, textPos);
+        }
+
+        if (
+            state.PartialSide == MatchState.PartialLeft
+            && textPos < state.TextEnd
+            && ReversedGraphemeBoundaryReadsTheTextToCome(state, textPos)
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtGraphemeBoundary(state, textPos));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1: a grapheme boundary at the edge of a partial call's second pass
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.1).
+    /// </summary>
+    /// <remarks>
+    /// One side of the edge is the first character of the text to come, and UAX #29 decides a
+    /// boundary from that character and the text on the other side. Every class of character can
+    /// come, so the test is decided only where one rule fixes the answer for all of them: after a
+    /// Control or LF (GB4), or before a Control or CR (GB5), there is always a break, which is also
+    /// what the first pass, reading the edge as the end of the text (GB1, GB2), answered. Everywhere
+    /// else an Extend character keeps the cluster going (GB9, and GB3 for a CR before an LF) and a
+    /// Control breaks it (GB5, GB4), so the test is undetermined. The known side is empty only when
+    /// the held text is: <c>\X</c> tests its boundary after taking a character
+    /// (<c>Nodes.cs</c>, <c>Grapheme.CompileCore</c>), unless a fuzzy deletion skipped that
+    /// character, which leaves the boundary where the <c>\X</c> started. The edge is then also the
+    /// start of the text forward (its end reversed), and every continuation is non-empty, so there
+    /// is always a break (GB1, GB2), where the first pass, over an empty text, answered none.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The edge.</param>
+    /// <returns><see cref="MatchStatus.Success"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int GraphemeBoundaryAtEdge(MatchState state, int textPos)
+    {
+        bool forward = state.PartialSide == MatchState.PartialRight;
+
+        if (forward ? textPos <= state.TextStart : textPos >= state.TextEnd)
+        {
+            Debug.Assert(state.TextStart == state.TextEnd, "D11 M1: the known side is empty only in an empty text");
+            state.AttemptTouchedTheTextToCome = true;
+            state.NotePartialEvent(PartialEvent.DecidedReadDiffering);
+            return MatchStatus.Success;
+        }
+
+        uint knownProp = UnicodeTables.GetGraphemeClusterBreak(
+            state.CharAt(forward ? state.PrevPos(textPos) : textPos)
+        );
+
+        bool alwaysBreaks = forward
+            ? knownProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakLf
+            : knownProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr;
+
+        if (alwaysBreaks)
+        {
+            Debug.Assert(
+                AtGraphemeBoundary(state, textPos),
+                "D11 A4: a decided grapheme test answers what the first pass answered"
+            );
+
+            return MatchStatus.Success;
+        }
+
+        return UndeterminedRead(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M1 (build chunk 10): whether a grapheme boundary inside the held text of
+    /// a reversed partial call's second pass depends on the text to come on the left.
+    /// </summary>
+    /// <remarks>
+    /// GB3 to GB9b read only the two characters beside the position, which the held text holds.
+    /// GB9c, GB11 and GB12/GB13 look further left, through a run of Extend and Linker characters to
+    /// a Consonant, of Extend characters to an Extended_Pictographic, or of regional indicators to
+    /// count them; a run that reaches the edge goes on in the text to come, which can end it in the
+    /// way that keeps the cluster together (a Consonant, with a Linker if the run had none; an
+    /// Extended_Pictographic; one regional indicator more). Each such rule therefore holds for some
+    /// continuation, and the boundary is undetermined unless a rule the held text does decide
+    /// holds first or later on the same path, since every rule that holds answers "no break" and
+    /// only GB999 answers a break. Forward, every rule looks left into the held text and right only
+    /// at the neighbour, so only the edge itself reads the text to come
+    /// (<see cref="GraphemeBoundaryAtEdge"/>).
+    /// </remarks>
+    /// <param name="state">The match state, reversed, in a partial call's second pass.</param>
+    /// <param name="textPos">A position strictly inside the held text.</param>
+    /// <returns><see langword="true"/> if some continuation keeps the cluster together and the held text breaks it.</returns>
+    private static bool ReversedGraphemeBoundaryReadsTheTextToCome(MatchState state, int textPos)
+    {
+        int leftPos = state.PrevPos(textPos);
+        uint leftChar = state.CharAt(leftPos);
+        uint rightChar = state.CharAt(textPos);
+        if (
+            GraphemeBoundaryNear(
+                UnicodeTables.GetGraphemeClusterBreak(leftChar),
+                UnicodeTables.GetGraphemeClusterBreak(rightChar)
+            ) != _boundaryNotDecided
+        )
+        {
+            return false;
+        }
+
+        bool open = false;
+
+        // GB9c
+        if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        {
+            bool hasLinker = false;
+            int pos = leftPos;
+            while (true)
+            {
+                if (pos < state.TextStart)
+                {
+                    open = true;
+                    break;
+                }
+
+                uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
+                if (prop == UnicodeTables.IncbLinker)
+                {
+                    hasLinker = true;
+                }
+                else if (prop == UnicodeTables.IncbConsonant)
+                {
+                    if (hasLinker)
+                    {
+                        return false;
+                    }
+
+                    break;
+                }
+                else if (prop != UnicodeTables.IncbExtend)
+                {
+                    break;
+                }
+
+                pos = state.PrevPos(pos);
+            }
+        }
+
+        // GB11
+        if (
+            UnicodeTables.GetGraphemeClusterBreak(leftChar) == UnicodeTables.GbreakZwj
+            && UnicodeTables.GetExtendedPictographic(rightChar) != 0
+        )
+        {
+            int pos = state.PrevPos(leftPos);
+            while (
+                pos >= state.TextStart
+                && UnicodeTables.GetGraphemeClusterBreak(state.CharAt(pos)) == UnicodeTables.GbreakExtend
+            )
+            {
+                pos = state.PrevPos(pos);
+            }
+
+            if (pos < state.TextStart)
+            {
+                open = true;
+            }
+            else if (UnicodeTables.GetExtendedPictographic(state.CharAt(pos)) != 0)
+            {
+                return false;
+            }
+        }
+
+        // GB12 and GB13
+        if (UnicodeTables.GetGraphemeClusterBreak(rightChar) == UnicodeTables.GbreakRegionalindicator)
+        {
+            long count = 0;
+            int pos = leftPos;
+            while (
+                pos >= state.TextStart
+                && UnicodeTables.GetGraphemeClusterBreak(state.CharAt(pos)) == UnicodeTables.GbreakRegionalindicator
+            )
+            {
+                ++count;
+                pos = state.PrevPos(pos);
+            }
+
+            if (pos < state.TextStart)
+            {
+                open = true;
+            }
+            else if (count % 2 == 1)
+            {
+                return false;
+            }
+        }
+
+        return open;
     }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
@@ -1992,8 +3468,9 @@ internal static class Matcher
     /// DELIBERATE DIVERGENCE, S35: upstream bounds this one with <c>slice_end</c> where every other
     /// zero-width assertion it has bounds itself with <c>text_end</c>, and this reads
     /// <see cref="MatchState.TextEnd"/> like the rest of them. In everything the port implements
-    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (the <see cref="Opcode.Skip"/>
-    /// arm, <c>:14545</c>), and a verb moves where the next attempt starts and nothing else - PCRE2
+    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (when backtracking reaches the
+    /// verb, ledger entry 45; upstream moves it when the verb runs, <c>:14545</c>), and a verb moves
+    /// where the next attempt starts and nothing else - PCRE2
     /// pcre2pattern, "Verbs that act after backtracking" - so an assertion about the text must not
     /// read a bound a verb has moved. <b>Phase 5 gets a second mover</b>, flagged by S35's blind
     /// review: <c>do_best_fuzzy_match</c> (<c>:17802</c>) and <c>do_enhanced_fuzzy_match</c>
@@ -2013,57 +3490,262 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || state.CharAt(textPos) == '\n');
+    internal static int TryMatchEndOfLine(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            // D11 M1: the text to come may start with a newline or may not.
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.From(state.CharAt(textPos) == '\n');
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE_U</c> (line 7115).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined at the end forward, where the text to come may start with a line
+    /// separator or may not, and reversed at the start before a newline, which the text to come
+    /// may put inside a CR/LF.
+    /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfLineU(MatchState state, int textPos) =>
-        MatchStatus.From(AtLineEnd(state, textPos));
+    internal static int TryMatchEndOfLineU(MatchState state, Node node, int textPos)
+    {
+        if (
+            state.PartialSide != MatchState.PartialNone
+            && (
+                state.PartialSide == MatchState.PartialRight
+                    ? textPos >= state.TextEnd
+                    : textPos <= state.TextStart && textPos < state.TextEnd && state.CharAt(textPos) == 0x0A
+            )
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtLineEnd(state, node.Encoding, textPos));
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING</c> (line 7121).</summary>
+    /// <remarks>
+    /// D11 M1, decision 3: false at the end in a partial call's second pass, which asks only about
+    /// non-empty continuations, and after any of them the end of the text is not the end of the
+    /// string.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfString(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd);
+    internal static int TryMatchEndOfString(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING_LINE</c> (line 7127).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined at the end forward (the text to come may be a newline), and decided
+    /// false at a final newline, which any text to come stops being final.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfStringLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || textPos == state.FinalNewline);
+    internal static int TryMatchEndOfStringLine(MatchState state, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        if (textPos == state.FinalNewline)
+        {
+            return state.PartialSide == MatchState.PartialRight ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
 
     /// <summary>Upstream <c>try_match_END_OF_STRING_LINE_U</c> (line 7134).</summary>
+    /// <remarks>
+    /// D11 M1: as <see cref="TryMatchEndOfStringLine"/>, with one more undetermined case. A final
+    /// CR stays the start of the final line separator when the text to come is a lone LF, so there
+    /// the test is undetermined rather than decided false.
+    /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfStringLineU(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || textPos == state.FinalLineSep);
+    internal static int TryMatchEndOfStringLineU(MatchState state, Node node, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        if (textPos == FinalLineSep(state, node.Encoding))
+        {
+            if (state.PartialSide != MatchState.PartialRight)
+            {
+                return MatchStatus.Success;
+            }
+
+            return state.CharAt(textPos) == 0x0D && state.NextPos(textPos) >= state.TextEnd
+                ? UndeterminedRead(state)
+                : DecidedFalseAtEdge(state);
+        }
+
+        return MatchStatus.Failure;
+    }
+
+    /// <summary>
+    /// <see cref="MatchState.FinalLineSep"/> under an encoding that may not be the pattern's (S91).
+    /// Only the arm for a final separator other than LF depends on the encoding.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding.</param>
+    /// <returns>Where the final line separator starts, or -1.</returns>
+    private static int FinalLineSep(MatchState state, CaseEncoding encoding)
+    {
+        if (encoding == state.Encoding || state.FinalNewline >= 0)
+        {
+            return state.FinalLineSep;
+        }
+
+        int finalPos = state.PrevPos(state.TextEnd);
+
+        return finalPos >= 0 && Encodings.IsLineSep(encoding, state.CharAt(finalPos)) ? finalPos : -1;
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_LINE</c> (line 7358).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos <= state.TextStart || state.CharBefore(textPos) == '\n');
+    internal static int TryMatchStartOfLine(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            // D11 M1: reversed, the text to come may end with a newline or may not.
+            return state.PartialSide == MatchState.PartialLeft ? UndeterminedRead(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.From(state.CharBefore(textPos) == '\n');
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_LINE_U</c> (line 7365).</summary>
+    /// <remarks>
+    /// D11 M1: undetermined reversed at the start, where the text to come may end with a line
+    /// separator or may not, and forward at the end after a CR, which a text to come starting with
+    /// LF turns into the inside of a CR/LF.
+    /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfLineU(MatchState state, int textPos) =>
-        MatchStatus.From(AtLineStart(state, textPos));
+    internal static int TryMatchStartOfLineU(MatchState state, Node node, int textPos)
+    {
+        if (
+            state.PartialSide != MatchState.PartialNone
+            && (
+                state.PartialSide == MatchState.PartialLeft
+                    ? textPos <= state.TextStart
+                    : textPos >= state.TextEnd && textPos > state.TextStart && state.CharBefore(textPos) == 0x0D
+            )
+        )
+        {
+            return UndeterminedRead(state);
+        }
+
+        return MatchStatus.From(AtLineStart(state, node.Encoding, textPos));
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_STRING</c> (line 7371).</summary>
+    /// <remarks>
+    /// D11 M1: reversed, false at the start in a partial call's second pass, by decision 3's
+    /// reasoning: with text to come on the left, the start of the text is not the start of the
+    /// string.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfString(MatchState state, int textPos) =>
-        MatchStatus.From(textPos <= state.TextStart);
+    internal static int TryMatchStartOfString(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? DecidedFalseAtEdge(state) : MatchStatus.Success;
+        }
+
+        return MatchStatus.Failure;
+    }
+
+    /// <summary>
+    /// The two readings of a zero-width test that leave the usual second pass: from a start inside
+    /// the text to come (<see cref="MatchState.InsideW"/>), and the oracle's pre-D11 ablation.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int ZeroWidthOffTheUsualPath(MatchState state, Node node, int textPos) =>
+        state.InsideW ? ZeroWidthInsideTheTextToCome(state, node) : ZeroWidthAgainstTheHeldText(state, node, textPos);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a zero-width test in the attempt that starts inside the text to come,
+    /// where both sides of the position are unknown (design section 1, rule 3).
+    /// </summary>
+    /// <remarks>
+    /// Only the start is ever asked, because anything consumed from it runs out. A test is false
+    /// where no position inside the text to come can pass it: <c>\A</c> and a plain <c>^</c>
+    /// forward, which need the start of the string, and <c>\Z</c> and a plain <c>$</c> reversed,
+    /// which need its end or a final newline, both of which lie in the held text on that side;
+    /// <c>\G</c> either way, which holds only where the search began. Except that a plain <c>$</c>
+    /// reversed is undetermined when no held text follows the edge, because then the final newline
+    /// itself can be in the text to come (D73: <c>(?wr)^(?&lt;=\b$^)</c> over '' is completed by
+    /// '\n' on its left). Every other test holds for
+    /// some continuation and fails for another, so it is undetermined, which passes and marks the
+    /// path as the edge's tests do.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <returns><see cref="MatchStatus.Failure"/> or <see cref="MatchStatus.Undetermined"/>.</returns>
+    private static int ZeroWidthInsideTheTextToCome(MatchState state, Node node)
+    {
+        bool neverInside = node.Op switch
+        {
+            Opcode.SearchAnchor => true,
+            Opcode.StartOfString => state.PartialSide == MatchState.PartialRight,
+            Opcode.EndOfString => state.PartialSide == MatchState.PartialLeft,
+            Opcode.EndOfStringLine or Opcode.EndOfStringLineU => state.PartialSide == MatchState.PartialLeft
+                && !state.NothingHeldBeyondTheEdge,
+            _ => false,
+        };
+
+        return neverInside ? MatchStatus.Failure : UndeterminedRead(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, and only the oracle reaches it (<see cref="PatternObject.SecondPassAsBeforeD11"/>):
+    /// a zero-width test in a partial call's second pass as it was before D11 M1, answered against
+    /// the held text. S57d's escalation, which used to note a word or grapheme test here, is
+    /// deleted (design section 4.5), so this is upstream's answer.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns><see cref="MatchStatus.Success"/> or <see cref="MatchStatus.Failure"/>.</returns>
+    private static int ZeroWidthAgainstTheHeldText(MatchState state, Node node, int textPos)
+    {
+        int partialSide = state.PartialSide;
+        state.PartialSide = MatchState.PartialNone;
+        int status = TryMatchZeroWidth(state, node, textPos);
+        state.PartialSide = partialSide;
+
+        return status;
+    }
 
     /// <summary>
     /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
@@ -2071,34 +3753,73 @@ internal static class Matcher
     /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
     /// same question about a position the matcher is not standing on.
     /// </summary>
+    /// <remarks>
+    /// In a partial call's second pass the word, line and string tests may also answer
+    /// <see cref="MatchStatus.Undetermined"/> at the edge (D11 M1). Nothing here marks the path:
+    /// the matcher's own arm pushes the touch mark, and the prefilter and
+    /// <see cref="AnchorIsPinned"/>, which are not on a path, read the answer without one. The
+    /// <c>(?w)</c> tests read a window that can reach the text to come from inside the held text
+    /// (<see cref="DefaultWordTestInAPartialCall"/>), and so does a reversed grapheme test.
+    /// It stays one method, as before D11: a wrapper around the switch added a call to every
+    /// zero-width test and cost a call without partial about 3% on a multiline <c>$</c> scan
+    /// (measured 2026-09-29).
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
     /// <param name="textPos">The position to ask about.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
-        node.Op switch
-        {
-            Opcode.Boundary => TryMatchBoundary(state, node, textPos),
-            Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
-            Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, textPos),
-            Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, textPos),
-            Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
-            Opcode.EndOfLineU => TryMatchEndOfLineU(state, textPos),
-            Opcode.EndOfString => TryMatchEndOfString(state, textPos),
-            Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
-            Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, textPos),
-            Opcode.EndOfWord => TryMatchEndOfWord(state, textPos),
-            Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, textPos),
-            Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
-            Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
-            Opcode.StartOfLineU => TryMatchStartOfLineU(state, textPos),
-            Opcode.StartOfWord => TryMatchStartOfWord(state, textPos),
-            _ => TryMatchStartOfString(state, textPos),
-        };
+        state.PartialSide != MatchState.PartialNone && (state.InsideW || state.Pattern.SecondPassAsBeforeD11)
+            ? ZeroWidthOffTheUsualPath(state, node, textPos)
+            : node.Op switch
+            {
+                Opcode.Boundary => TryMatchBoundary(state, node, textPos),
+                Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
+                Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, node, textPos),
+                Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, node, textPos),
+                Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
+                Opcode.EndOfLineU => TryMatchEndOfLineU(state, node, textPos),
+                Opcode.EndOfString => TryMatchEndOfString(state, textPos),
+                Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
+                Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, node, textPos),
+                Opcode.EndOfWord => TryMatchEndOfWord(state, node, textPos),
+                Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, node, textPos),
+                Opcode.SearchAnchor => MatchStatus.From(textPos == BackslashGPosition(state)),
+                Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
+                Opcode.StartOfLineU => TryMatchStartOfLineU(state, node, textPos),
+                Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
+                _ => TryMatchStartOfString(state, textPos),
+            };
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D79: where <c>\G</c> holds, which is where the matching operation began
+    /// (<see cref="MatchState.OperationStart"/>). Upstream's <c>\G</c> reads <c>search_anchor</c>
+    /// (<c>_regex.c:7288</c>), and the BESTMATCH and ENHANCEMATCH re-runs move that to each
+    /// candidate's start, so <c>(?b)\G(?:abc){e&lt;=2}</c> over 'xabc' answered (1, 4).
+    /// <see cref="PatternObject.AnchorsBackslashGAtEveryCandidate"/> restores that for the oracle.
+    /// The insertion rule (<see cref="AnchorIsPinned"/> and the <c>PermitInsertion</c> lines) keeps
+    /// the candidate's start (D61, ledger 19/20).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The position <c>\G</c> holds at.</returns>
+    private static int BackslashGPosition(MatchState state)
+    {
+        // Only the two flagged walks re-run 'InitMatch' from a later start; every other strategy
+        // inits once, from where the operation began.
+        Debug.Assert(
+            state.SearchAnchor == state.OperationStart
+                || (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0,
+            "D79: only BESTMATCH and ENHANCEMATCH move the search anchor off the operation start"
+        );
+
+        return state.Pattern.AnchorsBackslashGAtEveryCandidate ? state.SearchAnchor : state.OperationStart;
+    }
 
     /// <summary>
     /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
-    /// fuzzy section there may open with an inserted character.
+    /// fuzzy section there may open with an inserted character. BESTMATCH ONLY since D61: for every
+    /// other search rule H' replaced it (<see cref="DoMatch2LiftingTheAnchorBan"/>), and
+    /// <c>Optimiser.FindAnchorGuards</c> fills the guards only for a BESTMATCH pattern.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -2139,9 +3860,11 @@ internal static class Matcher
 
         foreach (Node guard in guards)
         {
+            // D11 M1: an undetermined answer holds for some continuations and fails for others, so
+            // it counts as either, which permits the insertion wherever some continuation would.
             if (
-                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success
-                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure
+                TryMatchZeroWidth(state, guard, state.SearchAnchor) != MatchStatus.Failure
+                && TryMatchZeroWidth(state, guard, onePastAnchor) != MatchStatus.Success
             )
             {
                 return true;
@@ -2166,11 +3889,11 @@ internal static class Matcher
     {
         if (textPos >= state.TextEnd)
         {
-            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
         return MatchStatus.From(
-            textPos < state.SliceEnd && MatchesOne(state.Encoding, node, state.CharAt(textPos)) == node.Match
+            textPos < state.SliceEnd && MatchesOne(node.Encoding, node, state.CharAt(textPos)) == node.Match
         );
     }
 
@@ -2192,7 +3915,7 @@ internal static class Matcher
         }
 
         return MatchStatus.From(
-            textPos > state.SliceStart && MatchesOne(state.Encoding, node, state.CharBefore(textPos)) == node.Match
+            textPos > state.SliceStart && MatchesOne(node.Encoding, node, state.CharBefore(textPos)) == node.Match
         );
     }
 
@@ -2215,10 +3938,10 @@ internal static class Matcher
         {
             Opcode.Any => TryMatchAny(state, textPos),
             Opcode.AnyAll => TryMatchAnyAll(state, textPos),
-            Opcode.AnyU => TryMatchAnyU(state, textPos),
+            Opcode.AnyU => TryMatchAnyU(state, node, textPos),
             Opcode.AnyRev => TryMatchAnyRev(state, textPos),
             Opcode.AnyAllRev => TryMatchAnyAllRev(state, textPos),
-            Opcode.AnyURev => TryMatchAnyURev(state, textPos),
+            Opcode.AnyURev => TryMatchAnyURev(state, node, textPos),
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.PropertyRev
@@ -2395,6 +4118,153 @@ internal static class Matcher
         }
     }
 
+    /// <summary>
+    /// Whether an iteration that read no text but moved the capture-change counter led the current
+    /// run of its repeat back to a state it had already reached; if not, records the state.
+    /// <b>Not upstream</b> (D17).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream counts any span change of a tested group as progress (D12), so a body that flips a
+    /// group between spans at one position goes round for ever:
+    /// <c>^(?:(?=(?P=g)b)(?=(?P&lt;g&gt;ab))|(?=(?P&lt;g&gt;a)))*$</c> over <c>ab</c> raises
+    /// MemoryError. A revisited state is instead no progress, which ends the loop the way upstream
+    /// ends one that changed nothing: the iteration stands and only the tail is tried from it.
+    /// </para>
+    /// <para>
+    /// The state is everything the rest of the match can depend on within the run: the position,
+    /// the count (clipped to the minimum when there is no maximum, as the counts past it are
+    /// alike), the error counts as <see cref="ErrorCountCap"/> clips them, and the spans of the
+    /// tested groups. If the state was reached earlier on this path, the body from here can only
+    /// repeat what it did from there, and upstream never ends; if on a path already backtracked,
+    /// that path's whole future failed, and this one's is the same. Each part takes finitely many
+    /// values in one run, so a run of empty iterations must come back to a state it has seen. With
+    /// a maximum the count keeps every state on a path apart, so only a repeated sibling is cut.
+    /// The design is <c>docs/plan/2026-09-29-d17-empty-iteration-cycle.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration counted.</param>
+    /// <param name="endNode">The repeat's end node: minimum in its second value, maximum in its third.</param>
+    /// <returns><see langword="true"/> if the state was already reached in this run.</returns>
+    private static bool RevisitsEmptyIterationState(MatchState state, RepeatData rpData, Node endNode)
+    {
+        // A fuzzy edit alone moves only the counter's high half; that case is ledger 33's.
+        if (MatchState.GroupChanges(state.CaptureChange) == MatchState.GroupChanges(rpData.CaptureChange))
+        {
+            return false;
+        }
+
+        // START_GROUP and END_GROUP move the group half only for a referenced group, so a pattern
+        // that gets here tests one, and its repeats were numbered on entry.
+        int[] tested = state.Pattern.TestedGroups;
+        Debug.Assert(tested.Length > 0 && rpData.RunId > 0, "a group change without a tested group or a run number");
+
+        long count = rpData.Count;
+        if (~endNode.Values[2] == 0)
+        {
+            count = Math.Min(count, endNode.Values[1]);
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long[] values = state.EmptyIterationScratch!;
+        Debug.Assert(
+            values.Length == 2 + counts.Length + (2 * tested.Length),
+            "the scratch key is sized for the pattern"
+        );
+        int v = 0;
+        values[v++] = state.TextPos;
+        values[v++] = count;
+
+        long cap = ErrorCountCap(state);
+        foreach (long fuzzyCount in counts)
+        {
+            values[v++] = Math.Min(fuzzyCount, cap);
+        }
+
+        foreach (int group in tested)
+        {
+            GroupData data = state.Groups[group - 1];
+            if (data.Current >= 0)
+            {
+                GroupSpan span = data.Captures[data.Current];
+                values[v++] = span.Start;
+                values[v++] = span.End;
+            }
+            else
+            {
+                // Unset, which no span is: a span's ends are never negative.
+                values[v++] = -1;
+                values[v++] = -1;
+            }
+        }
+
+        var key = new EmptyIterationState(rpData.RunId, values);
+        state.EmptyIterationStates ??= [];
+        if (state.EmptyIterationStates.Contains(key))
+        {
+            return true;
+        }
+
+        state.EmptyIterationStates.Add(key.Copy());
+        return false;
+    }
+
+    /// <summary>
+    /// The value at which an error count stops mattering to the rest of the match, for
+    /// <see cref="RevisitsEmptyIterationState"/>: one more than the largest finite limit in the
+    /// pattern or on the whole match, or 0 when there is none. <b>Not upstream</b> (D17).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MatchState.FuzzyCounts"/> holds the open section's counts, with every inner
+    /// section's merged in by END_FUZZY without a check against the open section's limits, so a
+    /// body with a fuzzy section in it raises them on every pass:
+    /// <c>^(?:(?=(?P=g)b)(?=(?P&lt;g&gt;ab))|(?=(?P&lt;g&gt;a))(?:x){d&lt;=1})*$</c> deletes the
+    /// <c>x</c> each time round. Keyed exactly, no state would ever repeat.
+    /// </para>
+    /// <para>
+    /// The rest of the match reads the counts only by comparing them, alone, summed, or weighted
+    /// into a cost, with limits: the open section's minimums, maximums and cost limit (its
+    /// END_FUZZY, <see cref="FuzzyWithinConstraints"/>, and each edit's permission,
+    /// <see cref="ThisErrorPermitted"/>); every enclosing section's, since each END_FUZZY adds the
+    /// counts into the section around it, which checks the sums at its own END_FUZZY; and the whole
+    /// match's <see cref="MatchState.MaxErrors"/> and <see cref="MatchState.MaxCost"/>, which the
+    /// ranking modes lower. The enclosing sections' own counts wait on the stack, fixed for the
+    /// run, since the run began inside the open section. So every comparison still to come is
+    /// with some section's limit or a match limit, and
+    /// <see cref="PatternObject.LargestFuzzyLimit"/> covers every section.
+    /// </para>
+    /// <para>
+    /// Two counts at or above one more than the largest of those limits give the same answer to
+    /// every such comparison, now and after any further edits: counts only rise, a sum containing
+    /// either is at or above the cap too, and no cost weight is negative, so a kind of error with
+    /// weight 1 or more puts both over any cost limit and one with weight 0 adds nothing to either.
+    /// So clipping there keeps the key exact and makes it finite. It is not a dominance cut: below
+    /// the cap every count is kept, which a minimum such as <c>{1&lt;=e}</c> needs.
+    /// </para>
+    /// <para>
+    /// With no finite limit anywhere (only <c>{e}</c> sections, in a plain match) the cap is 0 and
+    /// the counts drop out of the key, which is exact because nothing reads them.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The cap for every count in <see cref="MatchState.FuzzyCounts"/>.</returns>
+    private static long ErrorCountCap(MatchState state)
+    {
+        long largest = state.Pattern.LargestFuzzyLimit;
+        largest = LargerFiniteBound(largest, state.MaxErrors);
+        largest = LargerFiniteBound(largest, state.MaxCost);
+        return largest + 1;
+    }
+
+    /// <summary>The larger of <paramref name="largest"/> and a bound, if the bound is finite.</summary>
+    /// <param name="largest">The largest finite bound so far, or -1.</param>
+    /// <param name="bound">A bound; <see cref="RegexFlags.Unlimited"/> or more is none.</param>
+    /// <returns>The larger of the two, never below 0 once a finite bound is seen.</returns>
+    internal static long LargerFiniteBound(long largest, long bound) =>
+        bound < RegexFlags.Unlimited ? Math.Max(largest, Math.Max(bound, 0)) : largest;
+
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
     /// <param name="span1">One span.</param>
     /// <param name="span2">The other.</param>
@@ -2454,37 +4324,154 @@ internal static class Matcher
         int PublicIndex
     );
 
-    /// <summary>Upstream <c>push_groups</c> (<c>upstream/src/_regex.c</c> line 2490).</summary>
+    /// <summary>
+    /// NOT UPSTREAM'S (D51, ledger entry 63): what <c>GROUP_RETURN</c> puts on the backtracking
+    /// stack for the callee's groups, while it puts each group back as the caller left it.
+    /// </summary>
     /// <remarks>
-    /// Only each group's <c>current</c>, where <see cref="PushCaptures"/> also saves its
-    /// <c>count</c>. A group call leaves the callee's captures in place on purpose - a
-    /// <c>(?&amp;name)</c> call that matches records a capture the caller can read afterwards - and
-    /// restores only where each group's span currently is.
+    /// <para>
+    /// A call runs like a subroutine, as in Perl and PCRE2, so the captures its body made are
+    /// thrown away on return: each group gets back its <c>count</c> and its <c>current</c> from the
+    /// caller's saved copy, which <c>GROUP_CALL</c> pushed with <see cref="PushCaptures"/>. Upstream's
+    /// <c>push_groups</c> (<c>upstream/src/_regex.c:2490</c>), called by <c>GROUP_CALL</c> at
+    /// :13405, saves only <c>current</c>, and <c>GROUP_RETURN</c>'s <c>pop_groups</c> (:13516) restores
+    /// only that, so the callee's captures
+    /// stayed on the list: <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' reported c unset with a
+    /// capture listed. <see cref="PatternObject.KeepCallCaptures"/> restores upstream's rule for the
+    /// oracle.
+    /// </para>
+    /// <para>
+    /// Lowering the count frees the callee's slots, and the caller may write over them before it
+    /// backtracks into the call, so the spans themselves go on the stack too:
+    /// <c>(?(DEFINE)(?&lt;d&gt;(.)(?:.)?\2))(?&amp;d)(?:(?2)x)?ab</c> over 'aaab' writes 'b'@3 over
+    /// the call's 'a'@0 and then backtracks into it. Only the spans the call added are pushed, so a
+    /// call that captures nothing costs one caller count per group more than upstream.
+    /// </para>
+    /// <para>
+    /// The caller's copy is on the saved stack, on top of its repeats and capture change and right
+    /// under the return node, so it comes off first (D62 put it there). Each group's entry is
+    /// <c>span[callerCount] ... span[calleeCount - 1] callerCount calleeCount calleeCurrent</c>, last
+    /// group first, so <see cref="PopCalleeCaptures"/> meets the first group first.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="stack">The stack to push onto.</param>
-    private static void PushGroups(MatchState state, ByteStack stack)
+    /// <returns><see langword="false"/> if the saved stack holds too few bytes.</returns>
+    private static bool ReturnToCallerCaptures(MatchState state)
     {
-        foreach (GroupData group in state.Groups)
-        {
-            stack.PushSize(group.Current);
-        }
-    }
-
-    /// <summary>Upstream <c>pop_groups</c> (line 2662).</summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="stack">The stack to pop from.</param>
-    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopGroups(MatchState state, ByteStack stack)
-    {
+        bool keepCallCaptures = state.Pattern.KeepCallCaptures;
         for (int g = state.Groups.Length - 1; g >= 0; g--)
         {
-            if (!stack.PopSize(out long current))
+            if (!state.Sstack.PopSize(out long callerCurrent) || !state.Sstack.PopSize(out long callerCount))
             {
                 return false;
             }
 
+            GroupData group = state.Groups[g];
+
+            // Under upstream's rule the saved count is not the caller's: a re-entered call's frame
+            // is pushed with the count the return left, which was never lowered. It is then read
+            // only for the span range, which may be empty; upstream itself never saves a count.
+            Debug.Assert(
+                keepCallCaptures || group.Count >= callerCount,
+                "a call only adds captures: its own are unsaved only by backtracking past the call"
+            );
+            for (int i = (int)callerCount; i < group.Count; i++)
+            {
+                GroupSpan span = group.Captures[i];
+                state.Bstack.PushSize(((long)(uint)span.Start << 32) | (uint)span.End);
+            }
+
+            state.Bstack.PushSize(callerCount);
+            state.Bstack.PushSize(group.Count);
+            state.Bstack.PushSize(group.Current);
+
+            if (!keepCallCaptures)
+            {
+                group.Count = (int)callerCount;
+            }
+
+            group.Current = (int)callerCurrent;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D51): <c>GROUP_CALL</c>'s backtrack arm putting back the caller's groups as
+    /// <see cref="PushCaptures"/> saved them at the call.
+    /// </summary>
+    /// <remarks>
+    /// Everything inside the call has been undone by then, so each count is already the caller's;
+    /// only <c>current</c> needs the saved copy, and the count is asserted rather than written.
+    /// Under <see cref="PatternObject.KeepCallCaptures"/> the count is not even read, which is
+    /// upstream's <c>pop_groups</c> (<c>upstream/src/_regex.c:2662</c>) exactly: the frame a
+    /// re-entered call pushed carries the count its return left, which upstream never lowers.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the saved stack holds too few bytes.</returns>
+    private static bool PopCallerCaptures(MatchState state)
+    {
+        bool keepCallCaptures = state.Pattern.KeepCallCaptures;
+        for (int g = state.Groups.Length - 1; g >= 0; g--)
+        {
+            if (!state.Sstack.PopSize(out long current) || !state.Sstack.PopSize(out long count))
+            {
+                return false;
+            }
+
+            Debug.Assert(
+                keepCallCaptures || state.Groups[g].Count == count,
+                "backtracking past a call finds each group's count back at the caller's"
+            );
             state.Groups[g].Current = (int)current;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D51): <c>GROUP_RETURN</c>'s backtrack arm undoing
+    /// <see cref="ReturnToCallerCaptures"/>, so the callee resumes inside the call with the captures
+    /// it had made, written back into their slots.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the backtracking stack holds too few bytes.</returns>
+    private static bool PopCalleeCaptures(MatchState state)
+    {
+        for (int g = 0; g < state.Groups.Length; g++)
+        {
+            if (
+                !state.Bstack.PopSize(out long current)
+                || !state.Bstack.PopSize(out long count)
+                || !state.Bstack.PopSize(out long callerCount)
+            )
+            {
+                return false;
+            }
+
+            GroupData group = state.Groups[g];
+
+            // Everything done since the return has been undone, so the group is as the return left
+            // it: back at the caller's count, or at the callee's under upstream's rule.
+            Debug.Assert(
+                group.Count == (state.Pattern.KeepCallCaptures ? count : callerCount),
+                "backtracking into a call finds each group as the return left it"
+            );
+
+            // The slots were written before the return, and a captures array only ever grows.
+            Debug.Assert(count <= group.Captures.Length, "the callee's slots are still in the array");
+            for (int i = (int)count - 1; i >= callerCount; i--)
+            {
+                if (!state.Bstack.PopSize(out long packed))
+                {
+                    return false;
+                }
+
+                group.Captures[i] = new GroupSpan((int)(packed >> 32), (int)(uint)packed);
+            }
+
+            group.Count = (int)count;
+            group.Current = (int)current;
         }
 
         return true;
@@ -2532,33 +4519,89 @@ internal static class Matcher
     /// <summary>Upstream <c>push_repeat_data</c> (<c>upstream/src/_regex.c</c> line 2552).</summary>
     /// <param name="stack">The stack to push onto.</param>
     /// <param name="repeatData">The repeat to save.</param>
-    private static void PushRepeatData(ByteStack stack, RepeatData repeatData)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
+    /// <param name="keepGuards">
+    /// NOT UPSTREAM (D35): whether the guard lists are left out, so the matching pop leaves them as
+    /// they are then; see <see cref="PushRepeats"/>. Push and pop must be given the same value.
+    /// </param>
+    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy, bool runs, bool keepGuards)
     {
-        repeatData.BodyGuardList.PushTo(stack);
-        repeatData.TailGuardList.PushTo(stack);
+        if (keepGuards)
+        {
+            PushGuardEditCounts(stack, repeatData);
+        }
+        else
+        {
+            repeatData.BodyGuardList.PushTo(stack);
+            repeatData.TailGuardList.PushTo(stack);
+        }
+
         stack.PushSize(repeatData.Count);
         stack.PushSize(repeatData.Start);
         stack.PushSize(repeatData.CaptureChange);
+        if (fuzzy)
+        {
+            stack.PushSize(repeatData.ChangesAtStart);
+        }
+
+        if (runs)
+        {
+            stack.PushSize(repeatData.RunId);
+        }
     }
 
     /// <summary>Upstream <c>pop_repeat_data</c> (line 2726).</summary>
     /// <param name="stack">The stack to pop from.</param>
     /// <param name="repeatData">The repeat to restore.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    /// <param name="runs">Whether the pattern numbers its repeat runs, and so carries the D17 run too.</param>
+    /// <param name="keepGuards">What the matching push was given.</param>
+    /// <param name="testJustEnded">
+    /// Whether a conditional's test has only just ended, so that nothing but the test has run since
+    /// the push.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData)
+    private static bool PopRepeatData(
+        ByteStack stack,
+        RepeatData repeatData,
+        bool fuzzy,
+        bool runs,
+        bool keepGuards,
+        bool testJustEnded
+    )
     {
+        long runId = 0;
+        if (runs && !stack.PopSize(out runId))
+        {
+            return false;
+        }
+
+        long sectionEdits = 0;
+        if (fuzzy && !stack.PopSize(out sectionEdits))
+        {
+            return false;
+        }
+
         if (
             !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long start)
             || !stack.PopSize(out long count)
-            || !repeatData.TailGuardList.PopFrom(stack)
-            || !repeatData.BodyGuardList.PopFrom(stack)
+            || (!keepGuards && (!repeatData.TailGuardList.PopFrom(stack) || !repeatData.BodyGuardList.PopFrom(stack)))
         )
         {
             return false;
         }
 
+        if (keepGuards)
+        {
+            CheckKeptGuards(stack, repeatData, testJustEnded);
+        }
+
         repeatData.CaptureChange = captureChange;
+        repeatData.ChangesAtStart = sectionEdits;
+        repeatData.ClearMemo();
+        repeatData.RunId = runId;
         repeatData.Start = (int)start;
         repeatData.Count = count;
         return true;
@@ -2566,30 +4609,162 @@ internal static class Matcher
 
     /// <summary>Upstream <c>push_repeats</c> (line 2570): every repeat's state, in index order.</summary>
     /// <remarks>
+    /// <para>
     /// Unlike the captures, this saves the guard lists in full. A conditional's test can run a repeat
     /// and guard positions inside it, and those guards have to go when the test is undone - otherwise
     /// the yes-branch inherits "already failed here" from a subpattern that was only being asked
     /// about.
+    /// </para>
+    /// <para>
+    /// NOT UPSTREAM (D35): a repeat whose guards are a failure memo on this call
+    /// (<see cref="MatchState.KeepsFailureMemo"/>) keeps its lists instead. Upstream saves them all
+    /// (<c>push_repeat_data</c>, <c>_regex.c:2552</c>), and the conditional's backtrack arms put
+    /// them back (<c>:15423</c>, <c>:15475</c>, and the negative test's success at <c>:12431</c>).
+    /// Putting them back also throws away what the repeat learned after the test had ended. At each
+    /// position of <c>(?:(?(?=a)a|a)|a)*b</c> the path through the conditional explores the rest of
+    /// the run and records where the body failed; backtracking out of the conditional deletes those
+    /// records, and the plain <c>a</c> beside it explores the same rest again, which is 2^n.
+    /// </para>
+    /// <para>
+    /// Keeping them is sound. A guard records that the body entered at p, or the tail tried from p,
+    /// reached no success (upstream <c>guard_repeat</c>, <c>:9446</c>, read by
+    /// <c>is_repeat_guarded</c>, <c>:9559</c>; the lists are reset only per attempt,
+    /// <c>reset_guards</c>, <c>:3383</c>). For a memo repeat that record holds for every path that
+    /// reaches p in the same attempt, the premise the memo already relies on across every other kind
+    /// of backtracking (<see cref="RepeatInfo.FailureMemo"/>): nothing after the repeat reads more
+    /// than the position, because the pattern has no backreference, group-exists conditional, group
+    /// call, <c>(*PRUNE)</c>, <c>(*SKIP)</c>, fuzzy or POSIX matching, or <c>\K</c> in a submatch.
+    /// So the captures a test or an arm sets, which the restore still puts back, are never read by
+    /// what follows; there are no fuzzy counts; and no verb cuts below the repeat. A memo list never
+    /// holds a success mark, the one entry that is a heuristic rather than a fact:
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> skip it, and tail guards are only ever
+    /// failures.
+    /// </para>
+    /// <para>
+    /// What the save protects is the guards recorded inside the test, and a memo repeat has none
+    /// there: it is not inside a test (<c>NodeCompiler.BuildRepeat</c>), and with no group call none
+    /// of its nodes can run inside one. So a pop when the yes-arm is undone finds only records made
+    /// after the test, each true whatever runs next. A <c>BRANCH</c> already treats the guards that
+    /// way; for a memo repeat a conditional is now a branch between its arms. The rest of the saved
+    /// state (count, start, capture change, run) is still put back, and every other repeat keeps
+    /// upstream's save.
+    /// </para>
+    /// <para>
+    /// A pop when the test has ended without the yes-arm running finds the lists as they were,
+    /// because nothing but the test ran since the push. That holds outside a partial call's second
+    /// pass, and in it for a negative test and for a positive test whose end was never blocked.
+    /// The exception is the second pass, which keeps the memo since D11 build chunk 9: a positive
+    /// test whose end was blocked (D11 amendment 2) lets the yes-arm and the rest of the pattern
+    /// run before backtracking returns into the test, and when the test's body is then exhausted
+    /// the test fails and pops the repeats. The records made in between are the yes-arm's, made
+    /// after the test, so they are true for the no-arm as for any other arrival (row X2,
+    /// <c>(?:(?(?=.*z)a|a))*b</c> over 'a' * 40 + 'c', the chunk 9 review's finding 1).
+    /// <see cref="CheckKeptGuards"/> asserts that only such a pop finds the lists changed, and that
+    /// a kept list holds failures only.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to push onto.</param>
     private static void PushRepeats(MatchState state, ByteStack stack)
     {
-        foreach (RepeatData repeat in state.Repeats)
+        bool runs = state.Pattern.TestedGroups.Length > 0;
+        for (int r = 0; r < state.Repeats.Length; r++)
         {
-            PushRepeatData(stack, repeat);
+            bool keepGuards = state.KeepsFailureMemo(r);
+
+            // The proof's premises (see the remarks): a memo pattern has no group call, the only
+            // other caller, and is not fuzzy. PartialSide, the call's half of KeepsFailureMemo,
+            // changes only between the two passes of a partial call (DoMatch), and each pass starts
+            // from empty stacks (MatchState.InitMatch), so the pop sees the value the push did.
+            Debug.Assert(
+                !keepGuards || (!state.Pattern.HasGroupCalls && !state.IsFuzzy),
+                "a failure-memo repeat is never saved by a group call or in a fuzzy pattern"
+            );
+            PushRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, keepGuards);
         }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the optional passes' slots, which a call
+        // must not see changed when it returns; see OpenOptionalPass.
+        stack.PushBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan()));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D35), Debug only: in place of a kept repeat's guard lists, how many edits each
+    /// had seen, for <see cref="CheckKeptGuards"/>.
+    /// </summary>
+    /// <param name="stack">The stack to push onto.</param>
+    /// <param name="repeatData">The repeat whose lists are kept.</param>
+    [Conditional("DEBUG")]
+    private static void PushGuardEditCounts(ByteStack stack, RepeatData repeatData)
+    {
+        stack.PushSize(repeatData.BodyGuardList.Edits);
+        stack.PushSize(repeatData.TailGuardList.Edits);
+        stack.PushSize(KeptGuardsMarker);
+    }
+
+    /// <summary>
+    /// What <see cref="PushGuardEditCounts"/> pushes last, so a pop that expects kept lists where
+    /// the push saved them in full is caught.
+    /// </summary>
+    internal const long KeptGuardsMarker = 0x35_6B_65_70_74;
+
+    /// <summary>
+    /// NOT UPSTREAM (D35), Debug only: pops what <see cref="PushGuardEditCounts"/> pushed and asserts
+    /// the two facts <see cref="PushRepeats"/> rests on.
+    /// </summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <param name="repeatData">The repeat whose lists were kept.</param>
+    /// <param name="testJustEnded">Whether only a conditional's test has run since the push.</param>
+    [Conditional("DEBUG")]
+    private static void CheckKeptGuards(ByteStack stack, RepeatData repeatData, bool testJustEnded)
+    {
+        bool markerPopped = stack.PopSize(out long marker);
+        bool tailPopped = stack.PopSize(out long tailEdits);
+        bool bodyPopped = stack.PopSize(out long bodyEdits);
+        Debug.Assert(
+            markerPopped && tailPopped && bodyPopped && marker == KeptGuardsMarker,
+            "the push kept this repeat's guard lists too"
+        );
+        Debug.Assert(
+            !testJustEnded
+                || (bodyEdits == repeatData.BodyGuardList.Edits && tailEdits == repeatData.TailGuardList.Edits),
+            "a conditional's test never guards a failure-memo repeat, which is not inside it"
+        );
+        if (bodyEdits != repeatData.BodyGuardList.Edits)
+        {
+            WorkCounter.GuardListKept();
+        }
+
+        if (tailEdits != repeatData.TailGuardList.Edits)
+        {
+            WorkCounter.GuardListKept();
+        }
+
+        Debug.Assert(
+            repeatData.BodyGuardList.HoldsFailuresOnly() && repeatData.TailGuardList.HoldsFailuresOnly(),
+            "a kept list records failures only: a failure-memo repeat leaves no success mark"
+        );
     }
 
     /// <summary>Upstream <c>pop_repeats</c> (line 2744).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to pop from.</param>
+    /// <param name="testJustEnded">
+    /// Whether this is a conditional's test that has only just ended, when a kept guard list must be
+    /// exactly as the push left it; see <see cref="PushRepeats"/>.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeats(MatchState state, ByteStack stack)
+    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded)
     {
+        bool runs = state.Pattern.TestedGroups.Length > 0;
+        if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
+        {
+            return false;
+        }
+
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r]))
+            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, state.KeepsFailureMemo(r), testJustEnded))
             {
                 return false;
             }
@@ -2617,18 +4792,650 @@ internal static class Matcher
     /// so an empty list would be a bug in the bookkeeping rather than a state to handle.
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <returns>The closed call's key.</returns>
-    private static long PopOpenCall(MatchState state)
+    /// <returns>The closed call's key, and the text reached when it was made.</returns>
+    private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
-        state.ActiveCalls.Remove(key);
-        return key;
+        int readCount = state.Pattern.CallReadGroups.Length;
+        if (readCount == 0)
+        {
+            bool removed = state.ActiveCalls.Remove((key, reach));
+            Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
+            return (key, reach);
+        }
+
+        // One lookup in the common case, where this was the only open call with its key and reach.
+        bool counted = state.ActiveCallCounts.Remove((key, reach), out int open);
+        Debug.Assert(counted && open > 0, "ActiveCallCounts counts exactly the calls OpenCalls holds");
+        if (open > 1)
+        {
+            state.ActiveCallCounts[(key, reach)] = open - 1;
+        }
+
+        CollectionsMarshal.SetCount(state.OpenCallSpans, state.OpenCallSpans.Count - readCount);
+        return (key, reach);
     }
 
     /// <summary>
-    /// Closes every group call whose saved-stack frame has just been discarded by a restore of
-    /// <see cref="ByteStack.Count"/>.
+    /// NOT UPSTREAM'S: the re-entry guard (<see cref="MatchState.ActiveCalls"/>). Opens a call with
+    /// this key and reach, recording the spans of the read groups, unless an open call with the
+    /// same key and reach saw the same read state, when the call could only repeat it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="key">The call's key (<see cref="ActiveCallKey"/>).</param>
+    /// <param name="reach">The text reached.</param>
+    /// <returns><see langword="false"/> if the call is refused.</returns>
+    private static bool TryOpenCall(MatchState state, long key, int reach)
+    {
+        (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        if (readGroups.Length == 0)
+        {
+            return state.ActiveCalls.Add((key, reach));
+        }
+
+        ref int open = ref CollectionsMarshal.GetValueRefOrAddDefault(
+            state.ActiveCallCounts,
+            (key, reach),
+            out bool exists
+        );
+        if (exists && AnOpenCallSawThisReadState(state, key, reach))
+        {
+            return false;
+        }
+
+        ++open;
+        int at = state.OpenCallSpans.Count;
+        CollectionsMarshal.SetCount(state.OpenCallSpans, at + readGroups.Length);
+        Span<long> spans = CollectionsMarshal.AsSpan(state.OpenCallSpans)[at..];
+        for (int g = 0; g < readGroups.Length; g++)
+        {
+            spans[g] = PackedSpan(state.Groups[readGroups[g].Index]);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Counts a call that backtracking has re-opened as open again (<see cref="MatchState.ActiveCalls"/>).
+    /// Its read spans are already back on <see cref="MatchState.OpenCallSpans"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="key">The call's key.</param>
+    /// <param name="reach">The text reached when it was made.</param>
+    private static void ReopenCall(MatchState state, long key, int reach)
+    {
+        if (state.Pattern.CallReadGroups.Length == 0)
+        {
+            bool reopened = state.ActiveCalls.Add((key, reach));
+            Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
+            return;
+        }
+
+        ++CollectionsMarshal.GetValueRefOrAddDefault(state.ActiveCallCounts, (key, reach), out _);
+    }
+
+    /// <summary>
+    /// Whether an open call with this key and reach saw the read groups as they are now, compared
+    /// as <see cref="CallRead"/> says.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="key">The key.</param>
+    /// <param name="reach">The reach.</param>
+    /// <returns><see langword="true"/> if the new call would repeat that one.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool AnOpenCallSawThisReadState(MatchState state, long key, int reach)
+    {
+        (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        for (int i = state.OpenCalls.Count - 1; i >= 0; i--)
+        {
+            if (state.OpenCalls[i].Key != key || state.OpenCalls[i].Reach != reach)
+            {
+                continue;
+            }
+
+            bool same = true;
+            for (int g = 0; g < readGroups.Length && same; g++)
+            {
+                long then = state.OpenCallSpans[(i * readGroups.Length) + g];
+                long now = PackedSpan(state.Groups[readGroups[g].Index]);
+                same = SameRead(state, then, now, readGroups[g].Read);
+            }
+
+            if (same)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a reader sees the same of a read group with these two packed spans
+    /// (<see cref="PackedSpan"/>): <see cref="ReadValue"/> compared, without numbering any text.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="then">One packed span, -1 when unset.</param>
+    /// <param name="now">The other.</param>
+    /// <param name="read">What is read of the group.</param>
+    /// <returns><see langword="true"/> if the two read the same.</returns>
+    private static bool SameRead(MatchState state, long then, long now, CallRead read)
+    {
+        if (then == now)
+        {
+            return true;
+        }
+
+        if (then == -1 || now == -1 || read == CallRead.Span)
+        {
+            return false;
+        }
+
+        if (read == CallRead.SetOrUnset)
+        {
+            return true;
+        }
+
+        ReadOnlySpan<char> text = state.Text.Span;
+        int thenStart = (int)(then >> 32);
+        int nowStart = (int)(now >> 32);
+        int length = (int)(uint)then - thenStart;
+        return length == (int)(uint)now - nowStart
+            && text.Slice(thenStart, length).SequenceEqual(text.Slice(nowStart, length));
+    }
+
+    /// <summary>
+    /// What a reader can see of a read group with this packed span, as one number: -1 unset, 0 set
+    /// for a group only conditionals read, its text for a backreferenced group (spelled out when
+    /// it is at most three characters, else its id in <see cref="CaptureTextIds"/>), or the span
+    /// itself, made negative, where the span is read (<see cref="CallRead.Span"/>). Equal numbers
+    /// mean equal read states. Only the failed-call memo needs the number; the guard compares with
+    /// <see cref="SameRead"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="packed">The packed span (<see cref="PackedSpan"/>), -1 when unset.</param>
+    /// <param name="read">What is read of the group.</param>
+    /// <returns>The value.</returns>
+    private static long ReadValue(MatchState state, long packed, CallRead read)
+    {
+        if (packed == -1)
+        {
+            return -1;
+        }
+
+        int start = (int)(packed >> 32);
+        int end = (int)(uint)packed;
+        return read switch
+        {
+            CallRead.SetOrUnset => 0,
+            CallRead.Text => TextValue(state, start, end - start),
+            // Negative and never -1, since a start is never negative.
+            _ => long.MinValue | packed,
+        };
+    }
+
+    /// <summary>
+    /// The <see cref="ReadValue"/> of a text: up to three characters spelled out above bit 62, so
+    /// the common empty and one-character captures need no table, and a longer text's id from
+    /// <see cref="CaptureTextIds"/>, which is below 2^31. The two ranges never meet.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="start">Where the text starts.</param>
+    /// <param name="length">Its length.</param>
+    /// <returns>The value, always positive.</returns>
+    private static long TextValue(MatchState state, int start, int length)
+    {
+        if (length > 3)
+        {
+            return state.CaptureTexts.IdOf(start, length);
+        }
+
+        ReadOnlySpan<char> text = state.Text.Span.Slice(start, length);
+        long value = (1L << 62) | ((long)length << 48);
+        for (int i = 0; i < length; i++)
+        {
+            value |= (long)text[i] << (16 * i);
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Widens the text this attempt has reached to take in <paramref name="textPos"/>. See
+    /// <see cref="MatchState.ReachedLow"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">A position matching has just been at.</param>
+    private static void NoteReached(MatchState state, int textPos)
+    {
+        // The termination argument in MatchState.ActiveCalls counts on this: a width no greater
+        // than the text, because positions never leave it.
+        Debug.Assert(textPos >= 0 && textPos <= state.TextLength, "a text position lies within the text");
+
+        if (textPos < state.ReachedLow)
+        {
+            state.ReachedLow = textPos;
+        }
+
+        if (textPos > state.ReachedHigh)
+        {
+            state.ReachedHigh = textPos;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (the failed-call memo): the entry key of the call about to be made, built in
+    /// <see cref="MatchState.CallMemoKey"/>. It holds everything the called group can read before it
+    /// writes it, so two calls with equal keys either both reach their <c>GROUP_RETURN</c> or both
+    /// run out of choices without doing so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A call of a fuzzy recursive pattern is reached under many different call stacks, because the
+    /// callers below it spent their errors in different ways, and the called group cannot see those
+    /// differences. <c>(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2&lt;=e&lt;=3}(?=b))){1&lt;=s&lt;=1,1&lt;=d&lt;=2}</c>
+    /// over <c>baxbax</c> made 889,000 calls at four characters, all of which failed, and only
+    /// 2,390 of them were different; at six characters it took over a minute. The design, the
+    /// proof and the measurements are in <c>docs/plan/2026-09-27-recursion-failure-memo-design.md</c>.
+    /// </para>
+    /// <para>
+    /// What the key holds, in order: the call target and the position; the open section's node and
+    /// counts, since every error the called group makes is judged by them; what each group a
+    /// backreference or a conditional reads shows (<see cref="ReadValue"/>: set or not, the text or
+    /// the span); for each enclosing section, its node and how far it still is from each minimum,
+    /// counting the errors of the sections inside it, which is all <see cref="RaisesUnmetMinimum"/>
+    /// and <see cref="AllMinimumsMet"/> read of it; the text the attempt has reached; and, as a
+    /// set, the open calls the re-entry guard could refuse a call of the called group against.
+    /// </para>
+    /// <para>
+    /// That set is the capture-dependent recursion design's addendum 1 (A1, A2). The guard reads the
+    /// open calls only as a set (<c>ActiveCalls.Add</c>), so their order is left out, and it holds
+    /// only an open call O that could ever refuse a call I made inside this one: O at or after the
+    /// position (at or before it in a reverse pattern; a call inside a lookbehind could reach the
+    /// others, and <see cref="PatternObject.UseCallMemo"/> is off for it), O's reach equal to the
+    /// reach now, and O's read groups set exactly where this call's are. The reach only grows, so
+    /// an O with a smaller reach never equals I's. The read groups that are set never shrink inside
+    /// an open call (a group is only ever set going forward, and every restore puts back a snapshot
+    /// taken inside that call's run), so O's set groups are a subset of this call's and this
+    /// call's of I's, and an O whose set groups differ from this call's can never show I's state.
+    /// Keying the ordered chain instead gave every order of setting k empty groups its own key:
+    /// <c>(?:()|()|()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6\7\8x</c> over <c>aay</c> took over a million
+    /// steps.
+    /// </para>
+    /// <para>
+    /// What it leaves out, and why that is safe: the caller's repeats, since the called group starts
+    /// every repeat it enters at its head and <c>GROUP_CALL</c> empties the guards; the capture
+    /// change and edit counters and the capture lists, which the called group only compares with
+    /// values it recorded itself or appends to; the rest of the saved stack, which the called group
+    /// reaches only through the section chain; the start of the attempt, which only <c>SUCCESS</c>
+    /// reads and a called group cannot reach; and the search anchor, which is fixed for the life of
+    /// the set (<see cref="MatchState.FailedCalls"/>). The pass limits and the slice are left out
+    /// because they cannot differ between two calls the set compares: the set is emptied by
+    /// <see cref="MatchState.InitMatch"/>, the limits are set only between passes, and within a
+    /// pass the slice moves only inside a lookaround or a conditional's test, which put it back
+    /// and where the memo is off, and at a <c>(*SKIP)</c>, which turns the memo off. The
+    /// whole-match totals are left out because a called group never reads them before writing
+    /// them: <c>END_FUZZY</c> keeps the old values only to put them back and overwrites them
+    /// before its limit check, and otherwise they are read
+    /// only after the pass, by the drivers that rank matches. The exact-deletion narrowing
+    /// (<see cref="DeletionRepeatsAnEarlierAlternative"/>) reads the caller's last edit, but it
+    /// leaves out only a deletion whose state an earlier alternative reaches too, so it cannot
+    /// change whether the call has an exit.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="callIndex">The call-ref index the <c>GROUP_CALL</c> node carries.</param>
+    /// <returns>The key, valid until the next call of this method.</returns>
+    private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex)
+    {
+        (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        List<long> key = state.CallMemoKey;
+        key.Clear();
+
+        long[] counts = state.FuzzyCounts;
+        key.Add(callIndex);
+        // Oracle-only (PatternObject.CallMemoKeyOmitsPosition): a deliberately wrong key, check C5's
+        // firing control.
+        key.Add(state.Pattern.CallMemoKeyOmitsPosition ? -1 : state.TextPos);
+        key.Add(counts[FuzzyValue.Sub]);
+        key.Add(counts[FuzzyValue.Ins]);
+        key.Add(counts[FuzzyValue.Del]);
+        key.Add(state.FuzzyNode?.Index ?? -1);
+
+        foreach ((int index, CallRead read) in readGroups)
+        {
+            key.Add(ReadValue(state, PackedSpan(state.Groups[index]), read));
+        }
+
+        // The enclosing sections, as RaisesUnmetMinimum walks them. Ends: MatchState.TryOuterSection
+        // only steps to a lower frame.
+        int sectionsAt = key.Count;
+        if (state.SectionFrame >= 0 && state.FuzzyNode is not null)
+        {
+            long sub = counts[FuzzyValue.Sub];
+            long ins = counts[FuzzyValue.Ins];
+            long del = counts[FuzzyValue.Del];
+            int frame = state.SectionFrame;
+            Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+            while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+            {
+                sub += outerCounts[FuzzyValue.Sub];
+                ins += outerCounts[FuzzyValue.Ins];
+                del += outerCounts[FuzzyValue.Del];
+
+                List<uint> values = outer.Values;
+                key.Add(outer.Index);
+                key.Add(Math.Max(0, values[FuzzyValue.MinSub] - sub));
+                key.Add(Math.Max(0, values[FuzzyValue.MinIns] - ins));
+                key.Add(Math.Max(0, values[FuzzyValue.MinDel] - del));
+                key.Add(Math.Max(0, values[FuzzyValue.MinErr] - (sub + ins + del)));
+            }
+        }
+
+        // The text the attempt has reached, which the re-entry guard compares
+        // (MatchState.ActiveCalls): a nested call is let through only once the reach has grown past
+        // the open call's, and how far the called group's own positions grow it depends on where
+        // the reach already stands.
+        // How many values the sections took, so no two keys of different shapes can be equal.
+        key.Add(key.Count - sectionsAt);
+        key.Add(state.ReachedLow);
+        key.Add(state.ReachedHigh);
+
+        // The open calls the guard could refuse a call inside this one against, as a set: see the
+        // remarks. Their reach is the reach now, so it is already in the key.
+        int reach = state.ReachedWidth;
+        List<int> ancestors = state.CallMemoAncestors;
+        ancestors.Clear();
+        for (int i = 0; i < state.OpenCalls.Count; i++)
+        {
+            (long openCall, int openReach, _, _) = state.OpenCalls[i];
+            int openPos = (int)(uint)openCall;
+            if (
+                (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
+                && openReach == reach
+                && CouldRefuseInside(state, i)
+            )
+            {
+                // Insertion sort: the calls that pass the filter are few, one per call target
+                // when only conditionals read (A3).
+                int at = ancestors.Count;
+                ancestors.Add(i);
+                while (at > 0 && CompareOpenCalls(state, ancestors[at - 1], i) > 0)
+                {
+                    ancestors[at] = ancestors[at - 1];
+                    --at;
+                }
+
+                ancestors[at] = i;
+            }
+        }
+
+        key.Add(ancestors.Count);
+        foreach (int i in ancestors)
+        {
+            key.Add(state.OpenCalls[i].Key);
+            for (int g = 0; g < readGroups.Length; g++)
+            {
+                key.Add(OpenReadValue(state, i, g));
+            }
+        }
+
+        return CollectionsMarshal.AsSpan(key);
+    }
+
+    /// <summary>
+    /// The <see cref="ReadValue"/> of read group <paramref name="group"/> when open call
+    /// <paramref name="call"/> was made.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="call">An index into <see cref="MatchState.OpenCalls"/>.</param>
+    /// <param name="group">An index into <see cref="PatternObject.CallReadGroups"/>.</param>
+    /// <returns>The value.</returns>
+    private static long OpenReadValue(MatchState state, int call, int group)
+    {
+        (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        return ReadValue(state, state.OpenCallSpans[(call * readGroups.Length) + group], readGroups[group].Read);
+    }
+
+    /// <summary>
+    /// Whether open call <paramref name="call"/> could refuse a call made inside the one about to be
+    /// made: the filter on the failed-call memo's ancestors (addendum 1, A2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two tests, each true of every call I made inside the new call C, at position p. First, the
+    /// read groups that are set never shrink inside an open call, so an ancestor with a different
+    /// set of them can never show I's state (A2 ii).
+    /// </para>
+    /// <para>
+    /// Second, for a group compared by span (<see cref="CallRead.Span"/>): at I the group holds
+    /// either C's span, or a span captured inside C's run, since every restore puts back a snapshot
+    /// taken inside that run or at its entry. A capture inside C's run starts at or after p (ends at
+    /// or before it in a reverse pattern), because matching moves one way from p and the called
+    /// group's captures are well nested inside it. So an ancestor whose span differs from C's and
+    /// starts before p can never show I's span, and cannot refuse I. Without this, ancestors that
+    /// differ only in which earlier position set each group all entered the key, and every order of
+    /// setting k groups was its own key: <c>(?:()|()|()|()|()|()|a)(?R)|\1\2\3\4\5\6x|(?:qq){s&lt;=1}</c>
+    /// over <c>aay</c> took 1.6 s against 20 ms (review of 687e011, 2026-09-29). A capture made
+    /// against the pattern's direction, in a lookbehind of a forward pattern or a lookahead of a
+    /// reverse one, can start before p, so there the second test is off
+    /// (<see cref="PatternObject.CapturesAgainstDirection"/>).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="call">An index into <see cref="MatchState.OpenCalls"/>.</param>
+    /// <returns><see langword="false"/> if it can never refuse such a call.</returns>
+    private static bool CouldRefuseInside(MatchState state, int call)
+    {
+        (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
+        bool spansMoveOneWay = !state.Pattern.CapturesAgainstDirection;
+        for (int g = 0; g < readGroups.Length; g++)
+        {
+            long then = state.OpenCallSpans[(call * readGroups.Length) + g];
+            GroupData group = state.Groups[readGroups[g].Index];
+            bool unsetThen = then == -1;
+            if (unsetThen != (group.Current < 0))
+            {
+                return false;
+            }
+
+            if (spansMoveOneWay && then != -1 && readGroups[g].Read == CallRead.Span && then != PackedSpan(group))
+            {
+                int start = (int)(then >> 32);
+                int end = (int)(uint)then;
+                if (state.Reverse ? end > state.TextPos : start < state.TextPos)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Orders two open calls by their guard key and then by what their read groups showed, so
+    /// <see cref="FailedCallKey"/> lists a set of them the same way whatever order they opened in.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="first">An index into <see cref="MatchState.OpenCalls"/>.</param>
+    /// <param name="second">Another.</param>
+    /// <returns>Negative, zero or positive, as for <see cref="IComparer{T}.Compare"/>.</returns>
+    private static int CompareOpenCalls(MatchState state, int first, int second)
+    {
+        int order = state.OpenCalls[first].Key.CompareTo(state.OpenCalls[second].Key);
+        for (int g = 0; order == 0 && g < state.Pattern.CallReadGroups.Length; g++)
+        {
+            order = OpenReadValue(state, first, g).CompareTo(OpenReadValue(state, second, g));
+        }
+
+        return order;
+    }
+
+    /// <summary>The most keys <see cref="MatchState.FailedCalls"/> records in one pass.</summary>
+    /// <remarks>
+    /// SHORTCUT: past 2^20 keys, about 100 MB, the set stops recording and only answers from what it
+    /// holds: correct, and slower only on a pass that fails that many different calls.
+    /// </remarks>
+    private const int _failedCallCap = 1 << 20;
+
+    /// <summary>
+    /// Builds the entry key of the group call about to be made (<see cref="FailedCallKey"/>) and
+    /// reports whether the failed-call memo holds it, counting a hit.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c>, whose every call pays to zero its frame: the lookup's locals
+    /// would otherwise live there.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="callIndex">The called group's index.</param>
+    /// <returns><see langword="true"/> if a call with this key has already failed in this pass.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool CallAlreadyFailed(MatchState state, int callIndex)
+    {
+        ReadOnlySpan<long> key = FailedCallKey(state, callIndex);
+        if (state.FailedCalls is { } failedCalls && failedCalls.GetAlternateLookup<ReadOnlySpan<long>>().Contains(key))
+        {
+            ++state.CallMemoHits;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The key <see cref="CallAlreadyFailed"/> has just built, copied for <see cref="MatchState.OpenCalls"/>,
+    /// or <see langword="null"/> when the memo is full.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The key to record if the call fails, or <see langword="null"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long[]? FailedCallKeyToRecord(MatchState state) =>
+        (state.FailedCalls?.Count ?? 0) < _failedCallCap ? [.. state.CallMemoKey] : null;
+
+    /// <summary>
+    /// A group call has run out of choices: records its entry key in the failed-call memo, if the
+    /// call was given one (<see cref="MatchState.OpenCalls"/>). Kept out of <c>BasicMatch</c> for
+    /// the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state, with the call still open.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecordFailedCall(MatchState state)
+    {
+        if (state.OpenCalls[^1].MemoKey is { } failedCallKey)
+        {
+            state.FailedCalls ??= new HashSet<long[]>(new FailedCallKeyComparer());
+            _ = state.FailedCalls.Add(failedCallKey);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the fuzzy part of a repeat end's progress test, the
+    /// "needed" rule and the repeat memo, which drop an iteration or say whether it counts as
+    /// progress. See <see cref="EmptyIterationAdmitted"/>.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat's data, for the iteration just ended.</param>
+    /// <param name="node">The repeat's end node.</param>
+    /// <param name="changed">Whether the iteration moved through the text or changed a capture.</param>
+    /// <returns>-1 to drop the iteration, otherwise 1 if it is progress and 0 if not.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int FuzzyIterationStands(MatchState state, RepeatData rpData, Node node, bool changed)
+    {
+        bool keyed = true;
+        if (state.TextPos == rpData.Start)
+        {
+            bool edited = state.FuzzyChanges.Count > IterationChanges(rpData);
+            bool groupChanged =
+                MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(rpData.CaptureChange);
+            if (edited)
+            {
+                if (EmptyIterationAdmitted(state, rpData, node, groupChanged))
+                {
+                    changed = true;
+                }
+                else if (CrossedAVerb(state, rpData))
+                {
+                    // It stands, but no iteration follows it; see CrossedAVerb.
+                    changed = false;
+                    keyed = false;
+                }
+                else
+                {
+                    return -1;
+                }
+            }
+            else
+            {
+                // Error-free: upstream's rule, a tested group's change is progress.
+                changed = groupChanged;
+                keyed = false;
+            }
+        }
+
+        if (keyed && state.Pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+        {
+            return -1;
+        }
+
+        return changed ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Pops the link to the enclosing section's frame that <c>FUZZY</c> pushed for a pattern with a
+    /// minimum error count, into <see cref="MatchState.SectionFrame"/>. Kept out of
+    /// <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool PopSectionFrame(MatchState state)
+    {
+        if (!state.Sstack.PopSize(out long outerFrame))
+        {
+            return false;
+        }
+
+        state.SectionFrame = (int)outerFrame;
+        return true;
+    }
+
+    /// <summary>
+    /// <c>END_OPTIONAL_PASS</c>'s backtrack arm: pops the entry <see cref="OpenOptionalPass"/>
+    /// pushed, gives the slot its previous value and moves to where the branch's next alternative
+    /// begins. Kept out of <c>BasicMatch</c> for the reason <see cref="CallAlreadyFailed"/> gives.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The next alternative, or <see langword="null"/> if the stack is malformed.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node? PopOptionalPass(MatchState state)
+    {
+        /* bstack: previous_start slot text_pos node */
+
+        if (
+            !state.Bstack.PopNode(state.Pattern, out Node? nextAlternative)
+            || !state.Bstack.PopSize(out long branchTextPos)
+            || !state.Bstack.PopCode(out uint slot)
+            || slot >= state.OptionalPasses.Length
+            || !state.Bstack.PopBlock(
+                MemoryMarshal.AsBytes(new Span<OptionalPassStart>(ref state.OptionalPasses[slot]))
+            )
+        )
+        {
+            return null;
+        }
+
+        state.TextPos = (int)branchTextPos;
+        return nextAlternative;
+    }
+
+    /// <summary>
+    /// Closes every group call and every fuzzy section whose saved-stack frame has just been
+    /// discarded by a restore of <see cref="ByteStack.Count"/>.
     /// </summary>
     /// <remarks>
     /// NOT UPSTREAM'S, and the reason <see cref="MatchState.OpenCalls"/> records a depth at all - see
@@ -2639,13 +5446,30 @@ internal static class Matcher
     /// constructs has returned before the construct ends; it earns its keep when a
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> has already thrown the call's <c>GROUP_CALL</c> entry off
     /// the backtracking stack, so the arm that would have closed the call can never run.
+    /// <para>
+    /// The same verbs can throw away the <c>FUZZY</c> entry of a section opened inside the
+    /// construct, the entry whose backtrack arm would have put <see cref="MatchState.SectionFrame"/>
+    /// back. So the open-section link steps out, through the links stored in the frames themselves,
+    /// to the first frame still on the stack, which is the section that was open when the construct
+    /// was entered. Left pointing above the stack, it was read later as a frame when the stack had
+    /// grown again, and a node that is not a section was taken for an enclosing one (blind review of
+    /// 7277fb6, 2026-09-27).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    private static void CloseCallsAbove(MatchState state)
+    private static void CloseFramesAbove(MatchState state)
     {
         while (state.OpenCalls.Count > 0 && state.OpenCalls[^1].SstackDepth > state.Sstack.Count)
         {
             PopOpenCall(state);
+        }
+
+        // Ends: each step moves to a lower frame or to -1. The discarded bytes are still in the
+        // stack's storage, since nothing has been pushed since the restore.
+        while (state.SectionFrame > state.Sstack.Count)
+        {
+            long link = state.Sstack.SizeAt(state.SectionFrame - MatchState.SectionFrameSize);
+            state.SectionFrame = link >= 0 && link < state.SectionFrame ? (int)link : -1;
         }
     }
 
@@ -2662,9 +5486,1437 @@ internal static class Matcher
     {
         if (state.Pstack.TopSize(out long bstackCount))
         {
-            state.Bstack.Count = (int)bstackCount;
+            CutBstack(state, (int)bstackCount);
         }
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: a cut or a verb truncating the backtracking stack, which discards the
+    /// w-marks of the entries it discards before <see cref="MatchState.SetBstackCount"/> checks A7.
+    /// </summary>
+    /// <remarks>
+    /// A verb's unwinding drops the marks above its target by design (section 4.2). An atomic
+    /// group, possessive repeat or <c>\X</c> reaches here only unblocked, with no mark above its
+    /// frame (build chunk 4, <see cref="BlockAtomicCut"/>), and so does a <c>(*PRUNE)</c> or
+    /// <c>(*SKIP)</c> (build chunk 5, <see cref="SkipABlockedVerb"/>), and a lookaround's end (build
+    /// chunk 6, <see cref="EndALookaroundInTheSecondPass"/>), and so does a condition's test (build
+    /// chunk 7, the same method).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="count">The new count.</param>
+    private static void CutBstack(MatchState state, int count)
+    {
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom(count);
+        }
+
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom(count);
+        }
+
+        state.SetBstackCount(count);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: the end of an atomic group, possessive repeat or <c>\X</c> whose cut
+    /// is blocked, because a mark lies above its frame (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>,
+    /// section 4.2). The cut would discard the body's other paths, and some continuation of the text
+    /// needs them (rows D1-D3: 'x' + 'a' fails the <c>\b</c> in <c>(?&gt;x\b|)</c>, and only the
+    /// empty path then matches).
+    /// </summary>
+    /// <remarks>
+    /// Nothing is discarded. The frame gets a cut taint, once however often its end is blocked, and
+    /// the pruning-stack mark the end popped is saved in a <see cref="Opcode.Reopen"/> entry, whose
+    /// backtracking arm pushes it back. The saved-stack count the frame holds is left alone, as a
+    /// group that is not atomic leaves it, because the body's entries are still live. The frame's
+    /// own backtracking arm drops the taint when the group is backtracked out of.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The pruning-stack mark: the backtracking stack's count just after the
+    /// frame's <see cref="Opcode.Atomic"/> entry.</param>
+    private static void BlockAtomicCut(MatchState state, int frameEnd)
+    {
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass blocks a cut");
+
+        if (!HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint))
+        {
+            state.AddWMark(frameEnd - 1, WMarkKind.CutTaint);
+        }
+
+        state.Bstack.PushSize(CallBase(state));
+        state.Bstack.PushSize(frameEnd);
+        state.Bstack.PushUInt8((byte)Opcode.Reopen);
+
+        /* bstack: call_base pstack_mark REOPEN */
+
+        state.NotePartialEvent(PartialEvent.CutBlockedAtomic);
+        CountFork(state);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: drops the cut taint an atomic group's own frame carries before an
+    /// unblocked cut pops the frame, so that the caller can move it to the end entry it pushes (the
+    /// exception to A7 that design section 4.5 names).
+    /// </summary>
+    /// <remarks>
+    /// Called after the cut, when no mark lies above the frame. A taint at the frame does not block
+    /// the group's own cut: in the continuations where the group committed at an earlier end, none
+    /// of its other paths is needed (row N1).
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <param name="frameEnd">The pruning-stack mark the end popped.</param>
+    /// <returns><see langword="true"/> if the frame carried a taint.</returns>
+    private static bool DropOwnCutTaint(MatchState state, int frameEnd)
+    {
+        if (state.WMarks[^1].Position < frameEnd - 1)
+        {
+            return false;
+        }
+
+        Debug.Assert(
+            state.WMarks[^1] == new WMark(frameEnd - 1, WMarkKind.CutTaint),
+            "D11: after an unblocked cut, the only mark at the frame is its own cut taint"
+        );
+        state.DropWMarksFrom(frameEnd - 1);
+
+        return true;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11: whether a w-mark of a kind lies at a position.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="position">The backtracking-stack position.</param>
+    /// <param name="kind">The kind.</param>
+    /// <returns><see langword="true"/> if the mark is there.</returns>
+    private static bool HasWMarkAt(MatchState state, int position, WMarkKind kind)
+    {
+        for (int i = state.WMarks.Count - 1; i >= 0 && state.WMarks[i].Position >= position; i--)
+        {
+            if (state.WMarks[i] == new WMark(position, kind))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// D11 A9: the pruning-stack mark a <see cref="Opcode.Reopen"/> entry pushes back is its frame's:
+    /// the entry just below it is an <see cref="Opcode.Atomic"/> frame's, and that frame carries the
+    /// cut taint its blocked end made.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The mark the entry saved.</param>
+    /// <returns><see langword="true"/> if it holds.</returns>
+    private static bool ReopenedFrameIsTheBlockedOne(MatchState state, int frameEnd) =>
+        state.Bstack.ReadUInt8Below(frameEnd, out byte frameOp)
+        && frameOp is (byte)Opcode.Atomic or (byte)Opcode.Lookaround or (byte)Opcode.Conditional
+        && HasWMarkAt(state, frameEnd - 1, WMarkKind.CutTaint);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2 (2026-10-04 pre-merge review, P1): whether a verb whose path to it is
+    /// not blocked may act although an earlier verb of the same scope was skipped (a verb taint at
+    /// the scope's frame).
+    /// </summary>
+    /// <remarks>
+    /// The path to this verb exists only in the continuations where the skipped verb did not act;
+    /// in those, nothing above the scope's frame read the text to come, so this verb acts in every
+    /// one of them. In the others the skipped verb acted and ended the scope already. Either way the
+    /// scope's other paths are gone and matching goes on below its frame in the same state, so
+    /// acting is right for every continuation, unless the two verbs end the scope differently: when
+    /// the scope is the attempt, a <c>(*SKIP)</c> sets the next start at its own position, so the
+    /// skipped verb and this one must be the same kind at the same position
+    /// (<see cref="MatchState.SkippedAttemptVerb"/>). Before,
+    /// the taint blocked every later verb of the scope, and a positive lookahead decided on the held
+    /// text could not prune: `(?=(?:ab)*(?&lt;=b))(*PRUNE)x|ab` over 'ab' answered P(0, 2) where main
+    /// and the judge say None. The taint still blocks the scope's own decision (rows Q1, T2).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">The scope's pruning mark.</param>
+    /// <param name="verb">This verb: a <c>(*SKIP)</c>'s position, or -1 for a <c>(*PRUNE)</c>.</param>
+    /// <returns><see langword="true"/> if acting ends the scope as the skipped verb would have.</returns>
+    private static bool ActingEndsTheScopeAsTheSkippedVerbDid(MatchState state, long targetMark, long verb) =>
+        ScopeIsAConstruct(state, targetMark) || state.SkippedAttemptVerb == verb;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: whether a verb's scope is a construct (a negative lookaround, a
+    /// condition's test, or under the oracle's ablation an atomic group or lookaround) rather than
+    /// the attempt.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">The scope's pruning mark.</param>
+    /// <returns><see langword="true"/> for a construct.</returns>
+    private static bool ScopeIsAConstruct(MatchState state, long targetMark) =>
+        ReadPruningMark(state, (int)targetMark, out Opcode op, out _)
+        && op is Opcode.Lookaround or Opcode.Conditional or Opcode.Atomic;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: the cut rule for a <c>(*PRUNE)</c> or <c>(*SKIP)</c> about to act
+    /// (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2). The verb discards the
+    /// paths of its scope, which is a decision about the text to come whenever the path to the verb
+    /// read that text; then it does nothing, and its scope's frame gets a verb taint.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Blocked when a touch or cut taint lies above the scope's frame (the path since the scope
+    /// opened reached the verb only for some continuations: rows V1-V3, and T1 through the atomic
+    /// group's skipped cut), or a verb taint lies at the frame (an earlier verb of the scope was
+    /// skipped, and in the continuations where it acted the scope has ended already). A cut taint at
+    /// the frame itself does not block, as it does not block an atomic group's own cut (row N1).
+    /// </para>
+    /// <para>
+    /// The taint stands for the continuations where the verb acted, in which the scope's other
+    /// paths are gone. It blocks the scope's own decision (a negative lookaround's failure, rows Q1
+    /// and T2) and every enclosing one, and not a construct opened later inside the scope, which
+    /// no such continuation reaches. The frame's own arms drop it.
+    /// </para>
+    /// <para>
+    /// Only a partial call's second pass makes marks (A6), so every caller asks
+    /// <c>state.WMarks.Count != 0</c> first, and a call without partial pays that test alone.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <param name="verb">Which verb: a <c>(*SKIP)</c>'s position, or -1 for a <c>(*PRUNE)</c>.</param>
+    /// <returns><see langword="true"/> if the verb was blocked and must do nothing.</returns>
+    private static bool SkipABlockedVerb(MatchState state, long verb)
+    {
+        // A verb whose scope is a condition's test is skipped as any other is: its verb taint then
+        // blocks the test's end, so the test takes both branches rather than letting its other
+        // branches decide it for every continuation (build chunk 7; row T6, and
+        // `(?(?=a$(*PRUNE)(?<=b)|a)x|a\n)` over 'a' from the review of chunk 5, round 1).
+        if (!FindTheVerbTarget(state, out long targetMark))
+        {
+            return false;
+        }
+
+        int frame = (int)targetMark - 1;
+        if (
+            state.WMarks[^1].Position <= frame
+            && (
+                !HasWMarkAt(state, frame, WMarkKind.VerbTaint)
+                || ActingEndsTheScopeAsTheSkippedVerbDid(state, targetMark, verb)
+            )
+        )
+        {
+            return false;
+        }
+
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass skips a verb");
+        if (!HasWMarkAt(state, frame, WMarkKind.VerbTaint))
+        {
+            state.AddWMark(frame, WMarkKind.VerbTaint);
+        }
+
+        if (!ScopeIsAConstruct(state, targetMark))
+        {
+            // The attempt's scope: which verb was skipped decides where the next attempt starts.
+            state.SkippedAttemptVerb =
+                state.SkippedAttemptVerb == MatchState.NoSkippedVerb || state.SkippedAttemptVerb == verb
+                    ? verb
+                    : MatchState.SkippedVerbsDiffer;
+        }
+
+        state.NotePartialEvent(PartialEvent.VerbSkipped);
+        CountFork(state);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the pruning mark of the scope a verb acts on, read without disturbing
+    /// either stack: the innermost mark, or under ledger entry 47 the innermost that is not an
+    /// unfinished atomic group or positive lookaround (<see cref="UnwindToTheVerbTarget"/>, which
+    /// drops the marks this walks past).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="targetMark">Receives the scope's pruning mark.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
+    private static bool FindTheVerbTarget(MatchState state, out long targetMark)
+    {
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            targetMark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)targetMark, out Opcode targetOp, out LookaroundStateData look))
+            {
+                break;
+            }
+
+            if (state.Pattern.VerbsAreConfinedToTheInnermostGroup || !IsTransparentToVerbs(targetOp, look))
+            {
+                return true;
+            }
+        }
+
+        targetMark = 0;
+        return false;
+    }
+
+    /// <summary>What <see cref="EndALookaroundInTheSecondPass"/> tells the END_LOOKAROUND arm to do.</summary>
+    private enum LookaroundEnd
+    {
+        /// <summary>Cut, as outside the second pass.</summary>
+        Cut,
+
+        /// <summary>Cut, and move the frame's own cut taint to the end entry.</summary>
+        CutTainted,
+
+        /// <summary>Carry on after the lookaround: its end was blocked and nothing was discarded.</summary>
+        Continue,
+
+        /// <summary>Backtrack: back into the body, or out of the lookaround.</summary>
+        Backtrack,
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: the cut rule at the end of a lookaround's body, in a partial call's
+    /// second pass (<c>docs/plan/2026-09-28-partial-boundary-design.md</c>, section 4.2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The end is blocked when a touch or cut taint lies above the frame (the body's success read
+    /// the text to come, or came back through a skipped cut: rows C2, G1 and the double negative
+    /// <c>(?!(?!a$(*PRUNE)(?&lt;=b)|a))a</c>), or a verb taint lies at it (a verb of the scope was
+    /// skipped: rows Q1 and T2). A cut taint at the frame itself does not block (row L6).
+    /// </para>
+    /// <para>
+    /// Negative and blocked: the success holds only for some continuations, so the frame gets a cut
+    /// taint and backtracking goes back into the body; once the body is exhausted the
+    /// <see cref="Opcode.Lookaround"/> arm passes the assertion with a touch. Unblocked, the body's
+    /// success fails the assertion for every continuation, as outside the second pass.
+    /// </para>
+    /// <para>
+    /// Positive and blocked: as an atomic group's blocked end (<see cref="BlockAtomicCut"/>), the
+    /// frame gets a cut taint, the pruning mark goes into a <see cref="Opcode.Reopen"/> entry, and
+    /// matching carries on after the lookaround from where it started, with the body's entries kept
+    /// for the continuations where it matched otherwise. The dedup comes first: a success with the
+    /// captures, fuzzy counts and fuzzy changes of one already continued from this frame fails where
+    /// that one failed, so a blocked end backtracks into the body, and an unblocked one cuts and
+    /// fails.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with at least one w-mark.</param>
+    /// <param name="node">The END_LOOKAROUND node; on <see cref="LookaroundEnd.Continue"/>, where
+    /// matching carries on.</param>
+    /// <returns>What the arm does next.</returns>
+    private static LookaroundEnd EndALookaroundInTheSecondPass(MatchState state, ref Node node)
+    {
+        if (
+            !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op is not (Opcode.Lookaround or Opcode.Conditional)
+        )
+        {
+            return LookaroundEnd.Cut;
+        }
+
+        int frame = (int)mark - 1;
+        bool blocked = state.WMarks[^1].Position > frame || HasWMarkAt(state, frame, WMarkKind.VerbTaint);
+        PartialEvent blockedEvent =
+            op == Opcode.Conditional ? PartialEvent.CutBlockedCondition : PartialEvent.CutBlockedLookaround;
+
+        if (!look.Node.Match)
+        {
+            if (!blocked)
+            {
+                return LookaroundEnd.Cut;
+            }
+
+            // Not a fork yet: a negative construct keeps two outcomes once, when its body is
+            // exhausted and it passes undetermined, and that is where it is counted (the LOOKAROUND
+            // and CONDITIONAL backtracking arms), however many of its body's successes were blocked.
+            TaintTheFrame(state, frame);
+            state.NotePartialEvent(blockedEvent);
+            return LookaroundEnd.Backtrack;
+        }
+
+        // The decided end (2026-10-04 pre-merge review, P1). An earlier success of this body was
+        // blocked, so the frame carries a cut taint, but this one read nothing of the text to come:
+        // the construct succeeds for every continuation. Where its success leaves the same state in
+        // every continuation (its body sets no group, or no capture is read while matching; nothing
+        // is fuzzy, or it lies outside every fuzzy section; so only the position matters, and it
+        // goes back to the start either way), the continuation is decided
+        // as well: the taint goes, the construct cuts, and an enclosing decision (a negative
+        // lookaround, an atomic group, a verb) can be taken on it. The dedup must not catch it
+        // first: its premise, that a later success carries no fewer marks, fails here.
+        if (
+            !blocked
+            && ((look.Node.Status & NodeStatus.HasGroups) == 0 || !state.Pattern.ReadsCapturesWhileMatching)
+            && (!state.Pattern.IsFuzzy || look.Node.EnclosingSection is null)
+            && RemoveCutTaintAt(state, frame)
+        )
+        {
+            RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
+            state.NotePartialEvent(PartialEvent.DecidedAfterBlocked);
+            return LookaroundEnd.Cut;
+        }
+
+        LookaroundSuccess success = new(
+            frame,
+            [.. state.Groups.Select(static g => g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1))],
+            [.. state.FuzzyCounts],
+            (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0 ? [.. state.FuzzyChanges] : []
+        );
+        if (state.HasSameContinuation(success))
+        {
+            state.NotePartialEvent(PartialEvent.Dedup);
+            if (!blocked)
+            {
+                // Cut and fail: the frame's entry is next, and its arm fails the construct. A test
+                // that held for every continuation must not be read as one that failed, which would
+                // take the condition's no-branch (D38: `(?(?=ab$|a)ac|abc)` over 'ab', where the `a`
+                // success holds whatever follows, answered the no-branch's run-out). A lookaround's
+                // arm only tries ledger 50's insertion in front of it, which changed no answer when
+                // planted out (30,240 fuzzy rows, 2026-10-03), so it is left as it was.
+                CutBstack(state, (int)mark);
+                if (op == Opcode.Conditional)
+                {
+                    state.AddWMark(frame, WMarkKind.Held);
+                }
+            }
+
+            return LookaroundEnd.Backtrack;
+        }
+
+        if (!blocked)
+        {
+            // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
+            RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
+            return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
+        }
+
+        TaintTheFrame(state, frame);
+        state.AddLookaroundSuccess(success);
+        _ = state.Pstack.DropSize();
+
+        // Amendment 2: the continuation starts from the saved stack a normal end leaves (S0, the
+        // count before the construct parked its state), with the calls and fuzzy sections opened in
+        // the body closed. What lies above S0 moves to the backtracking stack, where REOPEN puts it
+        // back for the body's other paths. SHORTCUT: a run-out inside a fuzzy section of the body
+        // leaves that section's entries above S0 and so moves them too, which is right, but the
+        // continuation is then judged without the section's minimum, where before it wrongly went
+        // on constraining it; 8 rows turn from the judge's answer to a phantom partial or an earlier
+        // start (OpenDefectTests.A_run_out_in_a_fuzzy_section_of_a_lookaround_leaves_no_residue).
+        // Ceiling: those phantoms. Upgrade: build chunk 8's run-outs inside bodies.
+        if (!state.Bstack.ReadSizeBelow((int)mark - 1, out long savedSstack))
+        {
+            return LookaroundEnd.Cut;
+        }
+
+        int s0 = (int)savedSstack - _lookaroundStateDataSize;
+        Debug.Assert(
+            state.Sstack.Count >= savedSstack,
+            "D11 amendment 2, assert 1: the parked state is on the saved stack"
+        );
+        int moved = state.Sstack.Count - s0;
+        _ = state.Sstack.MoveTopTo(state.Bstack, moved);
+        state.Bstack.PushSize(moved);
+        state.Bstack.PushSize(state.SectionFrame);
+        state.Bstack.PushSize(CallBase(state));
+        state.Bstack.PushSize(mark);
+        state.Bstack.PushUInt8((byte)Opcode.Reopen);
+
+        /* bstack: sstack_bytes length section_frame call_base pstack_mark REOPEN */
+
+        Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
+        CloseFramesAbove(state);
+        Debug.Assert(
+            state.OpenCalls.Count == 0 || state.OpenCalls[^1].SstackDepth <= s0,
+            "D11 amendment 2, assert 3: no call opened in the body is open"
+        );
+        state.NotePartialEvent(PartialEvent.BlockedEndMovedSstack);
+        if (moved > _lookaroundStateDataSize)
+        {
+            state.NotePartialEvent(PartialEvent.BlockedEndMovedMore);
+        }
+
+        state.TextPos = look.TextPos;
+        state.SliceStart = look.SliceStart;
+        state.SliceEnd = look.SliceEnd;
+        node = node.Next1.Node!;
+        state.NotePartialEvent(blockedEvent);
+        CountFork(state);
+        return LookaroundEnd.Continue;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2, repair 1: the saved-stack depth where the innermost open
+    /// call's frame ends, or 0 with no call open. Everything a blocked frame recorded as an absolute
+    /// saved-stack depth lies above it.
+    /// </summary>
+    /// <remarks>
+    /// Backtracking into a <c>GROUP_RETURN</c> pushes the call's frame again from the caller's state
+    /// as it is then, and the caller's repeat guard lists persist across backtracking, so the frame
+    /// can come back longer than it went (upstream's <c>push_repeats</c>, as ported in the
+    /// <c>GROUP_RETURN</c> arm). A frame that is still open across the return, which only a blocked
+    /// end makes, then records a depth that is short by the difference. Everything above the call's
+    /// frame moves by the same amount, so a depth measured from this point does not move: the
+    /// <c>REOPEN</c> arm rebases by the change in it (<see cref="RebaseTheReopenedFrame"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The depth.</returns>
+    private static int CallBase(MatchState state) => state.OpenCalls.Count > 0 ? state.OpenCalls[^1].SstackDepth : 0;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 amendment 2, repair 1: moves a reopened frame's saved-stack depth by the
+    /// distance the innermost open call's frame end moved since its blocked end
+    /// (<see cref="CallBase"/>). Row `(?(DEFINE)(?&lt;c&gt;(?=a\b)))(?&amp;c)*b` over 'a': the call's
+    /// frame ends at 64 when the lookahead parks at 72, and at 96 after the return is backtracked
+    /// into, because the repeat's guard list has grown.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frameEnd">The frame's pruning mark.</param>
+    /// <param name="callBase">The call base the blocked end recorded.</param>
+    /// <returns>The distance, 0 when nothing moved; or <see langword="null"/> if the stacks are not as the marks promise.</returns>
+    private static int? RebaseTheReopenedFrame(MatchState state, int frameEnd, long callBase)
+    {
+        int delta = CallBase(state) - (int)callBase;
+        if (delta == 0)
+        {
+            return 0;
+        }
+
+        if (
+            !state.Bstack.ReadSizeBelow(frameEnd - 1, out long saved)
+            || !state.Bstack.WriteSizeBelow(frameEnd - 1, saved + delta)
+        )
+        {
+            return null;
+        }
+
+        state.NotePartialEvent(PartialEvent.ReopenRebased);
+        return delta;
+    }
+
+    /// <summary>The span an unknown capture holds (build chunk 8); no real span is negative.</summary>
+    internal static GroupSpan UnknownSpan => new(-2, -2);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: whether a group's current capture is one a run-out made
+    /// unknown. Only asked once a run-out has made one (<see cref="MatchState.HasUnknownCaptures"/>).
+    /// </summary>
+    /// <param name="group">The group, which has captured.</param>
+    /// <returns><see langword="true"/> if its current span is unknown.</returns>
+    private static bool IsUnknown(GroupData group) => group.Captures[group.Current] == UnknownSpan;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: gives every group a body that ran out can still reach an unknown
+    /// capture (design section 4.2, the run-out row, part 1), through an
+    /// <see cref="Opcode.UnknownCapture"/> entry each, whose backtracking arm takes it back as
+    /// END_GROUP's arm takes a capture back.
+    /// </summary>
+    /// <remarks>
+    /// In the continuations where the body goes on, it goes on from the item that ran out, so only a
+    /// group whose start or end lies on a path from that item can take a value the held text did not
+    /// give it: a group open at the edge, one a repeat can enter again, or one not reached yet
+    /// (<see cref="Node.RunOutGroups"/>). A group the body closed before the item and cannot reach
+    /// again holds the same span in every such continuation, so it stays as it is (review of chunk 8,
+    /// round 1: `(?=a(.)b)\1` over 'aa', where every completion gives group 1 (1, 2)).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The LOOKAROUND or CONDITIONAL node whose body ran out.</param>
+    /// <param name="item">The item that ran out.</param>
+    private static void MarkTheBodysCapturesUnknown(MatchState state, Node test, Node? item)
+    {
+        Debug.Assert(test.BodyInfo is not null, "D11 chunk 8: every lookaround and test has its body");
+        Debug.Assert(item?.RunOutGroups is not null, "D11 chunk 8: an item in a body knows the groups it reaches");
+        foreach ((int privateIndex, int publicIndex) in item?.RunOutGroups ?? test.BodyInfo?.Groups ?? [])
+        {
+            GroupData group = state.Groups[privateIndex - 1];
+            PushGroupStateData(
+                state.Bstack,
+                new GroupStateData(0, group.Current, state.CaptureChange, privateIndex, publicIndex)
+            );
+            state.Bstack.PushUInt8((byte)Opcode.UnknownCapture);
+
+            /* bstack: 0 current capture_change private_index public_index UNKNOWN_CAPTURE */
+
+            if (state.Pattern.GroupInfoAt(privateIndex).Referenced && !SameSpanAsGroup(group, UnknownSpan))
+            {
+                ++state.CaptureChange;
+            }
+
+            state.SaveCapture(privateIndex, publicIndex, UnknownSpan);
+            group.Current = group.Count - 1;
+            state.HasUnknownCaptures = true;
+            state.NotePartialEvent(PartialEvent.UnknownCaptureSet);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: an unknown capture is reported unset (design section 4.3). Run
+    /// on a second-pass partial, which ends the call, so the groups need not be restored.
+    /// </summary>
+    /// <remarks>
+    /// A group whose current capture is unknown is reported with no captures at all, so that
+    /// <c>Success</c> and <c>Captures</c> agree: its earlier captures are the held text's, but which
+    /// of them, if any, a completion leaves last is not known. A group whose current capture is known
+    /// keeps its list, with the unknown ones left out.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void ReportUnknownCapturesUnset(MatchState state)
+    {
+        foreach (GroupData group in state.Groups)
+        {
+            if (group.Current >= 0 && IsUnknown(group))
+            {
+                group.Count = 0;
+                group.Current = -1;
+                continue;
+            }
+
+            int kept = 0;
+            int current = -1;
+            for (int i = 0; i < group.Count; i++)
+            {
+                if (group.Captures[i] == UnknownSpan)
+                {
+                    continue;
+                }
+
+                if (i == group.Current)
+                {
+                    current = kept;
+                }
+
+                group.Captures[kept++] = group.Captures[i];
+            }
+
+            group.Count = kept;
+            group.Current = current;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: a run-out inside a lookaround body left a fuzzy section open that
+    /// the body opened. The continuation after the lookaround belongs to the section around the
+    /// lookaround, so that section becomes current again, with the body's errors added to its
+    /// counts, as the section's END_FUZZY adds them on a normal end, and the totals checked as
+    /// END_FUZZY checks them. A <see cref="Opcode.RunOutClosedSection"/> entry puts the body's section
+    /// back when backtracking undoes the run-out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Left open, the body's section went on governing the continuation: its limits instead of the
+    /// enclosing ones, and counts without the enclosing section's. `(?:a(?=(?:bcd){e&lt;=2})bx){e&lt;=1}`
+    /// over 'aby' answered P(0, 3) with two errors, where no continuation completes it: the body
+    /// needs one error before the edge, and <c>x</c> another (D11 amendment 2's residue).
+    /// </para>
+    /// <para>
+    /// The continuations where the body goes on make at least these errors, so a path whose count
+    /// is already over a limit fails for all of them, and a minimum is not asked: errors after the
+    /// edge may still meet it, and the enclosing section asks its own at its END_FUZZY.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the counts added are the section's at the lookaround's entry, which its entry
+    /// holds, and the innermost open section's own; errors the body made in the enclosing section
+    /// before it opened a section, and those of sections open between the two, are not counted,
+    /// because a pattern without a minimum keeps no link to the frames that hold them
+    /// (<see cref="MatchState.SectionFrame"/>). Ceiling: a lower bound, so the continuation may take
+    /// errors the enclosing limits refuse, which answers a phantom partial and never refuses a
+    /// completion. Upgrade: keep the section links for a pattern with a section in a body, and add
+    /// each open frame's counts.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The lookaround or condition whose body ran out.</param>
+    /// <param name="lookMark">The backtracking-stack position just above its entry.</param>
+    /// <returns><see langword="false"/> if the errors are over a limit, and the path fails.</returns>
+    private static bool CloseTheBodysSection(MatchState state, Node test, int lookMark)
+    {
+        Node? outer = test.EnclosingSection;
+
+        /* bstack: ... fuzzy_counts change_count capture_change sstack LOOKAROUND | CONDITIONAL */
+
+        int countsAt = lookMark - 1 - (3 * sizeof(long)) - (FuzzyValue.Count * sizeof(long));
+        Span<long> merged = stackalloc long[FuzzyValue.Count];
+        for (int kind = 0; kind < FuzzyValue.Count; kind++)
+        {
+            merged[kind] = state.Bstack.SizeAt(countsAt + (kind * sizeof(long))) + state.FuzzyCounts[kind];
+        }
+
+        long errors = TotalErrors(merged);
+        if (errors > state.MaxErrors || (outer is not null && !WithinTheLimits(merged, outer)))
+        {
+            return false;
+        }
+
+        state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+        state.Bstack.PushNode(state.FuzzyNode);
+        state.Bstack.PushSize(state.TotalErrors);
+        state.Bstack.PushSize(state.TotalCost);
+        state.Bstack.PushUInt8((byte)Opcode.RunOutClosedSection);
+
+        /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost RUN_OUT_CLOSED_SECTION */
+
+        merged.CopyTo(state.FuzzyCounts);
+        state.FuzzyNode = outer;
+        state.TotalErrors = errors;
+        if (outer is not null)
+        {
+            state.TotalCost = TotalCost(merged, outer);
+        }
+
+        state.NotePartialEvent(PartialEvent.RunOutClosedSection);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 chunk 8: <see cref="FuzzyWithinConstraints"/> without the minimums, for
+    /// counts that may still grow (<see cref="CloseTheBodysSection"/>).
+    /// </summary>
+    /// <param name="counts">The counts.</param>
+    /// <param name="section">The FUZZY node whose limits apply.</param>
+    /// <returns><see langword="true"/> if no maximum is exceeded.</returns>
+    private static bool WithinTheLimits(ReadOnlySpan<long> counts, Node section)
+    {
+        List<uint> values = section.Values;
+        return counts[FuzzyValue.Del] <= values[FuzzyValue.MaxDel]
+            && counts[FuzzyValue.Ins] <= values[FuzzyValue.MaxIns]
+            && counts[FuzzyValue.Sub] <= values[FuzzyValue.MaxSub]
+            && TotalErrors(counts) <= values[FuzzyValue.MaxErr]
+            && TotalCost(counts, section) <= values[FuzzyValue.MaxCost];
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 M2: removes a construct's own cut taint, if it has one.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    /// <returns><see langword="true"/> if there was one.</returns>
+    private static bool RemoveCutTaintAt(MatchState state, int frame) =>
+        RemoveWMarkAt(state, frame, WMarkKind.CutTaint);
+
+    /// <summary>NOT UPSTREAM'S, D11 M2: removes a mark of one kind at a frame, if there is one.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    /// <param name="kind">The mark's kind.</param>
+    /// <returns><see langword="true"/> if there was one.</returns>
+    private static bool RemoveWMarkAt(MatchState state, int frame, WMarkKind kind)
+    {
+        for (int i = state.WMarks.Count - 1; i >= 0 && state.WMarks[i].Position >= frame; i--)
+        {
+            if (state.WMarks[i] == new WMark(frame, kind))
+            {
+                state.WMarks.RemoveAt(i);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 M2: gives a construct's frame a cut taint, once.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="frame">The frame's backtracking-stack position.</param>
+    private static void TaintTheFrame(MatchState state, int frame)
+    {
+        if (!HasWMarkAt(state, frame, WMarkKind.CutTaint))
+        {
+            state.AddWMark(frame, WMarkKind.CutTaint);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M2: a consuming item has run out of text inside a lookaround's body in a
+    /// partial call's second pass. The body may match for some continuations, so matching carries
+    /// on at the body's end with a touch above the frame, which blocks the end (design section 4.2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The atomic groups still open inside the body are closed as blocked ends close them, each with
+    /// a cut taint: in the continuations where the body goes on, any of them may commit (the run-out
+    /// taint, row N8).
+    /// </para>
+    /// <para>
+    /// When the pattern has a verb, one may lie after the edge, and in the continuations where it
+    /// acts it ends its scope: the frame <see cref="FindTheVerbTarget"/> finds from here gets a verb
+    /// taint, which blocks that scope's later decisions (row Q3's shape). The scope is the lookaround
+    /// itself when it is negative or a condition's test; a positive lookaround and an atomic group
+    /// are transparent to verbs (ledger entry 47), so there it is the construct outside them, which
+    /// the design's first version missed: `(?!(?=a.(*PRUNE)b)x|.)a` over 'a' was refused, where
+    /// 'a' + 'xy' completes it (review of chunk 8, round 1). So neither the lookaround's own frame
+    /// nor an atomic group's needs the taint: no verb can have either as its scope. The exception is
+    /// the oracle's ablation <see cref="PatternObject.VerbsAreConfinedToTheInnermostGroup"/>, under
+    /// which every group is a scope, so the atomic groups get it as well.
+    /// </para>
+    /// <para>
+    /// A condition's test is a lookaround here (build chunk 7): a run-out inside it goes on at the
+    /// test's end, whose blocked end then takes both branches (rows L4 and L5).
+    /// </para>
+    /// <para>
+    /// Build chunk 8: in a pattern that reads captures while it matches, the groups inside the body
+    /// become unknown (<see cref="MarkTheBodysCapturesUnknown"/>): a condition on one takes both
+    /// branches and a backreference to one runs out.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: a run-out inside a group call that the body opened, and every run-out under the
+    /// oracle's pre-D11 ablation, answers the partial at the attempt's start
+    /// (<see cref="ACallOpenedInTheBodyIsOpen"/>). Such a call is still open at the run-out, and
+    /// REOPEN would have to open it again as well (amendment 2). Ceiling: a partial at the attempt's
+    /// start whatever follows, a phantom where main may answer None (`(?!(?1))ab((?=(?:ab)*(?&lt;=b)))?`
+    /// over 'ab', P(0, 2), judge None). Upgrade: REOPEN re-opens the calls opened in the body. Until
+    /// the second pre-merge review (R1) any group call anywhere in the pattern switched the rule off.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="item">The item that ran out, for assert A10.</param>
+    /// <param name="fails">Receives whether the path fails instead: the body's errors so far are
+    /// already more than the section around the lookaround allows (<see cref="CloseTheBodysSection"/>).</param>
+    /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
+    private static Node? RunOutInALookaroundBody(MatchState state, Node? item, out bool fails)
+    {
+        fails = false;
+        PatternObject pattern = state.Pattern;
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
+        {
+            return null;
+        }
+
+        // The innermost open lookaround, with only atomic groups open above it.
+        int atomics = 0;
+        int offset = state.Pstack.Count - sizeof(long);
+        LookaroundStateData look;
+        long lookMark;
+        while (true)
+        {
+            if (offset < 0)
+            {
+                return null;
+            }
+
+            lookMark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)lookMark, out Opcode op, out look))
+            {
+                return null;
+            }
+
+            if (op is Opcode.Lookaround or Opcode.Conditional)
+            {
+                break;
+            }
+
+            if (op != Opcode.Atomic)
+            {
+                return null;
+            }
+
+            atomics++;
+            offset -= sizeof(long);
+        }
+
+        if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark))
+        {
+            return null;
+        }
+
+        // A fuzzy section the body opened and left open: the continuation runs in the section
+        // around the lookaround, with the body's errors counted there, as END_FUZZY would count them.
+        if (
+            pattern.HasFuzzyInABody
+            && state.FuzzyNode != look.Node.EnclosingSection
+            && !CloseTheBodysSection(state, look.Node, (int)lookMark)
+        )
+        {
+            fails = true;
+            return null;
+        }
+
+        bool verbs = pattern.HasBacktrackingVerb;
+        bool atomicScopes = verbs && pattern.VerbsAreConfinedToTheInnermostGroup;
+        for (int i = 0; i < atomics; i++)
+        {
+            _ = state.Pstack.PopSize(out long atomicMark);
+            BlockAtomicCut(state, (int)atomicMark);
+            if (atomicScopes && !HasWMarkAt(state, (int)atomicMark - 1, WMarkKind.VerbTaint))
+            {
+                state.AddWMark((int)atomicMark - 1, WMarkKind.VerbTaint);
+            }
+
+            state.NotePartialEvent(PartialEvent.RunOutTaintSet);
+        }
+
+        if (
+            verbs
+            && FindTheVerbTarget(state, out long scopeMark)
+            && !HasWMarkAt(state, (int)scopeMark - 1, WMarkKind.VerbTaint)
+        )
+        {
+            state.AddWMark((int)scopeMark - 1, WMarkKind.VerbTaint);
+        }
+
+        Debug.Assert(
+            item is null || Array.BinarySearch(look.Node.BodyInfo!.Nodes, item.Index) >= 0,
+            "D11 A10: the innermost open lookaround or test is the one whose body holds the item"
+        );
+
+        // Chunk 8, unknown captures: after the edge a group inside the body may hold anything, or
+        // nothing, so a pattern that reads a capture while it matches sees it as unknown until
+        // backtracking undoes the run-out (rows Q2 and T3). Other patterns report the captures the
+        // held text made, as a run-out outside a body does.
+        if (pattern.ReadsCapturesWhileMatching)
+        {
+            MarkTheBodysCapturesUnknown(state, look.Node, item);
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        PushTouchMark(state);
+        state.NotePartialEvent(PartialEvent.RunOutInBody);
+        return look.Node.LookaroundEnd;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 (second pre-merge review, R3): a run-out in a positive lookaround's body
+    /// waits until every other path of the body has been tried. The lookaround's frame gets a
+    /// <see cref="WMarkKind.RunOutPending"/> mark and backtracking goes on; a success of the body on
+    /// the held text then decides the lookaround (its end is not blocked, and it drops the mark),
+    /// and if none comes, the LOOKAROUND backtracking arm takes the run-out there: the lookaround
+    /// holds for some continuations, so matching goes on after it with a touch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Run-out first, the lookaround's first success was blocked and a later one on the held text
+    /// was decided only once backtracking reached it, after everything opened above the lookaround,
+    /// and in another order than a decision around it needs: in
+    /// `(?&gt;(?:(?=(?:ab)*(?&lt;!b))|ab)+)x` over 'ab' the atomic group's 'ab' branch was tried
+    /// while the first copy of the lookahead was still blocked, so the group never committed and the
+    /// call answered P(0, 2), where main and the judge say None. The lookahead holds at 0 for every
+    /// continuation (no 'ab' before 0), which the success on the held text now decides at once.
+    /// </para>
+    /// <para>
+    /// Sound where the lookaround is the innermost body with no atomic group open in it around the
+    /// item (which could commit on the run-out's longer path where it exists), no call opened in it
+    /// is open, the body holds no verb and no call (a verb on the run-out's path, reached directly or
+    /// through a called group, could prune the body's other paths; a verb after the lookaround
+    /// cannot reach them), and its success leaves the same state for every continuation (no group in its body,
+    /// or no capture read while matching; nothing fuzzy, or the lookaround outside every fuzzy
+    /// section). Then the lookaround succeeds in
+    /// every continuation where any path of its body succeeds on the held text, whichever path the
+    /// continuation takes first; and where none does, the waiting run-out stands for the paths that
+    /// read the text to come. Only where its outcome feeds a decision
+    /// (<see cref="RunOutFeedsADecision"/>): elsewhere the run-out at once is cheaper and answers the
+    /// same.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the run-out waits.</returns>
+    private static bool RunOutCanWaitForTheBody(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            state.PartialSide == MatchState.PartialNone
+            || pattern.SecondPassAsBeforeD11
+            || !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op != Opcode.Lookaround
+            || !look.Node.Match
+            || look.Node.BodyInfo is not { HasVerbOrCall: false }
+            || ((look.Node.Status & NodeStatus.HasGroups) != 0 && pattern.ReadsCapturesWhileMatching)
+            || (pattern.IsFuzzy && look.Node.EnclosingSection is not null)
+            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark))
+            || !RunOutFeedsADecision(state)
+        )
+        {
+            return false;
+        }
+
+        int frame = (int)mark - 1;
+        if (!HasWMarkAt(state, frame, WMarkKind.RunOutPending))
+        {
+            state.AddWMark(frame, WMarkKind.RunOutPending);
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+        state.NoteRunOutTaken(answered: false);
+        state.NotePartialEvent(PartialEvent.RunOutWaits);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether a group call that a lookaround's (or condition test's) body
+    /// opened is still open, so that a run-out here lies inside the called group; or the pattern is
+    /// one whose call-free models the run-out rule needs are not built (the SHORTCUT on
+    /// <see cref="RunOutInALookaroundBody"/>).
+    /// </summary>
+    /// <remarks>
+    /// A call pushes no pruning mark, only its frame on the saved stack, and records the saved
+    /// stack's depth after it in <see cref="MatchState.OpenCalls"/>. The construct parked its state
+    /// on the saved stack when it opened (the depth sits under its backtracking entry), so a call
+    /// opened inside its body is one whose depth lies above that state, as amendment 2's assert 3
+    /// reads it. A call open around the construct lies below it and does not count.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <returns><see langword="true"/> if a call opened in the body is open, or the pattern needs a
+    /// model the compiler skips for patterns with calls: the groups a run-out leaves unknown
+    /// (<see cref="Node.RunOutGroups"/>, only where captures are read) and the section around a
+    /// lookaround (<see cref="Node.EnclosingSection"/>, only where something is fuzzy).</returns>
+    private static bool ACallOpenedInTheBodyIsOpenOrUnmodelled(MatchState state, long mark) =>
+        state.Pattern.ReadsCapturesWhileMatching || state.Pattern.IsFuzzy || ACallOpenedInTheBodyIsOpen(state, mark);
+
+    /// <summary>NOT UPSTREAM'S, D11: the half of <see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/> that reads the stacks.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <returns><see langword="true"/> if a call opened in the body is open.</returns>
+    private static bool ACallOpenedInTheBodyIsOpen(MatchState state, long mark) =>
+        state.OpenCalls.Count != 0
+        && (
+            !state.Bstack.ReadSizeBelow((int)mark - 1, out long savedSstack)
+            || state.OpenCalls[^1].SstackDepth > savedSstack - _lookaroundStateDataSize
+        );
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in a body whose outcome
+    /// feeds a decision, the only place where the alternatives a choice point keeps before it can
+    /// change the answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The body is the innermost open lookaround or condition test, with only atomic groups open
+    /// above it (<see cref="RunOutInALookaroundBody"/>'s walk). Its outcome feeds a decision when
+    /// it is negative or a condition's test (a success of a kept alternative on the held text
+    /// decides it, where the run-out alone leaves it undetermined); or when it is a positive
+    /// lookaround and something can still cut on its outcome: a verb anywhere in the pattern, or an
+    /// atomic group, a condition's test or a negative lookaround open around it (the 2026-10-04
+    /// pre-merge review, P1: `(?!(?=(?:ab)*(?&lt;=b)))ab`, `(?&gt;(?=(?:ab)*(?&lt;=b))|ab)x` and
+    /// `(?=(?:ab)*(?&lt;=b))(*PRUNE)x|ab` over 'ab' answered P(0, 2) where main and the judge say
+    /// None). There the kept success also needs <see cref="EndALookaroundInTheSecondPass"/>'s
+    /// decided end.
+    /// </para>
+    /// <para>
+    /// A positive lookaround that feeds nothing keeps nothing: every continuation after a kept
+    /// alternative's success is one the run-out's own continuation already covers, so there the
+    /// kept alternatives only cost time (`(?:(?=.*z)a)*b` over 'a' * 1000 + 'c' took 3.5 times as
+    /// long with <c>.*</c>'s smaller counts kept). Outside every body the run-out answers the
+    /// partial and the kept entries would go with the attempt.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: a verb anywhere in the pattern makes every positive lookaround feed a decision.
+    /// Ceiling: `(?:(?=.*z)a)*b|(*PRUNE)q` over 'a' * 1000 + 'c' keeps <c>.*</c>'s smaller counts for
+    /// nothing, about 4 times the first pass over any completed text (n^2 either way; second
+    /// pre-merge review, R4). Upgrade: ask at compile time whether a verb can run after the
+    /// lookaround in its own scope (ledger entry 47's scope rules over the node graph).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
+    private static bool RunOutFeedsADecision(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
+        {
+            return false;
+        }
+
+        bool inBody = false;
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            long mark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look))
+            {
+                return false;
+            }
+
+            // The innermost body: a run-out inside a call it opened is answered at once.
+            if (
+                !inBody
+                && op is Opcode.Lookaround or Opcode.Conditional
+                && pattern.HasGroupCalls
+                && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark)
+            )
+            {
+                return false;
+            }
+
+            if (op == Opcode.Conditional || (op == Opcode.Lookaround && !look.Node.Match))
+            {
+                return true;
+            }
+
+            if (op == Opcode.Lookaround)
+            {
+                if (!inBody && pattern.HasBacktrackingVerb)
+                {
+                    return true;
+                }
+
+                inBody = true;
+            }
+            else if (op == Opcode.Atomic)
+            {
+                if (inBody)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule at a choice point: the test of one of a repeat's two
+    /// alternatives (its body or its tail) ran out of text, and the other one passed its test, so
+    /// the other one is kept on the backtracking stack before the run-out is taken, when the run-out
+    /// goes on in a body whose outcome feeds a decision (<see cref="RunOutFeedsADecision"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A test that runs out stands for its alternative having been entered and run out at its first
+    /// item, so the arm keeps every other alternative it would have kept had it entered that one,
+    /// and then takes the run-out through <c>runOut</c> (never a <c>return</c>). Inside a lookaround
+    /// body the run-out goes on at the body's end with a touch; a blocked end backtracks into the
+    /// body, so the kept alternative is tried, and a success of it on the held text decides the
+    /// construct as the blocked-end rule says (design section 4.2). Upstream returns the partial at
+    /// once and the alternative was lost: `(?!(?:ab)*(?&lt;=b))ab` over 'ab' answered P(0, 2) where
+    /// the tail's lookbehind fails the lookahead for every continuation (review of 2026-10-04, F1
+    /// and item 7). Outside every body the run-out answers the partial, as before, and the entry
+    /// goes with the attempt.
+    /// </para>
+    /// <para>
+    /// The run-out is taken first even where the alternative that ran out is the one the repeat
+    /// tries second (a greedy repeat's tail, a lazy repeat's body): a run-out first is what upstream
+    /// does outside a body, so the answers there, captures included, do not move. Inside a body the
+    /// kept alternatives are still tried, after the run-out; for a positive lookaround whose kept
+    /// success comes after its blocked one, <see cref="EndALookaroundInTheSecondPass"/>'s decided
+    /// end lets that success decide what encloses it (the dedup would take it for a repeat).
+    /// </para>
+    /// <para>
+    /// Since D67 a repeat's tail test does not run out here (<see cref="TailMayMatch"/>): the tail is
+    /// entered and its own item runs out, so only a body's run-out reaches this rule, and a tail's
+    /// only under the oracle's ablation (<c>PatternObject.TailRunOutAsBeforeD67</c>).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="bodyStatus">The body's test.</param>
+    /// <param name="tailStatus">The tail's test.</param>
+    /// <param name="kept">The entry for the alternative that did not run out, in the shape this arm
+    /// parks for it when both could match.</param>
+    private static void KeepTheAlternativeThatDidNotRunOut(
+        MatchState state,
+        int bodyStatus,
+        int tailStatus,
+        MatchBodyTailStateData kept
+    )
+    {
+        Debug.Assert(
+            bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial,
+            "D11 run-out rule: one alternative ran out"
+        );
+
+        if (!RunOutFeedsADecision(state))
+        {
+            return;
+        }
+
+        Opcode op;
+        if (bodyStatus == MatchStatus.Success)
+        {
+            op = Opcode.MatchBody;
+        }
+        else if (tailStatus == MatchStatus.Success)
+        {
+            op = Opcode.MatchTail;
+        }
+        else
+        {
+            return;
+        }
+
+        PushMatchBodyTailStateData(state.Bstack, kept, state.IsFuzzy);
+        state.Bstack.PushUInt8((byte)op);
+
+        /* bstack: position count start capture_change index text_pos MATCH_BODY | MATCH_TAIL */
+
+        state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11, the run-out rule (<see cref="KeepTheAlternativeThatDidNotRunOut"/>) in
+    /// <c>GREEDY_REPEAT_ONE</c>'s backtracking arm: the tail's test ran out at
+    /// <paramref name="pos"/>, so the counts below it are kept, exactly as the arm keeps them when
+    /// the tail could match there.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat.</param>
+    /// <param name="pos">Where the tail ran out.</param>
+    /// <param name="start">The start the arm's entry parked.</param>
+    /// <param name="savedCount">The count the arm's entry parked.</param>
+    /// <param name="node">The repeat's node.</param>
+    /// <param name="index">The repeat's index.</param>
+    private static void KeepTheSmallerCounts(
+        MatchState state,
+        RepeatData rpData,
+        int pos,
+        int start,
+        long savedCount,
+        Node node,
+        int index
+    )
+    {
+        long count = CountBetween(state, pos, rpData.Start);
+        if (count > node.Values[1])
+        {
+            rpData.Count = count;
+            PushRepeatOneStateData(state.Bstack, new RepeatOneStateData(savedCount, start, node, index));
+            state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
+
+            /* bstack: count start node index GREEDY_REPEAT_ONE */
+
+            state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+        }
+        else
+        {
+            rpData.Start = start;
+            rpData.Count = savedCount;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: whether the innermost construct open around a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> is one that backtracking onto the verb passes straight
+    /// through - an atomic group (which is also what a possessive repeat compiles to) or a positive
+    /// lookaround that has not finished.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PCRE2's model (pcre2pattern 10.47, "Verbs that act after backtracking" and "Backtracking verbs
+    /// in assertions"): backtracking onto the verb unwinds to the innermost enclosing negative
+    /// assertion, which becomes true, or conditional test, which becomes false if positive and true
+    /// if negative; with neither, the attempt fails. Upstream instead stops at the innermost pruning
+    /// mark of any kind (<see cref="TopBstack"/>), which makes every atomic group and lookaround a
+    /// scope. When the innermost mark is already a target the two agree, so the verb keeps
+    /// upstream's arm; only a transparent innermost mark takes the new path, and a pattern with no
+    /// verb never gets here.
+    /// </para>
+    /// <para>
+    /// The answer is read from the stacks rather than fixed when the pattern compiles, because a
+    /// group call pushes no pruning mark: a verb in a called group sees whatever is open around the
+    /// call, which only the running match knows. Called groups themselves stay transparent, as they
+    /// are in Perl, Boost and upstream (PCRE2 alone makes the call a target).
+    /// </para>
+    /// <para>
+    /// Asked when the verb runs and again when backtracking reaches it, with the same answer both
+    /// times: every construct opened after the verb has been backtracked out of, or has finished and
+    /// discarded the verb's entry with everything else it pushed, by the time backtracking gets back
+    /// to the entry.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the verb must unwind past the innermost mark.</returns>
+    private static bool VerbIsInsideATransparentGroup(MatchState state) =>
+        !state.Pattern.VerbsAreConfinedToTheInnermostGroup
+        && state.Pstack.TopSize(out long mark)
+        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+        && IsTransparentToVerbs(op, look);
+
+    /// <summary>Whether a construct is one ledger entry 47's unwind passes through.</summary>
+    /// <param name="op">The opcode that pushed the pruning mark.</param>
+    /// <param name="look">For a lookaround, what it parked; otherwise unused.</param>
+    /// <returns><see langword="true"/> for an atomic group or a positive lookaround.</returns>
+    private static bool IsTransparentToVerbs(Opcode op, LookaroundStateData look) =>
+        op == Opcode.Atomic || (op == Opcode.Lookaround && look.Node.Match);
+
+    /// <summary>
+    /// Reads which construct pushed a pruning mark, without disturbing either stack.
+    /// </summary>
+    /// <remarks>
+    /// Each of the four sites that push a mark (<c>start_match</c>, <c>ATOMIC</c>,
+    /// <c>CONDITIONAL</c>, <c>LOOKAROUND</c>) pushes its opcode byte immediately before it, so the
+    /// byte under the mark names the construct. A lookaround's entry holds the structure-stack depth
+    /// just below that byte, and the parked node there says whether it is negative. Upstream's way
+    /// of reading is to move <see cref="ByteStack.Count"/> down and put it back; this port reads in
+    /// place (<see cref="ByteStack.ReadBlockBelow"/>), because every change to the count goes
+    /// through <see cref="MatchState.SetBstackCount"/> (D11, A7) and a read is not a truncation.
+    /// The Sstack read keeps upstream's way.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The backtracking-stack size the mark holds.</param>
+    /// <param name="op">Receives the construct's opcode.</param>
+    /// <param name="look">Receives what a lookaround parked; default for anything else.</param>
+    /// <returns><see langword="false"/> if the stacks do not hold what the mark promises.</returns>
+    private static bool ReadPruningMark(MatchState state, int mark, out Opcode op, out LookaroundStateData look)
+    {
+        op = Opcode.Failure;
+        look = default;
+
+        int bstackCount = state.Bstack.Count;
+        if (mark > bstackCount)
+        {
+            return false;
+        }
+
+        // A condition's parked state is read only in a partial call's second pass, the one place
+        // that asks for it (EndALookaroundInTheSecondPass and RunOutInALookaroundBody); the verb
+        // paths read a lookaround's alone (IsTransparentToVerbs), so other calls skip the read.
+        bool read = state.Bstack.ReadUInt8Below(mark, out byte code);
+        bool parked =
+            (Opcode)code == Opcode.Lookaround
+            || ((Opcode)code == Opcode.Conditional && state.PartialSide != MatchState.PartialNone);
+        long sstackCount = 0;
+        if (read && parked)
+        {
+            read = state.Bstack.ReadSizeBelow(mark - 1, out sstackCount);
+        }
+
+        if (!read)
+        {
+            return false;
+        }
+
+        op = (Opcode)code;
+        if (!parked)
+        {
+            return op is Opcode.Failure or Opcode.Atomic or Opcode.Conditional;
+        }
+
+        int sstackTop = state.Sstack.Count;
+        if (sstackCount > sstackTop)
+        {
+            return false;
+        }
+
+        state.Sstack.Count = (int)sstackCount;
+        read = PopLookaroundStateData(state.Pattern, state.Sstack, out look);
+        state.Sstack.Count = sstackTop;
+        return read;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: backtracking has reached a <c>(*PRUNE)</c> or
+    /// <c>(*SKIP)</c> inside an unfinished atomic group or positive lookaround, so abandon everything
+    /// back to the innermost enclosing negative lookaround, conditional test or attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The pruning marks of the transparent constructs crossed are dropped, and the backtracking
+    /// stack is cut to the target's own mark, so the next pop is the target's entry and its own
+    /// failure arm runs exactly as it does when its body fails: a negative lookaround becomes true,
+    /// a condition picks its branch, and <c>FAILURE</c> starts the next attempt. Those arms put back
+    /// the structure-stack depth, close the group calls and fuzzy sections above it
+    /// (<see cref="CloseFramesAbove"/>), and restore the captures, fuzzy counts and slice they saved,
+    /// which covers everything the crossed constructs' own arms would have undone.
+    /// </para>
+    /// <para>
+    /// The one thing <c>FAILURE</c> does not restore is the slice, which each crossed lookaround
+    /// widened to the whole text. The outermost crossed lookaround parked the attempt's own slice,
+    /// so that goes back here.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="toAttempt">Receives whether the target is the attempt itself.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
+    private static bool UnwindToTheVerbTarget(MatchState state, out bool toAttempt)
+    {
+        toAttempt = false;
+        LookaroundStateData outermostLook = default;
+        bool crossedALookaround = false;
+
+        while (true)
+        {
+            if (
+                !state.Pstack.TopSize(out long mark)
+                || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            )
+            {
+                return false;
+            }
+
+            if (!IsTransparentToVerbs(op, look))
+            {
+                CutBstack(state, (int)mark);
+                toAttempt = op == Opcode.Failure;
+                if (toAttempt && crossedALookaround)
+                {
+                    state.SliceStart = outermostLook.SliceStart;
+                    state.SliceEnd = outermostLook.SliceEnd;
+                }
+
+                return true;
+            }
+
+            if (op == Opcode.Lookaround)
+            {
+                outermostLook = look;
+                crossedALookaround = true;
+            }
+
+            _ = state.Pstack.DropSize();
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, ledger entry 47: a <c>(*SKIP)</c> reached through transparent groups has
+    /// ended the attempt, so the next attempt starts where the verb was reached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The verb may sit in a lookaround whose direction is not the search's: a lookbehind body runs
+    /// right to left in a forward search, and a lookahead left to right under <c>(?r)</c>. So the
+    /// search direction picks the end that moves, not the verb's own. A position that is not ahead
+    /// of the attempt's start leaves the ordinary bump-along in charge, which is pcre2pattern's rule
+    /// ("If (*SKIP) is used to specify a new starting position that is the same as the starting
+    /// position of the current match, or (by being inside a lookbehind) earlier, the position
+    /// specified by (*SKIP) is ignored"); the slice never widens.
+    /// </para>
+    /// <para>
+    /// A lookaround can also reach past the far end of the slice: a lookbehind to the left of the
+    /// caller's start under <c>(?r)</c>, or a lookahead past a best-match refinement's narrowed end.
+    /// The next start is then outside the slice, so no attempt is left, and the attempt position is
+    /// put on the slice's end for <c>FAILURE</c>'s "can we advance?" test to say so.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with the attempt's slice already restored.</param>
+    /// <param name="skipPos">The text position the verb was reached at.</param>
+    private static void MoveTheSliceForAnUnwoundSkip(MatchState state, int skipPos)
+    {
+        if (state.Reverse)
+        {
+            if (skipPos < state.SliceStart)
+            {
+                state.SliceEnd = state.SliceStart;
+                state.MatchPos = state.SliceStart;
+            }
+            else if (skipPos < state.SliceEnd)
+            {
+                state.SliceEnd = skipPos;
+            }
+        }
+        else if (skipPos > state.SliceEnd)
+        {
+            state.SliceStart = state.SliceEnd;
+            state.MatchPos = state.SliceEnd;
+        }
+        else if (skipPos > state.SliceStart)
+        {
+            state.SliceStart = skipPos;
+        }
+    }
+
+    /// <summary>Upstream's two slice lines in <c>RE_OP_SKIP</c> (<c>:14551-14555</c>).</summary>
+    /// <remarks>
+    /// Run when backtracking reaches the verb rather than when the verb runs (ledger entry 45), or
+    /// when it runs if <see cref="PatternObject.SkipMovesTheSliceWhenItRuns"/> is set.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="skipNode">The <c>(*SKIP)</c> node, whose direction says which end moves.</param>
+    /// <param name="skipPos">The text position the verb was reached at.</param>
+    private static void MoveTheSliceForASkip(MatchState state, Node skipNode, int skipPos)
+    {
+        if ((skipNode.Status & NodeStatus.Reverse) != 0)
+        {
+            state.SliceEnd = skipPos;
+        }
+        else
+        {
+            state.SliceStart = skipPos;
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D11 amendment 2: the bytes <see cref="PushLookaroundStateData"/> pushes, four sizes.</summary>
+    private const int _lookaroundStateDataSize = 4 * sizeof(long);
 
     /// <summary>
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_l, sizeof(data_l))</c>, field by field.
@@ -2706,10 +6958,11 @@ internal static class Matcher
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_g, sizeof(data_g))</c>, field by field.
     /// </summary>
     /// <remarks>
-    /// Upstream pushes the struct's bytes, padding and all; this pushes the five fields as five
-    /// 8-byte words. The stack is internal to the engine and the only requirement on it is that the
-    /// pop is the mirror image of the push, so the difference is 8 bytes of stack per group entry
-    /// and nothing else.
+    /// Upstream pushes the struct's bytes: three 8-byte fields and two 4-byte <c>RE_CODE</c>s, 32
+    /// bytes with no padding (lines 416-422). This pushes the same widths field by field. S86 made
+    /// them match: five 8-byte words cost a capturing repeat 8 bytes more per iteration than
+    /// upstream, enough on their own to fail <c>fullmatch('(ab)*', 'ab' * 6_000_000)</c> at the 1GB
+    /// bound upstream passes under (ledger entry 18).
     /// </remarks>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
@@ -2718,8 +6971,8 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         stack.PushSize(data.Current);
         stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.PrivateIndex);
-        stack.PushSize(data.PublicIndex);
+        stack.PushCode((uint)data.PrivateIndex);
+        stack.PushCode((uint)data.PublicIndex);
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
@@ -2731,8 +6984,8 @@ internal static class Matcher
         data = default;
 
         if (
-            !stack.PopSize(out long publicIndex)
-            || !stack.PopSize(out long privateIndex)
+            !stack.PopCode(out uint publicIndex)
+            || !stack.PopCode(out uint privateIndex)
             || !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long current)
             || !stack.PopSize(out long textPos)
@@ -2754,8 +7007,15 @@ internal static class Matcher
     /// <param name="Start">Where this iteration of the body started.</param>
     /// <param name="CaptureChange">The repeat's capture-change counter before this iteration.</param>
     /// <param name="Index">The repeat index.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-    private readonly record struct BodyEndStateData(long Count, int Start, long CaptureChange, int Index);
+    private readonly record struct BodyEndStateData(
+        long Count,
+        int Start,
+        long CaptureChange,
+        int Index,
+        long ChangesAtStart
+    );
 
     /// <summary>
     /// Port of <c>RE_RepeatStateData</c> (lines 440-446): what <c>GREEDY_REPEAT</c> and
@@ -2767,8 +7027,16 @@ internal static class Matcher
     /// <param name="CaptureChange">The enclosing repeat's capture-change counter.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">Where the repeat was entered.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-    private readonly record struct RepeatStateData(long Count, int Start, long CaptureChange, int Index, int TextPos);
+    private readonly record struct RepeatStateData(
+        long Count,
+        int Start,
+        long CaptureChange,
+        int Index,
+        int TextPos,
+        long ChangesAtStart
+    );
 
     /// <summary>
     /// Port of <c>RE_MatchBodyTailStateData</c> (lines 424-431): what a repeat parks when
@@ -2781,6 +7049,7 @@ internal static class Matcher
     /// <param name="CaptureChange">The repeat's capture-change counter to restore first.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">The position the loser is being tried at, for its own guard.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct MatchBodyTailStateData(
         Position Position,
@@ -2788,7 +7057,8 @@ internal static class Matcher
         int Start,
         long CaptureChange,
         int Index,
-        int TextPos
+        int TextPos,
+        long ChangesAtStart
     );
 
     /// <summary>
@@ -2806,21 +7076,32 @@ internal static class Matcher
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_be, sizeof(data_be))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data, bool fuzzy)
     {
         stack.PushSize(data.Count);
         stack.PushSize(data.Start);
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
+        if (fuzzy)
+        {
+            stack.PushSize(data.ChangesAtStart);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data)
+    private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data, bool fuzzy)
     {
         data = default;
+        long sectionEdits = 0;
+        if (fuzzy && !stack.PopSize(out sectionEdits))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long index)
@@ -2832,29 +7113,40 @@ internal static class Matcher
             return false;
         }
 
-        data = new BodyEndStateData(count, (int)start, captureChange, (int)index);
+        data = new BodyEndStateData(count, (int)start, captureChange, (int)index, sectionEdits);
         return true;
     }
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_r, sizeof(data_r))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data, bool fuzzy)
     {
         stack.PushSize(data.Count);
         stack.PushSize(data.Start);
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
         stack.PushSize(data.TextPos);
+        if (fuzzy)
+        {
+            stack.PushSize(data.ChangesAtStart);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data)
+    private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data, bool fuzzy)
     {
         data = default;
+        long sectionEdits = 0;
+        if (fuzzy && !stack.PopSize(out sectionEdits))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long textPos)
@@ -2867,14 +7159,15 @@ internal static class Matcher
             return false;
         }
 
-        data = new RepeatStateData(count, (int)start, captureChange, (int)index, (int)textPos);
+        data = new RepeatStateData(count, (int)start, captureChange, (int)index, (int)textPos, sectionEdits);
         return true;
     }
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_mbt, sizeof(data_mbt))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data, bool fuzzy)
     {
         stack.PushNode(data.Position.Node);
         stack.PushSize(data.Position.TextPos);
@@ -2883,20 +7176,32 @@ internal static class Matcher
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
         stack.PushSize(data.TextPos);
+        if (fuzzy)
+        {
+            stack.PushSize(data.ChangesAtStart);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="pattern">The pattern the parked node index is into.</param>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so pushed the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopMatchBodyTailStateData(
         PatternObject pattern,
         ByteStack stack,
-        out MatchBodyTailStateData data
+        out MatchBodyTailStateData data,
+        bool fuzzy
     )
     {
         data = default;
+
+        long sectionEdits = 0;
+        if (fuzzy && !stack.PopSize(out sectionEdits))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long textPos)
@@ -2917,7 +7222,8 @@ internal static class Matcher
             (int)start,
             captureChange,
             (int)index,
-            (int)textPos
+            (int)textPos,
+            sectionEdits
         );
         return true;
     }
@@ -2974,8 +7280,8 @@ internal static class Matcher
     /// may only save work. The one-character arms are the functions the opcodes call
     /// (<see cref="MatchOne"/>), the zero-width arms likewise (<see cref="TryMatchZeroWidth"/>),
     /// and the string arms carry upstream's slice bounds, which S33 found are what upstream's
-    /// partial answers depend on (<see cref="TryMatchString"/>). The <c>SUCCESS</c> arm is left to
-    /// the default for the reason given at it.
+    /// partial answers depend on (<see cref="TryMatchString"/>). The <c>SUCCESS</c> arm is S86's
+    /// (below), and it enters the node rather than passing over it.
     /// </para>
     /// <para>
     /// <b>History.</b> S19 ported this in full and reverted it, because the exponential blowup it
@@ -2985,6 +7291,24 @@ internal static class Matcher
     /// <c>regex.search(r'(\D*?)z', 'a', partial=True)</c> leaves group 1 unset. S60b restored the
     /// rest, measured answer-identical to the partial-only version over 325,952 slices of 64
     /// patterns under 11 flag sets (notes, S60b sittings).
+    /// </para>
+    /// <para>
+    /// <b>D67 (2026-10-08) undid this for a repeat's tail test, on purpose</b> (see
+    /// <see cref="TailMayMatch"/>). D62's rule says a partial reports what every completion of its
+    /// path would report, and every completion of the path in which the lazy repeat took the 'a' and
+    /// the <c>z</c> ran out ('az', 'azb') gives group 1 (0, 1). So that row reports (0, 1) again, now
+    /// as a deliberate divergence. Body tests and branch tests still propagate the partial.
+    /// </para>
+    /// <para>
+    /// <b>S86 restored the <c>SUCCESS</c> arm (<c>:7828</c>), because a wasted tail is not free in a
+    /// repeat.</b> When <c>END_GREEDY_REPEAT</c> finds that both the body and the tail could match,
+    /// it pushes a <c>MATCH_TAIL</c> record (57 B here) before it re-enters the body, and nothing
+    /// pops it while the repeat runs. Under a full match the tail is the <c>SUCCESS</c> node, which
+    /// upstream refuses short of the end, so <c>fullmatch('(ab)*', 'ab' * n)</c> costs upstream
+    /// 82 B a repetition and cost this port 151 (ledger entry 18). The arm fails exactly where the
+    /// <c>SUCCESS</c> opcode in <see cref="BasicMatch"/> would, bounds and all: upstream's own arm
+    /// tests reversed matches against <c>text_start</c> where its opcode tests
+    /// <c>slice_start</c>, which is the narrowed-slice bug DECISIONS 2026-09-12 records.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -3016,6 +7340,14 @@ internal static class Matcher
             return status;
         }
 
+        if (test.Op == Opcode.Success)
+        {
+            // We want to match all of the slice (:7829). The SUCCESS node is entered, not passed
+            // over, as upstream's arm does: it is the opcode that ends the match.
+            bool shortOfTheEnd = state.Reverse ? textPos != state.SliceStart : textPos != state.SliceEnd;
+            return state.MatchAll && shortOfTheEnd ? MatchStatus.Failure : MatchStatus.Success;
+        }
+
         if (IsOneCharacterTest(test.Op))
         {
             status = MatchOne(state, test, textPos);
@@ -3023,13 +7355,19 @@ internal static class Matcher
         else if (Optimiser.IsPositionAssertion(test.Op))
         {
             status = TryMatchZeroWidth(state, test, textPos);
+
+            // NOT UPSTREAM'S, D11 M1: a test at the edge of a partial call's second pass that some
+            // continuations pass. The node is entered, not passed over, because its own arm in
+            // BasicMatch is what marks the path (PushTouchMark); every caller reads this as the
+            // pre-S60b default arm's success, which is what it was before.
+            if (status == MatchStatus.Undetermined)
+            {
+                return MatchStatus.Success;
+            }
         }
         else
         {
-            // The default arm (:7843), and the SUCCESS arm (:7832) with it: upstream's SUCCESS arm
-            // checks 'match_all' against 'text_start' where the SUCCESS opcode checks 'slice_start',
-            // which is upstream's bug (DECISIONS 2026-09-12, reversed narrowed-slice fullmatch).
-            // Entering is always right here, because the SUCCESS opcode answers a moment later.
+            // The default arm (:7843).
             return MatchStatus.Success;
         }
 
@@ -3043,6 +7381,26 @@ internal static class Matcher
         nextPosition = new Position(next.MatchNext!, Step(state, textPos, next.MatchStep));
         return MatchStatus.Success;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D67: a repeat's tail test that runs out of text means the tail may match, so
+    /// the repeat enters the tail and the tail's own item runs out there. Upstream answers the
+    /// partial at the test, before the tail's group ends are reached, so `(?&lt;o&gt;b(?&lt;i&gt;a)?)b`
+    /// over 'ba' reported o unset where every completion ('bab') sets it to (0, 2) (D62's rule: a
+    /// partial reports what every completion of its path would report).
+    /// </summary>
+    /// <remarks>
+    /// The test is a filter in front of the tail (<see cref="TryMatch"/>): it may refuse a tail that
+    /// cannot match, and may not decide anything else. A run-out is not a refusal, so entering the tail
+    /// is what matching would do with no test at all; the item that ran out runs out again where it
+    /// stands, after the nodes before it (a group's end) have run. Only a partial call's second pass
+    /// gets a run-out from a test, so an ordinary match pays the one comparison.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="status">The tail test's answer.</param>
+    /// <returns><see cref="MatchStatus.Success"/> for a run-out, otherwise <paramref name="status"/>.</returns>
+    private static int TailMayMatch(MatchState state, int status) =>
+        status == MatchStatus.Partial && !state.Pattern.TailRunOutAsBeforeD67 ? MatchStatus.Success : status;
 
     /// <summary>
     /// Whether <c>try_match</c> hands this test node to one of its six <c>try_match_STRING*</c> arms
@@ -3115,10 +7473,10 @@ internal static class Matcher
                 {
                     if (pos >= state.SliceEnd)
                     {
-                        return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+                        return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                     }
 
-                    if (!SameStringChar(state, test.Op, state.CharAt(pos), test.Values[sPos]))
+                    if (!SameStringChar(test, state.CharAt(pos), test.Values[sPos]))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3136,7 +7494,7 @@ internal static class Matcher
                         return RanOutOnTheLeft(state, pos) ? MatchStatus.Partial : MatchStatus.Failure;
                     }
 
-                    if (!SameStringChar(state, test.Op, state.CharBefore(pos), test.Values[length - sPos - 1]))
+                    if (!SameStringChar(test, state.CharBefore(pos), test.Values[length - sPos - 1]))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3152,16 +7510,14 @@ internal static class Matcher
                     {
                         if (pos >= state.SliceEnd)
                         {
-                            return state.PartialSide == MatchState.PartialRight
-                                ? MatchStatus.Partial
-                                : MatchStatus.Failure;
+                            return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                         }
 
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+                        foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharAt(pos), folded);
                         foldedPos = 0;
                     }
 
-                    if (!SameCharIgn(state.Encoding, test.Values[sPos], folded[foldedPos]))
+                    if (!SameCharIgn(test.Encoding, test.Values[sPos], folded[foldedPos]))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3193,11 +7549,11 @@ internal static class Matcher
                             return RanOutOnTheLeft(state, pos) ? MatchStatus.Partial : MatchStatus.Failure;
                         }
 
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(pos), folded);
+                        foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharBefore(pos), folded);
                         foldedPos = 0;
                     }
 
-                    if (!SameCharIgn(state.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
+                    if (!SameCharIgn(test.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3230,13 +7586,14 @@ internal static class Matcher
     /// <c>try_match_STRING_IGN</c> (<c>upstream/src/_regex.c:7405</c> against <c>:7583</c>) and
     /// between their two reversed twins (<c>:7655</c> against <c>:7622</c>).
     /// </summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="op">The string opcode.</param>
+    /// <param name="test">The string node.</param>
     /// <param name="ch">The character from the subject.</param>
     /// <param name="value">The character from the pattern.</param>
     /// <returns><see langword="true"/> if they match.</returns>
-    private static bool SameStringChar(MatchState state, Opcode op, uint ch, uint value) =>
-        op is Opcode.StringIgn or Opcode.StringIgnRev ? SameCharIgn(state.Encoding, ch, value) : SameChar(ch, value);
+    private static bool SameStringChar(Node test, uint ch, uint value) =>
+        test.Op is Opcode.StringIgn or Opcode.StringIgnRev
+            ? SameCharIgn(test.Encoding, ch, value)
+            : SameChar(ch, value);
 
     /// <summary>
     /// Whether a <c>LAZY_REPEAT_ONE</c> backtrack has run out of text for its tail before it can
@@ -3259,10 +7616,17 @@ internal static class Matcher
     /// has run out, where a narrowed slice ends the repeat by its own <c>limit</c> - and the two are
     /// the same number anyway, because <c>text_end</c> IS the slice end. Backwards the reversed arms
     /// go through <see cref="RanOutOnTheLeft"/>, which asks <c>slice_start</c> rather than
-    /// upstream's always-zero <c>text_start</c>. A character tail is about to test the character one
-    /// step on, so it guards a step further out than a string tail, which guards at
-    /// <paramref name="pos"/> itself; upstream's <c>pos + 1</c> and <c>pos - 1</c> are codepoint
-    /// steps, hence <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
+    /// upstream's always-zero <c>text_start</c>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM for a character tail, deliberately: it guards at
+    /// <paramref name="pos"/>, as a string tail does, where upstream's four <c>CHARACTER</c> arms
+    /// guard one step further out (<c>pos + 1 &gt;= text_end</c>, <c>pos - 1 &lt;= text_start</c>).
+    /// That step is the repetition the arm has not tried yet, so upstream answers a partial when the
+    /// repeat cannot take it at all - the item refuses the last character, or the repeat is at its
+    /// maximum - and no continuation of the text can complete the match: `(?r)ab??` over 'c' and
+    /// `([^a-f]{3,}?)x` over '__AAb' (ledger entry 2). When the repeat CAN take it, the loop below
+    /// does, and the tail's own test at the end of the text answers the partial.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -3272,12 +7636,14 @@ internal static class Matcher
     private static bool IsTailPartial(MatchState state, Node test, int pos) =>
         test.Op switch
         {
-            Opcode.Character or Opcode.CharacterIgn => state.NextPos(pos) >= state.TextEnd
-                && state.PartialSide == MatchState.PartialRight,
-            Opcode.CharacterRev or Opcode.CharacterIgnRev => RanOutOnTheLeft(state, state.PrevPos(pos)),
-            Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos >= state.TextEnd
-                && state.PartialSide == MatchState.PartialRight,
-            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
+            Opcode.Character or Opcode.CharacterIgn or Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos
+                >= state.TextEnd
+                && state.RunsOutRight,
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.StringRev
+            or Opcode.StringIgnRev
+            or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
             _ => false,
         };
 
@@ -3329,6 +7695,120 @@ internal static class Matcher
                 or Opcode.SetSymDiffIgnRev
                 or Opcode.SetUnionRev
                 or Opcode.SetUnionIgnRev;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the bytes the second pass's two stacks may hold before the attempt
+    /// answers the budget's partial (<see cref="SecondPassStackIsOverBudget"/>): a quarter of the
+    /// stack's 1 GB limit.
+    /// </summary>
+    private const long _secondPassStackBudget = 1L << 28;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4 (design section 4.4): counts one fork of the current attempt, a
+    /// blocked construct that keeps more than one outcome (a blocked cut, a skipped verb, a negative
+    /// lookaround or test that passes undetermined, a condition that takes both branches). Past
+    /// 256 (|t| + 1) forks the budget is spent, and the matcher's next cancellation check, which
+    /// this brings forward, answers the partial at the attempt's start (<see cref="ForkBudgetPartial"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count is per attempt, because a search makes one attempt per start and a per-call count
+    /// grows with the starts: `a*(?=.*z)b` over 'a' * n + 'c' crosses a per-call budget from about
+    /// n = 256 (review round 3). The check rides on the cancellation gate, so a matching step pays
+    /// nothing for it; only the second pass forks (assert A6).
+    /// </para>
+    /// <para>
+    /// Each fork is counted at one site: an atomic group's or possessive repeat's blocked cut
+    /// (<see cref="BlockAtomicCut"/>), a skipped verb (<see cref="SkipABlockedVerb"/>), a positive
+    /// lookaround's or test's blocked end that goes on (<see cref="EndALookaroundInTheSecondPass"/>),
+    /// a negative lookaround passing undetermined (the LOOKAROUND backtracking arm), a negative test
+    /// taking both branches (the CONDITIONAL backtracking arm), and a group-exists condition on an
+    /// unknown capture (the GROUP_EXISTS arm). A negative construct's blocked body successes are not
+    /// forks of their own, and a positive test's no-branch is one of the outcomes its blocked ends
+    /// counted; counting those too made one construct two forks (chunk 9 review, finding 3).
+    /// <c>PartialForkBudgetTests.Each_fork_is_counted_once</c> witnesses every site.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void CountFork(MatchState state)
+    {
+        Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass forks");
+        if (++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1) && !state.ForkBudgetSpent)
+        {
+            state.ForkBudgetSpent = true;
+
+            // The next step wraps the counter to zero, which opens the cancellation gate.
+            state.Iterations = 0xFF00;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the second pass's stack budget. A partial call's second pass keeps
+    /// every blocked lookaround body's entries for the continuations where the body matched
+    /// otherwise, so lookarounds over repeats nested d deep keep O(n^(d + 1)) bytes, where the first
+    /// pass keeps the body of one. Past <see cref="_secondPassStackBudget"/> bytes on the two stacks
+    /// the budget is spent like the fork budget, and the call answers the budget's partial
+    /// (<see cref="ForkBudgetPartial"/>) instead of throwing at the stack's 1 GB limit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked at the cancellation gate, every 256 steps. A blocked end and REOPEN only move bytes
+    /// between the two stacks, so the total grows by one step's pushes at a time, and between two
+    /// checks by at most 256 of them: the stacks never hold more than the budget plus 256 times the
+    /// largest single step, whatever n and the nesting depth. That step is a frame's captures,
+    /// repeats and fuzzy state, so it grows with the pattern's groups and repeats (tens of bytes
+    /// each). The budget is a quarter of the limit, and a stack throws when its doubling would reach
+    /// the limit, at half of it (512 MB), so the budget fires first while one step pushes under
+    /// 1 MB, which takes a pattern of tens of thousands of groups.
+    /// </para>
+    /// <para>
+    /// `(?:(?=(?:(?=(?:ab)*(?&lt;=b))ab)*)ab)*c` over 'ab' * 500 threw at the limit (D11's repeat run-out
+    /// rule exposed it, 2026-10-04); it now answers P(0, 1000), a phantom of class C5, as X1 does
+    /// through the fork budget. A first pass and a call without partial pay the one test of
+    /// <see cref="MatchState.PartialSide"/>, once every 256 steps.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the attempt must stop with the budget's partial.</returns>
+    private static bool SecondPassStackIsOverBudget(MatchState state)
+    {
+        if (
+            state.PartialSide == MatchState.PartialNone
+            || (long)state.Bstack.Count + state.Sstack.Count <= _secondPassStackBudget
+        )
+        {
+            return false;
+        }
+
+        state.ForkBudgetSpent = true;
+        state.NotePartialEvent(PartialEvent.StackBudgetFired);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11 M4: the attempt whose fork budget is spent stops, and the call answers
+    /// the partial at the attempt's start, which for a search is the leftmost start not yet ruled
+    /// out.
+    /// </summary>
+    /// <remarks>
+    /// A partial is never a refusal, so the budget cannot lose a match (design section 1); each
+    /// firing is a phantom of class C5 (section 6). No path completed, so no capture is attested
+    /// and the groups are cleared, with a group call open too:
+    /// <see cref="BasicMatch"/> does not put the caller's groups back for this partial.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see cref="MatchStatus.Partial"/>.</returns>
+    private static int ForkBudgetPartial(MatchState state)
+    {
+        state.MatchPos = state.ForkAttemptStart;
+        state.ClearGroups();
+        state.NotePartialEvent(PartialEvent.BudgetFired);
+#if DEBUG
+        state.ForkBudgetAnswered = true;
+#endif
+
+        return MatchStatus.Partial;
+    }
 
     /// <summary>
     /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266). Upstream's two
@@ -3403,6 +7883,61 @@ internal static class Matcher
         return pos;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D37), Debug only: what a match must satisfy when it reaches SUCCESS.
+    /// </summary>
+    /// <remarks>
+    /// Every call has returned and every fuzzy section has closed, so each section's END_FUZZY has
+    /// checked its limits against counts that include every section nested in it, a recursive
+    /// instance of itself included (the merge at the END_FUZZY arm). That is what makes the third
+    /// invariant - each section within its limits at a match - hold without being asserted here:
+    /// a section that never closed was never checked, which is how D37's '(?:z(?R)?){e&lt;=1}' over
+    /// 'b' reported two errors. The counts and the change list describe the same errors, and the
+    /// running total is their sum.
+    /// </remarks>
+    /// <param name="state">The state at SUCCESS.</param>
+    [Conditional("DEBUG")]
+    private static void AssertMatchIsClosed(MatchState state)
+    {
+        // The oracle's ablations reproduce upstream's D37, D44 and D45 on purpose.
+        Debug.Assert(
+            state.OpenCalls.Count == 0 || state.Pattern.MatchMayEndInsideTheWholePatternCall,
+            "a match never ends inside a group call"
+        );
+
+        Debug.Assert(
+            state.FuzzyNode is null
+                || state.Pattern.KeepSectionOpenAfterAVerb
+                || state.Pattern.MatchMayEndInsideTheWholePatternCall,
+            "a match never ends inside a fuzzy section"
+        );
+
+        Span<long> kinds = stackalloc long[3];
+        foreach (FuzzyChange change in state.FuzzyChanges)
+        {
+            ++kinds[change.Type];
+        }
+
+        // Under D37's ablation the recursive instance's changes stay listed after its counts are
+        // lost, and the match reports the first count of each list, as upstream does (:20522).
+        Debug.Assert(
+            state.Pattern.MatchMayEndInsideTheWholePatternCall
+                || (
+                    kinds[FuzzyValue.Sub] == state.FuzzyCounts[FuzzyValue.Sub]
+                    && kinds[FuzzyValue.Ins] == state.FuzzyCounts[FuzzyValue.Ins]
+                    && kinds[FuzzyValue.Del] == state.FuzzyCounts[FuzzyValue.Del]
+                ),
+            "the counts are the lengths of the change lists, kind by kind"
+        );
+
+        Debug.Assert(
+            !state.Pattern.IsFuzzy
+                || state.Pattern.KeepDiscardedTotals
+                || state.TotalErrors == TotalErrors(state.FuzzyCounts),
+            "the running total is the sum of the kinds"
+        );
+    }
+
     /// <summary>Upstream <c>total_errors</c> (<c>upstream/src/_regex.c</c> line 9643).</summary>
     /// <param name="fuzzyCounts">The counts.</param>
     /// <returns>Their sum.</returns>
@@ -3434,7 +7969,11 @@ internal static class Matcher
     private static bool AnyErrorPermitted(MatchState state)
     {
         long[] fuzzyCounts = state.FuzzyCounts;
-        Node fuzzyNode = state.FuzzyNode!;
+
+        // A fuzzy item is compiled only inside a fuzzy section or a fuzzy copy of a called group,
+        // and a copy runs only from a call inside a section. D40 was a copy that broke this.
+        Debug.Assert(state.FuzzyNode is not null, "A fuzzy item ran with no fuzzy section in force.");
+        Node fuzzyNode = state.FuzzyNode;
         List<uint> values = fuzzyNode.Values;
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
@@ -3541,6 +8080,80 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether counts that fail <see cref="FuzzyWithinConstraints"/> at the end of their section
+    /// fail it only for want of insertions: an insertion or error minimum is unmet, and the section
+    /// would be legal with just enough more insertions to meet it.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 51, known defect D9). Counts only rise along a path, and a trailing
+    /// insertion raises the insertion and error counts and nothing else, so no run of them can meet
+    /// an unmet substitution or deletion minimum, or bring back a maximum already passed. Adding the
+    /// fewest insertions that would meet the minimums and asking the constraints again answers both:
+    /// with more than that, every count limited above is only higher.
+    /// <para>
+    /// The same holds for each enclosing section, whose counts will include these insertions once
+    /// this section closes (END_FUZZY adds the inner counts to the outer ones,
+    /// <c>upstream/src/_regex.c</c>:12475-12481). Where one of them cannot take that many more
+    /// insertions or errors, the insertions only lead to its own END_FUZZY failing. Row A of
+    /// <c>FailedCallMemoTests</c>, whose outer section permits no insertion at all, spent a quarter
+    /// more time on them without that check (2026-09-28).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, for the enclosing sections.</param>
+    /// <param name="fuzzyCounts">The section's counts.</param>
+    /// <param name="fuzzyNode">The section.</param>
+    /// <returns><see langword="true"/> if trailing insertions can make the section legal.</returns>
+    private static bool InsertionsCanMeetMinimum(MatchState state, ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
+    {
+        List<uint> values = fuzzyNode.Values;
+        long needed = Math.Max(
+            values[FuzzyValue.MinIns] - fuzzyCounts[FuzzyValue.Ins],
+            values[FuzzyValue.MinErr] - TotalErrors(fuzzyCounts)
+        );
+        if (needed <= 0)
+        {
+            return false;
+        }
+
+        Span<long> raised = stackalloc long[FuzzyValue.Count];
+        fuzzyCounts.CopyTo(raised);
+        raised[FuzzyValue.Ins] += needed;
+        if (!FuzzyWithinConstraints(raised, fuzzyNode, state.MaxErrors))
+        {
+            return false;
+        }
+
+        // The enclosing sections: see the remarks. Their counts at entry plus this section's.
+        int frame = state.SectionFrame;
+        if (frame < 0)
+        {
+            return true;
+        }
+
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+        {
+            for (int kind = 0; kind < FuzzyValue.Count; kind++)
+            {
+                raised[kind] += outerCounts[kind];
+            }
+
+            List<uint> outerValues = outer.Values;
+            if (
+                raised[FuzzyValue.Ins] > outerValues[FuzzyValue.MaxIns]
+                || TotalErrors(raised) > outerValues[FuzzyValue.MaxErr]
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Whether a reversed match has run out of the text it is allowed to match, which is the
     /// question every left-hand partial match turns on. <b>This is the one place the left edge is
     /// decided</b>; every site that reports a partial on the left asks it here.
@@ -3583,7 +8196,21 @@ internal static class Matcher
     /// <param name="textPos">The position the match has reached.</param>
     /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
     private static bool RanOutOnTheLeft(MatchState state, int textPos) =>
-        state.PartialSide == MatchState.PartialLeft && textPos <= state.SliceStart;
+        state.RunsOutLeft && textPos <= state.SliceStart;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: whether the next character a repeat would take from
+    /// <paramref name="textPos"/>, travelling by <paramref name="step"/>, lies in the text to come
+    /// of a partial call's second pass, so that taking it runs out. The oracle's pre-D11 ablation
+    /// answers <see langword="false"/>, as upstream.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The repeat's position.</param>
+    /// <param name="step">1 forward, -1 reversed.</param>
+    /// <returns><see langword="true"/> if taking another character runs out.</returns>
+    private static bool RunsOutPast(MatchState state, int textPos, long step) =>
+        !state.Pattern.SecondPassAsBeforeD11
+        && (step > 0 ? state.RunsOutRight && textPos >= state.TextEnd : RanOutOnTheLeft(state, textPos));
 
     /// <summary>
     /// The same edge as <see cref="RanOutOnTheLeft"/>, for a position that has already stepped PAST
@@ -3599,20 +8226,17 @@ internal static class Matcher
     /// <param name="textPos">The position the match has been moved to.</param>
     /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
     private static bool SteppedPastTheLeft(MatchState state, int textPos) =>
-        state.PartialSide == MatchState.PartialLeft && textPos < state.SliceStart;
+        state.RunsOutLeft && textPos < state.SliceStart;
 
     /// <summary>Upstream <c>check_fuzzy_partial</c> (line 9751).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position the error would have moved to.</param>
     /// <returns><see cref="MatchStatus.Partial"/> if the subject ran out, else failure.</returns>
     private static int CheckFuzzyPartial(MatchState state, int textPos) =>
-        state.PartialSide switch
-        {
-            // 'slice_start', not upstream's 'text_start': see 'SteppedPastTheLeft'.
-            MatchState.PartialLeft when SteppedPastTheLeft(state, textPos) => MatchStatus.Partial,
-            MatchState.PartialRight when textPos > state.TextEnd => MatchStatus.Partial,
-            _ => MatchStatus.Failure,
-        };
+        // 'slice_start', not upstream's 'text_start': see 'SteppedPastTheLeft'.
+        SteppedPastTheLeft(state, textPos) || (state.RunsOutRight && textPos > state.TextEnd)
+            ? MatchStatus.Partial
+            : MatchStatus.Failure;
 
     /// <summary>
     /// Upstream <c>save_fuzzy_changes</c> (line 9899): takes a copy of the errors the current match
@@ -3697,14 +8321,14 @@ internal static class Matcher
             or Opcode.SetInterIgn
             or Opcode.SetSymDiffIgn
             or Opcode.SetUnionIgn => pos < state.SliceEnd
-                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)) == testNode.Match,
+                && MatchesOne(testNode.Encoding, testNode, state.CharAt(pos)) == testNode.Match,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.PropertyRev
             or Opcode.PropertyIgnRev
             or Opcode.RangeRev
             or Opcode.RangeIgnRev => pos > state.SliceStart
-                && MatchesOne(state.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
+                && MatchesOne(testNode.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
             _ => true,
         };
     }
@@ -3747,6 +8371,18 @@ internal static class Matcher
                     return MatchStatus.Failure;
                 }
 
+                // NOT UPSTREAM (finding F-A): see DeletionRepeatsAnEarlierAlternative.
+                if (!isString && DeletionRepeatsAnEarlierAlternative(state, data.NewNode!, step))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                // NOT UPSTREAM (ledger entry 44's addendum): see DeletionEmptiesAnOptionalPass.
+                if (!isString && DeletionEmptiesAnOptionalPass(state, data.NewNode!))
+                {
+                    return MatchStatus.Failure;
+                }
+
                 AdvanceItem(state, ref data, isString, step);
 
                 return MatchStatus.Success;
@@ -3774,7 +8410,23 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, data.NewTextPos);
+                // NOT UPSTREAM'S, D11 RC5 (design section 4.5): the position after the insertion,
+                // as the substitution arm below passes. Upstream passes the position before it
+                // (:10156), which is never past the edge, so an insertion that needs the character
+                // after the text failed instead of running out. S57d's note hid that until M1
+                // decided the tests at the edge: `(?:a\m){i<=1}` over 'a' ('a' + ' ' matches). The
+                // oracle's pre-D11 ablation keeps upstream's argument.
+                if (
+                    CheckFuzzyPartial(state, state.Pattern.SecondPassAsBeforeD11 ? data.NewTextPos : newPos)
+                    == MatchStatus.Partial
+                )
+                {
+                    state.NotePartialEvent(PartialEvent.InsertionRunOut);
+
+                    return MatchStatus.Partial;
+                }
+
+                return MatchStatus.Failure;
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 if (step == 0)
@@ -3842,6 +8494,901 @@ internal static class Matcher
     private static int FuzzyChangePos(MatchState state, in FuzzyData data) =>
         data.FuzzyType == FuzzyValue.Del ? data.NewTextPos : Step(state, data.NewTextPos, -data.Step);
 
+    /// <summary>
+    /// The fuzzy type of a frame pushed for an item that matched exactly. No error was recorded for
+    /// it, so a retry takes nothing back, and the only alternative left to try is
+    /// <see cref="FuzzyValue.Del"/>.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (finding F-A, 2026-09-26). Upstream tries errors on an item only when it fails
+    /// to match (<c>fuzzy_match_item</c>, <c>upstream/src/_regex.c</c>:10185-10258), and an item
+    /// that matches pushes nothing (the one-character arms at :11924-11927, the string arms at
+    /// :14742-14745). So an item that matched exactly is never tried as a deletion when the rest of
+    /// the pattern then fails, and a match within the budget is lost:
+    /// <c>regex.match(r'(?:a){d&lt;=1}a', 'a')</c> is None, though deleting the fuzzy <c>a</c> is
+    /// one deletion. Upstream defines a deletion as a pattern item absent from the text
+    /// (<c>upstream/README.rst</c>:538-566), so <c>(?:a){d&lt;=1}</c> has the paths of
+    /// <c>(?:a|)</c>: the <c>a</c> first, then nothing. The port pushes the "delete it instead"
+    /// choice at the moment the item matches, so it is tried after everything that follows the
+    /// exact match has failed and before any earlier choice is retried: the place upstream tries
+    /// the errors of an item that fails (README.rst:609, <c>(?:cats|cat){e&lt;=1}</c>).
+    /// </remarks>
+    private const byte _exactFuzzyType = byte.MaxValue;
+
+    /// <summary>
+    /// The fuzzy type of a full-case-folded frame whose exact-deletion retry
+    /// (<see cref="_exactFuzzyType"/>) has been taken. Its retry takes the deletion back and fails.
+    /// </summary>
+    /// <remarks>
+    /// Pushed back as an ordinary deletion, the frame would go on, at an expanding subject
+    /// character, to the whole-character kinds: the edits <c>OfferWholeFoldedCharEdit</c>'s frame
+    /// beneath it tries anyway, without that frame's filter on a substitution that repeats a folded
+    /// insertion. Measured on <c>(?fi)fi(?:(?:ssaffiffii){e&lt;=3}(?:ffis|fitstss)|)</c>: 1.94 times
+    /// the engine steps, and 7% more over 8,000 random <c>(?fi)</c> rows (review, 2026-09-29).
+    /// </remarks>
+    private const byte _exactDeletionDone = byte.MaxValue - 1;
+
+    /// <summary>
+    /// The "needed" rule: whether a repeat iteration that consumed no text and spent fuzzy edits may
+    /// stand. Otherwise it fails.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (empty-iteration rule, 2026-09-26; docs/plan/2026-09-26-empty-iteration-survey.md).
+    /// It is admitted only if something needs it: (a) the repeat is still below its minimum count;
+    /// (b) its edits raise a count that an open fuzzy section has an unmet minimum for; or (c) it
+    /// changed the span of a group a backreference or conditional tests, which is upstream's own
+    /// progress test without the fuzzy edits upstream also counts. Each admission raises the count,
+    /// a count toward a finite minimum, or a tested span (which inside an empty iteration can only
+    /// end at the current position), so a run of them ends.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration already counted.</param>
+    /// <param name="endNode">The repeat's end node; its second value is the minimum.</param>
+    /// <param name="groupChanged">Whether it changed a tested group's span.</param>
+    /// <returns><see langword="true"/> if the iteration stands.</returns>
+    private static bool EmptyIterationAdmitted(MatchState state, RepeatData rpData, Node endNode, bool groupChanged)
+    {
+        if (rpData.Count <= endNode.Values[1] || groupChanged)
+        {
+            return true;
+        }
+
+        // The iteration's edits by kind. Most are deletions, but a lookaround in the body can
+        // substitute or insert and still leave the position where the iteration began.
+        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        for (int i = IterationChanges(rpData); i < changes.Count; i++)
+        {
+            edits[changes[i].Type]++;
+        }
+
+        return RaisesUnmetMinimum(state, edits, counted: true);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the 2-way branch of an alternative with an
+    /// alternative written empty after it has been taken. Records where the pass begins in the
+    /// alternation's slot (<see cref="MatchState.OptionalPasses"/>), for its <c>END_OPTIONAL_PASS</c>
+    /// (<see cref="OptionalPassAdmitted"/>), and pushes the slot's previous value so backtracking
+    /// puts it back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A slot per alternation, as a repeat has its <see cref="RepeatData"/>, so the pass's end reads
+    /// its start with no stack traffic. The start it reads is this pass's because nothing between
+    /// the branch and the pass's end can open another pass of the same alternation except a group
+    /// call, and a call saves every slot with the repeats (<see cref="PushRepeats"/>) and its return
+    /// restores them. Backtracking undoes the branch's entry before it tries the next alternative, or
+    /// before it re-enters anything that ran before the branch, so a slot always holds the start of
+    /// the innermost pass of its alternation still on the path.
+    /// </para>
+    /// <para>
+    /// The entry takes the place of the branch's own (<c>text_pos node BRANCH</c>): backtracking to
+    /// it restores the slot and then tries the next alternative, as <c>BRANCH</c>'s arm does. The
+    /// restore is needed only where one activation of the pattern or of a called group can pass
+    /// through the alternation more than once, which takes a repeat around it (the pass end's
+    /// second value, set by <c>NodeCompiler.BuildBranch</c>). A group call saves and restores every
+    /// slot in both directions, at the call and at the return and in both of their backtrack arms,
+    /// so each activation has its own. Elsewhere the branch pushes its own entry, and a stale slot
+    /// is never read: once backtracking has left a pass, the path reaches that pass's end again
+    /// only through its branch, which writes the slot anew.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="branch">
+    /// The 2-way branch of a pattern with optional passes. One that opens none pushes the branch's
+    /// own entry: the table lookup is here rather than in <c>BasicMatch</c>, whose frame every call
+    /// zeroes.
+    /// </param>
+    private static void OpenOptionalPass(MatchState state, Node branch)
+    {
+        if (state.Pattern.OptionalPassEndOf![branch.Index] is not { } passEnd)
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+            /* bstack: text_pos node BRANCH */
+            return;
+        }
+
+        uint slot = passEnd.Values[0];
+        if (passEnd.Values[1] != 0)
+        {
+            state.Bstack.PushBlock(
+                MemoryMarshal.AsBytes(new ReadOnlySpan<OptionalPassStart>(in state.OptionalPasses[slot]))
+            );
+            state.Bstack.PushCode(slot);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.EndOptionalPass);
+
+            /* bstack: previous_start slot text_pos node END_OPTIONAL_PASS */
+        }
+        else
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(branch.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+            /* bstack: text_pos node BRANCH */
+        }
+
+        state.OptionalPasses[slot] = new OptionalPassStart(
+            state.TextPos,
+            state.FuzzyChanges.Count,
+            state.CaptureChange,
+            state.VerbsCrossed
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether deleting <paramref name="node"/> here,
+    /// the last item of an alternative with an alternative written empty after it, leaves a pass
+    /// that <see cref="OptionalPassAdmitted"/> fails at <c>END_OPTIONAL_PASS</c>, the item's next
+    /// node. Then the deletion holds nothing and is not tried.
+    /// </summary>
+    /// <remarks>
+    /// It is that check with the pass's edits known to be this one deletion: the pass began here,
+    /// with no edit and no change to a tested group since, so the deletion is its only edit, it
+    /// consumes nothing and it changes no group. Asked where an item that matched offers its
+    /// deletion (<see cref="PushExactItemDeletion"/>) and where an item that failed tries one
+    /// (<see cref="NextFuzzyMatchItem"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The one-character item about to be deleted.</param>
+    /// <returns><see langword="true"/> if the deletion can be left out.</returns>
+    private static bool DeletionEmptiesAnOptionalPass(MatchState state, Node node) =>
+        node.Next1.Node is { Op: Opcode.EndOptionalPass } passEnd
+        && !state.Pattern.UpstreamEmptyIterations
+        && state.OptionalPasses[passEnd.Values[0]] is var pass
+        && pass.TextPos == state.TextPos
+        && pass.Changes == state.FuzzyChanges.Count
+        && MatchState.GroupChanges(pass.CaptureChange) == MatchState.GroupChanges(state.CaptureChange)
+        && !VerbCutPast(state, pass.Verbs)
+        && !RaisesUnmetMinimum(state, _oneDeletion, counted: false);
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether a pass through an alternative with an
+    /// alternative written empty after it may stand. Otherwise it fails.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An empty alternative after X is the exit of an optional, the same as the zero iterations of
+    /// <c>X?</c>, so a pass that consumed no text and spent errors is dominated by it: the empty
+    /// alternative reaches the same position with the same groups and fewer errors, and it is always
+    /// tried later. So the pass stands only if something needs its errors, by the rule
+    /// <see cref="EmptyIterationAdmitted"/> applies to a repeat: they raise an open section's unmet
+    /// minimum, or the pass changed the span of a group a backreference or conditional tests.
+    /// <c>(?:a|){d&lt;=1}</c> over <c>''</c> then has no errors, as <c>(?:a?){d&lt;=1}</c> has.
+    /// </para>
+    /// <para>
+    /// A pass that crossed a <c>(*PRUNE)</c> or <c>(*SKIP)</c> that cuts past it (<see cref="VerbCutPast"/>)
+    /// stands, in plain order. The rule is this
+    /// port's own pruning, so it must never do more than an ordinary failure would, and a verb cuts
+    /// the backtracking stack when it is crossed (the empty exit's choice goes with it) or unwinds
+    /// past it when backtracking reaches it (ledger entry 47): failing the pass would then end the
+    /// attempt, and <c>(?:b(*SKIP)|){d&lt;=1}</c> over <c>''</c> answered None where upstream has
+    /// (0, 0) with one deletion. Deciding before the verb is crossed would need to know that nothing
+    /// after it in the pass consumes text, which only the pass's end knows.
+    /// </para>
+    /// <para>
+    /// Off under <see cref="PatternObject.UpstreamEmptyIterations"/>, the oracle's ablation, which
+    /// puts back upstream's answer for the repeat and the alternation alike.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pass">Where the pass began.</param>
+    /// <returns><see langword="true"/> if the pass stands.</returns>
+    private static bool OptionalPassAdmitted(MatchState state, OptionalPassStart pass)
+    {
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        Debug.Assert(changes.Count >= pass.Changes, "fuzzy changes only grow along a path");
+        if (
+            state.TextPos != pass.TextPos
+            || changes.Count == pass.Changes
+            || state.Pattern.UpstreamEmptyIterations
+            || MatchState.GroupChanges(state.CaptureChange) != MatchState.GroupChanges(pass.CaptureChange)
+            || VerbCutPast(state, pass.Verbs)
+        )
+        {
+            return true;
+        }
+
+        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        for (int i = pass.Changes; i < changes.Count; i++)
+        {
+            edits[changes[i].Type]++;
+        }
+
+        return RaisesUnmetMinimum(state, edits, counted: true);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44 and its addendum): what an iteration records as its start,
+    /// <see cref="RepeatData.ChangesAtStart"/>: how many fuzzy changes had been made, and in the
+    /// high 32 bits how many verbs had been crossed (<see cref="MatchState.VerbsCrossed"/>), so
+    /// both ride every save and restore the change count already has.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The packed start.</returns>
+    private static long IterationStart(MatchState state) =>
+        (uint)state.FuzzyChanges.Count | ((long)state.VerbsCrossed << 32);
+
+    /// <summary>The change count half of <see cref="IterationStart"/>.</summary>
+    /// <param name="rpData">The repeat.</param>
+    /// <returns>How many fuzzy changes had been made when the iteration began.</returns>
+    private static int IterationChanges(RepeatData rpData) => (int)rpData.ChangesAtStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether the iteration now ending crossed a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> that cuts past its start (<see cref="VerbCutPast"/>). Then an
+    /// empty iteration the needed rule would fail stands,
+    /// but the repeat takes no further iteration from it and the memo does not record it.
+    /// </summary>
+    /// <remarks>
+    /// Failing it would do more than an ordinary failure: the verb has cut the choice of leaving the
+    /// repeat, so backtracking would end the attempt (see <see cref="OptionalPassAdmitted"/>);
+    /// <c>(?:(?:b(*SKIP))?){d&lt;=1}</c> over <c>''</c> answered None where upstream has (0, 0) with
+    /// one deletion. Standing without another iteration is upstream's answer wherever the budget ends
+    /// the loop, and it keeps the loop finite where a section inside the body restarts its budget,
+    /// which in upstream goes on to MemoryError (entry 33): <c>(?:(?:(*PRUNE)a){1&lt;=d&lt;=1})+</c> over
+    /// <c>'c'</c> now matches (0, 0) with two deletions.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, whose iteration start <see cref="IterationStart"/> recorded.</param>
+    /// <returns><see langword="true"/> if it did.</returns>
+    private static bool CrossedAVerb(MatchState state, RepeatData rpData) =>
+        VerbCutPast(state, (int)(rpData.ChangesAtStart >> 32));
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): whether a verb crossed since the pass or iteration
+    /// now ending began cuts past its start, so that failing it would lose the exit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The structure of a pass is balanced, so every atomic group, lookaround and conditional it
+    /// opened it has closed, and <see cref="MatchState.Pstack"/> is as deep as when it began. A verb
+    /// crossed with the pruning stack no deeper than that cuts to a mark set before the pass: the
+    /// attempt's own, or an enclosing group's, which for an unfinished atomic group or positive
+    /// lookaround the verb unwinds past when backtracking reaches it (ledger entry 47). Either way
+    /// the exit's choice is gone. A verb crossed deeper cut to a group the pass opened, and that
+    /// group has finished and taken the verb's effect with it, as in <c>(?:(?&gt;(*PRUNE))a|)</c>, so
+    /// the rule applies as it would without the verb (blind review of 41a281a).
+    /// </para>
+    /// <para>
+    /// A scan, but only of the verbs this pass crossed, and only where the rule would fail it.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="verbsAtStart"><see cref="MatchState.VerbsCrossed"/> when the pass began.</param>
+    /// <returns><see langword="true"/> if one does.</returns>
+    private static bool VerbCutPast(MatchState state, int verbsAtStart)
+    {
+        List<int> marks = state.VerbMarks;
+        int depth = state.Pstack.Count;
+        for (int i = verbsAtStart; i < marks.Count; i++)
+        {
+            if (marks[i] <= depth)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="edits"/>, counted by kind, raise a count that an open fuzzy section
+    /// has a minimum for and has not yet reached: the minimum for one of their own kinds, or an
+    /// <c>e</c> minimum.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An enclosing section counts the errors of the sections open inside it, since END_FUZZY adds
+    /// the inner counts to the outer ones (<c>upstream/src/_regex.c</c>:12475-12481); its count is
+    /// what it had when the inner section was entered (<see cref="MatchState.TryOuterSection"/>) plus
+    /// the inner section's own.
+    /// </para>
+    /// <para>
+    /// Each kind is asked about on its own. Taking every edit of an empty iteration for a deletion
+    /// took a substitution made inside a lookaround off the deletion count, which then stood below
+    /// zero and so below every <c>d</c> minimum, and every further empty iteration was admitted:
+    /// <c>(?:(?=b{e&lt;=1})*){1&lt;=e&lt;=2}</c> over <c>c</c> grew the backtracking stack to its
+    /// limit (blind review of 7277fb6, 2026-09-27).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="edits">
+    /// The edits, indexed by <see cref="FuzzyValue.Sub"/>, <see cref="FuzzyValue.Ins"/> and
+    /// <see cref="FuzzyValue.Del"/>.
+    /// </param>
+    /// <param name="counted">
+    /// Whether the counts already include them (an iteration that made them), rather than their
+    /// being about to be made (a deletion not yet taken).
+    /// </param>
+    /// <returns><see langword="true"/> if they do.</returns>
+    private static bool RaisesUnmetMinimum(MatchState state, ReadOnlySpan<long> edits, bool counted)
+    {
+        if (!state.Pattern.HasFuzzyMinimum || state.SectionFrame < 0 || state.FuzzyNode is not { } section)
+        {
+            return false;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long taken = counted ? 1 : 0;
+        long sub = counts[FuzzyValue.Sub] - (taken * edits[FuzzyValue.Sub]);
+        long ins = counts[FuzzyValue.Ins] - (taken * edits[FuzzyValue.Ins]);
+        long del = counts[FuzzyValue.Del] - (taken * edits[FuzzyValue.Del]);
+        int frame = state.SectionFrame;
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (true)
+        {
+            List<uint> values = section.Values;
+            if (
+                (edits[FuzzyValue.Sub] > 0 && sub < values[FuzzyValue.MinSub])
+                || (edits[FuzzyValue.Ins] > 0 && ins < values[FuzzyValue.MinIns])
+                || (edits[FuzzyValue.Del] > 0 && del < values[FuzzyValue.MinDel])
+                || sub + ins + del < values[FuzzyValue.MinErr]
+            )
+            {
+                return true;
+            }
+
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
+            {
+                return false;
+            }
+
+            sub += outerCounts[FuzzyValue.Sub];
+            ins += outerCounts[FuzzyValue.Ins];
+            del += outerCounts[FuzzyValue.Del];
+            section = outer;
+        }
+    }
+
+    /// <summary>
+    /// Whether the counts as they stand already meet every minimum of the open section and of the
+    /// sections enclosing it, each counting the errors of the sections inside it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if they all do.</returns>
+    private static bool AllMinimumsMet(MatchState state)
+    {
+        if (state.SectionFrame < 0 || state.FuzzyNode is not { } section)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long sub = counts[FuzzyValue.Sub];
+        long ins = counts[FuzzyValue.Ins];
+        long del = counts[FuzzyValue.Del];
+        int frame = state.SectionFrame;
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (true)
+        {
+            List<uint> values = section.Values;
+            if (
+                sub < values[FuzzyValue.MinSub]
+                || ins < values[FuzzyValue.MinIns]
+                || del < values[FuzzyValue.MinDel]
+                || sub + ins + del < values[FuzzyValue.MinErr]
+            )
+            {
+                return false;
+            }
+
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
+            {
+                return true;
+            }
+
+            sub += outerCounts[FuzzyValue.Sub];
+            ins += outerCounts[FuzzyValue.Ins];
+            del += outerCounts[FuzzyValue.Del];
+            section = outer;
+        }
+    }
+
+    /// <summary>
+    /// The repeat memo: whether an earlier path through the current run of this repeat already
+    /// reached the state this iteration has led to; if not, records it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (empty-iteration rule). The state is everything the rest of the match can depend
+    /// on: the text position, the count (clipped to the minimum when there is no maximum, since the
+    /// counts beyond it are alike), the open section's error counts (the enclosing sections' are
+    /// fixed for a run) and the spans of the tested groups. Dropping the later path is exact: two
+    /// paths with equal states are never on one branch, because every iteration that is keyed moves
+    /// the position or raises the count, an error count or a tested span, and none of these goes
+    /// down. So the earlier path was explored to its end first, with the same future; had it held a
+    /// match the search would have returned it. It is upstream's repeat guard
+    /// (<c>guard_repeat</c>, <c>_regex.c</c>:9446), which <c>is_repeat_guarded</c> switches off for
+    /// a fuzzy pattern (:9564-9566) because a position alone is not a state, keyed by the state.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: a memo stops recording at 2^20 states, after which it only answers from what it
+    /// holds: correct, and slower only on a run of the repeat that reaches that many.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration counted.</param>
+    /// <param name="endNode">The repeat's end node: minimum in its second value, maximum in its third.</param>
+    /// <returns><see langword="true"/> if the state was already reached.</returns>
+    private static bool RepeatMemoHit(MatchState state, RepeatData rpData, Node endNode)
+    {
+        long count = rpData.Count;
+        if (~endNode.Values[2] == 0)
+        {
+            count = Math.Min(count, endNode.Values[1]);
+        }
+
+        int[] groups = state.Pattern.MemoGroups;
+        long[] counts = state.FuzzyCounts;
+        var key = new RepeatMemoKey(
+            state.TextPos,
+            count,
+            counts[FuzzyValue.Sub],
+            counts[FuzzyValue.Ins],
+            counts[FuzzyValue.Del],
+            groups.Length > 0 ? PackedSpan(state.Groups[groups[0] - 1]) : 0,
+            groups.Length > 1 ? PackedSpan(state.Groups[groups[1] - 1]) : 0
+        );
+
+        rpData.Memo ??= [];
+        return rpData.Memo.Count < _repeatMemoCap ? !rpData.Memo.Add(key) : rpData.Memo.Contains(key);
+    }
+
+    /// <summary>One deletion, in the form <see cref="RaisesUnmetMinimum"/> takes edits.</summary>
+    private static ReadOnlySpan<long> _oneDeletion => [0, 0, 1];
+
+    /// <summary>The most states a repeat memo records in one run.</summary>
+    private const int _repeatMemoCap = 1 << 20;
+
+    /// <summary>A group's current span as one number, for a <see cref="RepeatMemoKey"/>.</summary>
+    /// <param name="group">The group.</param>
+    /// <returns>Start in the high half and end in the low half; unset is (-1, -1).</returns>
+    private static long PackedSpan(GroupData group)
+    {
+        GroupSpan span = group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1);
+        return ((long)(uint)span.Start << 32) | (uint)span.End;
+    }
+
+    /// <summary>
+    /// Whether deleting an item that has just matched exactly at <c>state.TextPos</c> could lead to
+    /// a match that the search will not already have found by the time the choice is tried.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The choice is tried only after everything that follows the exact match has failed, and it
+    /// can be left out whenever it holds no match: the search then goes on exactly as it would
+    /// have. Call the items that follow one another directly in a fuzzy section - characters of
+    /// one string, and one-character items chained by <c>next_1</c> - a run
+    /// (<see cref="Node.FuzzyRunLength"/>). Take a match that deletes an item X which matched
+    /// exactly at position p. If some later item of the run, W, is the first after X to use the
+    /// character at p (matching it, substituting it, or inserting it just before W), then letting
+    /// X match p and deleting W instead is also a match, with no more errors of any kind and the
+    /// same span and groups, since no group boundary lies inside a run. That match follows X's
+    /// exact match, so the search has already tried it and it failed: a contradiction. So the
+    /// choice can hold a match only if the budget can delete X AND everything after it in its run,
+    /// and the first node that reads text after the run can read the character at p.
+    /// </para>
+    /// <para>
+    /// Where the argument does not hold the choice is always kept
+    /// (<see cref="PatternObject.NarrowExactDeletions"/>), as it is for the items a run does not
+    /// model: group references, and full-case-folded strings, where one subject character can
+    /// answer for two pattern characters. The budget asked is the current section's and the whole
+    /// match's, not an enclosing section's, which can only keep a choice that could have gone.
+    /// </para>
+    /// <para>
+    /// A one-character item followed straight away by a repeat whose whole body is the same item,
+    /// as the compiler writes <c>\w+</c> (<c>\w\w*</c>), is looked through
+    /// (<see cref="IsRepeatOfSameItem"/>). In a match that deletes the item X at p, the repeat R
+    /// either takes no iterations or its first iteration that consumes text consumes p, and it can
+    /// only do that exactly, since R's body is X's test and X matched p (an error is tried only on
+    /// a mismatch). In the second case, letting X match p and leaving that iteration out is also a
+    /// match, with one deletion fewer; if R would then fall below its minimum, that iteration
+    /// instead becomes an empty deleting iteration at p + 1, which the empty-iteration rule admits
+    /// below the minimum, with the same counts. Either way the match follows X's exact match and
+    /// was tried first. Every other empty iteration of R stands in both for the same reason (below
+    /// the minimum; with every minimum met no section minimum can admit one, and R's body holds no
+    /// group). So only R taking no iterations remains, and then the run goes on from R's tail,
+    /// which needs R's minimum to be 0.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="remaining">How many items from this one to the end of its own node.</param>
+    /// <param name="next">The node after this item's own node.</param>
+    /// <param name="item">The item, when it is a one-character item; null for a string.</param>
+    /// <returns>
+    /// <see langword="false"/> when a deletion does not fit the budget, or the choice certainly
+    /// holds no new match.
+    /// </returns>
+    private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next, Node? item = null)
+    {
+        // The common case, more of the item left than any section has deletions: see
+        // PatternObject.ExactDeletionCeiling.
+        if (remaining > state.Pattern.ExactDeletionCeiling || state.Pattern.SkipExactDeletionRetry)
+        {
+            return false;
+        }
+
+        // This runs for every exact fuzzy item, so the budget is worked out once, as a count.
+        long room = DeletionRoom(state);
+        if (room < 1 || !state.Pattern.NarrowExactDeletions)
+        {
+            return room >= 1;
+        }
+
+        // The exchange below can remove an error, so it needs every minimum already met: counts
+        // only rise along a path, so the exchanged match, which shares this path up to here, then
+        // meets them too.
+        if (state.Pattern.HasFuzzyMinimum && !AllMinimumsMet(state))
+        {
+            return true;
+        }
+
+        // An item followed by a repeat of itself: see the remarks.
+        if (item is not null && next is not null && IsRepeatOfSameItem(next, item))
+        {
+            if (next.Values[1] > 0)
+            {
+                return false;
+            }
+
+            next = next.Next2.Node;
+        }
+
+        long count = remaining;
+        Node? exit;
+        if (next is { FuzzyRunLength: > 0 })
+        {
+            count += next.FuzzyRunLength;
+            exit = state.Pattern.FuzzyRunExits![next.Index];
+        }
+        else
+        {
+            exit = PatternObject.SkipTextlessNodes(state.Pattern, next);
+        }
+
+        return count <= room && ExitCanRead(state, exit);
+    }
+
+    /// <summary>
+    /// The status bits the compiler's analysis sets, which say nothing about what a node matches:
+    /// the body and tail marks, the repeat, limit, reference and visit marks, the fast-init, used,
+    /// string and inner marks, and whether groups or repeats lie inside.
+    /// </summary>
+    private const uint _analysisStatus =
+        NodeStatus.Body
+        | NodeStatus.Tail
+        | NodeStatus.Repeat
+        | NodeStatus.Limited
+        | NodeStatus.Ref
+        | NodeStatus.VisitedAg
+        | NodeStatus.VisitedRep
+        | NodeStatus.FastInit
+        | NodeStatus.Used
+        | NodeStatus.String
+        | NodeStatus.Inner
+        | NodeStatus.HasGroups
+        | NodeStatus.HasRepeats;
+
+    /// <summary>
+    /// Whether <paramref name="node"/> is a greedy or lazy repeat whose whole body is one item with
+    /// exactly <paramref name="item"/>'s test, in the same fuzzy section.
+    /// </summary>
+    /// <param name="node">The node after the item.</param>
+    /// <param name="item">A fuzzy one-character item.</param>
+    /// <returns><see langword="true"/> if it is.</returns>
+    private static bool IsRepeatOfSameItem(Node node, Node item) =>
+        node.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat
+        && node.Next1.Node is { } body
+        && body.Op == item.Op
+        && (body.Status & ~_analysisStatus) == (item.Status & ~_analysisStatus)
+        && body.Match == item.Match
+        && body.Step == item.Step
+        && body.Encoding == item.Encoding
+        && body.Values.SequenceEqual(item.Values)
+        && body.Next1.Node is { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
+        && ReferenceEquals(end.Next1.Node, body)
+        && end.Values[0] == node.Values[0];
+
+    /// <summary>
+    /// Whether the node a match reaches after a fuzzy run could read the character at
+    /// <c>state.TextPos</c>, which is where it would stand once an item and the rest of its run
+    /// were deleted.
+    /// </summary>
+    /// <remarks>
+    /// In a match <see cref="ExactDeletionMayMatch"/> cannot rule out, nothing in the run uses that
+    /// character, and a trailing insertion at the section's end that used it could be exchanged
+    /// the same way, so the first node after the run does. When that node is an exact
+    /// one-character item that does not match the character, there is no such match.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="exit">The node after the run, or <see langword="null"/>.</param>
+    /// <returns><see langword="false"/> only when it certainly cannot.</returns>
+    private static bool ExitCanRead(MatchState state, Node? exit) =>
+        exit is null
+        || (exit.Status & NodeStatus.Fuzzy) != 0
+        || !IsOneCharacterTest(exit.Op)
+        || MatchOne(state, exit, state.TextPos) != MatchStatus.Failure;
+
+    /// <summary>
+    /// How many more deletions fit the current section's budget and the whole match's:
+    /// <see cref="ThisErrorPermitted"/> for <see cref="FuzzyValue.Del"/> is this being at least 1.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The count, which may be negative.</returns>
+    private static long DeletionRoom(MatchState state)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+        Node fuzzyNode = state.FuzzyNode!;
+        List<uint> values = fuzzyNode.Values;
+        long errorCount = TotalErrors(fuzzyCounts);
+        long room = Math.Min(
+            values[FuzzyValue.MaxBase + FuzzyValue.Del] - fuzzyCounts[FuzzyValue.Del],
+            Math.Min(values[FuzzyValue.MaxErr], state.MaxErrors) - errorCount
+        );
+
+        long unitCost = values[FuzzyValue.CostBase + FuzzyValue.Del];
+        if (unitCost > 0)
+        {
+            long costRoom = Math.Min(values[FuzzyValue.MaxCost], state.MaxCost) - TotalCost(fuzzyCounts, fuzzyNode);
+            room = Math.Min(room, costRoom < 0 ? -1 : costRoom / unitCost);
+        }
+
+        return room;
+    }
+
+    /// <summary>
+    /// Whether deleting <paramref name="node"/> here leads to a state the search has already
+    /// explored in full: the state an earlier alternative of the same branch led to when it was
+    /// deleted at the same place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (finding F-A). In <c>(?:a|b){e&lt;=1}</c> each alternative is one item, and
+    /// deleting either consumes nothing, records the same change at the same position and goes on
+    /// to the same node, with every other part of the state put back by the backtracking in
+    /// between. So the later deletion explores exactly what the earlier one did, which found no
+    /// match, or the search would have stopped there. The earlier deletion was always tried when
+    /// the later one could be: it is offered after an exact match (<see cref="PushExactItemDeletion"/>)
+    /// and after a mismatch (<see cref="FuzzyMatchItem"/>) on the same budget, and where the
+    /// narrowing leaves it out it holds no match, which is a statement about that same state. Once
+    /// every item was retried as a deletion each such branch explored the same subtree twice over,
+    /// and under a recursion that doubled at every level: 13 s on a five-character subject where
+    /// upstream takes 64 ms (blind review of 7277fb6, 2026-09-27).
+    /// </para>
+    /// <para>
+    /// It holds only where the item stands where the branch began: after its own insertions the
+    /// earlier alternative may never have reached that position, since it inserts only where it
+    /// fails. An item reached through its own insertion has that insertion as the last change, one
+    /// character back; any other last change means it was reached from the branch. It is off with
+    /// the exact-deletion retry off, where an earlier alternative that matched offers no deletion,
+    /// and wherever the narrowing is off (<see cref="PatternObject.NarrowExactDeletions"/>): a verb
+    /// makes what a search does after a failure depend on more than the state, and a fuzzy test is
+    /// asked of the item.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item about to be deleted.</param>
+    /// <param name="step">The item's character step.</param>
+    /// <returns><see langword="true"/> if the deletion can be left out.</returns>
+    private static bool DeletionRepeatsAnEarlierAlternative(MatchState state, Node node, sbyte step)
+    {
+        if (!node.HasEarlierDeletionTwin || !state.Pattern.NarrowExactDeletions || state.Pattern.SkipExactDeletionRetry)
+        {
+            return false;
+        }
+
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        return changes.Count == 0
+            || changes[^1].Type != FuzzyValue.Ins
+            || changes[^1].Pos != Step(state, state.TextPos, -step);
+    }
+
+    /// <summary>
+    /// A one-character fuzzy item matched exactly at <c>state.TextPos</c>: pushes the choice of
+    /// deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item.</param>
+    /// <param name="step">The item's character step, which the retry needs.</param>
+    private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
+    {
+        if (
+            !ExactDeletionMayMatch(state, 1, node.Next1.Node, node)
+            || DeletionRepeatsAnEarlierAlternative(state, node, step)
+        )
+        {
+            return;
+        }
+
+        // When the item is the whole body of a repeat and this iteration began here (no insertion
+        // before it), deleting it leaves an iteration that consumed no text and spent an edit. Past
+        // the repeat's minimum, with no unmet section minimum that the deletion would raise, the
+        // "needed" rule fails it at the repeat's end (EmptyIterationAdmitted; a lone item changes no
+        // group), and nothing runs between here and there, so the choice holds nothing.
+        if (
+            node.Next1.Node is { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
+            && ReferenceEquals(end.Next1.Node, node)
+            && state.Repeats[(int)end.Values[0]] is var repeat
+            && !state.Pattern.UpstreamEmptyIterations
+            && repeat.Start == state.TextPos
+            && repeat.Count + 1 > end.Values[1]
+            && !RaisesUnmetMinimum(state, _oneDeletion, counted: false)
+        )
+        {
+            return;
+        }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the same for an item that ends an alternative
+        // with an empty alternative after it.
+        if (DeletionEmptiesAnOptionalPass(state, node))
+        {
+            return;
+        }
+
+        /* bstack: node step text_pos fuzzy_type op, the frame fuzzy_match_item pushes */
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A character of a fuzzy string or group reference matched exactly at <c>state.TextPos</c>:
+    /// pushes the choice of deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string or group reference.</param>
+    /// <param name="stringPos">How far into the item the comparison had got.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    private static void PushExactStringDeletion(MatchState state, Node node, int stringPos, sbyte step)
+    {
+        // A group reference's 'stringPos' is a subject position, and how much of the group is left
+        // is not modelled, so it keeps every choice that fits the budget.
+        bool mayMatch;
+        if (node.Op is Opcode.RefGroup or Opcode.RefGroupIgn or Opcode.RefGroupRev or Opcode.RefGroupIgnRev)
+        {
+            mayMatch = !state.Pattern.SkipExactDeletionRetry && ThisErrorPermitted(state, FuzzyValue.Del);
+        }
+        else
+        {
+            int remaining = step > 0 ? node.Values.Count - stringPos : stringPos;
+            mayMatch = ExactDeletionMayMatch(state, remaining, node.Next1.Node);
+        }
+
+        if (!mayMatch)
+        {
+            return;
+        }
+
+        /* bstack: node step string_pos text_pos fuzzy_type op, the frame fuzzy_match_string pushes */
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A character of a full-case-folded fuzzy string matched exactly: pushes the choice of deleting
+    /// it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string.</param>
+    /// <param name="stringPos">How far into the string the comparison had got.</param>
+    /// <param name="foldedPos">How far into the subject character's folding.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the string travels.</param>
+    /// <param name="foldChangesStart">The change count when the string began.</param>
+    private static void PushExactStringFldDeletion(
+        MatchState state,
+        Node node,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        sbyte step,
+        int foldChangesStart
+    )
+    {
+        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            return;
+        }
+
+        /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A folding character of a full-case-folded fuzzy group reference matched exactly: pushes the
+    /// choice of deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The group reference.</param>
+    /// <param name="foldedPos">How far into the subject character's folding.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="groupPos">The position in the group's text.</param>
+    /// <param name="gfoldedPos">How far into the group character's folding.</param>
+    /// <param name="gfoldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the reference travels.</param>
+    /// <param name="foldChangesStart">The change count when the reference began.</param>
+    private static void PushExactGroupFldDeletion(
+        MatchState state,
+        Node node,
+        int foldedPos,
+        int foldedLen,
+        int groupPos,
+        int gfoldedPos,
+        int gfoldedLen,
+        sbyte step,
+        int foldChangesStart
+    )
+    {
+        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            return;
+        }
+
+        /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len
+         * text_pos fuzzy_type op
+         */
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(gfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(groupPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
     /// <summary>Upstream <c>fuzzy_match_item</c> (line 10185): a first try at fuzzing one item.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
@@ -3901,19 +9448,74 @@ internal static class Matcher
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(state.TextPos);
         state.Bstack.PushUInt8((byte)data.FuzzyType);
-        state.Bstack.PushUInt8((byte)node.Op);
+        state.Bstack.PushUInt8(FuzzyFrameOp(node));
 
         /* bstack: node step text_pos fuzzy_type op */
 
         state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
 
         return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// The tag <see cref="FuzzyMatchItem"/> pushes above its frame: the item's own opcode, except for
+    /// a lookaround, whose opcode already tags the lookaround's frame (ledger entry 50).
+    /// </summary>
+    /// <param name="node">The item being fuzzed.</param>
+    /// <returns>The opcode the backtrack switch dispatches the frame on.</returns>
+    private static byte FuzzyFrameOp(Node node) =>
+        node.Op == Opcode.Lookaround ? (byte)Opcode.FuzzyLookaround : (byte)node.Op;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 50): a lookaround in a fuzzy section that has failed as a whole is
+    /// fuzzed as the zero-width item it is, so an inserted text character can move it one place on.
+    /// </summary>
+    /// <remarks>
+    /// Upstream fuzzes every other failing zero-width assertion this way (<c>\b</c> at
+    /// <c>upstream/src/_regex.c</c>:12060-12075, <c>$</c> at :13052-13062), but a positive lookaround
+    /// whose body has run out of choices just carries on backtracking (:17115-17168), and a negative
+    /// one whose body matched goes straight to <c>backtrack</c> (:12918-13000). Called at those two
+    /// places, after the lookaround's block is popped, so the text position, the fuzzy counts and the
+    /// captures are what they were when the lookaround started. On success the insertion leaves
+    /// <paramref name="node"/> on the lookaround, which then starts again one character on; its retry
+    /// is the zero-width one (<see cref="Opcode.FuzzyLookaround"/> in the backtrack switch), where
+    /// only deletion and substitution are left, and neither applies to a step of 0.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, the lookaround, to be matched again.</param>
+    /// <param name="lookaround">The lookaround that failed, in a fuzzy section.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int InsertBeforeAFailedLookaround(MatchState state, bool search, ref Node node, Node lookaround)
+    {
+        // The callers test the fuzzy flag themselves, so a lookaround outside a fuzzy section pays a
+        // bit test and no call.
+        Debug.Assert(lookaround.Op == Opcode.Lookaround, "only a lookaround's own node is fuzzed here");
+        Debug.Assert((lookaround.Status & NodeStatus.Fuzzy) != 0, "the caller tested the fuzzy flag");
+
+        if (state.Pattern.SkipLookaroundInsertion)
+        {
+            return MatchStatus.Failure;
+        }
+
+        Node at = lookaround;
+        int status = FuzzyMatchItem(state, search, ref at, 0);
+
+        if (status == MatchStatus.Success)
+        {
+            // A step of 0 rules out deletion and substitution (NextFuzzyMatchItem), so the error was
+            // an insertion, which leaves the item where it was.
+            Debug.Assert(ReferenceEquals(at, lookaround), "an insertion does not move past the item");
+            node = at;
+        }
+
+        return status;
     }
 
     /// <summary>Upstream <c>retry_fuzzy_match_item</c> (line 10262): the next kind of error.</summary>
@@ -3930,8 +9532,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: node step text_pos fuzzy_type */
 
         if (
@@ -3944,11 +9544,36 @@ internal static class Matcher
             return MatchStatus.Illegal;
         }
 
+        // The frame is fuzzy_match_item's, pushed with the item's own opcode (FuzzyMatchItem's
+        // PushUInt8(FuzzyFrameOp(node)), which tags a lookaround's frame FuzzyLookaround, ledger
+        // entry 50). A zero-width item pushed a step of 0 (the forward zero-width
+        // case's 'FuzzyMatchItem(state, search, ref node, 0)'), and with a step of 0 an insertion is
+        // the only error NextFuzzyMatchItem can take, so that is what the frame holds.
+        System.Diagnostics.Debug.Assert(
+            currNode is not null && FuzzyFrameOp(currNode) == op,
+            "a fuzzy item frame carries its own opcode"
+        );
+        System.Diagnostics.Debug.Assert(advance || step == 0, "a zero-width item's frame carries a step of 0");
+        System.Diagnostics.Debug.Assert(
+            advance || poppedType == FuzzyValue.Ins,
+            "the only error a zero-width item can take is an insertion"
+        );
+
         state.TextPos = (int)poppedTextPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.NewNode = currNode;
+
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         // Upstream's 'data.step = step', where 'step' is what fuzzy_match_item PUSHED - so a
         // zero-width item retries with a step of 0 here where its first attempt carried 1 or -1.
@@ -3958,8 +9583,8 @@ internal static class Matcher
 
         /* bstack: - */
 
-        // Upstream guards this with 'if (data.fuzzy_type >= 0)' on an RE_UINT8, which is always true.
-        --fuzzyCounts[data.FuzzyType];
+        // Upstream guards the decrement above with 'if (data.fuzzy_type >= 0)' on an RE_UINT8, which
+        // is always true.
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
@@ -4000,7 +9625,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
@@ -4091,7 +9716,7 @@ internal static class Matcher
         state.RecordFuzzy(FuzzyValue.Ins, Step(state, state.TextPos, (sbyte)-step));
 
         ++state.FuzzyCounts[FuzzyValue.Ins];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         node = currNode!;
 
@@ -4174,7 +9799,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -4201,8 +9826,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: node step string_pos text_pos fuzzy_type */
 
         if (
@@ -4220,12 +9843,20 @@ internal static class Matcher
         stringPos = (int)poppedStringPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.Step = step;
         data.NewStringPos = stringPos;
         data.StringPosIsText = stringPosIsText;
 
-        --fuzzyCounts[data.FuzzyType];
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
@@ -4265,11 +9896,382 @@ internal static class Matcher
         /* bstack: node step string_pos text_pos fuzzy_type op */
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
         stringPos = data.NewStringPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): a substitution of one whole subject character that expands under full case
+    /// folding, such as U+01F0, for one pattern character. A <c>STRING_FLD</c> error kind after
+    /// upstream's three, and since D22 a <c>REF_GROUP_FLD</c> one (where it replaces one whole group
+    /// character; see <see cref="NextFuzzyMatchGroupFld"/>); it is counted and recorded as
+    /// <see cref="FuzzyValue.Sub"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>STRING_FLD</c> edits move through the subject character's folding one folded
+    /// character at a time (<c>upstream/src/_regex.c</c>:10580-10633), so replacing a pattern
+    /// letter with U+01F0, which folds to j and U+030C, costs two edits inside a run, although the
+    /// same substitution costs one where the run is split around it: <c>(?fi)(?:ssx){s&lt;=1}</c>
+    /// over 'ǰsx' finds nothing upstream while <c>(?fi)(?:s){s&lt;=1}sx</c> gives (0, 3). This
+    /// kind, and <see cref="FoldWholeIns"/>, edit the subject character whole. They are tried only
+    /// at the start of its folding, only when the folding is longer than one character (for one
+    /// character the folded-character edit is the same edit), and after upstream's three kinds in
+    /// the same frame. No match upstream finds is lost, but the mix of edits in the first answer
+    /// can change: the frame <see cref="OfferWholeFoldedCharEdit"/> leaves, and these kinds in any
+    /// frame, are tried before the alternatives of older frames, so <c>(?fi)(?:ss){e&lt;=3}</c>
+    /// fullmatched over 'jßsß' is (0, 4) with counts (1, 2, 0) here and (0, 3, 0) upstream. Keeping
+    /// upstream's first answer would mean running each failing attempt again with these kinds on
+    /// once upstream's alternatives were spent, about the cost of the attempt twice over (measured
+    /// below). The subject-side twin of ledger entry 49; see <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// <para>
+    /// The cost is measured, not argued, on a Release build (2026-09-28, medians of three
+    /// interleaved runs of 15, <c>Matches</c> over 160,000 characters). Over text where every sixth
+    /// character expands (ß, ﬁ, ǰ, ŉ, ﬆ), <c>(?fi)(?:strasse lane){e&lt;=1}</c> takes 50.5 ms
+    /// against 43.7 ms before (+16%), <c>{e&lt;=2}</c> 170.9 against 137.8 ms (+24%) and
+    /// <c>{s&lt;=1}</c> 25.4 against 21.6 ms (+17%): the extra time is the new, valid candidates
+    /// being searched. With these edits switched off the same searches take 45.5, 141.3 and
+    /// 21.4 ms, so running an attempt twice would cost about 96, 312 and 47 ms. Over ASCII text,
+    /// where no folding is longer than one character, the two fuzzy searches take 4.47 against
+    /// 4.27 ms and 30.7 against 28.8 ms, the same spread as an exact search this change does not
+    /// touch (8.66 against 8.34 ms). Denser text costs more: where 8 of every 11 characters
+    /// expand, <c>{e&lt;=2}</c> is 35% slower and <c>{s&lt;=1}</c> 19% (the blind review's
+    /// measurement, 2026-09-28).
+    /// </para>
+    /// </remarks>
+    internal const int FoldWholeSub = FuzzyValue.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): an insertion of one whole subject character that expands under full case
+    /// folding; counted and recorded as <see cref="FuzzyValue.Ins"/>. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    internal const int FoldWholeIns = FuzzyValue.Count + 1;
+
+    /// <summary>How many error kinds a <c>STRING_FLD</c> frame tries: upstream's three and D7's two.</summary>
+    internal const int FoldEditKinds = FuzzyValue.Count + 2;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): a deletion of one whole group character that expands under full case
+    /// folding, such as a captured ß; a <c>REF_GROUP_FLD</c> kind only, counted and recorded as
+    /// <see cref="FuzzyValue.Del"/>. See <see cref="GroupFoldEditKinds"/>.
+    /// </summary>
+    internal const int FoldWholeDel = FoldEditKinds;
+
+    /// <summary>
+    /// How many error kinds a <c>REF_GROUP_FLD</c> frame tries: <see cref="FoldEditKinds"/> and
+    /// <see cref="FoldWholeDel"/>.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (D24). A backreference folds its group as it goes, and upstream edits that
+    /// folding one folded character at a time too (<c>next_fuzzy_match_group_fld</c>,
+    /// <c>upstream/src/_regex.c</c>:10824-10877), so a captured ß cost two edits to replace or
+    /// delete: <c>(?fi)(ß)x(?:\1){s&lt;=1}</c> fullmatched over 'ßxa' finds nothing upstream, while
+    /// the literal <c>(?fi)(ß)x(?:ß){s&lt;=1}</c> gives (0, 3) with one substitution. This is the
+    /// group-side twin of ledger entry 49, which lets a pattern ß be edited whole. At the start of
+    /// a group character whose folding is longer than one character, the frame also tries
+    /// <see cref="FoldWholeSub"/>, which replaces the whole group character with one whole subject
+    /// character, and this deletion, after upstream's three kinds and behind the same switch as
+    /// D22's subject-side kinds (<see cref="AtStartOfAnExpandingFolding"/>).
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of 15, <c>Count</c>
+    /// over 40,000 characters of ASCII words, against main at 894c495, D25 included): the V1
+    /// <c>(?i)(\w{4}) (?:\1){e&lt;=1}</c> takes 6.24 against 6.26 ms and <c>{s&lt;=1}</c> 4.38 against
+    /// 4.25 ms, the untouched simple-fold <c>(?V0i)</c> form 5.47 against 5.30 ms and the
+    /// case-sensitive one 5.30 against 5.30 ms: the same spread as a path this change does not
+    /// reach. Where every sixth character is ß the fuzzy search takes 6.46 against 6.18 ms (+4%)
+    /// and finds 303 matches where it found 269.
+    /// </remarks>
+    internal const int GroupFoldEditKinds = FoldEditKinds + 1;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): the error kind a <c>STRING_FLD</c> frame holds when the comparison at the
+    /// start of an expanding subject character's folding SUCCEEDED, so that backtracking into it
+    /// still tries the whole-character edits. No error was charged for it.
+    /// </summary>
+    /// <remarks>
+    /// Matching f against the first folded character of U+FB01 uses only half of that subject
+    /// character, and the rest must then be paid for one folded character at a time, so
+    /// <c>(?fi)(?:fst){s&lt;=1}</c> over 'ﬁst' could only charge the i as an insertion; with
+    /// insertions not allowed it failed, although substituting the ﬁ for the f is one edit.
+    /// </remarks>
+    internal const int FoldExactTaken = GroupFoldEditKinds;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): <see cref="FoldExactTaken"/> for a frame whose whole-character
+    /// substitution is left out, because it would repeat an insertion upstream's own edits have
+    /// already tried. See <see cref="WholeSubstitutionRepeatsAFoldedInsertion"/>.
+    /// </summary>
+    internal const int FoldExactTakenInsOnly = GroupFoldEditKinds + 1;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): the first of the codes a <c>REF_GROUP_FLD</c> frame uses at the start of
+    /// an expanding group character, where it tries the kinds in the order
+    /// <see cref="GroupCharFirstOrder"/> gives rather than upstream's.
+    /// </summary>
+    /// <remarks>
+    /// A backreference matches as the literal text it captured, and upstream compiles a lone
+    /// literal ß as the character first and its folding second (<c>Character._compile</c>,
+    /// <c>upstream/regex/_regex_core.py:2629-2632</c>), so its fuzzy edits take the whole ß before
+    /// any folded s: <c>(?fi)(ß)-(?:ß){e&lt;=2}</c> gives one deletion over 'ß-' and one
+    /// substitution over 'ß-a'. With upstream's order the backreference found two edits first for
+    /// the same spans. The codes run in sequence, so a retry moves on with <c>++</c> as for any
+    /// other frame; each stands for the kind <see cref="GroupCharFirstOrder"/> maps it to.
+    /// </remarks>
+    internal const int GroupCharFirst = FoldExactTakenInsOnly + 1;
+
+    /// <summary>One past the last <see cref="GroupCharFirst"/> code.</summary>
+    internal const int GroupCharFirstEnd = GroupCharFirst + 6;
+
+    /// <summary>
+    /// The kind a <see cref="GroupCharFirst"/> code stands for: the literal ß's own order (the whole
+    /// substitution, the insertion and the whole deletion), then upstream's folded substitution and
+    /// deletion, then D22's whole insertion of an expanding subject character. Any other kind is
+    /// itself.
+    /// </summary>
+    /// <param name="code">A <c>REF_GROUP_FLD</c> error kind or code.</param>
+    /// <returns>The error kind.</returns>
+    private static int GroupCharFirstOrder(int code) =>
+        (code - GroupCharFirst) switch
+        {
+            0 => FoldWholeSub,
+            1 => FuzzyValue.Ins,
+            2 => FoldWholeDel,
+            3 => FuzzyValue.Sub,
+            4 => FuzzyValue.Del,
+            5 => FoldWholeIns,
+            _ => code,
+        };
+
+    /// <summary>
+    /// The error type a <c>STRING_FLD</c> or <c>REF_GROUP_FLD</c> error kind is counted and
+    /// recorded as.
+    /// </summary>
+    /// <param name="code">
+    /// An error kind, below <see cref="GroupFoldEditKinds"/>, or a <see cref="GroupCharFirst"/> code.
+    /// </param>
+    /// <returns>A <see cref="FuzzyValue"/> error type.</returns>
+    private static int FoldCountedAs(int code) =>
+        GroupCharFirstOrder(code) switch
+        {
+            FoldWholeSub => FuzzyValue.Sub,
+            FoldWholeIns => FuzzyValue.Ins,
+            FoldWholeDel => FuzzyValue.Del,
+            int kind => kind,
+        };
+
+    /// <summary>
+    /// Whether the attempt stands at the start of a subject character's folding that is longer than
+    /// one character, where D7's whole-character edits apply. See <see cref="FoldWholeSub"/>.
+    /// </summary>
+    /// <remarks>
+    /// The start test is what keeps a whole-character edit from charging one edit for the rest of a
+    /// part-matched folding (<c>FullFoldFuzzySubjectCharacterEditTests</c>, 'ﬃi' and 'αᾷ'). The
+    /// length test only saves repeating upstream's own edits: for a one-character folding a
+    /// whole-character substitution or insertion lands where <see cref="FuzzyValue.Sub"/> and
+    /// <see cref="FuzzyValue.Ins"/> already land (<c>newPos = foldedPos + step</c>), so no answer
+    /// depends on it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole-character edit may be tried.</returns>
+    private static bool AtStartOfAnExpandingFolding(MatchState state, in FuzzyData data) =>
+        data.FoldedLen > 1
+        && (data.Step > 0 ? data.NewFoldedPos == 0 : data.NewFoldedPos == data.FoldedLen)
+        && !state.Pattern.SkipWholeFoldedCharEdits;
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): whether a <c>REF_GROUP_FLD</c> attempt stands at the start of a group
+    /// character whose folding is longer than one character, where the whole-character edits of
+    /// that group character apply. The group-side <see cref="AtStartOfAnExpandingFolding"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole group character may be edited.</returns>
+    private static bool AtStartOfAnExpandingGroupCharacter(MatchState state, in FuzzyData data) =>
+        data.GfoldedLen > 1
+        && AtStartOfAGroupCharacter(data.Step, data.NewGfoldedPos, data.GfoldedLen)
+        && !state.Pattern.SkipWholeFoldedCharEdits;
+
+    /// <summary>
+    /// How many error kinds a <c>REF_GROUP_FLD</c> attempt tries: all of
+    /// <see cref="GroupFoldEditKinds"/> where either side stands at the start of an expanding
+    /// character (D22 and D24), and otherwise upstream's three.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt.</param>
+    /// <returns>The kind to stop before.</returns>
+    private static int GroupFoldKinds(MatchState state, in FuzzyData data) =>
+        AtStartOfAnExpandingFolding(state, in data) || AtStartOfAnExpandingGroupCharacter(state, in data)
+            ? GroupFoldEditKinds
+            : FuzzyValue.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D7): leaves a <c>STRING_FLD</c> frame behind an exact comparison at the start of
+    /// an expanding subject character's folding, so that backtracking tries editing that character
+    /// whole. See <see cref="FoldExactTaken"/>.
+    /// </summary>
+    /// <remarks>
+    /// The frame has the layout <see cref="FuzzyMatchStringFld"/> pushes, with no change recorded or
+    /// counted, so <see cref="RetryFuzzyMatchStringFld"/> reads it like any other. Only a fuzzy
+    /// item reaches this, and only at a subject character whose folding is longer than one
+    /// character, so any other match pays one comparison per character.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedPos">Where in the folding the comparison is: its start.</param>
+    /// <param name="foldedLen">The length of the folding, more than one.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
+    /// <param name="folded">The subject character's folding.</param>
+    private static void OfferWholeFoldedCharEdit(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        int foldChangesStart,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        Debug.Assert(
+            foldedLen > 1 && foldedPos == (step > 0 ? 0 : foldedLen),
+            "only at the start of an expanding folding"
+        );
+
+        if (state.Pattern.SkipWholeFoldedCharEdits)
+        {
+            return;
+        }
+
+        // Backtracking restores the counts, so what is permitted now is what the retry will find:
+        // with neither kind permitted (deletions only, or the budget spent) the frame yields nothing.
+        bool sub = ThisErrorPermitted(state, FuzzyValue.Sub);
+        bool ins = ThisErrorPermitted(state, FuzzyValue.Ins);
+
+        if (!sub && !ins)
+        {
+            return;
+        }
+
+        byte kind =
+            sub && !(ins && WholeSubstitutionRepeatsAFoldedInsertion(state, node, step, stringPos, foldedLen, folded))
+                ? (byte)FoldExactTaken
+                : (byte)FoldExactTakenInsOnly;
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(kind);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// Whether substituting the whole subject character, after its first folded character matched,
+    /// would only repeat a state upstream's own edits have already tried and failed from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Take a two-character folding x1 x2 whose x1 matched the pattern character exactly, and a next
+    /// pattern character that x2 does not match. The comparison then fails at x2, and upstream's
+    /// edits there include inserting x2 (<see cref="NextFuzzyMatchStringFld"/>): the counts are the
+    /// ones this frame sees, so the insertion is permitted exactly when <paramref name="state"/>
+    /// permits one now, and <see cref="PermitInsertionInFold"/> allows it part way through a
+    /// folding. It ends the folding, one pattern character on, with one more insertion. The whole
+    /// substitution ends at the same subject and pattern positions with one more substitution.
+    /// That frame sits above this one, so by the time this one is retried every path from that
+    /// state has failed.
+    /// </para>
+    /// <para>
+    /// The two states differ only in which count holds the edit, so they reach the same answers
+    /// when nothing tells a substitution from an insertion: the section's minimums for both are
+    /// zero, neither kind's maximum is below the error maximum, both cost the same, and the section
+    /// is the pattern's only one (an enclosing section checks the sum against its own limits,
+    /// <c>END_FUZZY</c>). <c>BESTMATCH</c>, <c>ENHANCEMATCH</c> and <c>POSIX</c> keep looking after
+    /// a match, so they are left out too. The constraint's test sees the same subject character
+    /// either way.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item being matched.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedLen">The length of the folding.</param>
+    /// <param name="folded">The folding.</param>
+    /// <returns>Whether the whole substitution can be left out.</returns>
+    private static bool WholeSubstitutionRepeatsAFoldedInsertion(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int stringPos,
+        int foldedLen,
+        ReadOnlySpan<uint> folded
+    )
+    {
+        if (foldedLen != 2)
+        {
+            return false;
+        }
+
+        int next = step > 0 ? stringPos + 1 : stringPos - 2;
+
+        if (next < 0 || next >= node.Values.Count)
+        {
+            return false;
+        }
+
+        if (SameCharIgn(node.Encoding, node.Values[next], step > 0 ? folded[1] : folded[0]))
+        {
+            return false;
+        }
+
+        PatternObject pattern = state.Pattern;
+
+        if (
+            pattern.FuzzyCount != 1
+            || (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) != 0
+        )
+        {
+            return false;
+        }
+
+        List<uint> values = state.FuzzyNode!.Values;
+
+        return values[FuzzyValue.MinSub] == 0
+            && values[FuzzyValue.MinIns] == 0
+            && values[FuzzyValue.MaxSub] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.MaxIns] >= values[FuzzyValue.MaxErr]
+            && values[FuzzyValue.CostBase + FuzzyValue.Sub] == values[FuzzyValue.CostBase + FuzzyValue.Ins];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D7, D22): the whole-character insertion shared by <c>STRING_FLD</c> and
+    /// <c>REF_GROUP_FLD</c>: could the whole subject character at the start of its folding have been
+    /// inserted? Neither side's pattern or group position moves.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt; its folded position moves past the whole folding.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int WholeFoldedCharInsertion(MatchState state, ref FuzzyData data)
+    {
+        Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+        if (!data.PermitInsertion || !FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+        {
+            return MatchStatus.Failure;
+        }
+
+        data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
 
         return MatchStatus.Success;
     }
@@ -4290,7 +10292,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int NextFuzzyMatchStringFld(MatchState state, ref FuzzyData data)
     {
-        if (!ThisErrorPermitted(state, data.FuzzyType))
+        if (!ThisErrorPermitted(state, FoldCountedAs(data.FuzzyType)))
         {
             return MatchStatus.Failure;
         }
@@ -4353,6 +10355,31 @@ internal static class Matcher
                 }
 
                 return CheckFuzzyPartial(state, newPos);
+            case FoldWholeSub:
+                // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
+                // loop tries this kind only at the start of an expanding folding.
+                Debug.Assert(AtStartOfAnExpandingFolding(state, in data), "tried only at an expanding folding's start");
+
+                // The values run out at the start of a folding only in the leftovers loop under
+                // PatternObject.ChargeUntouchedFoldings, the oracle's upstream rule
+                // (FoldingIsPartUsed); there is no pattern character left to substitute.
+                if (data.ValuesRanOut)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+                data.NewStringPos += data.Step;
+
+                return MatchStatus.Success;
+            case FoldWholeIns:
+                // NOT UPSTREAM (D7): could the whole subject character have been inserted?
+                return WholeFoldedCharInsertion(state, ref data);
             default:
                 return MatchStatus.Failure;
         }
@@ -4361,15 +10388,15 @@ internal static class Matcher
     /// <summary>
     /// Upstream's "an insertion inside a folding is free" rule, spelled out four times
     /// (<c>upstream/src/_regex.c</c> lines 10659-10665, 10761-10767, 10905-10911 and, in a different
-    /// shape, 11019).
+    /// shape, 11019, which this port does not keep; see <see cref="RetryFuzzyMatchGroupFld"/>).
     /// </summary>
     /// <remarks>
     /// Once the comparison is part way through a subject character's folding, the search anchor has
     /// already been left behind even though <c>text_pos</c> has not moved, so the "no insertion at
     /// the anchor" rule stops applying.
     /// </remarks>
-    /// <param name="state">The match state.</param>
     /// <param name="data">The attempt being set up.</param>
+    /// <param name="state">The match state.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
     /// <param name="atAnchor">Whether <c>text_pos</c> is still at the search anchor.</param>
     /// <returns>Whether an insertion may be tried.</returns>
@@ -4517,7 +10544,11 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        // D7's two kinds only apply at the start of an expanding folding, which no kind that fails
+        // moves, so every other attempt stops after upstream's three.
+        int kinds = AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (data.FuzzyType = 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -4550,10 +10581,10 @@ internal static class Matcher
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
-        ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -4583,8 +10614,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type */
 
         if (
@@ -4607,8 +10636,35 @@ internal static class Matcher
 
         int currFoldedPos = (int)poppedFoldedPos;
 
+        // NOT UPSTREAM (D7): a frame left by OfferWholeFoldedCharEdit charged nothing, and goes on
+        // to the whole-character kinds. Nor did one left by PushExactStringFldDeletion (finding
+        // F-A), which tries a deletion alone: the whole-character kinds at that comparison belong to
+        // OfferWholeFoldedCharEdit's frame, pushed beneath it.
+        bool exactDeletion = poppedType == _exactFuzzyType;
+        bool exactTaken = exactDeletion || poppedType is FoldExactTaken or FoldExactTakenInsOnly;
+
+        // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
+        if (poppedType == _exactDeletionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
+        if (!exactTaken)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FoldCountedAs(poppedType)];
+        }
+
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
+        data.FuzzyType = poppedType switch
+        {
+            FoldExactTaken => FoldWholeSub - 1,
+            FoldExactTakenInsOnly => FoldWholeIns - 1,
+            _exactFuzzyType => FuzzyValue.Del - 1,
+            _ => poppedType,
+        };
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewStringPos = stringPos;
@@ -4616,13 +10672,13 @@ internal static class Matcher
         data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
-        --fuzzyCounts[data.FuzzyType];
-
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        int kinds = !exactDeletion && AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchStringFld(state, ref data);
 
@@ -4649,15 +10705,15 @@ internal static class Matcher
         state.Bstack.PushSize(currFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -4666,6 +10722,124 @@ internal static class Matcher
 
         return MatchStatus.Success;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D22, D24): <see cref="OfferWholeFoldedCharEdit"/> for a full-folded
+    /// backreference, leaving a <c>REF_GROUP_FLD</c> frame behind an exact comparison at the start of
+    /// an expanding subject character's folding or, since D24, of an expanding group character's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matching the group's s against the first folded s of a subject ß uses only half of the ß
+    /// (D22), and matching the first folded s of a group ß against a subject s uses only half of
+    /// the group's ß (D24): <c>(?fi)(ß)x(?:\1){s&lt;=1}</c> over 'ßxs' could then only delete the
+    /// rest, although substituting the s for the ß is one edit.
+    /// </para>
+    /// <para>
+    /// The frame has the layout <see cref="FuzzyMatchGroupFld"/> pushes, with no change recorded or
+    /// counted, so <see cref="RetryFuzzyMatchGroupFld"/> reads it like any other. Unlike the
+    /// literal's frame it never leaves the whole substitution out
+    /// (<see cref="WholeSubstitutionRepeatsAFoldedInsertion"/> reads the pattern's next value, which
+    /// a backreference does not have): that prune only saves work, so no answer depends on it.
+    /// Measured on a Release build (2026-09-29, medians of six interleaved runs of nine,
+    /// <c>Count</c> over 40,000 characters): over ASCII text <c>(?fi)(\w{4}) (?:\1){e&lt;=1}</c>
+    /// takes 45.2 against 44.6 ms and the exact <c>(?fi)(\w{3})\w* \1</c> 26.7 against 27.0 ms,
+    /// inside each side's spread; where every sixth character expands the fuzzy one takes 39.6
+    /// against 33.2 ms (+19%), the new candidates being searched, as for ledger entry 52's literal.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The backreference.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="foldedPos">Where in the subject folding the comparison is.</param>
+    /// <param name="foldedLen">The length of the subject folding.</param>
+    /// <param name="groupPos">The position in the referenced capture.</param>
+    /// <param name="gfoldedPos">Where in the group character's folding the comparison is.</param>
+    /// <param name="gfoldedLen">The length of the group character's folding.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    private static void OfferWholeFoldedGroupCharEdit(
+        MatchState state,
+        Node node,
+        sbyte step,
+        int foldedPos,
+        int foldedLen,
+        int groupPos,
+        int gfoldedPos,
+        int gfoldedLen,
+        int foldChangesStart,
+        bool search
+    )
+    {
+        Debug.Assert(
+            (foldedLen > 1 && foldedPos == (step > 0 ? 0 : foldedLen))
+                || (gfoldedLen > 1 && gfoldedPos == (step > 0 ? 0 : gfoldedLen)),
+            "only at the start of an expanding character"
+        );
+
+        if (state.Pattern.SkipWholeFoldedCharEdits)
+        {
+            return;
+        }
+
+        // Leave no frame that cannot succeed. The retry asks the same questions of the same state:
+        // backtracking restores the counts and text_pos, and the frame holds these positions, so
+        // what is refused here would be refused there, and the frame would only cost a push and a pop.
+        FuzzyData at = default;
+        at.Step = step;
+        at.NewFoldedPos = foldedPos;
+        at.FoldedLen = foldedLen;
+        at.NewGfoldedPos = gfoldedPos;
+        at.GfoldedLen = gfoldedLen;
+
+        bool sub =
+            ThisErrorPermitted(state, FuzzyValue.Sub)
+            && AtStartOfAGroupCharacter(step, gfoldedPos, gfoldedLen)
+            && AtStartOfASubjectCharacter(in at);
+        bool ins =
+            ThisErrorPermitted(state, FuzzyValue.Ins)
+            && AtStartOfAnExpandingFolding(state, in at)
+            && PermitInsertionInFold(state, in at, search, state.TextPos == state.SearchAnchor);
+        bool del = ThisErrorPermitted(state, FuzzyValue.Del) && AtStartOfAnExpandingGroupCharacter(state, in at);
+
+        if (!sub && !ins && !del)
+        {
+            return;
+        }
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(gfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(groupPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)FoldExactTaken);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D22): whether the group side of a <c>REF_GROUP_FLD</c> comparison stands at the
+    /// start of a group character, where a whole substitution may replace that character.
+    /// </summary>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="gfoldedPos">Where in the group character's folding the comparison is.</param>
+    /// <param name="gfoldedLen">The length of that folding, 0 once the group has run out.</param>
+    /// <returns>Whether a whole substitution may be tried.</returns>
+    private static bool AtStartOfAGroupCharacter(sbyte step, int gfoldedPos, int gfoldedLen) =>
+        gfoldedLen > 0 && gfoldedPos == (step > 0 ? 0 : gfoldedLen);
+
+    /// <summary>
+    /// NOT UPSTREAM (D24): whether the subject side of a <c>REF_GROUP_FLD</c> attempt stands at the
+    /// start of a subject character, where a whole substitution may replace that character. The
+    /// folding is empty at the end of the slice, where no character is left to substitute.
+    /// </summary>
+    /// <param name="data">The attempt.</param>
+    /// <returns>Whether a whole substitution may take the subject character.</returns>
+    private static bool AtStartOfASubjectCharacter(in FuzzyData data) =>
+        data.FoldedLen > 0 && data.NewFoldedPos == (data.Step > 0 ? 0 : data.FoldedLen);
 
     /// <summary>
     /// Upstream <c>fuzzy_ext_match_group_fld</c> (line 10033): the <c>{...:test}</c> constraint
@@ -4694,9 +10868,15 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
+    /// <param name="foldEncoding">The encoding the group reference folds the subject with.</param>
     /// <param name="foldedPos">The position in the folding the error would touch.</param>
     /// <returns><see langword="true"/> if the constraint allows it.</returns>
-    private static bool FuzzyExtMatchGroupFld(MatchState state, Node? fuzzyNode, int foldedPos)
+    private static bool FuzzyExtMatchGroupFld(
+        MatchState state,
+        Node? fuzzyNode,
+        CaseEncoding foldEncoding,
+        int foldedPos
+    )
     {
         Node? testNode = fuzzyNode?.Next2.Node;
 
@@ -4721,7 +10901,7 @@ internal static class Matcher
             or Opcode.SetInter
             or Opcode.SetSymDiff
             or Opcode.SetUnion => state.TextPos < state.SliceEnd
-                && MatchesOne(state.Encoding, testNode, FoldedCharAt(state, state.TextPos, foldedPos))
+                && MatchesOne(testNode.Encoding, testNode, FoldedCharAt(state, foldEncoding, state.TextPos, foldedPos))
                     == testNode.Match,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
@@ -4730,9 +10910,9 @@ internal static class Matcher
             or Opcode.RangeRev
             or Opcode.RangeIgnRev => state.TextPos > state.SliceStart
                 && MatchesOne(
-                    state.Encoding,
+                    testNode.Encoding,
                     testNode,
-                    FoldedCharAt(state, state.PrevPos(state.TextPos), foldedPos - 1)
+                    FoldedCharAt(state, foldEncoding, state.PrevPos(state.TextPos), foldedPos - 1)
                 ) == testNode.Match,
             _ => true,
         };
@@ -4740,14 +10920,20 @@ internal static class Matcher
 
     /// <summary>Upstream <c>folded_char_at</c> (line 10014).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">
+    /// The encoding to fold with: the group reference's, whose folding the error is in (S91). The
+    /// constraint's test can sit outside the reference's scope, as in
+    /// <c>(?aif)(ss)(?u:\1){i&lt;=1:[t]}</c>, so its own encoding is the wrong one; folding with it
+    /// refused 'ss\ufb05s', which <c>(?uif)(ss)(?:\1){i&lt;=1:[t]}</c> matches.
+    /// </param>
     /// <param name="pos">The subject position whose character is folded.</param>
     /// <param name="foldedPos">Which character of the folding to return.</param>
     /// <returns>That character.</returns>
-    private static uint FoldedCharAt(MatchState state, int pos, int foldedPos)
+    private static uint FoldedCharAt(MatchState state, CaseEncoding encoding, int pos, int foldedPos)
     {
         Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
 
-        _ = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+        _ = Encodings.FullCaseFold(encoding, state.CharAt(pos), folded);
 
         return folded[foldedPos];
     }
@@ -4766,7 +10952,7 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int NextFuzzyMatchGroupFld(MatchState state, ref FuzzyData data)
     {
-        if (!ThisErrorPermitted(state, data.FuzzyType))
+        if (!ThisErrorPermitted(state, FoldCountedAs(data.FuzzyType)))
         {
             return MatchStatus.Failure;
         }
@@ -4775,7 +10961,7 @@ internal static class Matcher
 
         int newPos;
 
-        switch (data.FuzzyType)
+        switch (GroupCharFirstOrder(data.FuzzyType))
         {
             case FuzzyValue.Del:
                 // Could a character at text_pos have been deleted?
@@ -4805,7 +10991,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4822,7 +11008,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4834,6 +11020,55 @@ internal static class Matcher
                 }
 
                 return CheckFuzzyPartial(state, newPos);
+            case FoldWholeSub:
+                // NOT UPSTREAM (D22, D24): could the whole subject character have been substituted
+                // for one whole group character? The loop tries this kind only where one side
+                // stands at the start of an expanding character, and both must stand at the start
+                // of one: the edit takes all of each folding, one character for one character. Part
+                // way through a group ß it would charge one edit for the rest of the ß and a whole
+                // subject character, part way through a subject ﬀ one edit for a whole group
+                // character and half of the ﬀ, and in the leftovers loop no group character is left.
+                Debug.Assert(
+                    GroupFoldKinds(state, in data) == GroupFoldEditKinds,
+                    "tried only at an expanding character's start"
+                );
+
+                if (
+                    !AtStartOfAGroupCharacter(data.Step, data.NewGfoldedPos, data.GfoldedLen)
+                    || !AtStartOfASubjectCharacter(in data)
+                )
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewFoldedPos = data.Step > 0 ? data.FoldedLen : 0;
+                data.NewGfoldedPos = data.Step > 0 ? data.GfoldedLen : 0;
+
+                return MatchStatus.Success;
+            case FoldWholeIns:
+                // NOT UPSTREAM (D22): could the whole subject character have been inserted? Only
+                // where it expands: a frame opened for an expanding group character (D24) can
+                // stand anywhere in the subject's folding.
+                return AtStartOfAnExpandingFolding(state, in data)
+                    ? WholeFoldedCharInsertion(state, ref data)
+                    : MatchStatus.Failure;
+            case FoldWholeDel:
+                // NOT UPSTREAM (D24): could the whole group character have been deleted? Only at
+                // the start of an expanding one; the subject side does not move, as for upstream's
+                // deletion, so it can stand anywhere in its folding.
+                if (!AtStartOfAnExpandingGroupCharacter(state, in data))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewGfoldedPos = data.Step > 0 ? data.GfoldedLen : 0;
+
+                return MatchStatus.Success;
             default:
                 return MatchStatus.Failure;
         }
@@ -4884,11 +11119,17 @@ internal static class Matcher
         data.GfoldedLen = gfoldedLen;
         data.Step = step;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = node.Encoding;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        // D22: D7's two kinds, on the same terms as in FuzzyMatchStringFld; D24: and the group's,
+        // whole edits first at an expanding group character.
+        bool groupCharFirst = AtStartOfAnExpandingGroupCharacter(state, in data);
+        int kinds = groupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
+
+        for (data.FuzzyType = groupCharFirst ? GroupCharFirst : 0; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchGroupFld(state, ref data);
 
@@ -4925,10 +11166,10 @@ internal static class Matcher
          * fuzzy_type op
          */
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
-        ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
         foldedPos = data.NewFoldedPos;
@@ -4960,8 +11201,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type
          */
@@ -4990,31 +11229,69 @@ internal static class Matcher
         int gfoldedLen = (int)poppedGfoldedLen;
         int newGfoldedPos = (int)poppedGfoldedPos;
 
+        // NOT UPSTREAM (D22): a frame left by OfferWholeFoldedGroupCharEdit charged nothing, and goes
+        // on to the whole-character kinds. Upstream unrecords before popping; nothing in between
+        // reads the record, so doing it here is the same. Nor did a frame left by
+        // PushExactGroupFldDeletion (finding F-A), which tries a deletion alone: the whole-character
+        // kinds at that comparison belong to OfferWholeFoldedGroupCharEdit's frame, pushed beneath it.
+        bool exactDeletion = poppedType == _exactFuzzyType;
+
+        // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
+        if (poppedType == _exactDeletionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
+        if (poppedType != FoldExactTaken && !exactDeletion)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FoldCountedAs(poppedType)];
+        }
+
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
+        if (exactDeletion)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            data.FuzzyType = poppedType == FoldExactTaken ? FoldWholeSub - 1 : poppedType;
+        }
+
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewFoldedPos = newFoldedPos;
         data.NewGfoldedPos = newGfoldedPos;
         data.GfoldedLen = gfoldedLen;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
-        --fuzzyCounts[data.FuzzyType];
-
-        // Permit insertion except initially when searching. Upstream spells the folding half of the
-        // rule differently here from the three places PermitInsertionInFold covers (:11019): one
-        // '||' chain, and with no step test, so a reverse retry asks 'folded_pos != folded_len'
-        // where the first attempt would have asked 'folded_pos != 0'. Ported as written.
-        // ...plus the issue 563 and 564 fix, NOT UPSTREAM, exactly as at the other seven sites.
-        data.PermitInsertion =
-            !search
-            || state.TextPos != state.SearchAnchor
-            || AnchorIsPinned(state, data.Step)
-            || data.NewFoldedPos != data.FoldedLen;
+        // Permit insertion except initially when searching.
+        // NOT UPSTREAM (D25): with the first attempt's rule. Upstream spells it here as one '||'
+        // chain ending 'new_folded_pos != folded_len' (:11019), which a forward retry meets at the
+        // start of every folding, where the first attempt asks 'folded_pos != 0'. Upstream never
+        // shows the difference, because its re-entry drops a retried insertion that finishes a
+        // folding (ledger entry 30). With S84's re-entry steps it opened a search with one:
+        // '(?i)(?=.*?(xtj))(?:\1){e<=1}' over 'axtj' retried the substitution at 0 as an
+        // insertion and gave (0, 4), where upstream and the literal give (1, 4). Reversed, the two
+        // rules are the same test. D22's whole insertion shares the rule.
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        int kinds;
+        if (exactDeletion)
+        {
+            kinds = FuzzyValue.Count;
+        }
+        else
+        {
+            kinds = poppedType >= GroupCharFirst ? GroupCharFirstEnd : GroupFoldKinds(state, in data);
+        }
+
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchGroupFld(state, ref data);
 
@@ -5043,19 +11320,20 @@ internal static class Matcher
         state.Bstack.PushSize(newFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
 
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type op
          */
 
-        ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
+        state.CaptureChange += MatchState.FuzzyEditChange;
 
         state.TextPos = data.NewTextPos;
+        state.RetriedAWholeFoldEdit = GroupCharFirstOrder(data.FuzzyType) >= FoldWholeSub;
         node = newNode!;
         groupPos = newGroupPos;
         foldedPos = data.NewFoldedPos;
@@ -5297,10 +11575,11 @@ internal static class Matcher
     /// </returns>
     /// <remarks>
     /// <para>
-    /// <b>Only the <c>STRING</c> arm is ported</b> (S60). Upstream's switch has six, and an opcode
-    /// it does not list falls through to "start matching from the current position" - so the five
-    /// unported arms take exactly the shape upstream already has for an unhandled opcode, and the
-    /// search is the one this port has always run. The reasons they are separate are in
+    /// <b>Only the <c>STRING</c> arm is ported</b> (S60). Upstream's switch has six; the other five
+    /// opcodes go to <see cref="RequiredStringScreen"/>, which refuses a subject that cannot hold the
+    /// string and otherwise starts matching from the current position, as upstream does for an
+    /// unhandled opcode (at offset 0 it starts at the nearest possible occurrence). Upstream's own
+    /// five arms are not ported, for the reasons in
     /// <c>docs/plan/OPTIMISATION-NOTES.md</c>: <c>STRING_REV</c> needs <c>string_search_rev</c> and
     /// the mirrored offset arithmetic, and the four case-insensitive arms are where S22 measured
     /// upstream's prefilter answering DIFFERENTLY from upstream's own matcher, so they are a
@@ -5384,7 +11663,14 @@ internal static class Matcher
                     return -1;
                 }
 
-                if (!isPartial)
+                if (isPartial)
+                {
+                    // D11: the required string runs into the text to come, so this start is
+                    // admitted through it. The attempt must still consume the rest of the string,
+                    // which runs out, so no success follows from it that the first pass missed (A1).
+                    state.NotePartialEvent(PartialEvent.PrefilterCandidate);
+                }
+                else
                 {
                     // Record where the required string matched. Upstream adds 'value_count', which
                     // is a character count; the needle's code-unit length is the same number of
@@ -5412,11 +11698,24 @@ internal static class Matcher
             }
 
             default:
-                // ponytail: Phase 7 - the STRING_REV, STRING_FLD, STRING_FLD_REV, STRING_IGN and
-                // STRING_IGN_REV arms of 'locate_required_string' (:11143-11365). Falling through
-                // costs the prefilter on reverse and case-insensitive patterns only; the lift is
-                // 'string_search_rev' (:6867) and the three folding searches, and for the folding
-                // ones a judgement about the divergences S22 pinned. OPTIMISATION-NOTES.md.
+                // NOT UPSTREAM'S ARMS. The STRING_REV, STRING_FLD, STRING_FLD_REV, STRING_IGN and
+                // STRING_IGN_REV arms of 'locate_required_string' (:11143-11365) are not ported,
+                // because the folding ones are not transparent (DECISIONS 2026-08-31). In their
+                // place a screen that only refuses, with a looser comparison than any the matcher
+                // makes, so it cannot change an answer: without it '(?i)(?:ss|ß)+x' over 25
+                // U+00DF ran the exponential search where upstream refuses the subject at once.
+                // The start-position jump only at offset 0, and never a 'req_pos'. The '(*SKIP)' rule
+                // is the STRING arm's.
+                if (RequiredStringScreen.Covers(reqString.Op))
+                {
+                    bool jump = pattern.ReqOffset == 0 && !pattern.HasSkipVerb;
+                    int place = RequiredStringScreen.Locate(state, reqString, jump, out cancelled);
+                    if (place < 0 || jump)
+                    {
+                        return place;
+                    }
+                }
+
                 break;
         }
 
@@ -5555,7 +11854,8 @@ internal static class Matcher
 
         while (true)
         {
-            if (TryMatchZeroWidth(state, test, pos) == MatchStatus.Success)
+            // Never undetermined: the prefilter runs in no second pass (see SearchStart).
+            if (TryMatchZeroWidth(state, test, pos) != MatchStatus.Failure)
             {
                 return pos;
             }
@@ -5680,6 +11980,12 @@ internal static class Matcher
         // operation is an allocation upstream does not make.
         int startPos = state.TextPos;
         newPosition = new Position(node, startPos);
+
+        // D11: BasicMatch withholds this from a partial call's second pass (narrowing 1, the
+        // PartialSide clause of 'searchStartAllowed'), so no answer here is undetermined and no
+        // start is admitted through the text to come. The design's "prefilter" of the second pass
+        // is the required-string locator (LocateRequiredString).
+        Debug.Assert(state.PartialSide == MatchState.PartialNone, "D11: the prefilter runs in no second pass");
 
         // Upstream's opening bound test (:8400-8416). Its partial halves are narrowing 1's; what is
         // left is the reverse arm, because the forward arm upstream has no failure case at all.
@@ -5830,13 +12136,15 @@ internal static class Matcher
                     break;
 
                 case Opcode.SearchAnchor:
-                    // '\G' can only hold where the search began (:8874-8884).
-                    if (state.Reverse ? startPos < state.SearchAnchor : startPos > state.SearchAnchor)
+                    // '\G' can only hold where the search began (:8874-8884). NOT UPSTREAM'S, D79:
+                    // where the operation began, not the current candidate run.
+                    int gPosition = BackslashGPosition(state);
+                    if (state.Reverse ? startPos < gPosition : startPos > gPosition)
                     {
                         return MatchStatus.Failure;
                     }
 
-                    startPos = state.SearchAnchor;
+                    startPos = gPosition;
                     break;
 
                 case Opcode.String:
@@ -5949,27 +12257,139 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Upstream <c>basic_match</c>, and NOT UPSTREAM'S (D62) in what a partial result reports.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A partial match reports, for each group, what every completion of the path the partial took
+    /// would report (owner ruling on D62, DECISIONS.md 2026-09-30). A group call that has not
+    /// returned when the text ran out will return in any completion, and its return puts the
+    /// caller's groups back (D51), so the groups are restored from the outermost open call's saved
+    /// frame here: <c>(?&lt;o&gt;(?&lt;i&gt;a)b)(?&amp;o)</c> over 'aba' partial reports i = (0, 1),
+    /// as the written-out <c>(?&lt;o&gt;(?&lt;i&gt;a)b)(?:(?:a)b)</c> does, where upstream and this
+    /// port reported the unfinished call's (2, 3). Only a partial result reaches the restore: every
+    /// arm that answers <see cref="MatchStatus.Partial"/> does so only when a partial side is set,
+    /// which the assertion below checks. Under <see cref="PatternObject.KeepCallCaptures"/> the
+    /// groups are left as upstream leaves them.
+    /// </para>
+    /// <para>
+    /// A partial from the D11 fork budget (<see cref="ForkBudgetPartial"/>) is not restored: it
+    /// stands for no path, so no completion attests any group, and it reports none, as the
+    /// written-out pattern does. Restored, <c>(x)(?&amp;c)(?(DEFINE)(?&lt;c&gt;(?:(a)|a){12}(?!\b)(*FAIL)\3))</c>
+    /// over 'x' + 'a' * 12 reported group 1 as (0, 1) where <c>(x)(?:(a)|a){12}(?!\b)(*FAIL)\2</c>
+    /// reports it unset (D11 chunk 9 review, finding 2). <see cref="MatchState.ForkBudgetSpent"/>
+    /// marks that partial: once it is set, the next step's cancellation gate answers it, and no arm
+    /// that counts a fork answers a partial in the same step (each goes on, breaks or backtracks:
+    /// <see cref="CountFork"/>'s callers). A Debug assertion checks that premise on every call.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>The match status.</returns>
+    internal static int BasicMatch(MatchState state, bool search)
+    {
+#if DEBUG
+        state.ForkBudgetAnswered = false;
+#endif
+        int status = BasicMatchCore(state, search);
+#if DEBUG
+        // The premise of skipping the restore below: a partial returned with the budget spent is
+        // the budget's own, never one an arm answered in the step that spent it.
+        Debug.Assert(
+            status != MatchStatus.Partial || state.ForkBudgetSpent == state.ForkBudgetAnswered,
+            "D11 M4: a partial with the fork budget spent comes from ForkBudgetPartial"
+        );
+#endif
+        if (
+            status == MatchStatus.Partial
+            && state.OpenCalls.Count > 0
+            && !state.Pattern.KeepCallCaptures
+            && !state.ForkBudgetSpent
+        )
+        {
+            Debug.Assert(state.PartialSide != MatchState.PartialNone, "only a partial search answers partial");
+            if (state.Pattern.PartialRestoresFrameByFrame)
+            {
+                // The oracle's second computation of the same answer; see the flag.
+                for (int frame = state.OpenCalls.Count - 1; frame >= 0; frame--)
+                {
+                    RestoreGroupsFromOpenCall(state, frame);
+                }
+            }
+            else
+            {
+                ReturnFromOpenCallsAtAPartial(state);
+            }
+        }
+
+        return status;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D62): puts every group back as it was when the outermost open call was made,
+    /// from that call's saved frame, whose captures lie directly under its return node.
+    /// </summary>
+    /// <param name="state">The match state, stopped at a partial result.</param>
+    private static void ReturnFromOpenCallsAtAPartial(MatchState state) => RestoreGroupsFromOpenCall(state, 0);
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D62): puts every group back as it was when open call <paramref name="frame"/>
+    /// (0 the outermost) was made, from the captures its saved frame holds under its return node.
+    /// </summary>
+    /// <param name="state">The match state, stopped at a partial result.</param>
+    /// <param name="frame">The index into <see cref="MatchState.OpenCalls"/>.</param>
+    private static void RestoreGroupsFromOpenCall(MatchState state, int frame)
+    {
+        int frameTop = state.OpenCalls[frame].SstackDepth;
+        int groups = state.Groups.Length;
+        int captures = frameTop - sizeof(long) - (2 * sizeof(long) * groups);
+        Debug.Assert(
+            captures >= 0 && frameTop <= state.Sstack.Count,
+            "an open call's frame is still on the saved stack"
+        );
+        for (int g = 0; g < groups; g++)
+        {
+            GroupData group = state.Groups[g];
+            int count = (int)state.Sstack.SizeAt(captures + (2 * sizeof(long) * g));
+            Debug.Assert(count <= group.Count, "a call only adds captures to what its caller had");
+            group.Count = count;
+            group.Current = (int)state.Sstack.SizeAt(captures + (2 * sizeof(long) * g) + sizeof(long));
+        }
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to advance the start position until something matches.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int BasicMatch(MatchState state, bool search)
+    private static int BasicMatchCore(MatchState state, bool search)
     {
         PatternObject pattern = state.Pattern;
         Node startNode = pattern.StartNode!;
 
+        // NOT UPSTREAM'S: only the call guard reads the text reached, so a pattern without group
+        // calls skips tracking it. See PatternObject.HasGroupCalls.
+        bool tracksReach = pattern.HasGroupCalls;
+
+        // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
+        // part of what makes a call a repeat, so the call guard keys on them too.
+        int readGroupCount = pattern.CallReadGroups.Length;
+
         // Look beyond any initial group node.
         Node startTest = pattern.StartTest!;
 
-        // Is the pattern anchored to the start or end of the string?
+        // Is the pattern anchored to the start or end of the string? NOT UPSTREAM'S (D11): the
+        // attempt from inside the text to come collapses the window to the edge, so it would pass
+        // the position test below, but no position inside that text is the start of the string, or
+        // its end reversed. Hence the InsideW clause (review of fa3880d: search `\Ax` over ':').
         switch (startTest.Op)
         {
             case Opcode.EndOfString:
                 if (state.Reverse)
                 {
                     // Searching backwards.
-                    if (state.TextPos != state.TextEnd)
+                    if (state.TextPos != state.TextEnd || state.InsideW)
                     {
                         return MatchStatus.Failure;
                     }
@@ -5983,7 +12403,7 @@ internal static class Matcher
                 if (!state.Reverse)
                 {
                     // Searching forwards.
-                    if (state.TextPos != state.TextStart)
+                    if (state.TextPos != state.TextStart || state.InsideW)
                     {
                         return MatchStatus.Failure;
                     }
@@ -6043,12 +12463,10 @@ internal static class Matcher
 
         // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
         // withheld from a partial match, which can be a prefix of the literal holding no whole
-        // piece. Its per-piece cache lives for this call, across every attempt. See FuzzyLiteralFilter.
+        // piece. What it learns lives on the state, across every attempt of every call of the scan
+        // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
-        Span<int> fuzzyFilterFound = stackalloc int[FuzzyLiteralFilter.MaxPieces];
-        fuzzyFilterFound.Fill(FuzzyLiteralFilter.Unknown);
-        int fuzzyFilterAsciiEnd = state.TextPos;
 
         // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
         // start with. Withheld from a partial match, which can end part way through a literal, and
@@ -6067,6 +12485,22 @@ internal static class Matcher
             return MatchStatus.Cancelled;
         }
 
+        Debug.Assert(state.WMarks.Count == 0, "D11 A5: an attempt starts with no w-mark");
+        Debug.Assert(
+            state.PartialSide != MatchState.PartialNone || state.Forks == 0,
+            "D11 A6: a first pass forks nowhere"
+        );
+        state.Forks = 0;
+
+        // D11 M3: the passes run the same code from the same start, and they try the same starts
+        // unless an attempt can move the next one. A (*SKIP) moves it, and so does a \K whose entry a
+        // cut discarded (FAILURE's bump-along starts from MatchPos). After a touched attempt the two
+        // passes may then try different starts, so the next attempt counts as touched too: a
+        // success there is one the first pass did not find (review of chunk 8, round 1:
+        // `(?=ab(*SKIP)c|a)a(*SKIP)x|b` search 'ab' was the complete match (1, 2)). A (*PRUNE)
+        // ends the attempt with the ordinary bump-along, so it needs nothing.
+        state.AttemptTouchedTheTextToCome =
+            state.InsideW || (state.AttemptTouchedTheTextToCome && pattern.AnAttemptCanMoveTheNextStart);
         state.Bstack.PushUInt8((byte)Opcode.Failure);
         state.Pstack.PushSize(state.Bstack.Count);
 
@@ -6112,22 +12546,53 @@ internal static class Matcher
         // upstream, because `$` has a `search_start_*` twin, and FOUR here, because the prefilter
         // is Phase 7's - so this port leaked where upstream did not and now agrees with it. Pinned
         // by FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one.
+        //
+        // NOT UPSTREAM EITHER (D44): no section is open either. The same verb throws away the FUZZY
+        // entry whose backtrack arm would have closed the section, which stayed the open one into
+        // the next attempt; upstream does the same.
+        //
+        // NOR THE RUNNING TOTALS (D45), which the verb leaves at the abandoned attempt's last
+        // END_FUZZY: an attempt that then succeeds without passing an END_FUZZY reported them.
         if (state.IsFuzzy)
         {
             Array.Clear(state.FuzzyCounts);
             state.FuzzyChanges.Clear();
+            if (!pattern.KeepSectionOpenAfterAVerb)
+            {
+                state.FuzzyNode = null;
+            }
+
+            if (!pattern.KeepDiscardedTotals)
+            {
+                state.TotalErrors = 0;
+                state.TotalCost = 0;
+            }
         }
+
+        // NOT UPSTREAM (empty-iteration rule): no section entered in this attempt is open yet.
+        state.SectionFrame = -1;
 
         // NOT UPSTREAM'S, and the same shape as the clear above: a fresh attempt has no group call
         // open, and the abandoned one may have left some - a verb that cuts the backtracking drops
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
+        if (state.Pattern.CallReadGroups.Length > 0)
+        {
+            state.ActiveCallCounts.Clear();
+            state.OpenCallSpans.Clear();
+        }
+
+        state.ReachedLow = int.MaxValue;
+        state.ReachedHigh = int.MinValue;
+
+        // NOT UPSTREAM (ledger entry 44's addendum): no pass of this attempt has crossed a verb.
+        state.VerbMarks.Clear();
 
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
-        if (state.Pattern.ReqString is null || state.TextPos < state.ReqPos)
+        if (state.Pattern.ReqString is null || state.InsideW || state.TextPos < state.ReqPos || state.ScreenSettles())
         {
             foundPos = state.TextPos;
         }
@@ -6147,7 +12612,7 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos))
+                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos, state.FilterMemory!))
                 {
                     return MatchStatus.Failure;
                 }
@@ -6156,13 +12621,7 @@ internal static class Matcher
             }
             else
             {
-                int next = fuzzyFilter.NextStart(
-                    state.Text.Span,
-                    foundPos,
-                    state.SliceEnd,
-                    fuzzyFilterFound,
-                    ref fuzzyFilterAsciiEnd
-                );
+                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!);
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
@@ -6257,11 +12716,13 @@ internal static class Matcher
             {
                 if (state.TextPos > state.SliceEnd)
                 {
-                    return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+                    return state.RunsOutRight ? MatchStatus.Partial : MatchStatus.Failure;
                 }
             }
 
             state.MatchPos = state.TextPos;
+            state.ForkAttemptStart = state.TextPos;
+            state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
 
             if (node.Op == Opcode.Success)
             {
@@ -6291,18 +12752,30 @@ internal static class Matcher
             }
 
             node = startNode;
+            state.ForkAttemptStart = state.TextPos;
+            state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
         }
 
         advance:
         // The main matching loop.
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
-            if (state.Iterations == 0 && SafeCheckCancel(state))
+            if (state.Iterations == 0)
             {
-                return MatchStatus.Cancelled;
+                if (SafeCheckCancel(state))
+                {
+                    return MatchStatus.Cancelled;
+                }
+
+                if (state.ForkBudgetSpent || SecondPassStackIsOverBudget(state))
+                {
+                    return ForkBudgetPartial(state);
+                }
             }
 
             switch (node.Op)
@@ -6311,11 +12784,21 @@ internal static class Matcher
                     status = TryMatchAny(state, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6325,6 +12808,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -6343,11 +12831,21 @@ internal static class Matcher
                     status = TryMatchAnyAll(state, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6357,6 +12855,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -6372,14 +12875,24 @@ internal static class Matcher
 
                     break;
                 case Opcode.AnyU: // Any character except a line separator.
-                    status = TryMatchAnyU(state, state.TextPos);
+                    status = TryMatchAnyU(state, node, state.TextPos);
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6389,6 +12902,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -6414,16 +12932,26 @@ internal static class Matcher
                     {
                         Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
                         Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
-                        _ => TryMatchAnyURev(state, state.TextPos),
+                        _ => TryMatchAnyURev(state, node, state.TextPos),
                     };
 
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, -1);
+                        }
+
                         state.TextPos = state.PrevPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6433,6 +12961,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -6449,7 +12982,7 @@ internal static class Matcher
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
                     PushCaptures(state, state.Bstack);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Atomic);
@@ -6478,7 +13011,36 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)atomicBstackCount;
+                    // D11 M2, the cut rule: a mark above the frame means the path since the group
+                    // began depends on the text to come, so the cut is not taken. Only a partial
+                    // call's second pass makes marks (A6).
+                    // A verb taint at the frame blocks too: only the oracle's ablation that confines verbs
+                    // to the innermost group (PatternObject.VerbsAreConfinedToTheInnermostGroup) makes
+                    // the group a verb's scope.
+                    if (
+                        state.WMarks.Count != 0
+                        && (
+                            state.WMarks[^1].Position >= atomicBstackCount
+                            || HasWMarkAt(state, (int)atomicBstackCount - 1, WMarkKind.VerbTaint)
+                        )
+                    )
+                    {
+                        Debug.Assert(
+                            state.Bstack.ReadSizeBelow((int)atomicBstackCount - 1, out long atomicSaved)
+                                && state.Sstack.Count == atomicSaved,
+                            "D11 amendment 2, assert 5: a blocked atomic end leaves the saved stack as its frame found it"
+                        );
+                        BlockAtomicCut(state, (int)atomicBstackCount);
+                        node = node.Next1.Node!;
+                        break;
+                    }
+
+                    CutBstack(state, (int)atomicBstackCount);
+
+                    // D11 M2: a cut taint the group's own frame carries (an earlier end was blocked)
+                    // does not block this cut, and moves to the end entry pushed below, because the
+                    // path after the group is still reached only for some continuations.
+                    bool atomicTainted = state.WMarks.Count != 0 && DropOwnCutTaint(state, (int)atomicBstackCount);
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
@@ -6486,8 +13048,14 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
+
                     state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
+
+                    if (atomicTainted)
+                    {
+                        state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                    }
 
                     /* bstack: captures fuzzy_counts capture_change END_ATOMIC
                      *
@@ -6509,7 +13077,7 @@ internal static class Matcher
                     // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
                     PushCaptures(state, state.Bstack);
                     PushRepeats(state, state.Bstack);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Conditional);
@@ -6539,6 +13107,24 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the cut rule, in a partial call's second pass. A blocked positive test
+                    // goes on in the yes-branch with its body's entries kept; a blocked negative one
+                    // goes back into its body.
+                    LookaroundEnd condEnd = LookaroundEnd.Cut;
+                    if (state.WMarks.Count != 0)
+                    {
+                        condEnd = EndALookaroundInTheSecondPass(state, ref node);
+                        if (condEnd == LookaroundEnd.Continue)
+                        {
+                            break;
+                        }
+
+                        if (condEnd == LookaroundEnd.Backtrack)
+                        {
+                            goto backtrack;
+                        }
+                    }
+
                     // The condition matched. It is atomic, like a lookaround, so everything it pushed
                     // while matching goes: the condition is asked once and never re-asked.
                     if (!state.Pstack.PopSize(out long endCondBstackCount))
@@ -6546,7 +13132,19 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)endCondBstackCount;
+                    CutBstack(state, (int)endCondBstackCount);
+
+                    // D11 M2: the frame goes, and its marks and dedup records with it. A positive
+                    // test's own cut taint moves to the end entry below, as a lookaround's does.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom((int)endCondBstackCount - 1);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom((int)endCondBstackCount - 1);
+                    }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
                     {
@@ -6554,7 +13152,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endCondSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
                     {
@@ -6575,21 +13173,34 @@ internal static class Matcher
                      * pstack: -
                      */
 
-                    if (endCondNode.Match)
+                    if (endCondNode.Match || !pattern.DropNegativeTestCaptures)
                     {
-                        // It's a positive lookaround that's succeeded, so the condition holds. The
-                        // saved block stays on the stack for the backtrack case to undo.
+                        // The test's body matched. The saved block stays on the stack for the
+                        // backtrack case to undo, and what the body did stands until then.
                         state.Bstack.PushUInt8((byte)Opcode.EndConditional);
+
+                        if (condEnd == LookaroundEnd.CutTainted)
+                        {
+                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                        }
 
                         /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
 
-                        // Go to the 'true' branch.
-                        node = node.Next1.Node!;
+                        // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
+                        // entry 65): a negative test fails, and the 'false' branch keeps the whole
+                        // block as the positive arm does - the captures, the repeats and the errors
+                        // of a fuzzy section inside the test - so (?(?!X)A|B) answers as
+                        // (?(?=X)B|A). Only backtracking undoes them, and none has happened: the
+                        // test chose the branch, so its work is not thrown away (owner ruling
+                        // 2026-09-30 on OPEN-2; errors decided 2026-10-03, DECISIONS). Upstream
+                        // restores the block first (_regex.c:12423-12432).
+                        node = endCondNode.Match ? node.Next1.Node! : endCondNode.Next2.Node!;
                     }
                     else
                     {
-                        // It's a negative lookaround that's succeeded, so the condition does not
-                        // hold. Undo what the condition did before taking the other branch.
+                        // Oracle-only (PatternObject.DropNegativeTestCaptures): upstream's arm. A
+                        // negative test has failed, so undo what the test did before taking the
+                        // 'false' branch.
                         if (!state.Bstack.PopSize(out long endCondCaptureChange))
                         {
                             return MatchStatus.Illegal;
@@ -6598,8 +13209,8 @@ internal static class Matcher
                         state.CaptureChange = endCondCaptureChange;
 
                         if (
-                            !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                            || !PopRepeats(state, state.Bstack)
+                            !state.PopSubAttemptFuzzyState(state.Bstack)
+                            || !PopRepeats(state, state.Bstack, testJustEnded: true)
                             || !PopCaptures(state, state.Bstack)
                         )
                         {
@@ -6634,18 +13245,44 @@ internal static class Matcher
                     }
 
                     status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
-                    if (status < 0)
+                    if (status is < 0 and not MatchStatus.Partial)
                     {
                         return status;
                     }
 
-                    if (status == MatchStatus.Success)
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): a
+                    // first alternative whose test runs out keeps the second one, which is kept
+                    // below as for an entered first alternative, and then runs out. Upstream
+                    // answers the partial at once: `(?!ab|a)` over 'a' was P(0, 1), where the 'a'
+                    // held fails the lookahead for every continuation.
+                    if (status == MatchStatus.Partial && !RunOutFeedsADecision(state))
                     {
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushNode(node.Next2.Node!);
-                        state.Bstack.PushUInt8((byte)Opcode.Branch);
+                        goto runOut;
+                    }
 
-                        /* bstack: text_pos node BRANCH */
+                    if (status != MatchStatus.Failure)
+                    {
+                        // NOT UPSTREAM (ledger entry 44's addendum): an alternative with an empty
+                        // one after it opens a pass, whose entry does the branch's job too; see
+                        // OpenOptionalPass.
+                        if (pattern.OptionalPassEndOf is not null)
+                        {
+                            OpenOptionalPass(state, node);
+                        }
+                        else
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+                            /* bstack: text_pos node BRANCH */
+                        }
+
+                        if (status == MatchStatus.Partial)
+                        {
+                            state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+                            goto runOut;
+                        }
 
                         node = nextPosition.Node;
                         state.TextPos = nextPosition.TextPos;
@@ -6751,9 +13388,34 @@ internal static class Matcher
                     // Are the inner constraints OK? This is the one place a 'min' is consulted: an
                     // item asks whether one more error fits, and only the end of the section can ask
                     // whether the section as a whole is legal.
+                    //
+                    // NOT UPSTREAM (ledger entry 51, known defect D9): a section below an insertion
+                    // or error minimum is not failed yet. Upstream fails it here (':12461-12462'),
+                    // before pushing the frame that offers trailing insertions (':12500-12511'), so
+                    // the one error that could still meet the minimum is never tried:
+                    // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
+                    // section were legal, pushes that frame, and then backtracks into it; the
+                    // backtrack arm asks the constraints again after each insertion.
+                    // D11 amendment 2, repair 2: the open-section link is this section's own frame,
+                    // which the saved stack's top is back at. A REOPEN that restored a body's open
+                    // section with a stale link would break it (MatchState.SectionFrame).
+                    Debug.Assert(
+                        !pattern.HasFuzzyMinimum || state.SectionFrame == state.Sstack.Count,
+                        "D11 amendment 2, repair 2: the open-section link is the closing section's frame"
+                    );
+
+                    bool minimumAwaitsInsertions = false;
                     if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
                     {
-                        goto backtrack;
+                        if (
+                            pattern.CheckMinimumBeforeTrailingInsertions
+                            || !InsertionsCanMeetMinimum(state, state.FuzzyCounts, state.FuzzyNode!)
+                        )
+                        {
+                            goto backtrack;
+                        }
+
+                        minimumAwaitsInsertions = true;
                     }
 
                     // MERGING, not restoring: the section's own changes are part of the answer this
@@ -6764,6 +13426,13 @@ internal static class Matcher
                         !state.Sstack.PopNode(pattern, out Node? outerNode)
                         || !state.PopFuzzyCountsMerging(state.Sstack, outerCounts, out _)
                     )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+                    long closedFrame = state.SectionFrame;
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -6821,8 +13490,14 @@ internal static class Matcher
                         state.TotalErrors = previousTotalErrors;
                         state.TotalCost = previousTotalCost;
 
+                        if (pattern.HasFuzzyMinimum)
+                        {
+                            state.Sstack.PushSize(state.SectionFrame);
+                        }
+
                         state.PushFuzzyCounts(state.Sstack, outerCounts);
                         state.Sstack.PushNode(outerNode);
+                        state.SectionFrame = (int)closedFrame;
 
                         /* sstack: outer_counts outer_node */
                         goto backtrack;
@@ -6850,6 +13525,12 @@ internal static class Matcher
                      * end_fuzzy_node END_FUZZY
                      */
 
+                    // Ledger entry 51: zero trailing insertions do not meet the minimum, so try one.
+                    if (minimumAwaitsInsertions)
+                    {
+                        goto backtrack;
+                    }
+
                     node = node.Next1.Node!;
                     break;
                 }
@@ -6859,56 +13540,52 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
 
-                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
-                    // slice: a fuzzy pattern throws in do_match_2 before it gets here.
-                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+                    // since undone, so how many empty deleting iterations a loop takes depends on the
+                    // path, and where a section inside the body restarts its budget it loops until
+                    // MemoryError. Here an empty iteration is progress only when it spent edits that
+                    // something needs, or changed a tested group; then the repeat memo drops any
+                    // iteration whose state this run of the repeat has already reached.
+                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
+                        {
+                            --rpData.Count;
+                            goto backtrack;
+                        }
+
+                        changed = stands > 0;
+                    }
+                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+                    {
+                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
                         changed = !(
                             node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
                         );
+                    }
 
-                        // NOT UPSTREAM (S88): a fuzzy edit bumps 'capture_change' (:10487), and the
-                        // repeat guards are off under fuzzy matching (:9596), so an iteration that
-                        // only deleted counts as progress. Outside any fuzzy section, its errors were
-                        // made by a section inside the body, which starts each iteration with a fresh
-                        // budget, so with no maximum upstream repeats it until MemoryError:
-                        // '(?:(?:x){d<=1})+y' over 'y'. Such a repeat past its minimum stops at an
-                        // iteration that did not move through the text. A bounded repeat keeps
-                        // upstream's answer ('{1,3}' there charges three deletions), and so does one
-                        // inside a section, whose budget ends the loop: '(?:\d+a0b+?){d<=2}'. So
-                        // does a body with a capture group, where an iteration that does not move
-                        // can set a group a later one tests: '(?:(?(1)c|z)|()(?:x){d<=1})*$'. A
-                        // group call puts 'capture_change' back when it returns, and upstream
-                        // loops on '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$' too, so a call
-                        // in the body does not turn the stop off.
-                        // SHORTCUT: inside a section whose budget the inner section never draws
-                        // on, '(?:(?:(?:x){d<=1})+y){e<=5}' over 'y', the loop still runs to the
-                        // 1 GB stack limit, as upstream's does to MemoryError, because END_FUZZY
-                        // adds the inner counts to the outer ones without checking the outer limit.
-                        // The upgrade path is to record which section charged each error of an
-                        // iteration, and stop it here when the enclosing section charged none.
-                        // SHORTCUT: a body with a capture group keeps upstream's rule whole, so
-                        // '(?:(?(1)c|z)|()(?:x){d<=1})+d' over 'cd' still loops to the limit.
-                        // The upgrade path is a count of group changes kept beside
-                        // 'capture_change', so an iteration that changed no group can stop.
-                        if (
-                            changed
-                            && ~node.Values[2] == 0
-                            && state.FuzzyNode is null
-                            && !pattern.RepeatInfoAt(index).BodyHasGroups
-                            && state.TextPos == rpData.Start
-                        )
-                        {
-                            changed = false;
-                        }
+                    // NOT UPSTREAM (D17): a changed group is no progress if it only brought the run
+                    // back to a state it had already reached. After the fuzzy rules, which decide
+                    // whether an empty iteration stands at all; see RevisitsEmptyIterationState.
+                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+                    {
+                        changed = false;
                     }
 
                     // Could the body or tail match?
@@ -6924,10 +13601,31 @@ internal static class Matcher
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
-                            // Reached when the body's test runs out of slice after the minimum:
-                            // regex.search(r'(?:ab)*c', 'ab', partial=True) passes here and is a
-                            // partial (0, 2) in both engines (regex 2026.9.10, 2026-09-23).
-                            if (bodyStatus == MatchStatus.Partial && rpData.Count >= node.Values[1] && AtEnd(state))
+                            // Upstream turns the body's run-out into a failure once the minimum is
+                            // reached at the end of the text, so that the tail's complete match wins
+                            // (:12575). Only a partial call's second pass gets a PARTIAL here (from
+                            // TryMatch's test node), and there every complete match is the first
+                            // pass's, already refused: a tail success reads the text to come, and
+                            // under fullmatch it backtracks. NOT UPSTREAM'S, D11: so the run-out
+                            // stays a run-out, through the run-out rule below, with the tail kept
+                            // (KeepTheAlternativeThatDidNotRunOut); `(?:.\b)+` fullmatch over 'a '
+                            // found no partial where 'a b' matches (D11 fix round 3's grid). The
+                            // oracle's pre-D11 ablation keeps upstream's failure.
+                            if (bodyStatus == MatchStatus.Partial && !pattern.SecondPassAsBeforeD11)
+                            {
+                                // Design assert A15: only a partial call's second pass gets here.
+                                Debug.Assert(
+                                    state.PartialSide != MatchState.PartialNone || state.InsideW,
+                                    "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
+                                );
+                                state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
+                                state.NoteRunOutCause(PartialEvent.GreedyBodyRunOutKept);
+                            }
+                            else if (
+                                bodyStatus == MatchStatus.Partial
+                                && rpData.Count >= node.Values[1]
+                                && AtEnd(state)
+                            )
                             {
                                 bodyStatus = MatchStatus.Failure;
                             }
@@ -6955,8 +13653,13 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -6978,19 +13681,44 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
-                    {
-                        return MatchStatus.Partial;
-                    }
-
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                        new BodyEndStateData(
+                            rpData.Count - 1,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            rpData.ChangesAtStart
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
                     /* bstack: count start capture_change index BODY_END */
+
+                    // NOT UPSTREAM'S, D11, the run-out rule: upstream returns the partial here,
+                    // dropping the other alternative. BODY_END goes first, as for an entered
+                    // alternative, so backtracking from the run-out puts the count back (inside a
+                    // body it re-enters this case through the body: `(?!(?:.\b|.){1,3}b)` over 'ab').
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+                    {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
+                            )
+                        );
+                        goto runOut;
+                    }
 
                     if (tryBody)
                     {
@@ -7007,8 +13735,10 @@ internal static class Matcher
                                     state.TextPos,
                                     state.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    state.FuzzyChanges.Count
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
 
@@ -7016,13 +13746,15 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
+
+                        rpData.ChangesAtStart = IterationStart(state);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -7034,7 +13766,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7053,21 +13785,50 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
 
-                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
-                    // slice, as in END_GREEDY_REPEAT above.
-                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+                    // since undone, so how many empty deleting iterations a loop takes depends on the
+                    // path, and where a section inside the body restarts its budget it loops until
+                    // MemoryError. Here an empty iteration is progress only when it spent edits that
+                    // something needs, or changed a tested group; then the repeat memo drops any
+                    // iteration whose state this run of the repeat has already reached.
+                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
+                        int stands = FuzzyIterationStands(state, rpData, node, changed);
+                        if (stands < 0)
+                        {
+                            --rpData.Count;
+                            goto backtrack;
+                        }
+
+                        changed = stands > 0;
+                    }
+                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+                    {
+                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
                         changed = !(
                             node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
                         );
+                    }
+
+                    // NOT UPSTREAM (D17), as in END_GREEDY_REPEAT above.
+                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+                    {
+                        changed = false;
                     }
 
                     // Could the body or tail match?
@@ -7082,9 +13843,10 @@ internal static class Matcher
                     {
                         // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
                         // minimum has been reached and the text has run out (:12575); this case does
-                        // not, and the asymmetry is upstream's own.
+                        // not, and the asymmetry is upstream's own. NOT UPSTREAM'S, D11: a run-out is
+                        // handled below, with the tail kept.
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -7107,8 +13869,13 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -7130,19 +13897,41 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
-                    {
-                        return MatchStatus.Partial;
-                    }
-
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                        new BodyEndStateData(
+                            rpData.Count - 1,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            rpData.ChangesAtStart
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
                     /* bstack: count start capture_change index BODY_END */
+
+                    // NOT UPSTREAM'S, D11, the run-out rule, as in END_GREEDY_REPEAT above.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+                    {
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count
+                            )
+                        );
+                        goto runOut;
+                    }
 
                     if (tryTail)
                     {
@@ -7159,8 +13948,10 @@ internal static class Matcher
                                     state.TextPos,
                                     state.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    state.FuzzyChanges.Count
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
 
@@ -7168,7 +13959,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7183,13 +13974,15 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
+
+                        rpData.ChangesAtStart = IterationStart(state);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -7208,6 +14001,22 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the cut rule, in a partial call's second pass.
+                    LookaroundEnd lookEnd = LookaroundEnd.Cut;
+                    if (state.WMarks.Count != 0)
+                    {
+                        lookEnd = EndALookaroundInTheSecondPass(state, ref node);
+                        if (lookEnd == LookaroundEnd.Continue)
+                        {
+                            break;
+                        }
+
+                        if (lookEnd == LookaroundEnd.Backtrack)
+                        {
+                            goto backtrack;
+                        }
+                    }
+
                     // Everything the body pushed while it matched goes: a lookaround is atomic, so
                     // there is nothing left to backtrack into once it has succeeded.
                     if (!state.Pstack.PopSize(out long endLookBstackCount))
@@ -7215,7 +14024,22 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    state.Bstack.Count = (int)endLookBstackCount;
+                    CutBstack(state, (int)endLookBstackCount);
+
+                    // The frame goes, and its marks and dedup records with it: a negative lookaround
+                    // that fails drops its own cut taint, and a positive one moves it to the end entry
+                    // below (A7's exception), because the path after it is reached only for some
+                    // continuations. A record left at the frame's position would dedup a later
+                    // lookaround's success there (review of chunk 7, round 1).
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom((int)endLookBstackCount - 1);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom((int)endLookBstackCount - 1);
+                    }
 
                     if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
                     {
@@ -7223,7 +14047,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endLookSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
                     {
@@ -7250,6 +14074,11 @@ internal static class Matcher
                         // stay visible; the block stays on the stack for the backtrack case to undo.
                         state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
 
+                        if (lookEnd == LookaroundEnd.CutTainted)
+                        {
+                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+                        }
+
                         /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
 
                         // Go to the 'true' branch.
@@ -7266,7 +14095,7 @@ internal static class Matcher
 
                         state.CaptureChange = endLookCaptureChange;
 
-                        if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                        if (!state.PopSubAttemptFuzzyState(state.Bstack))
                         {
                             return MatchStatus.Illegal;
                         }
@@ -7279,6 +14108,27 @@ internal static class Matcher
                         if (endLookHasGroups && !PopCaptures(state, state.Bstack))
                         {
                             return MatchStatus.Illegal;
+                        }
+
+                        // NOT UPSTREAM (ledger entry 50): try an insertion in front of it first.
+                        if ((endLookNode.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            status = InsertBeforeAFailedLookaround(state, search, ref node, endLookNode);
+
+                            if (status < 0)
+                            {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Success)
+                            {
+                                break;
+                            }
                         }
 
                         // Go to the 'false' branch.
@@ -7321,16 +14171,27 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgn: // Set symmetric difference, ignoring case.
                 case Opcode.SetUnion: // Set union.
                 case Opcode.SetUnionIgn: // Set union, ignoring case.
-                    if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                    if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                     {
-                        return MatchStatus.Partial;
+                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+                        {
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
+                        goto runOut;
                     }
 
                     if (
                         state.TextPos < state.SliceEnd
-                        && MatchesOne(state.Encoding, node, state.CharAt(state.TextPos)) == node.Match
+                        && MatchesOne(node.Encoding, node, state.CharAt(state.TextPos)) == node.Match
                     )
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = Step(state, state.TextPos, node.Step);
                         node = node.Next1.Node!;
                     }
@@ -7340,6 +14201,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -7374,14 +14240,25 @@ internal static class Matcher
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
                     if (RanOutOnTheLeft(state, state.TextPos))
                     {
-                        return MatchStatus.Partial;
+                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+                        {
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
+                        goto runOut;
                     }
 
                     if (
                         state.TextPos > state.SliceStart
-                        && MatchesOne(state.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
+                        && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
                     )
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, -1);
+                        }
+
                         state.TextPos = Step(state, state.TextPos, node.Step);
                         node = node.Next1.Node!;
                     }
@@ -7391,6 +14268,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -7430,11 +14312,35 @@ internal static class Matcher
 
                     if (status < 0)
                     {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
                         return status;
                     }
 
                     if (status == MatchStatus.Success)
                     {
+                        node = node.Next1.Node!;
+                    }
+                    else if (status == MatchStatus.Undetermined)
+                    {
+                        // D11 M1: some continuations pass the test, so the path goes on and leaves a
+                        // touch mark. The continuations that fail it are ordinary backtracking, and
+                        // in a fuzzy section they may still match it with an insertion, which an
+                        // entry below the touch tries: `(?:\B){i<=1}(?!^)` over '' ('' + 'a' inserts
+                        // the 'a'; review of chunk 6, round 1).
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node);
+                            state.Bstack.PushUInt8((byte)Opcode.UndeterminedFuzzyRetry);
+
+                            /* bstack: text_pos node UNDETERMINED_FUZZY_RETRY */
+                        }
+
+                        PushTouchMark(state);
                         node = node.Next1.Node!;
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
@@ -7445,6 +14351,11 @@ internal static class Matcher
 
                         if (status < 0)
                         {
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -7462,11 +14373,23 @@ internal static class Matcher
                 case Opcode.Failure: // Failure.
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
+                    // NOT UPSTREAM (empty-iteration rule): the link beneath the frame, see
+                    // MatchState.SectionFrame.
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.Sstack.PushSize(state.SectionFrame);
+                    }
+
                     // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
                     // zero and END_FUZZY adds them back in, which is how an inner budget can be
                     // tighter than the outer one without either being ignored.
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
+
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.SectionFrame = state.Sstack.Count;
+                    }
 
                     // Initialise the inner fuzzy info.
                     Array.Clear(state.FuzzyCounts);
@@ -7488,18 +14411,40 @@ internal static class Matcher
                     RepeatData rpData = state.Repeats[index];
 
                     // We might need to backtrack into the head, so save the current repeat.
+                    // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    bool numbersRuns = pattern.TestedGroups.Length > 0;
+                    if (numbersRuns)
+                    {
+                        state.Bstack.PushSize(rpData.RunId);
+                    }
+
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                        new RepeatStateData(
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
 
-                    /* bstack: count start capture_change index text_pos GREEDY_REPEAT */
+                    /* bstack: [run_id] count start capture_change index text_pos GREEDY_REPEAT */
 
                     // Initialise the new repeat.
+                    if (numbersRuns)
+                    {
+                        rpData.RunId = ++state.NextRunId;
+                    }
+
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
+                    rpData.ChangesAtStart = IterationStart(state);
+                    rpData.ClearMemo();
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -7509,7 +14454,9 @@ internal static class Matcher
                     if (tryBody)
                     {
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the tail kept.
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -7530,8 +14477,13 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -7552,9 +14504,25 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): upstream
+                    // returns the partial at either test, dropping the other alternative.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
                     {
-                        return MatchStatus.Partial;
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart
+                            )
+                        );
+                        goto runOut;
                     }
 
                     if (tryBody)
@@ -7578,8 +14546,10 @@ internal static class Matcher
                                     rpData.Start,
                                     rpData.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    rpData.ChangesAtStart
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
 
@@ -7587,7 +14557,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -7602,7 +14572,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7635,10 +14605,22 @@ internal static class Matcher
                         out bool isPartial,
                         out int pos
                     );
+                    // NOT UPSTREAM'S, D11, the run-out rule (KeepTheAlternativeThatDidNotRunOut): the
+                    // repeat could take a character of the text to come, which runs out, but the
+                    // counts the held text allows are kept first, as the arm keeps them for a repeat
+                    // that stopped inside the text. Upstream answers the partial at once:
+                    // `a(?!b*(?<=b))b` over 'ab' was P(0, 2) where the lookbehind after the 'b' held
+                    // fails the lookahead for every continuation (review of 2026-10-04, S1).
+                    int runOutAt = -1;
                     if (isPartial)
                     {
-                        state.TextPos = pos;
-                        return MatchStatus.Partial;
+                        if (!RunOutFeedsADecision(state))
+                        {
+                            state.TextPos = pos;
+                            goto runOut;
+                        }
+
+                        runOutAt = pos;
                     }
 
                     // Unmatch until it's not guarded. 'pos' is upstream's
@@ -7671,6 +14653,13 @@ internal static class Matcher
 
                     if (!match)
                     {
+                        if (runOutAt >= 0)
+                        {
+                            // No count the held text allows can be kept: only the run-out is left.
+                            state.TextPos = runOutAt;
+                            goto runOut;
+                        }
+
                         // The repeat has failed to match at this position.
                         state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
                         goto backtrack;
@@ -7691,6 +14680,21 @@ internal static class Matcher
                         rpData.Count = count;
                     }
 
+                    if (runOutAt >= 0)
+                    {
+                        // The tail at this count is kept too, in a BRANCH entry: its arm resumes
+                        // at a node and a position, which is all the tail's entry needs.
+                        state.Bstack.PushSize(pos);
+                        state.Bstack.PushNode(node.Next1.Node!);
+                        state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+                        /* bstack: text_pos node BRANCH */
+
+                        state.NotePartialEvent(PartialEvent.RunOutKeptAlternatives);
+                        state.TextPos = runOutAt;
+                        goto runOut;
+                    }
+
                     // Advance into the tail.
                     state.TextPos = pos;
                     node = node.Next1.Node!;
@@ -7702,28 +14706,71 @@ internal static class Matcher
                     Node groupCallReturnNode = node.Next1.Node!;
 
                     // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
-                    // already open. See MatchState.ActiveCalls and ledger entry 14 - the path is
-                    // infinite, and failing it leaves every other path alone.
+                    // already open, when the attempt has reached no further since that call was made.
+                    // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
+                    // and failing it leaves every other path alone.
                     long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
+                    NoteReached(state, state.TextPos);
+                    int groupCallReach = state.ReachedWidth;
+                    Debug.Assert(
+                        groupCallReach >= 0 && groupCallReach <= state.TextLength,
+                        "the text reached is measured and fits in the text"
+                    );
 
-                    if (!state.ActiveCalls.Add(groupCallKey))
+                    // NOT UPSTREAM'S: a call with the same entry key as one that ran out of choices
+                    // without returning fails the same way, so it fails now. Nothing has been pushed
+                    // yet, so backtracking resumes where the call's own backtrack arm would have left
+                    // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
+                    bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
+                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
                     {
                         goto backtrack;
                     }
 
-                    // For the caller.
-                    PushGroups(state, state.Sstack);
+                    if (
+                        readGroupCount == 0
+                            ? !state.ActiveCalls.Add((groupCallKey, groupCallReach))
+                            : !TryOpenCall(state, groupCallKey, groupCallReach)
+                    )
+                    {
+                        goto backtrack;
+                    }
+
+                    // For the caller. Each group's count as well as its current, where upstream's
+                    // push_groups saves only current: the return restores both (D51, see
+                    // ReturnToCallerCaptures). The captures go last, right under the return node,
+                    // so a partial result can find them at a fixed offset (D62, see
+                    // ReturnFromOpenCallsAtAPartial); upstream's order is groups first.
+                    // SHORTCUT (D68): every call saves, and its return restores, every repeat and
+                    // every group, whatever the called body can change. That is most of what a call
+                    // costs over its written-out body, 1.1-2.4x on the D68 rows, and a fuzzy section
+                    // pays it on every retry that re-enters the call. Upgrade: compile, for each
+                    // call reference, the groups and repeats its body can write, and save only
+                    // those; D51 and D62 depend on what is restored, so it needs nested and
+                    // recursive witnesses. docs/plan/2026-10-03-d68-call-copy-perf.md.
                     PushRepeats(state, state.Sstack);
                     state.Sstack.PushSize(state.CaptureChange);
+                    PushCaptures(state, state.Sstack);
                     state.Sstack.PushNode(groupCallReturnNode);
                     state.Bstack.PushUInt8((byte)Opcode.GroupCall);
 
                     // The call is open, and the frame it belongs to ends here. See
                     // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
                     // open calls it has just thrown away.
-                    state.OpenCalls.Add((groupCallKey, state.Sstack.Count));
+                    Debug.Assert(
+                        state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
+                        "the text reached never shrinks, so an inner call's reach is at least its caller's"
+                    );
+                    state.OpenCalls.Add(
+                        (
+                            groupCallKey,
+                            groupCallReach,
+                            state.Sstack.Count,
+                            groupCallKeyed ? FailedCallKeyToRecord(state) : null
+                        )
+                    );
 
-                    /* sstack: caller_groups caller_repeats capture_change return_node
+                    /* sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: GROUP_CALL
                      */
@@ -7771,6 +14818,24 @@ internal static class Matcher
                         // so far in this attempt" and not "exists in the pattern".
                         GroupData groupExistsGroup = state.Groups[groupExistsIndex - 1];
 
+                        // D11 chunk 8: a group a run-out made unknown may hold anything or nothing,
+                        // so the condition takes both branches, each only for some continuations
+                        // (row Q2): the yes-branch now, the no-branch through a NO_BRANCH entry.
+                        if (state.HasUnknownCaptures && groupExistsGroup.Current >= 0 && IsUnknown(groupExistsGroup))
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                            /* bstack: text_pos node NO_BRANCH */
+
+                            PushTouchMark(state);
+                            state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                            CountFork(state);
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
                         node =
                             groupExistsGroup.Current >= 0
                                 ? node.Next1.Node! // The 'true' branch.
@@ -7783,7 +14848,7 @@ internal static class Matcher
                 {
                     /* If called:
                      *
-                     * sstack: caller_groups caller_repeats capture_change return_node
+                     * sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      *
@@ -7804,33 +14869,43 @@ internal static class Matcher
                         // The group was called.
                         node = groupReturnNode;
 
-                        // The call is closed, so it is no longer one this position may not re-enter.
-                        // It is the innermost open one - calls nest - and its key goes on the
-                        // backtracking stack so the arm below can re-open it.
-                        long groupReturnCallKey = PopOpenCall(state);
+                        // For the callee and the caller in turn. The callee's repeats and groups go
+                        // on the backtracking stack and the caller's come back off the saved stack,
+                        // so matching resumes exactly where the call left it. Upstream restores only
+                        // each group's current here, so the captures the call made stayed on the
+                        // list; here they are thrown away, as in Perl and PCRE2 (D51, see
+                        // ReturnToCallerCaptures). The groups are exchanged first because the
+                        // caller's lie on top of its repeats on the saved stack (D62).
+                        if (!ReturnToCallerCaptures(state))
+                        {
+                            return MatchStatus.Illegal;
+                        }
 
-                        // For the callee.
-                        PushGroups(state, state.Bstack);
                         PushRepeats(state, state.Bstack);
                         state.Bstack.PushSize(state.CaptureChange);
-                        state.Bstack.PushSize(groupReturnCallKey);
-                        state.Bstack.PushNode(groupReturnNode);
-                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
-
-                        // For the caller. The callee's group spans and repeats go on the
-                        // backtracking stack and the caller's come back off the saved stack, so
-                        // matching resumes exactly where the call left it. The captures themselves
-                        // are untouched, which is how a called group's capture survives the return.
                         if (
                             !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                            || !PopRepeats(state, state.Sstack)
-                            || !PopGroups(state, state.Sstack)
+                            || !PopRepeats(state, state.Sstack, testJustEnded: false)
                         )
                         {
                             return MatchStatus.Illegal;
                         }
 
                         state.CaptureChange = groupReturnCaptureChange;
+
+                        // The call is closed, so it is no longer one this position may not re-enter.
+                        // It is the innermost open one - calls nest - and its key goes on the
+                        // backtracking stack so the arm below can re-open it.
+                        state.Bstack.PushSize(state.OpenCalls[^1].Key);
+                        state.Bstack.PushSize(state.OpenCalls[^1].Reach);
+                        foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
+                        {
+                            state.Bstack.PushSize(span);
+                        }
+
+                        _ = PopOpenCall(state);
+                        state.Bstack.PushNode(groupReturnNode);
+                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
                     }
                     else
                     {
@@ -7845,8 +14920,8 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
-                     *         GROUP_RETURN
+                     * bstack: callee_captures callee_repeats capture_change call_key call_reach
+                     *         return_node GROUP_RETURN
                      *
                      * else:
                      *
@@ -7867,6 +14942,16 @@ internal static class Matcher
 
                     node = node.Next1.Node!;
                     break;
+                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
+                {
+                    if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+                    {
+                        goto backtrack;
+                    }
+
+                    node = node.Next1.Node!;
+                    break;
+                }
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -7874,18 +14959,40 @@ internal static class Matcher
                     RepeatData rpData = state.Repeats[index];
 
                     // We might need to backtrack into the head, so save the current repeat.
+                    // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    bool numbersRuns = pattern.TestedGroups.Length > 0;
+                    if (numbersRuns)
+                    {
+                        state.Bstack.PushSize(rpData.RunId);
+                    }
+
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                        new RepeatStateData(
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
 
-                    /* bstack: count start capture_change index text_pos LAZY_REPEAT */
+                    /* bstack: [run_id] count start capture_change index text_pos LAZY_REPEAT */
 
                     // Initialise the new repeat.
+                    if (numbersRuns)
+                    {
+                        rpData.RunId = ++state.NextRunId;
+                    }
+
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
+                    rpData.ChangesAtStart = IterationStart(state);
+                    rpData.ClearMemo();
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -7895,7 +15002,9 @@ internal static class Matcher
                     if (tryBody)
                     {
                         bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the tail kept.
+                        if (bodyStatus is < 0 and not MatchStatus.Partial)
                         {
                             return bodyStatus;
                         }
@@ -7916,8 +15025,13 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
-                        if (tailStatus < 0)
+                        tailStatus = TailMayMatch(
+                            state,
+                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
+                        );
+
+                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+                        if (tailStatus is < 0 and not MatchStatus.Partial)
                         {
                             return tailStatus;
                         }
@@ -7938,9 +15052,24 @@ internal static class Matcher
                         goto backtrack;
                     }
 
-                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    // NOT UPSTREAM'S, D11, the run-out rule, as in GREEDY_REPEAT above.
+                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
                     {
-                        return MatchStatus.Partial;
+                        KeepTheAlternativeThatDidNotRunOut(
+                            state,
+                            bodyStatus,
+                            tailStatus,
+                            new MatchBodyTailStateData(
+                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart
+                            )
+                        );
+                        goto runOut;
                     }
 
                     if (tryTail)
@@ -7958,8 +15087,10 @@ internal static class Matcher
                                     rpData.Start,
                                     rpData.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    rpData.ChangesAtStart
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
 
@@ -7967,7 +15098,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7982,7 +15113,7 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -8018,7 +15149,7 @@ internal static class Matcher
                     if (isPartial)
                     {
                         state.TextPos = pos;
-                        return MatchStatus.Partial;
+                        goto runOut;
                     }
 
                     // Have we matched at least the minimum?
@@ -8064,7 +15195,7 @@ internal static class Matcher
                     }
 
                     state.Bstack.PushBool(lookHasGroups);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Lookaround);
@@ -8092,13 +15223,32 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    // Prune the backtracking back to an appropriate backtracking point.
-                    TopBstack(state);
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+                    state.VerbMarks.Add(state.Pstack.Count);
 
-                    /* bstack: ...
-                     *
-                     * pstack: bstack
-                     */
+                    // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
+                    // positive lookaround the verb acts when backtracking reaches it, and then
+                    // unwinds past the group (see VerbIsInsideATransparentGroup). Upstream prunes
+                    // to the group's own mark here and so fails only the group:
+                    // `(?>a(*PRUNE)b)|a` over 'ac' is (0, 1) upstream and None in PCRE2 10.47 and
+                    // Perl 5.42.3. Pinned by VerbScopeTests.
+                    if (VerbIsInsideATransparentGroup(state))
+                    {
+                        state.Bstack.PushUInt8((byte)Opcode.Prune);
+
+                        /* bstack: ... | ... PRUNE */
+                    }
+                    else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state, -1))
+                    {
+                        // Prune the backtracking back to an appropriate backtracking point, unless
+                        // the path here read the text to come (D11 M2, the cut rule for a verb).
+                        TopBstack(state);
+
+                        /* bstack: ...
+                         *
+                         * pstack: bstack
+                         */
+                    }
 
                     node = node.Next1.Node!;
                     break;
@@ -8124,6 +15274,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -8146,9 +15303,9 @@ internal static class Matcher
                     // where the lockstep argument no longer holds.
                     while (stringPos < span.End)
                     {
-                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -8156,6 +15313,11 @@ internal static class Matcher
                             && SameChar(state.CharAt(state.TextPos), state.CharAt(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, 1);
+                            }
+
                             stringPos = state.NextPos(stringPos);
                             state.TextPos = state.NextPos(state.TextPos);
                         }
@@ -8167,6 +15329,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8200,6 +15367,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -8212,7 +15386,7 @@ internal static class Matcher
                     {
                         if (RanOutOnTheLeft(state, state.TextPos))
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
@@ -8220,6 +15394,11 @@ internal static class Matcher
                             && SameChar(state.CharBefore(state.TextPos), state.CharBefore(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, -1);
+                            }
+
                             stringPos = state.PrevPos(stringPos);
                             state.TextPos = state.PrevPos(state.TextPos);
                         }
@@ -8229,6 +15408,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8261,6 +15445,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -8273,14 +15464,19 @@ internal static class Matcher
                     {
                         if (RanOutOnTheLeft(state, state.TextPos))
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
                             state.TextPos > state.SliceStart
-                            && SameCharIgn(state.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+                            && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, -1);
+                            }
+
                             stringPos = state.PrevPos(stringPos);
                             state.TextPos = state.PrevPos(state.TextPos);
                         }
@@ -8290,6 +15486,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8327,6 +15528,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
                     int foldedLen;
                     int gfoldedLen;
@@ -8343,17 +15551,23 @@ internal static class Matcher
                     else
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+                        // bounded by the slice, as in the loop below. Upstream folds the character
+                        // before text_pos unguarded; no retried kind of its own succeeds at the start
+                        // of the slice, but D24's whole deletion of a group character does.
+                        foldedLen =
+                            state.TextPos > state.SliceStart
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
+                                : 0;
 
                         // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
                         // STRING_FLD_REV takes the subject's step here (:14907).
                         gfoldedLen =
                             stringPos > span.Start
-                                ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded)
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
                                 : 0;
 
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos <= 0 && foldedLen > 0)
                             {
@@ -8379,12 +15593,12 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             foldedLen =
                                 state.TextPos > state.SliceStart
-                                    ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded)
+                                    ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
                                     : 0;
 
                             foldedPos = foldedLen;
@@ -8393,15 +15607,54 @@ internal static class Matcher
                         // Case-fold at current position in group.
                         if (gfoldedPos <= 0)
                         {
-                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
+                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded);
                             gfoldedPos = gfoldedLen;
                         }
 
-                        if (
-                            foldedPos > 0
-                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1])
-                        )
+                        if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    -1,
+                                    foldChangesStart
+                                );
+                            }
+
+                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                            if (
+                                (
+                                    (foldedLen > 1 && foldedPos == foldedLen)
+                                    || (gfoldedLen > 1 && gfoldedPos == gfoldedLen)
+                                )
+                                && (node.Status & NodeStatus.Fuzzy) != 0
+                            )
+                            {
+                                OfferWholeFoldedGroupCharEdit(
+                                    state,
+                                    node,
+                                    -1,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    foldChangesStart,
+                                    search
+                                );
+                            }
+
                             --foldedPos;
                             --gfoldedPos;
                         }
@@ -8422,6 +15675,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8468,6 +15726,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8510,6 +15773,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
                     int foldedLen;
                     int gfoldedLen;
@@ -8526,21 +15796,27 @@ internal static class Matcher
                     else
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+                        // bounded by the slice, as in the loop below. Upstream folds the character at
+                        // text_pos unguarded; no retried kind of its own succeeds at the end of the
+                        // slice, but D24's whole deletion of a group character does.
+                        foldedLen =
+                            state.TextPos < state.SliceEnd
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
+                                : 0;
 
                         // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
                         // used up, where upstream reads the character after it.
                         gfoldedLen =
                             stringPos < span.End
-                                ? Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded)
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded)
                                 : 0;
 
                         // NOT UPSTREAM (S84): upstream re-enters the loop without the two steps that
                         // follow a fuzzy call in its body, so a retried edit that finishes a folding
                         // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
                         // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
-                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
                         {
                             if (foldedPos >= foldedLen && foldedLen > 0)
                             {
@@ -8564,14 +15840,14 @@ internal static class Matcher
                         // Case-fold at current position in text.
                         if (foldedPos >= foldedLen)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             foldedLen =
                                 state.TextPos < state.SliceEnd
-                                    ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                    ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
                                     : 0;
 
                             foldedPos = 0;
@@ -8580,15 +15856,51 @@ internal static class Matcher
                         // Case-fold at current position in group.
                         if (gfoldedPos >= gfoldedLen)
                         {
-                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
+                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded);
                             gfoldedPos = 0;
                         }
 
-                        if (
-                            foldedPos < foldedLen
-                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos], folded[foldedPos])
-                        )
+                        if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
                         {
+                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                            // whole-character frame, so the whole deletion of an expanding group character is
+                            // retried before its folded characters are deleted one at a time, as the literal's
+                            // retry order has it.
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    1,
+                                    foldChangesStart
+                                );
+                            }
+
+                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                            if (
+                                ((foldedLen > 1 && foldedPos == 0) || (gfoldedLen > 1 && gfoldedPos == 0))
+                                && (node.Status & NodeStatus.Fuzzy) != 0
+                            )
+                            {
+                                OfferWholeFoldedGroupCharEdit(
+                                    state,
+                                    node,
+                                    1,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    foldChangesStart,
+                                    search
+                                );
+                            }
+
                             ++foldedPos;
                             ++gfoldedPos;
                         }
@@ -8609,6 +15921,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8660,6 +15977,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8701,6 +16023,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+                    // run-out does (row T3).
+                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
+                    {
+                        goto runOut;
+                    }
+
                     GroupSpan span = refGroup.Captures[refGroup.Current];
 
                     if (stringPos < 0)
@@ -8711,16 +16040,21 @@ internal static class Matcher
                     // Try comparing.
                     while (stringPos < span.End)
                     {
-                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                         {
-                            return MatchStatus.Partial;
+                            goto runOut;
                         }
 
                         if (
                             state.TextPos < state.SliceEnd
-                            && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
+                            && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, 1);
+                            }
+
                             stringPos = state.NextPos(stringPos);
                             state.TextPos = state.NextPos(state.TextPos);
                         }
@@ -8730,6 +16064,11 @@ internal static class Matcher
 
                             if (status < 0)
                             {
+                                if (status == MatchStatus.Partial)
+                                {
+                                    goto runOut;
+                                }
+
                                 return status;
                             }
 
@@ -8759,19 +16098,61 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    if ((node.Status & NodeStatus.Reverse) != 0)
+                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+                    state.VerbMarks.Add(state.Pstack.Count);
+
+                    // Prune the backtracking back to an appropriate backtracking point - unless the
+                    // verb is in an unfinished atomic group or positive lookaround, where it prunes
+                    // nothing until backtracking reaches it (ledger entry 47; see the Prune arm).
+                    // D11 M2: in a partial call's second pass the verb does nothing when the path
+                    // here read the text to come; the backtrack arm below asks again.
+                    bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
+                    bool skipIsBlocked =
+                        !skipIsInsideATransparentGroup
+                        && state.WMarks.Count != 0
+                        && SkipABlockedVerb(state, state.TextPos);
+                    if (!skipIsInsideATransparentGroup && !skipIsBlocked)
                     {
-                        state.SliceEnd = state.TextPos;
+                        TopBstack(state);
+                    }
+
+                    // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
+                    // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
+                    // rest of the attempt has run. pcre2pattern ("Verbs that act after
+                    // backtracking") and perlre give a verb its effect only when a later failure
+                    // backtracks onto it, and "the one that is backtracked onto first acts" ("More
+                    // than one backtracking verb"). So the skip position goes on the backtracking
+                    // stack above the pruned point: a later (*PRUNE) or (*SKIP) prunes it away and
+                    // decides the next start itself; the end of an atomic group or lookaround that
+                    // finished discards it, which confines the verb to the group; and a success
+                    // never pops it. The backtrack arm below applies it.
+                    // `(?>aa(*SKIP))x` over 'aaax' is (1, 4) here, in PCRE2 10.47 and in Perl
+                    // 5.42.3, and None upstream; `aa(*SKIP)x(*PRUNE)y|a` over 'aaxz' is (1, 2) in
+                    // all three and None upstream. Pinned by BacktrackingVerbTests.
+                    // PatternObject.SkipMovesTheSliceWhenItRuns restores upstream's timing for the
+                    // oracle alone.
+                    if (state.Pattern.SkipMovesTheSliceWhenItRuns)
+                    {
+                        if (!skipIsBlocked)
+                        {
+                            MoveTheSliceForASkip(state, node, state.TextPos);
+                        }
+
+                        // Ledger 45's ablation on its own: the slice has moved already, and
+                        // backtracking onto the verb must still unwind (ledger entry 47).
+                        if (skipIsInsideATransparentGroup)
+                        {
+                            state.Bstack.PushUInt8((byte)Opcode.Prune);
+                        }
                     }
                     else
                     {
-                        state.SliceStart = state.TextPos;
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushNode(node);
+                        state.Bstack.PushUInt8((byte)Opcode.Skip);
                     }
 
-                    // Prune the backtracking back to an appropriate backtracking point.
-                    TopBstack(state);
-
-                    /* bstack: ...
+                    /* bstack: ... text_pos node SKIP
                      *
                      * pstack: bstack
                      */
@@ -8786,6 +16167,12 @@ internal static class Matcher
                         // LIVE SINCE S60, and dead code before it: the locator is the only thing
                         // that sets 'req_pos', and this is the one arm it sets it for. The string
                         // the prefilter has already compared is not compared a second time.
+                        // Only an exact run is marked (String.CompileCore, D34): skipping a fuzzy
+                        // one would skip its exact-deletion choices too.
+                        Debug.Assert(
+                            (node.Status & NodeStatus.Fuzzy) == 0,
+                            "A fuzzy run was marked as the required string."
+                        );
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -8800,9 +16187,9 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos < length)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -8810,6 +16197,14 @@ internal static class Matcher
                                 && SameChar(state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, 1);
+                                }
+
                                 ++stringPos;
                                 state.TextPos = state.NextPos(state.TextPos);
                             }
@@ -8819,6 +16214,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -8876,7 +16276,7 @@ internal static class Matcher
                         else
                         {
                             // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
 
                             if (foldedPos >= foldedLen)
                             {
@@ -8896,14 +16296,14 @@ internal static class Matcher
                         {
                             if (foldedPos >= foldedLen)
                             {
-                                if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                                if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                                 {
-                                    return MatchStatus.Partial;
+                                    goto runOut;
                                 }
 
                                 foldedLen =
                                     state.TextPos < state.SliceEnd
-                                        ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                        ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
                                         : 0;
 
                                 foldedPos = 0;
@@ -8911,9 +16311,37 @@ internal static class Matcher
 
                             if (
                                 foldedPos < foldedLen
-                                && SameCharIgn(state.Encoding, node.Values[stringPos], folded[foldedPos])
+                                && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == 0 && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        1,
+                                        stringPos,
+                                        0,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringFldDeletion(
+                                        state,
+                                        node,
+                                        stringPos,
+                                        foldedPos,
+                                        foldedLen,
+                                        1,
+                                        foldChangesStart
+                                    );
+                                }
+
                                 ++stringPos;
                                 ++foldedPos;
 
@@ -8937,6 +16365,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -8980,6 +16413,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9031,16 +16469,24 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos < length)
                         {
-                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
                                 state.TextPos < state.SliceEnd
-                                && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
+                                && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
+                                if (
+                                    (node.Status & NodeStatus.Fuzzy) != 0
+                                    && length - stringPos <= pattern.ExactDeletionCeiling
+                                )
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, 1);
+                                }
+
                                 ++stringPos;
                                 state.TextPos = state.NextPos(state.TextPos);
                             }
@@ -9050,6 +16496,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9100,7 +16551,7 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
@@ -9108,6 +16559,11 @@ internal static class Matcher
                                 && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, -1);
+                                }
+
                                 --stringPos;
                                 state.TextPos = state.PrevPos(state.TextPos);
                             }
@@ -9117,6 +16573,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9166,18 +16627,23 @@ internal static class Matcher
                         {
                             if (RanOutOnTheLeft(state, state.TextPos))
                             {
-                                return MatchStatus.Partial;
+                                goto runOut;
                             }
 
                             if (
                                 state.TextPos > state.SliceStart
                                 && SameCharIgn(
-                                    state.Encoding,
+                                    node.Encoding,
                                     state.CharBefore(state.TextPos),
                                     node.Values[stringPos - 1]
                                 )
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, -1);
+                                }
+
                                 --stringPos;
                                 state.TextPos = state.PrevPos(state.TextPos);
                             }
@@ -9187,6 +16653,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9244,7 +16715,7 @@ internal static class Matcher
                         else
                         {
                             // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
 
                             if (foldedPos <= 0)
                             {
@@ -9266,16 +16737,12 @@ internal static class Matcher
                             {
                                 if (RanOutOnTheLeft(state, state.TextPos))
                                 {
-                                    return MatchStatus.Partial;
+                                    goto runOut;
                                 }
 
                                 foldedLen =
                                     state.TextPos > state.SliceStart
-                                        ? Encodings.FullCaseFold(
-                                            state.Encoding,
-                                            state.CharBefore(state.TextPos),
-                                            folded
-                                        )
+                                        ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
                                         : 0;
 
                                 foldedPos = foldedLen;
@@ -9283,9 +16750,37 @@ internal static class Matcher
 
                             if (
                                 foldedPos > 0
-                                && SameCharIgn(state.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
+                                && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
                             )
                             {
+                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                                if (foldedLen > 1 && foldedPos == foldedLen && (node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    OfferWholeFoldedCharEdit(
+                                        state,
+                                        node,
+                                        -1,
+                                        stringPos,
+                                        foldedLen,
+                                        foldedLen,
+                                        foldChangesStart,
+                                        folded
+                                    );
+                                }
+
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringFldDeletion(
+                                        state,
+                                        node,
+                                        stringPos,
+                                        foldedPos,
+                                        foldedLen,
+                                        -1,
+                                        foldChangesStart
+                                    );
+                                }
+
                                 --stringPos;
                                 --foldedPos;
 
@@ -9309,6 +16804,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9350,6 +16850,11 @@ internal static class Matcher
 
                                 if (status < 0)
                                 {
+                                    if (status == MatchStatus.Partial)
+                                    {
+                                        goto runOut;
+                                    }
+
                                     return status;
                                 }
 
@@ -9387,6 +16892,34 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // NOT UPSTREAM'S, D11 M3 (design section 4.3). The two passes run the same code
+                    // from the same start, so a second-pass path differs from the first only after
+                    // it read the text to come: an undetermined test, a decided one that differs
+                    // from the first pass, or any test of the attempt from inside that text
+                    // (MatchState.AttemptTouchedTheTextToCome). A run-out answers the partial
+                    // itself. A success after such a read needs a continuation, so it is a partial;
+                    // under fullmatch it backtracks, because a full match would need the
+                    // continuation to be empty, which the first pass has already judged.
+                    if (state.PartialSide != MatchState.PartialNone && state.AttemptTouchedTheTextToCome)
+                    {
+                        // Design assert A2. POSIX saves a match and keeps looking, and a partial here
+                        // would drop the one saved. Only a success A1 exempts can save one, and none
+                        // of the suite's or the grids' second passes reach one before a touched
+                        // success (measured 2026-09-29, Debug).
+                        Debug.Assert(!state.FoundMatch, "D11 A2: a second-pass partial drops no saved POSIX match");
+
+                        if (state.MatchAll)
+                        {
+                            state.NotePartialEvent(PartialEvent.FullmatchBacktrack);
+
+                            goto backtrack;
+                        }
+
+                        state.NotePartialEvent(PartialEvent.SuccessTurnedPartial);
+
+                        return MatchStatus.Partial;
+                    }
+
                     if (state.MatchAll)
                     {
                         // We want to match all of the slice.
@@ -9403,8 +16936,27 @@ internal static class Matcher
                         }
                     }
 
+                    // Design assert A1: a second-pass success that read nothing of the text to come
+                    // is one the first pass found, and the first pass failed. The exception is a
+                    // driver that refines a success outside BasicMatch: under BESTMATCH and
+                    // ENHANCEMATCH the first pass can find this success and refuse it, and then it
+                    // takes the path it took before D11. `(?b)` row 3834 of seed 4242 is one: M3
+                    // turned it into the partial (3, 6) until chunk 2's review, where the
+                    // refinement answers upstream's (6, 6)
+                    // (PartialEdgeReadTests.A_second_pass_success_that_read_nothing_to_come_is_refined_as_before).
+                    Debug.Assert(
+                        state.PartialSide == MatchState.PartialNone
+                            || (
+                                pattern.IsFuzzy
+                                && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0
+                            ),
+                        "D11 A1: a second-pass success read the text to come"
+                    );
+
                     if ((pattern.Flags & RegexFlags.Posix) != 0)
                     {
+                        AssertMatchIsClosed(state);
+
                         // If we're looking for a POSIX match, check whether this one is better and
                         // then keep looking.
                         CheckPosixMatch(state);
@@ -9412,21 +16964,69 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    AssertMatchIsClosed(state);
                     return MatchStatus.Success;
                 default:
                     throw Seam.For(node.Op);
             }
         }
 
+        // NOT UPSTREAM'S, D11 M2: a consuming item ran out of text. Inside a lookaround's body in a
+        // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
+        // anywhere else the attempt answers the partial, as it always has.
+        runOut:
+        if (RunOutCanWaitForTheBody(state))
+        {
+            stringPos = -1;
+            goto backtrack;
+        }
+
+        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
+        if (runOutFails)
+        {
+            stringPos = -1;
+            goto backtrack;
+        }
+
+        if (runOutEnd is null)
+        {
+            return MatchStatus.Partial;
+        }
+
+        // The item that ran out is abandoned, so the next STRING item starts at its own first
+        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
+        // (review of chunk 6, round 1).
+        stringPos = -1;
+        node = runOutEnd;
+        goto advance;
+
         backtrack:
+        // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
+        // MatchState.ReachedLow. Only a pattern with group calls reads it.
+        if (tracksReach)
+        {
+            NoteReached(state, state.TextPos);
+        }
+
         while (true)
         {
+            WorkCounter.Step();
+
             // Should we abort the matching?
             state.Iterations = (ushort)(state.Iterations + 0x100);
 
-            if (state.Iterations == 0 && SafeCheckCancel(state))
+            if (state.Iterations == 0)
             {
-                return MatchStatus.Cancelled;
+                if (SafeCheckCancel(state))
+                {
+                    return MatchStatus.Cancelled;
+                }
+
+                if (state.ForkBudgetSpent || SecondPassStackIsOverBudget(state))
+                {
+                    return ForkBudgetPartial(state);
+                }
             }
 
             if (!state.Bstack.PopUInt8(out byte op))
@@ -9488,6 +17088,10 @@ internal static class Matcher
                     break;
                 // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
                 // puts a step of 0 back into next_fuzzy_match_item.
+                case Opcode.FuzzyLookaround: // NOT UPSTREAM (ledger entry 50).
+                // NOT UPSTREAM: SEARCH_ANCHOR is here too, ledger entry 48. Upstream's forward case
+                // (:14431) fuzzes a failed \G exactly like the others, but its list here omits it, so
+                // backtracking over that insertion raises "invalid RE code".
                 case Opcode.Boundary:
                 case Opcode.DefaultBoundary:
                 case Opcode.DefaultEndOfWord:
@@ -9499,6 +17103,7 @@ internal static class Matcher
                 case Opcode.EndOfStringLineU:
                 case Opcode.EndOfWord:
                 case Opcode.GraphemeBoundary:
+                case Opcode.SearchAnchor:
                 case Opcode.StartOfLine:
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:
@@ -9625,13 +17230,19 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the cut taint a blocked end left at the frame goes with it.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long atomicSstackCount))
                     {
                         return MatchStatus.Illegal;
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!state.Bstack.PopSize(out long atomicCaptureChange))
                     {
@@ -9640,7 +17251,7 @@ internal static class Matcher
 
                     state.CaptureChange = atomicCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -9651,6 +17262,12 @@ internal static class Matcher
                 {
                     /* bstack: captures fuzzy_counts capture_change */
 
+                    // D11 M2: the cut taint an unblocked cut moved here from the frame goes with it.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     if (!state.Bstack.PopSize(out long endAtomicCaptureChange))
                     {
                         return MatchStatus.Illegal;
@@ -9658,7 +17275,7 @@ internal static class Matcher
 
                     state.CaptureChange = endAtomicCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -9686,6 +17303,23 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the frame's marks and dedup records go with it. A cut taint means a
+                    // success of the test was blocked, so the branch the test's failure picks is
+                    // taken only for some continuations.
+                    bool condWasBlocked = false;
+                    bool condHeld = false;
+                    if (state.WMarks.Count != 0)
+                    {
+                        condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+                        condHeld = HasWMarkAt(state, state.Bstack.Count, WMarkKind.Held);
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
+                    }
+
                     // The condition failed to match. As with LOOKAROUND, the condition's own bstack
                     // entries have already been popped by the backtracking that got here, so the
                     // pstack entry is simply dropped.
@@ -9695,7 +17329,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)condSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
                     {
@@ -9721,13 +17355,27 @@ internal static class Matcher
 
                     state.CaptureChange = condCaptureChange;
 
+                    // Only the test has run since the push, unless a positive test's end was blocked
+                    // and let the yes-branch go on (D35's remarks, PushRepeats).
                     if (
-                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                        || !PopRepeats(state, state.Bstack)
+                        !state.PopSubAttemptFuzzyState(state.Bstack)
+                        || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
                         || !PopCaptures(state, state.Bstack)
                     )
                     {
                         return MatchStatus.Illegal;
+                    }
+
+                    // D11 (D38): the test held for every continuation, and its yes-branch has failed
+                    // (EndALookaroundInTheSecondPass's dedup), so the conditional fails.
+                    if (condHeld)
+                    {
+                        Debug.Assert(
+                            condWasBlocked && condNode.Match,
+                            "D11: only a positive test that went on from a blocked end can be held"
+                        );
+                        state.NotePartialEvent(PartialEvent.HeldFailedTheCondition);
+                        break;
                     }
 
                     // A positive condition that failed means the condition does not hold, so take the
@@ -9735,11 +17383,41 @@ internal static class Matcher
                     // branch. Neither is a failure of the conditional itself, so this goes forward
                     // rather than on backtracking.
                     node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;
+
+                    // D11 M2: after a blocked success the branch holds only for some continuations.
+                    // A positive test has already taken its yes-branch for the others; a negative one
+                    // takes its no-branch for them when backtracking reaches the NO_BRANCH entry.
+                    if (condWasBlocked)
+                    {
+                        // A negative test forks here, once. A positive one forked at each blocked
+                        // end that went on (EndALookaroundInTheSecondPass), and this branch is
+                        // one of the outcomes those counted.
+                        if (!condNode.Match)
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(condNode.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                            /* bstack: text_pos node NO_BRANCH */
+
+                            CountFork(state);
+                        }
+
+                        PushTouchMark(state);
+                        state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                    }
+
                     goto advance;
                 }
                 case Opcode.EndConditional: // End of a conditional subpattern (:15460).
                 {
                     /* bstack: captures repeats capture_change */
+
+                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
 
                     if (!state.Bstack.PopSize(out long endCondCaptureChange))
                     {
@@ -9749,8 +17427,8 @@ internal static class Matcher
                     state.CaptureChange = endCondCaptureChange;
 
                     if (
-                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
-                        || !PopRepeats(state, state.Bstack)
+                        !state.PopSubAttemptFuzzyState(state.Bstack)
+                        || !PopRepeats(state, state.Bstack, testJustEnded: false)
                         || !PopCaptures(state, state.Bstack)
                     )
                     {
@@ -9788,7 +17466,12 @@ internal static class Matcher
                     }
 
                     node = endFuzzyNode!;
-                    state.TextPos = (int)endFuzzyTextPos;
+
+                    // NOT UPSTREAM'S, D11 (D41): a complemented position marks an entry whose
+                    // trailing insertion has already run out of text at the edge (below), so the
+                    // section goes straight back to its own choices.
+                    bool trailingInsertionRanOut = endFuzzyTextPos < 0;
+                    state.TextPos = (int)(trailingInsertionRanOut ? ~endFuzzyTextPos : endFuzzyTextPos);
 
                     // Try one more insertion after the section. This is the only place a trailing
                     // insertion can come from: every item inside the section has already been tried.
@@ -9803,6 +17486,8 @@ internal static class Matcher
                     // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and
                     // 'insertion_permitted' on the line above already applies the section's own
                     // limits to 'inner_counts', so nothing is lost by dropping the second term.
+                    // 'PatternObject.DoubleCountTrailingInsertions' puts it back, for the oracle's
+                    // ablation only (S89).
                     //
                     // The double count is invisible wherever 'max_errors' is unbounded, which is
                     // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
@@ -9810,7 +17495,9 @@ internal static class Matcher
                     // whose second pass climbs 'max_errors' only to 'fewest_errors' - so the budget
                     // the guard is tested against is the match's own cost, the caller cannot raise
                     // it, and '(?b)' loses a match the same engine finds the moment the flag is
-                    // deleted. On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
+                    // deleted. It bites in 'DoEnhancedFuzzyMatch' too, which tightens 'max_errors'
+                    // to the total minus one after each run (upstream ':17978'): '(?e)' then keeps a
+                    // costlier fit where a cheaper one exists (D46). On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
                     // every budget, WHICH IS THAT PATTERN'S BOUNDARY AND NOT THE DEFECT'S: a fit
                     // needing ONE insertion beside one other error is lost too, and a width-2
                     // section body survives counts a width-1 body does not (S52 sitting 16, blocks
@@ -9828,29 +17515,27 @@ internal static class Matcher
                     // merged - and it refuses only insertions the budget has already said are
                     // unaffordable, so it cannot lose a match that fits.
                     //
-                    // ponytail: NO TEST PINS THIS ONE, and it is kept anyway. Deleting it changes
-                    // nothing measurable - the 5854-test suite stays green, all three default-wave
-                    // seeds stay green, S42's blind review swept 1,425 weighted-cost '(?b)' rows
-                    // across two seeds and found no row it affects, and four hand-built
-                    // group-call-plus-trailing-insertion patterns behave identically with and
-                    // without it. What it defends is a HANG rather than a wrong answer: on
-                    // re-entering one section the merged live counts can outrun the per-entry bound
-                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on.
-                    // A hang costs an unattended slice where one comparison on a backtrack arm costs
-                    // nothing, so the asymmetry decides it. Upgrade path: if a case is ever
-                    // constructed, it becomes a test here and this note goes.
+                    // Pinned by Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion (D21,
+                    // tools/controls.json S42-2G): without this term, a self-recursive group call
+                    // that re-enters this section can outrun the per-entry bound
+                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
+                    // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
+                    // rather than asserting a value.
                     if (
-                        InsertionPermitted(state, innerNode!, innerCounts)
-                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors
+                        !trailingInsertionRanOut
+                        && InsertionPermitted(state, innerNode!, innerCounts)
+                        && TotalErrors(state.FuzzyCounts)
+                            + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
+                            < state.MaxErrors
                         && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
                             <= state.MaxCost
-                        && FuzzyExtMatch(state, innerNode, state.TextPos)
                     )
                     {
                         bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;
                         int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
 
-                        if (state.TextPos != endFuzzyLimit)
+                        if (state.TextPos != endFuzzyLimit && FuzzyExtMatch(state, innerNode, state.TextPos))
                         {
                             state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
                             ++innerCounts[FuzzyValue.Ins];
@@ -9879,8 +17564,67 @@ internal static class Matcher
                             // popped, which is the node the trailing insertion was tried against.
                             state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
 
+                            // NOT UPSTREAM (ledger entry 51): the forward arm let a section below
+                            // its minimum through to here, so the constraints are asked again. Until
+                            // they hold, the frame just pushed is backtracked into for one more
+                            // insertion. The limits were checked above, so only a minimum can fail.
+                            if (
+                                pattern.HasFuzzyMinimum
+                                && !FuzzyWithinConstraints(innerCounts, innerNode, state.MaxErrors)
+                            )
+                            {
+                                Debug.Assert(
+                                    !pattern.CheckMinimumBeforeTrailingInsertions
+                                        && innerCounts[FuzzyValue.Sub] >= innerNode.Values[FuzzyValue.MinSub]
+                                        && innerCounts[FuzzyValue.Del] >= innerNode.Values[FuzzyValue.MinDel],
+                                    "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
+                                );
+                                goto backtrack;
+                            }
+
                             node = node.Next1.Node!;
                             goto advance;
+                        }
+                        else if (
+                            state.TextPos == endFuzzyLimit
+                            && !pattern.SecondPassAsBeforeD11
+                            && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
+                                == MatchStatus.Partial
+                        )
+                        {
+                            // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
+                            // needs the character after the edge, so in a partial call it runs out
+                            // of text as the insertion arm of FuzzyMatchItem does, whether the rest
+                            // of the pattern needs it (a fullmatch's end, a lookahead's last letter)
+                            // or the section's own minimum does. It used to fail the path. Before
+                            // build chunk 6, S57d escalated a lookahead's run-out and hid that;
+                            // after it, `(?:a(?=bcd)b.){e<=1}` fullmatch 'abc' answered None where
+                            // 'abc' + 'd' completes it (the review of chunk 8). The character after
+                            // the edge is unknown, so a section's insertion test (`{i<=1:[a-z]}`) is
+                            // not asked, as the insertion arm does not ask it past the edge either.
+                            // The insertion is not counted: a run-out presumes the rest, and fewer
+                            // errors only let more through.
+                            //
+                            // The entry goes back with its position complemented, so that when the
+                            // run-out's continuation fails, backtracking into it goes on into the
+                            // section's own choices (below) instead of running out again. Outside a
+                            // lookaround's body the attempt answers the partial and the entry is
+                            // never read.
+                            state.Bstack.PushSize(previousTotalErrors);
+                            state.Bstack.PushSize(previousTotalCost);
+                            state.PushFuzzyCounts(state.Bstack, innerCounts);
+                            state.Bstack.PushSize(insertions);
+                            state.Bstack.PushNode(innerNode);
+                            state.Bstack.PushSize(~(long)state.TextPos);
+                            state.Bstack.PushNode(node);
+                            state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                            /* bstack: total_errors total_cost inner_counts insertions inner_node
+                             * ~text_pos end_fuzzy_node END_FUZZY
+                             */
+
+                            state.NotePartialEvent(PartialEvent.TrailingInsertionRunOut);
+                            goto runOut;
                         }
                     }
 
@@ -9895,8 +17639,17 @@ internal static class Matcher
                     state.TotalCost = previousTotalCost;
 
                     // Save the outer fuzzy info.
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.Sstack.PushSize(state.SectionFrame);
+                    }
+
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.SectionFrame = state.Sstack.Count;
+                    }
 
                     /* sstack: outer_counts outer_node
                      *
@@ -9918,10 +17671,15 @@ internal static class Matcher
                 }
                 case Opcode.GroupCall: // Group call (:16354).
                 {
-                    /* sstack: caller_groups caller_repeats capture_change return_node
+                    /* sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      */
+
+                    // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
+                    // returned, a later call with the same entry key fails the same way. See
+                    // FailedCallKey and MatchState.OpenCalls.
+                    RecordFailedCall(state);
 
                     // The call is no longer open: backtracking past it means it never happened.
                     PopOpenCall(state);
@@ -9930,9 +17688,9 @@ internal static class Matcher
                     // means there is nowhere to return to.
                     if (
                         !state.Sstack.DropSize()
+                        || !PopCallerCaptures(state)
                         || !state.Sstack.PopSize(out long groupCallCaptureChange)
-                        || !PopRepeats(state, state.Sstack)
-                        || !PopGroups(state, state.Sstack)
+                        || !PopRepeats(state, state.Sstack, testJustEnded: false)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -9948,7 +17706,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     * bstack: callee_captures callee_repeats capture_change call_key call_reach return_node
                      *
                      * else:
                      *
@@ -9964,41 +17722,68 @@ internal static class Matcher
 
                     if (groupReturnBackNode is not null)
                     {
-                        // Backtracking into the call re-opens it, so its key comes back off the
-                        // backtracking stack.
-                        if (!state.Bstack.PopSize(out long groupReturnBackKey))
+                        // Backtracking into the call re-opens it, so its key, reach and captures
+                        // come back off the backtracking stack.
+                        int groupReturnBackSpans = state.OpenCallSpans.Count;
+                        CollectionsMarshal.SetCount(state.OpenCallSpans, groupReturnBackSpans + readGroupCount);
+                        Span<long> groupReturnBackValues = CollectionsMarshal.AsSpan(state.OpenCallSpans)[
+                            groupReturnBackSpans..
+                        ];
+                        for (int i = readGroupCount - 1; i >= 0; i--)
+                        {
+                            if (!state.Bstack.PopSize(out groupReturnBackValues[i]))
+                            {
+                                return MatchStatus.Illegal;
+                            }
+                        }
+
+                        if (
+                            !state.Bstack.PopSize(out long groupReturnBackReach)
+                            || !state.Bstack.PopSize(out long groupReturnBackKey)
+                        )
                         {
                             return MatchStatus.Illegal;
                         }
 
                         // For the caller. The forward arm's exchange, run the other way round: the
                         // caller's state goes back on the saved stack and the callee's comes off
-                        // the backtracking stack, so the callee resumes inside the call.
-                        PushGroups(state, state.Sstack);
+                        // the backtracking stack, so the callee resumes inside the call with the
+                        // captures it had made (D51, see PopCalleeCaptures). The repeats first:
+                        // they lie on top of the callee's groups here, and under the caller's
+                        // groups on the saved stack (D62).
                         PushRepeats(state, state.Sstack);
                         state.Sstack.PushSize(state.CaptureChange);
-                        state.Sstack.PushNode(groupReturnBackNode);
-
-                        // The frame is back, so the call is open again and ends where it now ends.
-                        state.ActiveCalls.Add(groupReturnBackKey);
-                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count));
-
-                        /* sstack: caller_groups caller_repeats capture_change return_node
-                         *
-                         * bstack: callee_groups callee_repeats capture_change
-                         */
-
-                        // For the callee.
                         if (
                             !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                            || !PopRepeats(state, state.Bstack)
-                            || !PopGroups(state, state.Bstack)
+                            || !PopRepeats(state, state.Bstack, testJustEnded: false)
                         )
                         {
                             return MatchStatus.Illegal;
                         }
 
                         state.CaptureChange = groupReturnBackCaptureChange;
+
+                        PushCaptures(state, state.Sstack);
+                        if (!PopCalleeCaptures(state))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.Sstack.PushNode(groupReturnBackNode);
+
+                        // The frame is back, so the call is open again and ends where it now ends.
+                        ReopenCall(state, groupReturnBackKey, (int)groupReturnBackReach);
+                        Debug.Assert(
+                            state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
+                            "a re-opened call is still inside the calls that were open when it returned"
+                        );
+                        // It has returned, so it is not one the failed-call memo may record.
+                        state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
+
+                        /* sstack: caller_repeats capture_change caller_captures return_node
+                         *
+                         * bstack: -
+                         */
                     }
                     else
                     {
@@ -10007,7 +17792,7 @@ internal static class Matcher
 
                     /* If called:
                      *
-                     * sstack: caller_groups caller_repeats capture_change return_node
+                     * sstack: caller_repeats capture_change caller_captures return_node
                      *
                      * bstack: -
                      *
@@ -10032,11 +17817,25 @@ internal static class Matcher
                     state.MatchPos = (int)keepMatchPos;
                     break;
                 }
+                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
+                {
+                    /* bstack: previous_start slot text_pos node */
+
+                    // Leaving the pass through its 2-way branch: the slot gets its previous value,
+                    // and the branch tries its next alternative, as BRANCH's arm below does.
+                    if (PopOptionalPass(state) is not { } nextAlternative)
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    node = nextAlternative;
+                    goto advance;
+                }
                 case Opcode.BodyEnd:
                 {
                     /* bstack: count start capture_change index */
 
-                    if (!PopBodyEndStateData(state.Bstack, out BodyEndStateData dataBe))
+                    if (!PopBodyEndStateData(state.Bstack, out BodyEndStateData dataBe, state.IsFuzzy))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10048,13 +17847,14 @@ internal static class Matcher
                     rpData.Count = dataBe.Count;
                     rpData.Start = dataBe.Start;
                     rpData.CaptureChange = dataBe.CaptureChange;
+                    rpData.ChangesAtStart = dataBe.ChangesAtStart;
                     break;
                 }
                 case Opcode.BodyStart:
                 {
                     /* bstack: index text_pos */
 
-                    if (!state.Bstack.PopSize(out long bodyTextPos) || !state.Bstack.PopSize(out long bodyIndex))
+                    if (!state.Bstack.PopSize(out long bodyTextPos) || !state.Bstack.PopCode(out uint bodyIndex))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10133,6 +17933,12 @@ internal static class Matcher
                 {
                     /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change */
 
+                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
                     // The 'true' branch of a positive lookaround is being given up, so the captures
                     // its body made go with it. Leaving this out is invisible to any test that does
                     // not backtrack past the lookaround.
@@ -10143,7 +17949,7 @@ internal static class Matcher
 
                     state.CaptureChange = endLookCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10161,6 +17967,14 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Failure: // Failure.
+                    // D11 M2: the attempt's frame goes, and the verb taint a skipped verb left there.
+                    if (state.WMarks.Count != 0)
+                    {
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
+                    state.LookaroundSuccesses.Clear();
+
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
                     {
@@ -10181,14 +17995,7 @@ internal static class Matcher
                     // Can we advance?
                     state.TextPos = state.MatchPos;
 
-                    if (state.Reverse)
-                    {
-                        if (state.TextPos <= state.SliceStart)
-                        {
-                            return MatchStatus.Failure;
-                        }
-                    }
-                    else if (state.TextPos >= state.SliceEnd)
+                    if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
                         return MatchStatus.Failure;
                     }
@@ -10197,7 +18004,25 @@ internal static class Matcher
                     // 'start_node' itself; LeadingRepeat is that node, or (S60b item 17) the
                     // greedy repeat behind the capture groups that open in front of it. See
                     // FindLeadingRepeat.
-                    if (pattern.LeadingRepeat is Node leadingRepeat)
+                    //
+                    // NOT UPSTREAM'S, D77: not after a lazy repeat in a pattern with a (*PRUNE) or
+                    // (*SKIP). The skip is sound only if the attempt tried the continuation after
+                    // every length of the run, and a lazy repeat tries the short lengths first, so a
+                    // verb can cut the attempt before the long ones; the starts inside the run were
+                    // then never covered. PCRE2 bumps along after either verb here (pcre2pattern,
+                    // "Backtracking control"). A greedy repeat tries the longest length first, so any
+                    // start inside the run would reach the same verb at the same place and fail the
+                    // same way; it keeps the skip. The oracle's PatternObject.SkipsALazyRunDespiteAVerb
+                    // restores upstream's skip. LeadingRepeat is lazy only when it is the start node
+                    // itself, so this is D77's test unchanged.
+                    if (
+                        pattern.LeadingRepeat is Node leadingRepeat
+                        && (
+                            leadingRepeat.Op is Opcode.GreedyRepeatOne
+                            || !pattern.HasBacktrackingVerb
+                            || pattern.SkipsALazyRunDespiteAVerb
+                        )
+                    )
                     {
                         // How many characters did the repeat actually match?
                         long skipCount = CountOne(
@@ -10237,9 +18062,10 @@ internal static class Matcher
                     // Reset the guards.
                     state.ResetGuards();
 
-                    // Reset the stacks.
+                    // Reset the stacks. Backtracking has popped every entry of the attempt, and each
+                    // w-mark goes with its entry, so none is left for the next attempt (D11, A5).
                     state.Sstack.Reset();
-                    state.Bstack.Reset();
+                    state.SetBstackCount(0);
                     state.Pstack.Reset();
                     goto start_match;
                 case Opcode.Fuzzy: // Fuzzy matching (:15752).
@@ -10262,6 +18088,13 @@ internal static class Matcher
                     }
 
                     state.FuzzyNode = outerFuzzyNode;
+
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+                    if (pattern.HasFuzzyMinimum && !PopSectionFrame(state))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
                     break;
                 // GREEDY_REPEAT (:15778) and LAZY_REPEAT (:15779), which upstream gives one body:
                 // the repeat failed, so the enclosing repeat's state goes back and the position it
@@ -10269,9 +18102,13 @@ internal static class Matcher
                 case Opcode.GreedyRepeat: // Greedy repeat.
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
-                    /* bstack: count start capture_change index text_pos */
+                    /* bstack: [run_id] count start capture_change index text_pos */
 
-                    if (!PopRepeatStateData(state.Bstack, out RepeatStateData dataR))
+                    long runId = 0;
+                    if (
+                        !PopRepeatStateData(state.Bstack, out RepeatStateData dataR, state.IsFuzzy)
+                        || (pattern.TestedGroups.Length > 0 && !state.Bstack.PopSize(out runId))
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10286,6 +18123,9 @@ internal static class Matcher
                     rpData.Count = dataR.Count;
                     rpData.Start = dataR.Start;
                     rpData.CaptureChange = dataR.CaptureChange;
+                    rpData.ChangesAtStart = dataR.ChangesAtStart;
+                    rpData.ClearMemo();
+                    rpData.RunId = runId;
                     break;
                 }
                 case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
@@ -10404,9 +18244,24 @@ internal static class Matcher
                     {
                         pos = Step(state, pos, -step);
 
-                        status = TryMatch(state, node.Next1, pos, out _);
+                        status = TailMayMatch(state, TryMatch(state, node.Next1, pos, out _));
                         if (status < 0)
                         {
+                            // NOT UPSTREAM'S, D11 (D69): a string tail that runs into the edge runs
+                            // out like any other item, so inside a lookaround body matching goes on
+                            // after the lookaround (`(?=b[^a]*cab)(*FAIL)` over 'bca'). The run-out
+                            // rule (KeepTheAlternativeThatDidNotRunOut): the smaller counts are
+                            // kept first, as the match below keeps them.
+                            if (status == MatchStatus.Partial)
+                            {
+                                if (RunOutFeedsADecision(state))
+                                {
+                                    KeepTheSmallerCounts(state, rpData, pos, start, savedCount, node, index);
+                                }
+
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -10528,19 +18383,42 @@ internal static class Matcher
                         // loop, before it tries to extend the repeat at all (:16546, :16583,
                         // :16621, :16659 for the four CHARACTER tails; :16699, :16754, :16809,
                         // :16868, :16925, :16982 for the six STRING ones), and the default arm has
-                        // no such check. The gap is only visible when the repeat CANNOT extend: for
-                        // `regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)` upstream answers
-                        // a partial at (0,5) from here, while this port asked MatchOne first, was
-                        // refused by the 'b', broke out of the loop and reported no match at all.
-                        // Found by the S31 oracle wave, seed 7, row 581.
+                        // no such check. Not for a CHARACTER tail as upstream spells it, which
+                        // answers a partial the repeat cannot reach - see IsTailPartial.
                         if (IsTailPartial(state, test, pos))
                         {
-                            return MatchStatus.Partial;
+                            // NOT UPSTREAM'S, D11 (D69): a run-out, which inside a lookaround body
+                            // goes on after the lookaround; this arm answered the partial at once,
+                            // so `(?=b.*?c)(*FAIL)` over 'b' was P(0, 1) where no continuation
+                            // matches.
+                            goto runOut;
                         }
 
                         status = MatchOne(state, repeated, pos);
+
+                        // Design assert A14: the entry kept for a repeat at the edge (below) is
+                        // answered by this try running out, not by a failure or a character.
+                        Debug.Assert(
+                            !RunsOutPast(state, pos, step) || status == MatchStatus.Partial,
+                            "D11 A14: a lazy repeat's try past the edge runs out"
+                        );
+
                         if (status < 0)
                         {
+                            // NOT UPSTREAM'S, D11 (D69): the item runs out at the edge, which inside a
+                            // lookaround body goes on after the lookaround (`\X`'s lazy ANY_ALL in
+                            // `(?=\X)(*FAIL)` over 'b'). Past the edge it is the try the entry kept
+                            // by LazyRepeatPastTheEdge stands for.
+                            if (status == MatchStatus.Partial)
+                            {
+                                if (RunsOutPast(state, pos, step))
+                                {
+                                    state.NoteRunOutCause(PartialEvent.LazyRepeatPastTheEdge);
+                                }
+
+                                goto runOut;
+                            }
+
                             return status;
                         }
 
@@ -10557,13 +18435,26 @@ internal static class Matcher
                         // answers PARTIAL. Found by the S31 blind review:
                         // `regex.match('ba??x', 'baa', partial=True)` is (0,3) partial upstream and
                         // was no match here. 'nextPosition' is not used.
-                        status = TryMatch(state, node.Next1, pos, out _);
+                        status = TailMayMatch(state, TryMatch(state, node.Next1, pos, out _));
 
                         if (status < 0)
                         {
                             // Upstream returns RE_ERROR_PARTIAL here rather than 'status', where the
                             // GREEDY_REPEAT_ONE arm above returns 'status' (:17040 against :16280).
-                            // Ported as written.
+                            // Ported as written, except that a run-out goes through the run-out
+                            // rule (D69: a string tail that runs into the edge, `(?=b.*?cd)(*FAIL)`
+                            // over 'bc'). The run-out rule (KeepTheAlternativeThatDidNotRunOut)
+                            // keeps nothing here: only a string test runs out short of the edge, and
+                            // then fewer characters than the string follow, so every longer count's
+                            // test fails or runs out too (a one-character test runs out only at the
+                            // edge, where taking a character runs out as well). No row of a
+                            // 5,824-row grid of bounded lazy repeats before a string moved with the
+                            // longer counts kept (2026-10-04).
+                            if (status == MatchStatus.Partial)
+                            {
+                                goto runOut;
+                            }
+
                             return MatchStatus.Partial;
                         }
 
@@ -10585,8 +18476,18 @@ internal static class Matcher
                         count = CountBetween(state, pos, state.TextPos);
                         state.TextPos = pos;
 
-                        if (count < maxCount)
+                        // NOT UPSTREAM'S, D11: a repeat that has taken the held text up to the edge
+                        // can still take a character of the text to come, where the next try runs
+                        // out (MatchOne above). Upstream bounds it by the text held, so
+                        // `.*?(?<=c)` over 'aa' found no partial where 'aac' matches (D11 fix
+                        // round 3's grid).
+                        if (count < maxCount || (count < node.Values[2] && RunsOutPast(state, pos, step)))
                         {
+                            if (count >= maxCount)
+                            {
+                                state.NotePartialEvent(PartialEvent.LazyRepeatPastTheEdge);
+                            }
+
                             // The match is shorter than the maximum, so we might need to backtrack
                             // the repeat again to consume more.
                             rpData.Count = count;
@@ -10631,6 +18532,22 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // D11 M2: the frame's marks go with it. A cut taint means a success of the body
+                    // was blocked, so a negative lookaround holds only for some continuations.
+                    bool lookWasBlocked = false;
+                    bool lookRunOutWaits = false;
+                    if (state.WMarks.Count != 0)
+                    {
+                        lookWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+                        lookRunOutWaits = HasWMarkAt(state, state.Bstack.Count, WMarkKind.RunOutPending);
+                        state.DropWMarksFrom(state.Bstack.Count);
+                    }
+
+                    if (state.LookaroundSuccesses.Count != 0)
+                    {
+                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
+                    }
+
                     // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
                     // the parked count, here the body's own entries have already been popped by the
                     // backtracking that brought us here, so the pstack entry is simply dropped.
@@ -10640,7 +18557,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)lookSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
                     {
@@ -10666,7 +18583,7 @@ internal static class Matcher
 
                     state.CaptureChange = lookCaptureChange;
 
-                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10684,9 +18601,56 @@ internal static class Matcher
                     if (!lookNode.Match)
                     {
                         // It's a negative lookaround that's failed, which means the lookaround as a
-                        // whole has succeeded.
+                        // whole has succeeded: for every continuation, unless a success of its body
+                        // was blocked (D11 M2).
+                        if (lookWasBlocked)
+                        {
+                            PushTouchMark(state);
+                            state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                            CountFork(state);
+                        }
+
                         node = lookNode.Next2.Node!;
                         goto advance;
+                    }
+
+                    // D11 (RunOutCanWaitForTheBody): no path of the body succeeded on the held text,
+                    // and a run-out waited, so the lookaround holds for the continuations where that
+                    // path goes on. Its body sets no group and nothing fuzzy is left open, so what
+                    // the arm put back is the state its end would leave.
+                    if (lookRunOutWaits)
+                    {
+                        PushTouchMark(state);
+                        state.NotePartialEvent(PartialEvent.RunOutInBody);
+                        CountFork(state);
+                        node = lookNode.Next2.Node!;
+                        goto advance;
+                    }
+
+                    // It's a positive lookaround that's failed. NOT UPSTREAM (ledger entry 50): try
+                    // an insertion in front of it before backtracking further.
+                    if ((lookNode.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        status = InsertBeforeAFailedLookaround(state, search, ref node, lookNode);
+
+                        if (status < 0)
+                        {
+                            // D11: the insertion ran out of text in front of the lookaround, which
+                            // is the item that ran out. `node` is stale here (whatever matched
+                            // last, possibly outside the enclosing body: assert A10).
+                            if (status == MatchStatus.Partial)
+                            {
+                                node = lookNode;
+                                goto runOut;
+                            }
+
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Success)
+                        {
+                            goto advance;
+                        }
                     }
 
                     break;
@@ -10695,7 +18659,14 @@ internal static class Matcher
                 {
                     /* bstack: position count start capture_change index text_pos */
 
-                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    if (
+                        !PopMatchBodyTailStateData(
+                            pattern,
+                            state.Bstack,
+                            out MatchBodyTailStateData dataMbt,
+                            state.IsFuzzy
+                        )
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10707,9 +18678,10 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
+                    rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the body fails to match.
-                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -10724,7 +18696,14 @@ internal static class Matcher
                 {
                     /* bstack: position count start capture_change index text_pos */
 
-                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    if (
+                        !PopMatchBodyTailStateData(
+                            pattern,
+                            state.Bstack,
+                            out MatchBodyTailStateData dataMbt,
+                            state.IsFuzzy
+                        )
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10736,9 +18715,10 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
+                    rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the tail fails to match.
-                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -10753,7 +18733,7 @@ internal static class Matcher
                 {
                     /* bstack: index text_pos */
 
-                    if (!state.Bstack.PopSize(out long tailTextPos) || !state.Bstack.PopSize(out long tailIndex))
+                    if (!state.Bstack.PopSize(out long tailTextPos) || !state.Bstack.PopCode(out uint tailIndex))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10762,6 +18742,242 @@ internal static class Matcher
                     state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
                     break;
                 }
+                case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.
+                {
+                    /* bstack: text_pos node */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? retryNode) || !state.Bstack.PopSize(out long retryPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // As the forward arm does for a zero-width test that failed: an insertion is the
+                    // only error a zero-width item can take.
+                    state.TextPos = (int)retryPos;
+                    node = retryNode!;
+                    status = FuzzyMatchItem(state, search, ref node, 0);
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            goto runOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    break;
+                }
+                case Opcode.WTouch: // NOT UPSTREAM'S, D11: backtracking has passed a touch mark.
+                    // The popped entry was at the stack's new count, which is the mark's position.
+                    Debug.Assert(
+                        state.WMarks.Count > 0 && state.WMarks[^1] == new WMark(state.Bstack.Count, WMarkKind.Touch),
+                        "D11: a touch entry carries its own mark, the newest"
+                    );
+                    state.DropWMarksFrom(state.Bstack.Count);
+                    break;
+                case Opcode.RunOutClosedSection: // NOT UPSTREAM'S, D11 chunk 8: the body's section again.
+                {
+                    /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost */
+
+                    if (
+                        !state.Bstack.PopSize(out long closedCost)
+                        || !state.Bstack.PopSize(out long closedErrors)
+                        || !state.Bstack.PopNode(pattern, out Node? closedNode)
+                        || !state.PopFuzzyCountsMerging(state.Bstack, state.FuzzyCounts, out _)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.FuzzyNode = closedNode;
+                    state.TotalErrors = closedErrors;
+                    state.TotalCost = closedCost;
+                    break;
+                }
+                case Opcode.UnknownCapture: // NOT UPSTREAM'S, D11 chunk 8: an unknown capture goes.
+                {
+                    /* bstack: 0 current capture_change private_index public_index */
+
+                    if (!PopGroupStateData(state.Bstack, out GroupStateData unknownData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = unknownData.CaptureChange;
+                    state.Groups[unknownData.PrivateIndex - 1].Current = unknownData.Current;
+                    state.UnsaveCapture(unknownData.PrivateIndex, unknownData.PublicIndex);
+                    break;
+                }
+                case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
+                {
+                    /* bstack: text_pos node */
+
+                    if (
+                        !state.Bstack.PopNode(pattern, out Node? noBranchNode)
+                        || !state.Bstack.PopSize(out long noBranchPos)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The continuations in which a success of the test's body held: the condition
+                    // does not hold there, so the no-branch runs from where the condition stood.
+                    state.TextPos = (int)noBranchPos;
+                    node = noBranchNode!;
+                    PushTouchMark(state);
+                    goto advance;
+                }
+                case Opcode.Reopen: // NOT UPSTREAM'S, D11 M2: back into a group whose cut was blocked.
+                {
+                    /* bstack: pstack_mark */
+
+                    if (
+                        !state.Bstack.PopSize(out long reopenedFrameEnd)
+                        || !state.Bstack.PopSize(out long reopenedCallBase)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // Repair 1: the frame's saved-stack depth follows the call frame below it.
+                    if (RebaseTheReopenedFrame(state, (int)reopenedFrameEnd, reopenedCallBase) is not { } reopenedDelta)
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    Debug.Assert(
+                        ReopenedFrameIsTheBlockedOne(state, (int)reopenedFrameEnd),
+                        "D11 A9: a reopened group's mark is its own frame's, which its blocked end tainted"
+                    );
+
+                    // The group is open again, as it was before its end, so that the body's other
+                    // paths end at the group's end once more. A lookaround's body, and a condition's
+                    // test, match over the whole text, as their forward arms set them up to, and get
+                    // back the saved-stack bytes and section link their blocked end moved off
+                    // (amendment 2).
+                    if (
+                        state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
+                        && reopenedOp is (byte)Opcode.Lookaround or (byte)Opcode.Conditional
+                    )
+                    {
+                        /* bstack: sstack_bytes length section_frame */
+
+                        if (
+                            !state.Bstack.PopSize(out long reopenedSection)
+                            || !state.Bstack.PopSize(out long reopenedLength)
+                            || !state.Bstack.ReadSizeBelow((int)reopenedFrameEnd - 1, out long reopenedSaved)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        Debug.Assert(
+                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize,
+                            "D11 amendment 2, assert 4: the continuation is undone in full"
+                        );
+                        if (!state.Bstack.MoveTopTo(state.Sstack, (int)reopenedLength))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        Debug.Assert(
+                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
+                            "D11 amendment 2, assert 4: the body's bytes are back"
+                        );
+                        // Repair 2: the open-section link. Below the parked state the backtracking
+                        // arms have already restored it, at the depths the stack has now (a section
+                        // re-opened by END_FUZZY's backtrack arm records the depth it finds, and one
+                        // opened in an outer call's body moves with that call's frame, not the
+                        // innermost's). Only a section the body left open, which lies in the bytes
+                        // just put back, takes the saved value, moved with them. That happens only
+                        // after a run-out, which a pattern with group calls does not continue
+                        // (RunOutInALookaroundBody), so no call frame has moved then.
+                        int parkedS0 = (int)reopenedSaved - _lookaroundStateDataSize - reopenedDelta;
+                        Debug.Assert(
+                            reopenedDelta == 0 || reopenedLength == _lookaroundStateDataSize,
+                            "D11 amendment 2, repair 2: only a run-out moves more than the parked state, and no call frame moves then"
+                        );
+                        Debug.Assert(
+                            reopenedSection > parkedS0 || reopenedDelta != 0 || state.SectionFrame == reopenedSection,
+                            "D11 amendment 2, repair 2: below the parked state the backtracking arms restored the section link"
+                        );
+                        if (reopenedSection > parkedS0)
+                        {
+                            state.SectionFrame = (int)reopenedSection + reopenedDelta;
+                        }
+                        state.SliceStart = state.TextStart;
+                        state.SliceEnd = state.TextEnd;
+                        state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
+                    }
+
+                    state.Pstack.PushSize(reopenedFrameEnd);
+                    break;
+                }
+                case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
+                {
+                    /* bstack: text_pos node */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? skipNode) || !state.Bstack.PopSize(out long skipPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // D11 M2: a verb whose path read the text to come does nothing, and the attempt
+                    // keeps its ordinary bump-along, which visits every start the skip would.
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, skipPos))
+                    {
+                        break;
+                    }
+
+                    // Ledger entry 47: in an unfinished atomic group or positive lookaround the verb
+                    // unwinds to its target now. Only the attempt takes the skip position; a
+                    // negative lookaround or condition puts its own slice back.
+                    if (VerbIsInsideATransparentGroup(state))
+                    {
+                        if (!UnwindToTheVerbTarget(state, out bool skipEndsTheAttempt))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        if (skipEndsTheAttempt)
+                        {
+                            MoveTheSliceForAnUnwoundSkip(state, (int)skipPos);
+                        }
+
+                        break;
+                    }
+
+                    // Everything the verb's arm pruned is gone, so what backtracking reaches next is
+                    // the point the prune stopped at: FAILURE, which starts the next attempt from the
+                    // moved slice, or the start of the negative lookaround or condition the verb is
+                    // directly in.
+                    MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
+                    break;
+                }
+                case Opcode.Prune: // NOT UPSTREAM'S: backtracking has reached a (*PRUNE), ledger entry 47.
+                    /* bstack: - */
+
+                    // D11 M2: a verb whose path read the text to come does nothing.
+                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, -1))
+                    {
+                        break;
+                    }
+
+                    // Pushed only inside an unfinished atomic group or positive lookaround, so the
+                    // unwind always has somewhere to go.
+                    if (!UnwindToTheVerbTarget(state, out _))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
                 default:
                     // Nothing else is ever pushed by the opcodes ported so far. CHARACTER, STRING,
                     // the ANY family, S17's PROPERTY, RANGE and SET_* and S22's _IGN and _FLD
@@ -10941,6 +19157,22 @@ internal static class Matcher
         cost != bestCost ? cost < bestCost : errors < bestErrors;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D78: whether a BESTMATCH or ENHANCEMATCH run from <paramref name="start"/> must
+    /// advance. After an empty match the scan excludes only the empty match at its resume position
+    /// <paramref name="first"/>; upstream re-sets <c>must_advance</c> for every run, and each run's
+    /// <c>init_match</c> moves the search anchor to its own start (<c>_regex.c:15164</c>), so the
+    /// ban lands on every candidate's start and the scan skips positions.
+    /// <c>PatternObject.BansAnEmptyMatchAtEveryCandidate</c> restores that for the oracle.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mustAdvance">What the scan set for this step.</param>
+    /// <param name="start">Where this run starts.</param>
+    /// <param name="first">Where this scan step resumed.</param>
+    /// <returns>The value for <c>MatchState.MustAdvance</c>.</returns>
+    private static bool MustAdvanceAt(MatchState state, bool mustAdvance, int start, int first) =>
+        mustAdvance && (start == first || state.Pattern.BansAnEmptyMatchAtEveryCandidate);
+
+    /// <summary>
     /// Upstream <c>do_enhanced_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17862): find a
     /// fuzzy match, then keep re-running inside its own span with a tighter error budget until the
     /// fit stops improving.
@@ -11031,6 +19263,7 @@ internal static class Matcher
         int bestMatchPos = state.TextPos;
         int bestTextPos = 0;
         bool mustAdvance = state.MustAdvance;
+        int firstTextPos = state.TextPos;
 
         int sliceStart = state.SliceStart;
         int sliceEnd = state.SliceEnd;
@@ -11041,7 +19274,12 @@ internal static class Matcher
         {
             // If there's a better match, it won't start earlier in the string than the current best
             // match, so there's no need to start earlier than that match.
-            state.MustAdvance = mustAdvance;
+            //
+            // NOT UPSTREAM'S, D78: the ban on a second empty match is for the scan's resume position
+            // only. 'InitMatch' moves the search anchor to each run's start, so upstream's plain
+            // 'must_advance' here also bans the empty match where a refinement starts, and the
+            // better fit there is lost.
+            state.MustAdvance = MustAdvanceAt(state, mustAdvance, state.TextPos, firstTextPos);
 
             // Initialise the state.
             state.InitMatch();
@@ -11380,7 +19618,12 @@ internal static class Matcher
                 state.SliceEnd = callerSliceEnd;
 
                 state.TextPos = startPos;
-                state.MustAdvance = mustAdvance;
+
+                // NOT UPSTREAM'S, D78: the ban on a second empty match is for the scan's resume
+                // position only. 'InitMatch' moves the search anchor to each candidate's start, so
+                // upstream's plain 'must_advance' bans the empty match at EVERY candidate's start
+                // and the scan skips positions. The same rule at the second pass and the fallback.
+                state.MustAdvance = MustAdvanceAt(state, mustAdvance, startPos, firstStartPos);
 
                 // Initialise the state.
                 state.InitMatch();
@@ -11611,6 +19854,7 @@ internal static class Matcher
                     state.SliceEnd = callerSliceEnd;
 
                     state.TextPos = startPos;
+                    state.MustAdvance = MustAdvanceAt(state, mustAdvance, startPos, firstStartPos);
                     state.InitMatch();
                     status = BasicMatch(state, false);
 
@@ -11714,18 +19958,23 @@ internal static class Matcher
             // reverse and folded arms, which are still the Phase 7 deferral this file's header
             // records; deleting it as dead code was always wrong and is now visibly so.
             //
-            // S60b WAS ASKED TO PIN IT AND COULD NOT, and the reason is worth writing down rather
-            // than re-deriving. THE WHOLE BRANCH IS UNREACHED: instrumented on 2026-09-22 and run
-            // over all 6563 tests, this line was executed zero times. Reaching it needs
-            // 'bestGroups' to be null after the loop above, which needs every second-pass attempt at
-            // every entry and every offset to fail - and the first pass has just succeeded at
-            // 'entry.MatchPos' within 'errorLimit' errors against the same slice, so the only
-            // candidate mechanism left is the 'MaxCost' cap a cost equation adds. Settling that is a
-            // BESTMATCH question, not a prefilter one, and it is written up in the sittings notes.
+            // S60b WAS ASKED TO PIN IT AND COULD NOT: instrumented on 2026-09-22 over all 6563 tests
+            // of the time, this line ran zero times. THAT IS NO LONGER TRUE. Instrumented again on
+            // 2026-10-10 (D78), three tests reach the branch:
+            // 'FuzzyBestMatchTests.A_best_match_needing_more_errors_than_the_limit_falls_back_to_the_widened_slice',
+            // '.Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end' and
+            // 'PartialEdgeReadTests.A_second_pass_success_that_read_nothing_to_come_is_refined_as_before'.
+            // In the first the run below succeeds and keeps entry 0's span, so the change list
+            // copied after it describes that match; in the other two the run fails and its copied
+            // list is never reported. Before D78
+            // the run could move, because the ban on an empty match landed at 'entry.MatchPos', and
+            // the copy then described the wrong match - upstream's (?b) finditer of '(?:\ ){d<=1}'
+            // over ' xyz' reports (3, 3) with a deletion at 2. This reset itself is still unpinned.
             state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;
             state.TextPos = entry.MatchPos;
+            state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.MatchPos, firstStartPos);
             state.InitMatch();
             status = BasicMatch(state, search);
 
@@ -11775,6 +20024,158 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// <see cref="DoMatch2"/> under rule H' (known defect D61): the search-anchor insertion ban is
+    /// lifted exactly when upstream's search would return no match that starts inside the candidate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>THIS PORT'S OWN RULE</b>, replacing the ledger 19/20 exemption (DECISIONS 2026-09-30, rule
+    /// H'). Upstream refuses a fuzzy insertion at the position a search began
+    /// (<c>permit_insertion = !search || text_pos != search_anchor</c>, <c>upstream/src/_regex.c</c>:10214)
+    /// so that a match never swallows text where a later match could start. At anchor A, let u be
+    /// that banned search's answer. If u starts at A it is the answer. Otherwise let c be the
+    /// attempt at A without the ban, which is an anchored match at A (<c>search</c> false, the one
+    /// case upstream's own line permits the insertion). The answer is c if it exists and u is None
+    /// or starts at or after c's end, and u otherwise. BESTMATCH is gated out and keeps the ledger
+    /// 19/20 exemption (<see cref="AnchorIsPinned"/>; see the SHORTCUT in
+    /// <c>Optimiser.FindAnchorBanLift</c>). u is by definition the leftmost later start,
+    /// so c is kept exactly when no later start lies inside it: <c>(?:^a){i&lt;=1}</c> over 'xa' is
+    /// (0, 2), and <c>\b(?:dog){e&lt;=2}</c> finditer over 'dog  dog' keeps upstream's (5, 8).
+    /// Reversed, "starts" and "ends" are in the direction of the search.
+    /// </para>
+    /// <para>
+    /// The caller runs this once per pass, so under partial matching the full pass decides first
+    /// and a full c beats a later partial u, which is upstream's own preference. A pattern with no
+    /// construct that depends on position, or no section that permits an insertion
+    /// (<see cref="PatternObject.LiftsAnchorBan"/>), keeps the plain ban and pays one field test.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoMatch2LiftingTheAnchorBan(MatchState state, bool search)
+    {
+        if (!search || !LiftsTheBan(state))
+        {
+            return DoMatch2(state, search);
+        }
+
+        int anchor = state.TextPos;
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+        int banned = DoMatch2(state, search);
+
+        bool bannedMatched = banned is MatchStatus.Success or MatchStatus.Partial;
+        if ((bannedMatched && state.MatchPos == anchor) || !(bannedMatched || banned == MatchStatus.Failure))
+        {
+            return banned;
+        }
+
+        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state) : null;
+
+        state.TextPos = anchor;
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+        int attempt = DoMatch2(state, search: false);
+
+        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream))
+        {
+            return attempt;
+        }
+        else if (attempt is < 0 and not MatchStatus.Partial)
+        {
+            return attempt;
+        }
+
+        if (upstream is null)
+        {
+            return MatchStatus.Failure;
+        }
+
+        upstream.Restore(state);
+        return banned;
+    }
+
+    /// <summary>
+    /// Rule H''s test, with the attempt at the anchor in <paramref name="state"/>: the banned match
+    /// is absent or starts at or after the attempt's end.
+    /// </summary>
+    /// <param name="state">The match state, holding the attempt at the anchor.</param>
+    /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
+    /// <returns><see langword="true"/> if the attempt is the answer.</returns>
+    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
+    {
+        if (upstream is null)
+        {
+            return true;
+        }
+
+        return state.Reverse ? upstream.MatchPos <= state.TextPos : upstream.MatchPos >= state.TextPos;
+    }
+
+    /// <summary>Whether rule H' can change this search's answer (the compile-time gate).</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the anchored attempt must be considered.</returns>
+    private static bool LiftsTheBan(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+            ? state.Pattern.LiftsAnchorBan
+            : state.Pattern.LiftsAnchorBanWhenPartial;
+
+    /// <summary>
+    /// The parts of a match <see cref="DoMatch"/> and its callers read, kept while
+    /// <see cref="DoMatch2LiftingTheAnchorBan"/> runs the attempt at the anchor, so that upstream's
+    /// match can be put back.
+    /// </summary>
+    internal sealed class AnchorBanSnapshot
+    {
+        internal int MatchPos;
+        internal int TextPos;
+        internal long Errors;
+        internal long Cost;
+        internal long[] Counts = [];
+        internal List<FuzzyChange> Changes = [];
+        internal GroupData[] Groups = [];
+
+        /// <summary>
+        /// Saves the match into the state's one snapshot, reusing its storage: at most one is live at
+        /// a time, because the walk's snapshots are done with before the search's is taken.
+        /// </summary>
+        /// <param name="state">The match state.</param>
+        /// <returns>The snapshot.</returns>
+        internal static AnchorBanSnapshot Take(MatchState state)
+        {
+            AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
+            snapshot.MatchPos = state.MatchPos;
+            snapshot.TextPos = state.TextPos;
+            snapshot.Errors = state.TotalErrors;
+            snapshot.Cost = state.TotalCost;
+
+            if (snapshot.Counts.Length != state.FuzzyCounts.Length)
+            {
+                snapshot.Counts = new long[state.FuzzyCounts.Length];
+            }
+
+            state.FuzzyCounts.CopyTo(snapshot.Counts, 0);
+            snapshot.Changes.Clear();
+            snapshot.Changes.AddRange(state.FuzzyChanges);
+            snapshot.Groups = state.Groups.Length == 0 ? [] : GroupData.CopyGroups(state.Groups, state.Groups.Length);
+            return snapshot;
+        }
+
+        internal void Restore(MatchState state)
+        {
+            state.MatchPos = MatchPos;
+            state.TextPos = TextPos;
+            state.TotalErrors = Errors;
+            state.TotalCost = Cost;
+            Counts.CopyTo(state.FuzzyCounts, 0);
+            state.FuzzyChanges.Clear();
+            state.FuzzyChanges.AddRange(Changes);
+            RestoreGroups(state, Groups);
+        }
+    }
+
+    /// <summary>
     /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): which of the four match
     /// strategies a pattern gets.
     /// </summary>
@@ -11785,22 +20186,120 @@ internal static class Matcher
     {
         PatternObject pattern = state.Pattern;
 
+        // NOT UPSTREAM'S, D79: where this operation began, for '\G'. Every caller enters here with
+        // 'TextPos' at the start the operation was asked about: the scan's resume position, each of
+        // rule H''s two runs, the partial pass, and the edge for 'MatchFromInsideTheTextToCome'. The
+        // first 'InitMatch' below sets 'SearchAnchor' to the same value.
+        state.OperationStart = state.TextPos;
+
         if (!pattern.IsFuzzy)
         {
             return DoExactMatch(state, search);
         }
 
-        if ((pattern.Flags & RegexFlags.BestMatch) != 0)
+        if ((pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) == 0)
         {
-            return DoBestFuzzyMatch(state, search);
+            return DoSimpleFuzzyMatch(state, search);
         }
 
-        if ((pattern.Flags & RegexFlags.EnhanceMatch) != 0)
+        // NOT UPSTREAM'S, D78: the two functions now clear 'MustAdvance' for a re-run away from the
+        // resume position, and the partial fallback pass and 'DoMatch2LiftingTheAnchorBan' read it
+        // after this returns, so it goes back to what the caller set on every exit.
+        bool mustAdvance = state.MustAdvance;
+        try
         {
-            return DoEnhancedFuzzyMatch(state, search);
+            return (pattern.Flags & RegexFlags.BestMatch) != 0
+                ? DoBestFuzzyMatch(state, search)
+                : DoEnhancedFuzzyMatch(state, search);
+        }
+        finally
+        {
+            state.MustAdvance = mustAdvance;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D11: the one attempt of a partial search that starts inside the text to
+    /// come (design section 1, rule 3, "a match that could only begin inside w"; chunk 2's
+    /// post-repair design step, 2026-09-29).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A start at the edge sees the held text on one side, so it cannot say whether a start further
+    /// in could match: <c>\Z(?:\M)</c> over '' fails at 0, where <c>\Z</c> is false for every
+    /// non-empty continuation, but matches at 1 of '' + 'x'. This attempt stands for every such
+    /// start at once. The window is collapsed to the edge, so that consumption runs out on both
+    /// sides (<see cref="MatchState.RunsOutRight"/>, <see cref="MatchState.RunsOutLeft"/>), and
+    /// <see cref="MatchState.InsideW"/> answers each zero-width test for a position with unknown
+    /// text on both sides (<see cref="ZeroWidthInsideTheTextToCome"/>). A success there is M3's
+    /// partial; a run-out is the partial of limit C2, presuming the rest (known defect D19).
+    /// </para>
+    /// <para>
+    /// A pattern no text can match fails here as everywhere: search <c>(*FAIL)</c> over '' is None,
+    /// as upstream and PCRE2 answer. The groups are cleared, because what they would capture lies
+    /// in the text to come.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, after a failed second pass.</param>
+    /// <param name="edge">The truncation point: the slice end forward, the slice start reversed.</param>
+    /// <returns><see cref="MatchStatus.Partial"/> at the edge, or failure.</returns>
+    private static int MatchFromInsideTheTextToCome(MatchState state, int edge)
+    {
+        (int textStart, int textEnd, int initialStart, int initialEnd) = (
+            state.TextStart,
+            state.TextEnd,
+            state.InitialSliceStart,
+            state.InitialSliceEnd
+        );
+
+        state.NothingHeldBeyondTheEdge = textEnd == edge;
+        state.TextStart = state.TextEnd = edge;
+        state.InitialSliceStart = state.InitialSliceEnd = edge;
+        state.SliceStart = state.SliceEnd = edge;
+        state.TextPos = edge;
+        state.InsideW = true;
+
+        // A scan after an empty match must advance past that match's position, and the attempts
+        // in the held text have done so. This attempt stands for starts past the edge, never that
+        // position, so the ban does not apply: carried in, it refused the attempt's empty success
+        // and lost the scan's trailing partial (finditer `(?<=a)(?=\X)` over 'abb'; the D64
+        // design review, finding 1).
+        bool mustAdvance = state.MustAdvance;
+        state.MustAdvance = false;
+        if (mustAdvance)
+        {
+            state.NotePartialEvent(PartialEvent.MustAdvanceLifted);
         }
 
-        return DoSimpleFuzzyMatch(state, search);
+        int status;
+        try
+        {
+            status = DoMatch2(state, false);
+        }
+        finally
+        {
+            state.MustAdvance = mustAdvance;
+            state.InsideW = false;
+            (state.TextStart, state.TextEnd, state.InitialSliceStart, state.InitialSliceEnd) = (
+                textStart,
+                textEnd,
+                initialStart,
+                initialEnd
+            );
+            state.SliceStart = initialStart;
+            state.SliceEnd = initialEnd;
+        }
+
+        Debug.Assert(status != MatchStatus.Success, "D11 M3: a success from inside the text to come is a partial");
+
+        if (status == MatchStatus.Partial)
+        {
+            state.ClearGroups();
+            state.MatchPos = edge;
+            state.NotePartialEvent(PartialEvent.PrefilterNoCandidatePartial);
+        }
+
+        return status;
     }
 
     /// <summary>
@@ -11873,7 +20372,7 @@ internal static class Matcher
         if (state.PartialSide == MatchState.PartialNone)
         {
             // Normal match.
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
         }
         else
         {
@@ -11882,14 +20381,22 @@ internal static class Matcher
             int sliceStart = state.SliceStart;
             int sliceEnd = state.SliceEnd;
 
-            // One scan reuses one state, so the hitend flag is cleared per match rather than per
-            // state. S57d.
-            state.HitEnd = false;
+            // UNDER BESTMATCH AND ENHANCEMATCH A PARTIAL IS STILL THE LEFTMOST LIVE START (owner
+            // ruling 2026-09-30, option A, DECISIONS). The flags rank complete matches only: the
+            // partial pass below runs DoBestFuzzyMatch or DoEnhancedFuzzyMatch, and the first
+            // partial either walk meets ends it, so the answer is the least start from which some
+            // continuation matches, with the first fit found there. `(?e)(dog){e<=1}` over
+            // 'cat and d' is P(7, 9) with one insertion, as upstream answers, although the completed
+            // 'cat and dog' is (8, 11) exact.
+            // SHORTCUT: the ideal is option (B), the start the flagged search would report for some
+            // continuation. That needs reasoning over every continuation and is not computable in
+            // general (the same class as D19), so it is not attempted; a bounded version could rank
+            // the continuations a judge enumerates, for a caller that asks for it.
 
             // Try a normal match first.
             state.PartialSide = MatchState.PartialNone;
 
-            status = DoMatch2(state, search);
+            status = DoMatch2LiftingTheAnchorBan(state, search);
 
             state.PartialSide = partialSide;
 
@@ -11948,36 +20455,20 @@ internal static class Matcher
                 state.TextPos = textPos;
                 state.SliceStart = sliceStart;
                 state.SliceEnd = sliceEnd;
-                status = DoMatch2(state, search);
+                status = DoMatch2LiftingTheAnchorBan(state, search);
 
-                // PCRE2's model, and the point of the whole of S57d: a boundary decided at the
-                // truncation point only reports a partial once EVERYTHING else has failed. A
-                // complete match beat it at the first `DoMatch2` above; a partial found the
-                // ordinary way beat it just now, and keeps its own span and its own capture groups,
-                // which is what saves the two `(\.+?)\1\b` rows S50's predicate-level attempt broke.
-                // Upstream issue 589, ledger entry 21; pcre2partial(3), "if no complete match can be
-                // found, PCRE2_ERROR_PARTIAL is returned instead of PCRE2_ERROR_NOMATCH".
-                if (status == MatchStatus.Failure && state.HitEnd)
+                // D11 chunk 8: an unknown capture is reported unset (design section 4.3).
+                if (status == MatchStatus.Partial && state.HasUnknownCaptures)
                 {
-                    // The span is the leftmost end-reaching attempt's start to the end of the
-                    // available text, measured on PCRE2 10.47 rather than chosen
-                    // (tools/probes/pcre2-hitend-partial-span.py sections A and B, 2026-09-21). The
-                    // far end is filled in below, by the arm every partial shares.
-                    state.MatchPos = state.HitEndMatchPos;
+                    ReportUnknownCapturesUnset(state);
+                }
 
-                    // NO CAPTURE GROUPS. No path through the pattern completed, so no group span is
-                    // attested by anything; what the groups hold here is whatever the last failed
-                    // attempt happened to leave. PCRE2 says the same by not defining them -
-                    // pcre2partial(3), "the values in the rest of the ovector are undefined", which
-                    // section C of the probe above measures as uninitialised memory.
-                    //
-                    // IT IS LOAD-BEARING ONLY WHERE A VERB PRUNES THE UNWIND, which is what Control B
-                    // of this slice found: ordinary backtracking restores every group on the way out
-                    // of a failed match, so `(a)(b)\B` clears nothing, and `(a)(*SKIP)(b)\B` over 'ab'
-                    // leaves group 1 set at (0, 1) with `lastindex` 1 without this line.
-                    state.ClearGroups();
-
-                    status = MatchStatus.Partial;
+                // NOT UPSTREAM'S, D11 (design section 1, rule 3): a search whose second pass found
+                // nothing may still find a match that begins inside the text to come, which is
+                // reported at the edge. One attempt from there decides it.
+                if (status == MatchStatus.Failure && search && !state.Pattern.SecondPassAsBeforeD11)
+                {
+                    status = MatchFromInsideTheTextToCome(state, state.Reverse ? sliceStart : sliceEnd);
                 }
             }
         }

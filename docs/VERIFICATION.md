@@ -46,6 +46,87 @@ design spec section 8 and amendments 9-10.
    and watch it fail.
 9. **Verify on real output.** Green tests alone are not enough: read the actual rows, the rendered
    file, the built artifact. State what you checked and what you saw.
+10. **Every engine assumption a change relies on is listed, cited and asserted.** Before the first
+    commit, the builder writes down each fact about the engine the change depends on ("the anchor
+    is fixed while the set lives", "only call frames sit above a call"), with the `file:line` that
+    makes it true, and adds a `Debug.Assert` that checks it at run time. Grids run on a Debug build
+    so the assertions fire. An assumption that cannot be asserted gets a witness test instead.
+11. **A grid is green only if it could have gone red.** For every construct the change reads - each
+    key field, each exclusion, each listed assumption - the grid reports how many rows had that
+    construct present AND the new mechanism active. A zero means the grid is blind to it and proves
+    nothing about it: extend the grammar or write the row by hand, then rerun.
+12. **Every part is justified before the first commit, by the builder.** Each key field, exclusion,
+    guard and prune has either a witness test that goes red when the part is removed, or a written
+    argument with `file:line` that no witness can exist. "None found yet" is neither; it is an
+    open item and the change is not done.
+
+## Judging a red scheduled sweep
+
+The scheduled oracle sweep runs fresh seeds, so it keeps drawing new rows of upstream bugs that
+have already been judged. Most keys in `ExpectedDivergences.cs` are tables of judged rows, and a
+new row of the same bug is not in the table, so the sweep goes red. A key that recognised such
+rows automatically would also claim a port bug of the same shape. On 2026-10-09, three attempts at
+one did exactly that (`.claude/driver/triage-redseeds-2026-10-09.md`). So the judgement is made by
+a person or an agent and written down as data, one line per row, in
+`tests/FuzzyRegex.OracleTests/JudgedDivergences.jsonl`.
+
+**How a row is judged.** Take the red row from the sweep's `report.txt`. Reduce it to a minimal
+witness and run that witness on both engines. Name the cause: a `LEDGER.md` entry, a
+`KNOWN-DEFECTS.md` D-number, or a pending candidate listed in the data file's header. A row whose
+cause cannot be named is a new finding, and it goes through the normal triage with a red test. Never guess a cause. Two mechanisms on one row are fine when both are named.
+
+**How it is recorded.** One command per row:
+
+```
+python tools/judge-row.py --seed 4242 --row 34781 --cause "ledger 2" --witness "ba??x over 'baa', match, partial: upstream partial (0,3), port no match"
+```
+
+The tool reads the question and upstream's answer from `TestResults/oracle/sweep-<seed>/wave.jsonl`
+and both answers' text from that sweep's `report.txt`. It refuses a row a key already claims, a
+question already judged, and a cause that names nothing. Use `--dry-run` to print the line without
+writing it, and `--sweeps` when the sweep folders are in another checkout. The `judged-row` entry
+then accounts for the row only while the question and both answers are exactly the recorded ones,
+so if either engine's answer changes, the row turns red again.
+
+**The report must come from the code being judged.** The port's answer is pinned from the report,
+so a report made by older code pins an answer this port no longer gives. On 2026-10-10 a report
+written before the D78 fix did exactly that, and only `Every_judged_row_is_accounted_for` caught
+it. So `tools/run-oracle.ps1` ends every report with `port build: src <tree>`, git's tree id for
+`src/` at HEAD, with `-dirty` added when `src/` had uncommitted changes. `judge-row.py` compares it
+with the checkout it runs in and refuses a different tree, a `-dirty` stamp, or uncommitted `src/`
+changes in the checkout. A report with no stamp (one written before 2026-10-10) is refused unless
+you pass `--allow-unstamped`, which you do only after checking the row's port answer on the
+current build yourself. The tree id of `src/` is the build's identity because it changes exactly
+when the library's code changes: a docs or test commit moves HEAD and the status stamp but cannot
+change an answer. If the sweep's tree is stale, re-run that seed with `run-oracle.ps1` first.
+
+**Rows upstream crashed on.** This port must never reproduce an upstream crash. Where upstream
+crashes on a pattern, the port either answers correctly (preferred) or refuses the pattern at
+compile time. The sweep still puts a crashed row to this port, and its `FAULT` block shows the
+port's answer on a `port` line. Once the crash is explained (a ledger entry, its location in
+upstream's C source, and a check under the MSan screen), judge the row like any other, adding the
+evidence with `--crash`:
+
+```
+python tools/judge-row.py --seed 187242955 --row 25286 --cause "ledger 11" --witness "..." --crash "exit 3221225477 (access violation), again when run alone; invalid-pointer read in match_fuzzy_changes, _regex.c:20554, MSan clean"
+```
+
+The line records upstream's answer as `<upstream crashed>` and pins the port's exact answer. The
+row is then accounted for only while upstream's recorded row is still a crash and the port's
+answer is still exactly the pinned one. The loader refuses a crash line whose pinned answer is an
+error raised while matching, because that is a port bug to fix. It also refuses a
+line marked as a crash whose recorded row is not one, and a crash line whose evidence does not
+name the recorded exit code.
+
+**The triage budget is two hours per scheduled run.** Rows still unjudged when the two hours are up
+stay red in that run and are picked up by the next one. A red run with known rows in it is better
+than a hurried judgement.
+
+**When a mechanism gets its own key.** A mechanism that produces five or more judged rows in each
+of three consecutive scheduled runs may be given its own key in `ExpectedDivergences.cs`. The key
+needs a planted-bug control: a test showing that a port bug of the same shape is not claimed. If
+no key passes that control, the mechanism's rows stay in the data file. Once a key claims a row,
+delete its line from the data file; `Every_expected_divergence_still_diverges` fails until you do.
 
 ## Reviewer brief
 
@@ -104,6 +185,7 @@ because the verifier happened to have built that file minutes earlier; nothing g
 | 6 | Two repair rounds against error tracebacks capture 76-95% of achievable improvement across seven models, no model regressing (arXiv:2604.10508). |
 | 7 | Only 72% of LLM-transpiled functions were semantically equivalent despite compiling and passing the existing tests; differential testing against the reference caught the rest at 85.7-88.2% precision, 100% recall (arXiv:2510.07604). |
 | 7a | Not from a study - from this repo. S33's blind review ran the generators at seeds no earlier slice had used and found three unjudged divergence families at once, none of them caused by S33 (DECISIONS 2026-09-12). A 2000-row generator run costs about fifteen seconds, so the third seed is not the expensive part of anything. |
+| 10-12 | Not from a study - from this repo, 2026-09-26/27. Six defects in the F-A and failed-call memo work reached blind review, each resting on an unchecked engine assumption (the search anchor "fixed for one call", only call frames above a call, END_FUZZY always restoring the totals) or on a grid that could not produce the case (no `\G` in the grammar; three key fields "with no witness" had witnesses a reviewer built in minutes). Every one was caught before main, but each cost a full review round. |
 
 ## Limits
 

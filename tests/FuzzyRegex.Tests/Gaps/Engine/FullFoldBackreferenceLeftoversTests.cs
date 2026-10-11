@@ -196,6 +196,55 @@ public sealed class FullFoldBackreferenceLeftoversTests
         reverse.FuzzyChanges.Insertions.Should().Equal(3);
     }
 
+    // Known defect D25. Because the retried insertion now steps past the character it inserts,
+    // it has to obey the rule every first attempt obeys: a search does not open a match with an
+    // insertion at its first position, since starting one character later is better. Upstream's
+    // retry writes the rule as 'folded_pos != folded_len' (_regex.c:11019), which forwards holds at
+    // the start of every folding; upstream never showed it, because its re-entry dropped the
+    // insertion. So the substitution a-for-x at 0 was retried as an insertion of the a, and the
+    // search opened at 0 with one edit. Upstream: (1, 4) with no errors for the first two rows,
+    // as for the literal (?i)(?:xtj){e<=1}. The rest are controls that already agreed with the
+    // literal: (?-i) is REF_GROUP; over 'bbxtj' the search anchor stays at 0, so the insertion of
+    // the b at 1 is allowed, and the literal gives (1, 5) with it (upstream's backreference gives
+    // (2, 5), ledger entry 30's dropped insertion); and reversed, upstream's retry rule is the
+    // first attempt's.
+    [Test]
+    [Arguments(@"(?i)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?fi)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?-i)(?=.*?(xtj))(?:\1){e<=1}", "axtj", 1, 3, 0)]
+    [Arguments(@"(?fi)(?=.*?(xtj))(?:\1){e<=1}", "bbxtj", 1, 4, 1)]
+    [Arguments(@"(?rfi)(?:\1){e<=1}(?<=(xtj).*)", "xtja", 0, 3, 0)]
+    public void A_retried_insertion_does_not_open_a_search_at_its_anchor(
+        string pattern,
+        string text,
+        int index,
+        int length,
+        int insertions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, insertions, 0));
+    }
+
+    [Test]
+    public void The_oracle_switch_restores_upstream_s_re_entry_for_upstream_s_own_kinds_only()
+    {
+        // PatternObject.SkipRetriedFoldSteps restores upstream's re-entry for the oracle's
+        // ablation, but not after one of ledger entry 52's whole-character edits, which upstream
+        // does not have (MatchState.RetriedAWholeFoldEdit). Known defect D24's frame at an
+        // expanding group character holds upstream's folded kinds under GroupCharFirst codes, so
+        // the test for a whole edit reads the kind the code stands for. Read as the raw code, the
+        // folded substitutions stepped past the ﬀ and gave (0, 4) with two substitutions.
+        // Upstream: fullmatch(r'(?rfi)(?:\1){s<=2}-(ﬀ)', 'ﬀs-ﬀ') is None.
+        var regex = new FuzzyRegex(@"(?rfi)(?:\1){s<=2}-(ﬀ)");
+        regex.PatternObject.SkipRetriedFoldSteps = true;
+
+        regex.FullMatch("ﬀs-ﬀ").Success.Should().BeFalse();
+    }
+
     [Test]
     public void A_retried_deletion_steps_past_the_deleted_group_character()
     {
@@ -210,5 +259,40 @@ public sealed class FullFoldBackreferenceLeftoversTests
         (best.Index, best.Length).Should().Be((0, 4));
         best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
         best.FuzzyChanges.Deletions.Should().Equal(3);
+    }
+
+    [Test]
+    public void A_best_match_keeps_the_one_insertion_fit_of_a_retried_reference()
+    {
+        // S85's BESTMATCH row minimised (S89). Upstream needs two defects to lose this: the retry
+        // defect above turns the one-insertion fit into a substitution and a trailing insertion,
+        // and ledger entry 12's doubled guard refuses that insertion once BESTMATCH has brought
+        // the budget down to two. This port answers no match only with both switched off.
+        // Literal form, V1 fullmatch('(?b)(?fi)(f)(?:f){e<=3}', 'fxf'): span=(0, 3) counts=(0, 1, 0)
+        //   changes=([], [1], [])
+        // V1 fullmatch('(?b)(?fi)(f)(?:(?:\1)){e<=3}', 'fxf'): None
+        Match m = new FuzzyRegex(@"(?b)(?fi)(f)(?:(?:\1)){e<=3}").FullMatch("fxf");
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        m.FuzzyChanges.Insertions.Should().Equal(1);
+    }
+
+    [Test]
+    public void A_best_match_ends_on_the_ligature_as_the_literal_form_does()
+    {
+        // `fuzzy-overhang` row 67 at seed 20260923 (S89). Here the leftovers defect joins ledger
+        // entry 12's doubled guard: with both switched off this port answers upstream's
+        // (0, 2, 1).
+        // Literal form, V1 fullmatch('(?b)(?fi)(f)(?:\d+a00f){e<=3}', 'f767ax00ﬂ'): span=(0, 9)
+        //   counts=(1, 1, 0) changes=([8], [5], [])
+        // V1 fullmatch('(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}', 'f767ax00ﬂ'): span=(0, 9)
+        //   counts=(0, 2, 1) changes=([], [5, 8], [9])
+        Match m = new FuzzyRegex(@"(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}").FullMatch("f767ax00ﬂ");
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 9));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(8);
+        m.FuzzyChanges.Insertions.Should().Equal(5);
     }
 }

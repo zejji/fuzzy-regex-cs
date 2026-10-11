@@ -331,6 +331,14 @@ public sealed class Match : Group
     /// it, because upstream's <c>finditer</c>/<c>findall</c> take no <c>partial</c> argument.
     /// </para>
     /// <para>
+    /// <b>A partial promises only that more text may complete the match.</b> The subject ran out
+    /// while the match was still open; it does not follow that any text completes it.
+    /// <c>ba(*FAIL)</c> over <c>"b"</c> is a partial, yet <c>(*FAIL)</c> fails whatever follows, so
+    /// <c>"ba"</c> and every longer text give no match. PCRE2, Java's <c>hitEnd()</c>, Boost and
+    /// upstream make the same promise. The other direction is guaranteed: where some longer text
+    /// completes the match, a partial call never answers no match.
+    /// </para>
+    /// <para>
     /// <b>Reversed partial matches run out of text at the slice start</b>. Matched with
     /// <see cref="FuzzyRegexOptions.RightToLeft"/> (upstream's <c>(?r)</c>) and
     /// <c>partial: true</c>, this reports a partial at <c>beginning</c> when the pattern still
@@ -381,7 +389,7 @@ public sealed class Match : Group
     /// <c>Matcher</c>'s <c>start_match</c>, which is the rest of the same fix. The third and fourth -
     /// the change list desynchronising across <c>POSIX</c> and <c>BESTMATCH</c> candidates, and a
     /// lookaround under <c>(?e)</c> - were ledger entry 11's remaining half and <b>are fixed by S48b</b>
-    /// (<c>MatchState.PopFuzzyCounts</c> truncates the change list to the length its matching push
+    /// (<c>MatchState.PopSubAttemptFuzzyState</c> truncates the change list to the length its matching push
     /// recorded, and <c>Matcher.RestoreBestMatch</c> restores the running totals beside the counts).
     /// <b>This tally nevertheless stays confined to the partial exit</b>, because that is not what it
     /// was working around: on a partial match the state's counter provably is not the whole match's,

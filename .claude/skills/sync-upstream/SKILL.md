@@ -82,7 +82,18 @@ git -C upstream checkout <new sha>     # the exact commit we now track
 git add upstream
 ```
 
-Then:
+Then re-ask upstream everything this repo has recorded as a known upstream defect, because the new
+release may have fixed some of it. Both checks run in CI anyway and fail the oracle jobs until you
+do; running them here means you judge each change deliberately:
+
+```powershell
+python tools/screen-undefined.py --reverify   # MSan registry: moves its commit, or names a defect that no longer reproduces
+pwsh -File tools/run-oracle.ps1 -Seeds 7      # includes record-oracle.py --recheck over every ExpectedDivergences example and ledger reproduction
+```
+
+For each one reported as changed: if upstream fixed it, delete the `ExpectedDivergences` entry or
+registry defect, keep its `PinnedBy` test as a regression test, and move the ledger entry to fixed
+upstream; if only its shape moved, re-minimise and replace the stored row.
 
 - update the pinned SHA and release version in `NOTICE`,
 - add a CHANGELOG entry naming the upstream version this release tracks,

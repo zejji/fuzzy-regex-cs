@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -60,17 +62,52 @@ internal static class PatternCompiler
     /// its own test suite never changes; a parameter keeps that visible rather than hidden in
     /// static state.
     /// </param>
+    /// <param name="upstreamReverseGrapheme">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamReverseGrapheme"/>.
+    /// </param>
+    /// <param name="upstreamFoldedRuns">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFoldedRuns"/>.
+    /// </param>
+    /// <param name="upstreamWholePatternCall">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamWholePatternCall"/>.
+    /// </param>
+    /// <param name="upstreamCallFeatures">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallFeatures"/>.
+    /// </param>
+    /// <param name="upstreamFuzzyConditionTest">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamFuzzyConditionTest"/>.
+    /// </param>
+    /// <param name="upstreamCallCopies">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallCopies"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
         int flags = 0,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
-        int defaultVersion = DefaultVersion
+        int defaultVersion = DefaultVersion,
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         try
         {
-            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion);
+            return CompileUnderVersion(
+                pattern,
+                flags,
+                namedLists,
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies
+            );
         }
         catch (FuzzyRegexParseException unterminated)
             when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
@@ -153,7 +190,13 @@ internal static class PatternCompiler
         string pattern,
         int flags,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
-        int defaultVersion
+        int defaultVersion,
+        bool upstreamReverseGrapheme = false,
+        bool upstreamFoldedRuns = false,
+        bool upstreamWholePatternCall = false,
+        bool upstreamCallFeatures = false,
+        bool upstreamFuzzyConditionTest = false,
+        bool upstreamCallCopies = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -174,7 +217,16 @@ internal static class PatternCompiler
             try
             {
                 source = new Source(pattern);
-                info = new Info(globalFlags, kwargs, defaultVersion) { GuessEncoding = guessEncoding };
+                info = new Info(globalFlags, kwargs, defaultVersion)
+                {
+                    GuessEncoding = guessEncoding,
+                    UpstreamReverseGrapheme = upstreamReverseGrapheme,
+                    UpstreamFoldedRuns = upstreamFoldedRuns,
+                    UpstreamWholePatternCall = upstreamWholePatternCall,
+                    UpstreamCallFeatures = upstreamCallFeatures,
+                    UpstreamFuzzyConditionTest = upstreamFuzzyConditionTest,
+                    UpstreamCallCopies = upstreamCallCopies,
+                };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
                 break;
@@ -193,6 +245,15 @@ internal static class PatternCompiler
         if (!source.AtEnd())
         {
             throw new FuzzyRegexParseException("unbalanced parenthesis", pattern, source.Pos);
+        }
+
+        // Not in upstream: remove the sections that allow no errors where no error can reach them,
+        // which gives the tree upstream's parser builds (Fuzzy.IsExact). A group call can carry a
+        // budget into a group that sits outside every section, so a pattern that has one and allows
+        // errors anywhere keeps them all, as `{d<=0}` does in upstream.
+        if (!(info.HasGroupCall && parsed.AllowsFuzzyErrors()))
+        {
+            parsed = parsed.ElideExactFuzzy();
         }
 
         // Check the global flags for conflicts.
@@ -229,19 +290,36 @@ internal static class PatternCompiler
 
         bool reverse = (info.Flags & RegexFlags.Reverse) != 0;
 
-        bool fuzzy = parsed is Fuzzy;
+        // Upstream's own reading of "the pattern is a fuzzy section" (upstream/regex/_main.py:577),
+        // kept only for the oracle's ablation: see the note where 'fuzzy' is read below.
+        bool fuzzyBeforeOptimising = parsed is Fuzzy;
 
         // Fix the group references. Upstream wraps and re-raises the error; see the loop above.
         parsed.FixGroups(pattern, reverse, false);
 
         // NOT PORTED: the DEBUG flag's parsed.dump(), which only prints.
 
+        // NOT UPSTREAM (D50): a pattern whose calls need copies is optimised from a copy of its tree,
+        // so the tree as parsed is left as written for the called groups' copies
+        // (ParseFunctions.PrepareCopy). The optimiser rewrites parts of the tree it is given in
+        // place, and upstream compiles each copy from that half-optimised tree. A pattern with no
+        // call, or none that needs a copy, is optimised as before.
+        if (!info.UpstreamCallCopies && ParseFunctions.MayNeedCopies(info))
+        {
+            info.PatternAsWritten = parsed;
+            parsed = parsed.Clone();
+        }
+
         // Optimise the parsed pattern.
         parsed = parsed.Optimise(info, reverse);
         parsed = parsed.PackCharacters(info);
 
         // Get the required string.
-        (long reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(parsed, info.Flags);
+        (long reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(
+            parsed,
+            info.Flags,
+            info.UpstreamCallFeatures
+        );
 
         // Build the named lists.
         Dictionary<string, IReadOnlySet<string>> namedListsBuilt = new(StringComparer.Ordinal);
@@ -251,7 +329,7 @@ internal static class PatternCompiler
             HashSet<string> values = new(kwargs[name], StringComparer.Ordinal);
             IReadOnlySet<string> items =
                 caseFlags != 0
-                    ? new HashSet<string>(values.Select(v => FoldCase(info, v)), StringComparer.Ordinal)
+                    ? new HashSet<string>(values.Select(v => FoldCase(info, caseFlags, v)), StringComparer.Ordinal)
                     : values;
             namedListsBuilt[name] = values;
             namedListIndexes[index] = items;
@@ -263,7 +341,18 @@ internal static class PatternCompiler
         ComplainUnusedArgs(kwargs, info);
 
         // Check the features of the groups.
-        ParseFunctions.CheckGroupFeatures(info, parsed);
+        ParseFunctions.CheckGroupFeatures(info, pattern, parsed);
+
+        // NOT UPSTREAM (known defect D37): whether the pattern as a whole is a fuzzy section is read
+        // HERE, from the same optimised 'parsed' that 'CheckGroupFeatures' has just read it from.
+        // Upstream reads it before optimising (upstream/regex/_main.py:577), when
+        // '(?:z(?R)|){e<=1}' is still a one-item Sequence, and '_check_group_features' reads it
+        // after (':4436'), when the Sequence has been unwrapped to the Fuzzy. The two disagree, so a
+        // '(?R)' inside that section gets neither a copy of the pattern nor a CALL_REF around it: the
+        // call jumps to the start node and runs to SUCCESS with the call and the section still open,
+        // and the errors of the outer instance are never merged. A Fuzzy compiles the same code
+        // whatever its 'fuzzy' argument, so the optimised shape is the one that decides.
+        bool fuzzy = info.UpstreamWholePatternCall ? fuzzyBeforeOptimising : parsed is Fuzzy;
 
         // Compile the parsed pattern. The result is a list of tuples.
         List<uint[]> code = parsed.Compile(reverse);
@@ -282,14 +371,51 @@ internal static class PatternCompiler
         // Add the final 'success' opcode.
         code.Add([(uint)Opcode.Success]);
 
-        // Compile the additional copies of the groups that we need.
-        foreach ((RegexBase group, bool rev, bool fuz) in info.AdditionalGroups)
+        // Compile the additional copies of the groups that we need. NOT UPSTREAM (D40): each copy's
+        // calls are first resolved for the copy's own features, which can append more copies, so
+        // the loop reads the list's count afresh.
+        for (int i = 0; i < info.AdditionalGroups.Count; i++)
         {
+            (RegexBase group, bool rev, bool fuz) = info.AdditionalGroups[i];
+            if (!info.UpstreamCallFeatures)
+            {
+                int references = info.CallRefs.Count;
+                ParseFunctions.ResolveCallsInCopy(info, pattern, parsed, group, rev, fuz);
+
+                // CheckGroupFeatures found every reference before the pattern compiled, so that
+                // the groups as written carry theirs; one found now would have no definition.
+                Debug.Assert(
+                    info.CallRefs.Count == references,
+                    "A copy needed a reference found after the pattern compiled."
+                );
+            }
+
             code.AddRange(group.Compile(rev, fuz));
         }
 
         // Flatten the code into a list of ints.
         List<uint> flatCode = ParseFunctions.FlattenCode(code);
+
+        // NOT UPSTREAM (D4, D72): refuse a group that can call itself before matching any text. Read
+        // before the first set, whose walk reverses a reverse pattern's sequences in place.
+        if (info.CallRefs.Count != 0)
+        {
+            LeftRecursion.Check(info, parsed, pattern);
+        }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
+        // None in most patterns, so the list is made only for the first.
+        List<int>? optionalPassEnds = null;
+        int offset = 0;
+        foreach (uint[] word in code)
+        {
+            if (ReferenceEquals(word, Branch.OptionalPassEndWord))
+            {
+                (optionalPassEnds ??= []).Add(offset);
+            }
+
+            offset += word.Length;
+        }
 
         if (!parsed.HasSimpleStart())
         {
@@ -300,12 +426,21 @@ internal static class PatternCompiler
                     ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
                 );
                 flatCode = [.. firstsetCode, .. flatCode];
+                if (optionalPassEnds is not null)
+                {
+                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
+                }
             }
             catch (FirstSetErrorException)
             {
                 // No usable first set; the engine simply scans from every position.
             }
         }
+
+        Debug.Assert(
+            optionalPassEnds is null || optionalPassEnds.TrueForAll(o => flatCode[o] == (uint)Opcode.Next),
+            "every recorded offset is a NEXT word"
+        );
 
         // NOT PORTED: index_group, which CompiledPattern derives from GroupIndex on demand.
 
@@ -319,7 +454,10 @@ internal static class PatternCompiler
             reqChars,
             reqFlags,
             info.GroupCount
-        );
+        )
+        {
+            OptionalPassEnds = optionalPassEnds ?? [],
+        };
     }
 
     /// <summary>
@@ -331,9 +469,22 @@ internal static class PatternCompiler
     /// forced <see cref="RegexFlags.Unicode"/> on by the time the named lists are built. It is kept
     /// because a future caller earlier in the pipeline would need it.
     /// </remarks>
-    private static string FoldCase(Info info, string value)
+    /// <param name="info">The parse state.</param>
+    /// <param name="caseFlags">
+    /// The list's case flags. When they carry a scoped encoding (S91) the list folds with it, as
+    /// its members match with it: upstream folds with the pattern's flags, so a list used inside
+    /// <c>(?i)(?a:...)</c> was folded by the Unicode rules.
+    /// </param>
+    /// <param name="value">The string to fold.</param>
+    /// <returns>The folded string.</returns>
+    private static string FoldCase(Info info, int caseFlags, string value)
     {
         int flags = info.Flags;
+        if ((caseFlags & RegexFlags.CaseEncodings) != 0)
+        {
+            flags = (flags & ~RegexFlags.AllEncodings) | (caseFlags & RegexFlags.CaseEncodings);
+        }
+
         if ((flags & RegexFlags.AllEncodings) == 0)
         {
             flags |= info.GuessEncoding;

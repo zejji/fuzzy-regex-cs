@@ -91,6 +91,23 @@ Describe 'Test-Ratchet' {
         $verdict.IsGreen | Should -BeFalse
     }
 
+    It 'accepts a baselined work-counter test that skipped itself in a Release build, and no other skip' {
+        $id = 'Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine.FailureMemoTests.A_repeat_fails_fast'
+        $skipped = [pscustomobject]@{
+            Id         = $id
+            Outcome    = 'Skipped'
+            SkipReason = 'Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here'
+        }
+        (Test-Ratchet -Results @($skipped) -BaselinePassing @($id)).IsGreen | Should -BeTrue
+
+        $other = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'needs:lookbehind - not implemented' }
+        (Test-Ratchet -Results @($other) -BaselinePassing @($id)).IsGreen | Should -BeFalse
+
+        # A reason that only starts the same way is some other skip.
+        $prefix = [pscustomobject]@{ Id = $id; Outcome = 'Skipped'; SkipReason = 'Debug-only work counter: something else' }
+        (Test-Ratchet -Results @($prefix) -BaselinePassing @($id)).IsGreen | Should -BeFalse
+    }
+
     It 'stays red on a missing test unless removals are explicitly accepted' {
         # Renaming or deleting a test removes it from the run, which is indistinguishable from
         # losing coverage. The operator has to say so on purpose.
@@ -288,6 +305,24 @@ Describe 'New-StatusReport' {
 
     It 'uses LF endings so regenerating on Linux or macOS does not rewrite every line' {
         $script:Report | Should -Not -Match "`r"
+    }
+
+    It 'renders the same board for a Release run, where work-counter tests skip, as for a Debug run' {
+        # CI diffs docs/STATUS.md after a Release ratchet. In Debug the WorkCounter tests pass; in
+        # Release they skip with the Debug-only reason. The board must not depend on configuration.
+        $debug = @(
+            [pscustomobject]@{ Id = 'a'; Class = 'C'; Name = 'N'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Passed'; SkipReason = $null; WaitingOn = $null }
+            [pscustomobject]@{ Id = 'b'; Class = 'C'; Name = 'M'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Passed'; SkipReason = $null; WaitingOn = $null })
+        $release = @(
+            $debug[0]
+            [pscustomobject]@{ Id = 'b'; Class = 'C'; Name = 'M'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Skipped'; SkipReason = 'Debug-only work counter: WorkCounter is compiled out of a Release build, so this bound cannot be checked here'; WaitingOn = $null })
+        $fromRelease = New-StatusReport -Results $release -UpstreamCommit 'abc123'
+        $fromRelease | Should -BeExactly (New-StatusReport -Results $debug -UpstreamCommit 'abc123')
+    }
+
+    It 'still reports a test skipped for any other reason as skipped' {
+        $other = @([pscustomobject]@{ Id = 'a'; Class = 'C'; Name = 'N'; Area = 'Gaps'; IsPorted = $false; Outcome = 'Skipped'; SkipReason = 'something else'; WaitingOn = $null })
+        (New-StatusReport -Results $other -UpstreamCommit 'abc123') | Should -Match '\| Gaps \| 1 \| 0 \| 1 \| 0 \|'
     }
 }
 

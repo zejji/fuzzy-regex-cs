@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 
 namespace Fuzzy.Text.RegularExpressions.Parsing;
@@ -44,7 +45,7 @@ internal abstract class RegexBase
         bool newPositive = positive ?? Positive;
         int newCaseFlags = caseFlags is null
             ? CaseFlags
-            : RegexFlags.CaseFlagsCombination(caseFlags.Value & RegexFlags.CaseFlags);
+            : RegexFlags.CaseFlagsCombination(caseFlags.Value & (RegexFlags.CaseFlags | RegexFlags.CaseEncodings));
         bool newZerowidth = zerowidth ?? Zerowidth;
 
         if (newPositive == Positive && newCaseFlags == CaseFlags && newZerowidth == Zerowidth)
@@ -107,6 +108,34 @@ internal abstract class RegexBase
         throw new NotSupportedException($"{GetType().Name} has no matches; upstream would raise AttributeError");
 
     /// <summary>
+    /// Whether a character matches this set member under IGNORECASE, by the rule the matcher's
+    /// <c>MatchesMemberIgn</c> applies: each member answers case-insensitively on its own, and a
+    /// set then combines the answers. Not an upstream method; see <c>SetBase.HandleCaseFolding</c>.
+    /// </summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it matches, ignoring case.</returns>
+    internal virtual bool MatchesIgnoringCase(int ch) => Matches(ch);
+
+    /// <summary>Whether any case of a character passes a test, under the Unicode case tables.</summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <param name="test">The case-sensitive test.</param>
+    /// <returns><see langword="true"/> if some case of <paramref name="ch"/> passes.</returns>
+    private protected static bool AnyCase(int ch, Func<int, bool> test)
+    {
+        Span<uint> cases = stackalloc uint[Unicode.UnicodeTables.MaxCases];
+        int count = Unicode.Encodings.AllCases(Unicode.CaseEncoding.Unicode, (uint)ch, cases);
+        foreach (uint c in cases[..count])
+        {
+            if (test((int)c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Upstream's <c>_key</c> rendered as a string, with the class <i>name</i> in place of the
     /// class <i>object</i>, so that the two places a set of nodes becomes an ordered list can be
     /// sorted identically here and in the corpus recorder.
@@ -129,6 +158,39 @@ internal abstract class RegexBase
     /// <returns>The packed node.</returns>
     internal virtual RegexBase PackCharacters(Info info) => this;
 
+    /// <summary>
+    /// A copy of the tree that <see cref="Optimise(Info, bool)"/> and <see cref="PackCharacters"/>
+    /// can rewrite without touching this one. Not in upstream (D50).
+    /// </summary>
+    /// <remarks>
+    /// Those two passes reassign the children of some nodes in place (<see cref="Atomic"/>'s
+    /// <c>Optimise</c>, every composite's <c>PackCharacters</c>, a set's <c>Optimise</c>), and
+    /// <see cref="Fuzzy"/> is not optimised at all, so it reaches <c>PackCharacters</c> as the node
+    /// the parser built. Run on the parsed tree they leave it half optimised in the pattern's own
+    /// direction, which is no state a copy of a called group can be prepared from. Every node whose
+    /// children a pass can reassign overrides this; the rest are never changed by either pass, so
+    /// they are shared, as <c>Optimise</c> already shares them. <see cref="CallGroup"/> is one,
+    /// and must be: the copies' walks set its reference just before each compile.
+    /// <para>
+    /// Witnesses (<c>CalledCopyTests.A_copy_compiles_to_the_code_of_its_group_written_out</c>): with
+    /// <see cref="Atomic"/>, <see cref="Branch"/>, <see cref="GreedyRepeat"/>, <see cref="LookAround"/>,
+    /// <see cref="LookAroundConditional"/> or <see cref="Fuzzy"/> returning itself, the copy's code
+    /// stops being the written-out group's; <see cref="Sequence"/>, <see cref="Group"/> and
+    /// <see cref="Conditional"/> fail the same rows through the atomic group under them. No witness
+    /// can exist for a set or a named list, so their copies are defensive only. A set's members are
+    /// leaves whose in-set <c>Optimise</c> returns them unchanged (<see cref="Range"/>, <see cref="Property"/>,
+    /// <see cref="Character"/>), a set's own <c>Optimise</c> takes no direction from its caller, and
+    /// <c>PackCharacters</c> leaves it alone, so running the passes on a shared set a second time
+    /// rebuilds the same members. A <see cref="StringSet"/> is rebuilt by <see cref="Branch.Optimise"/>
+    /// and is changed in place only by <c>PackCharacters</c> in a fuzzy section, where every
+    /// member is one run of characters under the list's own case flags, which packs to the same
+    /// string twice. Measured 2026-10-03: with either returning itself, 9,000 generated called
+    /// copies (sets, named lists, scoped flags) compiled to the same bytes.
+    /// </para>
+    /// </remarks>
+    /// <returns>This node, or a copy of it whose children are copies.</returns>
+    internal virtual RegexBase Clone() => this;
+
     /// <summary>Strips capture groups from the node. Upstream <c>remove_captures</c>.</summary>
     /// <returns>The node without captures.</returns>
     internal virtual RegexBase RemoveCaptures() => this;
@@ -139,11 +201,32 @@ internal abstract class RegexBase
 
     /// <summary>Whether the node may be hoisted out of a branch. Upstream <c>can_be_affix</c>.</summary>
     /// <returns><see langword="true"/> if it may.</returns>
+    /// <remarks>
+    /// Moving <c>X</c> out of <c>XA|XB</c> to make <c>X(?:A|B)</c> keeps the answer only when
+    /// <c>X</c> matches in one way and backtracking through it does nothing: otherwise the two forms
+    /// try their paths in a different order, or reach a verb at a different time. Ledger entry 46
+    /// refuses the nodes upstream lets through that fail this: the verbs, nested branches, group
+    /// calls and fuzzy sections.
+    /// </remarks>
     internal virtual bool CanBeAffix() => true;
 
     /// <summary>Whether the node contains a capture group. Upstream <c>contains_group</c>.</summary>
     /// <returns><see langword="true"/> if it does.</returns>
     internal virtual bool ContainsGroup() => false;
+
+    /// <summary>
+    /// Whether the node holds a fuzzy section that allows at least one error. Not in upstream,
+    /// whose parser never builds a section that allows none; see <see cref="Fuzzy.IsExact"/>.
+    /// </summary>
+    /// <returns><see langword="true"/> if it does.</returns>
+    internal virtual bool AllowsFuzzyErrors() => false;
+
+    /// <summary>
+    /// Replaces each fuzzy section that allows no errors, and that is not inside a fuzzy section,
+    /// with its subpattern. Not in upstream; see <see cref="Fuzzy.IsExact"/>.
+    /// </summary>
+    /// <returns>The node without those sections.</returns>
+    internal virtual RegexBase ElideExactFuzzy() => this;
 
     /// <summary>
     /// The set of nodes that can start a match here, with <see langword="null"/> standing for
@@ -213,11 +296,11 @@ internal abstract class RegexBase
 /// <c>ZeroWidthBase</c> (<c>upstream/regex/_regex_core.py</c> lines 2011-2038).
 /// </summary>
 /// <remarks>
-/// Upstream's <c>_key</c> is <c>(self.__class__, self.positive)</c>, so <c>encoding</c> is
-/// deliberately <b>not</b> part of equality: <c>Boundary()</c> and
-/// <c>Boundary(encoding=ASCII_ENCODING)</c> compare equal even though they compile to different
-/// flag words. <c>Branch</c>'s prefix and suffix splitting hoists on that equality, so the
-/// divergence would be observable in the bytecode.
+/// DIVERGES FROM UPSTREAM, deliberately (S91): <c>encoding</c> is part of equality. Upstream's
+/// <c>_key</c> is <c>(self.__class__, self.positive)</c>, so <c>Boundary()</c> and
+/// <c>Boundary(encoding=ASCII_ENCODING)</c> compare equal, and <c>Branch</c>'s prefix splitting
+/// hoisted the first in place of both: <c>(?:\b\xe9|(?a:\b)\xe9)</c> refused 'x\xe9', which
+/// CPython re 3.14 matches at (1, 2) through the second alternative (regex 2026.9.10, 2026-09-25).
 /// </remarks>
 /// <param name="positive">Whether the node asserts the position or its complement.</param>
 /// <param name="encoding">The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends.</param>
@@ -240,14 +323,22 @@ internal abstract class ZeroWidthBase(bool positive = true, int encoding = 0) : 
 
     /// <inheritdoc />
     internal override string RenderKey() =>
-        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({GetType().Name},{Positive})");
+        Encoding == 0
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({GetType().Name},{Positive})")
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({GetType().Name},{Positive},{Encoding})"
+            );
 
     /// <inheritdoc />
     public override bool Equals(object? obj) =>
-        obj is ZeroWidthBase other && GetType() == other.GetType() && Positive == other.Positive;
+        obj is ZeroWidthBase other
+        && GetType() == other.GetType()
+        && Positive == other.Positive
+        && Encoding == other.Encoding;
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(GetType(), Positive);
+    public override int GetHashCode() => HashCode.Combine(GetType(), Positive, Encoding);
 
     /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
@@ -295,8 +386,12 @@ internal sealed class DefaultBoundary : ZeroWidthBase
 {
     /// <summary>Initializes a default word-boundary assertion.</summary>
     /// <param name="positive">Whether this is <c>\b</c> or <c>\B</c>.</param>
-    internal DefaultBoundary(bool positive = true)
-        : base(positive) { }
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91). Upstream gives the
+    /// <c>DEFAULT_</c> forms none, so <c>(?w)(?a:\bx)</c> answered by the pattern's encoding.
+    /// </param>
+    internal DefaultBoundary(bool positive = true, int encoding = 0)
+        : base(positive, encoding) { }
 
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultBoundary;
@@ -305,6 +400,11 @@ internal sealed class DefaultBoundary : ZeroWidthBase
 /// <summary><c>\M</c> under the <c>WORD</c> flag. Upstream <c>DefaultEndOfWord</c> (lines 2748-2750).</summary>
 internal sealed class DefaultEndOfWord : ZeroWidthBase
 {
+    /// <summary>Initializes a default end-of-word assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="DefaultBoundary"/>.</param>
+    internal DefaultEndOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultEndOfWord;
 }
@@ -312,6 +412,11 @@ internal sealed class DefaultEndOfWord : ZeroWidthBase
 /// <summary><c>\m</c> under the <c>WORD</c> flag. Upstream <c>DefaultStartOfWord</c> (lines 2752-2754).</summary>
 internal sealed class DefaultStartOfWord : ZeroWidthBase
 {
+    /// <summary>Initializes a default start-of-word assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="DefaultBoundary"/>.</param>
+    internal DefaultStartOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultStartOfWord;
 }
@@ -319,6 +424,11 @@ internal sealed class DefaultStartOfWord : ZeroWidthBase
 /// <summary><c>$</c> under <c>MULTILINE</c>. Upstream <c>EndOfLine</c> (lines 2756-2758).</summary>
 internal class EndOfLine : ZeroWidthBase
 {
+    /// <summary>Initializes an end-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="EndOfLineU"/> reads.</param>
+    internal EndOfLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfLine;
 }
@@ -326,6 +436,14 @@ internal class EndOfLine : ZeroWidthBase
 /// <summary><c>$</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>EndOfLineU</c> (lines 2760-2762).</summary>
 internal sealed class EndOfLineU : EndOfLine
 {
+    /// <summary>Initializes a Unicode end-of-line assertion.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): the line separators are
+    /// the encoding's. Upstream gives it none.
+    /// </param>
+    internal EndOfLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfLineU;
 }
@@ -340,6 +458,11 @@ internal sealed class EndOfString : ZeroWidthBase
 /// <summary><c>$</c> outside <c>MULTILINE</c>. Upstream <c>EndOfStringLine</c> (lines 2768-2770).</summary>
 internal class EndOfStringLine : ZeroWidthBase
 {
+    /// <summary>Initializes an end-of-string-or-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="EndOfStringLineU"/> reads.</param>
+    internal EndOfStringLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLine;
 }
@@ -347,6 +470,11 @@ internal class EndOfStringLine : ZeroWidthBase
 /// <summary><c>$</c> under <c>WORD</c>. Upstream <c>EndOfStringLineU</c> (lines 2772-2774).</summary>
 internal sealed class EndOfStringLineU : EndOfStringLine
 {
+    /// <summary>Initializes a Unicode end-of-string-or-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="EndOfLineU"/>.</param>
+    internal EndOfStringLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLineU;
 }
@@ -398,6 +526,15 @@ internal sealed class Prune : ZeroWidthBase
         throw new NotSupportedException($"{nameof(Prune)} has no _opcode; upstream would raise AttributeError");
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>. Backtracking into the verb ends the attempt at this
+    /// start position, so inside the first alternative it stops the others being tried, and in
+    /// front of the branch it does not: <c>(*PRUNE)[ab]+|(*PRUNE)\b</c> over <c>'ccb'</c> is
+    /// <c>(2, 3)</c> in PCRE2 and Perl, <c>(0, 0)</c> upstream. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
+
+    /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
         [
             [(uint)Opcode.Prune],
@@ -420,11 +557,23 @@ internal sealed class Skip : ZeroWidthBase
 {
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.Skip;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>; for why not, see <see cref="Prune.CanBeAffix"/>.
+    /// Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 }
 
 /// <summary><c>^</c> under <c>MULTILINE</c>. Upstream <c>StartOfLine</c> (lines 3991-3993).</summary>
 internal class StartOfLine : ZeroWidthBase
 {
+    /// <summary>Initializes a start-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="StartOfLineU"/> reads.</param>
+    internal StartOfLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.StartOfLine;
 }
@@ -432,6 +581,11 @@ internal class StartOfLine : ZeroWidthBase
 /// <summary><c>^</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>StartOfLineU</c> (lines 3995-3997).</summary>
 internal sealed class StartOfLineU : StartOfLine
 {
+    /// <summary>Initializes a Unicode start-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="EndOfLineU"/>.</param>
+    internal StartOfLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.StartOfLineU;
 }
@@ -490,9 +644,11 @@ internal sealed class PrecompiledCode : RegexBase
 /// (<c>upstream/regex/_regex_core.py</c> lines 3310-3364).
 /// </summary>
 /// <remarks>
-/// <c>encoding</c> is deliberately not part of <c>_key</c> upstream, so a property is equal to the
-/// same property with a different encoding tag even though the two compile to different flag
-/// words. Kept, because <c>Branch</c>'s prefix splitting hoists on that equality.
+/// DIVERGES FROM UPSTREAM, deliberately (S91): <c>encoding</c> is part of equality. It is not
+/// part of <c>_key</c> upstream, so a property equalled the same property with a different
+/// encoding tag, and <c>Branch</c>'s prefix splitting hoisted the first in place of both:
+/// <c>(?:(?a:\w)x|\wy)</c> refused '\xe9y', which CPython re 3.14 matches at (0, 2) through the
+/// second alternative (regex 2026.9.10, 2026-09-25).
 /// </remarks>
 internal sealed class Property : RegexBase
 {
@@ -558,14 +714,27 @@ internal sealed class Property : RegexBase
     internal override bool Matches(int ch) => Unicode.RegexModule.HasPropertyValue(Value, (uint)ch) == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) =>
+        Engine.Matcher.HasPropertyIgn(
+            Encoding == RegexFlags.AsciiEncoding ? Unicode.CaseEncoding.Ascii : Unicode.CaseEncoding.Unicode,
+            Value,
+            (uint)ch
+        ) == Positive;
+
+    /// <inheritdoc />
     internal override long MaxWidth() => 1;
 
     /// <inheritdoc />
     internal override string RenderKey() =>
-        string.Create(
-            System.Globalization.CultureInfo.InvariantCulture,
-            $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth})"
-        );
+        Encoding == 0
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth})"
+            )
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth},{Encoding})"
+            );
 
     /// <inheritdoc />
     public override bool Equals(object? obj) =>
@@ -573,10 +742,12 @@ internal sealed class Property : RegexBase
         && Value == other.Value
         && Positive == other.Positive
         && CaseFlags == other.CaseFlags
-        && Zerowidth == other.Zerowidth;
+        && Zerowidth == other.Zerowidth
+        && Encoding == other.Encoding;
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(typeof(Property), Value, Positive, CaseFlags, Zerowidth);
+    public override int GetHashCode() =>
+        HashCode.Combine(typeof(Property), Value, Positive, CaseFlags, Zerowidth, Encoding);
 
     /// <inheritdoc />
     protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
@@ -605,7 +776,7 @@ internal sealed class Property : RegexBase
 
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, Value],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, Value],
         ];
     }
 }
@@ -679,11 +850,8 @@ internal sealed class Range : RegexBase
             return this;
         }
 
-        // Is full case-folding possible?
-        if (
-            (info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the node's own encoding (S91).
+        if (!RegexFlags.FoldsFully(info.Flags, CaseFlags))
         {
             return this;
         }
@@ -714,6 +882,9 @@ internal sealed class Range : RegexBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => (Lower <= ch && ch <= Upper) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => AnyCase(ch, c => Lower <= c && c <= Upper) == Positive;
 
     /// <inheritdoc />
     internal override long MaxWidth() => 1;
@@ -760,9 +931,11 @@ internal sealed class Range : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Lower, (uint)Upper],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, (uint)Lower, (uint)Upper],
         ];
     }
 }
@@ -893,9 +1066,11 @@ internal sealed class RefGroup : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)GroupNumber],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, (uint)GroupNumber],
         ];
     }
 }
@@ -960,8 +1135,43 @@ internal sealed class AnyAll : Any
 /// </summary>
 internal sealed class AnyU : Any
 {
+    /// <summary>Initializes a <c>.</c> under the <c>WORD</c> flag.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): the line breaks are the
+    /// encoding's. Upstream gives it none, so <c>(?w)(?a:.)</c> refused U+2028 where
+    /// <c>(?aw).</c> matches it (regex 2026.9.10, 2026-09-25).
+    /// </param>
+    internal AnyU(int encoding = 0)
+    {
+        Encoding = encoding;
+    }
+
+    /// <summary>The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends, or 0.</summary>
+    internal int Encoding { get; }
+
     /// <inheritdoc />
     protected override (Opcode Forward, Opcode Reverse) Opcodes => (Opcode.AnyU, Opcode.AnyURev);
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        Encoding == 0
+            ? nameof(AnyU)
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({nameof(AnyU)},{Encoding})");
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AnyU other && Encoding == other.Encoding;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(typeof(AnyU), Encoding);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        List<uint[]> code = base.CompileCore(reverse, fuzzy);
+        code[0][1] |= (uint)Encoding << NodeFlags.EncodingShift;
+
+        return code;
+    }
 }
 
 /// <summary>
@@ -1005,6 +1215,9 @@ internal sealed class Atomic : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => new Atomic(Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         Subpattern = Subpattern.RemoveCaptures();
@@ -1016,6 +1229,16 @@ internal sealed class Atomic : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
@@ -1070,13 +1293,80 @@ internal class Branch : RegexBase
 {
     /// <summary>Initializes an alternation.</summary>
     /// <param name="branches">The alternatives, in pattern order.</param>
-    internal Branch(List<RegexBase> branches)
+    /// <param name="writtenEmpty">
+    /// NOT UPSTREAM: per alternative, whether the parser read it as nothing at all; see
+    /// <see cref="_writtenEmpty"/>.
+    /// </param>
+    internal Branch(List<RegexBase> branches, bool[]? writtenEmpty = null)
     {
         Branches = branches;
+        _writtenEmpty = writtenEmpty;
     }
 
     /// <summary>The alternatives. Upstream <c>branches</c>.</summary>
     internal List<RegexBase> Branches { get; private protected set; }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): per alternative, whether the parser read it as
+    /// nothing at all, as in <c>(?:a|)</c>: an alternative written empty. Null for an alternation the
+    /// parser did not build.
+    /// </summary>
+    /// <remarks>
+    /// Only this spelling is the exit of an optional. An empty group <c>(?:a|(?:))</c> or a zero
+    /// repeat <c>(?:a|b{0})</c> is an alternative that happens to match nothing, and stays
+    /// first-match as upstream has it, so the three spellings do not have to be told apart after
+    /// optimising has made them all an empty sequence. A comment or verbose-mode space is no item,
+    /// so <c>(?:a|(?#c))</c> is written empty.
+    /// </remarks>
+    private readonly bool[]? _writtenEmpty;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): per alternative, after <see cref="Optimise"/>,
+    /// whether an alternative written empty follows it in the alternation it was written in or in
+    /// one that encloses that, so that the empty alternative is its exit: <c>a</c> and <c>b</c> in
+    /// <c>(?:a|b|)</c> and in <c>(?:(?:a|b)|)</c>, <c>b</c> alone in <c>(?:a|(?:b|))</c>. Null when
+    /// none is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Kept per alternative because flattening merges nested alternations: <c>(?:x|(?:b|))</c>
+    /// becomes <c>x|b|</c>, where the empty alternative is <c>b</c>'s exit and not <c>x</c>'s, as in
+    /// the spelling <c>(?:x|(?:b)?)</c>. <see cref="CompileCore"/> marks the end of each covered
+    /// alternative (<see cref="OptionalPassEndWord"/>).
+    /// </para>
+    /// <para>
+    /// An empty alternative the compiler makes is never written empty. <c>(?:a(?:b){d&lt;=1}|a)</c> is
+    /// compiled as <c>a</c> followed by an alternation of <c>(?:b){d&lt;=1}</c> and an empty
+    /// alternative (<see cref="SplitCommonPrefix"/>), the same bytecode as
+    /// <c>(?:a(?:(?:b){d&lt;=1}|))</c>, but it is still a choice between two alternatives that are
+    /// not empty, which stays first-match (<c>upstream/README.rst</c>:609). Factoring never runs
+    /// inside a fuzzy section, since <see cref="Fuzzy"/> does not optimise its subpattern, so
+    /// <c>(?:cats|cat){e&lt;=1}</c> stays two alternatives in upstream's bytecode and here.
+    /// </para>
+    /// </remarks>
+    private bool[]? _covered;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): the <c>NEXT</c> word that ends an alternative
+    /// <see cref="_covered"/> marks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is upstream's word, so the bytecode stays upstream's (the compile-parity corpus pins it);
+    /// the mark is which instance it is. <c>PatternCompiler.Compile</c> finds this instance in the
+    /// code before flattening it and records its offset (<see cref="CompiledPattern.OptionalPassEnds"/>),
+    /// and <c>NodeCompiler.BuildBranch</c> ends the alternative with an <c>END_OPTIONAL_PASS</c> node.
+    /// Nothing writes to a code word once it is emitted.
+    /// </para>
+    /// <para>
+    /// A node of its own rather than the ruling's other route, rewriting <c>(?:X|)</c> as a
+    /// <c>{0,1}</c> repeat, which gives the same answers: a fuzzy repeat costs about 1.9 times a fuzzy
+    /// alternation (58.7 against 31.3 ms on the ruling's benchmark,
+    /// <c>docs/plan/2026-09-28-optional-vs-empty-alternative-ruling.md</c> section 5), and the
+    /// rewrite would put that on every fuzzy pattern with an empty alternative.
+    /// </para>
+    /// </remarks>
+    internal static readonly uint[] OptionalPassEndWord = [(uint)Opcode.Next];
 
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
@@ -1096,7 +1386,7 @@ internal class Branch : RegexBase
         }
 
         // Flatten branches within branches.
-        List<RegexBase> branches = FlattenBranches(info, reverse, Branches);
+        (List<RegexBase> branches, List<bool>? covered) = FlattenBranches(info, reverse, Branches, _writtenEmpty);
 
         // Move any common prefix or suffix out of the branches.
         List<RegexBase> prefix;
@@ -1112,13 +1402,24 @@ internal class Branch : RegexBase
             suffix = [];
         }
 
+        // An empty alternative stops the factoring, since it has no prefix or suffix to share, and a
+        // covered alternative has one after it, so nothing factored here is covered and the empty
+        // alternatives factoring leaves are no alternative's exit.
+        Debug.Assert(
+            (prefix.Count == 0 && suffix.Count == 0) || covered is null || !covered.Contains(true),
+            "an alternative with an empty one after it was factored"
+        );
+
         // Try to reduce adjacent single-character branches to sets.
-        branches = ReduceToSet(info, reverse, branches);
+        (branches, covered) = ReduceToSet(info, reverse, branches, covered);
 
         List<RegexBase> sequence;
         if (branches.Count > 1)
         {
-            sequence = [new Branch(branches)];
+            sequence =
+            [
+                new Branch(branches) { _covered = covered is not null && covered.Contains(true) ? [.. covered] : null },
+            ];
 
             if (prefix.Count == 0 || suffix.Count == 0)
             {
@@ -1154,6 +1455,10 @@ internal class Branch : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new Branch([.. Branches.Select(static b => b.Clone())], _writtenEmpty) { _covered = _covered };
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         Branches = [.. Branches.Select(static b => b.RemoveCaptures())];
@@ -1164,10 +1469,28 @@ internal class Branch : RegexBase
     internal override bool IsAtomic() => Branches.TrueForAll(static b => b.IsAtomic());
 
     /// <inheritdoc />
-    internal override bool CanBeAffix() => Branches.TrueForAll(static b => b.CanBeAffix());
+    /// <remarks>
+    /// Upstream answers <c>all(b.can_be_affix() for b in self.branches)</c>. A branch left after
+    /// optimising has more than one alternative, so it can match in more than one way, and moving
+    /// it out changes which way is tried first: <c>(?:a\K|ab)c|(?:a\K|ab)</c> over <c>'abc'</c> is
+    /// <c>(0, 3)</c> in PCRE2 and Perl, <c>(1, 1)</c> upstream. <see cref="StringSet"/> inherits this,
+    /// which changes nothing: its alternatives are sequences, which were never affixes. Ledger
+    /// entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Branches.Exists(static b => b.ContainsGroup());
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Branches.Exists(static b => b.AllowsFuzzyErrors());
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Branches = [.. Branches.Select(static b => b.ElideExactFuzzy())];
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -1219,36 +1542,119 @@ internal class Branch : RegexBase
         [
             [(uint)Opcode.Branch],
         ];
-        foreach (RegexBase b in Branches)
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the end of an alternative whose exit is an
+        // alternative written empty after it; see OptionalPassEndWord. Marked whether or not this
+        // alternation is inside a section, since a section inside an alternative spends errors too:
+        // (?:(?:a){d<=1}|) is (?:(?:a){d<=1})? spelt as an alternation. The node compiler drops the
+        // mark from a pattern that has no fuzzy section (NodeCompiler.CompileToNodes). An
+        // alternative that compiles to nothing has no pass to judge.
+        // A section's subpattern is compiled without being optimised, so an alternation inside one
+        // has only its own marks.
+        bool[]? covered = _covered ?? OwnCovered(_writtenEmpty, Branches.Count);
+        for (int i = 0; i < Branches.Count; i++)
         {
-            code.AddRange(b.Compile(reverse, fuzzy));
-            code.Add([(uint)Opcode.Next]);
+            List<uint[]> alternative = Branches[i].Compile(reverse, fuzzy);
+            code.AddRange(alternative);
+            bool passEnd = covered is not null && covered[i] && alternative.Count > 0;
+            code.Add(passEnd ? OptionalPassEndWord : [(uint)Opcode.Next]);
         }
 
+        Debug.Assert(covered is null || !covered[^1], "an alternative with an empty one after it is not the last");
         code[^1] = [(uint)Opcode.End];
 
         return code;
     }
 
-    /// <summary>Upstream <c>Branch._flatten_branches</c> (lines 2237-2248).</summary>
-    private static List<RegexBase> FlattenBranches(Info info, bool reverse, List<RegexBase> branches)
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 44's addendum): which alternatives have one written empty after
+    /// them in this alternation (<see cref="_covered"/>).
+    /// </summary>
+    /// <param name="writtenEmpty">The parser's flags, or null.</param>
+    /// <param name="count">How many alternatives.</param>
+    /// <returns>One flag per alternative, or <see langword="null"/> when none is covered.</returns>
+    private static bool[]? OwnCovered(bool[]? writtenEmpty, int count)
     {
-        // Flatten the branches so that there aren't branches of branches.
-        List<RegexBase> newBranches = [];
-        foreach (RegexBase branch in branches)
+        // An alternative is covered when one after it is written empty: every one before the last
+        // alternative written empty.
+        int lastEmpty = writtenEmpty is null ? -1 : Array.LastIndexOf(writtenEmpty, true);
+        if (lastEmpty <= 0)
         {
-            RegexBase b = branch.Optimise(info, reverse);
+            return null;
+        }
+
+        bool[] own = new bool[count];
+        Array.Fill(own, true, 0, lastEmpty);
+        return own;
+    }
+
+    /// <summary>Upstream <c>Branch._flatten_branches</c> (lines 2237-2248).</summary>
+    /// <remarks>
+    /// NOT UPSTREAM (ledger entry 44's addendum): also works out which of the flattened alternatives
+    /// have an alternative written empty after them (<see cref="_covered"/>). An alternative is
+    /// covered by a later one written empty in its own alternation, and a nested alternation's
+    /// alternatives also by whatever covered the nested alternation as a whole.
+    /// </remarks>
+    private static (List<RegexBase> Branches, List<bool>? Covered) FlattenBranches(
+        Info info,
+        bool reverse,
+        List<RegexBase> branches,
+        bool[]? writtenEmpty
+    )
+    {
+        bool[]? own = OwnCovered(writtenEmpty, branches.Count);
+
+        // Flatten the branches so that there aren't branches of branches. The flags stay null until
+        // one is set, which most alternations never do.
+        List<RegexBase> newBranches = [];
+        List<bool>? covered = null;
+        for (int i = 0; i < branches.Count; i++)
+        {
+            bool ownCovered = own is not null && own[i];
+            RegexBase b = branches[i].Optimise(info, reverse);
             if (b is Branch nested)
             {
-                newBranches.AddRange(nested.Branches);
+                for (int k = 0; k < nested.Branches.Count; k++)
+                {
+                    bool nestedCovered = nested._covered is not null && nested._covered[k];
+                    AddCovered(ref covered, newBranches.Count, ownCovered || nestedCovered);
+                    newBranches.Add(nested.Branches[k]);
+                }
             }
             else
             {
+                AddCovered(ref covered, newBranches.Count, ownCovered);
                 newBranches.Add(b);
             }
         }
 
-        return newBranches;
+        return (newBranches, covered);
+    }
+
+    /// <summary>
+    /// Appends the flag of the alternative at <paramref name="position"/> to a list of covered
+    /// flags that is <see langword="null"/> while every flag is false.
+    /// </summary>
+    /// <param name="covered">The flags so far, or <see langword="null"/> if all are false.</param>
+    /// <param name="position">How many flags come before this one.</param>
+    /// <param name="value">This alternative's flag.</param>
+    private static void AddCovered(ref List<bool>? covered, int position, bool value)
+    {
+        if (covered is null)
+        {
+            if (!value)
+            {
+                return;
+            }
+
+            covered = new List<bool>(position + 1);
+            for (int i = 0; i < position; i++)
+            {
+                covered.Add(false);
+            }
+        }
+
+        covered.Add(value);
     }
 
     /// <summary>Upstream <c>Branch._split_common_prefix</c> (lines 2250-2290).</summary>
@@ -1272,7 +1678,8 @@ internal class Branch : RegexBase
 
         int count = pos;
 
-        if ((info.Flags & RegexFlags.Unicode) != 0)
+        // S91: a scoped (?u:...) can fold fully inside a pattern that does not.
+        if ((info.Flags & RegexFlags.Unicode) != 0 || alternatives.Exists(HasScopedUnicode))
         {
             // We need to check that we're not splitting a sequence of characters which could form
             // part of full case-folding.
@@ -1324,7 +1731,7 @@ internal class Branch : RegexBase
 
         int count = back;
 
-        if ((info.Flags & RegexFlags.Unicode) != 0)
+        if ((info.Flags & RegexFlags.Unicode) != 0 || alternatives.Exists(HasScopedUnicode))
         {
             while (count > 0 && !alternatives.TrueForAll(a => CanSplitRev(a, count)))
             {
@@ -1439,39 +1846,85 @@ internal class Branch : RegexBase
         return true;
     }
 
+    /// <summary>Whether an alternative holds a character that folds under a scoped <c>(?u:...)</c>.</summary>
+    private static bool HasScopedUnicode(List<RegexBase> alternative) =>
+        alternative.Exists(static i => i is Character c && (c.CaseFlags & RegexFlags.Unicode) != 0);
+
     /// <summary>Upstream <c>Branch._reduce_to_set</c> (lines 2417-2443).</summary>
-    private static List<RegexBase> ReduceToSet(Info info, bool reverse, List<RegexBase> branches)
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (ledger entry 44's addendum): carries <see cref="_covered"/> through. Members
+    /// merge as upstream merges them, so the bytecode stays upstream's, and a set, or the single
+    /// character the flush rebuilds, is covered only if every member was.
+    /// </para>
+    /// <para>
+    /// The flag is needed although only an optimised alternation is merged and a section's
+    /// subpattern is never optimised: a group call from inside a section runs the optimised code
+    /// with the section's budget, so a merged character can be deleted there.
+    /// <c>(?:a|)z|(?:(?R)x){d&lt;=1}</c> over <c>'zx'</c> reaches <c>(?:a|)</c> through <c>(?R)</c>;
+    /// with the flag dropped it took one deletion where <c>(?:a?)z|(?:(?R)x){d&lt;=1}</c> takes none.
+    /// </para>
+    /// <para>
+    /// Taking every member's flag loses nothing: covered alternatives are followed by an empty one in
+    /// their own alternation, so a covered member can only follow an uncovered one in a set, as
+    /// <c>b</c> follows <c>a</c> in <c>(?:a|(?:b|))</c>, and deleting <c>b</c> there reaches the state
+    /// deleting <c>a</c> reached first, with the same errors.
+    /// </para>
+    /// </remarks>
+    private static (List<RegexBase> Branches, List<bool>? Covered) ReduceToSet(
+        Info info,
+        bool reverse,
+        List<RegexBase> branches,
+        List<bool>? covered
+    )
     {
-        // Can the branches be reduced to a set?
+        // Can the branches be reduced to a set? With no flag set there are none to carry.
         List<RegexBase> newBranches = [];
+        List<bool>? newCovered = covered is null ? null : [];
         HashSet<RegexBase> items = [];
+        bool itemsCovered = true;
         int caseFlags = RegexFlags.NoCase;
-        foreach (RegexBase b in branches)
+
+        void Flush()
         {
+            if (items.Count > 0)
+            {
+                newCovered?.Add(itemsCovered);
+            }
+
+            FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+            itemsCovered = true;
+        }
+
+        for (int i = 0; i < branches.Count; i++)
+        {
+            RegexBase b = branches[i];
             if (b is Character or Property or SetBase)
             {
                 // Branch starts with a single character.
                 if (b.CaseFlags != caseFlags)
                 {
                     // Different case sensitivity, so flush.
-                    FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+                    Flush();
 
                     caseFlags = b.CaseFlags;
                 }
 
                 items.Add(b.WithFlags(caseFlags: RegexFlags.NoCase));
+                itemsCovered &= covered is not null && covered[i];
             }
             else
             {
-                FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+                Flush();
 
                 newBranches.Add(b);
+                newCovered?.Add(covered![i]);
             }
         }
 
-        FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+        Flush();
 
-        return newBranches;
+        return (newBranches, newCovered);
     }
 
     /// <summary>Upstream <c>Branch._flush_set_members</c> (lines 2471-2484).</summary>
@@ -1599,7 +2052,6 @@ internal class Branch : RegexBase
 internal sealed class CallGroup : RegexBase
 {
     private readonly Info _info;
-    private readonly int _position;
     private readonly string _groupText;
 
     /// <summary>Initializes a group call.</summary>
@@ -1610,11 +2062,15 @@ internal sealed class CallGroup : RegexBase
     {
         _info = info;
         _groupText = group;
-        _position = position;
+        Position = position;
+        info.HasGroupCall = true;
     }
 
     /// <summary>The group number, resolved by <see cref="FixGroups"/>. Upstream <c>group</c>.</summary>
     internal int GroupNumber { get; private set; }
+
+    /// <summary>Where the call started, for the error messages.</summary>
+    internal int Position { get; }
 
     /// <summary>
     /// Which of the pattern's group-call references this call uses. Upstream <c>call_ref</c>, set
@@ -1636,17 +2092,17 @@ internal sealed class CallGroup : RegexBase
         }
         else
         {
-            throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
+            throw new FuzzyRegexParseException("invalid group reference", pattern, Position);
         }
 
         if (GroupNumber < 0 || GroupNumber > _info.GroupCount)
         {
-            throw new FuzzyRegexParseException("unknown group", pattern, _position);
+            throw new FuzzyRegexParseException("unknown group", pattern, Position);
         }
 
         if (GroupNumber > 0 && _info.OpenGroupCount[GroupNumber] > 1)
         {
-            throw new FuzzyRegexParseException("ambiguous group reference", pattern, _position);
+            throw new FuzzyRegexParseException("ambiguous group reference", pattern, Position);
         }
 
         _info.GroupCalls.Add((this, reverse, fuzzy));
@@ -1672,6 +2128,14 @@ internal sealed class CallGroup : RegexBase
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => obj is CallGroup other && GroupNumber == other.GroupNumber;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>, but the called group can match in more than one way:
+    /// <c>(?:(?1)c|(?1))|(a|ab)</c> over <c>'abc'</c> is <c>(0, 3)</c> in PCRE2 and Perl,
+    /// <c>(0, 1)</c> upstream. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
     /// <remarks>
@@ -1728,6 +2192,14 @@ internal sealed class CallRef : RegexBase
 
     /// <inheritdoc />
     public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Not in upstream, which never walks a copy (D40): <see cref="ParseFunctions.ResolveCallsInCopy"/>
+    /// walks this one to point its calls at the references for its own features.
+    /// </remarks>
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        _parsed.FixGroups(pattern, reverse, fuzzy);
 
     /// <inheritdoc />
     /// <remarks>
@@ -1814,6 +2286,9 @@ internal sealed class Character : RegexBase
     internal override bool Matches(int ch) => ch == Value == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => AnyCase(ch, c => c == Value) == Positive;
+
+    /// <inheritdoc />
     internal override long MaxWidth() => Folded.Length;
 
     /// <inheritdoc />
@@ -1861,7 +2336,13 @@ internal sealed class Character : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
-        RegexBase code = new PrecompiledCode([(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Value]);
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
+        RegexBase code = new PrecompiledCode([
+            (uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)],
+            flags,
+            (uint)Value,
+        ]);
 
         if (Folded.Length > 1)
         {
@@ -1916,6 +2397,9 @@ internal sealed class Conditional : RegexBase
     /// <summary>What to match when the group did not take part. Upstream <c>no_item</c>.</summary>
     internal RegexBase NoItem { get; set; }
 
+    /// <summary>Whether this is a <c>DEFINE</c>, which resolves to group 0 and matches nothing in place.</summary>
+    internal bool IsDefine => _group == 0;
+
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
@@ -1931,6 +2415,13 @@ internal sealed class Conditional : RegexBase
         {
             // 'DEFINE' is a special name unless there's a group with that name.
             _group = 0;
+
+            // Port-only (D75): upstream accepts a no-branch here and the pattern never matches.
+            // PCRE2 and Perl refuse it; an empty no-branch is kept, as upstream matches it.
+            if (!NoItem.IsEmpty())
+            {
+                throw new FuzzyRegexParseException("DEFINE group contains more than one branch", pattern, _position);
+            }
         }
         else
         {
@@ -1966,6 +2457,10 @@ internal sealed class Conditional : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new Conditional(_info, _groupText, _group, YesItem.Clone(), NoItem.Clone(), _position);
+
+    /// <inheritdoc />
     /// <remarks>
     /// Upstream's body falls off the end and returns <c>None</c>, which its one caller would then
     /// store in place of the node - a bug, and unreachable, because <c>remove_captures</c> is only
@@ -1987,6 +2482,17 @@ internal sealed class Conditional : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => YesItem.AllowsFuzzyErrors() || NoItem.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        YesItem = YesItem.ElideExactFuzzy();
+        NoItem = NoItem.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -2098,6 +2604,24 @@ internal class String : RegexBase
     /// </summary>
     internal bool Required { get; set; }
 
+    /// <summary>
+    /// The direction the prefilter scans for this run, the pattern's own. Not in upstream (D47):
+    /// see <see cref="CompileCore"/>.
+    /// </summary>
+    internal bool RequiredReverse { get; set; }
+
+    /// <summary>
+    /// Whether the mark goes on every exact compile, as upstream's does. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool RequiredInEveryDirection { get; set; }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: compile without <see cref="CharacterReading"/>,
+    /// as upstream does. Set from <see cref="Info.UpstreamFoldedRuns"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamFoldingOnly { get; init; }
+
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
         [new Character(Characters[reverse ? Characters.Length - 1 : 0], caseFlags: CaseFlags)];
@@ -2149,13 +2673,27 @@ internal class String : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
-        if (Required)
+        // NOT UPSTREAM (D34): only the exact compile carries the mark. A call to the whole pattern
+        // from a fuzzy section compiles the marked run again as fuzzy (_regex_core.py:4432-4441),
+        // and upstream marks that copy too (:4045). The engine skips comparing a marked run where
+        // the prefilter found it, which in a fuzzy run would also skip the choices of deleting its
+        // matched characters (ledger entry 42). Upstream loses nothing: it pushes no such choices.
+        //
+        // NOT UPSTREAM (D47): nor does a compile in the other direction. `(?R)` inside a
+        // lookbehind compiles the pattern again backwards, and at the prefilter's position the
+        // engine then moved a backwards run to the string's forward end (`ReqEnd`), so
+        // `aa(?:(?<=a(?R)){i<=1}a|)` matched 'aaaa' as (0, 3) with one insertion, in upstream too
+        // (`upstream/src/_regex.c:15109`). The mark only means something where the run is read in
+        // the direction the prefilter found it.
+        if (Required && !fuzzy && (reverse == RequiredReverse || RequiredInEveryDirection))
         {
             flags |= NodeFlags.Required;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         uint[] code = new uint[3 + FoldedCharacters.Length];
-        code[0] = (uint)_opcodes[(CaseFlags, reverse)];
+        code[0] = (uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)];
         code[1] = flags;
         code[2] = (uint)FoldedCharacters.Length;
         for (int i = 0; i < FoldedCharacters.Length; i++)
@@ -2163,7 +2701,102 @@ internal class String : RegexBase
             code[3 + i] = (uint)FoldedCharacters[i];
         }
 
+        // NOT UPSTREAM: see CharacterReading. The Branch below never hides a marked run from the
+        // engine, since a fuzzy compile leaves the mark off (above).
+        if (fuzzy && !UpstreamFoldingOnly && CharacterReading() is { } characters)
+        {
+            return new Branch([new PrecompiledCode(code), characters]).Compile(reverse, fuzzy);
+        }
+
         return [code];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger entry 49): the same run read one pattern character at a time, for a
+    /// fuzzy full-case-folded run holding a character that expands on folding, such as <c>ß</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On its own an expanding character compiles to a choice between itself and its folding
+    /// (<see cref="Character"/>, upstream <c>_regex_core.py:2629-2632</c>), so a fuzzy section can
+    /// replace the whole <c>ß</c> with one substitution. Packed into a run, it survives only as its
+    /// folding, whose edits are one folded letter each: <c>(?fi)(?:ßx){s&lt;=1}</c> over <c>ax</c>
+    /// needs a substitution and a deletion for the <c>ß</c> and finds nothing, although
+    /// <c>(?fi)(?:ß){s&lt;=1}x</c> matches it. A wider fuzzy section can never match less.
+    /// </para>
+    /// <para>
+    /// So a fuzzy run gets this reading as a second alternative: each expanding character as a
+    /// <see cref="Character"/>, and each stretch of the others as a run of its own, so a subject
+    /// <c>ß</c> can still answer for two written letters. The packed run stays first and is emitted
+    /// exactly as before, because only it lets one subject character's folding span a written
+    /// letter and the expanding character next to it: <c>(?fi)sß</c> matches <c>ßs</c>. Every
+    /// exact match of this reading is an exact match of the packed run, so it only adds fuzzy
+    /// matches. An exact section, and a run with nothing that expands, compile as upstream's.
+    /// </para>
+    /// <para>
+    /// It costs the fuzzy full-folded paths that hold an expanding character 10-30% (a search of
+    /// 200,000 characters, medians of 11 against 5e0a2cd, 2026-09-28), which is the new search
+    /// space itself; with one expanding character the reading holds it bare, since its folding is
+    /// the packed run. Every other path compiles as before and pays nothing.
+    /// </para>
+    /// </remarks>
+    /// <returns>The reading, or <see langword="null"/> when the run needs none.</returns>
+    private Sequence? CharacterReading()
+    {
+        if ((CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase || Characters.Length < 2)
+        {
+            return null;
+        }
+
+        int expanding = Array.FindAll(Characters, c => new Character(c, caseFlags: CaseFlags).Folded.Length > 1).Length;
+        if (expanding == 0)
+        {
+            return null;
+        }
+
+        // With one expanding character, reading it as its folding here would repeat the packed run
+        // that comes first, so it is read as the character alone: CHARACTER_IGN, without the full
+        // flag that makes a Character add its folding. With two or more, each may be either, and
+        // the mixtures are only here.
+        int atomFlags = expanding == 1 ? CaseFlags & ~RegexFlags.FullCase : CaseFlags;
+        List<RegexBase> items = [];
+        List<int> others = [];
+
+        foreach (int c in Characters)
+        {
+            var character = new Character(c, caseFlags: CaseFlags);
+
+            if (character.Folded.Length > 1)
+            {
+                // Its Character compiles its folding as a String, which must not expand again or
+                // that String would take a reading of its own. Full folding is idempotent.
+                System.Diagnostics.Debug.Assert(
+                    Array.TrueForAll(character.Folded, f => new Character(f, caseFlags: CaseFlags).Folded.Length == 1),
+                    "A full case folding expands again."
+                );
+                FlushOthers();
+                items.Add(new Character(c, caseFlags: atomFlags));
+            }
+            else
+            {
+                others.Add(c);
+            }
+        }
+
+        FlushOthers();
+
+        return new Sequence(items);
+
+        void FlushOthers()
+        {
+            if (others.Count > 0)
+            {
+                items.Add(
+                    others.Count == 1 ? new Character(others[0], caseFlags: CaseFlags) : new String(others, CaseFlags)
+                );
+                others.Clear();
+            }
+        }
     }
 }
 
@@ -2248,8 +2881,20 @@ internal sealed class StringSet : Branch
         ];
     }
 
+    /// <summary>A copy of a list, which is already registered with the parse state.</summary>
+    /// <param name="source">The list to copy.</param>
+    private StringSet(StringSet source)
+        : base([.. source.Branches.Select(static b => b.Clone())])
+    {
+        Name = source.Name;
+        SetCaseFlags = source.SetCaseFlags;
+    }
+
     /// <summary>The list's name. Upstream <c>name</c>.</summary>
     internal string Name { get; }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() => new StringSet(this);
 
     /// <inheritdoc />
     /// <remarks>
@@ -2345,7 +2990,7 @@ internal sealed class Sequence : RegexBase
                 // inner one has no else, so the conjunction is the same test.
                 if (
                     character.CaseFlags != caseFlags
-                    && (character.CaseFlags != 0 || ParseFunctions.IsCasedI(info, character.Value))
+                    && (character.CaseFlags != 0 || ParseFunctions.IsCasedI(info, caseFlags, character.Value))
                 )
                 {
                     FlushCharacters(info, characters, caseFlags, items);
@@ -2359,7 +3004,7 @@ internal sealed class Sequence : RegexBase
                 // As above, for a string rather than a character (lines 3543-3552).
                 if (
                     literal.CaseFlags != caseFlags
-                    && (literal.CaseFlags != 0 || characters.Exists(c => ParseFunctions.IsCasedI(info, c)))
+                    && (literal.CaseFlags != 0 || characters.Exists(c => ParseFunctions.IsCasedI(info, caseFlags, c)))
                 )
                 {
                     FlushCharacters(info, characters, caseFlags, items);
@@ -2381,6 +3026,9 @@ internal sealed class Sequence : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => new Sequence([.. Items.Select(static s => s.Clone())]);
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         for (int i = 0; i < Items.Count; i++)
@@ -2399,6 +3047,20 @@ internal sealed class Sequence : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Items.Exists(static s => s.ContainsGroup());
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Items.Exists(static s => s.AllowsFuzzyErrors());
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        for (int i = 0; i < Items.Count; i++)
+        {
+            Items[i] = Items[i].ElideExactFuzzy();
+        }
+
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -2503,21 +3165,24 @@ internal sealed class Sequence : RegexBase
         }
 
         // Disregard case_flags if all of the characters are case-less.
-        if ((caseFlags & RegexFlags.IgnoreCase) != 0 && !characters.Exists(c => ParseFunctions.IsCasedI(info, c)))
+        if (
+            (caseFlags & RegexFlags.IgnoreCase) != 0
+            && !characters.Exists(c => ParseFunctions.IsCasedI(info, caseFlags, c))
+        )
         {
             caseFlags = RegexFlags.NoCase;
         }
 
         if ((caseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase)
         {
-            foreach (Literal literal in FixFullCasefold(characters))
+            foreach (Literal literal in FixFullCasefold(characters, caseFlags & RegexFlags.CaseEncodings))
             {
                 int[] chars = literal.Characters;
 
                 items.Add(
                     chars.Length == 1
                         ? new Character(chars[0], caseFlags: literal.CaseFlags)
-                        : new String(chars, literal.CaseFlags)
+                        : new String(chars, literal.CaseFlags) { UpstreamFoldingOnly = info.UpstreamFoldedRuns }
                 );
             }
         }
@@ -2592,7 +3257,7 @@ internal sealed class Sequence : RegexBase
     /// test that used to pin it, <c>Gaps.Parsing.FullCaseFoldSplitTests</c>, says so too.
     /// </para>
     /// </remarks>
-    private static List<Literal> FixFullCasefold(List<int> characters)
+    private static List<Literal> FixFullCasefold(List<int> characters, int encoding)
     {
         // Get the characters which expand to multiple codepoints on folding, folded.
         List<int[]> expanded =
@@ -2655,16 +3320,16 @@ internal sealed class Sequence : RegexBase
 
             if (pos < startIndex)
             {
-                literals.Add(new Literal(PySlice(characters, pos, startIndex), RegexFlags.IgnoreCase));
+                literals.Add(new Literal(PySlice(characters, pos, startIndex), RegexFlags.IgnoreCase | encoding));
             }
 
-            literals.Add(new Literal(PySlice(characters, startIndex, end), RegexFlags.FullIgnoreCase));
+            literals.Add(new Literal(PySlice(characters, startIndex, end), RegexFlags.FullIgnoreCase | encoding));
             pos = end;
         }
 
         if (pos < characters.Count)
         {
-            literals.Add(new Literal(PySlice(characters, pos, characters.Count), RegexFlags.IgnoreCase));
+            literals.Add(new Literal(PySlice(characters, pos, characters.Count), RegexFlags.IgnoreCase | encoding));
         }
 
         return literals;
@@ -2797,11 +3462,8 @@ internal abstract class SetBase(
             return 1;
         }
 
-        // Is full case-folding possible?
-        if (
-            (Info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the set's own encoding (S91).
+        if (!RegexFlags.FoldsFully(Info.Flags, CaseFlags))
         {
             return 1;
         }
@@ -2809,7 +3471,8 @@ internal abstract class SetBase(
         // Get the folded characters in the set.
         HashSet<string> seen = [];
         long widest = 0;
-        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        // The same test as HandleCaseFolding's, so the width covers exactly its expansions.
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(MatchesIgnoringCase))
         {
             int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
             if (seen.Add(string.Join(',', folded)))
@@ -2865,6 +3528,11 @@ internal abstract class SetBase(
     protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
         Recreate(Info, Items, positive, caseFlags, zerowidth).Optimise(Info, reverse: false);
 
+    /// <inheritdoc />
+    /// <remarks>A set's <c>Optimise</c> reassigns its members in place.</remarks>
+    internal override RegexBase Clone() =>
+        Recreate(Info, [.. Items.Select(static i => i.Clone())], Positive, CaseFlags, Zerowidth);
+
     /// <summary>Upstream <c>SetBase._handle_case_folding</c> (lines 3762-3790).</summary>
     /// <param name="info">The parse state; upstream takes it and reads <c>self.info</c> instead.</param>
     /// <param name="inSet">Whether this set is itself a member of another set.</param>
@@ -2879,11 +3547,10 @@ internal abstract class SetBase(
             return this;
         }
 
-        // Is full case-folding possible?
-        if (
-            (Info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the set's own encoding (S91): alternatives that
+        // Branch.ReduceToSet merges inside (?u:...) are a set built after parsing, under the
+        // pattern's flags, so (?aif)(?u:x|\xdf) refused "ss" where (?uif)x|\xdf matches it.
+        if (!RegexFlags.FoldsFully(Info.Flags, CaseFlags))
         {
             return this;
         }
@@ -2892,7 +3559,12 @@ internal abstract class SetBase(
         // calls this list `items`, which the primary constructor's parameter now owns.
         List<RegexBase> expansions = [];
         HashSet<string> seen = [];
-        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        // DIVERGES FROM UPSTREAM, deliberately: upstream asks the case-SENSITIVE `matches`, so a
+        // set whose members refuse 's' case-insensitively still expanded to "ss" when it held the
+        // letter itself: (?i)[\P{Lu}x] refused 's' and matched '\xdf' and "ss", where (?i)\P{Lu}
+        // refuses all three (the blind review of ledger 35, 2026-09-25). A set matches an
+        // expansion exactly when it matches the letter case-insensitively.
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(MatchesIgnoringCase))
         {
             int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
             if (seen.Add(string.Join(',', folded)))
@@ -2929,9 +3601,11 @@ internal abstract class SetBase(
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         List<uint[]> code =
         [
-            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+            [(uint)Opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags],
         ];
         foreach (RegexBase m in Items)
         {
@@ -3001,6 +3675,10 @@ internal sealed class SetDiff : SetBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => (Items[0].Matches(ch) && !Items[1].Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) =>
+        (Items[0].MatchesIgnoringCase(ch) && !Items[1].MatchesIgnoringCase(ch)) == Positive;
 
     /// <inheritdoc />
     private protected override SetBase Recreate(
@@ -3078,6 +3756,9 @@ internal sealed class SetInter : SetBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => Items.TrueForAll(i => i.Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => Items.TrueForAll(i => i.MatchesIgnoringCase(ch)) == Positive;
 
     /// <inheritdoc />
     private protected override SetBase Recreate(
@@ -3160,6 +3841,18 @@ internal sealed class SetSymDiff : SetBase
         foreach (RegexBase i in Items)
         {
             m = m != i.Matches(ch);
+        }
+
+        return m == Positive;
+    }
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch)
+    {
+        bool m = false;
+        foreach (RegexBase i in Items)
+        {
+            m = m != i.MatchesIgnoringCase(ch);
         }
 
         return m == Positive;
@@ -3266,6 +3959,9 @@ internal sealed class SetUnion : SetBase
     internal override bool Matches(int ch) => Items.Exists(i => i.Matches(ch)) == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => Items.Exists(i => i.MatchesIgnoringCase(ch)) == Positive;
+
+    /// <inheritdoc />
     private protected override SetBase Recreate(
         Info info,
         IReadOnlyList<RegexBase> items,
@@ -3321,9 +4017,11 @@ internal sealed class SetUnion : SetBase
             }
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         List<uint[]> code =
         [
-            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+            [(uint)Opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags],
         ];
 
         foreach ((bool positive, List<int> values) in characters)
@@ -3410,6 +4108,9 @@ internal sealed class Group : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => new Group(_info, GroupNumber, Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures() => Subpattern.RemoveCaptures();
 
     /// <inheritdoc />
@@ -3420,6 +4121,16 @@ internal sealed class Group : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => true;
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
@@ -3498,9 +4209,23 @@ internal sealed class LookAround : RegexBase
     internal RegexBase Subpattern { get; set; }
 
     /// <inheritdoc />
-    /// <remarks>The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction.</remarks>
+    /// <remarks>
+    /// The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction, and as
+    /// exact whatever the caller's fuzziness. NOT UPSTREAM (D42), which passes the caller's
+    /// <c>fuzzy</c> (<c>upstream/regex/_regex_core.py</c>:3160) while compiling the body exact
+    /// (:3201, and <see cref="CompileCore"/> here): a call in the body then ran its group fuzzily,
+    /// so <c>(?:(?=(?&amp;g))..){s&lt;=1}(?P&lt;g&gt;ab)?</c> matched 'xb', which
+    /// <c>(?:(?=ab)..){s&lt;=1}</c> does not. The walk registers each call's features, so it must
+    /// pass what the compile will.
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
-        Subpattern.FixGroups(pattern, Behind, fuzzy);
+        Subpattern.FixGroups(pattern, Behind, UpstreamCallFeatures && fuzzy);
+
+    /// <summary>
+    /// Whether the body's calls take the caller's fuzziness, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse)
@@ -3511,7 +4236,7 @@ internal sealed class LookAround : RegexBase
             return subpattern;
         }
 
-        return new LookAround(Behind, Positive, subpattern);
+        return new LookAround(Behind, Positive, subpattern) { UpstreamCallFeatures = UpstreamCallFeatures };
     }
 
     /// <inheritdoc />
@@ -3520,6 +4245,10 @@ internal sealed class LookAround : RegexBase
         Subpattern = Subpattern.PackCharacters(info);
         return this;
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new LookAround(Behind, Positive, Subpattern.Clone()) { UpstreamCallFeatures = UpstreamCallFeatures };
 
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures() => Subpattern.RemoveCaptures();
@@ -3532,6 +4261,16 @@ internal sealed class LookAround : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
@@ -3632,12 +4371,39 @@ internal sealed class LookAroundConditional : RegexBase
     internal RegexBase NoItem { get; set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (D43): the test is fixed under <see cref="Behind"/>, the direction
+    /// <see cref="CompileCore"/> compiles it in (<c>upstream/regex/_regex_core.py</c>:3267).
+    /// Upstream fixes it under the caller's direction (:3230), so a call in a lookbehind test ran
+    /// its group forwards: <c>bc(?(?&lt;=(?&amp;g))x|y)(?P&lt;g&gt;bc)?</c> refused 'bcxzzz', which
+    /// <c>bc(?(?&lt;=bc)x|y)</c> matches.
+    /// </para>
+    /// <para>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test is exact, like a plain lookaround's body
+    /// (<c>upstream/regex/_regex_core.py</c>:3201), so its calls are fixed exact too. See
+    /// <see cref="CompileCore"/>.
+    /// </para>
+    /// </remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
-        Subpattern.FixGroups(pattern, reverse, fuzzy);
+        Subpattern.FixGroups(pattern, UpstreamCallFeatures ? reverse : Behind, UpstreamFuzzyTest && fuzzy);
         YesItem.FixGroups(pattern, reverse, fuzzy);
         NoItem.FixGroups(pattern, reverse, fuzzy);
     }
+
+    /// <summary>
+    /// Whether the test's calls take the caller's direction, as upstream's do. Set from
+    /// <see cref="Info.UpstreamCallFeatures"/>, for the oracle alone.
+    /// </summary>
+    internal bool UpstreamCallFeatures { get; init; }
+
+    /// <summary>
+    /// Whether the test is compiled with the enclosing section's fuzziness, as upstream's is (the
+    /// D52 fix switched off). Set from <see cref="Info.UpstreamFuzzyConditionTest"/>, for the oracle
+    /// alone.
+    /// </summary>
+    internal bool UpstreamFuzzyTest { get; init; }
 
     /// <inheritdoc />
     internal override RegexBase Optimise(Info info, bool reverse) =>
@@ -3647,7 +4413,11 @@ internal sealed class LookAroundConditional : RegexBase
             Subpattern.Optimise(info, Behind),
             YesItem.Optimise(info, Behind),
             NoItem.Optimise(info, Behind)
-        );
+        )
+        {
+            UpstreamCallFeatures = UpstreamCallFeatures,
+            UpstreamFuzzyTest = UpstreamFuzzyTest,
+        };
 
     /// <inheritdoc />
     internal override RegexBase PackCharacters(Info info)
@@ -3657,6 +4427,13 @@ internal sealed class LookAroundConditional : RegexBase
         NoItem = NoItem.PackCharacters(info);
         return this;
     }
+
+    /// <inheritdoc />
+    internal override RegexBase Clone() =>
+        new LookAroundConditional(Behind, Positive, Subpattern.Clone(), YesItem.Clone(), NoItem.Clone())
+        {
+            UpstreamCallFeatures = UpstreamCallFeatures,
+        };
 
     /// <inheritdoc />
     /// <remarks>Upstream returns <c>None</c> here too; see <see cref="Conditional.RemoveCaptures"/>.</remarks>
@@ -3677,6 +4454,19 @@ internal sealed class LookAroundConditional : RegexBase
     /// <inheritdoc />
     internal override bool ContainsGroup() =>
         Subpattern.ContainsGroup() || YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() =>
+        Subpattern.AllowsFuzzyErrors() || YesItem.AllowsFuzzyErrors() || NoItem.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        YesItem = YesItem.ElideExactFuzzy();
+        NoItem = NoItem.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -3707,13 +4497,21 @@ internal sealed class LookAroundConditional : RegexBase
     public override int GetHashCode() => typeof(LookAroundConditional).GetHashCode();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM (D52, ledger entry 64): the test compiles exact, as a plain lookaround's body
+    /// does (<see cref="LookAround"/>, upstream <c>_regex_core.py</c>:3201), where upstream passes the
+    /// enclosing section's <paramref name="fuzzy"/> (:3267). The test is atomic, so a test that
+    /// held only by an edit was never asked again exactly, and the budget took a match away:
+    /// <c>(?:(?(?=a)ab|b)){s&lt;=1}</c> over 'b' was None where <c>(?(?=a)ab|b)</c> gives (0, 1). A
+    /// fuzzy section written inside the test still applies there.
+    /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
         List<uint[]> code =
         [
             [(uint)Opcode.Conditional, Positive ? 1u : 0u, Behind ? 0u : 1u],
         ];
-        code.AddRange(Subpattern.Compile(Behind, fuzzy));
+        code.AddRange(Subpattern.Compile(Behind, UpstreamFuzzyTest && fuzzy));
         code.Add([(uint)Opcode.Next]);
         code.AddRange(YesItem.Compile(reverse, fuzzy));
 
@@ -3859,6 +4657,9 @@ internal sealed class Fuzzy : RegexBase
         Subpattern = subpattern;
         Constraints = constraints;
 
+        // Read before the defaults below are filled in: the test is on the constraints as written.
+        IsExact = !constraints.IsActuallyFuzzy();
+
         // If an error type is mentioned in the cost equation, then its maximum defaults to
         // unlimited.
         if (constraints.Cost is not null)
@@ -3906,11 +4707,38 @@ internal sealed class Fuzzy : RegexBase
         }
     }
 
+    /// <summary>A copy of a section, whose constraints are already filled in.</summary>
+    /// <param name="source">The section to copy.</param>
+    /// <param name="subpattern">The copy's subpattern.</param>
+    private Fuzzy(Fuzzy source, RegexBase subpattern)
+    {
+        Subpattern = subpattern;
+        Constraints = source.Constraints;
+        IsExact = source.IsExact;
+    }
+
     /// <summary>What the section matches. Upstream <c>subpattern</c>.</summary>
     internal RegexBase Subpattern { get; private set; }
 
     /// <summary>The error budget. Upstream <c>constraints</c>.</summary>
     internal FuzzyConstraints Constraints { get; }
+
+    /// <summary>
+    /// Whether the constraints, as written, allow no errors: <c>{e&lt;=0}</c>, <c>{e&lt;1}</c> or
+    /// <c>{s&lt;=0,i&lt;=0,d&lt;=0}</c>. Not in upstream, whose parser drops such a constraint
+    /// (<c>is_actually_fuzzy</c>, <c>upstream/regex/_regex_core.py:548-556</c>).
+    /// </summary>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM. Dropping the constraint is harmless only where no error could reach
+    /// the section anyway. Beside another fuzzy section it changes the answer, and only for these
+    /// spellings: <c>{d&lt;=0}</c> is the same zero budget and upstream keeps its node. So
+    /// <c>(?:(?:ab){s&lt;=1,d&lt;=1}){e&lt;=0}</c> matches 'x' upstream with two errors, and
+    /// <c>(?:c(?:ab){e&lt;=0}){e&lt;=1}</c> matches 'cax' with 'x' for 'b'. The parser here keeps
+    /// the section and <see cref="ElideExactFuzzy"/> removes it only where no error can reach it,
+    /// which leaves the compiled code of every pattern upstream answers correctly unchanged.
+    /// Ledger entry 39; <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool IsExact { get; }
 
     /// <inheritdoc />
     /// <remarks>Everything inside a fuzzy section is fuzzy, whatever the caller said.</remarks>
@@ -3925,6 +4753,10 @@ internal sealed class Fuzzy : RegexBase
     }
 
     /// <inheritdoc />
+    /// <remarks>The constraints are shared: no pass changes them once the section is built.</remarks>
+    internal override RegexBase Clone() => new Fuzzy(this, Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         Subpattern = Subpattern.RemoveCaptures();
@@ -3935,7 +4767,29 @@ internal sealed class Fuzzy : RegexBase
     internal override bool IsAtomic() => Subpattern.IsAtomic();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>, but a fuzzy section can match in more than one way, one
+    /// per choice of errors, and moving it out changes which is tried first:
+    /// <c>(?:a){e&lt;=1}c|(?:a){e&lt;=1}</c> over <c>'abc'</c> should be <c>(0, 3)</c> with one
+    /// insertion, as it is with the second section written <c>{e&lt;=2}</c>; upstream answers
+    /// <c>(0, 1)</c> with none. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
+
+    /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => !IsExact || Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// An exact section is removed only when nothing inside it may make an error, since it caps
+    /// those errors at zero. One inside another section is never reached, because a section that
+    /// is kept is returned whole: it keeps that section's budget off its subpattern.
+    /// </remarks>
+    internal override RegexBase ElideExactFuzzy() =>
+        IsExact && !Subpattern.AllowsFuzzyErrors() ? Subpattern.ElideExactFuzzy() : this;
 
     /// <inheritdoc />
     internal override bool IsEmpty() => Subpattern.IsEmpty();
@@ -4042,23 +4896,62 @@ internal sealed class Fuzzy : RegexBase
 /// </summary>
 internal sealed class Grapheme : RegexBase
 {
+    /// <summary>Initializes a grapheme cluster.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): under ASCII every position
+    /// is a grapheme boundary. Upstream gives it none, so <c>(?a:\X)</c> took 'e\u0301' whole where
+    /// <c>(?a)\X</c> takes 'e' (regex 2026.9.10, 2026-09-25).
+    /// </param>
+    /// <param name="upstreamReverse">
+    /// NOT UPSTREAM: compile backwards in upstream's order, for the oracle only. See
+    /// <see cref="Info.UpstreamReverseGrapheme"/>.
+    /// </param>
+    internal Grapheme(int encoding = 0, bool upstreamReverse = false)
+    {
+        Encoding = encoding;
+        UpstreamReverse = upstreamReverse;
+    }
+
+    /// <summary>The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends, or 0.</summary>
+    internal int Encoding { get; }
+
+    /// <summary>Whether this compiles backwards in upstream's order; see <see cref="Info.UpstreamReverseGrapheme"/>.</summary>
+    internal bool UpstreamReverse { get; }
+
     /// <inheritdoc />
     internal override long MaxWidth() => RegexFlags.Unlimited;
 
     /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is Grapheme;
+    public override bool Equals(object? obj) =>
+        obj is Grapheme other && Encoding == other.Encoding && UpstreamReverse == other.UpstreamReverse;
 
     /// <inheritdoc />
-    public override int GetHashCode() => typeof(Grapheme).GetHashCode();
+    public override int GetHashCode() => HashCode.Combine(typeof(Grapheme), Encoding, UpstreamReverse);
 
     /// <inheritdoc />
     /// <remarks>
-    /// Match at least 1 character until a grapheme boundary is reached. Note that this is the same
-    /// whether matching forwards or backwards.
+    /// <para>
+    /// Match at least one character, then stop at the first grapheme boundary. Upstream's comment
+    /// says this "is the same whether matching forwards or backwards", but its code builds one
+    /// sequence, characters then boundary, for both directions. A reversed <see cref="Sequence"/>
+    /// runs its items from the right, so going backwards the boundary was tested before any
+    /// character, where the match starts, and the repeat then stopped after one codepoint:
+    /// <c>(?r)\X</c> split 'e\u0301' in two and a lookbehind holding <c>\X</c> saw one codepoint.
+    /// </para>
+    /// <para>
+    /// DELIBERATE DIVERGENCE, ledger entry 43: going backwards the items are listed boundary first,
+    /// so that after the reversal the boundary is tested at the far end, where the cluster stops.
+    /// The code compiled forwards is upstream's. Pinned by <c>Gaps/Engine/ReverseGraphemeTests</c>;
+    /// <see cref="UpstreamReverse"/> restores upstream's order for the oracle.
+    /// </para>
     /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
-        var graphemeMatcher = new Atomic(new Sequence([new LazyRepeat(new AnyAll(), 1, null), new GraphemeBoundary()]));
+        var characters = new LazyRepeat(new AnyAll(), 1, null);
+        var boundary = new GraphemeBoundary(Encoding);
+        var graphemeMatcher = new Atomic(
+            new Sequence(reverse && !UpstreamReverse ? [boundary, characters] : [characters, boundary])
+        );
 
         return graphemeMatcher.Compile(reverse, fuzzy);
     }
@@ -4076,6 +4969,15 @@ internal sealed class Grapheme : RegexBase
 /// </remarks>
 internal sealed class GraphemeBoundary : RegexBase
 {
+    private readonly int _encoding;
+
+    /// <summary>Initializes the boundary test.</summary>
+    /// <param name="encoding">The <see cref="Grapheme"/>'s encoding tag.</param>
+    internal GraphemeBoundary(int encoding)
+    {
+        _encoding = encoding;
+    }
+
     /// <inheritdoc />
     internal override long MaxWidth() =>
         throw new NotSupportedException(
@@ -4092,7 +4994,7 @@ internal sealed class GraphemeBoundary : RegexBase
     /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
         [
-            [(uint)Opcode.GraphemeBoundary, 1],
+            [(uint)Opcode.GraphemeBoundary, 1 | ((uint)_encoding << NodeFlags.EncodingShift)],
         ];
 }
 
@@ -4147,6 +5049,9 @@ internal class GreedyRepeat : RegexBase
     }
 
     /// <inheritdoc />
+    internal override RegexBase Clone() => Recreate(Subpattern.Clone());
+
+    /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
         Subpattern = Subpattern.RemoveCaptures();
@@ -4161,6 +5066,16 @@ internal class GreedyRepeat : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)

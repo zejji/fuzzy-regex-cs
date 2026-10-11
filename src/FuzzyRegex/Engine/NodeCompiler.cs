@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -27,6 +28,12 @@ internal struct CompileArgs
 
     /// <summary>Upstream <c>min_width</c>.</summary>
     internal long MinWidth;
+
+    /// <summary>
+    /// <see cref="MinWidth"/> where the pattern's <c>SUCCESS</c> was built, or -1 before. Not in
+    /// upstream (D49): the pattern's width, without the called copies compiled after it.
+    /// </summary>
+    internal long MinWidthAtSuccess;
 
     /// <summary>Upstream <c>start</c>.</summary>
     internal Node? Start;
@@ -66,6 +73,22 @@ internal struct CompileArgs
 
     /// <summary>Upstream <c>all_atomic</c>.</summary>
     internal bool AllAtomic;
+
+    /// <summary>
+    /// Whether this is inside an atomic group, a possessive repeat, a lookaround, a conditional's
+    /// lookaround test or a called group, where the rest of the match ends at the construct's end
+    /// rather than at the end of the pattern. <b>Not upstream</b>; it keeps a repeat in there from
+    /// getting a failure memo (<see cref="RepeatInfo.FailureMemo"/>).
+    /// </summary>
+    internal bool WithinSubmatch;
+
+    /// <summary>
+    /// Whether this is inside an atomic group, a possessive repeat, a lookaround or a conditional's
+    /// lookaround test: a construct that throws away its body's undo entries when the body
+    /// succeeds. <b>Not upstream</b>; a group call or a fuzzy section in here turns
+    /// off the failed-call memo (<see cref="PatternObject.WritesInDiscardingConstruct"/>).
+    /// </summary>
+    internal bool WithinDiscardingConstruct;
 
     /// <summary>The opcode at the read position.</summary>
     internal readonly Opcode Op => (Opcode)CodeList[Code];
@@ -142,6 +165,7 @@ internal static class NodeCompiler
             WithinFuzzy = false,
             VisibleCaptureCount = 0,
             InDefine = false,
+            MinWidthAtSuccess = -1,
         };
 
         // Upstream calls set_error(RE_ERROR_ILLEGAL) here and returns FALSE; a status of
@@ -153,8 +177,32 @@ internal static class NodeCompiler
             return false;
         }
 
-        pattern.MinWidth = args.MinWidth;
+        // NOT UPSTREAM (D49): the width the pattern needs is what its own code needs, up to its
+        // SUCCESS. Upstream adds the called copies after it too (`build_CALL_REF`, :24560), whose
+        // width counts only where a call reaches them - and a call inside a lookaround consumes
+        // nothing - so `(?P<g1>\w)(?<=(?&g1))\W` needed three characters and refused 'a ', which
+        // the same pattern with the call written out matches.
+        Debug.Assert(args.MinWidthAtSuccess >= 0, "The pattern's code ends in SUCCESS.");
+        pattern.MinWidth = args.MinWidthAtSuccess;
+        pattern.UpstreamMinWidth = args.MinWidth;
         pattern.IsFuzzy = args.IsFuzzy;
+
+        // NOT UPSTREAM (ledger entry 44's addendum): without a fuzzy section no pass spends an
+        // error, so an END_OPTIONAL_PASS could only admit it. Each becomes a 1-way branch, which
+        // the optimiser skips (Optimiser.SkipOneWayBranches), and exact matching runs the graph
+        // upstream builds.
+        if (!args.IsFuzzy)
+        {
+            pattern.OptionalPassCount = 0;
+            pattern.OptionalPassBranches = null;
+            foreach (Node node in pattern.NodeList)
+            {
+                if (node.Op == Opcode.EndOptionalPass)
+                {
+                    node.Op = Opcode.Branch;
+                }
+            }
+        }
         pattern.DoSearchStart = true;
         pattern.StartNode = args.Start;
         pattern.VisibleCaptureCount = args.VisibleCaptureCount;
@@ -224,6 +272,10 @@ internal static class NodeCompiler
             Match = (flags & NodeFlags.Positive) != 0,
             Status = flags << NodeStatus.Shift,
             Step = step,
+
+            // From the code word, before anything can set HasGroups or HasRepeats, which share
+            // the encoding's two status bits.
+            Encoding = Matcher.NodeEncoding(pattern.Encoding, flags << NodeStatus.Shift),
         };
 
         // Record the new node.
@@ -507,6 +559,9 @@ internal static class NodeCompiler
         Node startNode = CreateNode(args.Pattern, Opcode.Fuzzy, flags, 0, 13);
         Node endNode = CreateNode(args.Pattern, Opcode.EndFuzzy, flags, 0, 0);
 
+        // NOT UPSTREAM: see PatternObject.UseCallMemo.
+        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
+
         var index = (uint)args.Pattern.FuzzyCount++;
         startNode.Values[0] = index;
 
@@ -630,6 +685,8 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of it.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
 
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -694,6 +751,12 @@ internal static class NodeCompiler
         // Create the node.
         Node node = CreateNode(args.Pattern, op, flags, 0, 0);
 
+        // NOT UPSTREAM: see PatternObject.KeepInSubmatch.
+        if (op == Opcode.Keep && args.WithinSubmatch)
+        {
+            args.Pattern.KeepInSubmatch = true;
+        }
+
         // Append the node.
         AddNode(args.End!, node);
         args.End = node;
@@ -724,6 +787,15 @@ internal static class NodeCompiler
 
         CompileArgs subargs = args;
 
+        // NOT UPSTREAM (finding F-A): the first alternative that is one fuzzy one-character item;
+        // see Node.HasEarlierDeletionTwin.
+        Node? firstItem = null;
+
+        // NOT UPSTREAM: the 2-way branch and last node of each alternative with an empty one after
+        // it, joined up once the alternation's slot is known; null until there is one. Every other
+        // alternative is joined as upstream joins it, straight away.
+        List<(Node Branch, Node End)>? covered = null;
+
         // A branch in the regular expression is compiled into a series of 2-way branches.
         do
         {
@@ -744,9 +816,41 @@ internal static class NodeCompiler
             args.HasGroups |= subargs.HasGroups;
             args.HasRepeats |= subargs.HasRepeats;
 
+            if (
+                subargs.Start!.Next1.Node is { } only
+                && ReferenceEquals(only, subargs.End)
+                && only.Next1.Node is null
+                && (only.Status & NodeStatus.Fuzzy) != 0
+                && NodeQueries.MatchesOneCharacter(only)
+            )
+            {
+                if (firstItem is null)
+                {
+                    firstItem = only;
+                }
+                else
+                {
+                    only.HasEarlierDeletionTwin = true;
+                }
+            }
+
             // Append the sequence.
-            AddNode(branchNode, subargs.Start!);
-            AddNode(subargs.End!, joinNode);
+            AddNode(branchNode, subargs.Start);
+            // NOT UPSTREAM (ledger entry 44's addendum): the word that ends the alternative says
+            // whether an alternative written empty after it is its exit; see
+            // Branch.OptionalPassEndWord.
+            if (args.Pattern.OptionalPassEnds?.Contains(subargs.Code) == true)
+            {
+                Debug.Assert(
+                    !ReferenceEquals(subargs.Start, subargs.End),
+                    "an alternative with a pass to judge has nodes"
+                );
+                (covered ??= []).Add((branchNode, subargs.End!));
+            }
+            else
+            {
+                AddNode(subargs.End!, joinNode);
+            }
 
             // Create a start node for the next sequence and append it.
             Node nextBranchNode = CreateNode(subargs.Pattern, Opcode.Branch, 0, 0, 0);
@@ -759,6 +863,25 @@ internal static class NodeCompiler
         if (subargs.Op != Opcode.End)
         {
             return _illegal;
+        }
+
+        // An alternative whose exit is an empty one after it ends its pass with END_OPTIONAL_PASS,
+        // which its 2-way branch opens (PatternObject.OptionalPassEndOf); see Branch.CompileCore.
+        if (covered is not null)
+        {
+            // Every alternative of one alternation shares its slot: only one is being matched.
+            uint slot = (uint)args.Pattern.OptionalPassCount++;
+            foreach ((Node alternativeBranch, Node end) in covered)
+            {
+                // The second value says whether a pass's start must be restored on backtracking;
+                // see Matcher.OpenOptionalPass.
+                Node passEnd = CreateNode(args.Pattern, Opcode.EndOptionalPass, 0, 0, 2);
+                passEnd.Values[0] = slot;
+                passEnd.Values[1] = args.RepeatDepth > 0 ? 1u : 0u;
+                (args.Pattern.OptionalPassBranches ??= []).Add((alternativeBranch, passEnd));
+                AddNode(end, passEnd);
+                AddNode(passEnd, joinNode);
+            }
         }
 
         args.Code = subargs.Code;
@@ -794,6 +917,7 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
         int status = BuildSequence(ref subargs);
         if (status != _success)
         {
@@ -891,6 +1015,8 @@ internal static class NodeCompiler
 
         // Compile the lookaround test and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
         int status = BuildSequence(ref subargs);
         if (status != _success)
@@ -929,6 +1055,7 @@ internal static class NodeCompiler
         // test node -> test -> end test node
         AddNode(testNode, subargs.Start!);
         AddNode(subargs.End!, endTestNode);
+        testNode.LookaroundEnd = endTestNode;
 
         // Compile the true branch.
         subargs = args;
@@ -1039,6 +1166,20 @@ internal static class NodeCompiler
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
+        // NOT UPSTREAM: see GroupInfo.CapturedInRepeat. Both numbers, since a conditional or
+        // backreference may name either.
+        if (args.RepeatDepth > 0)
+        {
+            args.Pattern.GroupInfoAt((int)privateGroup).CapturedInRepeat = true;
+            args.Pattern.GroupInfoAt((int)publicGroup).CapturedInRepeat = true;
+        }
+
+        // NOT UPSTREAM: see PatternObject.CapturesAgainstDirection.
+        args.Pattern.CapturesAgainstDirection |= forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+
+        // NOT UPSTREAM: a capture group inside a discarding construct leaves the failed-call memo on;
+        // only a call, a fuzzy section or \K in there turns it off. See PatternObject.UseCallMemo.
+
         // Compile the sequence and check that we've reached the end of the capture group.
         CompileArgs subargs = args;
         int status = BuildSequence(ref subargs);
@@ -1096,16 +1237,27 @@ internal static class NodeCompiler
 
         // Create the node.
         Node node = CreateNode(args.Pattern, Opcode.GroupCall, 0, 0, 1);
+        args.Pattern.HasGroupCalls = true;
 
         node.Values[0] = callRef;
 
         node.Status |= NodeStatus.HasGroups;
         node.Status |= NodeStatus.HasRepeats;
 
+        // NOT UPSTREAM (D10): a call writes the called group's captures, so it counts as a group for
+        // the enclosing sequence. Upstream sets only the call node's own flag, but the flag is read
+        // only on a LOOKAROUND node (:13772), so a lookaround whose body only calls a group never
+        // saves the captures and keeps the call's capture after a negative body succeeded or a
+        // positive one was backtracked past.
+        args.HasGroups = true;
+
         args.Code += 2;
 
         // Record that we used a call_ref.
         RecordCallRefUsed(args.Pattern, (int)callRef);
+
+        // NOT UPSTREAM: see PatternObject.UseCallMemo.
+        args.Pattern.WritesInDiscardingConstruct |= args.WithinDiscardingConstruct;
 
         // Append the node.
         AddNode(args.End!, node);
@@ -1250,7 +1402,10 @@ internal static class NodeCompiler
 
         // Compile the sequence and check that we've reached the end of the subpattern.
         CompileArgs subargs = args;
+        subargs.WithinSubmatch = true;
+        subargs.WithinDiscardingConstruct = true;
         subargs.Forward = forward;
+        long groupEndsBefore = args.Pattern.GroupEndIndex;
         int status = BuildSequence(ref subargs);
         if (status != _success)
         {
@@ -1277,6 +1432,15 @@ internal static class NodeCompiler
             lookaroundNode.Status |= NodeStatus.HasGroups;
         }
 
+        // NOT UPSTREAM (D10), for the oracle alone: upstream's flag means the body built a capture
+        // group (build_GROUP is the only place that sets has_groups, :24811), and every group built
+        // bumps GroupEndIndex, so a flag with no group built came from a call.
+        Debug.Assert(subargs.HasGroups || args.Pattern.GroupEndIndex == groupEndsBefore);
+        if (subargs.HasGroups && args.Pattern.GroupEndIndex == groupEndsBefore)
+        {
+            (args.Pattern.LookaroundsSavingOnlyForCalls ??= []).Add(lookaroundNode);
+        }
+
         if (subargs.HasRepeats)
         {
             lookaroundNode.Status |= NodeStatus.HasRepeats;
@@ -1284,6 +1448,7 @@ internal static class NodeCompiler
 
         // Create the node to terminate the subpattern.
         Node endNode = CreateNode(args.Pattern, Opcode.EndLookaround, 0, 0, 0);
+        lookaroundNode.LookaroundEnd = endNode;
 
         // Make a continuation node.
         Node nextNode = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
@@ -1363,6 +1528,9 @@ internal static class NodeCompiler
 
         // Record that we have a reference to a group.
         RecordRefGroup(args.Pattern, (int)group);
+
+        // NOT UPSTREAM: a backreference reads the group's text. See GroupInfo.TextRead.
+        args.Pattern.GroupInfoAt((int)group).TextRead = true;
 
         // Append the reference.
         AddNode(args.End!, node);
@@ -1504,6 +1672,17 @@ internal static class NodeCompiler
                 );
                 RecordRepeat(args.Pattern, index, args.RepeatDepth);
 
+                // NOT UPSTREAM: the repeat's own half of the failure memo's conditions; the
+                // pattern's half is Optimiser.KeepFailureMemosSound. With no maximum and a minimum
+                // of at most 1, the count after the body can never change what happens next. The
+                // loop above has already moved any larger minimum into copies of the body.
+                args.Pattern.RepeatInfoAt(index).FailureMemo =
+                    args.RepeatDepth == 0
+                    && !args.WithinSubmatch
+                    && !args.WithinFuzzy
+                    && ~maxCount == 0
+                    && minCount <= 1;
+
                 repeatNode.Values[0] = (uint)index;
                 repeatNode.Values[1] = minCount;
                 repeatNode.Values[2] = maxCount;
@@ -1536,7 +1715,6 @@ internal static class NodeCompiler
                 args.HasGroups |= subargs.HasGroups;
                 args.HasRepeats = true;
                 args.VisibleCaptureCount = subargs.VisibleCaptureCount;
-                args.Pattern.RepeatInfoAt(index).BodyHasGroups = subargs.HasGroups;
 
                 ++args.Code;
 
@@ -2009,6 +2187,11 @@ internal static class NodeCompiler
                 case Opcode.Failure:
                 case Opcode.Prune:
                 case Opcode.Success:
+                    if (args.Op == Opcode.Success)
+                    {
+                        args.MinWidthAtSuccess = args.MinWidth;
+                    }
+
                     status = BuildSuccess(ref args);
                     if (status != _success)
                     {

@@ -57,6 +57,21 @@ public sealed class FullFoldFuzzyDeletionTests
     }
 
     [Test]
+    public void A_deletion_after_a_pattern_side_ligature_costs_one_edit()
+    {
+        // S90. Full folding makes the st ligature equal to st, so the two patterns ask one question.
+        // V1 match('(?fi)(?:stxba){d<=1}', 'STba'): span=(0, 4) counts=(0, 0, 1) changes=([], [], [2])
+        // V1 match('(?fi)(?:ﬆxba){d<=1}', 'STba'): None
+        // (tools/probes/s89-partial-fold-rows.py, 2026-09-24)
+        Match m = new FuzzyRegex("(?fi)(?:ﬆxba){d<=1}").MatchAtStart("STba");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        m.FuzzyChanges.Deletions.Should().Equal(2);
+    }
+
+    [Test]
     public void A_reversed_fold_item_charges_a_deletion_once()
     {
         // V0 search('(?r)(?:fi){d<=1}', 'ei', I): span=(1, 2) counts=(0, 0, 1) changes=([], [], [1])

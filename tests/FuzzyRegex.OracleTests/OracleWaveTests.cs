@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
@@ -84,6 +85,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void The_wave_agrees_with_upstream()
     {
         OracleWaveFile wave = OracleWave.Load();
@@ -102,7 +104,30 @@ public sealed class OracleWaveTests
         wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
 
         OracleRunSummary run = OracleComparer.RunWave(wave.Rows, OracleComparer.Run);
-        string summary = OracleWave.WriteReport(wave.Header, wave.Rows.Count, run.Tally, run.Divergences, run.Expected);
+        string summary = OracleWave.WriteReport(
+            wave.Header,
+            wave.Rows.Count,
+            run.Tally,
+            run.Divergences,
+            run.Expected,
+            run.Faults,
+            run.Undefined
+        );
+        OracleWave.WriteScreenCandidates(run.ScreenCandidates);
+
+        // An upstream crash nobody has attributed, or uninitialised memory from an unknown origin:
+        // checked first, because a wave whose ground truth is in doubt answers nothing else.
+        run.Faults.Count.Should()
+            .Be(
+                0,
+                "{0}. Upstream gave no usable answer on these rows, and no known defect accounts for "
+                    + "them - run tools/screen-undefined.py, then triage any new origin into "
+                    + "docs/plan/upstream-reports/LEDGER.md. Full report at {1}. First:{2}{3}",
+                summary,
+                OracleWave.ReportPath,
+                Environment.NewLine,
+                run.Faults.Count > 0 ? run.Faults[0] : ""
+            );
 
         // Count, not the collection: a wave is hundreds of rows, and a failure that dumps every
         // block is unreadable. The report file holds them all.
@@ -118,6 +143,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void Our_own_answers_never_contradict_themselves()
     {
         // S47 for the fuzzy limb (ledger entry 11), WIDENED BY S52c to every metamorphic invariant
@@ -204,6 +230,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void The_lazy_walks_answer_exactly_what_the_eager_ones_do()
     {
         // S53b's `EnumerateMatches` and `EnumerateSplits` promise the same answer as `Matches` and
@@ -275,6 +302,7 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Category(OracleWave.NeedsARecordedWave)]
     public void A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does()
     {
         // S61 made a pattern keep its engine state between calls (`MatchStateCache`), so every
@@ -413,6 +441,10 @@ public sealed class OracleWaveTests
         // Chromium's TestExpectations lacks and pytest's xfail_strict has.
         ExpectedDivergences.All.Should().NotBeEmpty();
 
+        // The other direction, and the one this test cannot check itself: upstream's half of each
+        // example is re-asked by `record-oracle.py --recheck`, which run-oracle.ps1 runs on this file.
+        OracleWave.WriteExpectedExamples(ExpectedDivergences.All);
+
         foreach (ExpectedDivergence entry in ExpectedDivergences.All)
         {
             entry.Reason.Should().NotBeEmpty("{0}: an unexplained expected divergence is a hidden one", entry.Id);
@@ -435,25 +467,972 @@ public sealed class OracleWaveTests
                     .BeAssignableTo<IOracleOutcome>()
                     .Subject;
 
+                // A judged crash row has no upstream answer to diverge from; it is a FAULT that the
+                // judged-row entry claims (JudgedDivergences).
                 OracleComparer
                     .Compare(row, ours)
                     .Should()
                     .Be(
-                        OracleVerdict.Diverge,
+                        row.Expected is CrashedOutcome ? OracleVerdict.Fault : OracleVerdict.Diverge,
                         "{0}: example row {1} is what makes the entry current",
                         entry.Id,
                         row.Number
                     );
                 // The Id first, so a row another entry claims names that entry in the failure.
-                ExpectedDivergences
-                    .For(row, ours)
-                    ?.Id.Should()
+                (ExpectedDivergences.For(row, ours)?.Id)
+                    .Should()
                     .Be(entry.Id, "{0}: an entry must account for its own example row {1}", entry.Id, row.Number);
                 ExpectedDivergences
                     .For(row, ours)
                     .Should()
                     .BeSameAs(entry, "{0}: an entry must account for its own example row {1}", entry.Id, row.Number);
             }
+        }
+    }
+
+    [Test]
+    public void A_row_the_exact_deletion_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-exact-item-offered-as-a-deletion`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 42, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-exact-item-offered-as-a-deletion", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    /// <summary>The example row of an entry whose pattern is the one given.</summary>
+    /// <param name="id">The entry.</param>
+    /// <param name="pattern">The row's pattern.</param>
+    /// <returns>The entry and the row.</returns>
+    private static (ExpectedDivergence Entry, OracleRow Row) ExampleRow(string id, string pattern)
+    {
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+            .Subject;
+        OracleRow row = OracleWave
+            .ParseRows(entry.Example)
+            .Should()
+            .ContainSingle(r => string.Equals(r.Pattern, pattern, StringComparison.Ordinal))
+            .Subject;
+        return (entry, row);
+    }
+
+    /// <summary>This port's live answer to a row, which must be one.</summary>
+    /// <param name="row">The row.</param>
+    /// <returns>The answer.</returns>
+    private static IOracleOutcome Live(OracleRow row) =>
+        OracleComparer
+            .Run(row, TimeSpan.FromSeconds(5))
+            .Should()
+            .NotBeNull()
+            .And.Subject.Should()
+            .BeAssignableTo<IOracleOutcome>()
+            .Subject;
+
+    /// <summary>A match's fuzzy half with other change positions of the same kinds and counts.</summary>
+    /// <param name="match">The match.</param>
+    /// <param name="deletions">The deletion positions to report instead.</param>
+    /// <returns>The match, changed.</returns>
+    private static MatchOutcome WithDeletionsAt(MatchOutcome match, params int[] deletions) =>
+        match with
+        {
+            Fuzzy = match.Fuzzy! with { DeletionPositions = deletions },
+        };
+
+    [Test]
+    public void A_row_an_ablation_explains_only_bar_an_unproven_leak_is_not_accounted_for()
+    {
+        // The witnesses (VERIFICATION rule 12) for TheAblationExplainsItBarAPinnedLeak, one per arm,
+        // each on the complete-matrix row that arm was added for: the row as recorded is classified,
+        // and the same row with upstream's proof of the leak taken away is not.
+
+        // Arm 1, mechanism A's strong arm: row 1365 under entry 51 (a lookahead, so arm 2 cannot
+        // read it). Upstream's anchored re-ask gives the ablated deletion at 6; refused, or moved to
+        // 5, it proves nothing.
+        (ExpectedDivergence minimum, OracleRow strong) = ExampleRow(
+            "fuzzy-minimum-met-by-a-trailing-insertion",
+            @"(?:(?>.\w)(?!a+)){1<=e<=2}"
+        );
+        IOracleOutcome ours = Live(strong);
+        ExpectedDivergences.For(strong, ours).Should().BeSameAs(minimum, "row 1365 as recorded is the family");
+        ExpectedDivergences
+            .For(strong with { LeakFreeFuzzy = [null] }, ours)
+            .Should()
+            .BeNull("with no anchored answer the weak arm would accept anything, so it is refused here");
+        ExpectedDivergences
+            .For(strong with { LeakFreeFuzzy = [new OracleFuzzy(0, 0, 1, [], [], [5])] }, ours)
+            .Should()
+            .BeNull("an anchored answer that is not the ablated one does not prove a leak");
+
+        // Arm 2, impossible positions: row 1408 under entry 44. Upstream's deletions before a
+        // match's start cannot describe it; replaced by possible positions that still differ from
+        // the ablated ones (at most end + deletions), they prove nothing.
+        (ExpectedDivergence needed, OracleRow impossible) = ExampleRow(
+            "fuzzy-empty-iteration-needed-rule",
+            "(?:(?:a*)*+){1<=d<=2}"
+        );
+        ours = Live(impossible);
+        ExpectedDivergences.For(impossible, ours).Should().BeSameAs(needed, "row 1408 as recorded is the family");
+        MatchesOutcome scan = impossible.Expected.Should().BeOfType<MatchesOutcome>().Subject;
+        MatchesOutcome possible = new([
+            scan.Matches[0],
+            WithDeletionsAt(scan.Matches[1], 1, 3),
+            WithDeletionsAt(scan.Matches[2], 2, 6),
+            scan.Matches[3],
+            WithDeletionsAt(scan.Matches[4], 7),
+        ]);
+        ExpectedDivergences
+            .For(impossible with { Expected = possible }, ours)
+            .Should()
+            .BeNull("possible positions that differ are a disagreement, not a leak");
+
+        // Arm 3, the atomic door on a judged row: row 2310 under entry 44. Upstream's cut-free answer
+        // is the ablated one; without it, or equal to upstream's own answer, it proves nothing.
+        (_, OracleRow atomic) = ExampleRow(
+            "fuzzy-empty-iteration-needed-rule",
+            "(?|(b?)(?>(?:a*){e<=2,1i+2d<=2})[ab]|(x))"
+        );
+        ours = Live(atomic);
+        ExpectedDivergences.For(atomic, ours).Should().BeSameAs(needed, "row 2310 as recorded is the family");
+        ExpectedDivergences
+            .For(atomic with { AtomicFree = null }, ours)
+            .Should()
+            .BeNull("without upstream's cut-free answer the moved deletion is unexplained");
+        ExpectedDivergences
+            .For(atomic with { AtomicFree = atomic.Expected }, ours)
+            .Should()
+            .BeNull("a cut-free answer equal to upstream's own shows no leak");
+    }
+
+    [Test]
+    public void A_posix_row_whose_cost_upstream_does_not_contradict_is_not_accounted_for()
+    {
+        // The witness for PosixChargesMoreForTheSameMatch, on D58's two complete-matrix rows: upstream
+        // charges one deletion under (?p) and none without it, over the same match.
+        foreach (string pattern in new[] { "(?:b?){e<=2}", "(?:b?){d<=1}" })
+        {
+            (ExpectedDivergence posix, OracleRow row) = ExampleRow(
+                "posix-fuzzy-contradicts-its-own-flagless-answer",
+                pattern
+            );
+            IOracleOutcome ours = Live(row);
+            ExpectedDivergences.For(row, ours).Should().BeSameAs(posix, "{0} as recorded is the family", pattern);
+            ExpectedDivergences
+                .For(row with { PosixFree = row.Expected }, ours)
+                .Should()
+                .BeNull("a POSIX-free answer that costs the same contradicts nothing ({0})", pattern);
+            ExpectedDivergences
+                .For(row with { PosixFree = null }, ours)
+                .Should()
+                .BeNull("with no POSIX-free answer there is no evidence ({0})", pattern);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("an answer that is not the POSIX-free one is a defect ({0})", pattern);
+        }
+    }
+
+    [Test]
+    public void A_bestmatch_row_the_doubled_guard_does_not_explain_is_not_accounted_for()
+    {
+        // The witness for bestmatch-loses-a-candidate's predicate arm, on the two complete-matrix rows
+        // that set BESTMATCH by the flag bit: upstream refuses a fit that ends in two trailing
+        // insertions, its flagless engine keeps it, and the doubled guard reproduces the refusal. An
+        // upstream answer the guard cannot reproduce is outside the arm.
+        foreach (string pattern in new[] { @"(?:\w){e<=2,1i+2d<=2}", @"(?:\m\w.){e<=2}" })
+        {
+            (ExpectedDivergence best, OracleRow row) = ExampleRow("bestmatch-loses-a-candidate", pattern);
+            IOracleOutcome ours = Live(row);
+            ExpectedDivergences.For(row, ours).Should().BeSameAs(best, "{0} as recorded is the family", pattern);
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new MatchOutcome(
+                            [new OracleGroup(0, Success: true, 0, 1, [new OracleSpan(0, 1)])],
+                            -1,
+                            null
+                        ),
+                    },
+                    ours
+                )
+                .Should()
+                .BeNull("an upstream answer the doubled guard does not reproduce is not this family ({0})", pattern);
+            ExpectedDivergences
+                .For(row with { BestmatchFree = null }, ours)
+                .Should()
+                .BeNull("without upstream's flagless answer the arm has half its evidence ({0})", pattern);
+        }
+    }
+
+    [Test]
+    public void A_row_the_stale_enhancematch_total_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `enhancematch-stops-on-a-stale-total` (D59), keyed on judged rows: this
+        // port's live answer to each row is the family; upstream's own answer, and no match, are not.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "enhancematch-stops-on-a-stale-total", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences.For(row, Live(row)).Should().BeSameAs(entry, "{0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not", row.Pattern);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("no match over {0} is a defect", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_lookaround_insertion_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-insertion-before-a-failing-lookaround` (ledger entry 50), built as
+        // entry 42's: upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a match at 1 of length 1 with no errors, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live answer
+        // must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-insertion-before-a-failing-lookaround", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_call_capture_discard_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-discards-its-captures-on-return` (ledger entry 63, D51),
+        // built as entry 54's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live
+        // answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            // Not `?.Id.Should()`: a null (no entry at all) must fail here, not skip the assertion.
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    /// <summary>
+    /// The D51 backtracking witness, recorded 2026-09-30 by <c>python tools/record-oracle.py --rows</c>:
+    /// a call whose freed capture slots the caller writes over before it backtracks into the call.
+    /// </summary>
+    private const string _callReentryRow = """
+        {"generator":"rows","pattern":"(?(DEFINE)(?<d>(.)(?:.)?\\2))(?&d)(?:(?2)x)?ab","flags":0,"namedLists":{},"subject":"aaab","operation":"search","codepointSpan":[0,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]},{"number":1,"success":false,"index":0,"length":0,"captures":[[0,2]]},{"number":2,"success":false,"index":0,"length":0,"captures":[[0,1]]}],"lastIndex":-1,"lastGroup":null,"partial":false}}
+        """;
+
+    [Test]
+    public void A_partial_restored_from_the_wrong_frame_is_not_accounted_for()
+    {
+        // The blind review of D62 planted a restore from the innermost open call (OpenCalls[^1])
+        // instead of the outermost: the D51/D62 entry, which sets group values aside on a partial,
+        // still claimed its rows. Measured with that plant, 2026-09-30: over 'cebcebc' partial,
+        // group k is (5,6) with [(2,3), (5,6)], where the outermost frame gives (2,3) with [(2,3)].
+        // Both the entry's clause and the stacked ablations' must refuse it.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, "(?<j>ce)(?<i>(?<k>b)(?&j))(?&i)", StringComparison.Ordinal));
+        var live = (MatchOutcome)OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+        IOracleOutcome byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row)!;
+        MatchOutcome planted = live with
+        {
+            Groups =
+            [
+                .. live.Groups.Take(3),
+                live.Groups[3] with
+                {
+                    Index = 5,
+                    Length = 1,
+                    Captures = [new OracleSpan(2, 1), new OracleSpan(5, 1)],
+                },
+            ],
+        };
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        ExpectedDivergences.PartialIsTheFrameRestore(live, byFrames).Should().BeTrue();
+        ExpectedDivergences.PartialIsTheFrameRestore(planted, byFrames).Should().BeFalse();
+        (ExpectedDivergences.For(row, live)?.Id).Should().Be("group-call-discards-its-captures-on-return");
+        OracleComparer.StackedCallCaptureAnswer(planted, withoutTheFix, byFrames).Should().BeSameAs(planted);
+        OracleComparer.StackedCallCaptureAnswer(live, withoutTheFix, byFrames).Should().BeSameAs(withoutTheFix);
+    }
+
+    [Test]
+    public void A_port_bug_in_the_discard_is_not_hidden_by_another_entrys_ablation()
+    {
+        // Every other named ablation has the D51 fix off too, so an entry keyed on one of them
+        // would accept a call row whose live answer carries a bug in the discard itself: with the
+        // fix off the bug is gone and upstream comes back. The planted bug is the one measured for
+        // A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence: the
+        // discard without the span restore answers None over this row. With the fix on, the same
+        // ablation would answer None too, so the ablation must report that, not upstream's (0, 4).
+        // Found by the blind review of maint/d51-call-captures, 2026-09-30.
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
+        IOracleOutcome withoutTheFix = OracleComparer.RunWithTheUpstreamMinimumOrder(row)!;
+
+        OracleComparer.Compare(row, withoutTheFix).Should().Be(OracleVerdict.Agree);
+        OracleComparer
+            .Compare(row, OracleComparer.StackedCallCaptureAnswer(new NoMatchOutcome(), withoutTheFix, null))
+            .Should()
+            .NotBe(OracleVerdict.Agree, "a discard that changes a match must not be hidden by the ablation");
+
+        // And a fix-on answer that differs only by the calls' captures leaves the ablation as it was.
+        OracleComparer
+            .StackedCallCaptureAnswer(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, withoutTheFix, null)
+            .Should()
+            .BeSameAs(withoutTheFix);
+    }
+
+    [Test]
+    public void A_port_bug_in_the_discard_is_not_accounted_for_as_the_call_capture_divergence()
+    {
+        // The planted-bug test the owner's 2026-09-30 ruling asks of an entry keyed on a rule. The
+        // bug planted is the likeliest one of the fix's own shape: a return that lowers each
+        // group's count but does not save the callee's spans, so the caller writes over them and a
+        // re-entry reads the caller's. Planted in Matcher.PopCalleeCaptures and measured on
+        // 2026-09-30, it answers None over this row, where upstream, PCRE2 10.47, Perl 5.42 and
+        // the fixed port all give (0, 4). The ablation still reproduces upstream there, because it
+        // never lowers a count, so the ablation clause alone would have accepted the bug.
+        OracleRow row = OracleWave.ParseRows(_callReentryRow).Should().ContainSingle().Subject;
+        IOracleOutcome ablated = OracleComparer.RunWithTheUpstreamCallCaptures(row)!;
+
+        OracleComparer.Compare(row, ablated).Should().Be(OracleVerdict.Agree);
+        ExpectedDivergences.OnlyCallCapturesAreMissing(new NoMatchOutcome(), ablated).Should().BeFalse();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(OracleComparer.Run(row, TimeSpan.FromSeconds(5))!, ablated)
+            .Should()
+            .BeTrue();
+
+        // Two more bugs of the same shape, on the ruling's second witness, where the ablation
+        // lists c as [0,1][1,1]: a return that kept the callee's capture and dropped the caller's
+        // (a list that is not a subsequence), and one that restored the wrong span as the value.
+        OracleRow witness = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "group-call-discards-its-captures-on-return", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, "(?<c>a)(?&c)b", StringComparison.Ordinal) && !r.Partial);
+        var kept = (MatchOutcome)OracleComparer.RunWithTheUpstreamCallCaptures(witness)!;
+        var live = (MatchOutcome)OracleComparer.Run(witness, TimeSpan.FromSeconds(5))!;
+        OracleGroup c = live.Groups[1];
+
+        ExpectedDivergences.OnlyCallCapturesAreMissing(live, kept).Should().BeTrue();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(
+                live with
+                {
+                    Groups = [live.Groups[0], c with { Captures = [new OracleSpan(1, 1)] }],
+                },
+                kept
+            )
+            .Should()
+            .BeFalse();
+        ExpectedDivergences
+            .OnlyCallCapturesAreMissing(
+                live with
+                {
+                    Groups = [live.Groups[0], c with { Index = 1, Captures = [new OracleSpan(1, 1)] }],
+                },
+                kept
+            )
+            .Should()
+            .BeFalse();
+    }
+
+    [Test]
+    public void A_format_template_loses_only_the_fields_that_read_a_capture_list()
+    {
+        // The masked template of the D51 entry's format-substitution clause. Escaped braces and
+        // the fields that read a group's value stay; each `{group[index]}` field goes.
+        ExpectedDivergences.WithoutCaptureReads("{{}}{1[-2]}{0[-1]}}}").Should().Be("{{}}}}");
+        ExpectedDivergences.WithoutCaptureReads("{d}{1[-1]}{{}}{0[0]}").Should().Be("{d}{{}}");
+        ExpectedDivergences.WithoutCaptureReads("-{1[-1]}{0[0]}-").Should().Be("--");
+        ExpectedDivergences.WithoutCaptureReads("{g}{g}").Should().Be("{g}{g}");
+
+        // Refused rather than masked: removing an automatically numbered field renumbers the ones
+        // after it; anything but `name[integer]` is not a plain capture read; and a field with no
+        // closing brace is not a field.
+        ExpectedDivergences.WithoutCaptureReads("{[0]}{}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("{1[0]!s}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("{1[x]}").Should().BeNull();
+        ExpectedDivergences.WithoutCaptureReads("a{1[0]").Should().BeNull();
+    }
+
+    [Test]
+    public void A_format_substitution_that_differs_by_more_than_a_missing_capture_is_not_accounted_for()
+    {
+        // The planted-bug controls for the D51 entry's format-substitution clause. Over 'aa}a{aa{'
+        // the template `{{}}{1[-2]}{0[-1]}}}` reads the capture before group 1's last: upstream's
+        // list for the first match is [(0,1), (1,1)], the call's capture included, and this port's
+        // is [(0,1)], so this port raises "capture index out of range" as Python's own IndexError
+        // does for a list that short. Each plant below changes one piece of evidence the clause
+        // reads, and each must be refused.
+        OracleRow row = ExampleRow("group-call-discards-its-captures-on-return", "([ab])(?1)").Row;
+        IOracleOutcome live = Live(row);
+        IOracleOutcome ablated = OracleComparer.RunWithTheUpstreamCallCaptures(row)!;
+        OracleRow masked = row with { Template = ExpectedDivergences.WithoutCaptureReads(row.Template!) };
+        OracleRow scan = ExpectedDivergences.ScanOf(row);
+        var liveMasked = (SubOutcome)Live(masked);
+        IOracleOutcome ablatedMasked = OracleComparer.RunWithTheUpstreamCallCaptures(masked)!;
+        var liveScan = (MatchesOutcome)Live(scan);
+        IOracleOutcome ablatedScan = OracleComparer.RunWithTheUpstreamCallCaptures(scan)!;
+        var upstreams = (SubOutcome)ablated;
+
+        live.Should().BeOfType<ErrorOutcome>().Which.Message.Should().StartWith("capture index out of range");
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, liveScan, ablatedScan)
+            .Should()
+            .BeTrue("this port's live answer is the family");
+        ExpectedDivergences.OnlyMissingCapturesAreRead(row, live, ablated).Should().BeTrue();
+
+        // Another error: a template field naming a group the pattern has not got.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                new ErrorOutcome(nameof(ArgumentException), "the pattern has no group '9'", WhileMatching: true),
+                ablated,
+                liveMasked,
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("an error other than a capture index out of range is not this family");
+
+        // A string with a replacement count that is not upstream's: the scan itself differs.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                new SubOutcome(upstreams.Text, upstreams.Count + 1),
+                ablated,
+                liveMasked,
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("a different count is not a missing capture");
+
+        // A difference outside the capture fields: with them masked the two answers still differ.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(
+                live,
+                ablated,
+                liveMasked with
+                {
+                    Text = liveMasked.Text + "x",
+                },
+                ablatedMasked,
+                liveScan,
+                ablatedScan
+            )
+            .Should()
+            .BeFalse("a difference the masked template still shows is not in a capture field");
+
+        // A bug in the discard itself: the return kept the call's capture and dropped the caller's,
+        // so group 1's list no longer ends in its value.
+        MatchOutcome first = liveScan.Matches[0];
+        MatchesOutcome swapped = liveScan with
+        {
+            Matches =
+            [
+                first with
+                {
+                    Groups = [first.Groups[0], first.Groups[1] with { Captures = [new OracleSpan(1, 1)] }],
+                },
+                .. liveScan.Matches.Skip(1),
+            ],
+        };
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, swapped, ablatedScan)
+            .Should()
+            .BeFalse("a list that drops the caller's own capture is a bug in the discard");
+
+        // No capture missing at all: then nothing the discard did can explain a different answer.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(live, ablated, liveMasked, ablatedMasked, ablatedScan, ablatedScan)
+            .Should()
+            .BeFalse("identical capture lists cannot explain a different substitution");
+
+        // A plain substitution, or a split, reads only group values, which the discard never
+        // changes on a complete match, so no difference in one can be this family.
+        ExpectedDivergences
+            .OnlyMissingCapturesAreRead(row with { Operation = "sub" }, live, ablated)
+            .Should()
+            .BeFalse("a plain substitution reads no capture list");
+    }
+
+    [Test]
+    public void A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-in-a-discarded-lookaround-leaves-no-capture` (ledger entry 54,
+        // D10), built as entry 50's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no engine
+        // gives on any example, stands in for an unrelated defect; and this port's live answer must
+        // be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-in-a-discarded-lookaround-leaves-no-capture", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_verb_section_close_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-section-cut-by-a-verb-is-closed` (ledger entry 61, D44), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-section-cut-by-a-verb-is-closed", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_true_branch_skip_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `negative-condition-keeps-its-alternatives` (ledger entry 62, D55), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "negative-condition-keeps-its-alternatives", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_fuzzy_condition_test_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `conditional-test-is-matched-exactly` (ledger entry 64, D52), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "conditional-test-is-matched-exactly", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_dropped_test_captures_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `negative-condition-keeps-its-test-captures` (ledger entry 65, D54), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "negative-condition-keeps-its-test-captures", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_discarded_total_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-total-drops-a-discarded-section` (ledger entry 32, D45), built as entry 55's: upstream's own answer is what this
+        // port gave before the fix, so accepting it would classify a revert as the fix; a match at 1
+        // of length 1, which no engine gives on any example, stands in for an unrelated defect; and
+        // this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-total-drops-a-discarded-section", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_enhancematch_double_count_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `enhancematch-trailing-insertion-double-count` (ledger entry 12, D46),
+        // built as entry 55's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live
+        // answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "enhancematch-trailing-insertion-double-count", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_left_recursion_refusal_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `left-recursion-is-refused-at-compile-time` (ledger entry 73, D4): this
+        // port's live answer, the refusal, is accepted; upstream's own answer is not, so a revert
+        // that compiles the pattern again is not the family; and neither is another parse error.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "left-recursion-is-refused-at-compile-time", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port refuses {0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new ErrorOutcome(nameof(FuzzyRegexParseException), "unknown group"))
+                .Should()
+                .BeNull("another parse error over {0} is a defect, not this family", row.Pattern);
+
+            // Upstream rejecting the PATTERN is a different answer from this port's refusal, not
+            // the family: the refusal may sit beside an upstream error only when upstream
+            // compiled the pattern and raised later, as it does for a template it cannot use.
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new ErrorOutcome("error", "bad escape \\d", WhileMatching: false),
+                    },
+                    OracleComparer.Run(row, TimeSpan.FromSeconds(5))!
+                )
+                .Should()
+                .BeNull("a refusal beside upstream's parse error over {0} is not this family", row.Pattern);
+        }
+    }
+
+    [Test]
+    public void A_row_the_whole_pattern_call_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-whole-pattern-call-returns-to-its-caller` (ledger entry 55, D37),
+        // built as entry 50's: upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert as the fix; a match at 1 of length 1, which no engine
+        // gives on any example, stands in for an unrelated defect; and this port's live answer must
+        // be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-whole-pattern-call-returns-to-its-caller", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_call_site_features_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-runs-with-its-call-sites-features` (ledger entries 56-58; D40,
+        // D42, D43), built as entry 54's: upstream's own answer is what this port gave before the
+        // fixes, so accepting it would classify a revert as the fix; a match at 1 of length 1, which
+        // no engine gives on any example, stands in for an unrelated defect this entry must refuse; and this port's live
+        // answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-runs-with-its-call-sites-features", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            // Not BeNull: on the D43 rows upstream finds nothing, so `group-call-loses-the-match`
+            // rightly claims any match there. What matters is that this entry does not.
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                ?.Id.Should()
+                .NotBe(entry.Id, "a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_call_copies_do_not_explain_is_not_accounted_for()
+    {
+        // The control for `group-call-copy-is-the-group-written-out` (ledger entry 66, D50), built
+        // as entry 54's: upstream's own answer is what this port gave before the fix, so accepting
+        // it would classify a revert as the fix; a match at 1 of length 1, which no engine gives on
+        // any example, stands in for an unrelated defect this entry must refuse; and this port's
+        // live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "group-call-copy-is-the-group-written-out", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            (ExpectedDivergences.For(row, row.Expected)?.Id)
+                .Should()
+                .NotBe(entry.Id, "upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                ?.Id.Should()
+                .NotBe(entry.Id, "a match at 1 over {0} is a defect, not this family", row.Subject);
+            OracleComparer
+                .RunWithTheUpstreamCallCopies(row)
+                .Should()
+                .NotBeNull("the ablation must answer {0} for the entry to key on it", row.Pattern);
+        }
+    }
+
+    [Test]
+    public void A_row_the_minimum_order_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-minimum-met-by-a-trailing-insertion` (ledger entry 51), built as
+        // entry 50's: upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a match at 1 of length 1 with no errors, which no
+        // engine gives on any example, stands in for an unrelated defect; and this port's live answer
+        // must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-minimum-met-by-a-trailing-insertion", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_needed_rule_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-empty-iteration-needed-rule`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 44, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-empty-iteration-needed-rule", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
         }
     }
 
@@ -550,9 +1529,12 @@ public sealed class OracleWaveTests
     [Arguments("full-fold-backreference-leftovers")]
     [Arguments("full-fold-backreference-retry")]
     [Arguments("full-fold-leftover-take-back")]
+    [Arguments("full-fold-fix-behind-an-innermost-count")]
+    [Arguments("full-fold-run-edits-an-expanding-character-whole")]
+    [Arguments("full-fold-run-edits-an-expanding-subject-character-whole")]
     public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for(string id)
     {
-        // The control for the four full-fold entries (S83, S84, S85), built the same way as the anchor
+        // The control for the seven full-fold entries (S83, S84, S85, S90, ledgers 49 and 52), built the same way as the anchor
         // pin's above: upstream's own answer is what this port gave before the fix, so accepting it
         // would classify a revert of the fix as the fix; and no match stands in for an unrelated
         // defect. Most of these rows' upstream answer IS no match, so for them the two cases
@@ -576,66 +1558,284 @@ public sealed class OracleWaveTests
     }
 
     [Test]
-    public void A_partial_of_the_wrong_span_is_not_accounted_for_as_a_boundary_partial()
+    public void A_row_the_skip_timing_does_not_explain_is_not_accounted_for()
     {
-        // The control for `boundary-at-the-end-of-the-text`, named in that entry's own Reason.
-        //
-        // The entry is keyed on this port's ANSWER rather than on the pattern's shape, so what holds
-        // it narrow is that the answer is the escalation's signature. `Matcher.DoMatch` builds
-        // exactly one thing when a boundary runs the attempt out of text: a partial spanning the
-        // attempt's start to the end of the available text, with `ClearGroups` run, so no capture
-        // group is set and `lastindex` is -1. Every other answer on the same row is a different
-        // defect, and the five below are the five ways to be one:
-        //
-        //   * the right shape over the wrong span, which is a partial the escalation did not build
-        //   * a zero-width partial at the truncation point, which is the fault the escalation's
-        //     consumed-something narrowing exists to prevent and which Control A of this slice
-        //     caught the predicate classifying
-        //   * the right span with a capture group still set, the shape a bug in the clearing
-        //     itself would give
-        //   * the right span as a COMPLETE match, which is the port claiming to have matched text
-        //     upstream says it cannot
-        //   * no match at all, the shape of an unrelated engine defect landing on this row
-        //
-        // Both example rows, because the span limb turns round under `(?r)`: a reversed match runs
-        // out of text at its start, so the escalated partial reaches position 0 and its far end is
-        // wherever the attempt had got to. The wrong span therefore has to be spelt in the row's own
-        // direction, and it is the reversed row that caught the limb missing.
+        // The control for `skip-acts-when-backtracked-onto` (ledger entry 45), built like the fold
+        // fix's. Upstream's own answer is what this port gave before the fix, so accepting it would
+        // classify a revert of the fix as the fix; a match at position 0, which neither upstream nor
+        // PCRE2 gives, stands in for an unrelated defect; and this port's live answer must be
+        // accepted, or the entry classifies nothing.
         ExpectedDivergence entry = ExpectedDivergences
             .All.Should()
-            .ContainSingle(static e => string.Equals(e.Id, "boundary-at-the-end-of-the-text", StringComparison.Ordinal))
+            .ContainSingle(static e => string.Equals(e.Id, "skip-acts-when-backtracked-onto", StringComparison.Ordinal))
             .Subject;
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
         {
-            bool reversed = row.Pattern.Contains("(?r)", StringComparison.Ordinal);
-            (MatchOutcome right, MatchOutcome wrongSpan) = reversed
-                ? (Escalated(0, 1), Escalated(1, row.Subject.Length))
-                : (Escalated(0, row.Subject.Length), Escalated(0, row.Subject.Length - 1));
-
-            // The answer the escalation really builds, so each refusal below differs from an
-            // accounted answer in exactly the one thing it is about.
-            ExpectedDivergences.For(row, right).Should().NotBeNull("{0}", row.Pattern);
-
-            ExpectedDivergences.For(row, wrongSpan).Should().BeNull("the span does not reach the end of the text");
             ExpectedDivergences
-                .For(row, Escalated(reversed ? 0 : row.Subject.Length, reversed ? 0 : row.Subject.Length))
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
                 .Should()
-                .BeNull("a zero-width partial at the truncation point is the fault, not the family");
+                .NotBeNull("this port's live answer to {0} is the family", row.Pattern);
             ExpectedDivergences
-                .For(row, right with { Groups = [right.Groups[0], Taken(1, 0, 1)] })
+                .For(row, row.Expected)
                 .Should()
-                .BeNull("the groups were not cleared");
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
             ExpectedDivergences
-                .For(row, right with { Partial = false })
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 0, 1, [new OracleSpan(0, 1)])], -1, null))
                 .Should()
-                .BeNull("this one is a complete match");
-            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("a total failure is a defect");
+                .BeNull("a match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+    }
 
-            // And the other half, through the LIVE engine, so this fails the day the port stops
-            // diverging on the row as well as the day the predicate stops reaching it.
+    [Test]
+    public void A_row_the_bestmatch_advance_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `bestmatch-skips-after-an-empty-match` (D78), built like the lazy start
+        // skip's. Upstream's own answer is what this port gave before the fix, so accepting it would
+        // classify a revert of the fix as the fix; a lone empty match at 0, which neither upstream's
+        // flagged nor its plain scan gives on any of the rows, stands in for an unrelated defect;
+        // and this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "bestmatch-skips-after-an-empty-match", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        OracleRow[] rows = [.. OracleWave.ParseRows(entry.Example)];
+        rows.Should().HaveCount(4);
+
+        foreach (OracleRow row in rows)
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_search_anchor_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `bestmatch-search-anchor-moves-per-candidate` (D79), built like the
+        // best-match advance's. Upstream's own answer is what this port gave before the fix, so
+        // accepting it would classify a revert of the fix as the fix; an empty match at 0, which
+        // neither upstream nor its ^ twin gives on any of the rows, stands in for an unrelated
+        // defect; and this port's live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "bestmatch-search-anchor-moves-per-candidate", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        OracleRow[] rows = [.. OracleWave.ParseRows(entry.Example)];
+        rows.Should().HaveCount(4);
+
+        foreach (OracleRow row in rows)
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_lazy_start_skip_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `lazy-start-skip-passes-a-verb-cut-run` (D77), built like the skip
+        // timing's. Upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert of the fix as the fix; an empty match at 0, which neither upstream
+        // nor PCRE2 gives on any of the rows, stands in for an unrelated defect; and this port's
+        // live answer must be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "lazy-start-skip-passes-a-verb-cut-run", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    [Arguments("partial-retry-reversed-slice")]
+    [Arguments("bestmatch-walk-truncated-by-a-skip")]
+    [Arguments("bounded-lazy-repeat-partial")]
+    [Arguments("turkic-default-folding-without-spans")]
+    [Arguments("end-of-line-reads-a-skip-moved-slice")]
+    public void A_row_keyed_entry_refuses_every_answer_but_the_judged_one(string id)
+    {
+        // The control for the row-keyed entries the 2026-09-26 triage widened by a row each. Each
+        // is keyed on the question AND on this port's exact rendered answer, so the thing to prove
+        // is that a different answer to a listed question is reported. Upstream's own answer is
+        // what a revert of the fix would give; no match, or a match at 0 on a row whose judged
+        // answer is no match, stands in for an unrelated defect. The wrong answers are put to the
+        // entry itself rather than to `For`, because another entry may own them: on some of these
+        // rows upstream's answer or no match IS another family's judged answer, which is that
+        // entry's business and not this one's.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+            .Subject;
+        IOracleOutcome matchAtZero = new MatchOutcome(
+            [new OracleGroup(0, Success: true, 0, 1, [new OracleSpan(0, 1)])],
+            -1,
+            null
+        );
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+            IOracleOutcome defect = live is NoMatchOutcome ? matchAtZero : new NoMatchOutcome();
+
+            (ExpectedDivergences.For(row, live)?.Id)
+                .Should()
+                .Be(id, "this port's live answer to row {0} is the family", row.Number);
+            entry
+                .Applies(row, row.Expected)
+                .Should()
+                .BeFalse("{0}: upstream's own answer to row {1} is not this family", id, row.Number);
+            entry
+                .Applies(row, defect)
+                .Should()
+                .BeFalse("{0}: {1} on row {2} is a defect, not this family", id, defect.Describe(), row.Number);
+        }
+    }
+
+    [Test]
+    public void A_row_the_verb_scope_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `verb-unwinds-through-unfinished-groups` (ledger entry 47), built like
+        // ledger 45's. Upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert as the fix; a one-character match at 1, which neither upstream nor PCRE2
+        // gives on any example, stands in for an unrelated defect; and this port's live answer must
+        // be accepted, or the entry classifies nothing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "verb-unwinds-through-unfinished-groups", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)
+                .Should()
+                .NotBeNull("this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
+                .Should()
+                .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_trailing_dollar_before_a_carriage_return_is_false_only_without_the_word_flag()
+    {
+        // The control for `EndsWhereATrailingDollarIsFalse` reading the WORD flag, added when seed
+        // 101 row 463 showed the helper refusing a match that ends before a CR in a pattern with no
+        // WORD flag. First the engine fact the helper rests on, which upstream shares (measured
+        // 2026-09-26 on regex 2026.9.10): only WORD makes a CR end a line.
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline)
+            .IsMatch("a\r")
+            .Should()
+            .BeFalse();
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline).IsMatch("a\n").Should().BeTrue();
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Word).IsMatch("a\r").Should().BeTrue();
+
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "overlapped-skip-extra-match-reversed", StringComparison.Ordinal)
+            )
+            .Subject;
+        OracleRow row = OracleWave
+            .ParseRows(entry.Example)
+            .Should()
+            .ContainSingle(static r => r.Pattern.StartsWith(@"(?r)(?:.+?(*SKIP)[^\p{L}]", StringComparison.Ordinal))
+            .Subject;
+        IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+
+        (ExpectedDivergences.For(row, live)?.Id)
+            .Should()
+            .Be(entry.Id, "the extra match ends before a CR, where `$` is false");
+
+        // Under WORD the same CR ends a line, so the extra match no longer refutes itself - whether
+        // the flag comes from the row or from the pattern.
+        ExpectedDivergences
+            .For(row with { Flags = row.Flags | 0x800 }, live)
+            .Should()
+            .BeNull("WORD makes a CR a line end");
+        ExpectedDivergences
+            .For(row with { Pattern = "(?w)" + row.Pattern }, live)
+            .Should()
+            .BeNull("an inline w makes a CR a line end");
+
+        ExpectedDivergences.For(row, row.Expected).Should().BeNull("upstream's own answer is not this family");
+        ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("a total failure is a defect");
+    }
+
+    [Test]
+    public void A_row_the_search_anchor_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-search-anchor-backtracked`, named in that entry's own Reason. The
+        // entry accounts for one thing: upstream raised "invalid RE code" while matching a fuzzy
+        // pattern holding `\G`, and this port answered. Each refusal below changes exactly one of
+        // those, so a port error, a different upstream error, or the same error on a pattern the
+        // fix cannot reach all come back unaccounted.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "fuzzy-search-anchor-backtracked", StringComparison.Ordinal))
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
             IOracleOutcome ours = OracleComparer.Run(row)!;
 
+            // The live half: the port answers, the row diverges, and this entry is what accounts for it.
             OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
             ExpectedDivergences
                 .For(row, ours)
@@ -643,14 +1843,42 @@ public sealed class OracleWaveTests
                 .NotBeNull("{0} -> [{1}]", row.Pattern, ours.Describe())
                 .And.Subject.As<ExpectedDivergence>()
                 .Id.Should()
-                .Be("boundary-at-the-end-of-the-text");
+                .Be("fuzzy-search-anchor-backtracked");
+
+            ExpectedDivergences
+                .For(
+                    row,
+                    new ErrorOutcome(
+                        "NotImplementedException",
+                        "the matcher has no SearchAnchor yet",
+                        WhileMatching: true
+                    )
+                )
+                .Should()
+                .BeNull("a port that throws has not answered");
+            ExpectedDivergences
+                .For(row, new CompiledButUnmatched())
+                .Should()
+                .BeNull("an unported seam is not an answer");
+            ExpectedDivergences
+                .For(
+                    row with
+                    {
+                        Expected = new ErrorOutcome("RuntimeError", "internal error", WhileMatching: true),
+                    },
+                    ours
+                )
+                .Should()
+                .BeNull("upstream raised a different error");
+            ExpectedDivergences
+                .For(row with { Expected = new ErrorOutcome("RuntimeError", "invalid RE code") }, ours)
+                .Should()
+                .BeNull("upstream raised it compiling, not matching");
+            ExpectedDivergences
+                .For(row with { Pattern = row.Pattern.Replace(@"\G", @"\\G", StringComparison.Ordinal) }, ours)
+                .Should()
+                .BeNull("an escaped backslash before G is not a search anchor");
         }
-
-        static MatchOutcome Escalated(int index, int end) =>
-            new([Taken(0, index, end - index)], LastIndex: -1, LastGroup: null, Partial: true);
-
-        static OracleGroup Taken(int number, int index, int length) =>
-            new(number, Success: true, index, length, [new OracleSpan(index, length)]);
     }
 
     [Test]
@@ -855,6 +2083,136 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_port_timeout_is_never_the_live_answer_an_ablation_entry_judges()
+    {
+        // Before 2026-09-25 the ablation entries could tally a timeout: the wave's answer and the
+        // live re-run both timed out and described themselves identically, while the ablated run
+        // happened to finish. A budget of a microsecond makes the live run time out every time.
+        OracleRow row = OracleWave.ParseRows(
+            ExpectedDivergences
+                .All.Single(static e => string.Equals(e.Id, "full-fold-backreference-retry", StringComparison.Ordinal))
+                .Example
+        )[0] with
+        {
+            Timeout = 1e-6,
+        };
+        IOracleOutcome timedOut = OracleComparer.Run(row)!;
+
+        timedOut
+            .Should()
+            .BeOfType<ErrorOutcome>()
+            .Which.Exception.Should()
+            .Be(nameof(System.Text.RegularExpressions.RegexMatchTimeoutException));
+        ExpectedDivergences.IsTheLiveAnswer(row, timedOut).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Four span-less rows over the dotless i that no judged row of
+    /// <c>turkic-default-folding-without-spans</c> lists, each carrying upstream's answer with the dotless
+    /// i made kra. Recorded 2026-09-25 on regex 2026.9.10 from a 6,468-row grid of such rows.
+    /// </summary>
+    private const string _dotlessRowsToClassify = """
+        {"generator": "rows", "pattern": "[A-Z]", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "x", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}], "dotlessFreeOutcome": {"kind": "sub", "text": "\u0138", "count": 0}}
+        {"generator": "rows", "pattern": "I", "flags": 16386, "namedLists": {}, "subject": "a\u0131b", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "axb", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "sub", "text": "a\u0138b", "count": 0}}
+        {"generator": "rows", "pattern": "I", "flags": 16642, "namedLists": {}, "subject": "a\u0131b", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a", "b"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "split", "parts": ["a\u0138b"]}}
+        {"generator": "rows", "pattern": "I", "flags": 10, "namedLists": {}, "subject": "a\u0131b", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a", "b"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "split", "parts": ["a\u0138b"]}}
+        """;
+
+    /// <summary>
+    /// <c>[\w&amp;&amp;[^a-z]]</c> under V1 and IGNORECASE over 'I\u0131i': upstream's Turkic `T` rows make the
+    /// dotted capital a case variant of the plain i, which is not in [a-z], so upstream replaces the i
+    /// as well. Swapping the dotless i for kra leaves that in place, so the dotless i is not the
+    /// whole difference and the arm must refuse the row. (Until 2026-09-25 this was an ASCII|IGNORECASE
+    /// row, which diverged only through ledger entry 34's defect in this port, since fixed.)
+    /// </summary>
+    private const string _dotlessRowToRefuse = """
+        {"generator": "rows", "pattern": "[\\w&&[^a-z]]", "flags": 258, "namedLists": {}, "subject": "I\u0131i", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "Ixx", "count": 2}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}], "dotlessFreeOutcome": {"kind": "sub", "text": "Ixx", "count": 2}}
+        """;
+
+    [Test]
+    public void A_dotless_i_row_whose_kra_twin_is_this_ports_answer_is_the_turkic_family()
+    {
+        // The recorded control that `turkic-default-folding-without-spans` used to need a person
+        // for: upstream's answer to the row with the dotless i made kra, swapped back, is this
+        // port's answer to the row. Each row goes through the LIVE engine.
+        foreach (OracleRow row in OracleWave.ParseRows(_dotlessRowsToClassify))
+        {
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences.TheDotlessIAloneExplainsIt(row, ours).Should().BeTrue(row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull(row.Pattern)
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("turkic-default-folding-without-spans");
+
+            // A port with a defect on the dotless i answers something else, and stays red.
+            IOracleOutcome wrong = ours switch
+            {
+                SubOutcome sub => sub with { Count = sub.Count + 1 },
+                SplitOutcome split => split with { Parts = [.. split.Parts, "extra"] },
+                _ => throw new InvalidOperationException(ours.Describe()),
+            };
+            ExpectedDivergences.For(row, wrong).Should().BeNull("{0} -> {1}", row.Pattern, wrong.Describe());
+
+            // And so does a port that gave upstream's own Turkic answer's opposite: no match at all.
+            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull(row.Pattern);
+        }
+    }
+
+    [Test]
+    public void A_dotless_i_row_that_diverges_for_another_reason_is_not_the_turkic_family()
+    {
+        OracleRow row = OracleWave.ParseRows(_dotlessRowToRefuse)[0];
+        IOracleOutcome ours = OracleComparer.Run(row)!;
+
+        OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge);
+        ExpectedDivergences.TheDotlessIAloneExplainsIt(row, ours).Should().BeFalse();
+        ExpectedDivergences.For(row, ours).Should().BeNull(ours.Describe());
+    }
+
+    [Test]
+    public void A_bestmatch_row_with_no_backreference_is_not_claimed_by_a_full_fold_entry()
+    {
+        // Upstream's doubled insertion guard alone explains this row: its own (?b)-free and (?e)
+        // answers are the complete (0, 2) match this port gives, and it has no backreference and no
+        // full folding. The full-fold entries' doubled-guard arms used to claim it, because
+        // switching a fold repair off does nothing on a row without one (2026-09-25). It is ledger
+        // entry 12's, keyed on its row in `bestmatch-loses-a-candidate`.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "bestmatch-loses-a-candidate", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, @"(?b)(\p{L}){i,d}c", StringComparison.Ordinal));
+        IOracleOutcome ours = OracleComparer.Run(row)!;
+
+        OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge);
+        ExpectedDivergences
+            .For(row, ours)
+            .Should()
+            .NotBeNull(ours.Describe())
+            .And.Subject.As<ExpectedDivergence>()
+            .Id.Should()
+            .Be("bestmatch-loses-a-candidate");
+
+        // And the full-fold entries refuse it themselves, since `bestmatch-loses-a-candidate` only
+        // wins by coming first: an unjudged row of the same shape must reach no entry at all.
+        ExpectedDivergences
+            .All.Where(static e => e.Id.StartsWith("full-fold-", StringComparison.Ordinal))
+            .Where(e => e.Applies(row, ours))
+            .Select(static e => e.Id)
+            .Should()
+            .BeEmpty();
+    }
+
+    [Test]
     public void An_answer_with_no_spans_is_classified_by_the_row_keyed_turkic_entry()
     {
         // S52. The three span-less shapes - a `sub`, a `split` and a `subf` whose template throws -
@@ -940,7 +2298,11 @@ public sealed class OracleWaveTests
         OracleComparer.RowTimeout.Should().BePositive();
 
         ErrorOutcome timedOut = ErrorOutcome.From(
-            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)*b", OracleComparer.RowTimeout),
+            new System.Text.RegularExpressions.RegexMatchTimeoutException(
+                "aaa",
+                @"(a|a)*\1b",
+                OracleComparer.RowTimeout
+            ),
             whileMatching: true
         );
 
@@ -963,7 +2325,10 @@ public sealed class OracleWaveTests
         // And the deadline reaches the engine, which is the half a value assertion cannot see: this
         // row does not stop on its own, so the test returning at all is the proof. 50ms rather than
         // `RowTimeout`, so proving it costs no wall clock - upstream's own figure for this pattern
-        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve.
+        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve. The
+        // \1 is there since 2026-09-26: without it this port's failure memo
+        // (RepeatInfo.FailureMemo) answers the row in microseconds, and a pattern with a
+        // backreference gets no memo. Upstream was still running after 8 s (2026-09-26).
         //
         // What is deliberately *not* pinned: that the one-argument `Run` passes `RowTimeout` rather
         // than something else. Pinning that token needs a row that runs for the whole deadline, so
@@ -971,7 +2336,7 @@ public sealed class OracleWaveTests
         // sitting directly under the field whose remarks explain why it exists.
         OracleRow catastrophic = OracleWave.ParseRows(
             """
-            {"generator": "rows", "pattern": "(a|a)*b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "rows", "pattern": "(a|a)*\\1b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """
         )[0];
 
@@ -1050,24 +2415,29 @@ public sealed class OracleWaveTests
         // against the 0.25s the rows carry - a margin over 20x, so no plausible machine turns one
         // verdict into the other. See `tools/probes/timeout-row-margin.py` and its port half.
         //
-        // THE SUBJECT BELOW IS 32 'a's, which is SHORTER than the generator draws and is not a
-        // measurement of the family: `--knee` puts the shapes' knees between 24 and 36, so 32 is
-        // past this pattern's (24) and short of `(?:a|aa)+$`'s (36). It is chosen to keep this test
-        // cheap, and it is sound here only because the one shape it uses blows up well below it.
+        // THE ROW BELOW IS SYNTHETIC, and not a measurement of the family: 16 'a's is far SHORTER
+        // than the generator draws, and the budget is a millisecond rather than a quarter of a
+        // second. Both are chosen so that the last assertion below needs no stopwatch - see there.
+        // The shape was `(a|a)+$` until 2026-09-26, when this port's failure memo made it answer
+        // at once; `(a|a){1,999}$` is the generator's bounded twin.
         OracleRow budgeted = OracleWave.ParseRows(
             """
-            {"generator": "timeout", "pattern": "(a|a)+$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.05, "outcome": {"kind": "timeout", "seconds": 0.05}}
+            {"generator": "timeout", "pattern": "(a|a){1,999}$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.001, "outcome": {"kind": "timeout", "seconds": 0.001}}
             """
         )[0];
 
-        budgeted.Timeout.Should().Be(0.05);
-        budgeted.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(0.05);
+        budgeted.Timeout.Should().Be(0.001);
+        budgeted.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(0.001);
 
         // This port running out of the same budget is the agreement. `ErrorOutcome` rather than a
         // `TimeoutOutcome` of our own, because that is what the engine actually produces and inventing
         // a second shape for it here would hide which of the two the port really gave.
         ErrorOutcome ranOut = ErrorOutcome.From(
-            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)+$", TimeSpan.FromSeconds(0.05)),
+            new System.Text.RegularExpressions.RegexMatchTimeoutException(
+                "aaa",
+                "(a|a){1,999}$",
+                TimeSpan.FromSeconds(0.001)
+            ),
             whileMatching: true
         );
         OracleComparer.Compare(budgeted, ranOut).Should().Be(OracleVerdict.Agree);
@@ -1088,20 +2458,18 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(budgeted, new NoMatchOutcome()).Should().Be(OracleVerdict.Diverge);
 
         // The port IS asked, unlike every other timeout row, and it is asked with the ROW'S budget
-        // rather than `RowTimeout`. The wall clock is the only thing that can tell those apart, and
-        // this pattern does not stop on its own: at `RowTimeout` the call takes ten seconds, so
-        // returning well inside that is the proof the row's own field reached the engine.
-        var watch = System.Diagnostics.Stopwatch.StartNew();
+        // rather than `RowTimeout`. The verdict alone tells those apart, with no stopwatch, because
+        // this row DOES stop on its own: 1,704,238 steps, 233 ms in a Debug build (2026-09-28). So
+        // under the row's millisecond it runs out and agrees, and under `RowTimeout`, forty times
+        // longer than it needs, it answers no match and diverges. Until 2026-09-28 the row never
+        // stopped and this was a bound on the wall clock, which a busy machine can break (D13).
         OracleRunSummary run = OracleComparer.RunWave([budgeted], OracleComparer.Run);
-        watch.Stop();
 
-        watch
-            .Elapsed.Should()
-            .BeLessThan(
-                OracleComparer.RowTimeout / 2,
+        run.Tally.Should()
+            .Equal(
+                new Dictionary<OracleVerdict, int> { [OracleVerdict.Agree] = 1 },
                 "the row's own deadline reached the engine, not the comparer's blanket one"
             );
-        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Agree] = 1 });
         run.Divergences.Should().BeEmpty();
     }
 
@@ -1149,6 +2517,151 @@ public sealed class OracleWaveTests
         // The whole tally, so a future edit cannot fold it back into `unsupported` and make an
         // upstream blowup read as a gap in this port's coverage.
         run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Resource] = 1 });
+    }
+
+    [Test]
+    public void A_row_upstream_crashed_on_is_put_to_this_port_and_fails_the_run()
+    {
+        // 2026-09-24: upstream's C engine segfaulted on a `verbs` row on Linux, and the recorder now
+        // records such a row as `crashed` instead of dying with it. It has no answer at all, so it is
+        // not compared - and until it is judged, it is not a known defect either, so it FAILS THE
+        // RUN: a crash nobody has attributed is exactly what must not pass quietly. Since 2026-10-10
+        // it IS put to this port, which must never reproduce an upstream crash: the block shows this
+        // port's answer, for tools/judge-row.py to pin.
+        OracleRow crashed = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\\d]", "flags": 0, "namedLists": {}, "subject": "bba\naAA\r", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
+            """
+        )[0];
+
+        crashed.Expected.Should().Be(new CrashedOutcome(-11, ReproducedAlone: true));
+        OracleComparer.Compare(crashed, new NoMatchOutcome()).Should().Be(OracleVerdict.Fault);
+
+        var asked = new List<int>();
+        OracleRunSummary run = OracleComparer.RunWave(
+            [crashed],
+            row =>
+            {
+                asked.Add(row.Number);
+                return new NoMatchOutcome();
+            }
+        );
+
+        asked.Should().Equal([1], "this port's answer to a crashed row is what a judgement pins");
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Fault] = 1 });
+        run.Divergences.Should().BeEmpty("a crash is not a disagreement between the engines");
+        run.Faults.Should()
+            .ContainSingle()
+            .Which.Should()
+            .StartWith("FAULT row 1 (verbs)")
+            .And.Contain("  port     no match" + Environment.NewLine);
+    }
+
+    [Test]
+    public void A_row_the_screen_attributes_to_a_known_upstream_defect_is_counted_and_not_compared()
+    {
+        // The MSan screen (tools/screen-undefined.py) annotates a row on which upstream read memory
+        // it never initialised. Its answer - crashed or not - is whatever that memory held, so it is
+        // no ground truth; a KNOWN origin is accounted for and does not fail the run.
+        OracleRow known = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "\\b(?:\\D(*SKIP))+", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "undefinedBehaviour": {"origins": ["new_position in basic_match"], "known": "ledger 5"}}
+            """
+        )[0];
+
+        known
+            .UndefinedBehaviour.Should()
+            .BeEquivalentTo(new UndefinedBehaviour(["new_position in basic_match"], "ledger 5"));
+        OracleComparer.Compare(known, new NoMatchOutcome()).Should().Be(OracleVerdict.Undefined);
+
+        OracleRunSummary run = OracleComparer.RunWave([known], static _ => new NoMatchOutcome());
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Undefined] = 1 });
+        run.Faults.Should().BeEmpty();
+        run.Undefined.Should().ContainSingle().Which.Should().StartWith("UNDEFINED ledger 5 row 1 (verbs)");
+    }
+
+    [Test]
+    public void A_row_whose_undefined_behaviour_has_no_known_origin_fails_the_run()
+    {
+        // A NEW upstream defect: the screen found uninitialised memory it cannot attribute to any
+        // ledger entry. Not compared - the answer is garbage - and red, because it needs a ledger
+        // entry and a judgement before any wave containing it can be trusted.
+        OracleRow unknown = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": false}, "undefinedBehaviour": {"origins": ["some_other_local in try_match"], "known": null}}
+            """
+        )[0];
+
+        OracleComparer.Compare(unknown, new NoMatchOutcome()).Should().Be(OracleVerdict.Fault);
+        OracleRunSummary run = OracleComparer.RunWave([unknown], static _ => new NoMatchOutcome());
+        run.Faults.Should().ContainSingle().Which.Should().Contain("some_other_local in try_match");
+    }
+
+    [Test]
+    public void The_rows_offered_to_the_screen_are_exactly_those_whose_verdict_rests_on_upstreams_answer()
+    {
+        // tools/screen-undefined.py re-records these under MSan. An AGREEING row is not offered: the
+        // port has no uninitialised memory, so it agrees with a garbage answer only by coincidence.
+        // A row the screen has already annotated is not offered again.
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(
+            """
+            {"generator": "literals", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "literals", "pattern": "b", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "verbs", "pattern": "c", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
+            {"generator": "verbs", "pattern": "d", "flags": 0, "namedLists": {}, "subject": "d", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}, "undefinedBehaviour": {"origins": ["new_position in basic_match"], "known": "ledger 5"}}
+            """
+        );
+
+        // Row 2 is made to diverge by an engine that answers "no match" to it alone.
+        OracleRunSummary run = OracleComparer.RunWave(
+            rows,
+            static row =>
+                string.Equals(row.Pattern, "b", StringComparison.Ordinal)
+                    ? new NoMatchOutcome()
+                    : OracleComparer.Run(row)
+        );
+
+        run.ScreenCandidates.Should().Equal(2, 3);
+    }
+
+    [Test]
+    public void Every_example_row_is_exported_with_its_entry_for_the_recorder_to_ask_upstream_again()
+    {
+        // `record-oracle.py --recheck` reads this: one line per example row, carrying the entry's
+        // id beside the row exactly as the entry stores it, answers and all - the stored answer is
+        // what is checked against upstream's answer now.
+        string exported = OracleWave.RenderExpectedExamples(ExpectedDivergences.All);
+
+        string[] lines = exported.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int rows = ExpectedDivergences.All.Sum(static entry => OracleWave.ParseRows(entry.Example).Count);
+        lines.Should().HaveCount(rows, "every example row of every entry, and nothing else");
+
+        using var first = JsonDocument.Parse(lines[0]);
+        ExpectedDivergence entry = ExpectedDivergences.All[0];
+        first.RootElement.GetProperty("entry").GetString().Should().Be(entry.Id);
+        OracleWave
+            .ParseRows(first.RootElement.GetProperty("row").GetRawText())[0]
+            .Should()
+            .BeEquivalentTo(OracleWave.ParseRows(entry.Example)[0]);
+    }
+
+    [Test]
+    public void The_summary_line_counts_faults_and_undefined_rows_where_the_sweep_still_reads_it()
+    {
+        // tools/sweep-seeds.ps1 finds the line with `^agree \d` and reads `diverge (\d+)` off it,
+        // so the two new counts go in the middle and neither match moves.
+        var tally = new Dictionary<OracleVerdict, int>
+        {
+            [OracleVerdict.Agree] = 5,
+            [OracleVerdict.Undefined] = 2,
+            [OracleVerdict.Fault] = 1,
+        };
+        OracleWave
+            .Summary(8, tally)
+            .Should()
+            .Be(
+                "agree 5  unsupported 0  expected 0  timeout 0  resource 0  undefined 2  fault 1  diverge 0  of 8 rows"
+            );
     }
 
     [Test]

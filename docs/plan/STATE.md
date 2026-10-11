@@ -1,31 +1,59 @@
 # Current state
+**S91 is done** (e78f8d2, 5522bc3; `docs/plan/slices/done/S91-scoped-encoding-everywhere.md`). A
+scoped `(?a:...)` or `(?u:...)` now answers exactly as the same encoding set for the whole pattern:
+the 40,672-row scoped/global grid went from 1,596 disagreeing rows to 0 (upstream 2,207), and the
+oracle is GREEN at three seeds with diverge 0. Ledger entry 36.
 
-**S60b is in flight** (slice file and `docs/plan/slices/notes/S60b-sittings.md`). Items 2, 3, 9,
-10, 14 and 17 and the `SameCharIgn` fast path are landed and reviewed; item 6 is closed as never
-ported. Items 3 and 17 wait for the orchestrator's quiet run (filters in the notes' "23:10" and
-"2026-09-24, 00:50" sections). Open: 8, 11-13, 16. The three `long-alternation` rows are judged
-into `search-start-partial` and the generator is on the default oracle list (notes, "03:15").
+**S90 is done** (`docs/plan/slices/done/S90-partial-fold-rows.md`). The three partial rows over a
+full-folded ligature are port-right. Each is a fold repair (ledger 28, 29 or 30) stacked on ledger
+11 mechanism B, and a new oracle entry, `full-fold-fix-behind-an-innermost-count`, claims them. No
+engine change. The fuzzy and default waves both give diverge 0 at all three seeds. S86, S89 and
+S61 are done too; closing notes in `docs/plan/slices/done/`.
 
-**S89 is in flight**: the unjudged `(?b)`/`(?e)`/`(*SKIP)` oracle rows.
-## Next
-1. The orchestrator's quiet-machine benchmark baseline (read `CountStringMegabyte` first: 1.10x on
-   the gate, the row closest to the floor), then the time gates for items 3 and 17.
-2. S60b: items 16, 11, 12, 13, 8, in that order. `(?i)` named lists are not indexed.
-   Item 9's AOT run is done: tests and smoke GREEN, 6.91 MB.
+**S60b is in flight** (`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, notes
+in `docs/plan/slices/notes/S60b-sittings.md`). Its item 3 rewrote `TryMatch` and sends SUCCESS to
+the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it (DECISIONS
+2026-09-24), or `RepeatTests`'s byte test goes red.
+
+## Queue
+
+1. The orchestrator re-records the full benchmark baseline in process on merged main. S86 asks for
+   `*WorkloadBenchmarks*` on the quiet gate: its one hot-path change is a compare in `TryMatch`.
+2. S60b item 3 and onwards.
+
+## Waiting on the owner
+
+
+- O(1) backtracking state per repetition for a body with no alternative (DECISIONS 2026-09-24,
+  OPEN). A divergence from upstream in memory only; no code until decided.
 
 ## Findings that need a slice
-1. BESTMATCH over a full-folded backreference and the other unjudged `(?b)`/`(?e)`/`(*SKIP)` rows
-   are S89's (details in the S85 notes and `git show 1fa48a9:docs/plan/STATE.md`).
-2. Ledger 33's residuals loop to the 1 GB limit, as upstream does (`SHORTCUT:`s). Upstream
-   `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1).
-3. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
-4. `SearchStartZeroWidth` has no timeout poll: `\b\B` over 2^21 `a`s with a 1 ms timeout returns
-   after about 120 ms (S60b item 3 review; base behaves the same).
-5. S22's three upstream self-inconsistencies (S60b item 6) need a draft in `upstream-reports/`.
-6. Upstream `finditer(r'a*?(*SKIP)', 'aaab')` gives (0, 0), (4, 4); `(a*?)(*SKIP)` gives every
-   position. Possibly an upstream bug the port shares; not yet researched (S60b item 17 notes).
-7. **Bug, base too:** `(?i).{0,2}x` over `"😀x😀😀x"` sliced at beginning 1, length 1 throws
-   `IndexOutOfRangeException` (`MatchState.CharAt`); at beginning 4 or 6 it never ends.
-## Hand-offs
-- Ledger entry 18 is S86's. Oracle rows 3752, 5185 (seed 20260923) and 4957 (seed 99): S87
-  classified the first two; 4957 is in S89.
+
+0. Done: S91, scoped encodings everywhere (e78f8d2, 5522bc3). Its grid probe,
+   `tools/probes/s91-scoped-encoding-grid.py`, is cited by `ScopedEncodingGridTests` but was never
+   committed.
+0b. **The native-AOT allocation tests are flaky**: `AllocationTests` (S61) fail about one full
+   native run in three (4 of 12, 2026-09-25) with 280 B and no GC in the window, in different tests
+   (`A_warm_IsMatch_...`, `A_warm_Count_...`, and 7,744 B across two GCs in the span walk). Every test
+   passes alone, and the JIT suite never fails. CI runs this gate on three systems, so it will go red
+   intermittently. Not yet explained: not a GC trim (a forced gen-2 collection between warm-up and
+   measurement allocates nothing under JIT), not a per-call cost (the same calls are 0 B in 8 runs of
+   12). Next: an EventListener on GCAllocationTick inside the native run to name the type.
+
+1. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
+2. Classifier coverage, narrowed 2026-09-25: a fresh `sub`/`split` row over the dotless i is now
+   classified by a recorded control (the dotless i swapped for kra, `dotlessFreeOutcome`), which
+   takes all 18 such hand-judged rows on its own. A row holding the dotted capital U+0130 still
+   needs its row added to `turkic-default-folding-without-spans` by hand: no letter can stand in for
+   it (7 of the 24 listed rows).
+
+Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
+`Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
+ledger 25), and two classifier leaks (the full-fold doubled-guard arms claiming plain ledger 12
+rows, and ablation entries tallying a port timeout). DECISIONS 2026-09-25.
+
+Done 2026-09-26 on `maint/state-findings`: two upstream defects the sweep found, which this port
+does not share, pinned as port-right with DIVERGENCES rows, COMPARISON sections and draft reports
+(ledger 37, a scoped `(?i:...)` losing full folding in the required-string search; ledger 38, a
+lazy repeat missing a full-folded literal at its last position). No oracle entry yet: whether the
+generators draw them is unchecked.
