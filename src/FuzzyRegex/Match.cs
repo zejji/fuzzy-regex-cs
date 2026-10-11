@@ -134,7 +134,13 @@ public sealed class Match : Group
     private readonly int _sliceStart;
     private readonly int _sliceEnd;
     private readonly bool _overlapped;
-    private readonly bool _oneUnitPerCharacter;
+
+    // The three parts of NextMatch's Engine.SubjectScan, held apart rather than as the struct so the
+    // runtime packs them beside the fields above: as one 12-byte struct they cost 16 B per match,
+    // apart 8 (measured 2026-10-11, Matches of \w+).
+    private readonly int _scanCleanStart;
+    private readonly int _scanCleanEnd;
+    private readonly bool _scanFound;
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
 
     /// <summary>
@@ -188,11 +194,10 @@ public sealed class Match : Group
     /// <param name="fuzzyChanges">
     /// Every error the match used, in the order it was used, already copied out of the state.
     /// </param>
-    /// <param name="oneUnitPerCharacter">
-    /// The state's <see cref="Engine.MatchState.OneUnitPerCharacter"/>, which <see cref="NextMatch"/>
-    /// hands to the next state instead of scanning the subject again. The default,
-    /// <see langword="false"/>, is always correct and only slower: the next state then converts
-    /// between characters and positions by table rather than by arithmetic.
+    /// <param name="scan">
+    /// The state's <see cref="Engine.MatchState.Scan"/>, which <see cref="NextMatch"/> hands to the
+    /// next state instead of searching the same units again. The default, nothing known, is always
+    /// correct and only slower.
     /// </param>
     internal Match(
         FuzzyRegex regex,
@@ -209,7 +214,7 @@ public sealed class Match : Group
         bool partial = false,
         FuzzyCounts fuzzyCounts = default,
         Engine.FuzzyChange[]? fuzzyChanges = null,
-        bool oneUnitPerCharacter = false
+        Engine.SubjectScan scan = default
     )
         : base(subject, start, end, success, "0")
     {
@@ -219,7 +224,7 @@ public sealed class Match : Group
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
         _overlapped = overlapped;
-        _oneUnitPerCharacter = oneUnitPerCharacter;
+        (_scanCleanStart, _scanCleanEnd, _scanFound) = scan;
         _fuzzyChanges = fuzzyChanges ?? [];
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
@@ -541,7 +546,7 @@ public sealed class Match : Group
                 _sliceStart,
                 _sliceEnd,
                 _overlapped,
-                _oneUnitPerCharacter
+                new(_scanCleanStart, _scanCleanEnd, _scanFound)
             )
             : _regex.NoMatch(_subject);
 

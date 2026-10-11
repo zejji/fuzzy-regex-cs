@@ -62,6 +62,16 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long GuardListsKept { get; private set; }
 
+    /// <summary>
+    /// Code units of the subject examined on this thread for a reason that has nothing to do with
+    /// the match: looking for a high surrogate (<see cref="MatchState"/>) or
+    /// counting codepoints for a width shortcut (<c>Substitution</c>). A call that did either over the
+    /// whole subject would cost the subject's length however short its match, and a walk that did it
+    /// at every step would be quadratic.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long SubjectUnitsScanned { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -118,6 +128,11 @@ internal static class WorkCounter
     /// <param name="length">The stretch's length.</param>
     [Conditional("DEBUG")]
     internal static void Searched(int length) => CharactersSearched += length;
+
+    /// <summary>Counts code units of the subject examined outside the match.</summary>
+    /// <param name="units">How many.</param>
+    [Conditional("DEBUG")]
+    internal static void ScannedSubject(int units) => SubjectUnitsScanned += units;
 
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]

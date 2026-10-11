@@ -1083,35 +1083,56 @@ internal static class Matcher
     /// <param name="count">How many characters to step.</param>
     /// <param name="step">Upstream's step: 1 forwards, -1 backwards.</param>
     /// <returns>The stepped position.</returns>
-    private static int StepBy(MatchState state, int pos, long count, long step)
+    internal static int StepBy(MatchState state, int pos, long count, long step)
     {
-        // The walks below run 'for (i = 0; i < count; ...)', so a count of zero or less steps
-        // nowhere; the arithmetic arms would step backwards, so they get the same floor.
-        if (count < 0)
-        {
-            count = 0;
-        }
-
+        // The walks this replaces run 'for (i = 0; i < count && pos < bound; ...)', so a count of
+        // zero or less, or a start at or past the bound, steps nowhere - which may leave 'pos'
+        // inside a character, so neither may go through the arithmetic or the index's boundaries.
         if (step > 0)
         {
-            if (!state.OneUnitPerCharacter)
+            if (count <= 0 || pos >= state.SliceEnd)
             {
-                return state.GetCharacterIndex().StepForward(pos, count, state.SliceEnd);
+                return pos;
             }
 
-            // Upstream's arithmetic, restored: one character is one code unit, so the walk this
-            // replaces can only end at 'pos + count' or at the bound it stops on.
-            return pos >= state.SliceEnd ? pos : (int)Math.Min(pos + count, state.SliceEnd);
+            if (count >= state.SliceEnd - pos)
+            {
+                // Enough characters to reach the bound whatever they are, since each is at least
+                // one unit, so the walk ends on the first step that reaches or passes it. That step
+                // starts at SliceEnd - 1 exactly when it can pass: only a high surrogate there steps
+                // two, and every high surrogate is a stop on the walk. So no question about the
+                // stretch in between, which for an unbounded repeat is the rest of the slice (D83).
+                return state.NextPos(state.SliceEnd - 1);
+            }
+
+            // Upstream's arithmetic, restored where it holds: one character is one code unit unless
+            // a high surrogate starts one of the steps.
+            int target = pos + (int)count;
+            return state.NoHighSurrogateIn(pos, target)
+                ? target
+                : state.GetCharacterIndex().StepForward(pos, count, state.SliceEnd);
         }
 
         if (step < 0)
         {
-            if (!state.OneUnitPerCharacter)
+            if (count <= 0 || pos <= state.SliceStart)
             {
-                return state.GetCharacterIndex().StepBackward(pos, count, state.SliceStart);
+                return pos;
             }
 
-            return pos <= state.SliceStart ? pos : (int)Math.Max(pos - count, state.SliceStart);
+            if (count >= pos - state.SliceStart)
+            {
+                // The mirror image: the step that can pass SliceStart is the one from
+                // SliceStart + 1, onto a low surrogate whose high half sits below the bound.
+                return state.PrevPos(state.SliceStart + 1);
+            }
+
+            // A step back from p takes two units when p - 1 is a low surrogate and p - 2 a high
+            // one, so the unit below the target is part of the question.
+            int target = pos - (int)count;
+            return state.NoHighSurrogateIn(Math.Max(target - 1, 0), pos)
+                ? target
+                : state.GetCharacterIndex().StepBackward(pos, count, state.SliceStart);
         }
 
         return pos;
@@ -1130,15 +1151,39 @@ internal static class Matcher
     /// <param name="from">One position.</param>
     /// <param name="to">The other.</param>
     /// <returns>How many characters lie between them.</returns>
-    private static long CountBetween(MatchState state, int from, int to)
+    internal static long CountBetween(MatchState state, int from, int to)
     {
-        if (state.OneUnitPerCharacter)
-        {
-            // Upstream's subtraction, restored: see StepBy.
-            return Math.Abs(to - from);
-        }
+        int low = Math.Min(from, to);
+        int high = Math.Max(from, to);
 
-        return state.GetCharacterIndex().CountBetween(from, to);
+        // Upstream's subtraction, restored where it holds: see StepBy. A low surrogate at 'low'
+        // whose high half sits below it is one step of one unit, exactly as the arithmetic says.
+        return state.NoHighSurrogateIn(low, high) ? high - low : state.GetCharacterIndex().CountBetween(from, to);
+    }
+
+    /// <summary>
+    /// <c>Math.Min(CountBetween(state, from, to), cap)</c>, without counting a long stretch the cap
+    /// already settles.
+    /// </summary>
+    /// <remarks>
+    /// A character is one or two code units, and <see cref="CountBetween"/> counts a character the
+    /// stretch cuts at either end as a whole one, so each character it counts covers one or two of
+    /// the stretch's units: n units hold between n/2 and n characters. So at least <c>2 * cap</c>
+    /// units hold at least <c>cap</c> characters, and only a shorter stretch is counted. Every
+    /// caller asks a capped question - "at least MinWidth?", "at most the repeat's maximum?", "at
+    /// most the fewest errors?" - and before D83 each counted to the end of the slice to answer it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="from">One position.</param>
+    /// <param name="to">The other.</param>
+    /// <param name="cap">The most the caller needs to know about; not negative.</param>
+    /// <returns>The count, or <paramref name="cap"/> if that is smaller.</returns>
+    private static long CountUpTo(MatchState state, int from, int to, long cap)
+    {
+        Debug.Assert(cap >= 0, "Every caller's cap is a width, a repeat maximum or an error count.");
+
+        long units = Math.Abs((long)to - from);
+        return cap <= units / 2 ? cap : Math.Min(CountBetween(state, from, to), cap);
     }
 
     /// <summary>
@@ -18483,11 +18528,16 @@ internal static class Matcher
 
                     long step = node.Next2.Test!.Step;
                     int pos = StepBy(state, state.TextPos, count, step);
-                    long available =
+
+                    // SHORTCUT: capped at the repeat's maximum, so a bounded lazy repeat asks only
+                    // about its reach, but an unbounded one still counts to the end of the slice:
+                    // one search of the rest of the subject per state, shared across a walk by the
+                    // hand-on (D83). The upgrade is to compare positions with 'limit' instead of
+                    // counts with 'maxCount' below, which needs its own proof at a cut pair.
+                    long maxCount =
                         step > 0
-                            ? CountBetween(state, state.TextPos, state.SliceEnd)
-                            : CountBetween(state, state.SliceStart, state.TextPos);
-                    long maxCount = Math.Min(available, node.Values[2]);
+                            ? CountUpTo(state, state.TextPos, state.SliceEnd, node.Values[2])
+                            : CountUpTo(state, state.SliceStart, state.TextPos, node.Values[2]);
                     int limit = StepBy(state, state.TextPos, maxCount, step);
 
                     Node repeated = node.Next2.Node!;
@@ -19219,7 +19269,16 @@ internal static class Matcher
         // CountBetween rounds outward, so a caller that slices into the middle of a surrogate pair
         // still costs a whole character at that end. That is the old over-counting, surviving only
         // for a bound upstream cannot express, and it keeps 'available == 0' meaning what it did.
-        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+        //
+        // Capped at MinWidth, and at 1 so that the zero test still sees a zero: both comparisons
+        // below read the count only up to there, and the cap keeps the question local instead of a
+        // count to the end of the slice (D83).
+        long available = CountUpTo(
+            state,
+            state.TextPos,
+            state.Reverse ? state.SliceStart : state.SliceEnd,
+            Math.Max(state.MinWidth, 1)
+        );
 
         // The maximum permitted cost.
         state.MaxErrors = 0;
@@ -19371,8 +19430,14 @@ internal static class Matcher
         // as the loop narrows the slice - so the early-out below, which goes live from the second run
         // whenever the first run found exactly one error, tests a stale width. That is upstream's
         // behaviour and it is safe in the direction that matters: a stale 'available' is never
-        // smaller than the narrowed slice's, so the early-out can only fail to fire.
-        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+        // smaller than the narrowed slice's, so the early-out can only fail to fire. Capped as
+        // there, for the same two comparisons.
+        long available = CountUpTo(
+            state,
+            state.TextPos,
+            state.Reverse ? state.SliceStart : state.SliceEnd,
+            Math.Max(state.MinWidth, 1)
+        );
 
         // The maximum permitted cost.
         state.MaxErrors = long.MaxValue;
@@ -19623,8 +19688,14 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int DoBestFuzzyMatch(MatchState state, bool search)
     {
-        // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length.
-        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+        // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length, and capped
+        // as there.
+        long available = CountUpTo(
+            state,
+            state.TextPos,
+            state.Reverse ? state.SliceStart : state.SliceEnd,
+            Math.Max(state.MinWidth, 1)
+        );
         int step = state.Reverse ? -1 : 1;
 
         // EVERY CANDIDATE IS TRIED AGAINST THE SLICE THE CALLER ASKED FOR. Added by S48, and it is a
@@ -19953,12 +20024,12 @@ internal static class Matcher
             {
                 // CHARACTERS, NOT CODE UNITS: upstream's subtraction is over codepoint indexes, and
                 // this offset is compared against two error COUNTS on the next two lines.
-                maxOffset = CountBetween(state, entry.MatchPos, state.Reverse ? state.SliceStart : state.SliceEnd);
-
-                if (maxOffset > fewestErrors)
-                {
-                    maxOffset = fewestErrors;
-                }
+                maxOffset = CountUpTo(
+                    state,
+                    entry.MatchPos,
+                    state.Reverse ? state.SliceStart : state.SliceEnd,
+                    fewestErrors
+                );
 
                 if (maxOffset > errorLimit)
                 {

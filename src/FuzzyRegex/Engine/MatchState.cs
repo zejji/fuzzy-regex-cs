@@ -182,6 +182,12 @@ internal sealed class GroupData
     /// <returns>The copies.</returns>
     internal static GroupData[] CopyGroups(GroupData[] groups, int groupCount)
     {
+        if (groupCount == 0)
+        {
+            // A pattern without groups gives every match the one shared empty array: 24 B a match.
+            return [];
+        }
+
         var copies = new GroupData[groupCount];
         for (int g = 0; g < groupCount; g++)
         {
@@ -1028,25 +1034,138 @@ internal sealed class MatchState : IDisposable
     internal readonly List<FuzzyChange> FuzzyChanges = [];
 
     /// <summary>
-    /// Whether one character of <see cref="Text"/> is exactly one UTF-16 code unit, so that a
-    /// character count and a code-unit offset are the same number - which is what upstream gets for
-    /// free by indexing the subject by codepoint.
+    /// How far past a query <see cref="NoHighSurrogateIn"/> searches when it has to search at all,
+    /// so that a run of small queries moving along the subject costs one vectorised search per this
+    /// many units rather than one per query.
     /// </summary>
     /// <remarks>
-    /// Not an upstream field. <see cref="NextPos"/> steps two units only across a well-formed
-    /// surrogate pair, and a pair needs a high surrogate, so "the subject holds no high surrogate"
-    /// is sufficient - and it is conservative, because a lone high surrogate turns the flag off and
-    /// costs nothing but the walk that would have happened anyway. The scan is one vectorised pass
-    /// over the subject, done once per matching operation, and it buys back the per-position walks
-    /// in the repeat opcodes' backtrack arms that made a lazy scan quadratic.
+    /// 256 units is 512 bytes, a few nanoseconds of vectorised search, and it is also the most a
+    /// call examines beyond what its queries reach. Larger only makes a short match on a long
+    /// subject pay for text it never asks about.
     /// </remarks>
-    internal bool OneUnitPerCharacter;
+    private const int _scanChunk = 256;
+
+    /// <summary>The first unit of the stretch known to hold no high surrogate: see <see cref="NoHighSurrogateIn"/>.</summary>
+    private int _cleanStart;
+
+    /// <summary>One past the last unit of that stretch.</summary>
+    private int _cleanEnd;
+
+    /// <summary>Whether a high surrogate was found at an edge of the stretch, which then never grows again.</summary>
+    private bool _highSurrogateFound;
+
+    /// <summary>
+    /// What this state has learnt about the subject, for <see cref="Match.NextMatch"/> to hand to the
+    /// next state of a walk.
+    /// </summary>
+    internal SubjectScan Scan => new(_cleanStart, _cleanEnd, _highSurrogateFound);
+
+    /// <summary>
+    /// Whether the code units <c>[low, high)</c> of <see cref="Text"/> hold no high surrogate, which
+    /// is when one character is exactly one code unit over them - what upstream gets for free by
+    /// indexing the subject by codepoint.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not upstream's. <see cref="NextPos"/> steps two units only from a high surrogate, so a
+    /// stretch with none in it converts between a character count and a position by arithmetic;
+    /// <see cref="Matcher.StepBy"/> and <see cref="Matcher.CountBetween"/> ask this before they fall
+    /// back on the <see cref="CharacterIndex"/>. A lone high surrogate answers <see langword="false"/>
+    /// although it steps one unit: conservative, and it costs only the index a pair would have cost.
+    /// </para>
+    /// <para>
+    /// <b>It looks only where it is asked, and never twice (D83).</b> The state keeps one stretch
+    /// known to be clean and widens it to cover each query that reaches past it, by
+    /// <see cref="_scanChunk"/> at least, with one vectorised search of the units it adds. So a call
+    /// examines the hull of what its queries touch and little more, and a walk that hands the
+    /// stretch on (<see cref="SubjectScan"/>) examines each unit about once in all. Before D83 every
+    /// state searched the whole subject when it was set up: a <c>Match</c> that found a word at
+    /// position 0 of a megabyte paid for the megabyte, 30 of its 36 microseconds.
+    /// </para>
+    /// <para>
+    /// Once a widening meets a high surrogate the stretch stops there and never grows again: every
+    /// query outside it is answered <see langword="false"/> and goes to the index. Growing past the
+    /// surrogate would need a second stretch, and a subject with a surrogate pair in reach pays for
+    /// the index either way.
+    /// </para>
+    /// </remarks>
+    /// <param name="low">The first unit.</param>
+    /// <param name="high">One past the last unit.</param>
+    /// <returns>Whether none of those units is a high surrogate.</returns>
+    internal bool NoHighSurrogateIn(int low, int high)
+    {
+        if (low >= high || (low >= _cleanStart && high <= _cleanEnd))
+        {
+            return true;
+        }
+
+        return !_highSurrogateFound && Widen(low, high);
+    }
+
+    /// <summary>
+    /// <see cref="NoHighSurrogateIn"/>'s slow path: widens the clean stretch to cover
+    /// <c>[low, high)</c>, stopping at the first high surrogate in the way.
+    /// </summary>
+    /// <param name="low">The first unit of the query.</param>
+    /// <param name="high">One past its last unit.</param>
+    /// <returns>Whether the widened stretch covers the query.</returns>
+    private bool Widen(int low, int high)
+    {
+        // The ushort form of the search allocates nothing; the char form allocated 96 B on every
+        // call, even after tier-up, in Debug and Release (measured 2026-09-22, .NET 10).
+        // AllocationTests pins a warm IsMatch's 0.
+        ReadOnlySpan<ushort> units = MemoryMarshal.Cast<char, ushort>(Text.Span);
+
+        if (_cleanStart >= _cleanEnd)
+        {
+            // Nothing known yet: start from the query, not from either end of the subject.
+            _cleanStart = low;
+            _cleanEnd = low;
+        }
+
+        if (low < _cleanStart)
+        {
+            // Downwards. A gap between the query and the stretch is searched too, so that the
+            // stretch stays one piece; it is text the search has already passed over.
+            int from = Math.Max(0, Math.Min(low, _cleanStart - _scanChunk));
+            int found = units[from.._cleanStart].LastIndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF);
+            WorkCounter.ScannedSubject(_cleanStart - from);
+            if (found >= 0)
+            {
+                _highSurrogateFound = true;
+                _cleanStart = from + found + 1;
+                return false;
+            }
+
+            _cleanStart = from;
+        }
+
+        if (high > _cleanEnd)
+        {
+            // Upwards, and the chunk stops at TextEnd: no match reads past it, so a surrogate there
+            // must not send the queries to the index.
+            int to = Math.Min(units.Length, Math.Max(high, Math.Min(TextEnd, _cleanEnd + _scanChunk)));
+            int found = units[_cleanEnd..to].IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF);
+            WorkCounter.ScannedSubject(to - _cleanEnd);
+            if (found >= 0)
+            {
+                _highSurrogateFound = true;
+                _cleanEnd += found;
+            }
+            else
+            {
+                _cleanEnd = to;
+            }
+        }
+
+        return high <= _cleanEnd;
+    }
 
     private CharacterIndex? _characterIndex;
 
     /// <summary>
-    /// The sampled position table that converts between a character count and a position when
-    /// <see cref="OneUnitPerCharacter"/> is <see langword="false"/>, building it on first use.
+    /// The sampled position table that converts between a character count and a position over a
+    /// stretch <see cref="NoHighSurrogateIn"/> cannot vouch for, building it on first use.
     /// </summary>
     /// <remarks>
     /// A method rather than a property because the first call walks the whole subject. Built lazily
@@ -1158,10 +1277,10 @@ internal sealed class MatchState : IDisposable
     /// <see cref="ArrayPool{T}.Shared"/>. Only <c>PoolDisciplineTests</c> passes anything else; see
     /// <see cref="ByteStack"/>.
     /// </param>
-    /// <param name="oneUnitPerCharacter">
-    /// <see cref="OneUnitPerCharacter"/> for this subject when an earlier state already worked it
-    /// out, or <see langword="null"/> to scan the subject for it. <see cref="Match.NextMatch"/>
-    /// passes it on so that a walk does not rescan the whole subject at every step.
+    /// <param name="scan">
+    /// What an earlier state of the same walk learnt about the subject's surrogates, or the default
+    /// for nothing. <see cref="Match.NextMatch"/> passes it on so that a walk does not search the
+    /// same units again at every step.
     /// </param>
     /// <param name="cache">
     /// The cache the state goes back to when it is disposed; only <see cref="MatchStateCache.Rent"/>
@@ -1179,12 +1298,12 @@ internal sealed class MatchState : IDisposable
         bool matchAll,
         MatchLimits limits,
         ArrayPool<byte>? pool = null,
-        bool? oneUnitPerCharacter = null,
+        SubjectScan scan = default,
         MatchStateCache? cache = null
     )
     {
         var state = new MatchState(pattern, pool, cache);
-        state.Init(text, start, end, overlapped, partial, visibleCaptures, matchAll, limits, oneUnitPerCharacter);
+        state.Init(text, start, end, overlapped, partial, visibleCaptures, matchAll, limits, scan);
         return state;
     }
 
@@ -1215,7 +1334,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
     /// <param name="matchAll">Whether the match must cover the whole slice.</param>
     /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
-    /// <param name="oneUnitPerCharacter">As for <see cref="Create"/>.</param>
+    /// <param name="scan">As for <see cref="Create"/>.</param>
     internal void Init(
         ReadOnlyMemory<char> text,
         int start,
@@ -1225,7 +1344,7 @@ internal sealed class MatchState : IDisposable
         bool visibleCaptures,
         bool matchAll,
         MatchLimits limits,
-        bool? oneUnitPerCharacter
+        SubjectScan scan
     )
     {
         WorkCounter.StateInitialised();
@@ -1235,12 +1354,9 @@ internal sealed class MatchState : IDisposable
         Text = text;
         TextLength = text.Length;
         CaptureTexts.Reset(text);
-        // The ushort form of the same search allocates nothing; the char form allocated 96 B on
-        // every call, even after tier-up, in Debug and Release (measured 2026-09-22, .NET 10).
-        // That 96 B was the whole of a warm IsMatch's allocation; AllocationTests pins the 0.
-        OneUnitPerCharacter =
-            oneUnitPerCharacter
-            ?? MemoryMarshal.Cast<char, ushort>(text.Span).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
+
+        // Nothing is searched here: NoHighSurrogateIn looks only as far as the match asks (D83).
+        (_cleanStart, _cleanEnd, _highSurrogateFound) = scan;
         _characterIndex = null;
 
         // What a new state holds by default, and a reused one must be given back. A call that

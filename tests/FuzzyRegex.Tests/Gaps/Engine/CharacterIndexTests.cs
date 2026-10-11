@@ -228,6 +228,96 @@ public sealed class CharacterIndexTests
         }
     }
 
+    /// <summary>
+    /// <see cref="Matcher.StepBy"/> and <see cref="Matcher.CountBetween"/> - the arithmetic over a
+    /// stretch <see cref="MatchState.NoHighSurrogateIn"/> vouches for, the shortcut to a slice bound,
+    /// and the index for the rest - against the walk, after a first query at <paramref name="warm"/>
+    /// has decided how much of the subject the state already knows (D83).
+    /// </summary>
+    private static string? FirstConversionDisagreement(string subject, int beginning, int end, int warm)
+    {
+        using MatchState state = StateFor(subject, beginning, end);
+        if (warm >= 0)
+        {
+            _ = state.NoHighSurrogateIn(warm, Math.Min(warm + 1, subject.Length));
+        }
+
+        int units = state.TextEnd;
+        for (int pos = 0; pos <= units; pos++)
+        {
+            for (long count = 0; count <= units + 1; count++)
+            {
+                int forward = Matcher.StepBy(state, pos, count, 1);
+                int walkedForward = WalkForward(state, pos, count, state.SliceEnd);
+                if (forward != walkedForward)
+                {
+                    return Describe(
+                        $"StepBy+ warm {warm}",
+                        subject,
+                        beginning,
+                        end,
+                        pos,
+                        count,
+                        forward,
+                        walkedForward
+                    );
+                }
+
+                int backward = Matcher.StepBy(state, pos, count, -1);
+                int walkedBackward = WalkBackward(state, pos, count, state.SliceStart);
+                if (backward != walkedBackward)
+                {
+                    return Describe(
+                        $"StepBy- warm {warm}",
+                        subject,
+                        beginning,
+                        end,
+                        pos,
+                        count,
+                        backward,
+                        walkedBackward
+                    );
+                }
+            }
+
+            for (int other = 0; other <= units; other++)
+            {
+                long counted = Matcher.CountBetween(state, pos, other);
+                long walked = WalkCount(state, pos, other);
+                if (counted != walked)
+                {
+                    return Describe($"CountBetween warm {warm}", subject, beginning, end, pos, other, counted, walked);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(2)]
+    [Arguments(3)]
+    public void The_matchers_conversions_agree_with_the_walk_whatever_the_state_already_knows(int length)
+    {
+        // Every slice of every short subject, with the state's clean stretch seeded from each unit
+        // in turn (and from nothing), so that queries land inside it, straddle it, sit beyond a high
+        // surrogate it stopped at, and start from nothing. The answers must not depend on any of it.
+        foreach (string subject in AllSubjectsOfLength(length))
+        {
+            for (int beginning = 0; beginning <= subject.Length; beginning++)
+            {
+                for (int end = beginning; end <= subject.Length; end++)
+                {
+                    for (int warm = -1; warm < subject.Length; warm++)
+                    {
+                        FirstConversionDisagreement(subject, beginning, end, warm).Should().BeNull();
+                    }
+                }
+            }
+        }
+    }
+
     [Test]
     public void The_index_agrees_with_the_walk_across_its_sampling_stride()
     {

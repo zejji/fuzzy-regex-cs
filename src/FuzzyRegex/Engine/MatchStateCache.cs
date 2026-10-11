@@ -48,7 +48,7 @@ internal sealed class MatchStateCache
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
     /// <param name="matchAll">Whether the match must cover the whole slice.</param>
     /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
-    /// <param name="oneUnitPerCharacter">What a previous state already knows about the subject.</param>
+    /// <param name="scan">What a previous state already knows about the subject.</param>
     /// <param name="pool">
     /// A pool other than the shared one, which only <c>PoolDisciplineTests</c> passes. It gets a
     /// state of its own that is never kept, so the kept state never rents from a test's pool.
@@ -66,7 +66,7 @@ internal sealed class MatchStateCache
         bool visibleCaptures,
         bool matchAll,
         MatchLimits limits,
-        bool? oneUnitPerCharacter = null,
+        SubjectScan scan = default,
         ArrayPool<byte>? pool = null
     )
     {
@@ -83,7 +83,7 @@ internal sealed class MatchStateCache
                 matchAll,
                 limits,
                 pool,
-                oneUnitPerCharacter
+                scan
             );
         }
 
@@ -100,12 +100,12 @@ internal sealed class MatchStateCache
                 visibleCaptures,
                 matchAll,
                 limits,
-                oneUnitPerCharacter: oneUnitPerCharacter,
+                scan: scan,
                 cache: this
             );
         }
 
-        state.Init(text, start, end, overlapped, partial, visibleCaptures, matchAll, limits, oneUnitPerCharacter);
+        state.Init(text, start, end, overlapped, partial, visibleCaptures, matchAll, limits, scan);
         return state;
     }
 
