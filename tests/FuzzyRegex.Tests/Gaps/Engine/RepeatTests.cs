@@ -270,6 +270,52 @@ public sealed class RepeatTests
         Search("(?V1)[^k]??ss", "ass").Should().Be("(0,3)");
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A greedy repeat of one character gives back to a full-folded literal whose text holds the
+    /// expanding character itself. Ledger entry 80, the greedy sibling of entry 38.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's GREEDY_REPEAT_ONE backtrack arm for a STRING_FLD tail adds up the tail's FOLDED
+    /// length (3 for <c>ßa</c>, which folds to 'ssa') and uses it as a text offset:
+    /// <c>pos = max(pos + 1, slice_start + folded_length)</c>, then
+    /// <c>string_search_fld(..., pos - folded_length, limit, ...)</c>
+    /// (<c>upstream/src/_regex.c:16118-16129</c>; the reversed twin is at <c>:16066-16080</c>).
+    /// Over 'ßa' the literal spans two text positions, so the start overshoots <c>limit</c> and the
+    /// search never runs. The bare literal, the lazy repeat and the folded subject 'ssa' all match.
+    /// Measured 2026-10-11 against regex 2026.9.10 (confirmation sweep, seed 554621207 row 27187).
+    /// </remarks>
+    [Test]
+    public void A_greedy_repeat_gives_back_to_a_full_folded_literal_whose_text_is_shorter_than_its_folding()
+    {
+        // regex 2026.9.10: fullmatch(r'(?fi)\w*ßa', 'ßa') -> None
+        new FuzzyRegex(@"(?fi)\w*ßa")
+            .FullMatch("ßa")
+            .Length.Should()
+            .Be(2);
+
+        // regex 2026.9.10: search(r'(?fi)\w*ßa', 'xxßa') -> None
+        Search(@"(?fi)\w*ßa", "xxßa").Should().Be("(0,4)");
+
+        // regex 2026.9.10: fullmatch(r'(?fi)\w*ffi', 'ﬃ') -> None
+        new FuzzyRegex(@"(?fi)\w*ffi")
+            .FullMatch("ﬃ")
+            .Length.Should()
+            .Be(1);
+
+        // regex 2026.9.10: fullmatch(r'(?fi)(?r)ßa\w*', 'ßa') -> None (the reversed twin)
+        new FuzzyRegex(@"(?fi)(?r)ßa\w*")
+            .FullMatch("ßa")
+            .Length.Should()
+            .Be(2);
+
+        // The controls, on which the two engines agree: the bare literal, the lazy repeat and the
+        // folded subject. regex 2026.9.10 gives (0, 2), (0, 2) and (0, 3).
+        Search("(?fi)ßa", "ßa").Should().Be("(0,2)");
+        Search(@"(?fi)\w*?ßa", "ßa").Should().Be("(0,2)");
+        Search(@"(?fi)\w*ßa", "ssa").Should().Be("(0,3)");
+    }
+
     [Test]
     [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
