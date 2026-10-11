@@ -434,6 +434,13 @@ promise. It holds firmly the other way round: where some longer text does comple
 partial call never answers no match, so a caller that stops reading at the first no match never
 misses one.
 
+A fuzzy partial's `FuzzyCounts` and `FuzzyChanges` are the errors of the path that was still open,
+and they stay within the limits of every fuzzy section around that point, including sections
+that had not closed yet. More text can only add errors, so a path already over a limit could never
+complete, and the engine does not report it. In `(?:(?:b){e<=2}){i<=1}x` over 'c', the inner
+section could substitute 'c' for 'b', but the outer `{i<=1}` allows only insertions, so the
+partial is the insertion that 'cbx' completes.
+
 `Match.Groups` (a `GroupCollection`) is both an ordered list and an `IReadOnlyDictionary<string, Group>`: index it by
 number (`match.Groups[1]`) or by name (`match.Groups["year"]`), and use `ContainsKey`,
 `TryGetValue`, `Keys` and `Values` exactly as on any dictionary. Before matching,

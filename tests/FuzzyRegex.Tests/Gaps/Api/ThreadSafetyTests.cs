@@ -829,6 +829,8 @@ public sealed class ThreadSafetyTests
             // D67 added TailRunOutAsBeforeD67, likewise set only by
             // OracleComparer.RunWithTheUpstreamTailRunOut.
             "PatternObject.TailRunOutAsBeforeD67",
+            // D81 added RunOutAsBeforeD81, likewise set only by OracleComparer's named ablations.
+            "PatternObject.RunOutAsBeforeD81",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
@@ -863,6 +865,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
             "PatternObject.UseRepeatMemo",
+            // D81 added these two, written by Compile after the node-numbering loop.
+            "PatternObject.NestsFuzzySections",
+            "PatternObject.KeepsSectionLinks",
             // The capture-dependent call guard added one, written in Compile beside MemoGroups.
             "PatternObject.CallReadGroups",
             "PatternObject.CapturesAgainstDirection",
