@@ -13,8 +13,10 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// units, so the same conversion is a question that has to be answered.
 /// </para>
 /// <para>
-/// <see cref="MatchState.OneUnitPerCharacter"/> answers it by arithmetic for a subject with no
-/// surrogate pair in it, which is nearly all of them. This type answers it for the rest. Without
+/// <see cref="MatchState.NoHighSurrogateIn"/> lets it be answered by arithmetic over a stretch with
+/// no surrogate pair in it, which is nearly every stretch of nearly every subject. This type answers
+/// it for the rest. It is built the first time a query meets a high surrogate, by one walk from 0 to
+/// <see cref="MatchState.TextEnd"/>, once per state. Without
 /// either, <see cref="Matcher.StepBy"/> and <see cref="Matcher.CountBetween"/> walk the subject one
 /// character at a time, and because the repeat opcodes' backtrack arms call them once per repeat
 /// position, a walk makes the whole scan quadratic - measured at exactly 3n^2 walk steps before this

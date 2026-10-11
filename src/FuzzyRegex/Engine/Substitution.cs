@@ -92,7 +92,7 @@ internal static class Substitution
         // ever fails early may safely over-count; that reading was wrong, because the check gates
         // the NON-PARTIAL pass of a partial request and failing to fire suppresses the partial
         // retry. See the comment there.
-        if (!pattern.IsFuzzy && pattern.MinWidth > CodepointCount(input, start, end))
+        if (!pattern.IsFuzzy && HasFewerCodepointsThan(input, start, end, pattern.MinWidth))
         {
             replacements = 0;
             return input;
@@ -178,22 +178,44 @@ internal static class Substitution
     }
 
     /// <summary>
-    /// How many codepoints a stretch of the subject holds, which is what upstream's
-    /// <c>min_width</c> counts.
+    /// Whether a stretch of the subject holds fewer than <paramref name="width"/> codepoints, which
+    /// is what upstream's <c>min_width</c> counts.
     /// </summary>
+    /// <remarks>
+    /// A codepoint is one or two UTF-16 code units, so the stretch's length settles the question
+    /// unless it lies between <paramref name="width"/> and <c>2 * width - 1</c> units, and then only
+    /// that many units are counted. Before D83 this counted every codepoint of the input on every
+    /// call of a non-fuzzy pattern, whatever its width.
+    /// </remarks>
     /// <param name="text">The subject.</param>
     /// <param name="start">Where the stretch starts.</param>
     /// <param name="end">One past where it ends.</param>
-    /// <returns>The codepoint count.</returns>
-    private static int CodepointCount(string text, int start, int end)
+    /// <param name="width">The pattern's minimum width, in codepoints.</param>
+    /// <returns>Whether the pattern cannot fit.</returns>
+    private static bool HasFewerCodepointsThan(string text, int start, int end, long width)
     {
-        int count = 0;
-        foreach (Rune _ in text.AsSpan(start, end - start).EnumerateRunes())
+        int units = end - start;
+        if (units < width)
         {
-            count++;
+            return true;
         }
 
-        return count;
+        if (width <= units / 2)
+        {
+            return false;
+        }
+
+        WorkCounter.ScannedSubject(units);
+        long count = 0;
+        foreach (Rune _ in text.AsSpan(start, units).EnumerateRunes())
+        {
+            if (++count >= width)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

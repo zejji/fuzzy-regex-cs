@@ -32,11 +32,11 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// <para>
 /// <b>One <see cref="MatchState"/> per operation, never one per match.</b> Upstream keeps one
 /// across a whole scan and its <c>Scanner_Type</c> owns it, and since the 2026-09-01 quadratic fix
-/// this is a performance cliff rather than a style point: building a state costs one vectorised
-/// pass over the subject, and a surrogate pair costs a second pass to build
-/// <see cref="CharacterIndex"/>. Shared across a scan both amortise to nothing; created per match
-/// they make a find-all over a long subject quadratic again, with every correctness test still
-/// green. DECISIONS 2026-09-01.
+/// this is a performance cliff rather than a style point: a state searches the subject for high
+/// surrogates as far as its queries reach (<see cref="MatchState.NoHighSurrogateIn"/>), and a
+/// surrogate pair in reach costs a pass to build <see cref="CharacterIndex"/>. Shared across a
+/// scan both amortise to nothing; created per match they make a find-all over a long subject
+/// quadratic again, with every correctness test still green. DECISIONS 2026-09-01.
 /// </para>
 /// <para>
 /// Upstream's <c>Scanner_Type</c> and <c>Splitter_Type</c> as public objects, and their
@@ -218,9 +218,9 @@ internal static class Iteration
     /// A state per call used to cost a vectorised pass over the whole subject per match, looking
     /// for a surrogate pair, which made a <c>NextMatch</c> walk to the end quadratic (DECISIONS
     /// 2026-09-01; S58 measured the pass at 33.6 microseconds a step on 1 MB). Since S61 the match
-    /// carries the answer and <paramref name="oneUnitPerCharacter"/> hands it on, so a step costs
-    /// what a state costs and no more. The <see cref="CharacterIndex"/> a subject with a surrogate
-    /// pair needs is still rebuilt per step, and only if the pattern asks for it.
+    /// carries what its state learnt and <paramref name="scan"/> hands it on, so a step searches
+    /// only units no earlier step searched (D83). The <see cref="CharacterIndex"/> a subject with a
+    /// surrogate pair in reach needs is still rebuilt per step, and only if the pattern asks for it.
     /// </para>
     /// </remarks>
     /// <param name="regex">The pattern that produced the match.</param>
@@ -230,7 +230,7 @@ internal static class Iteration
     /// <param name="sliceStart">Where the slice it was found in starts.</param>
     /// <param name="sliceEnd">One past where that slice ends.</param>
     /// <param name="overlapped">Whether the scan it came from allowed matches to overlap.</param>
-    /// <param name="oneUnitPerCharacter">
+    /// <param name="scan">
     /// What the state that found the match knew about the subject; see
     /// <see cref="MatchState.Create"/>.
     /// </param>
@@ -252,7 +252,7 @@ internal static class Iteration
         int sliceStart,
         int sliceEnd,
         bool overlapped,
-        bool oneUnitPerCharacter
+        SubjectScan scan
     ) =>
         Step(
             regex,
@@ -263,7 +263,7 @@ internal static class Iteration
             partial: false,
             regex.PatternLimits,
             resumeAfter: (matchStart, matchEnd),
-            oneUnitPerCharacter
+            scan
         );
 
     /// <summary>
@@ -282,7 +282,7 @@ internal static class Iteration
     /// The previous match's (start, end) in the subject, or <see langword="null"/> to start the
     /// walk.
     /// </param>
-    /// <param name="oneUnitPerCharacter">Passed to <see cref="MatchState.Create"/>.</param>
+    /// <param name="scan">Passed to <see cref="MatchState.Create"/>.</param>
     /// <returns>The match, or an unsuccessful match if there is none.</returns>
     private static Match Step(
         FuzzyRegex regex,
@@ -293,7 +293,7 @@ internal static class Iteration
         bool partial,
         MatchLimits limits,
         (int Start, int End)? resumeAfter,
-        bool? oneUnitPerCharacter
+        SubjectScan scan
     )
     {
         using var state = regex.StateCache.Rent(
@@ -307,7 +307,7 @@ internal static class Iteration
             visibleCaptures: true,
             matchAll: false,
             limits,
-            oneUnitPerCharacter: oneUnitPerCharacter
+            scan: scan
         );
 
         if (resumeAfter is { } previous)

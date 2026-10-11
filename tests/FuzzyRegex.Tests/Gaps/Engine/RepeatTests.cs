@@ -143,8 +143,8 @@ public sealed class RepeatTests
     [Test]
     public void A_repeat_counts_a_lone_surrogate_as_one_character_and_a_pair_as_one_character()
     {
-        // The boundary of 'MatchState.OneUnitPerCharacter', which decides whether the repeat arms
-        // convert a count to a position by arithmetic or by walking. The flag is off for any subject
+        // The boundary of 'MatchState.NoHighSurrogateIn', which decides whether the repeat arms
+        // convert a count to a position by arithmetic or by walking. It answers no for any stretch
         // holding a high surrogate, so this subject takes the walk - and it holds both a *lone* high
         // surrogate, which is one character and one code unit, and a well-formed pair, which is one
         // character and two. A predicate that looked for pairs rather than for high surrogates would

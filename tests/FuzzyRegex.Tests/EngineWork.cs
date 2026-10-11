@@ -108,6 +108,22 @@ internal static class EngineWork
     }
 
     /// <summary>
+    /// Runs <paramref name="action"/> and asserts it examined at most <paramref name="maxUnits"/>
+    /// code units of the subject outside the match: see <see cref="WorkCounter.SubjectUnitsScanned"/>.
+    /// </summary>
+    /// <param name="action">The call to measure, with its own answer assertions.</param>
+    /// <param name="maxUnits">The bound.</param>
+    /// <param name="because">What the bound guards.</param>
+    internal static void ShouldScanAtMostUnits(Action action, long maxUnits, string because)
+    {
+        RequireCategory();
+        long before = WorkCounter.SubjectUnitsScanned;
+        action();
+        SkipUnlessCounting();
+        (WorkCounter.SubjectUnitsScanned - before).Should().BeLessThanOrEqualTo(maxUnits, because);
+    }
+
+    /// <summary>
     /// Runs <paramref name="action"/> and asserts it initialised exactly <paramref name="expected"/>
     /// match states.
     /// </summary>

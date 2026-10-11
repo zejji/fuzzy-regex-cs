@@ -74,10 +74,8 @@ public sealed class MatchStateCacheTests
             regex.PatternLimits
         );
         _ = Matcher.DoMatch(first, search: true);
-        if (!first.OneUnitPerCharacter)
-        {
-            _ = first.GetCharacterIndex();
-        }
+        _ = first.GetCharacterIndex();
+        _ = first.NoHighSurrogateIn(0, dirty.Length);
 
         cache.Return(first);
 
