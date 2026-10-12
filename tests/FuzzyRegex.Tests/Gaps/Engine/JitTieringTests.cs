@@ -35,6 +35,13 @@ public sealed class JitTieringTests
     [Test]
     public void The_matching_code_has_no_stackalloc_but_the_input_sized_ones()
     {
+        // Tiering is a JIT matter, and a native AOT binary has no IL to read: GetMethodBody throws
+        // PlatformNotSupportedException there.
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("no IL under native AOT; this rule runs under the JIT in the build-and-ratchet job");
+        }
+
         IEnumerable<Type> types = typeof(Matcher)
             .Assembly.GetTypes()
             .Where(static type =>
