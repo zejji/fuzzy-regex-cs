@@ -6568,4 +6568,49 @@ section checks its limits only at its END_FUZZY. This port checks every open sec
 limits at the run-out (`Matcher.AnOpenSectionIsOverItsLimits`, owner decision 2026-10-11, option
 (b)) and backtracks to a legal path or None. `PatternObject.RunOutAsBeforeD81` restores upstream's
 behaviour for the oracle's ablations. Pinned by `Gaps/Engine/PartialEnclosingSectionLimitTests`
-and the judged rows 101045221/24643, 77181735/40114 and 1061489043/24385.
+and the judged rows 101045221/24643, 77181735/40114, 1061489043/24385 and 7/24857 (the
+scheduled seed-7 row, red on 2026-10-12 because CI ran a9ea2c95, before D81).
+
+## 82. A lazy repeat before a full-folded literal reports a partial match where none can start - DIVERGES HERE (no defect row, 2026-10-12)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. Draft report: `entry-82-lazy-repeat-full-fold-phantom-partial.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-12, `partial=True`:
+
+```
+search(r'(?if)a*?b', '-')     -> P(0,1)    here P(1,1)
+match(r'(?if)a*?b', '-')      -> P(0,1)    here None
+search(r'(?if)a*?b', '--')    -> P(1,2)    here P(2,2)
+search(r'(?if)a{0,5}?b', '-') -> P(0,1)    here P(1,1)
+search(r'(?i)a*?b', '-')      -> P(1,1)    the same
+search(r'a*?b', '-')          -> P(1,1)    the same
+match(r'(?if)a*?b', '-c')     -> None      the same
+```
+
+**Why upstream is wrong.** Neither `a` nor `b` matches '-', so no text that begins '-' can ever
+complete `a*?b` from position 0; `upstream/README.rst:270` defines a partial match as one whose
+completion "could be possible if the string had not been truncated". The simple-folding and
+no-folding forms agree, and so does upstream itself one character later ('-c': None). PCRE2 10.47
+gives no partial for `(?i)a*?b` over '-' under PARTIAL_SOFT (measured 2026-10-12 with the
+`tools/probes/pcre2-hitend-partial-span.py` driver).
+
+**Mechanism.** When the lazy repeat takes one more character, the LAZY_REPEAT_ONE backtrack arm
+for a STRING_FLD tail searches from `pos + 1` and returns RE_ERROR_PARTIAL as soon as
+`string_search_fld` reports running out of text (`_regex.c:16764-16767`), before the loop that
+checks the repeat can take the characters in between (`:16776-16786`). Over '-' the search starts
+at the end of the text, so it is "partial" at once, and the attempt at 0 answers it. The STRING arm
+(`:16709`) clamps `limit` to `slice_end - length` first, so its search range is empty there. The
+reversed arm (`:16819-16822`) has the same order; `(?if)(?r)ba*?` over '-' gives P(0,1) too, and so
+does `(?i)(?r)ba*?` (not traced; a reversed IGNORECASE arm may share it).
+Same function and tail as entries 38 and 80, a different defect.
+
+**Proposed fix upstream:** when `string_search_fld` reports a partial at `found`, check the
+repeat can take `pos .. found` (the `match_one` loop) before returning RE_ERROR_PARTIAL.
+
+**This port.** It ports only the default arm of that switch, which tries the tail at each position
+in turn, so it answers P(1,1). Found by oracle seed 7 row 35060 (`partial-sliced`), red on the
+schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE|FULLCASE over
+'‍', upstream P(0,1), here P(1,1) with group 1 at (1,1) (groups set by a partial: entry 74).
+Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
+and the judged row 7/35060.
