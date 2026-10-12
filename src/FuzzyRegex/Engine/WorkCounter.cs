@@ -63,6 +63,14 @@ internal static class WorkCounter
     internal static long GuardListsKept { get; private set; }
 
     /// <summary>
+    /// Repeat guard lookups on this thread (<c>MatchState.IsRepeatGuarded</c>). A single-character
+    /// repeat that gives back characters asks once per character and counts no step, so this is
+    /// where a nested repeat's work shows when the step count does not.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long GuardChecks { get; private set; }
+
+    /// <summary>
     /// Code units of the subject examined on this thread for a reason that has nothing to do with
     /// the match: looking for a high surrogate (<see cref="MatchState"/>) or
     /// counting codepoints for a width shortcut (<c>Substitution</c>). A call that did either over the
@@ -137,6 +145,10 @@ internal static class WorkCounter
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]
     internal static void GuardListKept() => GuardListsKept++;
+
+    /// <summary>Counts one repeat guard lookup.</summary>
+    [Conditional("DEBUG")]
+    internal static void GuardChecked() => GuardChecks++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

@@ -293,6 +293,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<StatesInitialised>k__BackingField",
                 "WorkCounter.<StepLimit>k__BackingField",
@@ -750,6 +751,8 @@ public sealed class ThreadSafetyTests
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",
+            // Option B: written by Optimiser.KeepFailureMemosSound inside Compile.
+            "PatternObject.KeepsFailureMemosAcrossAttempts",
             // D17 added TestedGroups, written by Optimiser.CollectTestedGroups inside Compile.
             "PatternObject.TestedGroups",
             // And LargestFuzzyLimit, written by Optimiser.FindFuzzyLimit inside Compile.
