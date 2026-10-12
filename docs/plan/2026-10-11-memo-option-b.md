@@ -218,3 +218,36 @@ Build the narrow B as one Phase 7 slice: red step-budget tests, then the change 
 the differential, oracle, AOT. Widen to `\G` later with its own grid if a workload wants it. The
 gain is large (an estimated 10x to 100x on the two rows) for a small, local divergence, which is
 the case the 2026-10-11 performance policy asks for.
+
+## Could not verify, and what the build found
+
+Added 2026-10-12, after the build on `perf/memo-option-b`.
+
+- **"Later starts cost a constant" holds for the words row, not for the nested row.** A Debug step
+  count per attempt (main against the branch, n = 50 to 400) shows `(\w+\s?)+$` at 19 steps per
+  later start on the branch at every n, against 943 to 7,523 on main. `(a+)+c` falls from about
+  8.4n to about 2.5n steps per later start, but stays linear in n. The cause is in the compiler,
+  not in B: `NodeCompiler.BuildRepeat` (`NodeCompiler.cs:1596-1641`, upstream's shape) copies the
+  minimum count out of a repeat whose body holds a repeat, so `(a+)+` compiles as `(a+)(a+)*`. The
+  copied `a+` is not a memo repeat, so every start walks the run again through it. The search goes
+  from cubic to quadratic in guard lookups (growth per doubling 7.3x on main, 3.9x with B), not to
+  the near-linear the estimate above assumed.
+- **Measured instead of the estimates** (gap harness, Release, P-cores, best of three 3 s runs):
+  `(a+)+c` 21.0 ms to 2.2 ms at n = 200 and 147 ms to 9.1 ms at n = 400; `(\w+\s?)+$` 89.9 ms to
+  0.63 ms at n = 200 and 372 ms to 1.30 ms at n = 400. The nested row lands inside the 0.5 to 2 ms
+  estimate's order of magnitude but above it; the words row matches it.
+- **The first backreference witness tried, `(.)(?:a|a)+\1`, cannot witness anything.** The optimiser reduces `(?:a|a)` to a
+  one-character `a+`, which has no failure memo. The backreference witnesses that do go red with the
+  exclusion deleted are `(b*)(?:(a))+\1c` over `abaac` (2, 5) and over `baacb` (1, 4).
+- **No witness for the partial, `\G`, group-call and fuzzy exclusions.** Grids of 43,680 rows each
+  (120 patterns over subjects from `{a, b, c}` up to length 5) with one exclusion deleted at a time
+  found 0 differences for partial, `\G` and group calls, against 173 for backreferences and 821 for
+  group-exists conditionals. Under fuzzy matching the guards are never read
+  (`MatchState.IsRepeatGuarded`). All four exclusions stay, as conservative choices.
+- **Differential against main:** 112,608 rows (memo-biased plus the two existing generators), port
+  probe on Release builds of both: outputs identical by `cmp` after the per-row time is stripped.
+
+Follow-up, not in this slice: let the copied first iteration share the memo (or compile `(X)+`,
+with X holding a repeat, as one memo repeat with minimum 1). That would make the nested row's later
+starts constant too. It changes upstream's compiled shape, which every guard argument relies on,
+so it needs its own design note and witness grid.
