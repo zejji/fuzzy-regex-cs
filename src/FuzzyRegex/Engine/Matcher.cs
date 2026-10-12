@@ -263,12 +263,6 @@ internal static class Seam
 internal static class Matcher
 {
     /// <summary>
-    /// How many attempts in a row may start on a leading unit before the fold-aware screen stops
-    /// sweeping for the rest of the call: text that dense gains nothing from the sweep.
-    /// </summary>
-    private const int _denseLeadingUnits = 16;
-
-    /// <summary>
     /// Upstream <c>same_char</c> (<c>upstream/src/_regex.c</c> line 2838).
     /// </summary>
     /// <param name="ch1">One codepoint.</param>
@@ -12532,6 +12526,36 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S (2026-10-11). The fold-aware leading-unit screen for <see cref="BasicMatchCore"/>:
+    /// the first position at or after <paramref name="foundPos"/>, inside the slice, that holds one of
+    /// the pattern's leading units, and the end of the run of units it stands in, so the attempts
+    /// up to there need no screen. Kept out of line: inlined, the <see cref="SearchValues{T}"/> calls
+    /// grew the hot loop by about 4 KB and slowed every search through it by about 5%, screened or
+    /// not (pinned gap harness, 'sScC' row with the units nulled, 2026-10-12).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="foundPos">Where the next attempt would start.</param>
+    /// <param name="leadingUnits">The pattern's leading units.</param>
+    /// <returns>
+    /// The position, or -1 if no unit is left in the slice, and the end of the run of units that
+    /// starts there (exclusive). Only the end of a run already stood on is swept for: an attempt
+    /// the screen moved to a unit learns only that one.
+    /// </returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (int Start, int End) NextLeadingUnit(MatchState state, int foundPos, SearchValues<char> leadingUnits)
+    {
+        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        if (foundPos < text.Length && leadingUnits.Contains(text[foundPos]))
+        {
+            int run = text[(foundPos + 1)..].IndexOfAnyExcept(leadingUnits);
+            return (foundPos, run < 0 ? text.Length : foundPos + 1 + run);
+        }
+
+        int at = text[foundPos..].IndexOfAny(leadingUnits);
+        return at < 0 ? (-1, 0) : (foundPos + at, foundPos + at + 1);
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -12657,7 +12681,7 @@ internal static class Matcher
         bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
         SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
         SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
-        int leadingUnitHits = 0;
+        int leadingUnitsEnd = 0;
 
         Node node;
         int status;
@@ -12834,29 +12858,15 @@ internal static class Matcher
 
             foundPos += at;
         }
-        else if (leadingUnits is not null && foundPos <= state.SliceEnd)
+        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
         {
-            // Every match takes at least one character, which starts on one of the units. Where
-            // the attempt already stands on one there is nothing to skip, and on text that is all
-            // hits the screen only adds cost (1.14x on 100K units of 'sScC', 2026-10-11), so after
-            // _denseLeadingUnits hits in a row it stands down for the rest of the call.
-            if (foundPos < state.SliceEnd && leadingUnits.Contains(state.Text.Span[foundPos]))
+            // Every match takes at least one character, which starts on one of the units. Below
+            // leadingUnitsEnd the attempt is known to stand on one, so text that is all hits pays
+            // one sweep for the run, not one call per attempt (NextLeadingUnit).
+            (foundPos, leadingUnitsEnd) = NextLeadingUnit(state, foundPos, leadingUnits);
+            if (foundPos < 0)
             {
-                if (++leadingUnitHits >= _denseLeadingUnits)
-                {
-                    leadingUnits = null;
-                }
-            }
-            else
-            {
-                leadingUnitHits = 0;
-                int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingUnits);
-                if (at < 0)
-                {
-                    return MatchStatus.Failure;
-                }
-
-                foundPos += at;
+                return MatchStatus.Failure;
             }
         }
 

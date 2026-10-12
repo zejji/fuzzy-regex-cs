@@ -197,12 +197,13 @@ public sealed class LeadingUnitsTests
     }
 
     /// <summary>
-    /// Forty hits in a row make the screen stand down for the rest of the call; the matches after
-    /// them, one past a gap and one past more hits, are still found.
+    /// The screen sweeps a run of units once and lets the attempts inside it through unscreened; the
+    /// matches past a run of forty, one after a gap and one starting on the last unit of a second
+    /// run, are still found.
     /// </summary>
     [Test]
     [Property("Upstream", "regex 2026.9.10, finditer, 2026-10-11: (50, 54), (74, 80)")]
-    public void A_screen_that_stands_down_on_dense_hits_still_finds_every_match()
+    public void A_run_of_units_screened_once_still_finds_every_match()
     {
         string subject =
             string.Concat(Enumerable.Repeat("sS", 20)) + "xxxxxxxxxx" + "café" + new string('ſ', 20) + "Straße";
