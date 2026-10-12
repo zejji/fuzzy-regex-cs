@@ -18345,8 +18345,17 @@ internal static class Matcher
                     // Clear the groups.
                     state.ClearGroups();
 
-                    // Reset the guards.
-                    state.ResetGuards();
+                    // Reset the guards. sync-divergence: upstream resets every guard list at every
+                    // start position (_regex.c:15745, reset_guards) / the body lists of failure-memo
+                    // repeats survive to the next start, unless the call is partial / a failure
+                    // memo records "entering the body here fails", which no later attempt of the
+                    // pass can make true (PatternObject.KeepsFailureMemosAcrossAttempts), and
+                    // keeping it makes `(a+)+c` quadratic rather than cubic.
+                    // Re-aligning: if upstream changes what a body guard means, or what reset_guards
+                    // resets, re-check the argument there; nothing else moves.
+                    state.ResetGuards(
+                        pattern.KeepsFailureMemosAcrossAttempts && state.PartialSide == MatchState.PartialNone
+                    );
 
                     // Reset the stacks. Backtracking has popped every entry of the attempt, and each
                     // w-mark goes with its entry, so none is left for the next attempt (D11, A5).

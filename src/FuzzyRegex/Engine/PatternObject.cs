@@ -69,7 +69,8 @@ internal sealed class RepeatInfo
     /// Whether this repeat's body guard is a failure memo. <b>Not upstream.</b> When set,
     /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> do not mark the position where the body
     /// matched, so the failure recorded when the engine later backtracks past that position is
-    /// kept, and the body is never tried there again in the same attempt. That turns
+    /// kept, and the body is never tried there again in the same attempt (in the same search, where
+    /// <see cref="PatternObject.KeepsFailureMemosAcrossAttempts"/> holds). That turns
     /// <c>(?:a|a)+c</c> from exponential to linear.
     /// </summary>
     /// <remarks>
@@ -94,9 +95,9 @@ internal sealed class RepeatInfo
     /// condition is deleted: the maximum, backreferences, group-exists conditionals and a
     /// <c>\K</c> inside a construct. The rest
     /// have none. Differential grids of 7.6 million rows found no answer that changes when any one
-    /// of them is deleted (2026-09-26), and for most there is a reason. Guards are reset at every
-    /// start position, so a verb that ends the attempt leaves nothing behind for a later path to
-    /// misread. An atomic group, a lookaround and a conditional's test throw away the body's
+    /// of them is deleted (2026-09-26), and for most there is a reason. A pattern with a verb that
+    /// ends the attempt has no memo at all, so nothing it leaves behind is kept for a later start
+    /// (<see cref="PatternObject.KeepsFailureMemosAcrossAttempts"/>). An atomic group, a lookaround and a conditional's test throw away the body's
     /// backtrack entries once the body reaches its end, so a failure recorded inside one of them
     /// only ever means "cannot reach the end of the construct from here", a fact about the
     /// position; and a group call clears the guard lists on the way in and restores them on the
@@ -561,6 +562,26 @@ internal sealed class PatternObject
     /// excludes already.
     /// </remarks>
     internal bool KeepInSubmatch;
+
+    /// <summary>
+    /// Whether a search keeps the failure memos (<see cref="RepeatInfo.FailureMemo"/>) from one
+    /// start position to the next. <b>This port's own field</b>, written by
+    /// <c>Optimiser.KeepFailureMemosSound</c>: set when some repeat has a failure memo and the
+    /// pattern has no <c>\G</c>. A partial call resets the memos at every start all the same
+    /// (<c>Matcher.BasicMatch</c>, <c>FAILURE</c> arm).
+    /// </summary>
+    /// <remarks>
+    /// A failure memo says that entering the repeat's body at a position leads to no match.
+    /// Nothing the rest of the match reads changes between the attempts of one pass: captures are
+    /// read only by the constructs that switch the memo off, the text and the slice are the same,
+    /// and a match ending at the search anchor (rejected under <c>MustAdvance</c>) can only start
+    /// there, before every later attempt. So a failure recorded in one attempt holds in the next.
+    /// <c>\G</c> is excluded only because no workload needs it yet: it reads a position fixed for
+    /// the pass, so it is a fact about the position too. A partial call is excluded because the
+    /// touch flag that decides what <c>SUCCESS</c> does is set per attempt.
+    /// <c>docs/plan/2026-10-11-memo-option-b.md</c> gives the argument row by row.
+    /// </remarks>
+    internal bool KeepsFailureMemosAcrossAttempts;
 
     /// <summary>
     /// The private numbers of the groups a backreference or a conditional tests

@@ -50,6 +50,16 @@
     BenchmarkDotNet's --job. Recorded in the baseline, because two runs of different jobs are not
     comparable and a baseline that does not say which job produced it cannot be checked.
 
+.PARAMETER Cores
+    Which logical processors the benchmark processes may run on: `performance` (the default) or
+    `all`. On a hybrid processor an efficiency core runs this code about 1.6x slower than a
+    performance core, and Windows places each process where it likes, so an unpinned run can move a
+    row 1.6x between two runs of the same code (measured 2026-10-11 on the i7-13850HX: a fixed loop
+    took 90-110 ms on logical processors 0-15 and 156-183 ms on 16-27, and BCL control rows moved by
+    the same factor between runs). `performance` passes BenchmarkDotNet --affinity with the cores of
+    the highest efficiency class; on a processor with one kind of core it pins nothing. Recorded in
+    the baseline, like -Job.
+
 .PARAMETER BaselinePath
     Compare against this baseline file rather than the committed one for this machine. What the
     noise floor is measured with: two runs of an UNCHANGED tree, A recorded as a baseline and B
@@ -86,6 +96,8 @@ param(
     [string]$Filter = '*',
     [string]$ArtifactsPath = '.scratch/benchmark-artifacts',
     [string]$Job = '',
+    [ValidateSet('performance', 'all')]
+    [string]$Cores = 'performance',
     [string]$BaselinePath = '',
     # Defaults are this machine's measured floor - see bench/baselines/<machine-id>/noise-floor.md,
     # which records how they were taken and what they cover. They are NOT a guess to be tuned: a
@@ -116,6 +128,59 @@ function Get-RatioDigits([double]$Ratio) {
     $digits
 }
 
+# The affinity mask of the logical processors in the highest efficiency class (Windows numbers the
+# classes so that a higher one is a faster, less efficient core), or 0 when every core is in one
+# class and there is nothing to choose. Logical processor i is bit i.
+function Get-PerformanceCoreMask([int[]]$EfficiencyClasses) {
+    $top = ($EfficiencyClasses | Measure-Object -Maximum).Maximum
+    if (@($EfficiencyClasses | Where-Object { $_ -ne $top }).Count -eq 0) { return [long]0 }
+    [long]$mask = 0
+    for ($i = 0; $i -lt $EfficiencyClasses.Count; $i++) {
+        if ($EfficiencyClasses[$i] -eq $top) { $mask = $mask -bor ([long]1 -shl $i) }
+    }
+    $mask
+}
+
+# Each logical processor's efficiency class, from GetSystemCpuSetInformation, in logical processor
+# order. Processor group 0 only, which is all of a machine with 64 or fewer logical processors.
+function Get-EfficiencyClasses {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CpuSets {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetSystemCpuSetInformation(IntPtr information, int length, out int returned, IntPtr process, int flags);
+    public static int[] EfficiencyClasses() {
+        GetSystemCpuSetInformation(IntPtr.Zero, 0, out int length, IntPtr.Zero, 0);
+        IntPtr buffer = Marshal.AllocHGlobal(length);
+        try {
+            if (!GetSystemCpuSetInformation(buffer, length, out length, IntPtr.Zero, 0)) {
+                throw new System.ComponentModel.Win32Exception();
+            }
+            var classes = new System.Collections.Generic.SortedDictionary<int, int>();
+            for (int offset = 0; offset < length; ) {
+                // SYSTEM_CPU_SET_INFORMATION: Size (DWORD), Type (DWORD), then the CpuSet member:
+                // Id (DWORD) at 8, Group (WORD) at 12, LogicalProcessorIndex (BYTE) at 14,
+                // CoreIndex at 15, LastLevelCacheIndex at 16, NumaNodeIndex at 17, EfficiencyClass at 18.
+                int size = Marshal.ReadInt32(buffer, offset);
+                if (Marshal.ReadInt16(buffer, offset + 12) == 0) {
+                    classes[Marshal.ReadByte(buffer, offset + 14)] = Marshal.ReadByte(buffer, offset + 18);
+                }
+                offset += size;
+            }
+            var result = new int[classes.Count];
+            classes.Values.CopyTo(result, 0);
+            return result;
+        }
+        finally {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+}
+'@
+    [CpuSets]::EfficiencyClasses()
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $benchDir = Join-Path $repoRoot 'bench'
 $artifacts = Join-Path $repoRoot $ArtifactsPath
@@ -125,6 +190,13 @@ if (-not $UseExisting) {
 
     Write-Host "Running the benchmark suite (filter '$Filter'). This takes tens of minutes." -ForegroundColor Cyan
     $jobArgs = if ($Job) { @('--job', $Job) } else { @() }
+    if ($Cores -eq 'performance') {
+        $mask = Get-PerformanceCoreMask (Get-EfficiencyClasses)
+        if ($mask -ne 0) {
+            Write-Host "Pinned to performance cores (affinity mask $mask)." -ForegroundColor Cyan
+            $jobArgs += @('--affinity', $mask)
+        }
+    }
     Push-Location $benchDir
     try {
         dotnet run -c Release --project FuzzyRegex.Benchmarks -- `
@@ -246,6 +318,8 @@ if ($UpdateBaseline) {
         # spreads before any code changes - so a baseline that does not say which job it is cannot
         # be checked against a later run, only trusted.
         job        = if ($Job) { $Job } else { 'default' }
+        # Which cores, for the same reason: see -Cores.
+        cores      = $Cores
         # Recorded rather than assumed: BenchmarkDotNet flags a multimodal distribution when the
         # machine was not quiet, and a median carrying that flag should not be read to two decimal
         # places. Listing them here means the next reader sees which rows to distrust without
@@ -290,6 +364,13 @@ if ($baselineJob -ne 'unrecorded' -and $baselineJob -ne $thisJob) {
     Write-Host "CAUTION: the baseline was taken with --job $baselineJob and this run used $thisJob." -ForegroundColor Yellow
     Write-Host '  Different jobs have different spreads before any code changes, so these ratios mix' -ForegroundColor Yellow
     Write-Host '  a real difference with a measurement-method one. Re-run with the baseline"s job.' -ForegroundColor Yellow
+}
+$baselineCores = if ($baseline.PSObject.Properties['cores']) { $baseline.cores } else { 'unrecorded' }
+Write-Host "Cores:    baseline $baselineCores, this run $Cores"
+if ($baselineCores -ne $Cores) {
+    Write-Host "CAUTION: the baseline ran on $baselineCores cores and this run on $Cores cores." -ForegroundColor Yellow
+    Write-Host '  An efficiency core is about 1.6x slower than a performance core, so these ratios can' -ForegroundColor Yellow
+    Write-Host '  mix a real difference with where the processes ran. Re-take the baseline with -Cores.' -ForegroundColor Yellow
 }
 if ($NoiseFloor -gt 1 -or $AllocationNoiseFloor -gt 1 -or $AllocationSlackBytes -gt 0) {
     Write-Host ("Floor:    time {0:N2}x, allocation {1:N$(Get-RatioDigits $AllocationNoiseFloor)}x or {2} B - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor, $AllocationSlackBytes)

@@ -70,6 +70,13 @@ public sealed class JitTieringTests
     [Test]
     public void The_main_matching_loop_has_no_stackalloc()
     {
+        // Tiering is a JIT matter, and a native AOT binary has no IL to read: GetMethodBody throws
+        // PlatformNotSupportedException there.
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("no IL under native AOT; this rule runs under the JIT in the build-and-ratchet job");
+        }
+
         MethodInfo method = typeof(Matcher).GetMethod("BasicMatchCore", BindingFlags.Static | BindingFlags.NonPublic)!;
 
         HasLocalloc(method).Should().BeFalse("a stackalloc keeps the JIT from tiering the loop with profile data");

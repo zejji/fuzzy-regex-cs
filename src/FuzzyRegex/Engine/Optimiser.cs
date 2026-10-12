@@ -724,6 +724,10 @@ internal static class Optimiser
 
         if (!unsafePattern)
         {
+            // Option B (PatternObject.KeepsFailureMemosAcrossAttempts).
+            pattern.KeepsFailureMemosAcrossAttempts =
+                pattern.RepeatInfoList.Exists(static info => info.FailureMemo)
+                && !pattern.NodeList.Exists(static node => node.Op is Opcode.SearchAnchor);
             return;
         }
 
