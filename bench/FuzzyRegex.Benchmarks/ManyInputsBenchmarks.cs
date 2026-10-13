@@ -235,5 +235,44 @@ public class ManyInputsBenchmarks
         }
         return hits;
     }
+
+    /// <summary>
+    /// The full answer behind each row's returned number, per input, for the same-answer check
+    /// against Python (<see cref="AnswerText"/>): which inputs matched, where, and what a
+    /// substitution produced.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, Func<string>> AnswerDetails = new Dictionary<
+        string,
+        Func<string>
+    >
+    {
+        [nameof(FuzzyPhraseOneIsMatch)] = static () =>
+            AnswerText.Bitmap(UsageCorpus.Records.Select(s => _onePhrase.IsMatch(s))),
+        [nameof(FuzzyPhraseOneMatch)] = static () =>
+            string.Join('\n', UsageCorpus.Records.Select(r => AnswerText.Span(_onePhrase.Match(r)))),
+        [nameof(FuzzyPhraseOneEnhanced)] = static () =>
+            string.Join('\n', UsageCorpus.Records.Select(r => AnswerText.Span(_onePhraseEnhanced.Match(r)))),
+        [nameof(FuzzyPhraseThreeAlternation)] = static () =>
+            AnswerText.Bitmap(UsageCorpus.Records.Select(s => _phrasesAlternation.IsMatch(s))),
+        [nameof(FuzzyPhraseThreeNamedList)] = static () =>
+            AnswerText.Bitmap(UsageCorpus.Records.Select(s => _phrasesNamedList.IsMatch(s))),
+        [nameof(FuzzyPhraseThreeSeparatePasses)] = static () =>
+            string.Join(
+                '\n',
+                _phrasesSeparate.Select(p => AnswerText.Bitmap(UsageCorpus.Records.Select(s => p.IsMatch(s))))
+            ),
+        [nameof(ValidateEmails)] = static () => AnswerText.Bitmap(UsageCorpus.Emails.Select(s => _email.IsMatch(s))),
+        [nameof(ParseLogLines)] = static () =>
+            string.Join(
+                '\n',
+                UsageCorpus.LogLines.Select(l =>
+                    _logLine.Match(l) is { Success: true } m ? m.Groups["level"].Value : "-"
+                )
+            ),
+        [nameof(RedactDigits)] = static () =>
+            string.Join('\n', UsageCorpus.Records.Select(r => _digits.Replace(r, "#"))),
+        [nameof(CaseFoldAccented)] = static () =>
+            AnswerText.Bitmap(UsageCorpus.Accented.Select(s => _accented.IsMatch(s))),
+    };
 }
 #pragma warning restore S3267

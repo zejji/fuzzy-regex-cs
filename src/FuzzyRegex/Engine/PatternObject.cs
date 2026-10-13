@@ -619,6 +619,14 @@ internal sealed class PatternObject
     /// </summary>
     internal SearchValues<string>? LeadingStrings;
 
+    /// <summary>
+    /// The code units a search attempt can start on when the pattern opens with an alternation
+    /// whose every branch opens with a literal and at least one of those ignores case, or
+    /// <see langword="null"/>. <b>This port's own field</b> (2026-10-11, the fold-aware screen);
+    /// see <see cref="FindLeadingStrings"/>.
+    /// </summary>
+    internal SearchValues<char>? LeadingUnits;
+
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
 
@@ -1285,7 +1293,7 @@ internal sealed class PatternObject
 
         self.LeadingRepeat = FindLeadingRepeat(self);
 
-        self.LeadingStrings = FindLeadingStrings(self);
+        (self.LeadingStrings, self.LeadingUnits) = FindLeadingStrings(self);
 
         // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
         BranchChain.Build(self.NodeList);
@@ -1301,18 +1309,29 @@ internal sealed class PatternObject
     }
 
     /// <summary>
-    /// Finds <see cref="LeadingStrings"/>. Not upstream code: upstream has no fast search for a
-    /// pattern that opens with a branch, so it tries every position (S60b item 14).
-    /// sync-divergence: the search loop jumps to the earliest of these literals before each attempt.
+    /// Finds <see cref="LeadingStrings"/> or <see cref="LeadingUnits"/>. Not upstream code: upstream
+    /// has no fast search for a pattern that opens with a branch, so it tries every position (S60b
+    /// item 14; for case-insensitive branches, 2026-10-11).
+    /// sync-divergence: the search loop jumps to the earliest of these literals, or of these code
+    /// units, before each attempt.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A match of <c>cat|dog</c> starts where <c>cat</c> or <c>dog</c> does, so no attempt anywhere
     /// else can succeed, and the engine still chooses the branch. The walk follows each branch to
     /// its first node, looking through capture groups, which record where they open and do not read
-    /// text, and nested branches. Every path must reach a case-sensitive forward literal. Anything
-    /// else, such as an empty branch, a class, a lookaround or an anchor, gives
-    /// <see langword="null"/>.
+    /// text, and nested branches. Every path must reach a forward literal. Anything else, such as an
+    /// empty branch, a class, a lookaround or an anchor, gives <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// When every literal is case-sensitive the result is the literals themselves, since a search
+    /// for whole strings skips more than one for first characters. When one ignores case, which
+    /// under full case folding can let <c>ﬅ</c> start <c>st</c> or <c>ß</c> start <c>ss</c>, the
+    /// result is the first UTF-16 unit of every character that could start any of them, by the
+    /// rule <see cref="RequiredStringScreen.FirstCodepoints"/> applies to a required string. An
+    /// astral character contributes only its high surrogate, so a hit is never inside a pair; a
+    /// lone high surrogate in the subject is then a harmless false hit. A LOCALE node never gets
+    /// here: construction rejects case-insensitive LOCALE matching.
     /// </para>
     /// <para>
     /// A literal holding a surrogate code point on its own is refused. A search for a lone low
@@ -1324,20 +1343,47 @@ internal sealed class PatternObject
     /// </para>
     /// </remarks>
     /// <param name="pattern">The compiled pattern.</param>
-    /// <returns>The literals, or <see langword="null"/>.</returns>
-    private static SearchValues<string>? FindLeadingStrings(PatternObject pattern)
+    /// <returns>The literals or the code units, at most one of them set.</returns>
+    private static (SearchValues<string>? Strings, SearchValues<char>? Units) FindLeadingStrings(PatternObject pattern)
     {
         if (pattern.IsFuzzy || (pattern.Flags & RegexFlags.Reverse) != 0)
         {
-            return null;
+            return (null, null);
         }
 
-        var strings = new List<string>();
+        var heads = new List<Node>();
         int branches = 0;
 
-        return Collect(pattern.StartNode) && branches > 0
-            ? SearchValues.Create([.. strings], StringComparison.Ordinal)
-            : null;
+        if (!Collect(pattern.StartNode) || branches == 0)
+        {
+            return (null, null);
+        }
+
+        if (heads.TrueForAll(static head => head.Op is Opcode.String or Opcode.Character))
+        {
+            return (
+                SearchValues.Create(
+                    [
+                        .. heads.Select(static head =>
+                            string.Concat(head.Values.Select(static c => char.ConvertFromUtf32((int)c)))
+                        ),
+                    ],
+                    StringComparison.Ordinal
+                ),
+                null
+            );
+        }
+
+        var units = new HashSet<char>();
+        foreach (Node head in heads)
+        {
+            foreach (uint codepoint in RequiredStringScreen.FirstCodepoints(head))
+            {
+                units.Add(char.ConvertFromUtf32((int)codepoint)[0]);
+            }
+        }
+
+        return (null, SearchValues.Create([.. units]));
 
         bool Collect(Node? node)
         {
@@ -1368,13 +1414,15 @@ internal sealed class PatternObject
                         node = node.Next1.Node;
                         continue;
                     case Opcode.Character when node.Match && node.Step != 0:
+                    case Opcode.CharacterIgn when node.Match && node.Step != 0 && node.Encoding != CaseEncoding.Locale:
                     case Opcode.String:
+                    case Opcode.StringIgn or Opcode.StringFld when node.Encoding != CaseEncoding.Locale:
                         if (Array.Exists(node.Values, static c => c is >= 0xD800 and <= 0xDFFF))
                         {
                             return false;
                         }
 
-                        strings.Add(string.Concat(node.Values.Select(static c => char.ConvertFromUtf32((int)c))));
+                        heads.Add(node);
                         return true;
                     default:
                         return false;

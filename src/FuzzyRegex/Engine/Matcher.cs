@@ -12628,6 +12628,36 @@ internal static class Matcher
         }
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S (2026-10-11). The fold-aware leading-unit screen for <see cref="BasicMatchCore"/>:
+    /// the first position at or after <paramref name="foundPos"/>, inside the slice, that holds one of
+    /// the pattern's leading units, and the end of the run of units it stands in, so the attempts
+    /// up to there need no screen. Kept out of line: inlined, the <see cref="SearchValues{T}"/> calls
+    /// grew the hot loop by about 4 KB and slowed every search through it by about 5%, screened or
+    /// not (pinned gap harness, 'sScC' row with the units nulled, 2026-10-12).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="foundPos">Where the next attempt would start.</param>
+    /// <param name="leadingUnits">The pattern's leading units.</param>
+    /// <returns>
+    /// The position, or -1 if no unit is left in the slice, and the end of the run of units that
+    /// starts there (exclusive). Only the end of a run already stood on is swept for: an attempt
+    /// the screen moved to a unit learns only that one.
+    /// </returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (int Start, int End) NextLeadingUnit(MatchState state, int foundPos, SearchValues<char> leadingUnits)
+    {
+        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        if (foundPos < text.Length && leadingUnits.Contains(text[foundPos]))
+        {
+            int run = text[(foundPos + 1)..].IndexOfAnyExcept(leadingUnits);
+            return (foundPos, run < 0 ? text.Length : foundPos + 1 + run);
+        }
+
+        int at = text[foundPos..].IndexOfAny(leadingUnits);
+        return at < 0 ? (-1, 0) : (foundPos + at, foundPos + at + 1);
+    }
+
     // cold-arm (D82): what an arm moved out of BasicMatchCore hands back, beside the MatchStatus
     // values (all below 3) it returns as they are. BasicMatchCore had reached the JIT's limit on
     // locals (JitMaxLocalsToTrack, 1,024 with inlinees' temporaries): past it, locals live on the
@@ -12766,12 +12796,13 @@ internal static class Matcher
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
 
         // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
-        // start with. Withheld from a partial match, which can end part way through a literal, and
-        // from a pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        SearchValues<string>? leadingStrings =
-            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb
-                ? pattern.LeadingStrings
-                : null;
+        // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
+        // Withheld from a partial match, which can end part way through a literal, and from a
+        // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
+        SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
+        int leadingUnitsEnd = 0;
 
         Node node;
         int status;
@@ -12947,6 +12978,17 @@ internal static class Matcher
             }
 
             foundPos += at;
+        }
+        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
+        {
+            // Every match takes at least one character, which starts on one of the units. Below
+            // leadingUnitsEnd the attempt is known to stand on one, so text that is all hits pays
+            // one sweep for the run, not one call per attempt (NextLeadingUnit).
+            (foundPos, leadingUnitsEnd) = NextLeadingUnit(state, foundPos, leadingUnits);
+            if (foundPos < 0)
+            {
+                return MatchStatus.Failure;
+            }
         }
 
         if (search)
@@ -13225,55 +13267,10 @@ internal static class Matcher
                 case Opcode.AnyRev: // Any character except a newline, backwards.
                 case Opcode.AnyAllRev: // Any character at all, backwards.
                 case Opcode.AnyURev: // Any character except a line separator, backwards.
-                    status = node.Op switch
+                    status = AdvanceAnyRev(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
-                        Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
-                        _ => TryMatchAnyURev(state, node, state.TextPos),
-                    };
-
-                    if (status < 0)
-                    {
-                        if (status == MatchStatus.Partial)
-                        {
-                            goto runOut;
-                        }
-
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            PushExactItemDeletion(state, node, -1);
-                        }
-
-                        state.TextPos = state.PrevPos(state.TextPos);
-                        node = node.Next1.Node!;
-                    }
-                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        status = FuzzyMatchItem(state, search, ref node, -1);
-
-                        if (status < 0)
-                        {
-                            if (status == MatchStatus.Partial)
-                            {
-                                goto runOut;
-                            }
-
-                            return status;
-                        }
-
-                        if (status == MatchStatus.Failure)
-                        {
-                            goto backtrack;
-                        }
-                    }
-                    else
-                    {
-                        goto backtrack;
+                        goto armExit;
                     }
 
                     break;
@@ -14091,52 +14088,10 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev: // Set symmetric difference, backwards, ignoring case.
                 case Opcode.SetUnionRev: // Set union, backwards.
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
-                    if (RanOutOnTheLeft(state, state.TextPos))
+                    status = AdvanceCharacterRev(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
-                        {
-                            node = node.Next1.Node!;
-                            break;
-                        }
-
-                        goto runOut;
-                    }
-
-                    if (
-                        state.TextPos > state.SliceStart
-                        && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
-                    )
-                    {
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            PushExactItemDeletion(state, node, -1);
-                        }
-
-                        state.TextPos = Step(state, state.TextPos, node.Step);
-                        node = node.Next1.Node!;
-                    }
-                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        status = FuzzyMatchItem(state, search, ref node, -1);
-
-                        if (status < 0)
-                        {
-                            if (status == MatchStatus.Partial)
-                            {
-                                goto runOut;
-                            }
-
-                            return status;
-                        }
-
-                        if (status == MatchStatus.Failure)
-                        {
-                            goto backtrack;
-                        }
-                    }
-                    else
-                    {
-                        goto backtrack;
+                        goto armExit;
                     }
 
                     break;
@@ -14541,13 +14496,54 @@ internal static class Matcher
                 // only picks an exit, and both exits are reachable from the enclosing structure's
                 // own backtracking, so there is nothing here to undo.
                 case Opcode.GroupExists: // Capture group exists.
-                    status = AdvanceGroupExists(state, ref node);
-                    if (status != _armContinue)
+                {
+                    // Capture group indexes are 1-based (excluding group 0, which is the entire
+                    // matched string).
+                    //
+                    // Check whether the captured text, if any, exists at this position in the
+                    // string.
+                    //
+                    // A group index of 0, however, means that it's a DEFINE, which we should skip.
+                    int groupExistsIndex = (int)node.Values[0];
+
+                    if (groupExistsIndex == 0)
                     {
-                        goto armExit;
+                        // Skip past the body.
+                        node = node.Next2.Node!;
+                    }
+                    else
+                    {
+                        // 'current' indexes the capture this attempt is holding, and is -1 until the
+                        // group captures and again after backtracking past it, so this is "matched
+                        // so far in this attempt" and not "exists in the pattern".
+                        GroupData groupExistsGroup = state.Groups[groupExistsIndex - 1];
+
+                        // D11 chunk 8: a group a run-out made unknown may hold anything or nothing,
+                        // so the condition takes both branches, each only for some continuations
+                        // (row Q2): the yes-branch now, the no-branch through a NO_BRANCH entry.
+                        if (state.HasUnknownCaptures && groupExistsGroup.Current >= 0 && IsUnknown(groupExistsGroup))
+                        {
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node.Next2.Node!);
+                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                            /* bstack: text_pos node NO_BRANCH */
+
+                            PushTouchMark(state);
+                            state.NotePartialEvent(PartialEvent.ConditionBothWays);
+                            CountFork(state);
+                            node = node.Next1.Node!;
+                            break;
+                        }
+
+                        node =
+                            groupExistsGroup.Current >= 0
+                                ? node.Next1.Node! // The 'true' branch.
+                                : node.Next2.Node!; // The 'false' branch.
                     }
 
                     break;
+                }
                 case Opcode.GroupReturn: // Group return (:13474).
                     status = AdvanceGroupReturn(state, ref node, readGroupCount);
                     if (status != _armContinue)
@@ -14557,25 +14553,21 @@ internal static class Matcher
 
                     break;
                 case Opcode.Keep: // Keep.
-                    state.Bstack.PushSize(state.MatchPos);
-                    state.Bstack.PushUInt8((byte)Opcode.Keep);
-
-                    /* bstack: match_pos KEEP */
-
-                    state.MatchPos = state.TextPos;
-
-                    node = node.Next1.Node!;
-                    break;
-                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                {
-                    if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+                    status = AdvanceKeep(state, ref node);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    node = node.Next1.Node!;
                     break;
-                }
+                case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
+                    status = AdvanceEndOptionalPass(state, ref node);
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
+
+                    break;
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -15428,38 +15420,8 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
-        {
-            state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        if (RunOutCanWaitForTheBody(state))
-        {
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
-        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
-        if (runOutFails)
-        {
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        if (runOutEnd is null)
-        {
-            return MatchStatus.Partial;
-        }
-
-        // The item that ran out is abandoned, so the next STRING item starts at its own first
-        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
-        // (review of chunk 6, round 1).
-        stringPos = -1;
-        node = runOutEnd;
-        goto advance;
+        status = RunOut(state, ref node, ref stringPos);
+        goto armExit;
 
         backtrack:
         // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
@@ -15533,16 +15495,10 @@ internal static class Matcher
                 case Opcode.SetUnionIgn:
                 case Opcode.SetUnionIgnRev:
                 case Opcode.SetUnionRev:
-                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: true);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryChar(state, ref node, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
+                        goto armExit;
                     }
 
                     break;
@@ -15568,16 +15524,10 @@ internal static class Matcher
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:
                 case Opcode.StartOfWord:
-                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: false);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryZeroWidth(state, ref node, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
+                        goto armExit;
                     }
 
                     break;
@@ -15592,79 +15542,49 @@ internal static class Matcher
                 case Opcode.StringIgn:
                 case Opcode.StringIgnRev:
                 case Opcode.StringRev:
-                {
-                    bool stringPosIsText =
-                        (Opcode)op
-                        is Opcode.RefGroup
-                            or Opcode.RefGroupIgn
-                            or Opcode.RefGroupIgnRev
-                            or Opcode.RefGroupRev;
-
-                    status = RetryFuzzyMatchString(state, op, search, ref node, ref stringPos, stringPosIsText);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryString(state, ref node, ref stringPos, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
-                }
                 // Upstream :17291-17306.
                 case Opcode.RefGroupFld:
                 case Opcode.RefGroupFldRev:
-                    status = RetryFuzzyMatchGroupFld(
+                    status = BacktrackFuzzyRetryGroupFld(
                         state,
-                        op,
-                        search,
                         ref node,
-                        ref foldedPos,
                         ref stringPos,
+                        ref foldedPos,
                         ref gfoldedPos,
-                        ref foldChangesStart
+                        ref foldChangesStart,
+                        search,
+                        op
                     );
-
-                    if (status < 0)
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
                 // Upstream :17361-17376.
                 case Opcode.StringFld:
                 case Opcode.StringFldRev:
-                    status = RetryFuzzyMatchStringFld(
+                    status = BacktrackFuzzyRetryStringFld(
                         state,
-                        op,
-                        search,
                         ref node,
                         ref stringPos,
                         ref foldedPos,
-                        ref foldChangesStart
+                        ref foldChangesStart,
+                        search,
+                        op
                     );
-
-                    if (status < 0)
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
                 case Opcode.FuzzyInsert: // One more inserted character after a string (:15766).
                     status = BacktrackFuzzyInsert(state, ref node, ref stringPos);
@@ -15784,31 +15704,21 @@ internal static class Matcher
 
                     break;
                 case Opcode.Keep: // Keep.
-                {
-                    /* bstack: match_pos */
-
-                    if (!state.Bstack.PopSize(out long keepMatchPos))
+                    status = BacktrackKeep(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    state.MatchPos = (int)keepMatchPos;
                     break;
-                }
                 case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                {
-                    /* bstack: previous_start slot text_pos node */
-
-                    // Leaving the pass through its 2-way branch: the slot gets its previous value,
-                    // and the branch tries its next alternative, as BRANCH's arm below does.
-                    if (PopOptionalPass(state) is not { } nextAlternative)
+                    status = BacktrackEndOptionalPass(state, ref node);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    node = nextAlternative;
-                    goto advance;
-                }
+                    break;
                 case Opcode.BodyEnd:
                 {
                     /* bstack: count start capture_change index */
@@ -16594,24 +16504,13 @@ internal static class Matcher
 
                     break;
                 case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
-                {
-                    /* bstack: text_pos node */
-
-                    if (
-                        !state.Bstack.PopNode(pattern, out Node? noBranchNode)
-                        || !state.Bstack.PopSize(out long noBranchPos)
-                    )
+                    status = BacktrackNoBranch(state, ref node);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    // The continuations in which a success of the test's body held: the condition
-                    // does not hold there, so the no-branch runs from where the condition stood.
-                    state.TextPos = (int)noBranchPos;
-                    node = noBranchNode!;
-                    PushTouchMark(state);
-                    goto advance;
-                }
+                    break;
                 case Opcode.Reopen: // NOT UPSTREAM'S, D11 M2: back into a group whose cut was blocked.
                     status = BacktrackReopen(state);
                     if (status != _armContinue)
@@ -18591,64 +18490,6 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// The GroupExists arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
-    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
-    /// </summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="node">The current node; the next one on return.</param>
-    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int AdvanceGroupExists(MatchState state, ref Node node)
-    {
-        // Capture group indexes are 1-based (excluding group 0, which is the entire
-        // matched string).
-        //
-        // Check whether the captured text, if any, exists at this position in the
-        // string.
-        //
-        // A group index of 0, however, means that it's a DEFINE, which we should skip.
-        int groupExistsIndex = (int)node.Values[0];
-
-        if (groupExistsIndex == 0)
-        {
-            // Skip past the body.
-            node = node.Next2.Node!;
-        }
-        else
-        {
-            // 'current' indexes the capture this attempt is holding, and is -1 until the
-            // group captures and again after backtracking past it, so this is "matched
-            // so far in this attempt" and not "exists in the pattern".
-            GroupData groupExistsGroup = state.Groups[groupExistsIndex - 1];
-
-            // D11 chunk 8: a group a run-out made unknown may hold anything or nothing,
-            // so the condition takes both branches, each only for some continuations
-            // (row Q2): the yes-branch now, the no-branch through a NO_BRANCH entry.
-            if (state.HasUnknownCaptures && groupExistsGroup.Current >= 0 && IsUnknown(groupExistsGroup))
-            {
-                state.Bstack.PushSize(state.TextPos);
-                state.Bstack.PushNode(node.Next2.Node!);
-                state.Bstack.PushUInt8((byte)Opcode.NoBranch);
-
-                /* bstack: text_pos node NO_BRANCH */
-
-                PushTouchMark(state);
-                state.NotePartialEvent(PartialEvent.ConditionBothWays);
-                CountFork(state);
-                node = node.Next1.Node!;
-                return _armContinue;
-            }
-
-            node =
-                groupExistsGroup.Current >= 0
-                    ? node.Next1.Node! // The 'true' branch.
-                    : node.Next2.Node!; // The 'false' branch.
-        }
-
-        return _armContinue;
-    }
-
-    /// <summary>
     /// The GroupReturn arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
     /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
     /// </summary>
@@ -20087,6 +19928,493 @@ internal static class Matcher
         state.CaptureChange = unknownData.CaptureChange;
         state.Groups[unknownData.PrivateIndex - 1].Current = unknownData.Current;
         state.UnsaveCapture(unknownData.PrivateIndex, unknownData.PublicIndex);
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Any arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryChar(MatchState state, ref Node node, bool search, byte op)
+    {
+        int status;
+
+        status = RetryFuzzyMatchItem(state, op, search, ref node, advance: true);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The FuzzyLookaround arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryZeroWidth(MatchState state, ref Node node, bool search, byte op)
+    {
+        int status;
+
+        status = RetryFuzzyMatchItem(state, op, search, ref node, advance: false);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroup arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryString(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        bool stringPosIsText =
+            (Opcode)op is Opcode.RefGroup or Opcode.RefGroupIgn or Opcode.RefGroupIgnRev or Opcode.RefGroupRev;
+
+        status = RetryFuzzyMatchString(state, op, search, ref node, ref stringPos, stringPosIsText);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupFld arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="gfoldedPos">The position within the group's folded character ('gfolded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryGroupFld(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int gfoldedPos,
+        ref int foldChangesStart,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        status = RetryFuzzyMatchGroupFld(
+            state,
+            op,
+            search,
+            ref node,
+            ref foldedPos,
+            ref stringPos,
+            ref gfoldedPos,
+            ref foldChangesStart
+        );
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The StringFld arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryStringFld(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int foldChangesStart,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        status = RetryFuzzyMatchStringFld(
+            state,
+            op,
+            search,
+            ref node,
+            ref stringPos,
+            ref foldedPos,
+            ref foldChangesStart
+        );
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The <c>runOut</c> block of <see cref="BasicMatchCore"/>, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunOut(MatchState state, ref Node node, ref int stringPos)
+    {
+        PatternObject pattern = state.Pattern;
+
+        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        {
+            state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        if (RunOutCanWaitForTheBody(state))
+        {
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
+        if (runOutFails)
+        {
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        if (runOutEnd is null)
+        {
+            return MatchStatus.Partial;
+        }
+
+        // The item that ran out is abandoned, so the next STRING item starts at its own first
+        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
+        // (review of chunk 6, round 1).
+        stringPos = -1;
+        node = runOutEnd;
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The NoBranch arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackNoBranch(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* bstack: text_pos node */
+
+        if (!state.Bstack.PopNode(pattern, out Node? noBranchNode) || !state.Bstack.PopSize(out long noBranchPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // The continuations in which a success of the test's body held: the condition
+        // does not hold there, so the no-branch runs from where the condition stood.
+        state.TextPos = (int)noBranchPos;
+        node = noBranchNode!;
+        PushTouchMark(state);
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The Keep arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceKeep(MatchState state, ref Node node)
+    {
+        state.Bstack.PushSize(state.MatchPos);
+        state.Bstack.PushUInt8((byte)Opcode.Keep);
+
+        /* bstack: match_pos KEEP */
+
+        state.MatchPos = state.TextPos;
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Keep arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackKeep(MatchState state)
+    {
+        /* bstack: match_pos */
+
+        if (!state.Bstack.PopSize(out long keepMatchPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.MatchPos = (int)keepMatchPos;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndOptionalPass arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceEndOptionalPass(MatchState state, ref Node node)
+    {
+        if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+        {
+            return _armBacktrack;
+        }
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndOptionalPass arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackEndOptionalPass(MatchState state, ref Node node)
+    {
+        /* bstack: previous_start slot text_pos node */
+
+        // Leaving the pass through its 2-way branch: the slot gets its previous value,
+        // and the branch tries its next alternative, as BRANCH's arm below does.
+        if (PopOptionalPass(state) is not { } nextAlternative)
+        {
+            return MatchStatus.Illegal;
+        }
+
+        node = nextAlternative;
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The AnyRev arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceAnyRev(MatchState state, ref Node node, bool search)
+    {
+        int status;
+
+        status = node.Op switch
+        {
+            Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
+            Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
+            _ => TryMatchAnyURev(state, node, state.TextPos),
+        };
+
+        if (status < 0)
+        {
+            if (status == MatchStatus.Partial)
+            {
+                return _armRunOut;
+            }
+
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                PushExactItemDeletion(state, node, -1);
+            }
+
+            state.TextPos = state.PrevPos(state.TextPos);
+            node = node.Next1.Node!;
+        }
+        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            status = FuzzyMatchItem(state, search, ref node, -1);
+
+            if (status < 0)
+            {
+                if (status == MatchStatus.Partial)
+                {
+                    return _armRunOut;
+                }
+
+                return status;
+            }
+
+            if (status == MatchStatus.Failure)
+            {
+                return _armBacktrack;
+            }
+        }
+        else
+        {
+            return _armBacktrack;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The CharacterRev arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceCharacterRev(MatchState state, ref Node node, bool search)
+    {
+        int status;
+
+        if (RanOutOnTheLeft(state, state.TextPos))
+        {
+            if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+            {
+                node = node.Next1.Node!;
+                return _armContinue;
+            }
+
+            return _armRunOut;
+        }
+
+        if (
+            state.TextPos > state.SliceStart
+            && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
+        )
+        {
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                PushExactItemDeletion(state, node, -1);
+            }
+
+            state.TextPos = Step(state, state.TextPos, node.Step);
+            node = node.Next1.Node!;
+        }
+        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            status = FuzzyMatchItem(state, search, ref node, -1);
+
+            if (status < 0)
+            {
+                if (status == MatchStatus.Partial)
+                {
+                    return _armRunOut;
+                }
+
+                return status;
+            }
+
+            if (status == MatchStatus.Failure)
+            {
+                return _armBacktrack;
+            }
+        }
+        else
+        {
+            return _armBacktrack;
+        }
+
         return _armContinue;
     }
 

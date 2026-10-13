@@ -447,29 +447,29 @@ public sealed class OptimiserTrapsTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
     [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every member")]
-    [NotInParallel]
     public void A_long_named_list_tries_only_the_members_that_can_start_here()
     {
         // A named list compiles to one alternative per member, and every attempt used to try each
         // alternative's first character in turn: a thousand members cost a thousand tests at every
         // word boundary. S60b item 9 jumps straight to the members that start with the text's
         // next one or two code units. Over the megabyte below this port took about 1,840 ms before
-        // and 80 ms after, and upstream 1,099 ms. The test runs on its own because the rest of the
-        // suite, running alongside, made the same search take 700 ms. The members come from a small LCG so the Python probe can
-        // rebuild them.
+        // and 80 ms after (Release), and upstream 1,099 ms. The members come from a small LCG so
+        // the Python probe can rebuild them.
+        //
+        // The cost is counted in engine steps, not timed (D13, EngineWork). A 500 ms budget here
+        // failed four times on 2026-10-11: the Debug search takes about 280 ms on a performance
+        // core and 480-570 ms on an efficiency core, and the test run is not pinned (measured
+        // 2026-10-12, docs/plan/2026-10-12-overnight-triage.md). The search takes 881,790 steps
+        // with the index and 214,918,731 without it (BranchChain.MinAlternatives raised past the
+        // list), Debug, 2026-10-12; the bound sits between them.
         // regex 2026.9.10: search(r'\b\L<words>\b', <this subject>, words=<these members>) ->
         // (1048610, 1048616)
         List<string> members = [.. Enumerable.Range(0, 1000).Select(Member), "needle"];
         var words = new Dictionary<string, IReadOnlyCollection<string>> { ["words"] = members };
         var pattern = new FuzzyRegex(@"\b\L<words>\b", FuzzyRegexOptions.None, words);
         string subject = Pad("a needle in a haystack.", _megabyte);
-        _ = pattern.IsMatch("warm-up");
-
-        Func<Match> act = () => pattern.Match(subject, timeout: TimeSpan.FromMilliseconds(500));
-
-        Match found = act.Should().NotThrow().Subject;
-        (found.Index, found.Length).Should().Be((1_048_610, 6));
 
         // Ten members, enough to be indexed (BranchChain.MinAlternatives): one and two code units
         // long, several sharing a first unit, and one with an astral first character. Upstream's
@@ -489,6 +489,17 @@ public sealed class OptimiserTrapsTests
         Spans(@"\L<w>", "\U0001F600x\U0001F600ba").Should().Equal((0, 3), (5, 2));
         Spans(@"\L<w>$", "zab").Should().Equal((1, 2));
         Spans(@"\L<w>", "abcab xy", partial: true).Should().Equal((0, 3), (3, 2), (6, 2));
+
+        // Last, because in Release it reports the test skipped once the call has answered.
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match found = pattern.Match(subject, timeout: EngineWork.HangGuard);
+                (found.Index, found.Length).Should().Be((1_048_610, 6));
+            },
+            2_000_000,
+            "the index tries only the members that can start at each position"
+        );
 
         static string Member(int index)
         {

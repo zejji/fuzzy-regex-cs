@@ -319,4 +319,34 @@ public class WorkloadBenchmarks
     /// <returns>How many capture groups it has, so the result cannot be discarded.</returns>
     [Benchmark]
     public int CompileLargePattern() => new FuzzyRegex(Corpus.LargePattern).GroupNumbers.Count;
+
+    /// <summary>
+    /// The full answer behind each row's returned number, for the same-answer check against Python
+    /// (<see cref="AnswerText"/>). Rows that return a bare yes or no need nothing more and are absent.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, Func<string>> AnswerDetails = new Dictionary<
+        string,
+        Func<string>
+    >
+    {
+        [nameof(LiteralMatch)] = static () => AnswerText.Span(_literal.Match(Corpus.Long)),
+        [nameof(ClassScan)] = static () => AnswerText.Spans(_classHeavy.Matches(Corpus.Long)),
+        [nameof(CaseFoldedScan)] = static () => AnswerText.Spans(_caseFolded.Matches(Corpus.Long)),
+        [nameof(PartialMatch)] = static () => AnswerText.Span(_partial.Match(Corpus.LongPartial, partial: true)),
+        [nameof(MatchesToEnd)] = static () => AnswerText.Spans(_words.Matches(Corpus.Long)),
+        [nameof(MatchesToEndDense)] = static () => AnswerText.Spans(_words.Matches(Corpus.Dense)),
+        [nameof(EnumerateMatchesToEndDense)] = static () => AnswerText.Spans(_words.EnumerateMatches(Corpus.Dense)),
+        [nameof(MatchesFirstTwo)] = static () => AnswerText.Spans(_words.Matches(Corpus.Long).Take(2)),
+        [nameof(EnumerateMatchesFirstTwo)] = static () =>
+            AnswerText.Spans(_words.EnumerateMatches(Corpus.Long).Take(2)),
+        [nameof(ReplaceTemplate)] = static () => _pairs.Replace(Corpus.Long, @"\2 \1"),
+        [nameof(SplitLong)] = static () =>
+            string.Join('\u0001', _words.Split(Corpus.Long).Select(static p => p ?? "\u0002")),
+        [nameof(FuzzyShort)] = static () => AnswerText.FuzzySpan(_fuzzyOne.Match(Corpus.Short)),
+        [nameof(FuzzyLong)] = static () => AnswerText.FuzzySpan(_fuzzyOne.Match(Corpus.Long)),
+        [nameof(FuzzyBudgetThree)] = static () => AnswerText.FuzzySpan(_fuzzyThree.Match(Corpus.Fuzzy)),
+        [nameof(EnhanceMatch)] = static () => AnswerText.FuzzySpan(_enhance.Match(Corpus.Fuzzy)),
+        [nameof(BestMatch)] = static () => AnswerText.FuzzySpan(_best.Match(Corpus.Fuzzy)),
+        [nameof(ConditionalPerToken)] = static () => AnswerText.Span(_conditionalPerToken.Match(_wordsThenBang)),
+    };
 }
