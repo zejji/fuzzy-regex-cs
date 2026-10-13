@@ -1,6 +1,6 @@
 # C3: a bit-parallel reject stage for fuzzy literals (design note, 2026-10-13)
 
-Status: design only, nothing built. Stage C3 of `.claude/driver/next-session-optimisation-brief-2026-10-13.md`.
+Status: amended after a blind review ("sound with fixes", five fixes in section 9); option B written on perf/c3-myers, not yet built or run. Stage C3 of `.claude/driver/next-session-optimisation-brief-2026-10-13.md`.
 Machine rule while this was written: a quiet-machine benchmark held the machine, so no build, test
 or grid ran. Every claim about our code cites file:line on main `a3d79986`; every claim about
 upstream quotes a run of `regex` 2026.9.10 (`tools/probes/c3-fuzzy-literal-upstream-claims.py`,
@@ -120,7 +120,7 @@ considered. The table lists each construct the brief asked about.
 | Insertion class `{e<=1:[a-z]}` | keeps it | It only forbids some insertions, so it narrows what matches. `(?:abcd){e<=1:[a-z]}` over `ab9cd` gives None. |
 | POSIX `(?p)` | keeps it | Leftmost-longest still starts at a real match start. **Upstream crashes on fuzzy POSIX** (`docs/plan/upstream-reports/LEDGER.md:1364-1366`; reproduced tonight with `(?p)(?:abc){e<=1}` over `xabcz`, process exit 139), so the differential against main is the only check. |
 | Case-insensitive, ASCII both sides | keeps it | Peq is built from the engine's own `Matcher.SameCharIgn` over the 128 ASCII characters, so its equality is exactly the engine's on ASCII text. That is the same rule as the piece filter (`FuzzyLiteralFilter.cs:42-51`). |
-| Full case folding `(?f)` with a non-ASCII literal (ledger entry 49's `ß` unit) | **refuses** | The piece filter accepts a lone non-ASCII unit (`FuzzyLiteralFilter.cs:53-62`), but a scan over literal code units would not. `(?if)(?:straße){e<=1}` over `strasse` gives (0, 7) with no errors, while the code-unit distance from `strasse` to `straße` is 2. Rule: every literal value must be ASCII. |
+| Full case folding `(?f)` with an expanding character (ledger entry 49's run) | **refuses** (amended after review) | `LiteralWalk.ReadRun` stores an expanding character as **one unit of several folded values** (`FuzzyLiteralFilter.cs:426`, `read.Add([.. fold.Values])`), so `ß` becomes the unit `[s, s]`, and every value is ASCII. The port edits that unit with one error (`FullFoldFuzzyCharacterEditTests.cs:34-42`): `(?fi)(?:ßx){s<=1}` over `ax` gives (0, 2) with one substitution. A scan over the values would see `ssx`, m = 3, k = 1, distance 2, and reject the match. Rule: **every unit must be a single value** (`LiteralPath.UnitStarts` all true), and m is counted in units. Red witnesses: `ßx`/`ax`, `ﬁx`/`ax`, `ßßx`/`ssax`, and `{d<=1}` over `x` (this port's answers; upstream answers None, ledger entry 49). A lone non-ASCII `CHARACTER_IGN` unit (`:53-62`) is refused by the ASCII rule as well. The first draft's `straße`/`strasse` witness tested nothing, since those values are already ASCII; it is withdrawn. |
 | Non-ASCII subject text | **refuses** for the rest of the call | Kelvin sign: `(?i)(?:kabc){e<=1}` over `Kabx` gives (0, 4), counts (1, 0, 0). An ASCII Peq sees K as a mismatch, so the distance is 2 and the start would be rejected. The stage reuses `ScanMemory.IsAscii` (`FuzzyLiteralFilter.cs:789-822`) and returns `CannotTell` at the first non-ASCII character, as the piece search does (`:625-628`). |
 | Astral text (UTF-16 against code points) | **refuses** (covered by the ASCII rule) | `(?:abc){e<=1}` over `a\U0001F600c` gives (0, 3), counts (1, 0, 0): one code point, one substitution. In UTF-16 that is two code units, so the distance is 2 and the start would be rejected. A future BMP-wide stage must refuse surrogates. |
 | Budget k >= m | **refuses** (cost, not soundness) | Every position is then an occurrence end: `(?:ab){e<=2}` over `zzz` gives (0, 2), counts (2, 0, 0). The filter could reject nothing. No witness can exist: with k >= m, the empty span is already within k, so a correct scan never rejects. |
@@ -140,12 +140,15 @@ sharply. The changes all live in `FuzzyLiteralFilter`:
 - `TryCreate` (`:146-210`): when the pieces would be under `MinPieceLength` (`:187`) or too few
   (`:177`), build a filter with **no pieces and a scan** instead of returning null. That is the
   **stand-alone** mode. When the pieces are fine, also attach the scan; that is the **second-stage**
-  mode. Attach it only if there is one literal, every value is ASCII, 0 < k < m <= 64, and the
-  literal is forward.
-- The scan's data is built once at compile time: `Peq` as a `ulong[128]`, plus m and k. About 1 KB
-  per pattern, with no work per call.
-- `ScanMemory` (`:719-822`) gains the scan's facts, each stored with the range it is true over, as
-  D14 requires (`:704-718`).
+  mode. Attach it only if there is one literal, every unit is a single ASCII value, 0 < k < m <= 64
+  with m counted in units, the literal is forward, and the case-insensitive nodes share one encoding
+  that is not LOCALE.
+- The scan's data is built once at compile time: `Peq` and its reverse as two `ulong[128]`, plus m
+  and k. About 2 KB per pattern, with no work per call.
+- `ScanMemory` (`:719-822`) gains only the self-disable counters (section 5). As built, it keeps no
+  scan answers between queries (section 3.4).
+- `NextStart` gains a `MatchState` argument, used only to poll for cancellation (section 3.5), and
+  a fourth answer, `Cancelled`.
 
 ### 3.2 Three ways to use the scan
 
@@ -176,7 +179,11 @@ while the scan costs an estimated 1-2 ns per character. So in second-stage mode 
 run near piece hits, never across stretches the pieces already ruled out. The rule:
 
 1. Ask the piece filter for x. Pass `NoMatch` and `CannotTell` straight back.
-2. Scan forward from x, but only up to `L = min(sliceEnd, x + 2(m + k))`.
+2. Scan forward from x, but only up to `L = min(sliceEnd, x + 2(m + k))`. **L is inclusive**: the
+   last end checked is L itself, after reading `T[L - 1]`. Step 4's bound is only true if the end L
+   was checked. Witness: `(?:abcdefgh){e<=1}` over `zzzzzefghabcdxefghzz`. The piece `efgh` at 5
+   gives x = 0, so L = 18, and the only occurrence is (9, 18). A window that stopped before checking
+   end 18 would move to 10 and lose the match.
 3. If an end e1 <= L is found, do option B's reverse window and return s*.
 4. Otherwise no occurrence starts at or after x and ends by L. Any occurrence starting at or after
    x therefore starts after `L - m - k`. Set textPos to `L - m - k + 1` and go back to step 1. If L
@@ -189,28 +196,37 @@ step 1 jumps straight past any stretch with no piece.
 ### 3.4 Caching between attempts
 
 After an attempt at s* fails, `BasicMatch` asks again from s* + 1 (and `Matches` asks from the end
-of the last match). The memory keeps:
+of the last match). **As built, v1 keeps no scan answers between queries.** Each query scans again
+from its own position. That costs little:
 
-- `(From, Start)`: the last query position and the s* it found. For any later query p with
-  `From <= p <= Start`, the answer is Start, because an occurrence starts there and nothing in
-  `[From, Start)` is admissible.
-- `(From, Clear)`: a stretch found to hold no occurrence starting at or after From and ending by
-  Clear. Any query in `[From, Clear - m - k]` jumps straight to `Clear - m - k + 1`.
-- Both are cleared whenever the slice end changes (as `:596-600` does for pieces). `DoBestFuzzyMatch`
-  restores the caller's slice for every candidate (`Matcher.cs:19981-19982`), so its walk keeps the
-  cache; ENHANCEMATCH's narrowing resets it.
+- the next query starts after s*, which is at least e1 - m - k, so two consecutive scans overlap by
+  at most m + k characters;
+- a query follows an engine attempt, which costs about 40 times a whole window;
+- for plain `{e<=k}` most queries come after a match, not after a failed attempt (section 4).
 
-A query past Start restarts the forward scan at the new position. A scan cannot resume from the old
-state, because its "start at or after x" condition has changed. Consecutive scans overlap by at most
-m + k characters, since the new query starts after Start, which is after e1 - m - k.
+A scan cannot resume from an old state anyway, because its "start at or after x" condition has
+changed. The first draft's `(From, Start)` and `(From, Clear)` facts are the upgrade if
+a profile ever shows the rescans. They would be cleared on a slice-end change, as the pieces' facts
+are (`:596-600`). With no cache, the D14 invariant ("the answer depends only on the subject and
+the positions") holds trivially while the scan is armed. It is pinned by
+`FuzzyLiteralScanTests.The_scan_answers_the_earliest_admissible_start_exactly` against a plain
+dynamic programme, and by the existing `A_scan_s_memory_never_changes_an_answer`.
 
 ### 3.5 Cancellation
 
-The piece search does not poll for cancellation, and neither will the scan. But a stand-alone scan
-of a long subject must not run unbounded. The scan stops after 65,536 characters with no end found
-and returns `chunkEnd - m - k + 1`, which section 3.3's lemma shows is a valid start bound. The
-engine then makes one attempt there, and its main loop polls `SafeCheckCancel` (`Matcher.cs:8096`)
-as usual. The cost is one wasted attempt per 64 K characters.
+Amended after review. The matching loops poll `SafeCheckCancel` once per 256 turns
+(`Matcher.cs:8085-8097`). A stand-alone scan can read the rest of a long subject in one call, so
+**the scan polls `Matcher.SafeCheckCancel` itself at each chunk boundary** (`ScanChunk` = 4,096
+characters, which is also how far ahead it checks for ASCII). When the budget is spent it returns
+`Cancelled`, and `BasicMatch` answers `MatchStatus.Cancelled`. A chunk boundary is only a place to
+poll: **no answer is ever made of a chunk bound**. The first draft's "return `chunkEnd - m - k + 1`
+as a start" is withdrawn.
+
+The poll has no deterministic red witness. Every attempt passes `basic_match`'s opening check
+first, so a token cancelled between two calls is caught there. A token that expires during the scan
+is a race with the machine. That is the same argument `RequiredStringPrefilterTests`
+(`A_scan_whose_prefilter_sweeps_a_long_tail_is_still_cancellable`) records for the string sweep.
+The scan's equivalent test pins what can be pinned: a cancellation between two steps of a walk.
 
 ## 4. Worst-case cost on paper
 
@@ -248,7 +264,7 @@ one attempt in every 30 or so queries.
 
 | Input | What happens | Bound |
 |---|---|---|
-| **Every window within k**: `(?:aaaaaaaa){e<=3}` over `aaaa...`, or any literal with k close to m over a 2-letter alphabet | The scan never rejects. Each attempt is preceded by a query that finds s* = textPos within m - k + 3k characters. | The overhead is about 30 ns per 1.3 us attempt, so about 2-3%. On top of that, a **self-disable** rule: after 40 queries (aho-corasick's MIN_SKIPS = 40, `prefilter.rs:184-261` as recorded in `.scratch/perf-libs/notes.md`), if the positions skipped are fewer than 2 per query (MIN_AVG_FACTOR = 2), switch the scan off for the rest of the scan. Switching off is always sound. |
+| **Every window within k**: `(?:aaaaaaaa){e<=3}` over `aaaa...`, or any literal with k close to m over a 2-letter alphabet | The scan never rejects. Each attempt is preceded by a query that finds s* = textPos within m - k + 3k characters. | The overhead is about 30 ns per 1.3 us attempt, so about 2-3%. On top of that, a **cost-based pause** (amended after review). aho-corasick retires its prefilter for good below 2 bytes skipped per call over 40 calls (MIN_SKIPS = 40 and MIN_AVG_FACTOR = 2, `prefilter.rs:184-261` as recorded in `.scratch/perf-libs/notes.md`). That rule assumes a cheap verify; here an attempt costs about 40 times a query. So `ScanMemory.CountScan` judges each batch of 40 queries by cost: if `skipped x AttemptCostInCharacters < characters read` (the constant is 64, a judged SHORTCUT against an estimated ratio of about 800), the scan sits out the next 256 queries and is then **re-armed** with fresh counters, because the text can change along a subject. Pausing is always sound: the pieces' answer, or the query position, is never later than the scan's. Pinned by `A_scan_that_saves_nothing_pauses_itself` (`(?:aaaa){e<=1}` over 10,000 `a`s). |
 | **Pieces everywhere, no occurrence**: `(?:needle){e<=1}` over `nee nee nee ...` | Today the piece filter lets through a candidate at every hit, and the engine makes up to m + k + 1 attempts per hit, so close to n attempts. B rejects each window. | At most about 2 characters scanned per position (3.3). This is where the second stage earns its place. |
 | **Long subject, no piece** (FuzzyNoMatchLong) | The piece filter returns `NoMatch`; the scan never runs. | Unchanged: must stay within the noise floor. |
 | **Stand-alone, long subject, no occurrence**: `(?:haystack){e<=3}` over 1 MB of prose with no near-miss | Today: about a million attempts, roughly 1.3 s (estimate). B: one forward scan. | n x c, about 1.5 ms (estimate). |
@@ -331,26 +347,40 @@ naming this list.
 
 **Test plan.** Test first, and each test must be shown red with the guard it pins removed.
 
-1. **Witness tests**, one per refusal or bound, each red without its guard:
-   - partial: `(?:abcdef){e<=1}`, `xxabc` gives (1, 5) partial;
-   - Kelvin text: `(?i)(?:kabc){e<=1}`, `Kabx` gives (0, 4);
-   - astral text: `(?:abc){e<=1}`, `a\U0001F600c` gives (0, 3);
-   - non-ASCII literal: `(?if)(?:straße){e<=1}`, `strasse` gives (0, 7);
+1. **Witness tests**, written in `tests/FuzzyRegex.Tests/Gaps/Engine/FuzzyLiteralScanTests.cs`,
+   one per refusal or bound, each to be shown red with its guard removed (`.scratch/c3/gates.sh`):
+   - single-value units (ledger entry 49): `(?fi)(?:ßx){s<=1}` and `(?fi)(?:ﬁx){s<=1}` over `ax`
+     give (0, 2), counts (1, 0, 0); `(?fi)(?:ßßx){s<=1}` over `ssax` gives (0, 4); and
+     `(?fi)(?:ßx){d<=1}` over `x` gives (0, 1), counts (0, 0, 1);
+   - partial: `(?:abcd){e<=1}`, `xxab` gives (1, 4) partial (stand-alone mode, so only the
+     scan is involved);
+   - Kelvin text: `(?i)(?:kabc){e<=1}` over U+212A KELVIN SIGN then `abx` gives (0, 4);
+   - astral text: `(?:abc){e<=1}` over `a`, U+1F600, `c` gives (0, 4) in UTF-16;
    - cheapest-cost division: `(?:abcd){2i+2d+1s<=4}`, `wxyz` gives (0, 4);
    - per-kind sum: `(?:abcd){i<=1,d<=1,s<=1}`, `xbd` gives (0, 3), counts (1, 0, 1);
-   - m > 64: a 65-character literal with a real match;
-   - endpos: `(?:abcd){e<=1}` with `search('xxabcd', 0, 5)` gives (2, 5) and `search('xxabc', 0, 4)`
-     gives None;
+   - which patterns get a scan: m = 65, k >= m, `(?r)`, two literals, and an expanding unit inside a
+     literal that has pieces all get none;
+   - an inclusive L: `(?:abcdefgh){e<=1}` over `zzzzzefghabcdxefghzz` gives (9, 18);
+   - the slice end: `(?:abcd){e<=1}` over `zzzazcd` gives (3, 7); `xxabcd` with length 5 gives
+     (2, 5); `xxabc` with length 4 gives None;
    - the anchor rule: `(?:abc){e<=1}`, `xabc` gives (1, 4);
-   - BESTMATCH and ENHANCEMATCH: the bench subject gives (56, 63), counts (0, 0, 1), and
-     `(?b)(?:abcd){e<=2}`, `abxabcd` gives (3, 7);
-   - the scan's cache across a `Matches` walk over dense hits;
-   - self-disable, counted with `WorkCounter` in Debug, with the answers unchanged.
+   - leftmost-first, BESTMATCH and ENHANCEMATCH: the three bench answers, `(?:abcd){e<=2}` over
+     `abxabcd` gives (0, 4), and `(?b)` gives (3, 7);
+   - two `Matches` walks against upstream's finditer;
+   - exactness: random literals, subjects, slices and queries in both modes, where `NextStart` must
+     equal the leftmost admissible start from a plain dynamic programme;
+   - the gain, counted: `(?:haystack){e<=3}` over 10,000 characters of `the quick brown fox ` and
+     `(?:needle){e<=1}` over `nee nee ...` take at most 200 matching-loop steps (without the
+     scan, one attempt at every position, or about m + k + 1 attempts per piece hit);
+   - the pause: `(?:aaaa){e<=1}` over 10,000 `a`s searches at most 2n characters;
+   - cancellation between two steps of a walk (no deterministic mid-scan witness, section 3.5).
 
-   k >= m has no possible witness (section 2.3); record that argument at the guard
-   (VERIFICATION rule 12). Each engine assumption gets a `Debug.Assert`, for example that Peq agrees
-   with `SameCharIgn` on all 128 ASCII characters.
-2. **Differential against main**, at least 50 k rows through `tools/probes/port-probe.cs` on both,
+   k >= m has no possible witness (section 2.3): the guard's comment records the argument
+   (VERIFICATION rule 12). Peq is built from `Matcher.SameCharIgn` itself, so it needs no assertion
+   that it agrees with it. Two existing tests changed. The refusal row `(?:abcdef){e<=3}` now gets a
+   scan, so it became `(?:abcdef|ghijkl){e<=3}`. The compile-allocation test now compares 270 against
+   70 characters, both over 64, so neither carries the scan's tables.
+2. **Differential against main**, at least 100 k rows through `tools/probes/port-probe.cs` on both,
    never with `--no-build`, with zero differences. The generator is biased to fuzzy literals:
    lengths 2-12, 64 and 65 over 2-4-letter alphabets with case variants; k from 1 to m; the forms
    e, per-kind and cost; the flags `(?b)`, `(?e)`, `(?i)`, `(?if)`, `(?r)`, `(?p)`, partial,
@@ -371,3 +401,21 @@ naming this list.
 2. Before building slice 1: a toy timing of the C# forward scan per character (c) and of one
    (m = 8, k = 3) attempt (T_att), in a scratch console project. That takes seconds, and it settles
    the two estimates every number in sections 4 and 7 rests on.
+
+## 9. Review amendments (2026-10-13)
+
+A blind review returned "sound with fixes". All five are taken:
+
+1. **Blocker: ledger entry 49's runs.** "Every value ASCII" let `ß`, stored as the one unit
+   `[s, s]`, through, and the scan would have refused this port's one-substitution matches. The
+   rule is now one value per unit, with m counted in units (section 2.3), and four red witnesses
+   pin it.
+2. The `straße`/`strasse` witness tested nothing (its values are ASCII); it is replaced by item 1's
+   rows.
+3. The pause is cost-based and re-arms (section 5), instead of aho-corasick's cheap-verify rule,
+   which switches off for good.
+4. The scan polls `SafeCheckCancel` at each 4,096-character chunk, and never makes an answer of a
+   chunk bound (section 3.5).
+5. L is inclusive, with a witness whose only occurrence ends exactly at L (section 3.3).
+
+Also changed while building: no scan answers are cached between queries (section 3.4).
