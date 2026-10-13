@@ -959,6 +959,17 @@ own clean walk. Pinned by
   moves, the screen refuses to attribute anything until `--reverify` shows the origin still
   reproduces, so an upstream fix surfaces as a failing run rather than as a permanent "known".
 
+**A second MSan origin on the same path (2026-10-13).** Scheduled-oracle row 20261012/38391
+(`verbs`, forward overlapped scan of `\b((?:[^a](*SKIP))+?)(?:[^a-f](*SKIP)){1,3}?(?:[^\d](*SKIP)){2,3}`)
+crashed upstream on Linux, and MSan named `data_r2368 in basic_match` beside `new_position`: one
+read at `:15806` of bytes from the LAZY_REPEAT frame `data_r` (declared `:13567`, pushed `:13583`,
+popped `:15792`), next to eight reads traced to `new_position`. With `new_position` initialised to
+`state->text_pos` (a patched copy of the C source, built in the same MSan image), the row gives no
+MSan report at all and answers (0, 5) with group 1 at (0, 1) in codepoints - upstream's own stepwise
+walk, and this port's answer. So it is this entry's defect reaching a second frame, not a new one.
+The registry now lists the second origin under this entry, with the row as its reproduction
+(`--reverify` passes on all three). Pinned as case FOUR of the test above.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern

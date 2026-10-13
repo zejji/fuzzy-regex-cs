@@ -24,6 +24,21 @@
           "operation": "finditer-overlapped"
         }
       ]
+    },
+    {
+      "origin": "data_r2368 in basic_match",
+      "ledger": "ledger 5",
+      "summary": "A second MSan origin on ledger 5's path, not a second defect. The bytes come from the LAZY_REPEAT frame data_r (_regex.c:13567, pushed :13583, popped :15792, read at :15806), and they are read only after ledger 5's uninitialised new_position (:11820) has moved the match to a garbage position: on the reproduction, a build with new_position initialised to state->text_pos gives no MSan report at all, this origin included, and answers the port's single match (screened 2026-10-13). 'data_r2368' is clang's name for the local and may change with the compiler.",
+      "reproductions": [
+        {
+          "generator": "verbs",
+          "pattern": "\\b((?:[^a](*SKIP))+?)(?:[^a-f](*SKIP)){1,3}?(?:[^\\d](*SKIP)){2,3}",
+          "flags": 0,
+          "namedLists": {},
+          "subject": "\ud835\udd18\ud835\udd18\ud83d\ude00\rA",
+          "operation": "finditer-overlapped"
+        }
+      ]
     }
   ]
 }
