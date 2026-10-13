@@ -162,6 +162,8 @@ FAULT row is accounted for by the MSan registry.
 | 20260928/24641 | ledger 42 + ledger 12 | Upstream never tries deleting an item that matched exactly (`(?:ab){d<=1}b` over 'ab' is None), so the port's one-deletion (1,4) is out of its reach; `(?b)` then also loses the plain (0,4), which ends its section with an insertion. Main now answers (1,4) d=1; CI's older port answered (0,4). |
 | 20260928/28167 | ledger 35 | `(?i)\p{Lu}` matches U+FB01 upstream, but `(?i)(?:x\|\p{Lu})` does not. The port gives the bare property's answer in both, so the lookbehind sees a cased letter before the A at 4. |
 | 20260928/33663 | ledger 5 | The partial pass inherits the moved slice. With `(*PRUNE)` or no verb, upstream gives P(1,4) codepoints, which is the port's (2,5) in UTF-16; none of the three spellings matches without `partial`. |
+| 20261013/35741 (fresh wave, 2026-10-13) | ledger 63 | Upstream leaves the empty capture made by the call `(?&g1)` inside the lookbehind on group 1's list. With the call written out, upstream keeps only (0,1), which is the port's answer. |
+| 20261013/49187 (fresh wave, 2026-10-13) | ledger 12 + ledger 52 | Without `(?b)`, upstream fullmatches (0,7) with (2,1,0), and the insertion at 6 ends the section, so `(?b)` loses it. The port's (1,1,0) edits U+FB02 as one character, which upstream cannot do. |
 | 20261013/3841 | ledger 5 | Same span, different edit: with `(*PRUNE)`, upstream's partial is (0,5) with a substitution at 2, the port's answer and the row's recorded `pruneOutcome`. This is the "agree on the span, differ on the error" form of the carried slice that ledger 5 already describes. |
 
 **The reuse test's two failures were the harness, now fixed.** On 09-28 (row 31964) and 10-12
