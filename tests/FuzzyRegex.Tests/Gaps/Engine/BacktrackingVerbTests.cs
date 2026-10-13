@@ -498,6 +498,18 @@ public sealed class BacktrackingVerbTests
             .Select(static m => (m.Index, m.Index + m.Length))
             .Should()
             .Equal((0, 3), (1, 4), (2, 6), (3, 7), (4, 9), (6, 9), (7, 9));
+
+        // FOUR: scheduled oracle 2026-10-12, seed 20261012 row 38391, which crashed upstream on Linux.
+        // MSan names a second origin beside `new_position`, the LAZY_REPEAT frame `data_r`
+        // (`_regex.c:13567`), but a build with `new_position` initialised reports neither, so it is
+        // the same defect. Upstream's walk in codepoints is (0, 5) and nothing after; Windows' scan
+        // adds (2, 5) with group 1 at (0, 1), outside its own match. In UTF-16 (0, 5) is (0, 8).
+        string fraktur = char.ConvertFromUtf32(0x1D518);
+        new FuzzyRegex(@"\b((?:[^a](*SKIP))+?)(?:[^a-f](*SKIP)){1,3}?(?:[^\d](*SKIP)){2,3}")
+            .Matches(fraktur + fraktur + char.ConvertFromUtf32(0x1F600) + "\rA", overlapped: true)
+            .Select(static m => (m.Index, m.Length, m.Groups[1].Index, m.Groups[1].Length))
+            .Should()
+            .Equal((0, 8, 0, 2));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
