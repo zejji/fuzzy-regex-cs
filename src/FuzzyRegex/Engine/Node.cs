@@ -124,10 +124,24 @@ internal sealed class Node
     internal int Index;
 
     /// <summary>
-    /// Upstream <c>values</c> and <c>value_count</c>. A list because <c>add_index</c>
-    /// (<c>:23482</c>) appends to it after the node is built.
+    /// Upstream <c>values</c> and <c>value_count</c>. An array of the opcode's length rather than a
+    /// list, so the matching loop reads it without the list's extra indirection and version check
+    /// (S62). The compiler fills the elements; nothing writes them once
+    /// <see cref="PatternObject.Compile"/> returns. Upstream's <c>add_index</c> (<c>:23482</c>)
+    /// would grow it, but no call site of this release reaches that; see <c>Optimiser.AddIndex</c>.
     /// </summary>
-    internal readonly List<uint> Values;
+    internal readonly uint[] Values;
+
+    /// <summary>
+    /// NOT UPSTREAM (S62): what <c>Matcher.MatchesOne</c> answers for each ASCII codepoint, bit
+    /// <c>ch &amp; 63</c> of element <c>ch &gt;&gt; 6</c>, or <see langword="null"/> for a node it is not
+    /// kept for (<see cref="Matcher.HasAsciiAnswers"/>). Allocated when the node is built and filled by
+    /// <see cref="Matcher.FillAsciiAnswers"/> as the last step of <see cref="PatternObject.Compile"/>,
+    /// by asking the node's own predicate, so the two cannot disagree; nothing writes it after.
+    /// The idea is .NET's <c>RegexCharClass</c> ASCII lookup, computed eagerly here because a
+    /// compiled pattern is never written while it matches.
+    /// </summary>
+    internal ulong[]? AsciiAnswers { get; init; }
 
     /// <summary>Upstream <c>status</c>: the <see cref="NodeStatus"/> bits.</summary>
     internal uint Status;
@@ -193,7 +207,7 @@ internal sealed class Node
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)
     {
-        Values = [.. new uint[valueCount]];
+        Values = new uint[valueCount];
     }
 }
 
