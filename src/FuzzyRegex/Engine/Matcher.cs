@@ -12629,6 +12629,36 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S (2026-10-11). The fold-aware leading-unit screen for <see cref="BasicMatchCore"/>:
+    /// the first position at or after <paramref name="foundPos"/>, inside the slice, that holds one of
+    /// the pattern's leading units, and the end of the run of units it stands in, so the attempts
+    /// up to there need no screen. Kept out of line: inlined, the <see cref="SearchValues{T}"/> calls
+    /// grew the hot loop by about 4 KB and slowed every search through it by about 5%, screened or
+    /// not (pinned gap harness, 'sScC' row with the units nulled, 2026-10-12).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="foundPos">Where the next attempt would start.</param>
+    /// <param name="leadingUnits">The pattern's leading units.</param>
+    /// <returns>
+    /// The position, or -1 if no unit is left in the slice, and the end of the run of units that
+    /// starts there (exclusive). Only the end of a run already stood on is swept for: an attempt
+    /// the screen moved to a unit learns only that one.
+    /// </returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (int Start, int End) NextLeadingUnit(MatchState state, int foundPos, SearchValues<char> leadingUnits)
+    {
+        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        if (foundPos < text.Length && leadingUnits.Contains(text[foundPos]))
+        {
+            int run = text[(foundPos + 1)..].IndexOfAnyExcept(leadingUnits);
+            return (foundPos, run < 0 ? text.Length : foundPos + 1 + run);
+        }
+
+        int at = text[foundPos..].IndexOfAny(leadingUnits);
+        return at < 0 ? (-1, 0) : (foundPos + at, foundPos + at + 1);
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -12748,12 +12778,13 @@ internal static class Matcher
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
 
         // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
-        // start with. Withheld from a partial match, which can end part way through a literal, and
-        // from a pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        SearchValues<string>? leadingStrings =
-            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb
-                ? pattern.LeadingStrings
-                : null;
+        // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
+        // Withheld from a partial match, which can end part way through a literal, and from a
+        // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
+        SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
+        int leadingUnitsEnd = 0;
 
         Node node;
         int status;
@@ -12929,6 +12960,17 @@ internal static class Matcher
             }
 
             foundPos += at;
+        }
+        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
+        {
+            // Every match takes at least one character, which starts on one of the units. Below
+            // leadingUnitsEnd the attempt is known to stand on one, so text that is all hits pays
+            // one sweep for the run, not one call per attempt (NextLeadingUnit).
+            (foundPos, leadingUnitsEnd) = NextLeadingUnit(state, foundPos, leadingUnits);
+            if (foundPos < 0)
+            {
+                return MatchStatus.Failure;
+            }
         }
 
         if (search)

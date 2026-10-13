@@ -135,6 +135,13 @@ judging takes; recorded here so the next session starts from the list):
 - 20261012/38391 `verbs` finditer-overlapped, FAULT: upstream crashes; the MSan screen finds
   uninitialised memory from `data_r2368` in `basic_match` as well as `new_position`, "NO KNOWN
   DEFECT". A possible new ledger entry.
+- 20261013/3841 `interactions` partial search, IGNORECASE:
+  `(?:[^\d]ﬁ(.??)){e<=1}(?:[a\d]\D{2,}\W){2i+1d+1s<=2}(?:[^a-f]*?(*SKIP)[\w\s]|\p{Lu})` over
+  'ﬁﬁﬁﬁﬀ', same span P(0,5) and group 1, upstream counts (0,0,1) with a deletion at 2, port
+  (1,0,0) with a substitution at 2. First look (fold-screen builder, local oracle 2026-10-13): the
+  port gives the same answer on main f1ae913d, 4aaa924f and the fold-screen branch, so it predates
+  memo-b and the screen (all three of the screen's refusals apply: fuzzy, partial, `(*SKIP)`).
+  Which one-edit answer is right is unjudged.
 
 **The reuse test's two failures were the harness, now fixed.** On 09-28 (row 31964) and 10-12
 (row 36404) `A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does` failed on a
