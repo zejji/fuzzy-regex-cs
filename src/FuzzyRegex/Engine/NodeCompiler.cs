@@ -266,16 +266,18 @@ internal static class NodeCompiler
 
         pattern.RequiresCaseEncoding |= UsesCasing(op);
 
+        // From the code word, before anything can set HasGroups or HasRepeats, which share the
+        // encoding's two status bits.
+        Unicode.CaseEncoding encoding = Matcher.NodeEncoding(pattern.Encoding, flags << NodeStatus.Shift);
+
         var node = new Node(valueCount)
         {
             Op = op,
             Match = (flags & NodeFlags.Positive) != 0,
             Status = flags << NodeStatus.Shift,
             Step = step,
-
-            // From the code word, before anything can set HasGroups or HasRepeats, which share
-            // the encoding's two status bits.
-            Encoding = Matcher.NodeEncoding(pattern.Encoding, flags << NodeStatus.Shift),
+            Encoding = encoding,
+            AsciiAnswers = Matcher.HasAsciiAnswers(op, encoding) ? new ulong[2] : null,
         };
 
         // Record the new node.

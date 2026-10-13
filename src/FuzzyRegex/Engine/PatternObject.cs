@@ -1290,6 +1290,13 @@ internal sealed class PatternObject
         // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
         BranchChain.Build(self.NodeList);
 
+        // NOT UPSTREAM'S (S62): last, so every node and every set member is final. See
+        // Node.AsciiAnswers.
+        foreach (Node node in self.NodeList)
+        {
+            Matcher.FillAsciiAnswers(node);
+        }
+
         return self;
     }
 
@@ -1362,7 +1369,7 @@ internal sealed class PatternObject
                         continue;
                     case Opcode.Character when node.Match && node.Step != 0:
                     case Opcode.String:
-                        if (node.Values.Exists(static c => c is >= 0xD800 and <= 0xDFFF))
+                        if (Array.Exists(node.Values, static c => c is >= 0xD800 and <= 0xDFFF))
                         {
                             return false;
                         }
@@ -1454,7 +1461,7 @@ internal sealed class PatternObject
                 continue;
             }
 
-            List<uint> values = node.Values;
+            uint[] values = node.Values;
             long cap = Math.Min(values[FuzzyValue.MaxBase + FuzzyValue.Del], values[FuzzyValue.MaxErr]);
             long unitCost = values[FuzzyValue.CostBase + FuzzyValue.Del];
             if (unitCost > 0)
@@ -1735,7 +1742,9 @@ internal sealed class PatternObject
     /// <param name="node">A node <see cref="IsFuzzyRunItem"/> accepts.</param>
     /// <returns>The string's length, or 1.</returns>
     private static int RunItemWidth(Node node) =>
-        node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev ? node.Values.Count : 1;
+        node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev
+            ? node.Values.Length
+            : 1;
 
     /// <summary>
     /// The first node from <paramref name="node"/> on that is not an <c>END_FUZZY</c>, or a

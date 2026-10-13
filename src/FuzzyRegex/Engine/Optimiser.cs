@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -564,11 +565,13 @@ internal static class Optimiser
             }
         }
 
-        // Allocate more space for the new index.
-        node.Values.Add(0);
-
-        node.Values[firstIndex + (int)node.Values[offset]] = (uint)index;
-        node.Values[offset]++;
+        // Allocate more space for the new index. DIVERGES FROM UPSTREAM, unreachably: a node's values
+        // are a fixed-length array, so that a compiled pattern is immutable (S62), and both call
+        // sites pass a null parent (see RecordSubpatternRepeatsAndFuzzySections), so this line is
+        // never reached. An upstream release that restores the atomic and lookaround call sites
+        // must size those nodes' values for their indexes when it builds them.
+        // Upstream then stores the index and bumps the count.
+        throw new UnreachableException("add_index would grow a node's values, which are fixed once built");
     }
 
     /// <summary>

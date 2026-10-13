@@ -250,7 +250,7 @@ internal sealed class BranchChain
         if (
             test is null
             || (test.Status & NodeStatus.Fuzzy) != 0
-            || test.Values.Count == 0
+            || test.Values.Length == 0
             || !(test.Op == Opcode.String || (test.Op == Opcode.Character && test.Match))
         )
         {
@@ -258,7 +258,7 @@ internal sealed class BranchChain
         }
 
         string units = Units(test.Values[0]);
-        if (units.Length == 1 && test.Op == Opcode.String && test.Values.Count > 1)
+        if (units.Length == 1 && test.Op == Opcode.String && test.Values.Length > 1)
         {
             units += Units(test.Values[1])[0];
         }

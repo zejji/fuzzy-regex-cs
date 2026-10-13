@@ -78,7 +78,7 @@ public sealed class RequiredStringScreenTests
         Node required = compiled.ReqString!;
         var units = compiled.ReqScreenUnits!;
         bool reverse = (compiled.Flags & RegexFlags.Reverse) != 0;
-        uint want = required.Values[reverse ? required.Values.Count - 1 : 0];
+        uint want = required.Values[reverse ? required.Values.Length - 1 : 0];
         CaseEncoding encoding = required.Encoding;
 
         Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
