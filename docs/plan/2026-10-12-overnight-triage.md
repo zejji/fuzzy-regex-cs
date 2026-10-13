@@ -112,8 +112,7 @@ Every run of the workflow since 2026-09-21 failed. The first two were infrastruc
 | 37758544541 | 10-08, 9672d557 | sweep, 6 seeds | 21 rows | all accounted |
 | 38237349305 | 10-12, a9ea2c95 | oracle | 7: 24857, 35060; 20261012: 24184, 24238, 24272, 33186, 42649, FAULT 38391; reuse test: 36404 | 24857, 35060 judged here; **24184, 24238, 24272, 33186, 42649 and FAULT 38391 not**; 36404 see below |
 
-**Not accounted for, and not judged tonight** (each needs the research and blind review that
-judging takes; recorded here so the next session starts from the list):
+**Not accounted for on 2026-10-12** (all eleven judged on 2026-10-13, in the next section):
 
 - 20260928/24171 `interactions` fullmatch: `(?b)(?e)(?P<g1>(?:\W(?:ß){d<=1}){s<=1,i<=1,d<=1}(?P>g1)?)...`,
   upstream no match, port (0,9) through a recursive fuzzy group.
@@ -142,6 +141,30 @@ judging takes; recorded here so the next session starts from the list):
   port gives the same answer on main f1ae913d, 4aaa924f and the fold-screen branch, so it predates
   memo-b and the screen (all three of the screen's refusals apply: fuzzy, partial, `(*SKIP)`).
   Which one-edit answer is right is unjudged.
+
+### The eleven rows judged, 2026-10-13
+
+Branch `fix/oracle-rows-2`. Each row was cut from its recorded wave, re-recorded with
+`run-oracle.ps1 -Rows` and answered by main 9ee9a282; each witness was run on regex 2026.9.10 and on
+this port. None is a new port bug and none is a new upstream defect: every row is an entry already
+in the ledger, met on a fresh shape. The ten DIVERGE rows are in `JudgedDivergences.jsonl`; the
+FAULT row is accounted for by the MSan registry.
+
+| Row | Cause | The evidence that settles it |
+|---|---|---|
+| 20261012/38391 FAULT | ledger 5 | MSan's second origin, `data_r2368` (the LAZY_REPEAT frame), disappears with every other report when `new_position` is initialised in a patched build; the patched build, upstream's anchored walk and the port all answer (0, 5) codepoints with group 1 at (0, 1). Registry entry added, reproduction re-verified; test case FOUR in `BacktrackingVerbTests`. |
+| 20261012/24184 | ledger 7 | `(?iV1)[a-z]` matches U+0130 upstream only (Turkic pairing). `{e<=2,i<=1}` allows insertions alone, so the port cannot substitute it. Over 'Iiss' both engines match, over 'ÉÉss' neither. |
+| 20261012/24238 | ledger 77 | After the empty match at 0, upstream's `finditer` carries the first candidate's change list (d:0,1) forward; its own `search(pos=2)`, `(pos=4)` and `(pos=7)` give the port's three answers. |
+| 20261012/24272 | ledger 5 | A reversed `(*SKIP)` moves the slice, and upstream's `$` then holds at codepoint 3, before a `\r`. The same pattern without the verb finds nothing upstream, which is the port's answer. |
+| 20261012/33186 | ledger 5 | The partial pass inherits the slice the full pass's `(*SKIP)` moved. With `(*PRUNE)` or no verb, upstream gives P(0,3), the port's answer; with `(*SKIP)` it gives P(3,3), where `^` cannot hold. |
+| 20261012/42649 | ledger 81 + ledger 11 | The outer `{1i+1d+1s<=1}` allows one error in all. Upstream's own non-partial `(?:a(?:bc){e<=3}){1i+1d+1s<=1}` over 'axx' is None, but its partial spends two. The port's P(5,8) with one substitution is the leftmost legal partial; upstream's counts (1,2,0) list two substitutions and one insertion. |
+| 20260928/24171 | ledger 14 | The group calls itself after a fuzzy section that deletions can empty. Without `(?b)(?e)` both engines give (0,9) (2,0,5). With `(?b)`, upstream's minimised witness gives None on one subject and does not finish in 8 s on another. |
+| 20260928/24641 | ledger 42 + ledger 12 | Upstream never tries deleting an item that matched exactly (`(?:ab){d<=1}b` over 'ab' is None), so the port's one-deletion (1,4) is out of its reach; `(?b)` then also loses the plain (0,4), which ends its section with an insertion. Main now answers (1,4) d=1; CI's older port answered (0,4). |
+| 20260928/28167 | ledger 35 | `(?i)\p{Lu}` matches U+FB01 upstream, but `(?i)(?:x\|\p{Lu})` does not. The port gives the bare property's answer in both, so the lookbehind sees a cased letter before the A at 4. |
+| 20260928/33663 | ledger 5 | The partial pass inherits the moved slice. With `(*PRUNE)` or no verb, upstream gives P(1,4) codepoints, which is the port's (2,5) in UTF-16; none of the three spellings matches without `partial`. |
+| 20261013/35741 (fresh wave, 2026-10-13) | ledger 63 | Upstream leaves the empty capture made by the call `(?&g1)` inside the lookbehind on group 1's list. With the call written out, upstream keeps only (0,1), which is the port's answer. |
+| 20261013/49187 (fresh wave, 2026-10-13) | ledger 12 + ledger 52 | Without `(?b)`, upstream fullmatches (0,7) with (2,1,0), and the insertion at 6 ends the section, so `(?b)` loses it. The port's (1,1,0) edits U+FB02 as one character, which upstream cannot do. |
+| 20261013/3841 | ledger 5 | Same span, different edit: with `(*PRUNE)`, upstream's partial is (0,5) with a substitution at 2, the port's answer and the row's recorded `pruneOutcome`. This is the "agree on the span, differ on the error" form of the carried slice that ledger 5 already describes. |
 
 **The reuse test's two failures were the harness, now fixed.** On 09-28 (row 31964) and 10-12
 (row 36404) `A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does` failed on a
