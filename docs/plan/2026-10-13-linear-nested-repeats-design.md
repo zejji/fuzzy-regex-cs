@@ -1,8 +1,9 @@
 # Nested repeats in near-linear time, and the memo extensions
 
-Date: 2026-10-13. Status: design for the owner, nothing built. Branch `perf/c5-nested` from main at
-a3d79986. Read-only session: no build, test or benchmark ran (a quiet-machine benchmark held the
-test lock). Every claim about our engine comes from reading the code (file:line below); every claim
+Date: 2026-10-13. Status: S2d and G2 written (amendment 1, after a blind review), not yet built
+or measured; the rest is design. Branch `perf/c5-nested` from main at a3d79986. No build, test or
+benchmark has run (the test lock was held all night); the gates are one locked script,
+`.claude/worktrees/c5-nested/.scratch/c5/gates.sh`. Every claim about our engine comes from reading the code (file:line below); every claim
 about Python `regex` comes from regex 2026.9.10 on the owner's laptop, run on 2026-10-13, with the
 output quoted. Estimates are labelled as estimates. Section 4 lists the experiments that settle them.
 
@@ -108,7 +109,19 @@ by entering the copy at s. Before running that attempt, look up R's body guard a
 treat the attempt as failed at once and move to the next start. One lookup per attempt. The
 compiler records "the pattern starts with the copy of repeat i" in a new `PatternObject` field when
 the start node is the copy's first node after optimisation (`Optimiser.cs:305-310` can move the start
-node, so the check has to be made at the end of the optimiser, and Debug-asserted).
+node, so the check has to be made at the end of the optimiser).
+
+**Placement (amendment 1, from the review).** The skip must behave exactly like an attempt whose
+first node failed, because the `FAILURE` arm does more than step on: when the copy starts with a
+`GreedyRepeatOne` (`(?:a*b)+c`) its `LeadingRepeat` skip (`Matcher.cs:18338-18374`) also runs from
+the failed start, and the slice-end test decides when to stop. So the check sits where an attempt
+begins, after `MatchPos` is set (after `SearchStart`, and at `next_match_2`), and on a guarded start
+it jumps to `backtrack`, which pops the `FAILURE` entry `start_match` pushed and runs the arm from
+`MatchPos` as for any failed attempt. That also covers the starts a prefilter chooses. The lookup
+goes through `MatchState.IsRepeatGuarded` (false under fuzzy matching, counted by `WorkCounter`),
+only in a search with `PartialSide == PartialNone`, and the field is set only when
+`KeepsFailureMemosAcrossAttempts` holds. The `LeadingRepeat` skip stays sound after a skipped start:
+it rests on the attempt at that start failing, which the guard proves as surely as running it.
 
 **Why the answers cannot change.** The claim needed is: if entering R's body at s fails, entering the
 copy at s fails. The copy is the same code built a second time (`NodeCompiler.cs:1617-1622`), and
@@ -131,6 +144,13 @@ patterns never have `KeepsFailureMemosAcrossAttempts` set.
 
 No guard needs to be written: attempts only move forward (backward under `(?r)`), so the attempt at s
 is the last time this pass asks about s.
+
+**Conditions with no possible witness** (VERIFICATION rule 12, the argument instead). "The minimum
+was exactly 1" (`oneCopy` in `NodeCompiler.BuildRepeat`): with two or more copies the recorded start
+is the last copy's, which is never the pattern's start node, so the start-node comparison already
+excludes it. The partial condition: a partial call empties every guard list at each start (the
+`ResetGuards` call in the `FAILURE` arm), so the lookup could never find a guard. Both stay as
+defence.
 
 **Cost on paper.** One binary-search lookup per attempt, O(log S) for S spans in R's body list; no
 allocation. A pattern without the field must pay nothing: hoist the test inside the branch that
@@ -187,10 +207,30 @@ compiling. Not recommended.
 ### G2: skip a guarded span in one step
 
 **What.** `GuardList` stores sorted spans of guarded positions (`GuardList.cs:161-196`). The forward
-`GreedyRepeatOne` loop (`Matcher.cs:14947-14975`) and its lazy twin ask one position at a time and
-step back one character each time a position is guarded. Add `GuardList.LowestGuardedFrom(pos)` (the
-low end of the span holding pos) and jump to the position below the span. In the `(a+)+c` trace, each
-entry into #2 then costs one lookup instead of n - q.
+`GreedyRepeatOne` loop (`Matcher.cs:14947-14975`) asks one position at a time and steps back one
+character each time a position is guarded. Add `GuardList.TryGetSpan(pos)` (the span holding pos)
+and jump to the span's far end. In the `(a+)+c` trace, each entry into #2 then costs one lookup
+instead of n - q.
+
+**Amendment 1, from the review.**
+
+- Only the greedy forward loop. There `CountOne` has already matched every character the walk
+  passes, so the jump skips nothing but lookups. The lazy arm (`Matcher.cs:18670-18812`) tests each
+  character (`IsTailPartial`, `MatchOne`, `TryMatch`) before its guard, so a jump there would skip
+  those tests; it is left alone.
+- The lookup goes through a `MatchState.IsRepeatGuarded` overload that also returns the span and
+  keeps every side effect of the original: false under fuzzy matching, `WorkCounter.GuardChecked`,
+  `NoteSecondPassGuard`. `GuardList` is never called directly.
+- Spans carry a `Protect` flag and merge only when exactly adjacent and of the same kind
+  (`GuardList.Guard`). So the jump goes to the far end of the one span found and the loop asks
+  again there; a following span, or an unprotected one, is met on the next turn. A span can reach
+  past this entry's minimum or below its start, so the jump is clamped: if it passes more characters
+  than the count has above the minimum, nothing is left to try and the loop ends unmatched, as the
+  one-at-a-time walk would.
+- Surrogate pairs: guards on a run of astral characters are two units apart and never merge
+  (`GuardList.Guard` merges only when `textPos - High == 1`), so the jump saves nothing there. The
+  emoji row is an answer witness only, with no lookup bound. Merging by code point would change
+  what every guard list means; not done.
 
 **Why the answers cannot change.** The loop already skips every guarded position and stops at the
 first unguarded one at or above the minimum; jumping over a span skips exactly the positions it
@@ -209,9 +249,9 @@ quadratic part, the same class as plain `a+c` (Python: 0.18, 2.54 and 40.4 ms at
 guard every other position): every span has one position, so the skip saves nothing and costs one
 extra comparison per position. Within the 10% rule if the comparison is the span lookup already made.
 
-**Witnesses.** The existing repeat and guard tests, a reverse row (`(?r)c(a+)+`), a surrogate-pair row
-(`(\U0001F600+)+c` over a run of the emoji and `bc`), and a Debug lookup budget that goes red without
-the skip.
+**Witnesses.** The existing repeat and guard tests, a reverse row (`(?r)c(a+)+`), a surrogate-pair
+answer row (`(\U0001F600+)+c`), and a Debug lookup bound on `\A(a+)+c` (one attempt, so S2d plays no
+part) that goes red without the jump.
 
 **Slow-shape tests it breaks.** None.
 
@@ -345,6 +385,15 @@ green**: `(?:(a)|b)+(?(1)c|b)` over `abbb` (1, 4) and `abbbb` (1, 5) (Option B n
 
 ## Making the slow-shape tests independent of engine speed
 
+**Amendment 1: a separate follow-up, not on this branch.** The review found that the seam below
+does not work as first written. `InitMatch` resets `Iterations` (`MatchState.cs:1966`), so priming
+it beforehand is lost; calls refused before `BasicMatch` (the minimum-width check near
+`Matcher.cs:19463`, the prefilters) never poll at all; and `LazyEnumerationTests` needs a budget that
+two matches fit inside before the third times out. The redesign: a test-only limit that **expires on
+the k-th `SafeCheckCancel`**, used only with patterns that reach `start_match`, with k chosen per
+test (1 for most, enough for two matches in `LazyEnumerationTests`). The first version is kept below
+for the record.
+
 The handover's trap (`.claude/driver/optimisation-handover-2026-09-24.md:229-237`) is that about
 fifteen tests need a pattern that is slow, and every memo extension makes some of them fast. Two
 groups need different fixes.
@@ -378,7 +427,7 @@ Do this before K, BR or N, as its own slice. S2d, G2 and O8 need none of it.
 |---|---|---|---|---|
 | 1 | S2d | `(x+x+)+y` cubic to quadratic; `(a+)+c` later attempts to O(1) | none | low (one lookup, a short argument) |
 | 2 | G2 | attempt 0 of every nested shape: lookups O(n²) to O(n log n) | none | low (answer-identical loop change) |
-| 3 | test seam | nothing; unblocks 5-7 | (rewrites them) | low |
+| 3 | test seam (k-th poll, see amendment 1) | nothing; unblocks 5-7 | (rewrites them) | low |
 | 4 | O8 | `x+T` failing searches: steps O(L²) to O(L log L) | none | low to medium |
 | 5 | N | `(?:(?:a\|a)+)+$` exponential to near-linear | oracle `alt-nested` | medium |
 | 6 | K | bounded repeats exponential to polynomial | `{1,99}`, `{1,999}` users | medium |
@@ -403,16 +452,16 @@ then dominates, vectorising `CountOne` for a plain character or range (`IndexOfA
 
 ## 4. Experiments for when the machine is free (seconds each)
 
-Both probes are written and not yet run: `.scratch/c5/gc.cs` (Debug, reads `WorkCounter` by
-reflection) and `.scratch/c5/time.cs` (Release, P-cores, best of five). Both build the c5 worktree's
+Both probes are written and not yet run: `.claude/worktrees/c5-nested/.scratch/c5/gc.cs` (Debug, reads `WorkCounter` by
+reflection) and `.claude/worktrees/c5-nested/.scratch/c5/time.cs` (Release, P-cores, best of five). Both build the c5 worktree's
 `src/FuzzyRegex`, which is main at a3d79986.
 
-- **E1, the trace.** `dotnet run .scratch/c5/gc.cs`. For `(a+)+c`, `(x+x+)+y`, `(\w+\s?)+$` and
+- **E1, the trace.** `dotnet run .claude/worktrees/c5-nested/.scratch/c5/gc.cs`. For `(a+)+c`, `(x+x+)+y`, `(\w+\s?)+$` and
   `(?:(?:a|a)+)+$`, it prints lookups and steps for the whole search and for attempt 0 alone (the
   pattern behind `\A`), and the later-attempt cost per start. Expected if section 1 is right:
   `(a+)+c` attempt 0 about n²/2 lookups, later starts about 2.5n steps each; `(x+x+)+y` later starts
   growing as n²; `(?:(?:a|a)+)+$` attempt 0 doubling per character.
-- **E2, the times.** `dotnet run -c Release .scratch/c5/time.cs`. Fills the "Ours with B" column,
+- **E2, the times.** `dotnet run -c Release .claude/worktrees/c5-nested/.scratch/c5/time.cs`. Fills the "Ours with B" column,
   including `(x+x+)+y` and `a+c` at 400 to 6,400 for the character-scan baseline.
 - **E3, S2d prototype.** In this worktree: the field, the lookup at the attempt start, E1 again.
   Expected: later-start lookups constant, about 1 per start.
@@ -423,11 +472,11 @@ reflection) and `.scratch/c5/time.cs` (Release, P-cores, best of five). Both bui
   bodies, lazy R, `{2,}`, reverse, `Matches` with empty matches, overlapped, partial). Zero
   differences required.
 
-Delete `.scratch/c5/` afterwards.
+Delete `.claude/worktrees/c5-nested/.scratch/c5/` afterwards.
 
 ## Evidence (regex 2026.9.10, CPython 3.14, 2026-10-13)
 
-Collapse grids: `.scratch/c5/c5probe.py`, `c5probe2.py` and `c5probe3.py` (under a second each);
+Collapse grids: `.claude/worktrees/c5-nested/.scratch/c5/c5probe.py`, `c5probe2.py` and `c5probe3.py` (under a second each);
 the counts are in option C's table. Sample output:
 
 ```
@@ -475,6 +524,28 @@ overlapped (?:a+)+c over 'aacaac': [(0, 3), (1, 3), (3, 6), (4, 6)]
 
 `regex.compile('(?:(?:a|a)+)+$', regex.DEBUG)` shows the branch is kept (`GREEDY_REPEAT 1 INF /
 GREEDY_REPEAT 1 INF / BRANCH CHARACTER 'a' OR CHARACTER 'a'`), so that row is not reduced to `a+`.
+
+## Amendment 1: what was written (2026-10-13, after the blind review)
+
+S2d and G2 as described above, with the review's fixes; not built, no test run (lock queue full).
+
+- `NodeCompiler.BuildRepeat`: records the one copy's start in `RepeatInfo.FirstIterationStart`.
+- `Optimiser.FindFirstIterationAtStart` (after `KeepFailureMemosSound`): sets
+  `PatternObject.FirstIterationAtStart` when that start, looked through one-way branches, is the
+  pattern's start node and is not R itself (an empty copy).
+- `Matcher.BasicMatch`: the guarded-start skip after `SearchStart` and at `next_match_2`, by
+  `goto backtrack`.
+- `GuardList.TryGetSpan`, `MatchState.IsRepeatGuarded(..., out GuardSpan)`, and the clamped jump in
+  the greedy forward loop.
+- Tests in `FailureMemoAcrossAttemptsTests`: two step-ratio bounds for S2d (`(a+)+c`, `(x+x+)+y`,
+  steps at a run of 400 against 200 under 2.6), one lookup-ratio bound for G2 (`\A(a+)+c`), and the
+  upstream answer rows (with `pos`, empty first iteration, `{2,}`, lazy R, reverse, `\w`, emoji,
+  the leading-repeat interplay `(?:a*b)+c`, `Matches` with empty matches, overlapped, partial).
+- `.claude/worktrees/c5-nested/.scratch/c5/gates.sh`: one locked run of the Debug build, the C5 tests
+  with each part toggled off (the bounds must go red, the answers stay green), the E1 and E2 probes
+  before and after, the ratchet, a differential of 110,000 rows against a3d79986 (60,000 biased to
+  patterns that start with a nested repeat), the oracle at seeds 7, 4242 and 20260927, and pinned
+  BenchmarkDotNet Workload against the base.
 
 ## Could not verify
 
