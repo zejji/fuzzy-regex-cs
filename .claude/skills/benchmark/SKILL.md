@@ -37,13 +37,31 @@ good reason; do not work around it.
 
 ## Refreshing the Python baseline
 
+`bench/baselines/measure_python.py` times one pyperf benchmark per `WorkloadBenchmarks` and
+`ManyInputsBenchmarks` row, named as the BenchmarkDotNet method so the tables join. It reads the
+C# side's inputs and answers from a directory that its `--prepare` step writes (it runs the
+benchmark project's `usage-corpus`, `workload-answers` and `usage-answers` commands):
+
 ```powershell
 python -m pip install regex pyperf
-python bench/baselines/measure_python.py --output bench/baselines/python-regex.json
+python bench/baselines/measure_python.py --prepare .scratch/gate-inputs
+python bench/baselines/measure_python.py --inputs .scratch/gate-inputs --check-only
+python bench/baselines/measure_python.py --inputs .scratch/gate-inputs -o bench/baselines/<machine-id>/python-regex.json
+python -m pyperf check bench/baselines/<machine-id>/python-regex.json
 ```
 
-Record alongside the numbers: the `regex` version, the Python version, the machine, and the date.
-A baseline without those is not evidence. Commit the JSON.
+Before timing, every row's answer is compared with the C# answer: the returned number and the full
+answer behind it (every span, the substituted text, which inputs matched). A row that differs is
+printed and recorded as "answer differs" and still timed; `--check-only` exits 1 if any row
+differs. Rows Python cannot express, and why, are in the script's `EXCLUDED` table.
+
+Flags: the rows run under `regex.V1`, the port's default, where IgnoreCase means full case
+folding. The fuzzy `FuzzyPhrase` rows run under `V0 | I` (simple folding) instead, because upstream
+drops matches the port finds under full folding, in V1 and in `V0 | FULLCASE` alike (ledger entry
+28). On this all-ASCII data simple folding gives the port's answers. Each row's flags, operation and
+answer-check result are in the JSON metadata, with the `regex`, Python and pyperf versions and the
+git SHA. Record the machine and the date beside the file. A baseline without those is not
+evidence. Commit the JSON.
 
 ## What the suite must cover
 
