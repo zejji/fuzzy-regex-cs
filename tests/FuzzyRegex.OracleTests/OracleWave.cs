@@ -566,6 +566,21 @@ internal static class OracleWave
                 + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
         );
 
+    /// <summary>
+    /// Whether two of this port's answers to the same row are the same answer: their one-line
+    /// descriptions, without an exception's stack trace. The trace says where the throw happened,
+    /// which the JIT changes as it inlines: on 2026-09-28 and 2026-10-12 the scheduled oracle went
+    /// red on a row whose fresh and reused patterns raised the same "invalid group reference", once
+    /// from GetSubReplacement and once from Subx with it inlined.
+    /// </summary>
+    /// <param name="first">One answer, or <see langword="null"/> if it was unsupported.</param>
+    /// <param name="second">The other.</param>
+    /// <returns>Whether they agree.</returns>
+    public static bool SameAnswer(IOracleOutcome? first, IOracleOutcome? second) =>
+        string.Equals(Answer(first), Answer(second), StringComparison.Ordinal);
+
+    private static string Answer(IOracleOutcome? outcome) => outcome?.Describe() ?? "unsupported";
+
     /// <summary>Renders one diverging row: what was asked, what upstream said, what we said.</summary>
     /// <param name="row">The row that diverged.</param>
     /// <param name="actual">This port's answer, or <see langword="null"/> if it was unsupported.</param>

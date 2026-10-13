@@ -41,9 +41,9 @@ neither touches the Debug run the ratchet makes.
 
 **Fix (on this branch).** The test now counts engine steps instead of timing the search, the
 method D13 introduced for the same kind of flake (`EngineWork.ShouldTakeAtMostSteps`, Debug-only,
-skipped in Release after the answers are checked). Measured in Debug: STEPS_ON steps with the
-member index, STEPS_OFF with the index switched off (`BranchChain.MinAlternatives` raised past the
-list, a temporary edit). The bound, STEP_BOUND, sits between them, so the test still fails if the
+skipped in Release after the answers are checked). Measured in Debug: 881,790 steps with the
+member index, 214,918,731 (244 times as many) with the index switched off (`BranchChain.MinAlternatives` raised past the
+list, a temporary edit). The bound, 2,000,000, sits between them, so the test still fails if the
 index stops being used, and it no longer depends on which core the search lands on. The
 `[NotInParallel]` attribute existed only for the timing and is gone.
 
@@ -95,4 +95,54 @@ which the failure message prints in full.
 
 ### Why the schedule has been red since 2026-09-21
 
-REPLAY_SECTION
+Every run of the workflow since 2026-09-21 failed. The first two were infrastructure; from
+2026-09-28 on, every run drew rows nobody had judged. To see which are still unaccounted for, the
+66 DIVERGE and FAULT rows of runs 3-7 were cut out of their recorded waves, re-recorded with
+`run-oracle.ps1 -Rows` and compared with main f1ae913d plus this branch's two judged rows:
+56 are EXPECTED now (47 judged rows, 6 `fuzzy-exact-item-offered-as-a-deletion`, 2
+`fuzzy-empty-iteration-needed-rule`, 1 `bestmatch-loses-a-candidate`), 9 diverge and 1 is a fault.
+
+| Run | Date, head | Job | Failing rows then | Now on main |
+|---|---|---|---|---|
+| 35579883763 | 09-21, 229a2dd6 | oracle | none: the compile-parity fixture was stale | infrastructure, fixed since |
+| 35972437798 | 09-24, 966c2fb6 | sweep | none: sweep-seeds.ps1's `^agree \d` match was stale | infrastructure, fixed since |
+| 36404722626 | 09-28, 2373e273 | oracle | seed 7: 35060; 4242: 34781; 20260928: 24171, 24641, 28167, 33663, 42027; reuse test: 31964 | 35060 judged here (ledger 82); 34781, 42027 accounted; **24171, 24641, 28167, 33663 not**; 31964 see below |
+| 36843747887 | 10-01, 9672d557 | sweep, 6 seeds | 25 rows | all accounted |
+| 37295584525 | 10-05, 9672d557 | oracle | 7: 35060; 4242: 34781; 20261005: 25346, 25732, 40458 | all accounted (35060 judged here) |
+| 37758544541 | 10-08, 9672d557 | sweep, 6 seeds | 21 rows | all accounted |
+| 38237349305 | 10-12, a9ea2c95 | oracle | 7: 24857, 35060; 20261012: 24184, 24238, 24272, 33186, 42649, FAULT 38391; reuse test: 36404 | 24857, 35060 judged here; **24184, 24238, 24272, 33186, 42649 and FAULT 38391 not**; 36404 see below |
+
+**Not accounted for, and not judged tonight** (each needs the research and blind review that
+judging takes; recorded here so the next session starts from the list):
+
+- 20260928/24171 `interactions` fullmatch: `(?b)(?e)(?P<g1>(?:\W(?:ß){d<=1}){s<=1,i<=1,d<=1}(?P>g1)?)...`,
+  upstream no match, port (0,9) through a recursive fuzzy group.
+- 20260928/24641 `interactions` search, IGNORECASE: `(?b)(?:a\s{1}(\p{L})){1<=e<=2:[^a-z]}(\w{1})`
+  over 'aa\ra', upstream None, port (1,3) with a deletion where the text character is outside the
+  error test `[^a-z]`. A question of what a deletion's test reads.
+- 20260928/28167 `conditionals` finditer-overlapped: `(?(?<!(?:İ|\p{Lu})+)(A))$`, upstream
+  3 matches, port 2 (misses (4,1)).
+- 20260928/33663 `partial` search, IGNORECASE: a `(*SKIP)` then a conditional call, upstream
+  as (UTF-16 index, length) P(3,4), port P(2,5).
+- 20261012/24184 and 24272 `interactions` split: `(*SKIP)` inside a reversed fuzzy pattern;
+  upstream splits into 4, port does not split.
+- 20261012/24238 `interactions` finditer: `(?e)\b\K(?<=(?:[^a][a]([[:digit:]]*)){1<=e<=2})`,
+  same spans, group 1 and fuzzy counts differ from the second match on.
+- 20261012/33186 `partial` search: `^([a\d]+)\1(?:\p{L}?(*SKIP)[^a]|[\w\s])` over 'AAﬃ',
+  upstream P(3,3), port P(0,3).
+- 20261012/42649 `fuzzy-anchored` search: as (UTF-16 index, length), upstream P(1,7) counts (1,2,0), main
+  P(5,3) (1,0,0), CI's port P(1,7) (2,1,0); D81 moved it, so ledger 81 is the likely cause, unconfirmed.
+- 20261012/38391 `verbs` finditer-overlapped, FAULT: upstream crashes; the MSan screen finds
+  uninitialised memory from `data_r2368` in `basic_match` as well as `new_position`, "NO KNOWN
+  DEFECT". A possible new ledger entry.
+
+**The reuse test's two failures were the harness, now fixed.** On 09-28 (row 31964) and 10-12
+(row 36404) `A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does` failed on a
+substitution whose template refers to a group the pattern does not have. Fresh and reused patterns
+both raised `FuzzyRegexParseException: invalid group reference` while matching, the same answer;
+the comparison also read the exception's stack trace, whose top frame was `GetSubReplacement` the
+first time and `Subx` the second (the JIT had inlined the helper by then). Upstream behaves the
+same way for the observable part (`regex.compile('a').sub(r'\1', 'zzz')` returns 'zzz', and raises
+only when a match needs the template). The comparison, in the reuse and the lazy-walk tests, now
+reads the one-line answer only (`OracleWave.SameAnswer`), pinned by
+`OracleWaveTests.Two_errors_that_differ_only_in_their_stack_trace_are_the_same_answer`.
