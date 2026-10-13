@@ -106,7 +106,10 @@ param(
     # Measured 2026-09-19 (S58) from runs A and E, an unchanged tree on a quiet machine: the time
     # ratios spanned 0.88916 to 1.0768, and 1/0.88916 = 1.1247 is the wider side. Allocation moved at
     # most 307 bytes in 11.06 MB, 2.8e-5, so its floor is four orders of magnitude tighter.
-    [double]$NoiseFloor = 1.13,
+    # Re-taken 2026-10-13 pinned to the performance cores (-Cores performance, the default since
+    # 758fba81), runs A and B of 81 benchmarks on an unchanged tree: time ratios 0.914 to 1.061, so
+    # 1/0.914 = 1.094, rounded up to 1.10. Allocation identical on every row.
+    [double]$NoiseFloor = 1.10,
     [double]$AllocationNoiseFloor = 1.0001,
     # Measured 2026-09-23 (S61), two --job short --inProcess runs of an unchanged tree on a busy
     # machine: the largest move was 672 bytes an operation (FuzzyPhraseThreeAlternation, 4,656 then
