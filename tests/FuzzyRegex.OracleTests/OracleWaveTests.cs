@@ -69,6 +69,29 @@ public sealed class OracleWaveTests
     /// And a divergence block names the version it was compiled under, so a reader of the report
     /// never has to assume which of the two questions was asked.
     /// </summary>
+    /// <summary>
+    /// Two answers that raise the same error are the same answer wherever the throw happened: the
+    /// stack trace is in the report for a reader, not part of the answer.
+    /// </summary>
+    [Test]
+    public void Two_errors_that_differ_only_in_their_stack_trace_are_the_same_answer()
+    {
+        var fromHelper = new ErrorOutcome(
+            "FuzzyRegexParseException",
+            "invalid group reference",
+            "at Substitution.GetSubReplacement / at Substitution.AddReplacement / at Substitution.Subx",
+            WhileMatching: true
+        );
+        ErrorOutcome inlined = fromHelper with { Detail = "at Substitution.Subx" };
+
+        OracleWave.SameAnswer(fromHelper, inlined).Should().BeTrue();
+
+        // The controls: a different message, or the same error raised before matching, differs.
+        OracleWave.SameAnswer(fromHelper, fromHelper with { Message = "unknown group" }).Should().BeFalse();
+        OracleWave.SameAnswer(fromHelper, fromHelper with { WhileMatching = false }).Should().BeFalse();
+        OracleWave.SameAnswer(fromHelper, null).Should().BeFalse();
+    }
+
     [Test]
     public void A_divergence_block_names_the_version_the_row_was_compiled_under()
     {
@@ -273,13 +296,11 @@ public sealed class OracleWaveTests
             // Compared as their rendered descriptions, which is what a reader has to diff anyway:
             // the outcome records hold lists, so record equality would be reference equality and
             // would report every row as different.
-            string first = OracleWave.Describe(row, eager);
-            string second = OracleWave.Describe(row, lazily);
-
-            if (!string.Equals(first, second, StringComparison.Ordinal))
+            if (!OracleWave.SameAnswer(eager, lazily))
             {
                 disagreements.Add(
-                    $"eager:{Environment.NewLine}{first}{Environment.NewLine}lazy:{Environment.NewLine}{second}"
+                    $"eager:{Environment.NewLine}{OracleWave.Describe(row, eager)}{Environment.NewLine}"
+                        + $"lazy:{Environment.NewLine}{OracleWave.Describe(row, lazily)}"
                 );
             }
         }
@@ -341,13 +362,11 @@ public sealed class OracleWaveTests
             );
             compared++;
 
-            string first = OracleWave.Describe(row, fresh);
-            string second = OracleWave.Describe(row, reused);
-
-            if (!string.Equals(first, second, StringComparison.Ordinal))
+            if (!OracleWave.SameAnswer(fresh, reused))
             {
                 disagreements.Add(
-                    $"fresh:{Environment.NewLine}{first}{Environment.NewLine}reused:{Environment.NewLine}{second}"
+                    $"fresh:{Environment.NewLine}{OracleWave.Describe(row, fresh)}{Environment.NewLine}"
+                        + $"reused:{Environment.NewLine}{OracleWave.Describe(row, reused)}"
                 );
             }
         }

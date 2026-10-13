@@ -316,6 +316,59 @@ public sealed class RepeatTests
         Search(@"(?fi)\w*ßa", "ssa").Should().Be("(0,3)");
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A lazy repeat before a full-folded literal reports a partial match only where one can
+    /// start. Ledger entry 82, a third sibling of entries 38 and 80.
+    /// </summary>
+    /// <remarks>
+    /// When the repeat takes one more character, upstream's LAZY_REPEAT_ONE arm for a STRING_FLD
+    /// tail searches for the literal from <c>pos + 1</c> and returns a partial as soon as
+    /// <c>string_search_fld</c> says the text ran out (<c>upstream/src/_regex.c:16764-16767</c>),
+    /// before it checks that the repeat can take the characters in between (<c>:16776-16786</c>).
+    /// So over '-', where neither <c>a</c> nor <c>b</c> can match the '-', upstream reports a
+    /// partial match starting at 0: a promise of a completion no longer text can keep. The STRING,
+    /// IGNORECASE-only and no-folding forms answer (1, 1). PCRE2 10.47 (PARTIAL_SOFT) gives no
+    /// partial for <c>(?i)a*?b</c> over '-'. Measured 2026-10-12, oracle seed 7 row 35060.
+    /// </remarks>
+    [Test]
+    public void A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start()
+    {
+        // regex 2026.9.10: search(r'(?if)a*?b', '-', partial=True) -> (0, 1) partial
+        Match found = new FuzzyRegex("(?if)a*?b").Match("-", partial: true);
+        (found.Success, found.Index, found.Length, found.PartialMatch).Should().Be((true, 1, 0, true));
+
+        // regex 2026.9.10: match(r'(?if)a*?b', '-', partial=True) -> (0, 1) partial
+        new FuzzyRegex("(?if)a*?b")
+            .MatchAtStart("-", 0, 1, true)
+            .Success.Should()
+            .BeFalse();
+
+        // regex 2026.9.10: search(r'(?if)a*?b', '--', partial=True) -> (1, 2) partial
+        new FuzzyRegex("(?if)a*?b")
+            .Match("--", partial: true)
+            .Index.Should()
+            .Be(2);
+
+        // Upstream agrees one character later: match(r'(?if)a*?b', '-c', partial=True) -> None.
+        new FuzzyRegex("(?if)a*?b")
+            .MatchAtStart("-c", 0, 2, true)
+            .Success.Should()
+            .BeFalse();
+
+        // The oracle row: regex 2026.9.10 answers (0, 1) partial with both groups unset.
+        Match row = new FuzzyRegex("(?if)(\\p{L}*?)(?P<g2>[\U0001F3FB])\\2\\K$").Match("\u200D", partial: true);
+        (row.Success, row.Index, row.Length, row.PartialMatch).Should().Be((true, 1, 0, true));
+
+        // The controls, on which the two engines agree: IGNORECASE alone and no folding give
+        // (1, 1) partial on regex 2026.9.10.
+        new FuzzyRegex("(?i)a*?b")
+            .Match("-", partial: true)
+            .Index.Should()
+            .Be(1);
+        new FuzzyRegex("a*?b").Match("-", partial: true).Index.Should().Be(1);
+    }
+
     [Test]
     [Category(EngineWork.Category)]
     public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
