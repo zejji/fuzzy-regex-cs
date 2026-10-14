@@ -97,6 +97,38 @@ in the main checkout.
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
 
+## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
+
+`FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).
+Main `fd2ad87e` against perf/c3-myers, Release, affinity 0xFFF8. Two instruments:
+
+- BDN, `--job medium`, Workload and ManyInputs, branch before the lazy arm against tonight's
+  pinned main baseline (`.claude/worktrees/c3-myers/.scratch/c3/gates/bdn-*`): FuzzyBudgetThree
+  0.016x, EnhanceMatch 0.037x, BestMatch 0.044x, FuzzyPhraseOne* 0.90-0.92x,
+  FuzzyPhraseThreeSeparatePasses 0.84x, the other rows 0.95-1.02x, and **FuzzyShort 1.120x**
+  (283.7 ns to about 318 ns).
+- A harness (`.scratch/c3/h.cs`, min of 5 reps per process, main, before and after alternated in
+  9 processes each over two locked runs; the minimum of all is quoted):
+
+| Row | Main | Before the lazy arm | After | After / main |
+|---|---|---|---|---|
+| FuzzyShort | 313.2 ns | 343.4 ns | 304.3 ns | 0.97x |
+| FuzzyBudgetThree | 73,809 ns | 1,191 ns | 1,648 ns | 0.022x |
+| FuzzyPhraseOneMatch (100,000 records) | 52.13 ms | 49.52 ms | 50.21 ms | 0.96x |
+
+**The FuzzyShort slowdown was real and is fixed.** Its one search reaches the pieces' answer at the
+real match, so the scan behind the pieces read about 20 characters and saved nothing. Behind the
+pieces the scan now sits out a scan's first query (`ScanMemory.ArmSecondStage`): a Match that
+succeeds at the first piece answer pays nothing, and one that fails pays one attempt before the
+scan arms. The cost is about 1.4% on FuzzyPhraseOneMatch (49.52 to 50.21 ms).
+
+**Unexplained, recorded rather than chased tonight:** FuzzyBudgetThree, which takes the
+stand-alone path that the lazy arm does not touch, measured 1,191 ns before and 1,648 ns after.
+A copy of the "after" source built the same way as "before" measured the same as "after" (1,626 ns),
+so the build is ruled out. The suspect is code generation around `NextStart`, which grew by
+one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
+`NextStart` bodies.
+
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
 S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and

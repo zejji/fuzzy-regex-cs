@@ -289,7 +289,7 @@ public sealed class FuzzyLiteralPrefilterTests
     [Property("Upstream", "none - gap test")]
     [Arguments("(?:café au lait){e<=1}")] // a literal that is not ASCII
     [Arguments("(?i)(?:oak strass😀){e<=1}")] // a lone character outside the BMP is two code units
-    [Arguments("(?:abcdef){e<=3}")] // pieces too short to be worth searching for
+    [Arguments("(?:abcdef|ghijkl){e<=3}")] // pieces too short, and two literals, so no scan (C3) either
     [Arguments("(?:abcdefghijkl){i}")] // no bound on the errors at all
     [Arguments("(?:abcdefghijkl){2i+0d<=4}")] // a free deletion leaves the budget unbounded
     [Arguments("x(?:abcdefghijkl){e<=1}")] // something outside the fuzzy section
@@ -674,6 +674,20 @@ public sealed class FuzzyLiteralPrefilterTests
     [Arguments("(?ri)(?:abcdefgh|ijklmnop){e<=1}")]
     public void A_scan_s_memory_never_changes_an_answer(string pattern)
     {
+        // C3: behind the pieces the bit-parallel scan sits out a memory's first query, so both
+        // memories here are armed by one throwaway query first; armed, the answer is again a
+        // function of the subject and the positions alone.
+        static FuzzyLiteralFilter.ScanMemory Armed(FuzzyLiteralFilter filter)
+        {
+            FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+            if (!filter.Reverse)
+            {
+                _ = filter.NextStart("", 0, 0, memory);
+            }
+
+            return memory;
+        }
+
         // Every guard at once: random subjects, random query orders - mostly the steps of a walk,
         // sometimes a jump back or a new slice - each answered with the scan's memory and again with
         // none. The answer is a function of the subject and the positions alone.
@@ -687,7 +701,7 @@ public sealed class FuzzyLiteralPrefilterTests
             string text = string.Concat(
                 Enumerable.Range(0, random.Next(1, 12)).Select(_ => chunks[random.Next(chunks.Length)])
             );
-            FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
+            FuzzyLiteralFilter.ScanMemory memory = Armed(filter);
             int sliceStart = 0;
             int sliceEnd = text.Length;
             int pos = filter.Reverse ? text.Length : 0;
@@ -707,7 +721,7 @@ public sealed class FuzzyLiteralPrefilterTests
                     : filter.NextStart(text, at, sliceEnd, memory);
                 object fresh = filter.Reverse
                     ? filter.MayMatchBefore(text, sliceStart, at, filter.NewScanMemory())
-                    : filter.NextStart(text, at, sliceEnd, filter.NewScanMemory());
+                    : filter.NextStart(text, at, sliceEnd, Armed(filter));
                 remembered.Should().Be(fresh, $"'{text}' [{sliceStart}, {sliceEnd}) at {at}, step {step}");
                 answered++;
             }
@@ -737,7 +751,9 @@ public sealed class FuzzyLiteralPrefilterTests
             return GC.GetAllocatedBytesForCurrentThread() - before;
         }
 
-        double perCharacter = (CompileBytes(210) - CompileBytes(10)) / 200.0;
+        // Both literals over 64 characters, so neither gets C3's scan, whose two 1 KB tables a
+        // 10-character literal would carry and a 210-character one would not.
+        double perCharacter = (CompileBytes(270) - CompileBytes(70)) / 200.0;
 
         perCharacter
             .Should()

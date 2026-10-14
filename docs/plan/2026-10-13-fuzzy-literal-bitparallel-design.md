@@ -189,6 +189,8 @@ run near piece hits, never across stretches the pieces already ruled out. The ru
    x therefore starts after `L - m - k`. Set textPos to `L - m - k + 1` and go back to step 1. If L
    was the slice end, return `NoMatch`.
 
+**As built, the second stage arms only from a scan's second query** (`ScanMemory.ArmSecondStage`). The first piece answer is attempted unscanned. Measured reason: FuzzyShort went 1.12x slower when every query was scanned, because its one query lands on the real match and the scan saved nothing; the lazy arm brings it to 0.97x of main at about 1.4% on FuzzyPhraseOneMatch (`docs/plan/OPTIMISATION-NOTES.md`). The window-limit witness moved to `zzzzzefghzabcdxefghzz`, (10, 19), so that the armed query lands on it.
+
 Each round moves the position forward by at least m + k + 1, for at most 2(m + k) characters
 scanned, so the second stage reads each character at most about twice. It also has a way out:
 step 1 jumps straight past any stretch with no piece.
