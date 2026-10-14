@@ -12815,12 +12815,13 @@ internal static class Matcher
         // STRING_FLD or REF_GROUP_FLD item began, kept across a retry the way 'foldedPos' is. See
         // TakeBackFoldedComparison.
         int foldChangesStart = 0;
-        // Scratch on the state rather than stackalloc, which would keep the JIT from tiering this
-        // method (a method with loops and a localloc gets no on-stack replacement; see
-        // JitTieringTests), and rather than inline-array locals, which counted against this
-        // method's JIT local budget (cold-arm round 3). See MatchState.FoldedScratch.
-        Span<uint> folded = state.FoldedScratch;
-        Span<uint> gfolded = state.GFoldedScratch;
+        // Inline arrays rather than stackalloc, which would keep the JIT from tiering this method:
+        // a method with loops and a localloc gets no on-stack replacement, so it is compiled once,
+        // with no profile data. See JitTieringTests.
+        FoldBuffer foldedBuffer = default;
+        FoldBuffer gfoldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+        Span<uint> gfolded = gfoldedBuffer;
 
         state.FewestErrors = state.MaxErrors;
 

@@ -1010,20 +1010,6 @@ internal sealed class MatchState : IDisposable
     internal readonly long[] FuzzyCounts = new long[FuzzyValue.Count];
 
     /// <summary>
-    /// Scratch for the full case folding of one subject codepoint, used by the matcher's
-    /// case-folded string and backreference arms ('folded' upstream).
-    /// </summary>
-    /// <remarks>
-    /// Held here rather than in the matcher's frame so that it does not count against that
-    /// method's JIT local budget (cold-arm round 3). Every arm that reads it fills it first, and the
-    /// matcher is never re-entered on the same state, so no reader sees another call's contents.
-    /// </remarks>
-    internal FoldBuffer FoldedScratch;
-
-    /// <summary>The same for the captured group's side of a case-folded backreference ('gfolded').</summary>
-    internal FoldBuffer GFoldedScratch;
-
-    /// <summary>
     /// Upstream <c>fuzzy_node</c>: the <c>FUZZY</c> node whose constraints
     /// <see cref="FuzzyCounts"/> is being tested against, or <see langword="null"/> outside any
     /// fuzzy section.
