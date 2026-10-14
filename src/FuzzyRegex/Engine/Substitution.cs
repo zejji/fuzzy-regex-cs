@@ -467,6 +467,10 @@ internal static class Substitution
 
         if (index >= 1 && index <= groupCount)
         {
+            System.Diagnostics.Debug.Assert(
+                !state.SkipsCaptures,
+                "C4: a template that reads a group must not skip the captures (Subx opts in only for a literal or item 0)"
+            );
             GroupData group = state.Groups[index - 1];
             if (group.Current < 0)
             {

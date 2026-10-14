@@ -462,9 +462,9 @@ public sealed class ThreadSafetyTests
     }
 
     /// <summary>
-    /// The one field on a match that a read writes, and why that is safe. Checked exactly rather
-    /// than as a subset, so a second lazily computed field cannot be added without this test
-    /// noticing and without someone justifying it here.
+    /// The fields on a match and its collection that a read writes, and why that is safe. Checked
+    /// exactly rather than as a subset, so another lazily computed field cannot be added without
+    /// this test noticing and without someone justifying it here.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -480,8 +480,23 @@ public sealed class ThreadSafetyTests
     /// <see cref="ThreadSafetyStressTests.One_match_can_be_read_from_many_threads_at_once"/> is the
     /// reproduction, and is what keeps the fix honest.
     /// </para>
+    /// <para>
+    /// <c>MatchCollection._walk</c> and <c>MatchCollection._fault</c> are the lazy collection's
+    /// (2026-10-14): the walk that finds the matches not yet found, and the exception that stopped
+    /// it. Both are single references, and both are read and written only while the collection's
+    /// lock is held, so no reader sees either half-written and no two threads drive the walk at once.
+    /// The matches found are read without the lock from <c>MatchList</c>, which publishes its count
+    /// with <c>Volatile.Write</c> after the slot it counts.
+    /// <c>LazyMatchCollectionTests.Many_threads_reading_one_fresh_collection_each_get_every_answer_right</c>
+    /// is the behaviour this rests on, and goes red with the lock taken out.
+    /// </para>
     /// </remarks>
-    private static readonly IReadOnlyList<string> _matchAllowlist = ["Match._splitChanges"];
+    private static readonly IReadOnlyList<string> _matchAllowlist =
+    [
+        "Match._splitChanges",
+        "MatchCollection._fault",
+        "MatchCollection._walk",
+    ];
 
     /// <summary>The fields of a match and of its group and capture types.</summary>
     /// <param name="match">The match to read.</param>

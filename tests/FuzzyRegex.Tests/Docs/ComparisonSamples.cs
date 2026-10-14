@@ -435,15 +435,22 @@ public sealed class ComparisonSamples
     /// exponential, and `MatchTimeout` is their bound".
     /// </summary>
     [Test]
+    [Category(EngineWork.Category)]
     public void A_fuzzy_recursive_pattern_whose_calls_fail_is_matched_in_milliseconds()
     {
         var regex = new FuzzyRegex(
             "(|)(?:(?:(?:(?:.)+((?:(?R)){2,}|)){2<=e<=3}(?=b))){1<=s<=1,1<=d<=2}",
             FuzzyRegexOptions.None,
-            TimeSpan.FromSeconds(2)
+            EngineWork.HangGuard
         );
 
-        regex.Match("baxbax").Success.Should().BeFalse();
+        // A step bound, not the 2 s clock it had, which went red on a busy machine (D13). 437,708
+        // steps on main c4c6ea02 and on perf/c4-capture-free alike (2026-10-14).
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Match("baxbax").Success.Should().BeFalse(),
+            1_000_000,
+            "the failed-call memo fails each repeated failed call at once"
+        );
     }
 
     /// <summary>

@@ -82,7 +82,9 @@ Console.WriteLine($"{substitutions} substitution(s), {insertions} insertion(s), 
 ### Enumerating matches with a timeout
 
 `EnumerateMatches` finds matches lazily, one at a time, so an early exit does not pay for the
-whole subject. Its `timeout` bounds each step rather than the whole walk; see the divergence "A per-call
+whole subject. `Matches` is lazy in the same way, and keeps what it has found. The `timeout` of
+either bounds each step rather than the whole walk, so it surfaces from the `foreach` (or, for a
+`MatchCollection`, from `Count` and the indexer too); see the divergence "A per-call
 `timeout` on every input-dependent method" in [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md).
 
 ```csharp
@@ -158,7 +160,9 @@ alters global state. **A `Match` may be read from any thread too**, and from sev
 holds a copy of everything it reports.
 
 The one exception is the one .NET has everywhere: an **enumerator** belongs to the thread that made
-it. A `MatchCollection` can be read from several threads, but each needs its own `foreach`.
+it. A `MatchCollection` can be read from several threads, but each needs its own `foreach`. The
+collection finds its matches as they are read, and two threads asking for the same new match find
+it once between them.
 
 This is a slightly stronger promise than `System.Text.RegularExpressions.Regex`, which is itself
 thread safe but documents its `Match` and `MatchCollection` results as single-thread objects,

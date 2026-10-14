@@ -245,3 +245,18 @@ test seam.
 - `WorkCounter` share of group-arm steps on the two gate rows: still open; it needs a Debug count,
   not a timing, so it is allowed under today's order, but it is deferred to the build sitting.
 - Tests: `tests/FuzzyRegex.Tests/Gaps/Engine/CaptureFreeMatchingTests.cs`.
+
+### Build sitting record (2026-10-14 evening)
+
+- **Main c4c6ea02 merged.** `Iteration.Scan` now serves only `Count`, so it skips captures
+  unconditionally. The lazy `MatchCollection.Count` walks `Iteration.Enumerate`, which builds every
+  `Match` and never sets the flag.
+- **Equivalence grid** (`.scratch/c4/C4Grid.cs`, a temporary test, not committed): the s62 rows
+  c and d, non-partial, de-duplicated, Debug build with asserts on, each capture-free call compared
+  with its capture-on twin. 18,236 rows had the flag set on a pattern with groups: 1,359 with group
+  calls, 1,346 fuzzy, 196 both, 1,858 BESTMATCH or ENHANCEMATCH, 1,593 lookarounds, 2,974 verbs,
+  972 reverse. 3,552 of them showed `Match` saving captures while `IsMatch` saved none (273 with
+  group calls, 310 fuzzy). Zero differences, zero exceptions, zero timeouts. The widened condition
+  (`TestedGroups.Length == 0`, group calls and fuzzy included) stands.
+- **Asserts that no group reader meets the flag**: `Substitution.GetSubReplacement` (group items),
+  `Iteration.GetGroup` (`Split`) and `FuzzyRegex.NewMatch` (every `Match`).
