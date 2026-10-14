@@ -103,6 +103,9 @@ public ref struct ValueMatchEnumerator
                 matchAll: false,
                 limits
             );
+
+            // A ValueMatch is a span: nothing reads a group.
+            _state.SkipCapturesIfUnread();
         }
         catch
         {

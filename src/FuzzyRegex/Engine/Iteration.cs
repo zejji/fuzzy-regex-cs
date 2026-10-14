@@ -158,6 +158,12 @@ internal static class Iteration
             limits
         );
 
+        // Count: with no one to hand a match to, nobody reads a group.
+        if (onMatch is null)
+        {
+            state.SkipCapturesIfUnread();
+        }
+
         int count = 0;
 
         // No loop condition, because the scanner has none: `do_match` returns FAILURE once there is

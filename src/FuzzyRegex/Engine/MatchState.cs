@@ -1049,6 +1049,37 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>visible_captures</c>.</summary>
     internal bool VisibleCaptures;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, stage C4: whether the group arms record nothing for this call, because the
+    /// caller reads no group and nothing in the pattern reads one while matching. Cleared by
+    /// <see cref="Init"/>, set by <see cref="SkipCapturesIfUnread"/>. Not
+    /// <see cref="VisibleCaptures"/>, which is about capture lists: <c>Split</c> passes
+    /// <see langword="false"/> there and still reads every group's span.
+    /// </summary>
+    internal bool SkipsCaptures;
+
+    /// <summary>
+    /// For a caller that reads no group span or capture list (<c>IsMatch</c>, <c>Count</c>, a span
+    /// enumeration, a replacement without a group reference): records no captures at all when the
+    /// pattern reads none while matching. See <c>docs/plan/2026-10-11-capture-free-matching.md</c>,
+    /// amendment 1.
+    /// </summary>
+    /// <remarks>
+    /// A pattern reads a group while matching exactly when one is <see cref="GroupInfo.Referenced"/>
+    /// - by a backreference or a group condition (<c>NodeCompiler.RecordRefGroup</c>) - and those
+    /// are the <see cref="PatternObject.TestedGroups"/>. Every other reader of group state keys on
+    /// them: the capture-change counter, the D17 empty-iteration states and the group-call memo
+    /// (<see cref="PatternObject.CallReadGroups"/>).
+    /// </remarks>
+    internal void SkipCapturesIfUnread()
+    {
+        Debug.Assert(
+            PartialSide == PartialNone,
+            "C4: no capture-free caller is partial, so D11's unknown captures never meet the skip"
+        );
+        SkipsCaptures = Pattern.TestedGroups.Length == 0;
+    }
+
     /// <summary>Upstream <c>version_0</c>.</summary>
     internal bool Version0;
 
@@ -1531,6 +1562,7 @@ internal sealed class MatchState : IDisposable
         FuzzyChanges.Clear();
 
         VisibleCaptures = visibleCaptures;
+        SkipsCaptures = false;
         MatchAll = matchAll;
         ReqPos = -1;
         ScreenSliceStart = 0;
@@ -2518,6 +2550,7 @@ internal sealed class MatchState : IDisposable
     internal void SaveCapture(int privateIndex, int publicIndex, GroupSpan span)
     {
         _ = privateIndex;
+        WorkCounter.CaptureSaved();
 
         // Capture group indexes are 1-based (excluding group 0, which is the entire matched string).
         GroupData group = Groups[publicIndex - 1];

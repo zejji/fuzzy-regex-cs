@@ -151,3 +151,97 @@ Do the runtime flag, after failure memo Option B and not instead of it, and only
 `IsMatch` and `Count` on patterns with groups, cheap to keep in sync, and Rust's engine shows the
 shape is ordinary. Do not build the second node graph. If the count shows group arms under about 5
 percent of the work, record it as a negative result in OPTIMISATION-NOTES instead.
+
+## Amendment 1 (2026-10-14): refreshed against main fdc56120
+
+Every `file:line` above is against a1191e65 and is stale. This section replaces them; the
+reasoning above stands except where this section says otherwise. Read from the code at fdc56120 on
+branch `perf/c4-capture-free`; no timing of any kind was taken (owner order, 2026-10-14).
+
+### Current locations
+
+| What | Where now |
+|---|---|
+| Forward group arm (`EndGroup`/`StartGroup`, one shared case) | `Matcher.cs:13542-13612`, still inline in `BasicMatchCore` |
+| Backtrack group arm | `Matcher.cs:15861-15903`, still inline |
+| `SaveCapture` / `UnsaveCapture` | `MatchState.cs:2518`, `:2544` |
+| `CaptureChange` bump, only for a `Referenced` group | `Matcher.cs:13581` |
+| `Referenced` is set | `NodeCompiler.cs:365-369` (`RecordRefGroup`), called for a group-exists condition (`:1291`, not for `DEFINE`) and for every backreference (`:1532`) |
+| `TestedGroups` (the `Referenced` groups) | `Optimiser.cs:801-812`; read by D17 at `Matcher.cs:4295`, `:4805`, `:4894`, `:14282`, `:14675`, `:16045` and `PackedSpan` `:9315` |
+| `CallReadGroups` (the `Referenced` groups, only with group calls) | `PatternObject.cs:1288-1292`; read at `Matcher.cs:4935-5404`, `:12775`, `:12976` |
+| `ReadsCapturesWhileMatching` (backref or group condition opcode present) | `PatternObject.cs:1210-1223` |
+| Partial unknown captures (the other `SaveCapture` caller) | `Matcher.cs:6155-6175`, partial only |
+| Group-call capture save and restore | `ReturnToCallerCaptures` `:4494`, `PopCalleeCaptures` `:4574`, `RestoreGroupsFromOpenCall` `:12680`, `PushCaptures` at `:18534`, `:19521` |
+| BESTMATCH copy of the groups | `SaveBestMatch` `:4148-4163` (a copy; the choice is by fuzzy cost) |
+| `lastindex` after the match | `DoMatch` `:21842`, read at `:22025` |
+| `visibleCaptures` stored, read by nothing | `MatchState.cs:1533` |
+| Callers passing `visibleCaptures: false` | `Test` `FuzzyRegex.cs:757`, `Count` `Iteration.cs:115`, span `EnumerateMatches` `ValueMatch.cs:102`, `Split` `Iteration.cs:490` (reads spans: not capture-free), `Replace` `Substitution.cs:122` (false unless evaluator or `subf`; literal test at `:109`, `\N` read at `:463`) |
+
+### Does the cold-arm merge change the plan?
+
+No. D82 part 2 moved the `RefGroup*` arms out of line (`AdvanceRefGroup` `:16865`,
+`AdvanceRefGroupIgnRev` `:17065`, `AdvanceRefGroupFld` `:17426`, `AdvanceRefGroupIgn` `:17695` and the
+rest) but left both group arms inline. The early exit goes at the top of the inline forward arm and
+adds one load and one well-predicted branch to `BasicMatchCore`. The backtrack arm needs no change,
+because a skipped group pushes nothing for it to pop.
+
+### Which callers switch captures off
+
+`IsMatch`, `IsMatchAtStart`, `IsFullMatch` (all `Test`), `Count` (both overlapped and not), span
+`EnumerateMatches` (`ValueMatch`), and `Replace` with a literal template or a template whose only
+group item is `\g<0>`. Not `Split` when the pattern has a group (it returns each group's text),
+not `Replace` with `\N` or an evaluator or `subf`, not `Match`/`Matches`/`Enumerate`. None of the
+switched-off calls is partial (`Test` passes `partial: false`, `Count` and `ValueMatch` take none),
+so the D11 unknown-capture path never meets the flag; assert it in `Init`.
+
+### What in a pattern reads a group while matching
+
+Exactly the `Referenced` groups: a backreference of any kind (plain, named, `\g<n>`, ignore-case,
+full-fold, reverse, fuzzy) and a group-exists condition (`(?(1)...)`, `(?(<name>)...)`). Every other
+reader of group state is downstream of `Referenced`: `CaptureChange`, D17 and the repeat memo key
+(`TestedGroups`), the group-call memo (`CallReadGroups`), `SkipTextlessNodes`. Not readers:
+`(?(DEFINE)...)` (group 0, not recorded), group calls and recursion on their own (they save and
+restore the capture state, which stays empty and consistent when nothing is written), `\K`
+(positions only), verbs, named lists, lookarounds and atomic groups (`PushCaptures` copies the
+unwritten state, harmless), POSIX and BESTMATCH/ENHANCEMATCH (choose by length and fuzzy cost, and
+copy the groups only to report them), `lastindex` (after the match).
+
+So the pattern condition simplifies to **`TestedGroups.Length == 0`**: no separate group-call or
+fuzzy exclusion. This widens the first slice the original note proposed (which left out group calls
+and fuzzy patterns as unreviewed). The widening rests on the reading above and is tested by the
+equivalence rows (group calls, recursion, four fuzzy shapes, BESTMATCH, ENHANCEMATCH); if any of
+those rows goes red once the flag is built, the exclusion goes back in, not the row out.
+
+### Worst case and adversarial input, on paper
+
+- **Capture-on calls** (`Match`, `Split`, `\N` `Replace`): one extra field load and branch per
+  forward group arm. Adversarial input: many tiny groups in a hot loop, `(?:(a)(b)(c)(d))+` with
+  `Match` over a long run. The branch is a few cycles against an arm that already pushes 36 bytes,
+  calls `SaveCapture` and dispatches; bounded at well under one percent of the arm. Measure it when
+  timing is allowed again; it is the regression row.
+- **Capture-free calls**: strictly less work: no `Sstack`/`Bstack` traffic, no `SaveCapture`, no
+  backtrack-arm visit for the group. No input makes them do more.
+- **Correctness adversary**: a reader not covered by `Referenced`. The only ways for one to exist
+  are a new opcode that reads `Groups` (the D17 path already keys on `TestedGroups`) or a new
+  caller that reads spans while passing the flag. The equivalence rows (every reader kind) and the
+  witness rows (`(a)\1`, `(a)?(?(1)b|c)`, `(?:(a)|b)+(?(1)c|b)` over `abbb` whose span moves from
+  (1, 4) to (0, 4) without the capture) catch the first; the seam below catches the second, because
+  each caller opts in by name.
+- **Stack pairing**: the flag is fixed for the whole call, so both halves of every group are skipped
+  together and the `Sstack` park/pop pairing cannot be split.
+
+### Seam
+
+A `MatchState.SkipsCaptures` field, cleared in `Init`, set by the opting-in callers after renting
+(`state.SkipsCaptures = pattern.TestedGroups.Length == 0`), read at the top of the forward group
+arm. `visibleCaptures` keeps its upstream meaning (capture lists), because `Split` passes false
+while it reads spans. A Debug counter `WorkCounter.CapturesSaved` (bumped in `SaveCapture`) is the
+test seam.
+
+### The original open questions
+
+- Group calls: answered on paper (above), to be confirmed by the equivalence rows once built.
+- Fuzzy: same, and the fuzzy arms share the plain group arm; nothing fuzzy reads a group.
+- `WorkCounter` share of group-arm steps on the two gate rows: still open; it needs a Debug count,
+  not a timing, so it is allowed under today's order, but it is deferred to the build sitting.
+- Tests: `tests/FuzzyRegex.Tests/Gaps/Engine/CaptureFreeMatchingTests.cs`.

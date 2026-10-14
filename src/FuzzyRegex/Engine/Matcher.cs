@@ -13543,6 +13543,18 @@ internal static class Matcher
                 case Opcode.EndGroup: // End of a capture group.
                 case Opcode.StartGroup: // Start of a capture group.
                 {
+                    // sync-divergence: upstream parks, captures and pushes the backtrack entry for
+                    // every group / a call that reads no group, on a pattern nothing in which reads
+                    // one, passes straight through and pushes nothing, so the backtrack arm below is
+                    // never reached for it (MatchState.SkipCapturesIfUnread, stage C4). The flag is
+                    // fixed for the whole call, so both halves of a group are always skipped
+                    // together. When upstream changes START_GROUP/END_GROUP, keep this exit first.
+                    if (state.SkipsCaptures)
+                    {
+                        node = node.Next1.Node!;
+                        break;
+                    }
+
                     // Capture group indexes are 1-based (excluding group 0, which is the entire
                     // matched string).
                     int privateIndex = (int)node.Values[0];
