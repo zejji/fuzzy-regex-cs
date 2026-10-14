@@ -81,6 +81,12 @@ public class ManyInputsBenchmarks
         FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase
     );
 
+    /// <summary>
+    /// A case-insensitive alternation of plain words (D84): the compiler puts an ignore-case
+    /// first-set check in front of the branch, which the leading-units screen must see through.
+    /// </summary>
+    private static readonly FuzzyRegex _caseBlind = new("(?i)(?:amber|copper|violet)");
+
     /// <summary>Which records carry the one phrase.</summary>
     /// <returns>How many records match.</returns>
     [Benchmark]
@@ -236,6 +242,19 @@ public class ManyInputsBenchmarks
         return hits;
     }
 
+    /// <summary>A case-insensitive alternation of three words over 100,000 records.</summary>
+    /// <returns>How many matches there are in all.</returns>
+    [Benchmark]
+    public int CaseBlindAlternation()
+    {
+        int hits = 0;
+        foreach (string record in UsageCorpus.Records)
+        {
+            hits += _caseBlind.Count(record);
+        }
+        return hits;
+    }
+
     /// <summary>
     /// The full answer behind each row's returned number, per input, for the same-answer check
     /// against Python (<see cref="AnswerText"/>): which inputs matched, where, and what a
@@ -273,6 +292,8 @@ public class ManyInputsBenchmarks
             string.Join('\n', UsageCorpus.Records.Select(r => _digits.Replace(r, "#"))),
         [nameof(CaseFoldAccented)] = static () =>
             AnswerText.Bitmap(UsageCorpus.Accented.Select(s => _accented.IsMatch(s))),
+        [nameof(CaseBlindAlternation)] = static () =>
+            string.Join('\n', UsageCorpus.Records.Select(r => AnswerText.Spans(_caseBlind.Matches(r)))),
     };
 }
 #pragma warning restore S3267

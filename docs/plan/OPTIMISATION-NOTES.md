@@ -183,6 +183,40 @@ so the build is ruled out. The suspect is code generation around `NextStart`, wh
 one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
 `NextStart` bodies.
 
+## D84, the ignore-case first-set look-through (2026-10-14)
+
+Option A of `docs/plan/2026-10-14-multi-string-search-design.md`, on `fix/d84-ignorecase-screen`.
+`FindLeadingStrings` now looks through the zero-width ignore-case first-set check (`SetUnionIgn`
+or `CharacterIgn` with step 0), so `cat|dog` under IgnoreCase gets `LeadingUnits`. Logs are in the
+main checkout's `.scratch/d84/`.
+
+**Evidence.** The new tests were red before the fix (`red2.log`, 18 of 90 failed, all new rows)
+and green after. In front of literal heads the ignore-case check is only ever one character
+(`(?ai)(c)at|cow`) or a union of characters (`(?i)cat|dog`): `ops.txt` and `ops2.txt` probe 23
+shapes and none compiles to a step-0 `RangeIgn`, `SetDiffIgn`, `SetInterIgn` or `SetSymDiffIgn`,
+because `CheckFirstset` never merges characters into a range and a class head cannot lead to a
+literal. Those four were dropped from the list (rule 12); taking out `CharacterIgn` turns 1 test
+red, taking out `SetUnionIgn` 18 (`p10-noChar.log`, `p10-noUnion.log`). The differential against
+main c4c6ea02 over 240,000 rows (`.scratch/s62/rows-c`, `rows-d` and 80,000 generated
+case-insensitive alternation rows, `rows-d84.jsonl` from `gen.py`) is identical once the
+elapsed-time column is stripped (`strip8-*`, `strip10-*`, `cmp`). The counters (`count-*.txt`)
+show the new path live on 18,839 rows of `rows-d84` and 1,036 of `rows-c`. Oracle seeds 7, 4242
+and 20260927, AOT tests and smoke (7,611,904 bytes), and doc examples are green.
+
+**Timing** (BDN medium, P-cores): `CaseBlindAlternation`, a case-insensitive alternation of three
+words over 100,000 records, 45.2 to 31.5 ms (0.70x); no other ManyInputs row moved, and the BCL
+controls in Reference stayed within 1.06x. The first main run read 0.86-0.90x on untouched rows
+against the branch; a second main run showed that was drift on the main side (main against itself
+0.88-0.90x on the same rows), so the figures above use the second.
+
+**ThreadSafetyTests ran out of memory, fixed in the test walk.** Three of its walks threw
+`OutOfMemoryException` in `ObjectGraph.Walk` on this branch and passed on main
+(`diag-br-ThreadSafetyTests.log`, `diag-main-ThreadSafetyTests.log`). The named-lists family
+(`\L<words>` with IgnoreCase) now carries a `ProbabilisticWithAsciiCharSearchValues` as its
+`LeadingUnits`, and walking that object did not finish in five minutes (`sv/sv.cs`, `sv.txt`).
+The walk now treats `SearchValues<char>` and `SearchValues<string>` as leaves, as it does `Type`:
+they are immutable BCL objects, and the field holding them was already allowlisted on that ground.
+
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
 S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and

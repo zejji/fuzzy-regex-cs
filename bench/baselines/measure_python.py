@@ -419,6 +419,11 @@ def usage_rows(inputs: str) -> list[Row]:
     add("CaseFoldAccented", acc.pattern, fl, "search() per line, counted",
         count_hits(acc, accented), lambda: bitmap(acc.search(l) for l in accented))
 
+    blind = compile_("(?i)(?:amber|copper|violet)", V1)
+    add("CaseBlindAlternation", blind.pattern, V1, "len(findall()) per record, summed",
+        lambda: sum(len(blind.findall(r)) for r in records),
+        lambda: "\n".join(spans(blind.finditer(r)) for r in records))
+
     return rows
 
 
