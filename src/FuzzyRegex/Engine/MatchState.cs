@@ -535,7 +535,15 @@ internal sealed class MatchState : IDisposable
     /// Whether consumption past the right edge of the text is a run-out (a partial) rather than a
     /// failure: forward partial calls, and the attempt from inside the text to come either way.
     /// </summary>
-    internal bool RunsOutRight => PartialSide == PartialRight || InsideW;
+    internal bool RunsOutRight
+    {
+        // AggressiveInlining (cold-arm round 3): BasicMatchCore calls this from its repeat arms, and the JIT
+        // turned every one of those inlines down as "unprofitable" (runtime JitTracing events, 2026-10-14):
+        // its inline policy scales profitability by (1 - locals / JitMaxLocalsToTrack), and that method
+        // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => PartialSide == PartialRight || InsideW;
+    }
 
     /// <summary>The same as <see cref="RunsOutRight"/>, for the left edge.</summary>
     internal bool RunsOutLeft => PartialSide == PartialLeft || InsideW;
@@ -2367,6 +2375,11 @@ internal sealed class MatchState : IDisposable
     /// <param name="textPos">The position to guard.</param>
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
+    // AggressiveInlining (cold-arm round 3): BasicMatchCore calls this from its repeat arms, and the JIT
+    // turned every one of those inlines down as "unprofitable" (runtime JitTracing events, 2026-10-14):
+    // its inline policy scales profitability by (1 - locals / JitMaxLocalsToTrack), and that method
+    // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
         ActiveGuardList(index, guardType)?.Guard(textPos, protect);
 
@@ -2412,6 +2425,11 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     /// <param name="index">The repeat index.</param>
     /// <returns><see langword="true"/> if a matched body leaves no mark.</returns>
+    // AggressiveInlining (cold-arm round 3): BasicMatchCore calls this from its repeat arms, and the JIT
+    // turned every one of those inlines down as "unprofitable" (runtime JitTracing events, 2026-10-14):
+    // its inline policy scales profitability by (1 - locals / JitMaxLocalsToTrack), and that method
+    // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool KeepsFailureMemo(int index) => Pattern.RepeatInfoAt(index).FailureMemo;
 
     /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
@@ -2424,6 +2442,11 @@ internal sealed class MatchState : IDisposable
     /// <param name="textPos">The position to ask about.</param>
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     /// <returns><see langword="true"/> if that position is guarded for that repeat.</returns>
+    // AggressiveInlining (cold-arm round 3): BasicMatchCore calls this from its repeat arms, and the JIT
+    // turned every one of those inlines down as "unprofitable" (runtime JitTracing events, 2026-10-14):
+    // its inline policy scales profitability by (1 - locals / JitMaxLocalsToTrack), and that method
+    // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool IsRepeatGuarded(int index, int textPos, uint guardType)
     {
         if (IsFuzzy)

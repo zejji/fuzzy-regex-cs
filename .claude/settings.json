@@ -4,7 +4,7 @@
       {
         "matcher": "startup|resume|clear",
         "hooks": [
-          { "type": "command", "command": "pwsh -NoProfile -File tools/ci-status.ps1", "timeout": 20 }
+          { "type": "command", "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/ci-status.ps1\"", "timeout": 20 }
         ]
       }
     ],
@@ -12,7 +12,7 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "pwsh -NoProfile -File tools/session-hook.ps1", "timeout": 20 }
+          { "type": "command", "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/session-hook.ps1\"", "timeout": 20 }
         ]
       }
     ]

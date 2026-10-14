@@ -6844,13 +6844,24 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="bodyStatus">The body's test.</param>
     /// <param name="tailStatus">The tail's test.</param>
-    /// <param name="kept">The entry for the alternative that did not run out, in the shape this arm
-    /// parks for it when both could match.</param>
+    /// <param name="position">Where the alternative that did not run out resumes.</param>
+    /// <param name="count">The repeat count to restore first.</param>
+    /// <param name="start">The repeat start to restore first.</param>
+    /// <param name="captureChange">The capture-change counter to restore first.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position that alternative is tried at, for its own guard.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33).</param>
     private static void KeepTheAlternativeThatDidNotRunOut(
         MatchState state,
         int bodyStatus,
         int tailStatus,
-        MatchBodyTailStateData kept
+        Position position,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart
     )
     {
         Debug.Assert(
@@ -6877,7 +6888,17 @@ internal static class Matcher
             return;
         }
 
-        PushMatchBodyTailStateData(state.Bstack, kept, state.IsFuzzy);
+        PushMatchBodyTailStateData(
+            state.Bstack,
+            position,
+            count,
+            start,
+            captureChange,
+            index,
+            textPos,
+            changesAtStart,
+            state.IsFuzzy
+        );
         state.Bstack.PushUInt8((byte)op);
 
         /* bstack: position count start capture_change index text_pos MATCH_BODY | MATCH_TAIL */
@@ -6912,7 +6933,7 @@ internal static class Matcher
         if (count > node.Values[1])
         {
             rpData.Count = count;
-            PushRepeatOneStateData(state.Bstack, new RepeatOneStateData(savedCount, start, node, index));
+            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
             /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -7327,17 +7348,29 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_be, sizeof(data_be))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data, bool fuzzy)
+    private static void PushBodyEndStateData(
+        ByteStack stack,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7371,18 +7404,32 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_r, sizeof(data_r))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The text position to park.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data, bool fuzzy)
+    private static void PushRepeatStateData(
+        ByteStack stack,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
-        stack.PushSize(data.TextPos);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
+        stack.PushSize(textPos);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7417,20 +7464,36 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_mbt, sizeof(data_mbt))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="position">Where to resume - the node and the text position.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position the loser is tried at, for its own guard.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data, bool fuzzy)
+    private static void PushMatchBodyTailStateData(
+        ByteStack stack,
+        Position position,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushNode(data.Position.Node);
-        stack.PushSize(data.Position.TextPos);
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
-        stack.PushSize(data.TextPos);
+        stack.PushNode(position.Node);
+        stack.PushSize(position.TextPos);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
+        stack.PushSize(textPos);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7482,13 +7545,16 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_ro, sizeof(data_ro))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
-    private static void PushRepeatOneStateData(ByteStack stack, RepeatOneStateData data)
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="node">The repeat node, which the backtrack case resumes from.</param>
+    /// <param name="index">The repeat index.</param>
+    private static void PushRepeatOneStateData(ByteStack stack, long count, int start, Node node, int index)
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushNode(data.Node);
-        stack.PushSize(data.Index);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushNode(node);
+        stack.PushSize(index);
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
@@ -12660,6 +12726,24 @@ internal static class Matcher
         return at < 0 ? (-1, 0) : (foundPos + at, foundPos + at + 1);
     }
 
+    // cold-arm (D82): what an arm moved out of BasicMatchCore hands back, beside the MatchStatus
+    // values (all below 3) it returns as they are. BasicMatchCore had reached the JIT's limit on
+    // locals (JitMaxLocalsToTrack, 1,024 with inlinees' temporaries): past it, locals live on the
+    // stack, are zeroed on every call, and further calls are not inlined. Moving rarely used arms
+    // out keeps their locals and inlinees out of the hot method's count.
+
+    /// <summary>The arm finished; go on with the next node (or the next backtracking entry).</summary>
+    private const int _armContinue = 100;
+
+    /// <summary>The arm failed; backtrack.</summary>
+    private const int _armBacktrack = 101;
+
+    /// <summary>The arm ran out of text; take the run-out path.</summary>
+    private const int _armRunOut = 102;
+
+    /// <summary>Go on matching forwards from the node the arm left.</summary>
+    private const int _armAdvance = 103;
+
     /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
@@ -12751,17 +12835,6 @@ internal static class Matcher
         FoldBuffer gfoldedBuffer = default;
         Span<uint> folded = foldedBuffer;
         Span<uint> gfolded = gfoldedBuffer;
-
-        // The three scratch buffers FUZZY and END_FUZZY need, allocated here for the same reason
-        // 'folded' is: a stackalloc inside either loop is not released until this method returns, so
-        // one per backtrack step grows the stack without bound (CA2014). That analyzer does not see
-        // a stackalloc nested inside a switch case, so this is the rule and not the tool.
-        FuzzyCountBuffer outerBuffer = default;
-        FuzzyCountBuffer totalBuffer = default;
-        FuzzyCountBuffer innerBuffer = default;
-        Span<long> fuzzyOuterCounts = outerBuffer;
-        Span<long> fuzzyTotalCounts = totalBuffer;
-        Span<long> fuzzyInnerCounts = innerBuffer;
 
         state.FewestErrors = state.MaxErrors;
 
@@ -13289,55 +13362,10 @@ internal static class Matcher
                 case Opcode.AnyRev: // Any character except a newline, backwards.
                 case Opcode.AnyAllRev: // Any character at all, backwards.
                 case Opcode.AnyURev: // Any character except a line separator, backwards.
-                    status = node.Op switch
+                    status = AdvanceAnyRev(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
-                        Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
-                        _ => TryMatchAnyURev(state, node, state.TextPos),
-                    };
-
-                    if (status < 0)
-                    {
-                        if (status == MatchStatus.Partial)
-                        {
-                            goto runOut;
-                        }
-
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            PushExactItemDeletion(state, node, -1);
-                        }
-
-                        state.TextPos = state.PrevPos(state.TextPos);
-                        node = node.Next1.Node!;
-                    }
-                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        status = FuzzyMatchItem(state, search, ref node, -1);
-
-                        if (status < 0)
-                        {
-                            if (status == MatchStatus.Partial)
-                            {
-                                goto runOut;
-                            }
-
-                            return status;
-                        }
-
-                        if (status == MatchStatus.Failure)
-                        {
-                            goto backtrack;
-                        }
-                    }
-                    else
-                    {
-                        goto backtrack;
+                        goto armExit;
                     }
 
                     break;
@@ -13427,170 +13455,21 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Conditional: // Start of a conditional subpattern (:12213).
-                {
-                    // The condition is a lookaround, so it parks exactly what LOOKAROUND parks.
-                    PushLookaroundStateData(
-                        state.Sstack,
-                        new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
-                    );
+                    status = AdvanceConditional(state, ref node);
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
 
-                    // Upstream saves the captures unconditionally here, with no has-groups flag on
-                    // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
-                    PushCaptures(state, state.Bstack);
-                    PushRepeats(state, state.Bstack);
-                    state.PushSubAttemptFuzzyState(state.Bstack);
-                    state.Bstack.PushSize(state.CaptureChange);
-                    state.Bstack.PushSize(state.Sstack.Count);
-                    state.Bstack.PushUInt8((byte)Opcode.Conditional);
-                    state.Pstack.PushSize(state.Bstack.Count);
-
-                    /* sstack: node slice_start slice_end text_pos
-                     *
-                     * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL
-                     *
-                     * pstack: bstack
-                     */
-
-                    // The condition may read outside the slice the match is confined to, for the same
-                    // reason a lookaround may.
-                    state.SliceStart = state.TextStart;
-                    state.SliceEnd = state.TextEnd;
-
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.EndConditional: // End of a conditional subpattern (:12356).
-                {
-                    /* sstack: node slice_start slice_end text_pos ...
-                     *
-                     * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL ...
-                     *
-                     * pstack: bstack
-                     */
-
-                    // D11 M2: the cut rule, in a partial call's second pass. A blocked positive test
-                    // goes on in the yes-branch with its body's entries kept; a blocked negative one
-                    // goes back into its body.
-                    LookaroundEnd condEnd = LookaroundEnd.Cut;
-                    if (state.WMarks.Count != 0)
+                    status = AdvanceEndConditional(state, ref node);
+                    if (status != _armContinue)
                     {
-                        condEnd = EndALookaroundInTheSecondPass(state, ref node);
-                        if (condEnd == LookaroundEnd.Continue)
-                        {
-                            break;
-                        }
-
-                        if (condEnd == LookaroundEnd.Backtrack)
-                        {
-                            goto backtrack;
-                        }
-                    }
-
-                    // The condition matched. It is atomic, like a lookaround, so everything it pushed
-                    // while matching goes: the condition is asked once and never re-asked.
-                    if (!state.Pstack.PopSize(out long endCondBstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    CutBstack(state, (int)endCondBstackCount);
-
-                    // D11 M2: the frame goes, and its marks and dedup records with it. A positive
-                    // test's own cut taint moves to the end entry below, as a lookaround's does.
-                    if (state.WMarks.Count != 0)
-                    {
-                        state.DropWMarksFrom((int)endCondBstackCount - 1);
-                    }
-
-                    if (state.LookaroundSuccesses.Count != 0)
-                    {
-                        state.DropLookaroundSuccessesFrom((int)endCondBstackCount - 1);
-                    }
-
-                    if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.Sstack.Count = (int)endCondSstackCount;
-                    CloseFramesAbove(state);
-
-                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    // The condition consumes nothing: text position and slice go back to the
-                    // CONDITIONAL's.
-                    state.TextPos = endCondData.TextPos;
-                    state.SliceEnd = endCondData.SliceEnd;
-                    state.SliceStart = endCondData.SliceStart;
-                    Node endCondNode = endCondData.Node;
-
-                    /* sstack: -
-                     *
-                     * bstack: captures repeats fuzzy_counts capture_change
-                     *
-                     * pstack: -
-                     */
-
-                    if (endCondNode.Match || !pattern.DropNegativeTestCaptures)
-                    {
-                        // The test's body matched. The saved block stays on the stack for the
-                        // backtrack case to undo, and what the body did stands until then.
-                        state.Bstack.PushUInt8((byte)Opcode.EndConditional);
-
-                        if (condEnd == LookaroundEnd.CutTainted)
-                        {
-                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
-                        }
-
-                        /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
-
-                        // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
-                        // entry 65): a negative test fails, and the 'false' branch keeps the whole
-                        // block as the positive arm does - the captures, the repeats and the errors
-                        // of a fuzzy section inside the test - so (?(?!X)A|B) answers as
-                        // (?(?=X)B|A). Only backtracking undoes them, and none has happened: the
-                        // test chose the branch, so its work is not thrown away (owner ruling
-                        // 2026-09-30 on OPEN-2; errors decided 2026-10-03, DECISIONS). Upstream
-                        // restores the block first (_regex.c:12423-12432).
-                        node = endCondNode.Match ? node.Next1.Node! : endCondNode.Next2.Node!;
-                    }
-                    else
-                    {
-                        // Oracle-only (PatternObject.DropNegativeTestCaptures): upstream's arm. A
-                        // negative test has failed, so undo what the test did before taking the
-                        // 'false' branch.
-                        if (!state.Bstack.PopSize(out long endCondCaptureChange))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = endCondCaptureChange;
-
-                        if (
-                            !state.PopSubAttemptFuzzyState(state.Bstack)
-                            || !PopRepeats(state, state.Bstack, testJustEnded: true)
-                            || !PopCaptures(state, state.Bstack)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        /* sstack: -
-                         *
-                         * bstack: -
-                         *
-                         * pstack: -
-                         */
-
-                        // Go to the 'false' branch.
-                        node = endCondNode.Next2.Node!;
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.Branch: // 2-way branch.
                 {
                     // NOT UPSTREAM'S (S60b item 9): in a long run of branches, go straight to the
@@ -13737,164 +13616,13 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndFuzzy: // End of fuzzy matching (:12448).
-                {
-                    Span<long> outerCounts = fuzzyOuterCounts;
-                    Span<long> totalCounts = fuzzyTotalCounts;
-
-                    /* sstack: outer_counts outer_node
-                     *
-                     * bstack: -
-                     */
-
-                    // Are the inner constraints OK? This is the one place a 'min' is consulted: an
-                    // item asks whether one more error fits, and only the end of the section can ask
-                    // whether the section as a whole is legal.
-                    //
-                    // NOT UPSTREAM (ledger entry 51, known defect D9): a section below an insertion
-                    // or error minimum is not failed yet. Upstream fails it here (':12461-12462'),
-                    // before pushing the frame that offers trailing insertions (':12500-12511'), so
-                    // the one error that could still meet the minimum is never tried:
-                    // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
-                    // section were legal, pushes that frame, and then backtracks into it; the
-                    // backtrack arm asks the constraints again after each insertion.
-                    // D11 amendment 2, repair 2: the open-section link is this section's own frame,
-                    // which the saved stack's top is back at. A REOPEN that restored a body's open
-                    // section with a stale link would break it (MatchState.SectionFrame).
-                    Debug.Assert(
-                        !pattern.KeepsSectionLinks || state.SectionFrame == state.Sstack.Count,
-                        "D11 amendment 2, repair 2: the open-section link is the closing section's frame"
-                    );
-
-                    bool minimumAwaitsInsertions = false;
-                    if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
+                    status = AdvanceEndFuzzy(state, ref node);
+                    if (status != _armContinue)
                     {
-                        if (
-                            pattern.CheckMinimumBeforeTrailingInsertions
-                            || !InsertionsCanMeetMinimum(state, state.FuzzyCounts, state.FuzzyNode!)
-                        )
-                        {
-                            goto backtrack;
-                        }
-
-                        minimumAwaitsInsertions = true;
+                        goto armExit;
                     }
 
-                    // MERGING, not restoring: the section's own changes are part of the answer this
-                    // END_FUZZY is building, and taking the outer counts back off the stack must not
-                    // take them with it. This is the arm ledger entry 11 names as the one that has to
-                    // stay a merge. See 'MatchState.PopFuzzyCountsMerging'.
-                    if (
-                        !state.Sstack.PopNode(pattern, out Node? outerNode)
-                        || !state.PopFuzzyCountsMerging(state.Sstack, outerCounts, out _)
-                    )
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
-                    long closedFrame = state.SectionFrame;
-                    if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    /* sstack: - */
-
-                    // Add the inner counts to the outer counts.
-                    totalCounts[FuzzyValue.Sub] = outerCounts[FuzzyValue.Sub] + state.FuzzyCounts[FuzzyValue.Sub];
-                    totalCounts[FuzzyValue.Ins] = outerCounts[FuzzyValue.Ins] + state.FuzzyCounts[FuzzyValue.Ins];
-                    totalCounts[FuzzyValue.Del] = outerCounts[FuzzyValue.Del] + state.FuzzyCounts[FuzzyValue.Del];
-
-                    // THIS PORT KEEPS THE OLD TOTALS, so that whatever undoes this arm puts them back:
-                    // the reject below, and the backtrack arm through the two extra bstack entries.
-                    // Upstream writes 'total_errors' and never restores it - not on the reject
-                    // (':12484-12495') and not when backtracking out (':15568') - and the walks read
-                    // it at the next success. A match that no longer passes through this section, the
-                    // other side of an alternation, then reports errors its counts do not have.
-                    // 'DoBestFuzzyMatch' scores it as no better than the last run, 'start_pos' does
-                    // not advance, and it HANGS, upstream as well as here:
-                    // '(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)' over '2y'. Recomputing the totals from the
-                    // counts on the way back is not enough: with nested sections the counts then
-                    // still hold the enclosing section's errors, and nothing resets the total when
-                    // that section is itself backtracked out of. Ledger entry 32, found 2026-09-23 by
-                    // the oracle at seed 20260923; pinned by 'Gaps.Engine.FuzzyBestMatchTests
-                    // .Bestmatch_does_not_read_a_stale_error_total_from_a_rejected_fuzzy_section'.
-                    long previousTotalErrors = state.TotalErrors;
-                    long previousTotalCost = state.TotalCost;
-
-                    // Is the total number of errors OK?
-                    state.TotalErrors = TotalErrors(totalCounts);
-
-                    // This port's own line: what those errors cost, under the section just closed.
-                    // See 'MatchState.TotalCost' for why it is recorded here and what it means when
-                    // sections nest. Upstream has no equivalent.
-                    state.TotalCost = TotalCost(totalCounts, state.FuzzyNode!);
-
-                    // THE SECOND TEST IS THIS PORT'S, AND IT IS THE COST TWIN OF UPSTREAM'S OWN LINE.
-                    // The three constraint predicates bound the cost of the section CURRENTLY OPEN,
-                    // exactly as they bound its error count; what bounds the WHOLE MATCH is this
-                    // line, which upstream writes for the error count (':12486') and cannot write
-                    // for the cost because it has no running cost to write it about.
-                    //
-                    // Without it the cost budget is not a budget at all wherever one section is
-                    // entered more than once - a group call, a recursion, a repeat around the
-                    // section - because each entry starts from zero counts and passes the predicate
-                    // while the accumulated cost recorded above climbs past the budget. The first
-                    // walk of 'DoBestFuzzyMatch' then never sees a strictly cheaper run, 'start_pos'
-                    // never advances, and IT HANGS: '(?b)((?:a){1i+2d+1s<=1})(?1)' over 'bb' re-found
-                    // the same cost-2, two-substitution match under a cost-1 budget until it was
-                    // killed, where the unit-cost spelling of the same pattern answers in 80ms.
-                    // Found by S42's blind review, 2026-09-13; pinned by
-                    // 'Gaps.Engine.FuzzyBestMatchTests.Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section'.
-                    if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
-                    {
-                        state.TotalErrors = previousTotalErrors;
-                        state.TotalCost = previousTotalCost;
-
-                        if (pattern.KeepsSectionLinks)
-                        {
-                            state.Sstack.PushSize(state.SectionFrame);
-                        }
-
-                        state.PushFuzzyCounts(state.Sstack, outerCounts);
-                        state.Sstack.PushNode(outerNode);
-                        state.SectionFrame = (int)closedFrame;
-
-                        /* sstack: outer_counts outer_node */
-                        goto backtrack;
-                    }
-
-                    // Save the inner fuzzy info. The zero is the count of trailing insertions this
-                    // section has been asked to try, which the backtrack arm raises one at a time.
-                    // The two totals are this port's, for the backtrack arm to put back - see the note
-                    // above 'previousTotalErrors'.
-                    state.Bstack.PushSize(previousTotalErrors);
-                    state.Bstack.PushSize(previousTotalCost);
-                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
-                    state.Bstack.PushSize(0);
-                    state.Bstack.PushNode(state.FuzzyNode);
-                    state.Bstack.PushSize(state.TextPos);
-                    state.Bstack.PushNode(node);
-                    state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
-
-                    totalCounts.CopyTo(state.FuzzyCounts);
-                    state.FuzzyNode = outerNode;
-
-                    /* sstack: -
-                     *
-                     * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
-                     * end_fuzzy_node END_FUZZY
-                     */
-
-                    // Ledger entry 51: zero trailing insertions do not meet the minimum, so try one.
-                    if (minimumAwaitsInsertions)
-                    {
-                        goto backtrack;
-                    }
-
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.EndGreedyRepeat: // End of a greedy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -14045,13 +13773,11 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(
-                            rpData.Count - 1,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count - 1,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
@@ -14068,15 +13794,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            state.TextPos,
+                            state.CaptureChange,
+                            index,
+                            state.TextPos,
+                            bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
                         );
                         goto runOut;
                     }
@@ -14090,15 +13814,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextTailPosition,
-                                    rpData.Count,
-                                    state.TextPos,
-                                    state.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    state.FuzzyChanges.Count
-                                ),
+                                nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
@@ -14261,13 +13983,11 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(
-                            rpData.Count - 1,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count - 1,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
@@ -14281,15 +14001,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                state.FuzzyChanges.Count
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            state.TextPos,
+                            state.CaptureChange,
+                            index,
+                            state.TextPos,
+                            state.FuzzyChanges.Count
                         );
                         goto runOut;
                     }
@@ -14303,15 +14021,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextBodyPosition,
-                                    rpData.Count,
-                                    state.TextPos,
-                                    state.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    state.FuzzyChanges.Count
-                                ),
+                                nextBodyPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
@@ -14354,164 +14070,20 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndLookaround: // End of a lookaround subpattern (:12918).
-                {
-                    /* sstack: node slice_start slice_end text_pos ...
-                     *
-                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND ...
-                     *
-                     * pstack: bstack
-                     */
-
-                    // D11 M2: the cut rule, in a partial call's second pass.
-                    LookaroundEnd lookEnd = LookaroundEnd.Cut;
-                    if (state.WMarks.Count != 0)
+                    status = AdvanceEndLookaround(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        lookEnd = EndALookaroundInTheSecondPass(state, ref node);
-                        if (lookEnd == LookaroundEnd.Continue)
-                        {
-                            break;
-                        }
-
-                        if (lookEnd == LookaroundEnd.Backtrack)
-                        {
-                            goto backtrack;
-                        }
-                    }
-
-                    // Everything the body pushed while it matched goes: a lookaround is atomic, so
-                    // there is nothing left to backtrack into once it has succeeded.
-                    if (!state.Pstack.PopSize(out long endLookBstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    CutBstack(state, (int)endLookBstackCount);
-
-                    // The frame goes, and its marks and dedup records with it: a negative lookaround
-                    // that fails drops its own cut taint, and a positive one moves it to the end entry
-                    // below (A7's exception), because the path after it is reached only for some
-                    // continuations. A record left at the frame's position would dedup a later
-                    // lookaround's success there (review of chunk 7, round 1).
-                    if (state.WMarks.Count != 0)
-                    {
-                        state.DropWMarksFrom((int)endLookBstackCount - 1);
-                    }
-
-                    if (state.LookaroundSuccesses.Count != 0)
-                    {
-                        state.DropLookaroundSuccessesFrom((int)endLookBstackCount - 1);
-                    }
-
-                    if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.Sstack.Count = (int)endLookSstackCount;
-                    CloseFramesAbove(state);
-
-                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    // A lookaround consumes nothing: the text position and the slice both go back to
-                    // what they were at the LOOKAROUND.
-                    state.TextPos = endLookData.TextPos;
-                    state.SliceEnd = endLookData.SliceEnd;
-                    state.SliceStart = endLookData.SliceStart;
-                    Node endLookNode = endLookData.Node;
-
-                    /* sstack: -
-                     *
-                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
-                     *
-                     * pstack: -
-                     */
-
-                    if (endLookNode.Match)
-                    {
-                        // It's a positive lookaround that's succeeded. The captures its body made
-                        // stay visible; the block stays on the stack for the backtrack case to undo.
-                        state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
-
-                        if (lookEnd == LookaroundEnd.CutTainted)
-                        {
-                            state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
-                        }
-
-                        /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
-
-                        // Go to the 'true' branch.
-                        node = node.Next1.Node!;
-                    }
-                    else
-                    {
-                        // It's a negative lookaround that's succeeded, which means the whole
-                        // lookaround has failed. Undo the body's captures before failing.
-                        if (!state.Bstack.PopSize(out long endLookCaptureChange))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = endLookCaptureChange;
-
-                        if (!state.PopSubAttemptFuzzyState(state.Bstack))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        if (!state.Bstack.PopBool(out bool endLookHasGroups))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        if (endLookHasGroups && !PopCaptures(state, state.Bstack))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        // NOT UPSTREAM (ledger entry 50): try an insertion in front of it first.
-                        if ((endLookNode.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = InsertBeforeAFailedLookaround(state, search, ref node, endLookNode);
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Success)
-                            {
-                                break;
-                            }
-                        }
-
-                        // Go to the 'false' branch.
-                        goto backtrack;
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.CallRef: // A group call reference (:12106).
-                    // The node a called group is entered through. Reached in the ordinary forward
-                    // direction it means the group is being matched where it was written rather
-                    // than called, so the NULL tells the matching GROUP_RETURN there is no caller
-                    // to return to. GROUP_CALL enters the group by skipping over this node.
-                    state.Sstack.PushNode(null);
-                    state.Bstack.PushUInt8((byte)Opcode.CallRef);
+                    status = AdvanceCallRef(state, ref node);
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
 
-                    /* sstack: NULL
-                     *
-                     * bstack: CALL_REF
-                     */
-
-                    node = node.Next1.Node!;
                     break;
                 // Upstream gives each of these its own case with the same eleven-line tail copied
                 // out (:12968, :13804, :13914, :14446-14449 case-sensitive; :12146, :13827, :13937,
@@ -14599,52 +14171,10 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev: // Set symmetric difference, backwards, ignoring case.
                 case Opcode.SetUnionRev: // Set union, backwards.
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
-                    if (RanOutOnTheLeft(state, state.TextPos))
+                    status = AdvanceCharacterRev(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
-                        {
-                            node = node.Next1.Node!;
-                            break;
-                        }
-
-                        goto runOut;
-                    }
-
-                    if (
-                        state.TextPos > state.SliceStart
-                        && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
-                    )
-                    {
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            PushExactItemDeletion(state, node, -1);
-                        }
-
-                        state.TextPos = Step(state, state.TextPos, node.Step);
-                        node = node.Next1.Node!;
-                    }
-                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        status = FuzzyMatchItem(state, search, ref node, -1);
-
-                        if (status < 0)
-                        {
-                            if (status == MatchStatus.Partial)
-                            {
-                                goto runOut;
-                            }
-
-                            return status;
-                        }
-
-                        if (status == MatchStatus.Failure)
-                        {
-                            goto backtrack;
-                        }
-                    }
-                    else
-                    {
-                        goto backtrack;
+                        goto armExit;
                     }
 
                     break;
@@ -14734,36 +14264,12 @@ internal static class Matcher
                 case Opcode.Failure: // Failure.
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
-                    // NOT UPSTREAM (empty-iteration rule): the link beneath the frame, see
-                    // MatchState.SectionFrame.
-                    if (pattern.KeepsSectionLinks)
+                    status = AdvanceFuzzy(state, ref node);
+                    if (status != _armContinue)
                     {
-                        state.Sstack.PushSize(state.SectionFrame);
+                        goto armExit;
                     }
 
-                    // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
-                    // zero and END_FUZZY adds them back in, which is how an inner budget can be
-                    // tighter than the outer one without either being ignored.
-                    state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
-                    state.Sstack.PushNode(state.FuzzyNode);
-
-                    if (pattern.KeepsSectionLinks)
-                    {
-                        state.SectionFrame = state.Sstack.Count;
-                    }
-
-                    // Initialise the inner fuzzy info.
-                    Array.Clear(state.FuzzyCounts);
-                    state.FuzzyNode = node;
-
-                    state.Bstack.PushUInt8((byte)Opcode.Fuzzy);
-
-                    /* sstack: outer_counts outer_node
-                     *
-                     * bstack: FUZZY
-                     */
-
-                    node = node.Next1.Node!;
                     break;
                 case Opcode.GreedyRepeat: // Greedy repeat.
                 {
@@ -14781,14 +14287,12 @@ internal static class Matcher
 
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(
-                            rpData.Count,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            state.TextPos,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        state.TextPos,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
@@ -14873,15 +14377,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                rpData.Start,
-                                rpData.CaptureChange,
-                                index,
-                                state.TextPos,
-                                rpData.ChangesAtStart
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
                         );
                         goto runOut;
                     }
@@ -14901,15 +14403,13 @@ internal static class Matcher
                             // upstream's own and is kept.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextTailPosition,
-                                    rpData.Count,
-                                    rpData.Start,
-                                    rpData.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    rpData.ChangesAtStart
-                                ),
+                                nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
@@ -15051,10 +14551,7 @@ internal static class Matcher
                     if (count > node.Values[1])
                     {
                         // Record the backtracking info.
-                        PushRepeatOneStateData(
-                            state.Bstack,
-                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
-                        );
+                        PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
                         /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -15084,97 +14581,13 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.GroupCall: // Group call (:13394).
-                {
-                    int groupCallIndex = (int)node.Values[0];
-                    Node groupCallReturnNode = node.Next1.Node!;
-
-                    // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
-                    // already open, when the attempt has reached no further since that call was made.
-                    // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
-                    // and failing it leaves every other path alone.
-                    long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
-                    NoteReached(state, state.TextPos);
-                    int groupCallReach = state.ReachedWidth;
-                    Debug.Assert(
-                        groupCallReach >= 0 && groupCallReach <= state.TextLength,
-                        "the text reached is measured and fits in the text"
-                    );
-
-                    // NOT UPSTREAM'S: a call with the same entry key as one that ran out of choices
-                    // without returning fails the same way, so it fails now. Nothing has been pushed
-                    // yet, so backtracking resumes where the call's own backtrack arm would have left
-                    // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
-                    bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
-                    if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
+                    status = AdvanceGroupCall(state, ref node, readGroupCount);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    if (
-                        readGroupCount == 0
-                            ? !state.ActiveCalls.Add((groupCallKey, groupCallReach))
-                            : !TryOpenCall(state, groupCallKey, groupCallReach)
-                    )
-                    {
-                        goto backtrack;
-                    }
-
-                    // For the caller. Each group's count as well as its current, where upstream's
-                    // push_groups saves only current: the return restores both (D51, see
-                    // ReturnToCallerCaptures). The captures go last, right under the return node,
-                    // so a partial result can find them at a fixed offset (D62, see
-                    // ReturnFromOpenCallsAtAPartial); upstream's order is groups first.
-                    // SHORTCUT (D68): every call saves, and its return restores, every repeat and
-                    // every group, whatever the called body can change. That is most of what a call
-                    // costs over its written-out body, 1.1-2.4x on the D68 rows, and a fuzzy section
-                    // pays it on every retry that re-enters the call. Upgrade: compile, for each
-                    // call reference, the groups and repeats its body can write, and save only
-                    // those; D51 and D62 depend on what is restored, so it needs nested and
-                    // recursive witnesses. docs/plan/2026-10-03-d68-call-copy-perf.md.
-                    PushRepeats(state, state.Sstack);
-                    state.Sstack.PushSize(state.CaptureChange);
-                    PushCaptures(state, state.Sstack);
-                    state.Sstack.PushNode(groupCallReturnNode);
-                    state.Bstack.PushUInt8((byte)Opcode.GroupCall);
-
-                    // The call is open, and the frame it belongs to ends here. See
-                    // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
-                    // open calls it has just thrown away.
-                    Debug.Assert(
-                        state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
-                        "the text reached never shrinks, so an inner call's reach is at least its caller's"
-                    );
-                    state.OpenCalls.Add(
-                        (
-                            groupCallKey,
-                            groupCallReach,
-                            state.Sstack.Count,
-                            groupCallKeyed ? FailedCallKeyToRecord(state) : null
-                        )
-                    );
-
-                    /* sstack: caller_repeats capture_change caller_captures return_node
-                     *
-                     * bstack: GROUP_CALL
-                     */
-
-                    // Clear the repeat guards for the group call. They'll be restored on return -
-                    // 'push_repeats' above saved the guard lists in full. Without this a repeat
-                    // inside the called group would inherit "already failed at this position" from
-                    // the caller's own pass over the same text, and a recursive pattern visits the
-                    // same positions by design.
-                    foreach (RepeatData groupCallRepeat in state.Repeats)
-                    {
-                        groupCallRepeat.BodyGuardList.Reset();
-                        groupCallRepeat.TailGuardList.Reset();
-                    }
-
-                    // Call a group, skipping its CALL_REF node. Be aware that we might be calling
-                    // the entire pattern, which has no CALL_REF node of its own.
-                    Node? groupCallRefNode = pattern.CallRefInfoList[groupCallIndex].Node;
-                    node = groupCallRefNode is not null ? groupCallRefNode.Next1.Node! : pattern.StartNode!;
                     break;
-                }
                 // GROUP_EXISTS (:13442). Nothing is pushed to the backtracking stack: the opcode
                 // only picks an exit, and both exits are reachable from the enclosing structure's
                 // own backtracking, so there is nothing here to undo.
@@ -15228,113 +14641,29 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.GroupReturn: // Group return (:13474).
-                {
-                    /* If called:
-                     *
-                     * sstack: caller_repeats capture_change caller_captures return_node
-                     *
-                     * bstack: -
-                     *
-                     * else:
-                     *
-                     * sstack: NULL
-                     *
-                     * bstack: -
-                     */
-
-                    if (!state.Sstack.PopNode(pattern, out Node? groupReturnNode))
+                    status = AdvanceGroupReturn(state, ref node, readGroupCount);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
-
-                    if (groupReturnNode is not null)
-                    {
-                        // The group was called.
-                        node = groupReturnNode;
-
-                        // For the callee and the caller in turn. The callee's repeats and groups go
-                        // on the backtracking stack and the caller's come back off the saved stack,
-                        // so matching resumes exactly where the call left it. Upstream restores only
-                        // each group's current here, so the captures the call made stayed on the
-                        // list; here they are thrown away, as in Perl and PCRE2 (D51, see
-                        // ReturnToCallerCaptures). The groups are exchanged first because the
-                        // caller's lie on top of its repeats on the saved stack (D62).
-                        if (!ReturnToCallerCaptures(state))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        PushRepeats(state, state.Bstack);
-                        state.Bstack.PushSize(state.CaptureChange);
-                        if (
-                            !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                            || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = groupReturnCaptureChange;
-
-                        // The call is closed, so it is no longer one this position may not re-enter.
-                        // It is the innermost open one - calls nest - and its key goes on the
-                        // backtracking stack so the arm below can re-open it.
-                        state.Bstack.PushSize(state.OpenCalls[^1].Key);
-                        state.Bstack.PushSize(state.OpenCalls[^1].Reach);
-                        foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
-                        {
-                            state.Bstack.PushSize(span);
-                        }
-
-                        _ = PopOpenCall(state);
-                        state.Bstack.PushNode(groupReturnNode);
-                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
-                    }
-                    else
-                    {
-                        // The group was not called.
-                        state.Bstack.PushNode(null);
-                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
-
-                        node = node.Next1.Node!;
-                    }
-
-                    /* If called:
-                     *
-                     * sstack: -
-                     *
-                     * bstack: callee_captures callee_repeats capture_change call_key call_reach
-                     *         return_node GROUP_RETURN
-                     *
-                     * else:
-                     *
-                     * sstack: -
-                     *
-                     * bstack: NULL GROUP_RETURN
-                     */
 
                     break;
-                }
                 case Opcode.Keep: // Keep.
-                    state.Bstack.PushSize(state.MatchPos);
-                    state.Bstack.PushUInt8((byte)Opcode.Keep);
+                    status = AdvanceKeep(state, ref node);
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
 
-                    /* bstack: match_pos KEEP */
-
-                    state.MatchPos = state.TextPos;
-
-                    node = node.Next1.Node!;
                     break;
                 case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                {
-                    if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+                    status = AdvanceEndOptionalPass(state, ref node);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -15351,14 +14680,12 @@ internal static class Matcher
 
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(
-                            rpData.Count,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            state.TextPos,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        state.TextPos,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
@@ -15442,15 +14769,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                rpData.Start,
-                                rpData.CaptureChange,
-                                index,
-                                state.TextPos,
-                                rpData.ChangesAtStart
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
                         );
                         goto runOut;
                     }
@@ -15464,15 +14789,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextBodyPosition,
-                                    rpData.Count,
-                                    rpData.Start,
-                                    rpData.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    rpData.ChangesAtStart
-                                ),
+                                nextBodyPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
@@ -15547,10 +14870,7 @@ internal static class Matcher
                     {
                         // The match is shorter than the maximum, so we might need to backtrack the
                         // repeat to consume more.
-                        PushRepeatOneStateData(
-                            state.Bstack,
-                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
-                        );
+                        PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
                         /* bstack: count start node index LAZY_REPEAT_ONE */
@@ -15565,337 +14885,51 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Lookaround: // Start of a lookaround subpattern (:13758).
-                {
-                    PushLookaroundStateData(
-                        state.Sstack,
-                        new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
-                    );
-
-                    bool lookHasGroups = (node.Status & NodeStatus.HasGroups) != 0;
-                    if (lookHasGroups)
+                    status = AdvanceLookaround(state, ref node);
+                    if (status != _armContinue)
                     {
-                        PushCaptures(state, state.Bstack);
+                        goto armExit;
                     }
 
-                    state.Bstack.PushBool(lookHasGroups);
-                    state.PushSubAttemptFuzzyState(state.Bstack);
-                    state.Bstack.PushSize(state.CaptureChange);
-                    state.Bstack.PushSize(state.Sstack.Count);
-                    state.Bstack.PushUInt8((byte)Opcode.Lookaround);
-                    state.Pstack.PushSize(state.Bstack.Count);
-
-                    /* sstack: node slice_start slice_end text_pos
-                     *
-                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND
-                     *
-                     * pstack: bstack
-                     */
-
-                    // A lookaround may read outside the slice the match is confined to: '(?<=a)b'
-                    // against 'ab' searched from position 1 has to see the 'a'.
-                    state.SliceStart = state.TextStart;
-                    state.SliceEnd = state.TextEnd;
-
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.Prune: // Prune the backtracking (:13894).
-                {
-                    /* bstack: ... | ...
-                     *
-                     * pstack: bstack
-                     */
-
-                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
-                    state.VerbMarks.Add(state.Pstack.Count);
-
-                    // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
-                    // positive lookaround the verb acts when backtracking reaches it, and then
-                    // unwinds past the group (see VerbIsInsideATransparentGroup). Upstream prunes
-                    // to the group's own mark here and so fails only the group:
-                    // `(?>a(*PRUNE)b)|a` over 'ac' is (0, 1) upstream and None in PCRE2 10.47 and
-                    // Perl 5.42.3. Pinned by VerbScopeTests.
-                    if (VerbIsInsideATransparentGroup(state))
+                    status = AdvancePrune(state, ref node);
+                    if (status != _armContinue)
                     {
-                        state.Bstack.PushUInt8((byte)Opcode.Prune);
-
-                        /* bstack: ... | ... PRUNE */
-                    }
-                    else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state, -1))
-                    {
-                        // Prune the backtracking back to an appropriate backtracking point, unless
-                        // the path here read the text to come (D11 M2, the cut rule for a verb).
-                        TopBstack(state);
-
-                        /* bstack: ...
-                         *
-                         * pstack: bstack
-                         */
+                        goto armExit;
                     }
 
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP (:14004). Like STRING, it pushes nothing to the backtracking stack: the
                 // only state it carries between visits is 'stringPos', which the fuzzy retry block
                 // (:17269) reads and which Phase 5 will need a backtrack arm for.
                 case Opcode.RefGroup: // Reference to a capture group.
-                {
-                    // Capture group indexes are 1-based (excluding group 0, which is the entire
-                    // matched string).
-                    //
-                    // Check whether the captured text, if any, exists at this position in the
-                    // string.
-
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroup(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        // A reference to a group that has not captured fails; it does not match
-                        // empty. A group that captured an empty span has 'current' >= 0 and an
-                        // empty span, so it falls through and matches empty.
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.Start;
-                    }
-
-                    // Try comparing. Upstream's '++string_pos' and '++state->text_pos' are one
-                    // codepoint each, so both walk with 'NextPos' here - the S16 stepping - and an
-                    // astral character advances both by two code units, leaving 'stringPos' exactly
-                    // on 'span.End'.
-                    //
-                    // A plain '++' on both is in fact indistinguishable here, and deliberately not
-                    // used: measured 2026-08-31, it agreed on all 600 rows of the S21 negative
-                    // control and on the whole ported suite. Both operands index the *same* string,
-                    // so a code-unit walk stays in lockstep with a codepoint walk - it just tests
-                    // each surrogate half separately and reaches the same end. Kept as 'NextPos'
-                    // because upstream's '++' means one character, every other opcode in this port
-                    // spells that 'NextPos', and Phase 5's fuzzy retry moves 'stringPos' on its own,
-                    // where the lockstep argument no longer holds.
-                    while (stringPos < span.End)
-                    {
-                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
-                        {
-                            goto runOut;
-                        }
-
-                        if (
-                            state.TextPos < state.SliceEnd
-                            && SameChar(state.CharAt(state.TextPos), state.CharAt(stringPos))
-                        )
-                        {
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactStringDeletion(state, node, stringPos, 1);
-                            }
-
-                            stringPos = state.NextPos(stringPos);
-                            state.TextPos = state.NextPos(state.TextPos);
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            // 'stringPos' is a position in the subject here, not an index into the
-                            // node's values, so the fuzzy walk has to step it in code units.
-                            status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP_REV (:14375). The same walk from the other end: 'stringPos' starts at
                 // the capture's end and both sides retreat.
                 case Opcode.RefGroupRev: // Reference to a capture group, backwards.
-                {
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroupRev(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.End;
-                    }
-
-                    // Try comparing.
-                    while (stringPos > span.Start)
-                    {
-                        if (RanOutOnTheLeft(state, state.TextPos))
-                        {
-                            goto runOut;
-                        }
-
-                        if (
-                            state.TextPos > state.SliceStart
-                            && SameChar(state.CharBefore(state.TextPos), state.CharBefore(stringPos))
-                        )
-                        {
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactStringDeletion(state, node, stringPos, -1);
-                            }
-
-                            stringPos = state.PrevPos(stringPos);
-                            state.TextPos = state.PrevPos(state.TextPos);
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP_IGN_REV (:14318).
                 case Opcode.RefGroupIgnRev: // Reference to a capture group, backwards, ignoring case.
-                {
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroupIgnRev(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.End;
-                    }
-
-                    // Try comparing.
-                    while (stringPos > span.Start)
-                    {
-                        if (RanOutOnTheLeft(state, state.TextPos))
-                        {
-                            goto runOut;
-                        }
-
-                        if (
-                            state.TextPos > state.SliceStart
-                            && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
-                        )
-                        {
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactStringDeletion(state, node, stringPos, -1);
-                            }
-
-                            stringPos = state.PrevPos(stringPos);
-                            state.TextPos = state.PrevPos(state.TextPos);
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP_FLD_REV (:14161). REF_GROUP_FLD with both foldings consumed from their
                 // last character back, so each side's position counts down from its length instead
                 // of up from zero. S22 and S23 disapplied S1854 over this case because every store to
@@ -15903,646 +14937,63 @@ internal static class Matcher
                 // 'FuzzyMatchGroupFld(..., gfoldedLen, -1)' below reads it, so the disapplication is
                 // gone.
                 case Opcode.RefGroupFldRev: // Reference to a capture group, backwards, ignoring case.
-                {
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroupFldRev(
+                        state,
+                        ref node,
+                        ref stringPos,
+                        ref foldedPos,
+                        ref gfoldedPos,
+                        ref foldChangesStart,
+                        search,
+                        folded,
+                        gfolded
+                    );
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-                    int foldedLen;
-                    int gfoldedLen;
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.End;
-                        foldedPos = 0;
-                        foldedLen = 0;
-                        gfoldedPos = 0;
-                        gfoldedLen = 0;
-                        foldChangesStart = state.FuzzyChanges.Count;
-                    }
-                    else
-                    {
-                        // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
-                        // bounded by the slice, as in the loop below. Upstream folds the character
-                        // before text_pos unguarded; no retried kind of its own succeeds at the start
-                        // of the slice, but D24's whole deletion of a group character does.
-                        foldedLen =
-                            state.TextPos > state.SliceStart
-                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
-                                : 0;
-
-                        // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
-                        // STRING_FLD_REV takes the subject's step here (:14907).
-                        gfoldedLen =
-                            stringPos > span.Start
-                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
-                                : 0;
-
-                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
-                        {
-                            if (foldedPos <= 0 && foldedLen > 0)
-                            {
-                                state.TextPos = state.PrevPos(state.TextPos);
-                                foldedPos = 0;
-                                foldedLen = 0;
-                            }
-
-                            if (gfoldedPos <= 0 && stringPos > span.Start)
-                            {
-                                stringPos = state.PrevPos(stringPos);
-                                gfoldedPos = 0;
-                                gfoldedLen = 0;
-                            }
-                        }
-                    }
-
-                    // Try comparing.
-                    while (stringPos > span.Start)
-                    {
-                        // Case-fold at current position in text.
-                        if (foldedPos <= 0)
-                        {
-                            if (RanOutOnTheLeft(state, state.TextPos))
-                            {
-                                goto runOut;
-                            }
-
-                            foldedLen =
-                                state.TextPos > state.SliceStart
-                                    ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
-                                    : 0;
-
-                            foldedPos = foldedLen;
-                        }
-
-                        // Case-fold at current position in group.
-                        if (gfoldedPos <= 0)
-                        {
-                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded);
-                            gfoldedPos = gfoldedLen;
-                        }
-
-                        if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
-                        {
-                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
-                            // whole-character frame, so the whole deletion of an expanding group character is
-                            // retried before its folded characters are deleted one at a time, as the literal's
-                            // retry order has it.
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactGroupFldDeletion(
-                                    state,
-                                    node,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    -1,
-                                    foldChangesStart
-                                );
-                            }
-
-                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
-                            if (
-                                (
-                                    (foldedLen > 1 && foldedPos == foldedLen)
-                                    || (gfoldedLen > 1 && gfoldedPos == gfoldedLen)
-                                )
-                                && (node.Status & NodeStatus.Fuzzy) != 0
-                            )
-                            {
-                                OfferWholeFoldedGroupCharEdit(
-                                    state,
-                                    node,
-                                    -1,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    foldChangesStart,
-                                    search
-                                );
-                            }
-
-                            --foldedPos;
-                            --gfoldedPos;
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = FuzzyMatchGroupFld(
-                                state,
-                                search,
-                                node,
-                                ref foldedPos,
-                                foldedLen,
-                                stringPos,
-                                ref gfoldedPos,
-                                gfoldedLen,
-                                -1,
-                                foldChangesStart
-                            );
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-
-                        if (foldedPos <= 0 && foldedLen > 0)
-                        {
-                            state.TextPos = state.PrevPos(state.TextPos);
-                        }
-
-                        if (gfoldedPos <= 0)
-                        {
-                            stringPos = state.PrevPos(stringPos);
-                        }
-                    }
-
-                    // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's leftovers loop below.
-                    if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
-                    {
-                        while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
-                        {
-                            status = FuzzyMatchGroupFld(
-                                state,
-                                search,
-                                node,
-                                ref foldedPos,
-                                foldedLen,
-                                stringPos,
-                                ref gfoldedPos,
-                                gfoldedLen,
-                                -1,
-                                foldChangesStart
-                            );
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-
-                            if (foldedPos <= 0 && foldedLen > 0)
-                            {
-                                state.TextPos = state.PrevPos(state.TextPos);
-                            }
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // A folding that ran out on one side but not the other did not line up.
-                    // NOT UPSTREAM: upstream tests 'folded_pos > 0' (:14255); see FoldingIsPartUsed.
-                    if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1) || gfoldedPos > 0)
-                    {
-                        goto backtrack;
-                    }
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP_FLD (:14060). The hard one: the captured text and the subject are both
                 // full-case-folded, and the two foldings need not be the same length, so each side
                 // has its own buffer and its own position and only advances when its buffer runs
                 // out. 'gfolded' is the group's side, 'folded' the subject's.
                 case Opcode.RefGroupFld: // Reference to a capture group, ignoring case.
-                {
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroupFld(
+                        state,
+                        ref node,
+                        ref stringPos,
+                        ref foldedPos,
+                        ref gfoldedPos,
+                        ref foldChangesStart,
+                        search,
+                        folded,
+                        gfolded
+                    );
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-                    int foldedLen;
-                    int gfoldedLen;
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.Start;
-                        foldedPos = 0;
-                        foldedLen = 0;
-                        gfoldedPos = 0;
-                        gfoldedLen = 0;
-                        foldChangesStart = state.FuzzyChanges.Count;
-                    }
-                    else
-                    {
-                        // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
-                        // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
-                        // bounded by the slice, as in the loop below. Upstream folds the character at
-                        // text_pos unguarded; no retried kind of its own succeeds at the end of the
-                        // slice, but D24's whole deletion of a group character does.
-                        foldedLen =
-                            state.TextPos < state.SliceEnd
-                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
-                                : 0;
-
-                        // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
-                        // used up, where upstream reads the character after it.
-                        gfoldedLen =
-                            stringPos < span.End
-                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded)
-                                : 0;
-
-                        // NOT UPSTREAM (S84): upstream re-enters the loop without the two steps that
-                        // follow a fuzzy call in its body, so a retried edit that finishes a folding
-                        // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
-                        // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
-                        if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
-                        {
-                            if (foldedPos >= foldedLen && foldedLen > 0)
-                            {
-                                state.TextPos = state.NextPos(state.TextPos);
-                                foldedPos = 0;
-                                foldedLen = 0;
-                            }
-
-                            if (gfoldedPos >= gfoldedLen && stringPos < span.End)
-                            {
-                                stringPos = state.NextPos(stringPos);
-                                gfoldedPos = 0;
-                                gfoldedLen = 0;
-                            }
-                        }
-                    }
-
-                    // Try comparing.
-                    while (stringPos < span.End)
-                    {
-                        // Case-fold at current position in text.
-                        if (foldedPos >= foldedLen)
-                        {
-                            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
-                            {
-                                goto runOut;
-                            }
-
-                            foldedLen =
-                                state.TextPos < state.SliceEnd
-                                    ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
-                                    : 0;
-
-                            foldedPos = 0;
-                        }
-
-                        // Case-fold at current position in group.
-                        if (gfoldedPos >= gfoldedLen)
-                        {
-                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded);
-                            gfoldedPos = 0;
-                        }
-
-                        if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
-                        {
-                            // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
-                            // whole-character frame, so the whole deletion of an expanding group character is
-                            // retried before its folded characters are deleted one at a time, as the literal's
-                            // retry order has it.
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactGroupFldDeletion(
-                                    state,
-                                    node,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    1,
-                                    foldChangesStart
-                                );
-                            }
-
-                            // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
-                            if (
-                                ((foldedLen > 1 && foldedPos == 0) || (gfoldedLen > 1 && gfoldedPos == 0))
-                                && (node.Status & NodeStatus.Fuzzy) != 0
-                            )
-                            {
-                                OfferWholeFoldedGroupCharEdit(
-                                    state,
-                                    node,
-                                    1,
-                                    foldedPos,
-                                    foldedLen,
-                                    stringPos,
-                                    gfoldedPos,
-                                    gfoldedLen,
-                                    foldChangesStart,
-                                    search
-                                );
-                            }
-
-                            ++foldedPos;
-                            ++gfoldedPos;
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = FuzzyMatchGroupFld(
-                                state,
-                                search,
-                                node,
-                                ref foldedPos,
-                                foldedLen,
-                                stringPos,
-                                ref gfoldedPos,
-                                gfoldedLen,
-                                1,
-                                foldChangesStart
-                            );
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-
-                        // Upstream's '++state->text_pos' and '++string_pos' are one codepoint each;
-                        // both index this subject, so both walk with 'NextPos' - the S21 reasoning
-                        // on REF_GROUP applies unchanged.
-                        if (foldedPos >= foldedLen && foldedLen > 0)
-                        {
-                            state.TextPos = state.NextPos(state.TextPos);
-                        }
-
-                        if (gfoldedPos >= gfoldedLen)
-                        {
-                            stringPos = state.NextPos(stringPos);
-                        }
-                    }
-
-                    // NOT UPSTREAM (S84): the group ran out part way through the subject character's
-                    // folding. STRING_FLD charges the leftovers as errors (:14855); upstream's
-                    // REF_GROUP_FLD backtracks, so '(s)(?:\1){e<=1}' over 'sß' is None under V1.
-                    if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
-                    {
-                        while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
-                        {
-                            status = FuzzyMatchGroupFld(
-                                state,
-                                search,
-                                node,
-                                ref foldedPos,
-                                foldedLen,
-                                stringPos,
-                                ref gfoldedPos,
-                                gfoldedLen,
-                                1,
-                                foldChangesStart
-                            );
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-
-                            if (foldedPos >= foldedLen && foldedLen > 0)
-                            {
-                                state.TextPos = state.NextPos(state.TextPos);
-                            }
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // A folding that ran out on one side but not the other did not line up.
-                    // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' (:14154); see
-                    // FoldingIsPartUsed.
-                    if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1) || gfoldedPos < gfoldedLen)
-                    {
-                        goto backtrack;
-                    }
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // REF_GROUP_IGN (:14262): REF_GROUP with 'same_char_ign' in place of 'same_char'.
                 // Simple folding, so both sides still advance one character at a time.
                 case Opcode.RefGroupIgn: // Reference to a capture group, ignoring case.
-                {
-                    // Did the group capture anything?
-                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
-                    if (refGroup.Current < 0)
+                    status = AdvanceRefGroupIgn(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        goto backtrack;
+                        goto armExit;
                     }
 
-                    // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
-                    // run-out does (row T3).
-                    if (state.HasUnknownCaptures && IsUnknown(refGroup))
-                    {
-                        goto runOut;
-                    }
-
-                    GroupSpan span = refGroup.Captures[refGroup.Current];
-
-                    if (stringPos < 0)
-                    {
-                        stringPos = span.Start;
-                    }
-
-                    // Try comparing.
-                    while (stringPos < span.End)
-                    {
-                        if (state.TextPos >= state.TextEnd && state.RunsOutRight)
-                        {
-                            goto runOut;
-                        }
-
-                        if (
-                            state.TextPos < state.SliceEnd
-                            && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
-                        )
-                        {
-                            if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                PushExactStringDeletion(state, node, stringPos, 1);
-                            }
-
-                            stringPos = state.NextPos(stringPos);
-                            state.TextPos = state.NextPos(state.TextPos);
-                        }
-                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
-
-                            if (status < 0)
-                            {
-                                if (status == MatchStatus.Partial)
-                                {
-                                    goto runOut;
-                                }
-
-                                return status;
-                            }
-
-                            if (status == MatchStatus.Failure)
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-                        else
-                        {
-                            stringPos = -1;
-                            goto backtrack;
-                        }
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.Skip: // Skip the part of the text already matched (:14544).
-                {
-                    /* bstack: ... | ...
-                     *
-                     * pstack: bstack
-                     */
-
-                    // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
-                    state.VerbMarks.Add(state.Pstack.Count);
-
-                    // Prune the backtracking back to an appropriate backtracking point - unless the
-                    // verb is in an unfinished atomic group or positive lookaround, where it prunes
-                    // nothing until backtracking reaches it (ledger entry 47; see the Prune arm).
-                    // D11 M2: in a partial call's second pass the verb does nothing when the path
-                    // here read the text to come; the backtrack arm below asks again.
-                    bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
-                    bool skipIsBlocked =
-                        !skipIsInsideATransparentGroup
-                        && state.WMarks.Count != 0
-                        && SkipABlockedVerb(state, state.TextPos);
-                    if (!skipIsInsideATransparentGroup && !skipIsBlocked)
+                    status = AdvanceSkip(state, ref node);
+                    if (status != _armContinue)
                     {
-                        TopBstack(state);
+                        goto armExit;
                     }
 
-                    // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
-                    // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
-                    // rest of the attempt has run. pcre2pattern ("Verbs that act after
-                    // backtracking") and perlre give a verb its effect only when a later failure
-                    // backtracks onto it, and "the one that is backtracked onto first acts" ("More
-                    // than one backtracking verb"). So the skip position goes on the backtracking
-                    // stack above the pruned point: a later (*PRUNE) or (*SKIP) prunes it away and
-                    // decides the next start itself; the end of an atomic group or lookaround that
-                    // finished discards it, which confines the verb to the group; and a success
-                    // never pops it. The backtrack arm below applies it.
-                    // `(?>aa(*SKIP))x` over 'aaax' is (1, 4) here, in PCRE2 10.47 and in Perl
-                    // 5.42.3, and None upstream; `aa(*SKIP)x(*PRUNE)y|a` over 'aaxz' is (1, 2) in
-                    // all three and None upstream. Pinned by BacktrackingVerbTests.
-                    // PatternObject.SkipMovesTheSliceWhenItRuns restores upstream's timing for the
-                    // oracle alone.
-                    if (state.Pattern.SkipMovesTheSliceWhenItRuns)
-                    {
-                        if (!skipIsBlocked)
-                        {
-                            MoveTheSliceForASkip(state, node, state.TextPos);
-                        }
-
-                        // Ledger 45's ablation on its own: the slice has moved already, and
-                        // backtracking onto the verb must still unwind (ledger entry 47).
-                        if (skipIsInsideATransparentGroup)
-                        {
-                            state.Bstack.PushUInt8((byte)Opcode.Prune);
-                        }
-                    }
-                    else
-                    {
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushNode(node);
-                        state.Bstack.PushUInt8((byte)Opcode.Skip);
-                    }
-
-                    /* bstack: ... text_pos node SKIP
-                     *
-                     * pstack: bstack
-                     */
-
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.String: // A string.
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
@@ -16915,359 +15366,43 @@ internal static class Matcher
                 // STRING_REV (:15103). The pattern's values are consumed from the last back, and the
                 // subject retreats with them.
                 case Opcode.StringRev: // A string, backwards.
-                {
-                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    status = AdvanceStringRev(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        // Unreachable until Phase 7 ports this arm of the required-string locator
-                        // (:11143-11365); S60 ported the case-sensitive forward one only.
-                        state.TextPos = state.ReqEnd;
-                    }
-                    else
-                    {
-                        if (stringPos < 0)
-                        {
-                            stringPos = node.Values.Length;
-                        }
-
-                        // Try comparing.
-                        while (stringPos > 0)
-                        {
-                            if (RanOutOnTheLeft(state, state.TextPos))
-                            {
-                                goto runOut;
-                            }
-
-                            if (
-                                state.TextPos > state.SliceStart
-                                && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
-                            )
-                            {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
-                                {
-                                    PushExactStringDeletion(state, node, stringPos, -1);
-                                }
-
-                                --stringPos;
-                                state.TextPos = state.PrevPos(state.TextPos);
-                            }
-                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
+                        goto armExit;
                     }
 
-                    if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        FuzzyInsert(state, -1, node.Next1.Node);
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // STRING_IGN_REV (:15046): STRING_REV with 'same_char_ign' in place of 'same_char'.
                 case Opcode.StringIgnRev: // A string, backwards, ignoring case.
-                {
-                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    status = AdvanceStringIgnRev(state, ref node, ref stringPos, search);
+                    if (status != _armContinue)
                     {
-                        // Unreachable until Phase 7 ports this arm of the required-string locator
-                        // (:11143-11365); S60 ported the case-sensitive forward one only.
-                        state.TextPos = state.ReqEnd;
-                    }
-                    else
-                    {
-                        if (stringPos < 0)
-                        {
-                            stringPos = node.Values.Length;
-                        }
-
-                        // Try comparing.
-                        while (stringPos > 0)
-                        {
-                            if (RanOutOnTheLeft(state, state.TextPos))
-                            {
-                                goto runOut;
-                            }
-
-                            if (
-                                state.TextPos > state.SliceStart
-                                && SameCharIgn(
-                                    node.Encoding,
-                                    state.CharBefore(state.TextPos),
-                                    node.Values[stringPos - 1]
-                                )
-                            )
-                            {
-                                if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
-                                {
-                                    PushExactStringDeletion(state, node, stringPos, -1);
-                                }
-
-                                --stringPos;
-                                state.TextPos = state.PrevPos(state.TextPos);
-                            }
-                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-                            }
-                            else
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
+                        goto armExit;
                     }
 
-                    if ((node.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        FuzzyInsert(state, -1, node.Next1.Node);
-                    }
-
-                    stringPos = -1;
-
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // STRING_FLD_REV (:14882). STRING_FLD with the subject's folding consumed from its
                 // last character back, so 'foldedPos' counts down from 'foldedLen' to zero and
                 // 'text_pos' retreats when it reaches zero. S22's S1854 disapplication is gone for the
                 // same reason as REF_GROUP_FLD_REV's above: 'FuzzyMatchStringFld(..., foldedLen, -1)'
                 // is the reader it was waiting for.
                 case Opcode.StringFldRev: // A string, backwards, ignoring case.
-                {
-                    int foldedLen;
-
-                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    status = AdvanceStringFldRev(
+                        state,
+                        ref node,
+                        ref stringPos,
+                        ref foldedPos,
+                        ref foldChangesStart,
+                        search,
+                        folded
+                    );
+                    if (status != _armContinue)
                     {
-                        // Unreachable until Phase 7 ports this arm of the required-string locator
-                        // (:11143-11365); S60 ported the case-sensitive forward one only.
-                        state.TextPos = state.ReqEnd;
-                    }
-                    else
-                    {
-                        int length = node.Values.Length;
-
-                        if (stringPos < 0)
-                        {
-                            stringPos = length;
-                            foldedPos = 0;
-                            foldedLen = 0;
-                            foldChangesStart = state.FuzzyChanges.Count;
-                        }
-                        else
-                        {
-                            // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
-
-                            if (foldedPos <= 0)
-                            {
-                                if (state.TextPos <= state.SliceStart)
-                                {
-                                    goto backtrack;
-                                }
-
-                                state.TextPos = state.PrevPos(state.TextPos);
-                                foldedPos = 0;
-                                foldedLen = 0;
-                            }
-                        }
-
-                        // Try comparing.
-                        while (stringPos > 0)
-                        {
-                            if (foldedPos <= 0)
-                            {
-                                if (RanOutOnTheLeft(state, state.TextPos))
-                                {
-                                    goto runOut;
-                                }
-
-                                foldedLen =
-                                    state.TextPos > state.SliceStart
-                                        ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
-                                        : 0;
-
-                                foldedPos = foldedLen;
-                            }
-
-                            if (
-                                foldedPos > 0
-                                && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
-                            )
-                            {
-                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
-                                if (foldedLen > 1 && foldedPos == foldedLen && (node.Status & NodeStatus.Fuzzy) != 0)
-                                {
-                                    OfferWholeFoldedCharEdit(
-                                        state,
-                                        node,
-                                        -1,
-                                        stringPos,
-                                        foldedLen,
-                                        foldedLen,
-                                        foldChangesStart,
-                                        folded
-                                    );
-                                }
-
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
-                                {
-                                    PushExactStringFldDeletion(
-                                        state,
-                                        node,
-                                        stringPos,
-                                        foldedPos,
-                                        foldedLen,
-                                        -1,
-                                        foldChangesStart
-                                    );
-                                }
-
-                                --stringPos;
-                                --foldedPos;
-
-                                if (foldedPos <= 0)
-                                {
-                                    state.TextPos = state.PrevPos(state.TextPos);
-                                }
-                            }
-                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                status = FuzzyMatchStringFld(
-                                    state,
-                                    search,
-                                    node,
-                                    ref stringPos,
-                                    ref foldedPos,
-                                    foldedLen,
-                                    -1,
-                                    foldChangesStart
-                                );
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-
-                                if (foldedPos <= 0 && foldedLen > 0)
-                                {
-                                    state.TextPos = state.PrevPos(state.TextPos);
-                                }
-                            }
-                            else
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-
-                        // The pattern ran out part way through the subject character's folding
-                        // (:14962), the mirror of STRING_FLD's own loop.
-                        // NOT UPSTREAM: upstream tests 'folded_pos > 0'; see FoldingIsPartUsed.
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
-                            {
-                                status = FuzzyMatchStringFld(
-                                    state,
-                                    search,
-                                    node,
-                                    ref stringPos,
-                                    ref foldedPos,
-                                    foldedLen,
-                                    -1,
-                                    foldChangesStart
-                                );
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-
-                                if (foldedPos <= 0 && foldedLen > 0)
-                                {
-                                    state.TextPos = state.PrevPos(state.TextPos);
-                                }
-                            }
-                        }
-
-                        stringPos = -1;
-
-                        // The subject character's folding was longer than what the pattern
-                        // consumed, so this string is only part of it.
-                        if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
-                        {
-                            goto backtrack;
-                        }
+                        goto armExit;
                     }
 
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 case Opcode.Success: // Success.
                     // Must the match advance past its start?
                     if (state.TextPos == state.SearchAnchor && state.MustAdvance)
@@ -17354,42 +15489,26 @@ internal static class Matcher
             }
         }
 
+        // cold-arm: where an arm moved out of this method hands back anything but _armContinue.
+        armExit:
+        switch (status)
+        {
+            case _armBacktrack:
+                goto backtrack;
+            case _armRunOut:
+                goto runOut;
+            case _armAdvance:
+                goto advance;
+            default:
+                return status;
+        }
+
         // NOT UPSTREAM'S, D11 M2: a consuming item ran out of text. Inside a lookaround's body in a
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
-        {
-            state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        if (RunOutCanWaitForTheBody(state))
-        {
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
-        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
-        if (runOutFails)
-        {
-            stringPos = -1;
-            goto backtrack;
-        }
-
-        if (runOutEnd is null)
-        {
-            return MatchStatus.Partial;
-        }
-
-        // The item that ran out is abandoned, so the next STRING item starts at its own first
-        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
-        // (review of chunk 6, round 1).
-        stringPos = -1;
-        node = runOutEnd;
-        goto advance;
+        status = RunOut(state, ref node, ref stringPos);
+        goto armExit;
 
         backtrack:
         // NOT UPSTREAM'S: where a path fails is text the attempt has reached. See
@@ -17463,16 +15582,10 @@ internal static class Matcher
                 case Opcode.SetUnionIgn:
                 case Opcode.SetUnionIgnRev:
                 case Opcode.SetUnionRev:
-                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: true);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryChar(state, ref node, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
+                        goto armExit;
                     }
 
                     break;
@@ -17498,16 +15611,10 @@ internal static class Matcher
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:
                 case Opcode.StartOfWord:
-                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: false);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryZeroWidth(state, ref node, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
+                        goto armExit;
                     }
 
                     break;
@@ -17522,94 +15629,57 @@ internal static class Matcher
                 case Opcode.StringIgn:
                 case Opcode.StringIgnRev:
                 case Opcode.StringRev:
-                {
-                    bool stringPosIsText =
-                        (Opcode)op
-                        is Opcode.RefGroup
-                            or Opcode.RefGroupIgn
-                            or Opcode.RefGroupIgnRev
-                            or Opcode.RefGroupRev;
-
-                    status = RetryFuzzyMatchString(state, op, search, ref node, ref stringPos, stringPosIsText);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyRetryString(state, ref node, ref stringPos, search, op);
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
-                }
                 // Upstream :17291-17306.
                 case Opcode.RefGroupFld:
                 case Opcode.RefGroupFldRev:
-                    status = RetryFuzzyMatchGroupFld(
+                    status = BacktrackFuzzyRetryGroupFld(
                         state,
-                        op,
-                        search,
                         ref node,
-                        ref foldedPos,
                         ref stringPos,
+                        ref foldedPos,
                         ref gfoldedPos,
-                        ref foldChangesStart
+                        ref foldChangesStart,
+                        search,
+                        op
                     );
-
-                    if (status < 0)
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
                 // Upstream :17361-17376.
                 case Opcode.StringFld:
                 case Opcode.StringFldRev:
-                    status = RetryFuzzyMatchStringFld(
+                    status = BacktrackFuzzyRetryStringFld(
                         state,
-                        op,
-                        search,
                         ref node,
                         ref stringPos,
                         ref foldedPos,
-                        ref foldChangesStart
+                        ref foldChangesStart,
+                        search,
+                        op
                     );
-
-                    if (status < 0)
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
                 case Opcode.FuzzyInsert: // One more inserted character after a string (:15766).
-                    status = RetryFuzzyInsert(state, ref node);
-
-                    if (status < 0)
+                    status = BacktrackFuzzyInsert(state, ref node, ref stringPos);
+                    if (status != _armContinue)
                     {
-                        return status;
+                        goto armExit;
                     }
 
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
-                    }
-
-                    stringPos = -1;
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
                 {
@@ -17673,554 +15743,69 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.CallRef: // A group call ref (:15367).
-                    /* sstack: NULL
-                     *
-                     * bstack: -
-                     */
-
-                    if (!state.Sstack.DropSize())
+                    status = BacktrackCallRef(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
                     break;
                 case Opcode.Conditional: // Conditional subpattern (:15378).
-                {
-                    /* sstack: node slice_start slice_end text_pos ...
-                     *
-                     * bstack: captures repeats capture_change sstack
-                     *
-                     * pstack: bstack
-                     */
-
-                    // D11 M2: the frame's marks and dedup records go with it. A cut taint means a
-                    // success of the test was blocked, so the branch the test's failure picks is
-                    // taken only for some continuations.
-                    bool condWasBlocked = false;
-                    bool condHeld = false;
-                    if (state.WMarks.Count != 0)
+                    status = BacktrackConditional(state, ref node);
+                    if (status != _armContinue)
                     {
-                        condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
-                        condHeld = HasWMarkAt(state, state.Bstack.Count, WMarkKind.Held);
-                        state.DropWMarksFrom(state.Bstack.Count);
+                        goto armExit;
                     }
 
-                    if (state.LookaroundSuccesses.Count != 0)
-                    {
-                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
-                    }
-
-                    // The condition failed to match. As with LOOKAROUND, the condition's own bstack
-                    // entries have already been popped by the backtracking that got here, so the
-                    // pstack entry is simply dropped.
-                    if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long condSstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.Sstack.Count = (int)condSstackCount;
-                    CloseFramesAbove(state);
-
-                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.TextPos = condData.TextPos;
-                    state.SliceEnd = condData.SliceEnd;
-                    state.SliceStart = condData.SliceStart;
-                    Node condNode = condData.Node;
-
-                    /* sstack: -
-                     *
-                     * bstack: captures repeats capture_change
-                     *
-                     * pstack: -
-                     */
-
-                    if (!state.Bstack.PopSize(out long condCaptureChange))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.CaptureChange = condCaptureChange;
-
-                    // Only the test has run since the push, unless a positive test's end was blocked
-                    // and let the yes-branch go on (D35's remarks, PushRepeats).
-                    if (
-                        !state.PopSubAttemptFuzzyState(state.Bstack)
-                        || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
-                        || !PopCaptures(state, state.Bstack)
-                    )
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    // D11 (D38): the test held for every continuation, and its yes-branch has failed
-                    // (EndALookaroundInTheSecondPass's dedup), so the conditional fails.
-                    if (condHeld)
-                    {
-                        Debug.Assert(
-                            condWasBlocked && condNode.Match,
-                            "D11: only a positive test that went on from a blocked end can be held"
-                        );
-                        state.NotePartialEvent(PartialEvent.HeldFailedTheCondition);
-                        break;
-                    }
-
-                    // A positive condition that failed means the condition does not hold, so take the
-                    // 'false' branch; a negative one that failed means it does, so take the 'true'
-                    // branch. Neither is a failure of the conditional itself, so this goes forward
-                    // rather than on backtracking.
-                    node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;
-
-                    // D11 M2: after a blocked success the branch holds only for some continuations.
-                    // A positive test has already taken its yes-branch for the others; a negative one
-                    // takes its no-branch for them when backtracking reaches the NO_BRANCH entry.
-                    if (condWasBlocked)
-                    {
-                        // A negative test forks here, once. A positive one forked at each blocked
-                        // end that went on (EndALookaroundInTheSecondPass), and this branch is
-                        // one of the outcomes those counted.
-                        if (!condNode.Match)
-                        {
-                            state.Bstack.PushSize(state.TextPos);
-                            state.Bstack.PushNode(condNode.Next2.Node!);
-                            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
-
-                            /* bstack: text_pos node NO_BRANCH */
-
-                            CountFork(state);
-                        }
-
-                        PushTouchMark(state);
-                        state.NotePartialEvent(PartialEvent.ConditionBothWays);
-                    }
-
-                    goto advance;
-                }
+                    break;
                 case Opcode.EndConditional: // End of a conditional subpattern (:15460).
-                {
-                    /* bstack: captures repeats capture_change */
-
-                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
-                    if (state.WMarks.Count != 0)
+                    status = BacktrackEndConditional(state);
+                    if (status != _armContinue)
                     {
-                        state.DropWMarksFrom(state.Bstack.Count);
-                    }
-
-                    if (!state.Bstack.PopSize(out long endCondCaptureChange))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.CaptureChange = endCondCaptureChange;
-
-                    if (
-                        !state.PopSubAttemptFuzzyState(state.Bstack)
-                        || !PopRepeats(state, state.Bstack, testJustEnded: false)
-                        || !PopCaptures(state, state.Bstack)
-                    )
-                    {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.EndFuzzy: // End of fuzzy matching (:15488).
-                {
-                    Span<long> innerCounts = fuzzyInnerCounts;
-
-                    /* sstack: -
-                     *
-                     * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
-                     * end_fuzzy_node
-                     */
-
-                    if (
-                        !state.Bstack.PopNode(pattern, out Node? endFuzzyNode)
-                        || !state.Bstack.PopSize(out long endFuzzyTextPos)
-                        || !state.Bstack.PopNode(pattern, out Node? innerNode)
-                        || !state.Bstack.PopSize(out long insertions)
-                        // MERGING, for the reason the forward END_FUZZY arm gives: the section's
-                        // changes outlive its counts coming off the stack, and the trailing-insertion
-                        // retry below goes on to ADD to them.
-                        || !state.PopFuzzyCountsMerging(state.Bstack, innerCounts, out _)
-                        // This port's: the totals as they were before the forward arm wrote them.
-                        // Ledger entry 32; see the note above 'previousTotalErrors' there.
-                        || !state.Bstack.PopSize(out long previousTotalCost)
-                        || !state.Bstack.PopSize(out long previousTotalErrors)
-                    )
+                    status = BacktrackEndFuzzy(state, ref node);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    node = endFuzzyNode!;
-
-                    // NOT UPSTREAM'S, D11 (D41): a complemented position marks an entry whose
-                    // trailing insertion has already run out of text at the edge (below), so the
-                    // section goes straight back to its own choices.
-                    bool trailingInsertionRanOut = endFuzzyTextPos < 0;
-                    state.TextPos = (int)(trailingInsertionRanOut ? ~endFuzzyTextPos : endFuzzyTextPos);
-
-                    // Try one more insertion after the section. This is the only place a trailing
-                    // insertion can come from: every item inside the section has already been tried.
-                    //
-                    // THE SECOND TEST IS UPSTREAM'S WITH ITS DOUBLE COUNT REMOVED - a deliberate
-                    // divergence, ledger entry 12, fixed by S46 (2026-09-14). Upstream writes
-                    // 'total_errors(state->fuzzy_counts) + total_errors(inner_counts) <
-                    // state->max_errors' (:15515-15517), and END_FUZZY has already merged
-                    // 'inner_counts' INTO 'state->fuzzy_counts' on the way in (:12475-12513),
-                    // so the two terms are the same errors added twice. Every other 'max_errors'
-                    // test in upstream's file asks about ONE set of counts ('any_error_permitted'
-                    // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and
-                    // 'insertion_permitted' on the line above already applies the section's own
-                    // limits to 'inner_counts', so nothing is lost by dropping the second term.
-                    // 'PatternObject.DoubleCountTrailingInsertions' puts it back, for the oracle's
-                    // ablation only (S89).
-                    //
-                    // The double count is invisible wherever 'max_errors' is unbounded, which is
-                    // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
-                    // upstream's ':18027' sets PY_SSIZE_T_MAX). It bites in 'DoBestFuzzyMatch',
-                    // whose second pass climbs 'max_errors' only to 'fewest_errors' - so the budget
-                    // the guard is tested against is the match's own cost, the caller cannot raise
-                    // it, and '(?b)' loses a match the same engine finds the moment the flag is
-                    // deleted. It bites in 'DoEnhancedFuzzyMatch' too, which tightens 'max_errors'
-                    // to the total minus one after each run (upstream ':17978'): '(?e)' then keeps a
-                    // costlier fit where a cheaper one exists (D46). On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
-                    // every budget, WHICH IS THAT PATTERN'S BOUNDARY AND NOT THE DEFECT'S: a fit
-                    // needing ONE insertion beside one other error is lost too, and a width-2
-                    // section body survives counts a width-1 body does not (S52 sitting 16, blocks
-                    // 6 and 7 of tools/probes/upstream-bestmatch-trailing-insertions.py). Held by
-                    // 'Gaps.Engine.FuzzyBestMatchTests
-                    // .Bestmatch_keeps_a_match_that_needs_two_trailing_insertions', the (k, N)
-                    // matrix beside it, and
-                    // '.Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error'.
-                    //
-                    // The third test is this port's, for the reason the second test at 'END_FUZZY'
-                    // spells out: 'InsertionPermitted' bounds the cost of the section it is handed,
-                    // and nothing here bounds the cost of the WHOLE MATCH, which is the quantity
-                    // 'DoBestFuzzyMatch' ranks by. It is upstream's second test with cost in place of
-                    // the error count, over 'state.FuzzyCounts' - the counts 'END_FUZZY' has already
-                    // merged - and it refuses only insertions the budget has already said are
-                    // unaffordable, so it cannot lose a match that fits.
-                    //
-                    // Pinned by Gaps.Engine.FuzzyBestMatchTests
-                    // .Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion (D21,
-                    // tools/controls.json S42-2G): without this term, a self-recursive group call
-                    // that re-enters this section can outrun the per-entry bound
-                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
-                    // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
-                    // rather than asserting a value.
-                    if (
-                        !trailingInsertionRanOut
-                        && InsertionPermitted(state, innerNode!, innerCounts)
-                        && TotalErrors(state.FuzzyCounts)
-                            + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
-                            < state.MaxErrors
-                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
-                            <= state.MaxCost
-                    )
-                    {
-                        bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;
-                        int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
-
-                        if (state.TextPos != endFuzzyLimit && FuzzyExtMatch(state, innerNode, state.TextPos))
-                        {
-                            state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
-                            ++innerCounts[FuzzyValue.Ins];
-
-                            state.TextPos = Step(state, state.TextPos, endFuzzyReverse ? -1 : 1);
-
-                            // Save the inner fuzzy info.
-                            state.Bstack.PushSize(previousTotalErrors);
-                            state.Bstack.PushSize(previousTotalCost);
-                            state.PushFuzzyCounts(state.Bstack, innerCounts);
-                            state.Bstack.PushSize(insertions + 1);
-                            state.Bstack.PushNode(innerNode);
-                            state.Bstack.PushSize(state.TextPos);
-                            state.Bstack.PushNode(node);
-                            state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
-
-                            /* bstack: total_errors total_cost inner_counts insertions inner_node
-                             * text_pos end_fuzzy_node END_FUZZY
-                             */
-
-                            ++state.FuzzyCounts[FuzzyValue.Ins];
-                            state.TotalErrors = TotalErrors(state.FuzzyCounts);
-
-                            // This port's own line - see the matching one in the END_FUZZY case
-                            // above. The section that used these errors is the inner one just
-                            // popped, which is the node the trailing insertion was tried against.
-                            state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
-
-                            // NOT UPSTREAM (ledger entry 51): the forward arm let a section below
-                            // its minimum through to here, so the constraints are asked again. Until
-                            // they hold, the frame just pushed is backtracked into for one more
-                            // insertion. The limits were checked above, so only a minimum can fail.
-                            if (
-                                pattern.HasFuzzyMinimum
-                                && !FuzzyWithinConstraints(innerCounts, innerNode, state.MaxErrors)
-                            )
-                            {
-                                Debug.Assert(
-                                    !pattern.CheckMinimumBeforeTrailingInsertions
-                                        && innerCounts[FuzzyValue.Sub] >= innerNode.Values[FuzzyValue.MinSub]
-                                        && innerCounts[FuzzyValue.Del] >= innerNode.Values[FuzzyValue.MinDel],
-                                    "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
-                                );
-                                goto backtrack;
-                            }
-
-                            node = node.Next1.Node!;
-                            goto advance;
-                        }
-                        else if (
-                            state.TextPos == endFuzzyLimit
-                            && !pattern.SecondPassAsBeforeD11
-                            && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
-                                == MatchStatus.Partial
-                        )
-                        {
-                            // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
-                            // needs the character after the edge, so in a partial call it runs out
-                            // of text as the insertion arm of FuzzyMatchItem does, whether the rest
-                            // of the pattern needs it (a fullmatch's end, a lookahead's last letter)
-                            // or the section's own minimum does. It used to fail the path. Before
-                            // build chunk 6, S57d escalated a lookahead's run-out and hid that;
-                            // after it, `(?:a(?=bcd)b.){e<=1}` fullmatch 'abc' answered None where
-                            // 'abc' + 'd' completes it (the review of chunk 8). The character after
-                            // the edge is unknown, so a section's insertion test (`{i<=1:[a-z]}`) is
-                            // not asked, as the insertion arm does not ask it past the edge either.
-                            // The insertion is not counted: a run-out presumes the rest, and fewer
-                            // errors only let more through.
-                            //
-                            // The entry goes back with its position complemented, so that when the
-                            // run-out's continuation fails, backtracking into it goes on into the
-                            // section's own choices (below) instead of running out again. Outside a
-                            // lookaround's body the attempt answers the partial and the entry is
-                            // never read.
-                            state.Bstack.PushSize(previousTotalErrors);
-                            state.Bstack.PushSize(previousTotalCost);
-                            state.PushFuzzyCounts(state.Bstack, innerCounts);
-                            state.Bstack.PushSize(insertions);
-                            state.Bstack.PushNode(innerNode);
-                            state.Bstack.PushSize(~(long)state.TextPos);
-                            state.Bstack.PushNode(node);
-                            state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
-
-                            /* bstack: total_errors total_cost inner_counts insertions inner_node
-                             * ~text_pos end_fuzzy_node END_FUZZY
-                             */
-
-                            state.NotePartialEvent(PartialEvent.TrailingInsertionRunOut);
-                            goto runOut;
-                        }
-                    }
-
-                    // Subtract the inner counts from the outer counts.
-                    state.FuzzyCounts[FuzzyValue.Sub] -= innerCounts[FuzzyValue.Sub];
-                    state.FuzzyCounts[FuzzyValue.Ins] -= innerCounts[FuzzyValue.Ins];
-                    state.FuzzyCounts[FuzzyValue.Del] -= innerCounts[FuzzyValue.Del];
-
-                    // This port's two lines. Upstream subtracts the counts and leaves 'total_errors'
-                    // as the forward arm set it (':15568'); ledger entry 32.
-                    state.TotalErrors = previousTotalErrors;
-                    state.TotalCost = previousTotalCost;
-
-                    // Save the outer fuzzy info.
-                    if (pattern.KeepsSectionLinks)
-                    {
-                        state.Sstack.PushSize(state.SectionFrame);
-                    }
-
-                    state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
-                    state.Sstack.PushNode(state.FuzzyNode);
-                    if (pattern.KeepsSectionLinks)
-                    {
-                        state.SectionFrame = state.Sstack.Count;
-                    }
-
-                    /* sstack: outer_counts outer_node
-                     *
-                     * bstack: -
-                     */
-
-                    innerCounts[FuzzyValue.Ins] -= insertions;
-
-                    while (insertions > 0)
-                    {
-                        state.UnrecordFuzzy();
-                        --insertions;
-                    }
-
-                    // Restore the inner fuzzy info.
-                    innerCounts.CopyTo(state.FuzzyCounts);
-                    state.FuzzyNode = innerNode;
                     break;
-                }
                 case Opcode.GroupCall: // Group call (:16354).
-                {
-                    /* sstack: caller_repeats capture_change caller_captures return_node
-                     *
-                     * bstack: -
-                     */
-
-                    // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
-                    // returned, a later call with the same entry key fails the same way. See
-                    // FailedCallKey and MatchState.OpenCalls.
-                    RecordFailedCall(state);
-
-                    // The call is no longer open: backtracking past it means it never happened.
-                    PopOpenCall(state);
-
-                    // The return node is dropped rather than popped: backtracking past the call
-                    // means there is nowhere to return to.
-                    if (
-                        !state.Sstack.DropSize()
-                        || !PopCallerCaptures(state)
-                        || !state.Sstack.PopSize(out long groupCallCaptureChange)
-                        || !PopRepeats(state, state.Sstack, testJustEnded: false)
-                    )
+                    status = BacktrackGroupCall(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    // For the caller.
-                    state.CaptureChange = groupCallCaptureChange;
                     break;
-                }
                 case Opcode.GroupReturn: // Group return (:16375).
-                {
-                    /* If called:
-                     *
-                     * sstack: -
-                     *
-                     * bstack: callee_captures callee_repeats capture_change call_key call_reach return_node
-                     *
-                     * else:
-                     *
-                     * sstack: -
-                     *
-                     * bstack: NULL
-                     */
-
-                    if (!state.Bstack.PopNode(pattern, out Node? groupReturnBackNode))
+                    status = BacktrackGroupReturn(state, readGroupCount);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
-
-                    if (groupReturnBackNode is not null)
-                    {
-                        // Backtracking into the call re-opens it, so its key, reach and captures
-                        // come back off the backtracking stack.
-                        int groupReturnBackSpans = state.OpenCallSpans.Count;
-                        CollectionsMarshal.SetCount(state.OpenCallSpans, groupReturnBackSpans + readGroupCount);
-                        Span<long> groupReturnBackValues = CollectionsMarshal.AsSpan(state.OpenCallSpans)[
-                            groupReturnBackSpans..
-                        ];
-                        for (int i = readGroupCount - 1; i >= 0; i--)
-                        {
-                            if (!state.Bstack.PopSize(out groupReturnBackValues[i]))
-                            {
-                                return MatchStatus.Illegal;
-                            }
-                        }
-
-                        if (
-                            !state.Bstack.PopSize(out long groupReturnBackReach)
-                            || !state.Bstack.PopSize(out long groupReturnBackKey)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        // For the caller. The forward arm's exchange, run the other way round: the
-                        // caller's state goes back on the saved stack and the callee's comes off
-                        // the backtracking stack, so the callee resumes inside the call with the
-                        // captures it had made (D51, see PopCalleeCaptures). The repeats first:
-                        // they lie on top of the callee's groups here, and under the caller's
-                        // groups on the saved stack (D62).
-                        PushRepeats(state, state.Sstack);
-                        state.Sstack.PushSize(state.CaptureChange);
-                        if (
-                            !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                            || !PopRepeats(state, state.Bstack, testJustEnded: false)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.CaptureChange = groupReturnBackCaptureChange;
-
-                        PushCaptures(state, state.Sstack);
-                        if (!PopCalleeCaptures(state))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        state.Sstack.PushNode(groupReturnBackNode);
-
-                        // The frame is back, so the call is open again and ends where it now ends.
-                        ReopenCall(state, groupReturnBackKey, (int)groupReturnBackReach);
-                        Debug.Assert(
-                            state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
-                            "a re-opened call is still inside the calls that were open when it returned"
-                        );
-                        // It has returned, so it is not one the failed-call memo may record.
-                        state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
-
-                        /* sstack: caller_repeats capture_change caller_captures return_node
-                         *
-                         * bstack: -
-                         */
-                    }
-                    else
-                    {
-                        state.Sstack.PushNode(null);
-                    }
-
-                    /* If called:
-                     *
-                     * sstack: caller_repeats capture_change caller_captures return_node
-                     *
-                     * bstack: -
-                     *
-                     * else:
-                     *
-                     * sstack: NULL
-                     *
-                     * bstack: -
-                     */
 
                     break;
-                }
                 case Opcode.Keep: // Keep.
-                {
-                    /* bstack: match_pos */
-
-                    if (!state.Bstack.PopSize(out long keepMatchPos))
+                    status = BacktrackKeep(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    state.MatchPos = (int)keepMatchPos;
                     break;
-                }
                 case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                {
-                    /* bstack: previous_start slot text_pos node */
-
-                    // Leaving the pass through its 2-way branch: the slot gets its previous value,
-                    // and the branch tries its next alternative, as BRANCH's arm below does.
-                    if (PopOptionalPass(state) is not { } nextAlternative)
+                    status = BacktrackEndOptionalPass(state, ref node);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    node = nextAlternative;
-                    goto advance;
-                }
+                    break;
                 case Opcode.BodyEnd:
                 {
                     /* bstack: count start capture_change index */
@@ -18320,42 +15905,13 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndLookaround: // End of a lookaround subpattern (:15650).
-                {
-                    /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change */
-
-                    // D11 M2: the cut taint an unblocked end moved here goes with the entry.
-                    if (state.WMarks.Count != 0)
+                    status = BacktrackEndLookaround(state);
+                    if (status != _armContinue)
                     {
-                        state.DropWMarksFrom(state.Bstack.Count);
-                    }
-
-                    // The 'true' branch of a positive lookaround is being given up, so the captures
-                    // its body made go with it. Leaving this out is invisible to any test that does
-                    // not backtrack past the lookaround.
-                    if (!state.Bstack.PopSize(out long endLookCaptureChange))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.CaptureChange = endLookCaptureChange;
-
-                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    if (!state.Bstack.PopBool(out bool endLookHasGroups))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    if (endLookHasGroups && !PopCaptures(state, state.Bstack))
-                    {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.Failure: // Failure.
                     // D11 M2: the attempt's frame goes, and the verb taint a skipped verb left there.
                     if (state.WMarks.Count != 0)
@@ -18468,30 +16024,10 @@ internal static class Matcher
                     state.Pstack.Reset();
                     goto start_match;
                 case Opcode.Fuzzy: // Fuzzy matching (:15752).
-                    /* sstack: outer_counts outer_node
-                     *
-                     * bstack: -
-                     */
-
-                    // Restore the outer fuzzy info. MERGING: backing out through FUZZY means every
-                    // item in the section has already backtracked and unwound its own change, so
-                    // there is nothing left to truncate - and the length on the stack here may have
-                    // been re-pushed by the END_FUZZY backtrack arm, which cannot know the one the
-                    // section was entered with.
-                    if (
-                        !state.Sstack.PopNode(pattern, out Node? outerFuzzyNode)
-                        || !state.PopFuzzyCountsMerging(state.Sstack, state.FuzzyCounts, out _)
-                    )
+                    status = BacktrackFuzzy(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.FuzzyNode = outerFuzzyNode;
-
-                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
-                    if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
-                    {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
                     break;
@@ -18687,10 +16223,7 @@ internal static class Matcher
                             // repeat again to consume less.
                             rpData.Count = count;
 
-                            PushRepeatOneStateData(
-                                state.Bstack,
-                                new RepeatOneStateData(savedCount, start, node, index)
-                            );
+                            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
                             /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -18896,10 +16429,7 @@ internal static class Matcher
                             // the repeat again to consume more.
                             rpData.Count = count;
 
-                            PushRepeatOneStateData(
-                                state.Bstack,
-                                new RepeatOneStateData(savedCount, start, node, index)
-                            );
+                            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
                             /* bstack: count start node index LAZY_REPEAT_ONE */
@@ -18928,137 +16458,13 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Lookaround: // Lookaround subpattern (:17109).
-                {
-                    /* sstack: node slice_start slice_end text_pos ...
-                     *
-                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack
-                     *
-                     * pstack: bstack
-                     */
-
-                    // D11 M2: the frame's marks go with it. A cut taint means a success of the body
-                    // was blocked, so a negative lookaround holds only for some continuations.
-                    bool lookWasBlocked = false;
-                    bool lookRunOutWaits = false;
-                    if (state.WMarks.Count != 0)
+                    status = BacktrackLookaround(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        lookWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
-                        lookRunOutWaits = HasWMarkAt(state, state.Bstack.Count, WMarkKind.RunOutPending);
-                        state.DropWMarksFrom(state.Bstack.Count);
-                    }
-
-                    if (state.LookaroundSuccesses.Count != 0)
-                    {
-                        state.DropLookaroundSuccessesFrom(state.Bstack.Count);
-                    }
-
-                    // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
-                    // the parked count, here the body's own entries have already been popped by the
-                    // backtracking that brought us here, so the pstack entry is simply dropped.
-                    if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long lookSstackCount))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.Sstack.Count = (int)lookSstackCount;
-                    CloseFramesAbove(state);
-
-                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.TextPos = lookData.TextPos;
-                    state.SliceEnd = lookData.SliceEnd;
-                    state.SliceStart = lookData.SliceStart;
-                    Node lookNode = lookData.Node;
-
-                    /* sstack: -
-                     *
-                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
-                     *
-                     * pstack: -
-                     */
-
-                    if (!state.Bstack.PopSize(out long lookCaptureChange))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    state.CaptureChange = lookCaptureChange;
-
-                    if (!state.PopSubAttemptFuzzyState(state.Bstack))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    if (!state.Bstack.PopBool(out bool lookHasGroups))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    if (lookHasGroups && !PopCaptures(state, state.Bstack))
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    if (!lookNode.Match)
-                    {
-                        // It's a negative lookaround that's failed, which means the lookaround as a
-                        // whole has succeeded: for every continuation, unless a success of its body
-                        // was blocked (D11 M2).
-                        if (lookWasBlocked)
-                        {
-                            PushTouchMark(state);
-                            state.NotePartialEvent(PartialEvent.NegativeUndetermined);
-                            CountFork(state);
-                        }
-
-                        node = lookNode.Next2.Node!;
-                        goto advance;
-                    }
-
-                    // D11 (RunOutCanWaitForTheBody): no path of the body succeeded on the held text,
-                    // and a run-out waited, so the lookaround holds for the continuations where that
-                    // path goes on. Its body sets no group and nothing fuzzy is left open, so what
-                    // the arm put back is the state its end would leave.
-                    if (lookRunOutWaits)
-                    {
-                        PushTouchMark(state);
-                        state.NotePartialEvent(PartialEvent.RunOutInBody);
-                        CountFork(state);
-                        node = lookNode.Next2.Node!;
-                        goto advance;
-                    }
-
-                    // It's a positive lookaround that's failed. NOT UPSTREAM (ledger entry 50): try
-                    // an insertion in front of it before backtracking further.
-                    if ((lookNode.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        status = InsertBeforeAFailedLookaround(state, search, ref node, lookNode);
-
-                        if (status < 0)
-                        {
-                            // D11: the insertion ran out of text in front of the lookaround, which
-                            // is the item that ran out. `node` is stale here (whatever matched
-                            // last, possibly outside the enclosing body: assert A10).
-                            if (status == MatchStatus.Partial)
-                            {
-                                node = lookNode;
-                                goto runOut;
-                            }
-
-                            return status;
-                        }
-
-                        if (status == MatchStatus.Success)
-                        {
-                            goto advance;
-                        }
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.MatchBody:
                 {
                     /* bstack: position count start capture_change index text_pos */
@@ -19147,238 +16553,66 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.
-                {
-                    /* bstack: text_pos node */
-
-                    if (!state.Bstack.PopNode(pattern, out Node? retryNode) || !state.Bstack.PopSize(out long retryPos))
+                    status = BacktrackUndeterminedFuzzyRetry(state, ref node, search);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
-                    }
-
-                    // As the forward arm does for a zero-width test that failed: an insertion is the
-                    // only error a zero-width item can take.
-                    state.TextPos = (int)retryPos;
-                    node = retryNode!;
-                    status = FuzzyMatchItem(state, search, ref node, 0);
-
-                    if (status < 0)
-                    {
-                        if (status == MatchStatus.Partial)
-                        {
-                            goto runOut;
-                        }
-
-                        return status;
-                    }
-
-                    if (status == MatchStatus.Success)
-                    {
-                        goto advance;
+                        goto armExit;
                     }
 
                     break;
-                }
                 case Opcode.WTouch: // NOT UPSTREAM'S, D11: backtracking has passed a touch mark.
-                    // The popped entry was at the stack's new count, which is the mark's position.
-                    Debug.Assert(
-                        state.WMarks.Count > 0 && state.WMarks[^1] == new WMark(state.Bstack.Count, WMarkKind.Touch),
-                        "D11: a touch entry carries its own mark, the newest"
-                    );
-                    state.DropWMarksFrom(state.Bstack.Count);
+                    status = BacktrackWTouch(state);
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
+
                     break;
                 case Opcode.RunOutClosedSection: // NOT UPSTREAM'S, D11 chunk 8: the body's section again.
-                {
-                    /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost */
-
-                    if (
-                        !state.Bstack.PopSize(out long closedCost)
-                        || !state.Bstack.PopSize(out long closedErrors)
-                        || !state.Bstack.PopNode(pattern, out Node? closedNode)
-                        || !state.PopFuzzyCountsMerging(state.Bstack, state.FuzzyCounts, out _)
-                    )
+                    status = BacktrackRunOutClosedSection(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    state.FuzzyNode = closedNode;
-                    state.TotalErrors = closedErrors;
-                    state.TotalCost = closedCost;
                     break;
-                }
                 case Opcode.UnknownCapture: // NOT UPSTREAM'S, D11 chunk 8: an unknown capture goes.
-                {
-                    /* bstack: 0 current capture_change private_index public_index */
-
-                    if (!PopGroupStateData(state.Bstack, out GroupStateData unknownData))
+                    status = BacktrackUnknownCapture(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    state.CaptureChange = unknownData.CaptureChange;
-                    state.Groups[unknownData.PrivateIndex - 1].Current = unknownData.Current;
-                    state.UnsaveCapture(unknownData.PrivateIndex, unknownData.PublicIndex);
                     break;
-                }
                 case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
-                {
-                    /* bstack: text_pos node */
-
-                    if (
-                        !state.Bstack.PopNode(pattern, out Node? noBranchNode)
-                        || !state.Bstack.PopSize(out long noBranchPos)
-                    )
+                    status = BacktrackNoBranch(state, ref node);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    // The continuations in which a success of the test's body held: the condition
-                    // does not hold there, so the no-branch runs from where the condition stood.
-                    state.TextPos = (int)noBranchPos;
-                    node = noBranchNode!;
-                    PushTouchMark(state);
-                    goto advance;
-                }
+                    break;
                 case Opcode.Reopen: // NOT UPSTREAM'S, D11 M2: back into a group whose cut was blocked.
-                {
-                    /* bstack: pstack_mark */
-
-                    if (
-                        !state.Bstack.PopSize(out long reopenedFrameEnd)
-                        || !state.Bstack.PopSize(out long reopenedCallBase)
-                    )
+                    status = BacktrackReopen(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    // Repair 1: the frame's saved-stack depth follows the call frame below it.
-                    if (RebaseTheReopenedFrame(state, (int)reopenedFrameEnd, reopenedCallBase) is not { } reopenedDelta)
-                    {
-                        return MatchStatus.Illegal;
-                    }
-
-                    Debug.Assert(
-                        ReopenedFrameIsTheBlockedOne(state, (int)reopenedFrameEnd),
-                        "D11 A9: a reopened group's mark is its own frame's, which its blocked end tainted"
-                    );
-
-                    // The group is open again, as it was before its end, so that the body's other
-                    // paths end at the group's end once more. A lookaround's body, and a condition's
-                    // test, match over the whole text, as their forward arms set them up to, and get
-                    // back the saved-stack bytes and section link their blocked end moved off
-                    // (amendment 2).
-                    if (
-                        state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
-                        && reopenedOp is (byte)Opcode.Lookaround or (byte)Opcode.Conditional
-                    )
-                    {
-                        /* bstack: sstack_bytes length section_frame */
-
-                        if (
-                            !state.Bstack.PopSize(out long reopenedSection)
-                            || !state.Bstack.PopSize(out long reopenedLength)
-                            || !state.Bstack.ReadSizeBelow((int)reopenedFrameEnd - 1, out long reopenedSaved)
-                        )
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        Debug.Assert(
-                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize,
-                            "D11 amendment 2, assert 4: the continuation is undone in full"
-                        );
-                        if (!state.Bstack.MoveTopTo(state.Sstack, (int)reopenedLength))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        Debug.Assert(
-                            state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
-                            "D11 amendment 2, assert 4: the body's bytes are back"
-                        );
-                        // Repair 2: the open-section link. Below the parked state the backtracking
-                        // arms have already restored it, at the depths the stack has now (a section
-                        // re-opened by END_FUZZY's backtrack arm records the depth it finds, and one
-                        // opened in an outer call's body moves with that call's frame, not the
-                        // innermost's). Only a section the body left open, which lies in the bytes
-                        // just put back, takes the saved value, moved with them. That happens only
-                        // after a run-out, which a pattern with group calls does not continue
-                        // (RunOutInALookaroundBody), so no call frame has moved then.
-                        int parkedS0 = (int)reopenedSaved - _lookaroundStateDataSize - reopenedDelta;
-                        Debug.Assert(
-                            reopenedDelta == 0 || reopenedLength == _lookaroundStateDataSize,
-                            "D11 amendment 2, repair 2: only a run-out moves more than the parked state, and no call frame moves then"
-                        );
-                        Debug.Assert(
-                            reopenedSection > parkedS0 || reopenedDelta != 0 || state.SectionFrame == reopenedSection,
-                            "D11 amendment 2, repair 2: below the parked state the backtracking arms restored the section link"
-                        );
-                        if (reopenedSection > parkedS0)
-                        {
-                            state.SectionFrame = (int)reopenedSection + reopenedDelta;
-                        }
-                        state.SliceStart = state.TextStart;
-                        state.SliceEnd = state.TextEnd;
-                        state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
-                    }
-
-                    state.Pstack.PushSize(reopenedFrameEnd);
                     break;
-                }
                 case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
-                {
-                    /* bstack: text_pos node */
-
-                    if (!state.Bstack.PopNode(pattern, out Node? skipNode) || !state.Bstack.PopSize(out long skipPos))
+                    status = BacktrackSkip(state);
+                    if (status != _armContinue)
                     {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
-                    // D11 M2: a verb whose path read the text to come does nothing, and the attempt
-                    // keeps its ordinary bump-along, which visits every start the skip would.
-                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, skipPos))
-                    {
-                        break;
-                    }
-
-                    // Ledger entry 47: in an unfinished atomic group or positive lookaround the verb
-                    // unwinds to its target now. Only the attempt takes the skip position; a
-                    // negative lookaround or condition puts its own slice back.
-                    if (VerbIsInsideATransparentGroup(state))
-                    {
-                        if (!UnwindToTheVerbTarget(state, out bool skipEndsTheAttempt))
-                        {
-                            return MatchStatus.Illegal;
-                        }
-
-                        if (skipEndsTheAttempt)
-                        {
-                            MoveTheSliceForAnUnwoundSkip(state, (int)skipPos);
-                        }
-
-                        break;
-                    }
-
-                    // Everything the verb's arm pruned is gone, so what backtracking reaches next is
-                    // the point the prune stopped at: FAILURE, which starts the next attempt from the
-                    // moved slice, or the start of the negative lookaround or condition the verb is
-                    // directly in.
-                    MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
                     break;
-                }
                 case Opcode.Prune: // NOT UPSTREAM'S: backtracking has reached a (*PRUNE), ledger entry 47.
-                    /* bstack: - */
-
-                    // D11 M2: a verb whose path read the text to come does nothing.
-                    if (state.WMarks.Count != 0 && SkipABlockedVerb(state, -1))
+                    status = BacktrackPrune(state);
+                    if (status != _armContinue)
                     {
-                        break;
-                    }
-
-                    // Pushed only inside an unfinished atomic group or positive lookaround, so the
-                    // unwind always has somewhere to go.
-                    if (!UnwindToTheVerbTarget(state, out _))
-                    {
-                        return MatchStatus.Illegal;
+                        goto armExit;
                     }
 
                     break;
@@ -19396,6 +16630,3872 @@ internal static class Matcher
                     throw Seam.For((Opcode)op);
             }
         }
+    }
+
+    /// <summary>
+    /// The EndFuzzy arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceEndFuzzy(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        // Scratch in this helper's own frame (cold-arm round 3): BasicMatchCore used to hold these
+        // for its whole run, which counted against its JIT local budget. Inline arrays, not
+        // stackalloc, for the tiering reason in InlineBuffers.cs.
+        FuzzyCountBuffer outerBuffer = default;
+        FuzzyCountBuffer totalBuffer = default;
+        Span<long> outerCounts = outerBuffer;
+        Span<long> totalCounts = totalBuffer;
+
+        /* sstack: outer_counts outer_node
+         *
+         * bstack: -
+         */
+
+        // Are the inner constraints OK? This is the one place a 'min' is consulted: an
+        // item asks whether one more error fits, and only the end of the section can ask
+        // whether the section as a whole is legal.
+        //
+        // NOT UPSTREAM (ledger entry 51, known defect D9): a section below an insertion
+        // or error minimum is not failed yet. Upstream fails it here (':12461-12462'),
+        // before pushing the frame that offers trailing insertions (':12500-12511'), so
+        // the one error that could still meet the minimum is never tried:
+        // '(?:a){1<=e<=2}b' over 'aab' is None upstream. This arm runs on as if the
+        // section were legal, pushes that frame, and then backtracks into it; the
+        // backtrack arm asks the constraints again after each insertion.
+        // D11 amendment 2, repair 2: the open-section link is this section's own frame,
+        // which the saved stack's top is back at. A REOPEN that restored a body's open
+        // section with a stale link would break it (MatchState.SectionFrame).
+        Debug.Assert(
+            !pattern.KeepsSectionLinks || state.SectionFrame == state.Sstack.Count,
+            "D11 amendment 2, repair 2: the open-section link is the closing section's frame"
+        );
+
+        bool minimumAwaitsInsertions = false;
+        if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
+        {
+            if (
+                pattern.CheckMinimumBeforeTrailingInsertions
+                || !InsertionsCanMeetMinimum(state, state.FuzzyCounts, state.FuzzyNode!)
+            )
+            {
+                return _armBacktrack;
+            }
+
+            minimumAwaitsInsertions = true;
+        }
+
+        // MERGING, not restoring: the section's own changes are part of the answer this
+        // END_FUZZY is building, and taking the outer counts back off the stack must not
+        // take them with it. This is the arm ledger entry 11 names as the one that has to
+        // stay a merge. See 'MatchState.PopFuzzyCountsMerging'.
+        if (
+            !state.Sstack.PopNode(pattern, out Node? outerNode)
+            || !state.PopFuzzyCountsMerging(state.Sstack, outerCounts, out _)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+        long closedFrame = state.SectionFrame;
+        if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        /* sstack: - */
+
+        // Add the inner counts to the outer counts.
+        totalCounts[FuzzyValue.Sub] = outerCounts[FuzzyValue.Sub] + state.FuzzyCounts[FuzzyValue.Sub];
+        totalCounts[FuzzyValue.Ins] = outerCounts[FuzzyValue.Ins] + state.FuzzyCounts[FuzzyValue.Ins];
+        totalCounts[FuzzyValue.Del] = outerCounts[FuzzyValue.Del] + state.FuzzyCounts[FuzzyValue.Del];
+
+        // THIS PORT KEEPS THE OLD TOTALS, so that whatever undoes this arm puts them back:
+        // the reject below, and the backtrack arm through the two extra bstack entries.
+        // Upstream writes 'total_errors' and never restores it - not on the reject
+        // (':12484-12495') and not when backtracking out (':15568') - and the walks read
+        // it at the next success. A match that no longer passes through this section, the
+        // other side of an alternation, then reports errors its counts do not have.
+        // 'DoBestFuzzyMatch' scores it as no better than the last run, 'start_pos' does
+        // not advance, and it HANGS, upstream as well as here:
+        // '(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)' over '2y'. Recomputing the totals from the
+        // counts on the way back is not enough: with nested sections the counts then
+        // still hold the enclosing section's errors, and nothing resets the total when
+        // that section is itself backtracked out of. Ledger entry 32, found 2026-09-23 by
+        // the oracle at seed 20260923; pinned by 'Gaps.Engine.FuzzyBestMatchTests
+        // .Bestmatch_does_not_read_a_stale_error_total_from_a_rejected_fuzzy_section'.
+        long previousTotalErrors = state.TotalErrors;
+        long previousTotalCost = state.TotalCost;
+
+        // Is the total number of errors OK?
+        state.TotalErrors = TotalErrors(totalCounts);
+
+        // This port's own line: what those errors cost, under the section just closed.
+        // See 'MatchState.TotalCost' for why it is recorded here and what it means when
+        // sections nest. Upstream has no equivalent.
+        state.TotalCost = TotalCost(totalCounts, state.FuzzyNode!);
+
+        // THE SECOND TEST IS THIS PORT'S, AND IT IS THE COST TWIN OF UPSTREAM'S OWN LINE.
+        // The three constraint predicates bound the cost of the section CURRENTLY OPEN,
+        // exactly as they bound its error count; what bounds the WHOLE MATCH is this
+        // line, which upstream writes for the error count (':12486') and cannot write
+        // for the cost because it has no running cost to write it about.
+        //
+        // Without it the cost budget is not a budget at all wherever one section is
+        // entered more than once - a group call, a recursion, a repeat around the
+        // section - because each entry starts from zero counts and passes the predicate
+        // while the accumulated cost recorded above climbs past the budget. The first
+        // walk of 'DoBestFuzzyMatch' then never sees a strictly cheaper run, 'start_pos'
+        // never advances, and IT HANGS: '(?b)((?:a){1i+2d+1s<=1})(?1)' over 'bb' re-found
+        // the same cost-2, two-substitution match under a cost-1 budget until it was
+        // killed, where the unit-cost spelling of the same pattern answers in 80ms.
+        // Found by S42's blind review, 2026-09-13; pinned by
+        // 'Gaps.Engine.FuzzyBestMatchTests.Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section'.
+        if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
+        {
+            state.TotalErrors = previousTotalErrors;
+            state.TotalCost = previousTotalCost;
+
+            if (pattern.KeepsSectionLinks)
+            {
+                state.Sstack.PushSize(state.SectionFrame);
+            }
+
+            state.PushFuzzyCounts(state.Sstack, outerCounts);
+            state.Sstack.PushNode(outerNode);
+            state.SectionFrame = (int)closedFrame;
+
+            /* sstack: outer_counts outer_node */
+            return _armBacktrack;
+        }
+
+        // Save the inner fuzzy info. The zero is the count of trailing insertions this
+        // section has been asked to try, which the backtrack arm raises one at a time.
+        // The two totals are this port's, for the backtrack arm to put back - see the note
+        // above 'previousTotalErrors'.
+        state.Bstack.PushSize(previousTotalErrors);
+        state.Bstack.PushSize(previousTotalCost);
+        state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+        state.Bstack.PushSize(0);
+        state.Bstack.PushNode(state.FuzzyNode);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+        totalCounts.CopyTo(state.FuzzyCounts);
+        state.FuzzyNode = outerNode;
+
+        /* sstack: -
+         *
+         * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
+         * end_fuzzy_node END_FUZZY
+         */
+
+        // Ledger entry 51: zero trailing insertions do not meet the minimum, so try one.
+        if (minimumAwaitsInsertions)
+        {
+            return _armBacktrack;
+        }
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Fuzzy arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceFuzzy(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        // NOT UPSTREAM (empty-iteration rule): the link beneath the frame, see
+        // MatchState.SectionFrame.
+        if (pattern.KeepsSectionLinks)
+        {
+            state.Sstack.PushSize(state.SectionFrame);
+        }
+
+        // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
+        // zero and END_FUZZY adds them back in, which is how an inner budget can be
+        // tighter than the outer one without either being ignored.
+        state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
+        state.Sstack.PushNode(state.FuzzyNode);
+
+        if (pattern.KeepsSectionLinks)
+        {
+            state.SectionFrame = state.Sstack.Count;
+        }
+
+        // Initialise the inner fuzzy info.
+        Array.Clear(state.FuzzyCounts);
+        state.FuzzyNode = node;
+
+        state.Bstack.PushUInt8((byte)Opcode.Fuzzy);
+
+        /* sstack: outer_counts outer_node
+         *
+         * bstack: FUZZY
+         */
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroup arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroup(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        int status;
+
+        // Capture group indexes are 1-based (excluding group 0, which is the entire
+        // matched string).
+        //
+        // Check whether the captured text, if any, exists at this position in the
+        // string.
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            // A reference to a group that has not captured fails; it does not match
+            // empty. A group that captured an empty span has 'current' >= 0 and an
+            // empty span, so it falls through and matches empty.
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+
+        if (stringPos < 0)
+        {
+            stringPos = span.Start;
+        }
+
+        // Try comparing. Upstream's '++string_pos' and '++state->text_pos' are one
+        // codepoint each, so both walk with 'NextPos' here - the S16 stepping - and an
+        // astral character advances both by two code units, leaving 'stringPos' exactly
+        // on 'span.End'.
+        //
+        // A plain '++' on both is in fact indistinguishable here, and deliberately not
+        // used: measured 2026-08-31, it agreed on all 600 rows of the S21 negative
+        // control and on the whole ported suite. Both operands index the *same* string,
+        // so a code-unit walk stays in lockstep with a codepoint walk - it just tests
+        // each surrogate half separately and reaches the same end. Kept as 'NextPos'
+        // because upstream's '++' means one character, every other opcode in this port
+        // spells that 'NextPos', and Phase 5's fuzzy retry moves 'stringPos' on its own,
+        // where the lockstep argument no longer holds.
+        while (stringPos < span.End)
+        {
+            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
+            {
+                return _armRunOut;
+            }
+
+            if (state.TextPos < state.SliceEnd && SameChar(state.CharAt(state.TextPos), state.CharAt(stringPos)))
+            {
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactStringDeletion(state, node, stringPos, 1);
+                }
+
+                stringPos = state.NextPos(stringPos);
+                state.TextPos = state.NextPos(state.TextPos);
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                // 'stringPos' is a position in the subject here, not an index into the
+                // node's values, so the fuzzy walk has to step it in code units.
+                status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroupRev(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        int status;
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+
+        if (stringPos < 0)
+        {
+            stringPos = span.End;
+        }
+
+        // Try comparing.
+        while (stringPos > span.Start)
+        {
+            if (RanOutOnTheLeft(state, state.TextPos))
+            {
+                return _armRunOut;
+            }
+
+            if (
+                state.TextPos > state.SliceStart
+                && SameChar(state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+            )
+            {
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactStringDeletion(state, node, stringPos, -1);
+                }
+
+                stringPos = state.PrevPos(stringPos);
+                state.TextPos = state.PrevPos(state.TextPos);
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupIgnRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroupIgnRev(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        int status;
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+
+        if (stringPos < 0)
+        {
+            stringPos = span.End;
+        }
+
+        // Try comparing.
+        while (stringPos > span.Start)
+        {
+            if (RanOutOnTheLeft(state, state.TextPos))
+            {
+                return _armRunOut;
+            }
+
+            if (
+                state.TextPos > state.SliceStart
+                && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+            )
+            {
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactStringDeletion(state, node, stringPos, -1);
+                }
+
+                stringPos = state.PrevPos(stringPos);
+                state.TextPos = state.PrevPos(state.TextPos);
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupFldRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="gfoldedPos">The position within the group's folded character ('gfolded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="folded">The folding buffer ('folded').</param>
+    /// <param name="gfolded">The group folding buffer ('gfolded').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroupFldRev(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int gfoldedPos,
+        ref int foldChangesStart,
+        bool search,
+        Span<uint> folded,
+        Span<uint> gfolded
+    )
+    {
+        int status;
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+        int foldedLen;
+        int gfoldedLen;
+
+        if (stringPos < 0)
+        {
+            stringPos = span.End;
+            foldedPos = 0;
+            foldedLen = 0;
+            gfoldedPos = 0;
+            gfoldedLen = 0;
+            foldChangesStart = state.FuzzyChanges.Count;
+        }
+        else
+        {
+            // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
+            // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+            // bounded by the slice, as in the loop below. Upstream folds the character
+            // before text_pos unguarded; no retried kind of its own succeeds at the start
+            // of the slice, but D24's whole deletion of a group character does.
+            foldedLen =
+                state.TextPos > state.SliceStart
+                    ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
+                    : 0;
+
+            // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
+            // STRING_FLD_REV takes the subject's step here (:14907).
+            gfoldedLen =
+                stringPos > span.Start
+                    ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
+                    : 0;
+
+            if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
+            {
+                if (foldedPos <= 0 && foldedLen > 0)
+                {
+                    state.TextPos = state.PrevPos(state.TextPos);
+                    foldedPos = 0;
+                    foldedLen = 0;
+                }
+
+                if (gfoldedPos <= 0 && stringPos > span.Start)
+                {
+                    stringPos = state.PrevPos(stringPos);
+                    gfoldedPos = 0;
+                    gfoldedLen = 0;
+                }
+            }
+        }
+
+        // Try comparing.
+        while (stringPos > span.Start)
+        {
+            // Case-fold at current position in text.
+            if (foldedPos <= 0)
+            {
+                if (RanOutOnTheLeft(state, state.TextPos))
+                {
+                    return _armRunOut;
+                }
+
+                foldedLen =
+                    state.TextPos > state.SliceStart
+                        ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
+                        : 0;
+
+                foldedPos = foldedLen;
+            }
+
+            // Case-fold at current position in group.
+            if (gfoldedPos <= 0)
+            {
+                gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded);
+                gfoldedPos = gfoldedLen;
+            }
+
+            if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
+            {
+                // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                // whole-character frame, so the whole deletion of an expanding group character is
+                // retried before its folded characters are deleted one at a time, as the literal's
+                // retry order has it.
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactGroupFldDeletion(
+                        state,
+                        node,
+                        foldedPos,
+                        foldedLen,
+                        stringPos,
+                        gfoldedPos,
+                        gfoldedLen,
+                        -1,
+                        foldChangesStart
+                    );
+                }
+
+                // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                if (
+                    ((foldedLen > 1 && foldedPos == foldedLen) || (gfoldedLen > 1 && gfoldedPos == gfoldedLen))
+                    && (node.Status & NodeStatus.Fuzzy) != 0
+                )
+                {
+                    OfferWholeFoldedGroupCharEdit(
+                        state,
+                        node,
+                        -1,
+                        foldedPos,
+                        foldedLen,
+                        stringPos,
+                        gfoldedPos,
+                        gfoldedLen,
+                        foldChangesStart,
+                        search
+                    );
+                }
+
+                --foldedPos;
+                --gfoldedPos;
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = FuzzyMatchGroupFld(
+                    state,
+                    search,
+                    node,
+                    ref foldedPos,
+                    foldedLen,
+                    stringPos,
+                    ref gfoldedPos,
+                    gfoldedLen,
+                    -1,
+                    foldChangesStart
+                );
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+
+            if (foldedPos <= 0 && foldedLen > 0)
+            {
+                state.TextPos = state.PrevPos(state.TextPos);
+            }
+
+            if (gfoldedPos <= 0)
+            {
+                stringPos = state.PrevPos(stringPos);
+            }
+        }
+
+        // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's leftovers loop below.
+        if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
+        {
+            while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
+            {
+                status = FuzzyMatchGroupFld(
+                    state,
+                    search,
+                    node,
+                    ref foldedPos,
+                    foldedLen,
+                    stringPos,
+                    ref gfoldedPos,
+                    gfoldedLen,
+                    -1,
+                    foldChangesStart
+                );
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+
+                if (foldedPos <= 0 && foldedLen > 0)
+                {
+                    state.TextPos = state.PrevPos(state.TextPos);
+                }
+            }
+        }
+
+        stringPos = -1;
+
+        // A folding that ran out on one side but not the other did not line up.
+        // NOT UPSTREAM: upstream tests 'folded_pos > 0' (:14255); see FoldingIsPartUsed.
+        if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1) || gfoldedPos > 0)
+        {
+            return _armBacktrack;
+        }
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupFld arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="gfoldedPos">The position within the group's folded character ('gfolded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="folded">The folding buffer ('folded').</param>
+    /// <param name="gfolded">The group folding buffer ('gfolded').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroupFld(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int gfoldedPos,
+        ref int foldChangesStart,
+        bool search,
+        Span<uint> folded,
+        Span<uint> gfolded
+    )
+    {
+        int status;
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+        int foldedLen;
+        int gfoldedLen;
+
+        if (stringPos < 0)
+        {
+            stringPos = span.Start;
+            foldedPos = 0;
+            foldedLen = 0;
+            gfoldedPos = 0;
+            gfoldedLen = 0;
+            foldChangesStart = state.FuzzyChanges.Count;
+        }
+        else
+        {
+            // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
+            // way in, so that is the one thing that reaches this arm. NOT UPSTREAM (D24):
+            // bounded by the slice, as in the loop below. Upstream folds the character at
+            // text_pos unguarded; no retried kind of its own succeeds at the end of the
+            // slice, but D24's whole deletion of a group character does.
+            foldedLen =
+                state.TextPos < state.SliceEnd
+                    ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
+                    : 0;
+
+            // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
+            // used up, where upstream reads the character after it.
+            gfoldedLen =
+                stringPos < span.End ? Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded) : 0;
+
+            // NOT UPSTREAM (S84): upstream re-enters the loop without the two steps that
+            // follow a fuzzy call in its body, so a retried edit that finishes a folding
+            // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
+            // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
+            if (!state.Pattern.SkipRetriedFoldSteps || state.RetriedAWholeFoldEdit)
+            {
+                if (foldedPos >= foldedLen && foldedLen > 0)
+                {
+                    state.TextPos = state.NextPos(state.TextPos);
+                    foldedPos = 0;
+                    foldedLen = 0;
+                }
+
+                if (gfoldedPos >= gfoldedLen && stringPos < span.End)
+                {
+                    stringPos = state.NextPos(stringPos);
+                    gfoldedPos = 0;
+                    gfoldedLen = 0;
+                }
+            }
+        }
+
+        // Try comparing.
+        while (stringPos < span.End)
+        {
+            // Case-fold at current position in text.
+            if (foldedPos >= foldedLen)
+            {
+                if (state.TextPos >= state.TextEnd && state.RunsOutRight)
+                {
+                    return _armRunOut;
+                }
+
+                foldedLen =
+                    state.TextPos < state.SliceEnd
+                        ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
+                        : 0;
+
+                foldedPos = 0;
+            }
+
+            // Case-fold at current position in group.
+            if (gfoldedPos >= gfoldedLen)
+            {
+                gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded);
+                gfoldedPos = 0;
+            }
+
+            if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
+            {
+                // NOT UPSTREAM (finding F-A): the exact deletion goes beneath D22/D24's
+                // whole-character frame, so the whole deletion of an expanding group character is
+                // retried before its folded characters are deleted one at a time, as the literal's
+                // retry order has it.
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactGroupFldDeletion(
+                        state,
+                        node,
+                        foldedPos,
+                        foldedLen,
+                        stringPos,
+                        gfoldedPos,
+                        gfoldedLen,
+                        1,
+                        foldChangesStart
+                    );
+                }
+
+                // NOT UPSTREAM (D22, D24): see OfferWholeFoldedGroupCharEdit.
+                if (
+                    ((foldedLen > 1 && foldedPos == 0) || (gfoldedLen > 1 && gfoldedPos == 0))
+                    && (node.Status & NodeStatus.Fuzzy) != 0
+                )
+                {
+                    OfferWholeFoldedGroupCharEdit(
+                        state,
+                        node,
+                        1,
+                        foldedPos,
+                        foldedLen,
+                        stringPos,
+                        gfoldedPos,
+                        gfoldedLen,
+                        foldChangesStart,
+                        search
+                    );
+                }
+
+                ++foldedPos;
+                ++gfoldedPos;
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = FuzzyMatchGroupFld(
+                    state,
+                    search,
+                    node,
+                    ref foldedPos,
+                    foldedLen,
+                    stringPos,
+                    ref gfoldedPos,
+                    gfoldedLen,
+                    1,
+                    foldChangesStart
+                );
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+
+            // Upstream's '++state->text_pos' and '++string_pos' are one codepoint each;
+            // both index this subject, so both walk with 'NextPos' - the S21 reasoning
+            // on REF_GROUP applies unchanged.
+            if (foldedPos >= foldedLen && foldedLen > 0)
+            {
+                state.TextPos = state.NextPos(state.TextPos);
+            }
+
+            if (gfoldedPos >= gfoldedLen)
+            {
+                stringPos = state.NextPos(stringPos);
+            }
+        }
+
+        // NOT UPSTREAM (S84): the group ran out part way through the subject character's
+        // folding. STRING_FLD charges the leftovers as errors (:14855); upstream's
+        // REF_GROUP_FLD backtracks, so '(s)(?:\1){e<=1}' over 'sß' is None under V1.
+        if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
+        {
+            while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
+            {
+                status = FuzzyMatchGroupFld(
+                    state,
+                    search,
+                    node,
+                    ref foldedPos,
+                    foldedLen,
+                    stringPos,
+                    ref gfoldedPos,
+                    gfoldedLen,
+                    1,
+                    foldChangesStart
+                );
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+
+                if (foldedPos >= foldedLen && foldedLen > 0)
+                {
+                    state.TextPos = state.NextPos(state.TextPos);
+                }
+            }
+        }
+
+        stringPos = -1;
+
+        // A folding that ran out on one side but not the other did not line up.
+        // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' (:14154); see
+        // FoldingIsPartUsed.
+        if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1) || gfoldedPos < gfoldedLen)
+        {
+            return _armBacktrack;
+        }
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupIgn arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceRefGroupIgn(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        int status;
+
+        // Did the group capture anything?
+        GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+        if (refGroup.Current < 0)
+        {
+            return _armBacktrack;
+        }
+
+        // D11 chunk 8: a backreference to an unknown capture presumes the rest, as a
+        // run-out does (row T3).
+        if (state.HasUnknownCaptures && IsUnknown(refGroup))
+        {
+            return _armRunOut;
+        }
+
+        GroupSpan span = refGroup.Captures[refGroup.Current];
+
+        if (stringPos < 0)
+        {
+            stringPos = span.Start;
+        }
+
+        // Try comparing.
+        while (stringPos < span.End)
+        {
+            if (state.TextPos >= state.TextEnd && state.RunsOutRight)
+            {
+                return _armRunOut;
+            }
+
+            if (
+                state.TextPos < state.SliceEnd
+                && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
+            )
+            {
+                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    PushExactStringDeletion(state, node, stringPos, 1);
+                }
+
+                stringPos = state.NextPos(stringPos);
+                state.TextPos = state.NextPos(state.TextPos);
+            }
+            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+            else
+            {
+                stringPos = -1;
+                return _armBacktrack;
+            }
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndFuzzy arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackEndFuzzy(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        // Scratch in this helper's own frame: see AdvanceEndFuzzy.
+        FuzzyCountBuffer innerBuffer = default;
+        Span<long> innerCounts = innerBuffer;
+
+        /* sstack: -
+         *
+         * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
+         * end_fuzzy_node
+         */
+
+        if (
+            !state.Bstack.PopNode(pattern, out Node? endFuzzyNode)
+            || !state.Bstack.PopSize(out long endFuzzyTextPos)
+            || !state.Bstack.PopNode(pattern, out Node? innerNode)
+            || !state.Bstack.PopSize(out long insertions)
+            // MERGING, for the reason the forward END_FUZZY arm gives: the section's
+            // changes outlive its counts coming off the stack, and the trailing-insertion
+            // retry below goes on to ADD to them.
+            || !state.PopFuzzyCountsMerging(state.Bstack, innerCounts, out _)
+            // This port's: the totals as they were before the forward arm wrote them.
+            // Ledger entry 32; see the note above 'previousTotalErrors' there.
+            || !state.Bstack.PopSize(out long previousTotalCost)
+            || !state.Bstack.PopSize(out long previousTotalErrors)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        node = endFuzzyNode!;
+
+        // NOT UPSTREAM'S, D11 (D41): a complemented position marks an entry whose
+        // trailing insertion has already run out of text at the edge (below), so the
+        // section goes straight back to its own choices.
+        bool trailingInsertionRanOut = endFuzzyTextPos < 0;
+        state.TextPos = (int)(trailingInsertionRanOut ? ~endFuzzyTextPos : endFuzzyTextPos);
+
+        // Try one more insertion after the section. This is the only place a trailing
+        // insertion can come from: every item inside the section has already been tried.
+        //
+        // THE SECOND TEST IS UPSTREAM'S WITH ITS DOUBLE COUNT REMOVED - a deliberate
+        // divergence, ledger entry 12, fixed by S46 (2026-09-14). Upstream writes
+        // 'total_errors(state->fuzzy_counts) + total_errors(inner_counts) <
+        // state->max_errors' (:15515-15517), and END_FUZZY has already merged
+        // 'inner_counts' INTO 'state->fuzzy_counts' on the way in (:12475-12513),
+        // so the two terms are the same errors added twice. Every other 'max_errors'
+        // test in upstream's file asks about ONE set of counts ('any_error_permitted'
+        // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and
+        // 'insertion_permitted' on the line above already applies the section's own
+        // limits to 'inner_counts', so nothing is lost by dropping the second term.
+        // 'PatternObject.DoubleCountTrailingInsertions' puts it back, for the oracle's
+        // ablation only (S89).
+        //
+        // The double count is invisible wherever 'max_errors' is unbounded, which is
+        // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
+        // upstream's ':18027' sets PY_SSIZE_T_MAX). It bites in 'DoBestFuzzyMatch',
+        // whose second pass climbs 'max_errors' only to 'fewest_errors' - so the budget
+        // the guard is tested against is the match's own cost, the caller cannot raise
+        // it, and '(?b)' loses a match the same engine finds the moment the flag is
+        // deleted. It bites in 'DoEnhancedFuzzyMatch' too, which tightens 'max_errors'
+        // to the total minus one after each run (upstream ':17978'): '(?e)' then keeps a
+        // costlier fit where a cheaper one exists (D46). On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
+        // every budget, WHICH IS THAT PATTERN'S BOUNDARY AND NOT THE DEFECT'S: a fit
+        // needing ONE insertion beside one other error is lost too, and a width-2
+        // section body survives counts a width-1 body does not (S52 sitting 16, blocks
+        // 6 and 7 of tools/probes/upstream-bestmatch-trailing-insertions.py). Held by
+        // 'Gaps.Engine.FuzzyBestMatchTests
+        // .Bestmatch_keeps_a_match_that_needs_two_trailing_insertions', the (k, N)
+        // matrix beside it, and
+        // '.Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error'.
+        //
+        // The third test is this port's, for the reason the second test at 'END_FUZZY'
+        // spells out: 'InsertionPermitted' bounds the cost of the section it is handed,
+        // and nothing here bounds the cost of the WHOLE MATCH, which is the quantity
+        // 'DoBestFuzzyMatch' ranks by. It is upstream's second test with cost in place of
+        // the error count, over 'state.FuzzyCounts' - the counts 'END_FUZZY' has already
+        // merged - and it refuses only insertions the budget has already said are
+        // unaffordable, so it cannot lose a match that fits.
+        //
+        // Pinned by Gaps.Engine.FuzzyBestMatchTests
+        // .Bestmatch_bounds_the_whole_match_cost_of_a_trailing_insertion (D21,
+        // tools/controls.json S42-2G): without this term, a self-recursive group call
+        // that re-enters this section can outrun the per-entry bound
+        // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
+        // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
+        // rather than asserting a value.
+        if (
+            !trailingInsertionRanOut
+            && InsertionPermitted(state, innerNode!, innerCounts)
+            && TotalErrors(state.FuzzyCounts)
+                + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
+                < state.MaxErrors
+            && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost] <= state.MaxCost
+        )
+        {
+            bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;
+            int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
+
+            if (state.TextPos != endFuzzyLimit && FuzzyExtMatch(state, innerNode, state.TextPos))
+            {
+                state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
+                ++innerCounts[FuzzyValue.Ins];
+
+                state.TextPos = Step(state, state.TextPos, endFuzzyReverse ? -1 : 1);
+
+                // Save the inner fuzzy info.
+                state.Bstack.PushSize(previousTotalErrors);
+                state.Bstack.PushSize(previousTotalCost);
+                state.PushFuzzyCounts(state.Bstack, innerCounts);
+                state.Bstack.PushSize(insertions + 1);
+                state.Bstack.PushNode(innerNode);
+                state.Bstack.PushSize(state.TextPos);
+                state.Bstack.PushNode(node);
+                state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                /* bstack: total_errors total_cost inner_counts insertions inner_node
+                 * text_pos end_fuzzy_node END_FUZZY
+                 */
+
+                ++state.FuzzyCounts[FuzzyValue.Ins];
+                state.TotalErrors = TotalErrors(state.FuzzyCounts);
+
+                // This port's own line - see the matching one in the END_FUZZY case
+                // above. The section that used these errors is the inner one just
+                // popped, which is the node the trailing insertion was tried against.
+                state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
+
+                // NOT UPSTREAM (ledger entry 51): the forward arm let a section below
+                // its minimum through to here, so the constraints are asked again. Until
+                // they hold, the frame just pushed is backtracked into for one more
+                // insertion. The limits were checked above, so only a minimum can fail.
+                if (pattern.HasFuzzyMinimum && !FuzzyWithinConstraints(innerCounts, innerNode, state.MaxErrors))
+                {
+                    Debug.Assert(
+                        !pattern.CheckMinimumBeforeTrailingInsertions
+                            && innerCounts[FuzzyValue.Sub] >= innerNode.Values[FuzzyValue.MinSub]
+                            && innerCounts[FuzzyValue.Del] >= innerNode.Values[FuzzyValue.MinDel],
+                        "Only the forward END_FUZZY lets an unmet minimum through, and only one insertions can meet."
+                    );
+                    return _armBacktrack;
+                }
+
+                node = node.Next1.Node!;
+                return _armAdvance;
+            }
+            else if (
+                state.TextPos == endFuzzyLimit
+                && !pattern.SecondPassAsBeforeD11
+                && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
+                    == MatchStatus.Partial
+            )
+            {
+                // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
+                // needs the character after the edge, so in a partial call it runs out
+                // of text as the insertion arm of FuzzyMatchItem does, whether the rest
+                // of the pattern needs it (a fullmatch's end, a lookahead's last letter)
+                // or the section's own minimum does. It used to fail the path. Before
+                // build chunk 6, S57d escalated a lookahead's run-out and hid that;
+                // after it, `(?:a(?=bcd)b.){e<=1}` fullmatch 'abc' answered None where
+                // 'abc' + 'd' completes it (the review of chunk 8). The character after
+                // the edge is unknown, so a section's insertion test (`{i<=1:[a-z]}`) is
+                // not asked, as the insertion arm does not ask it past the edge either.
+                // The insertion is not counted: a run-out presumes the rest, and fewer
+                // errors only let more through.
+                //
+                // The entry goes back with its position complemented, so that when the
+                // run-out's continuation fails, backtracking into it goes on into the
+                // section's own choices (below) instead of running out again. Outside a
+                // lookaround's body the attempt answers the partial and the entry is
+                // never read.
+                state.Bstack.PushSize(previousTotalErrors);
+                state.Bstack.PushSize(previousTotalCost);
+                state.PushFuzzyCounts(state.Bstack, innerCounts);
+                state.Bstack.PushSize(insertions);
+                state.Bstack.PushNode(innerNode);
+                state.Bstack.PushSize(~(long)state.TextPos);
+                state.Bstack.PushNode(node);
+                state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                /* bstack: total_errors total_cost inner_counts insertions inner_node
+                 * ~text_pos end_fuzzy_node END_FUZZY
+                 */
+
+                state.NotePartialEvent(PartialEvent.TrailingInsertionRunOut);
+                return _armRunOut;
+            }
+        }
+
+        // Subtract the inner counts from the outer counts.
+        state.FuzzyCounts[FuzzyValue.Sub] -= innerCounts[FuzzyValue.Sub];
+        state.FuzzyCounts[FuzzyValue.Ins] -= innerCounts[FuzzyValue.Ins];
+        state.FuzzyCounts[FuzzyValue.Del] -= innerCounts[FuzzyValue.Del];
+
+        // This port's two lines. Upstream subtracts the counts and leaves 'total_errors'
+        // as the forward arm set it (':15568'); ledger entry 32.
+        state.TotalErrors = previousTotalErrors;
+        state.TotalCost = previousTotalCost;
+
+        // Save the outer fuzzy info.
+        if (pattern.KeepsSectionLinks)
+        {
+            state.Sstack.PushSize(state.SectionFrame);
+        }
+
+        state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
+        state.Sstack.PushNode(state.FuzzyNode);
+        if (pattern.KeepsSectionLinks)
+        {
+            state.SectionFrame = state.Sstack.Count;
+        }
+
+        /* sstack: outer_counts outer_node
+         *
+         * bstack: -
+         */
+
+        innerCounts[FuzzyValue.Ins] -= insertions;
+
+        while (insertions > 0)
+        {
+            state.UnrecordFuzzy();
+            --insertions;
+        }
+
+        // Restore the inner fuzzy info.
+        innerCounts.CopyTo(state.FuzzyCounts);
+        state.FuzzyNode = innerNode;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Fuzzy arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzy(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* sstack: outer_counts outer_node
+         *
+         * bstack: -
+         */
+
+        // Restore the outer fuzzy info. MERGING: backing out through FUZZY means every
+        // item in the section has already backtracked and unwound its own change, so
+        // there is nothing left to truncate - and the length on the stack here may have
+        // been re-pushed by the END_FUZZY backtrack arm, which cannot know the one the
+        // section was entered with.
+        if (
+            !state.Sstack.PopNode(pattern, out Node? outerFuzzyNode)
+            || !state.PopFuzzyCountsMerging(state.Sstack, state.FuzzyCounts, out _)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.FuzzyNode = outerFuzzyNode;
+
+        // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+        if (pattern.KeepsSectionLinks && !PopSectionFrame(state))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The UndeterminedFuzzyRetry arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackUndeterminedFuzzyRetry(MatchState state, ref Node node, bool search)
+    {
+        PatternObject pattern = state.Pattern;
+        int status;
+
+        /* bstack: text_pos node */
+
+        if (!state.Bstack.PopNode(pattern, out Node? retryNode) || !state.Bstack.PopSize(out long retryPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // As the forward arm does for a zero-width test that failed: an insertion is the
+        // only error a zero-width item can take.
+        state.TextPos = (int)retryPos;
+        node = retryNode!;
+        status = FuzzyMatchItem(state, search, ref node, 0);
+
+        if (status < 0)
+        {
+            if (status == MatchStatus.Partial)
+            {
+                return _armRunOut;
+            }
+
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The FuzzyInsert arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyInsert(MatchState state, ref Node node, ref int stringPos)
+    {
+        int status;
+
+        status = RetryFuzzyInsert(state, ref node);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Conditional arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceConditional(MatchState state, ref Node node)
+    {
+        // The condition is a lookaround, so it parks exactly what LOOKAROUND parks.
+        PushLookaroundStateData(
+            state.Sstack,
+            new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
+        );
+
+        // Upstream saves the captures unconditionally here, with no has-groups flag on
+        // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
+        PushCaptures(state, state.Bstack);
+        PushRepeats(state, state.Bstack);
+        state.PushSubAttemptFuzzyState(state.Bstack);
+        state.Bstack.PushSize(state.CaptureChange);
+        state.Bstack.PushSize(state.Sstack.Count);
+        state.Bstack.PushUInt8((byte)Opcode.Conditional);
+        state.Pstack.PushSize(state.Bstack.Count);
+
+        /* sstack: node slice_start slice_end text_pos
+         *
+         * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL
+         *
+         * pstack: bstack
+         */
+
+        // The condition may read outside the slice the match is confined to, for the same
+        // reason a lookaround may.
+        state.SliceStart = state.TextStart;
+        state.SliceEnd = state.TextEnd;
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndConditional arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceEndConditional(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* sstack: node slice_start slice_end text_pos ...
+         *
+         * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL ...
+         *
+         * pstack: bstack
+         */
+
+        // D11 M2: the cut rule, in a partial call's second pass. A blocked positive test
+        // goes on in the yes-branch with its body's entries kept; a blocked negative one
+        // goes back into its body.
+        LookaroundEnd condEnd = LookaroundEnd.Cut;
+        if (state.WMarks.Count != 0)
+        {
+            condEnd = EndALookaroundInTheSecondPass(state, ref node);
+            if (condEnd == LookaroundEnd.Continue)
+            {
+                return _armContinue;
+            }
+
+            if (condEnd == LookaroundEnd.Backtrack)
+            {
+                return _armBacktrack;
+            }
+        }
+
+        // The condition matched. It is atomic, like a lookaround, so everything it pushed
+        // while matching goes: the condition is asked once and never re-asked.
+        if (!state.Pstack.PopSize(out long endCondBstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        CutBstack(state, (int)endCondBstackCount);
+
+        // D11 M2: the frame goes, and its marks and dedup records with it. A positive
+        // test's own cut taint moves to the end entry below, as a lookaround's does.
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom((int)endCondBstackCount - 1);
+        }
+
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom((int)endCondBstackCount - 1);
+        }
+
+        if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.Sstack.Count = (int)endCondSstackCount;
+        CloseFramesAbove(state);
+
+        if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // The condition consumes nothing: text position and slice go back to the
+        // CONDITIONAL's.
+        state.TextPos = endCondData.TextPos;
+        state.SliceEnd = endCondData.SliceEnd;
+        state.SliceStart = endCondData.SliceStart;
+        Node endCondNode = endCondData.Node;
+
+        /* sstack: -
+         *
+         * bstack: captures repeats fuzzy_counts capture_change
+         *
+         * pstack: -
+         */
+
+        if (endCondNode.Match || !pattern.DropNegativeTestCaptures)
+        {
+            // The test's body matched. The saved block stays on the stack for the
+            // backtrack case to undo, and what the body did stands until then.
+            state.Bstack.PushUInt8((byte)Opcode.EndConditional);
+
+            if (condEnd == LookaroundEnd.CutTainted)
+            {
+                state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+            }
+
+            /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
+
+            // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
+            // entry 65): a negative test fails, and the 'false' branch keeps the whole
+            // block as the positive arm does - the captures, the repeats and the errors
+            // of a fuzzy section inside the test - so (?(?!X)A|B) answers as
+            // (?(?=X)B|A). Only backtracking undoes them, and none has happened: the
+            // test chose the branch, so its work is not thrown away (owner ruling
+            // 2026-09-30 on OPEN-2; errors decided 2026-10-03, DECISIONS). Upstream
+            // restores the block first (_regex.c:12423-12432).
+            node = endCondNode.Match ? node.Next1.Node! : endCondNode.Next2.Node!;
+        }
+        else
+        {
+            // Oracle-only (PatternObject.DropNegativeTestCaptures): upstream's arm. A
+            // negative test has failed, so undo what the test did before taking the
+            // 'false' branch.
+            if (!state.Bstack.PopSize(out long endCondCaptureChange))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            state.CaptureChange = endCondCaptureChange;
+
+            if (
+                !state.PopSubAttemptFuzzyState(state.Bstack)
+                || !PopRepeats(state, state.Bstack, testJustEnded: true)
+                || !PopCaptures(state, state.Bstack)
+            )
+            {
+                return MatchStatus.Illegal;
+            }
+
+            /* sstack: -
+             *
+             * bstack: -
+             *
+             * pstack: -
+             */
+
+            // Go to the 'false' branch.
+            node = endCondNode.Next2.Node!;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndLookaround arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceEndLookaround(MatchState state, ref Node node, bool search)
+    {
+        PatternObject pattern = state.Pattern;
+        int status;
+
+        /* sstack: node slice_start slice_end text_pos ...
+         *
+         * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND ...
+         *
+         * pstack: bstack
+         */
+
+        // D11 M2: the cut rule, in a partial call's second pass.
+        LookaroundEnd lookEnd = LookaroundEnd.Cut;
+        if (state.WMarks.Count != 0)
+        {
+            lookEnd = EndALookaroundInTheSecondPass(state, ref node);
+            if (lookEnd == LookaroundEnd.Continue)
+            {
+                return _armContinue;
+            }
+
+            if (lookEnd == LookaroundEnd.Backtrack)
+            {
+                return _armBacktrack;
+            }
+        }
+
+        // Everything the body pushed while it matched goes: a lookaround is atomic, so
+        // there is nothing left to backtrack into once it has succeeded.
+        if (!state.Pstack.PopSize(out long endLookBstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        CutBstack(state, (int)endLookBstackCount);
+
+        // The frame goes, and its marks and dedup records with it: a negative lookaround
+        // that fails drops its own cut taint, and a positive one moves it to the end entry
+        // below (A7's exception), because the path after it is reached only for some
+        // continuations. A record left at the frame's position would dedup a later
+        // lookaround's success there (review of chunk 7, round 1).
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom((int)endLookBstackCount - 1);
+        }
+
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom((int)endLookBstackCount - 1);
+        }
+
+        if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.Sstack.Count = (int)endLookSstackCount;
+        CloseFramesAbove(state);
+
+        if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // A lookaround consumes nothing: the text position and the slice both go back to
+        // what they were at the LOOKAROUND.
+        state.TextPos = endLookData.TextPos;
+        state.SliceEnd = endLookData.SliceEnd;
+        state.SliceStart = endLookData.SliceStart;
+        Node endLookNode = endLookData.Node;
+
+        /* sstack: -
+         *
+         * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
+         *
+         * pstack: -
+         */
+
+        if (endLookNode.Match)
+        {
+            // It's a positive lookaround that's succeeded. The captures its body made
+            // stay visible; the block stays on the stack for the backtrack case to undo.
+            state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
+
+            if (lookEnd == LookaroundEnd.CutTainted)
+            {
+                state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+            }
+
+            /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
+
+            // Go to the 'true' branch.
+            node = node.Next1.Node!;
+        }
+        else
+        {
+            // It's a negative lookaround that's succeeded, which means the whole
+            // lookaround has failed. Undo the body's captures before failing.
+            if (!state.Bstack.PopSize(out long endLookCaptureChange))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            state.CaptureChange = endLookCaptureChange;
+
+            if (!state.PopSubAttemptFuzzyState(state.Bstack))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            if (!state.Bstack.PopBool(out bool endLookHasGroups))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            if (endLookHasGroups && !PopCaptures(state, state.Bstack))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            // NOT UPSTREAM (ledger entry 50): try an insertion in front of it first.
+            if ((endLookNode.Status & NodeStatus.Fuzzy) != 0)
+            {
+                status = InsertBeforeAFailedLookaround(state, search, ref node, endLookNode);
+
+                if (status < 0)
+                {
+                    if (status == MatchStatus.Partial)
+                    {
+                        return _armRunOut;
+                    }
+
+                    return status;
+                }
+
+                if (status == MatchStatus.Success)
+                {
+                    return _armContinue;
+                }
+            }
+
+            // Go to the 'false' branch.
+            return _armBacktrack;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The GroupCall arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="readGroupCount">How many groups the call guard keys on.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceGroupCall(MatchState state, ref Node node, int readGroupCount)
+    {
+        PatternObject pattern = state.Pattern;
+
+        int groupCallIndex = (int)node.Values[0];
+        Node groupCallReturnNode = node.Next1.Node!;
+
+        // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
+        // already open, when the attempt has reached no further since that call was made.
+        // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
+        // and failing it leaves every other path alone.
+        long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
+        NoteReached(state, state.TextPos);
+        int groupCallReach = state.ReachedWidth;
+        Debug.Assert(
+            groupCallReach >= 0 && groupCallReach <= state.TextLength,
+            "the text reached is measured and fits in the text"
+        );
+
+        // NOT UPSTREAM'S: a call with the same entry key as one that ran out of choices
+        // without returning fails the same way, so it fails now. Nothing has been pushed
+        // yet, so backtracking resumes where the call's own backtrack arm would have left
+        // the matcher. See FailedCallKey and MatchState.CallMemoThreshold.
+        bool groupCallKeyed = ++state.CallsThisPass > state.CallMemoThreshold;
+        if (groupCallKeyed && CallAlreadyFailed(state, groupCallIndex))
+        {
+            return _armBacktrack;
+        }
+
+        if (
+            readGroupCount == 0
+                ? !state.ActiveCalls.Add((groupCallKey, groupCallReach))
+                : !TryOpenCall(state, groupCallKey, groupCallReach)
+        )
+        {
+            return _armBacktrack;
+        }
+
+        // For the caller. Each group's count as well as its current, where upstream's
+        // push_groups saves only current: the return restores both (D51, see
+        // ReturnToCallerCaptures). The captures go last, right under the return node,
+        // so a partial result can find them at a fixed offset (D62, see
+        // ReturnFromOpenCallsAtAPartial); upstream's order is groups first.
+        // SHORTCUT (D68): every call saves, and its return restores, every repeat and
+        // every group, whatever the called body can change. That is most of what a call
+        // costs over its written-out body, 1.1-2.4x on the D68 rows, and a fuzzy section
+        // pays it on every retry that re-enters the call. Upgrade: compile, for each
+        // call reference, the groups and repeats its body can write, and save only
+        // those; D51 and D62 depend on what is restored, so it needs nested and
+        // recursive witnesses. docs/plan/2026-10-03-d68-call-copy-perf.md.
+        PushRepeats(state, state.Sstack);
+        state.Sstack.PushSize(state.CaptureChange);
+        PushCaptures(state, state.Sstack);
+        state.Sstack.PushNode(groupCallReturnNode);
+        state.Bstack.PushUInt8((byte)Opcode.GroupCall);
+
+        // The call is open, and the frame it belongs to ends here. See
+        // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
+        // open calls it has just thrown away.
+        Debug.Assert(
+            state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
+            "the text reached never shrinks, so an inner call's reach is at least its caller's"
+        );
+        state.OpenCalls.Add(
+            (groupCallKey, groupCallReach, state.Sstack.Count, groupCallKeyed ? FailedCallKeyToRecord(state) : null)
+        );
+
+        /* sstack: caller_repeats capture_change caller_captures return_node
+         *
+         * bstack: GROUP_CALL
+         */
+
+        // Clear the repeat guards for the group call. They'll be restored on return -
+        // 'push_repeats' above saved the guard lists in full. Without this a repeat
+        // inside the called group would inherit "already failed at this position" from
+        // the caller's own pass over the same text, and a recursive pattern visits the
+        // same positions by design.
+        foreach (RepeatData groupCallRepeat in state.Repeats)
+        {
+            groupCallRepeat.BodyGuardList.Reset();
+            groupCallRepeat.TailGuardList.Reset();
+        }
+
+        // Call a group, skipping its CALL_REF node. Be aware that we might be calling
+        // the entire pattern, which has no CALL_REF node of its own.
+        Node? groupCallRefNode = pattern.CallRefInfoList[groupCallIndex].Node;
+        node = groupCallRefNode is not null ? groupCallRefNode.Next1.Node! : pattern.StartNode!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The GroupReturn arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="readGroupCount">How many groups the call guard keys on.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceGroupReturn(MatchState state, ref Node node, int readGroupCount)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* If called:
+         *
+         * sstack: caller_repeats capture_change caller_captures return_node
+         *
+         * bstack: -
+         *
+         * else:
+         *
+         * sstack: NULL
+         *
+         * bstack: -
+         */
+
+        if (!state.Sstack.PopNode(pattern, out Node? groupReturnNode))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (groupReturnNode is not null)
+        {
+            // The group was called.
+            node = groupReturnNode;
+
+            // For the callee and the caller in turn. The callee's repeats and groups go
+            // on the backtracking stack and the caller's come back off the saved stack,
+            // so matching resumes exactly where the call left it. Upstream restores only
+            // each group's current here, so the captures the call made stayed on the
+            // list; here they are thrown away, as in Perl and PCRE2 (D51, see
+            // ReturnToCallerCaptures). The groups are exchanged first because the
+            // caller's lie on top of its repeats on the saved stack (D62).
+            if (!ReturnToCallerCaptures(state))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            PushRepeats(state, state.Bstack);
+            state.Bstack.PushSize(state.CaptureChange);
+            if (
+                !state.Sstack.PopSize(out long groupReturnCaptureChange)
+                || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            )
+            {
+                return MatchStatus.Illegal;
+            }
+
+            state.CaptureChange = groupReturnCaptureChange;
+
+            // The call is closed, so it is no longer one this position may not re-enter.
+            // It is the innermost open one - calls nest - and its key goes on the
+            // backtracking stack so the arm below can re-open it.
+            state.Bstack.PushSize(state.OpenCalls[^1].Key);
+            state.Bstack.PushSize(state.OpenCalls[^1].Reach);
+            foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
+            {
+                state.Bstack.PushSize(span);
+            }
+
+            _ = PopOpenCall(state);
+            state.Bstack.PushNode(groupReturnNode);
+            state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
+        }
+        else
+        {
+            // The group was not called.
+            state.Bstack.PushNode(null);
+            state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
+
+            node = node.Next1.Node!;
+        }
+
+        /* If called:
+         *
+         * sstack: -
+         *
+         * bstack: callee_captures callee_repeats capture_change call_key call_reach
+         *         return_node GROUP_RETURN
+         *
+         * else:
+         *
+         * sstack: -
+         *
+         * bstack: NULL GROUP_RETURN
+         */
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Lookaround arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceLookaround(MatchState state, ref Node node)
+    {
+        PushLookaroundStateData(
+            state.Sstack,
+            new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
+        );
+
+        bool lookHasGroups = (node.Status & NodeStatus.HasGroups) != 0;
+        if (lookHasGroups)
+        {
+            PushCaptures(state, state.Bstack);
+        }
+
+        state.Bstack.PushBool(lookHasGroups);
+        state.PushSubAttemptFuzzyState(state.Bstack);
+        state.Bstack.PushSize(state.CaptureChange);
+        state.Bstack.PushSize(state.Sstack.Count);
+        state.Bstack.PushUInt8((byte)Opcode.Lookaround);
+        state.Pstack.PushSize(state.Bstack.Count);
+
+        /* sstack: node slice_start slice_end text_pos
+         *
+         * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND
+         *
+         * pstack: bstack
+         */
+
+        // A lookaround may read outside the slice the match is confined to: '(?<=a)b'
+        // against 'ab' searched from position 1 has to see the 'a'.
+        state.SliceStart = state.TextStart;
+        state.SliceEnd = state.TextEnd;
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Prune arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvancePrune(MatchState state, ref Node node)
+    {
+        /* bstack: ... | ...
+         *
+         * pstack: bstack
+         */
+
+        // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+        state.VerbMarks.Add(state.Pstack.Count);
+
+        // DELIBERATE DIVERGENCE, ledger entry 47: inside an unfinished atomic group or
+        // positive lookaround the verb acts when backtracking reaches it, and then
+        // unwinds past the group (see VerbIsInsideATransparentGroup). Upstream prunes
+        // to the group's own mark here and so fails only the group:
+        // `(?>a(*PRUNE)b)|a` over 'ac' is (0, 1) upstream and None in PCRE2 10.47 and
+        // Perl 5.42.3. Pinned by VerbScopeTests.
+        if (VerbIsInsideATransparentGroup(state))
+        {
+            state.Bstack.PushUInt8((byte)Opcode.Prune);
+
+            /* bstack: ... | ... PRUNE */
+        }
+        else if (state.WMarks.Count == 0 || !SkipABlockedVerb(state, -1))
+        {
+            // Prune the backtracking back to an appropriate backtracking point, unless
+            // the path here read the text to come (D11 M2, the cut rule for a verb).
+            TopBstack(state);
+
+            /* bstack: ...
+             *
+             * pstack: bstack
+             */
+        }
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Skip arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceSkip(MatchState state, ref Node node)
+    {
+        /* bstack: ... | ...
+         *
+         * pstack: bstack
+         */
+
+        // NOT UPSTREAM (ledger entry 44's addendum): see MatchState.VerbMarks.
+        state.VerbMarks.Add(state.Pstack.Count);
+
+        // Prune the backtracking back to an appropriate backtracking point - unless the
+        // verb is in an unfinished atomic group or positive lookaround, where it prunes
+        // nothing until backtracking reaches it (ledger entry 47; see the Prune arm).
+        // D11 M2: in a partial call's second pass the verb does nothing when the path
+        // here read the text to come; the backtrack arm below asks again.
+        bool skipIsInsideATransparentGroup = VerbIsInsideATransparentGroup(state);
+        bool skipIsBlocked =
+            !skipIsInsideATransparentGroup && state.WMarks.Count != 0 && SkipABlockedVerb(state, state.TextPos);
+        if (!skipIsInsideATransparentGroup && !skipIsBlocked)
+        {
+            TopBstack(state);
+        }
+
+        // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
+        // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
+        // rest of the attempt has run. pcre2pattern ("Verbs that act after
+        // backtracking") and perlre give a verb its effect only when a later failure
+        // backtracks onto it, and "the one that is backtracked onto first acts" ("More
+        // than one backtracking verb"). So the skip position goes on the backtracking
+        // stack above the pruned point: a later (*PRUNE) or (*SKIP) prunes it away and
+        // decides the next start itself; the end of an atomic group or lookaround that
+        // finished discards it, which confines the verb to the group; and a success
+        // never pops it. The backtrack arm below applies it.
+        // `(?>aa(*SKIP))x` over 'aaax' is (1, 4) here, in PCRE2 10.47 and in Perl
+        // 5.42.3, and None upstream; `aa(*SKIP)x(*PRUNE)y|a` over 'aaxz' is (1, 2) in
+        // all three and None upstream. Pinned by BacktrackingVerbTests.
+        // PatternObject.SkipMovesTheSliceWhenItRuns restores upstream's timing for the
+        // oracle alone.
+        if (state.Pattern.SkipMovesTheSliceWhenItRuns)
+        {
+            if (!skipIsBlocked)
+            {
+                MoveTheSliceForASkip(state, node, state.TextPos);
+            }
+
+            // Ledger 45's ablation on its own: the slice has moved already, and
+            // backtracking onto the verb must still unwind (ledger entry 47).
+            if (skipIsInsideATransparentGroup)
+            {
+                state.Bstack.PushUInt8((byte)Opcode.Prune);
+            }
+        }
+        else
+        {
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(node);
+            state.Bstack.PushUInt8((byte)Opcode.Skip);
+        }
+
+        /* bstack: ... text_pos node SKIP
+         *
+         * pstack: bstack
+         */
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The StringRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceStringRev(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        PatternObject pattern = state.Pattern;
+        int status;
+
+        if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+        {
+            // Unreachable until Phase 7 ports this arm of the required-string locator
+            // (:11143-11365); S60 ported the case-sensitive forward one only.
+            state.TextPos = state.ReqEnd;
+        }
+        else
+        {
+            if (stringPos < 0)
+            {
+                stringPos = node.Values.Length;
+            }
+
+            // Try comparing.
+            while (stringPos > 0)
+            {
+                if (RanOutOnTheLeft(state, state.TextPos))
+                {
+                    return _armRunOut;
+                }
+
+                if (
+                    state.TextPos > state.SliceStart
+                    && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
+                )
+                {
+                    if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
+                    {
+                        PushExactStringDeletion(state, node, stringPos, -1);
+                    }
+
+                    --stringPos;
+                    state.TextPos = state.PrevPos(state.TextPos);
+                }
+                else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            return _armRunOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        return _armBacktrack;
+                    }
+                }
+                else
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+        }
+
+        if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            FuzzyInsert(state, -1, node.Next1.Node);
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The StringIgnRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceStringIgnRev(MatchState state, ref Node node, ref int stringPos, bool search)
+    {
+        PatternObject pattern = state.Pattern;
+        int status;
+
+        if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+        {
+            // Unreachable until Phase 7 ports this arm of the required-string locator
+            // (:11143-11365); S60 ported the case-sensitive forward one only.
+            state.TextPos = state.ReqEnd;
+        }
+        else
+        {
+            if (stringPos < 0)
+            {
+                stringPos = node.Values.Length;
+            }
+
+            // Try comparing.
+            while (stringPos > 0)
+            {
+                if (RanOutOnTheLeft(state, state.TextPos))
+                {
+                    return _armRunOut;
+                }
+
+                if (
+                    state.TextPos > state.SliceStart
+                    && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), node.Values[stringPos - 1])
+                )
+                {
+                    if ((node.Status & NodeStatus.Fuzzy) != 0 && stringPos <= pattern.ExactDeletionCeiling)
+                    {
+                        PushExactStringDeletion(state, node, stringPos, -1);
+                    }
+
+                    --stringPos;
+                    state.TextPos = state.PrevPos(state.TextPos);
+                }
+                else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            return _armRunOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        return _armBacktrack;
+                    }
+                }
+                else
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+        }
+
+        if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            FuzzyInsert(state, -1, node.Next1.Node);
+        }
+
+        stringPos = -1;
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The StringFldRev arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="folded">The folding buffer ('folded').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceStringFldRev(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int foldChangesStart,
+        bool search,
+        Span<uint> folded
+    )
+    {
+        int status;
+
+        int foldedLen;
+
+        if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+        {
+            // Unreachable until Phase 7 ports this arm of the required-string locator
+            // (:11143-11365); S60 ported the case-sensitive forward one only.
+            state.TextPos = state.ReqEnd;
+        }
+        else
+        {
+            int length = node.Values.Length;
+
+            if (stringPos < 0)
+            {
+                stringPos = length;
+                foldedPos = 0;
+                foldedLen = 0;
+                foldChangesStart = state.FuzzyChanges.Count;
+            }
+            else
+            {
+                // Only Phase 5's fuzzy retry reaches this arm.
+                foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
+
+                if (foldedPos <= 0)
+                {
+                    if (state.TextPos <= state.SliceStart)
+                    {
+                        return _armBacktrack;
+                    }
+
+                    state.TextPos = state.PrevPos(state.TextPos);
+                    foldedPos = 0;
+                    foldedLen = 0;
+                }
+            }
+
+            // Try comparing.
+            while (stringPos > 0)
+            {
+                if (foldedPos <= 0)
+                {
+                    if (RanOutOnTheLeft(state, state.TextPos))
+                    {
+                        return _armRunOut;
+                    }
+
+                    foldedLen =
+                        state.TextPos > state.SliceStart
+                            ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
+                            : 0;
+
+                    foldedPos = foldedLen;
+                }
+
+                if (foldedPos > 0 && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1]))
+                {
+                    // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                    if (foldedLen > 1 && foldedPos == foldedLen && (node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        OfferWholeFoldedCharEdit(
+                            state,
+                            node,
+                            -1,
+                            stringPos,
+                            foldedLen,
+                            foldedLen,
+                            foldChangesStart,
+                            folded
+                        );
+                    }
+
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        PushExactStringFldDeletion(state, node, stringPos, foldedPos, foldedLen, -1, foldChangesStart);
+                    }
+
+                    --stringPos;
+                    --foldedPos;
+
+                    if (foldedPos <= 0)
+                    {
+                        state.TextPos = state.PrevPos(state.TextPos);
+                    }
+                }
+                else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    status = FuzzyMatchStringFld(
+                        state,
+                        search,
+                        node,
+                        ref stringPos,
+                        ref foldedPos,
+                        foldedLen,
+                        -1,
+                        foldChangesStart
+                    );
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            return _armRunOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        return _armBacktrack;
+                    }
+
+                    if (foldedPos <= 0 && foldedLen > 0)
+                    {
+                        state.TextPos = state.PrevPos(state.TextPos);
+                    }
+                }
+                else
+                {
+                    stringPos = -1;
+                    return _armBacktrack;
+                }
+            }
+
+            // The pattern ran out part way through the subject character's folding
+            // (:14962), the mirror of STRING_FLD's own loop.
+            // NOT UPSTREAM: upstream tests 'folded_pos > 0'; see FoldingIsPartUsed.
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
+                {
+                    status = FuzzyMatchStringFld(
+                        state,
+                        search,
+                        node,
+                        ref stringPos,
+                        ref foldedPos,
+                        foldedLen,
+                        -1,
+                        foldChangesStart
+                    );
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            return _armRunOut;
+                        }
+
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        return _armBacktrack;
+                    }
+
+                    if (foldedPos <= 0 && foldedLen > 0)
+                    {
+                        state.TextPos = state.PrevPos(state.TextPos);
+                    }
+                }
+            }
+
+            stringPos = -1;
+
+            // The subject character's folding was longer than what the pattern
+            // consumed, so this string is only part of it.
+            if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
+            {
+                return _armBacktrack;
+            }
+        }
+
+        // Successful match.
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The CallRef arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceCallRef(MatchState state, ref Node node)
+    {
+        // The node a called group is entered through. Reached in the ordinary forward
+        // direction it means the group is being matched where it was written rather
+        // than called, so the NULL tells the matching GROUP_RETURN there is no caller
+        // to return to. GROUP_CALL enters the group by skipping over this node.
+        state.Sstack.PushNode(null);
+        state.Bstack.PushUInt8((byte)Opcode.CallRef);
+
+        /* sstack: NULL
+         *
+         * bstack: CALL_REF
+         */
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Conditional arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackConditional(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* sstack: node slice_start slice_end text_pos ...
+         *
+         * bstack: captures repeats capture_change sstack
+         *
+         * pstack: bstack
+         */
+
+        // D11 M2: the frame's marks and dedup records go with it. A cut taint means a
+        // success of the test was blocked, so the branch the test's failure picks is
+        // taken only for some continuations.
+        bool condWasBlocked = false;
+        bool condHeld = false;
+        if (state.WMarks.Count != 0)
+        {
+            condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+            condHeld = HasWMarkAt(state, state.Bstack.Count, WMarkKind.Held);
+            state.DropWMarksFrom(state.Bstack.Count);
+        }
+
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom(state.Bstack.Count);
+        }
+
+        // The condition failed to match. As with LOOKAROUND, the condition's own bstack
+        // entries have already been popped by the backtracking that got here, so the
+        // pstack entry is simply dropped.
+        if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long condSstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.Sstack.Count = (int)condSstackCount;
+        CloseFramesAbove(state);
+
+        if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = condData.TextPos;
+        state.SliceEnd = condData.SliceEnd;
+        state.SliceStart = condData.SliceStart;
+        Node condNode = condData.Node;
+
+        /* sstack: -
+         *
+         * bstack: captures repeats capture_change
+         *
+         * pstack: -
+         */
+
+        if (!state.Bstack.PopSize(out long condCaptureChange))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.CaptureChange = condCaptureChange;
+
+        // Only the test has run since the push, unless a positive test's end was blocked
+        // and let the yes-branch go on (D35's remarks, PushRepeats).
+        if (
+            !state.PopSubAttemptFuzzyState(state.Bstack)
+            || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
+            || !PopCaptures(state, state.Bstack)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // D11 (D38): the test held for every continuation, and its yes-branch has failed
+        // (EndALookaroundInTheSecondPass's dedup), so the conditional fails.
+        if (condHeld)
+        {
+            Debug.Assert(
+                condWasBlocked && condNode.Match,
+                "D11: only a positive test that went on from a blocked end can be held"
+            );
+            state.NotePartialEvent(PartialEvent.HeldFailedTheCondition);
+            return _armContinue;
+        }
+
+        // A positive condition that failed means the condition does not hold, so take the
+        // 'false' branch; a negative one that failed means it does, so take the 'true'
+        // branch. Neither is a failure of the conditional itself, so this goes forward
+        // rather than on backtracking.
+        node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;
+
+        // D11 M2: after a blocked success the branch holds only for some continuations.
+        // A positive test has already taken its yes-branch for the others; a negative one
+        // takes its no-branch for them when backtracking reaches the NO_BRANCH entry.
+        if (condWasBlocked)
+        {
+            // A negative test forks here, once. A positive one forked at each blocked
+            // end that went on (EndALookaroundInTheSecondPass), and this branch is
+            // one of the outcomes those counted.
+            if (!condNode.Match)
+            {
+                state.Bstack.PushSize(state.TextPos);
+                state.Bstack.PushNode(condNode.Next2.Node!);
+                state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+                /* bstack: text_pos node NO_BRANCH */
+
+                CountFork(state);
+            }
+
+            PushTouchMark(state);
+            state.NotePartialEvent(PartialEvent.ConditionBothWays);
+        }
+
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The EndConditional arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackEndConditional(MatchState state)
+    {
+        /* bstack: captures repeats capture_change */
+
+        // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom(state.Bstack.Count);
+        }
+
+        if (!state.Bstack.PopSize(out long endCondCaptureChange))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.CaptureChange = endCondCaptureChange;
+
+        if (
+            !state.PopSubAttemptFuzzyState(state.Bstack)
+            || !PopRepeats(state, state.Bstack, testJustEnded: false)
+            || !PopCaptures(state, state.Bstack)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The GroupCall arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackGroupCall(MatchState state)
+    {
+        /* sstack: caller_repeats capture_change caller_captures return_node
+         *
+         * bstack: -
+         */
+
+        // NOT UPSTREAM'S: every choice inside the call has been tried. If it never
+        // returned, a later call with the same entry key fails the same way. See
+        // FailedCallKey and MatchState.OpenCalls.
+        RecordFailedCall(state);
+
+        // The call is no longer open: backtracking past it means it never happened.
+        PopOpenCall(state);
+
+        // The return node is dropped rather than popped: backtracking past the call
+        // means there is nowhere to return to.
+        if (
+            !state.Sstack.DropSize()
+            || !PopCallerCaptures(state)
+            || !state.Sstack.PopSize(out long groupCallCaptureChange)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // For the caller.
+        state.CaptureChange = groupCallCaptureChange;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The GroupReturn arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="readGroupCount">How many groups the call guard keys on.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackGroupReturn(MatchState state, int readGroupCount)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* If called:
+         *
+         * sstack: -
+         *
+         * bstack: callee_captures callee_repeats capture_change call_key call_reach return_node
+         *
+         * else:
+         *
+         * sstack: -
+         *
+         * bstack: NULL
+         */
+
+        if (!state.Bstack.PopNode(pattern, out Node? groupReturnBackNode))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (groupReturnBackNode is not null)
+        {
+            // Backtracking into the call re-opens it, so its key, reach and captures
+            // come back off the backtracking stack.
+            int groupReturnBackSpans = state.OpenCallSpans.Count;
+            CollectionsMarshal.SetCount(state.OpenCallSpans, groupReturnBackSpans + readGroupCount);
+            Span<long> groupReturnBackValues = CollectionsMarshal.AsSpan(state.OpenCallSpans)[groupReturnBackSpans..];
+            for (int i = readGroupCount - 1; i >= 0; i--)
+            {
+                if (!state.Bstack.PopSize(out groupReturnBackValues[i]))
+                {
+                    return MatchStatus.Illegal;
+                }
+            }
+
+            if (
+                !state.Bstack.PopSize(out long groupReturnBackReach)
+                || !state.Bstack.PopSize(out long groupReturnBackKey)
+            )
+            {
+                return MatchStatus.Illegal;
+            }
+
+            // For the caller. The forward arm's exchange, run the other way round: the
+            // caller's state goes back on the saved stack and the callee's comes off
+            // the backtracking stack, so the callee resumes inside the call with the
+            // captures it had made (D51, see PopCalleeCaptures). The repeats first:
+            // they lie on top of the callee's groups here, and under the caller's
+            // groups on the saved stack (D62).
+            PushRepeats(state, state.Sstack);
+            state.Sstack.PushSize(state.CaptureChange);
+            if (
+                !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
+                || !PopRepeats(state, state.Bstack, testJustEnded: false)
+            )
+            {
+                return MatchStatus.Illegal;
+            }
+
+            state.CaptureChange = groupReturnBackCaptureChange;
+
+            PushCaptures(state, state.Sstack);
+            if (!PopCalleeCaptures(state))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            state.Sstack.PushNode(groupReturnBackNode);
+
+            // The frame is back, so the call is open again and ends where it now ends.
+            ReopenCall(state, groupReturnBackKey, (int)groupReturnBackReach);
+            Debug.Assert(
+                state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
+                "a re-opened call is still inside the calls that were open when it returned"
+            );
+            // It has returned, so it is not one the failed-call memo may record.
+            state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
+
+            /* sstack: caller_repeats capture_change caller_captures return_node
+             *
+             * bstack: -
+             */
+        }
+        else
+        {
+            state.Sstack.PushNode(null);
+        }
+
+        /* If called:
+         *
+         * sstack: caller_repeats capture_change caller_captures return_node
+         *
+         * bstack: -
+         *
+         * else:
+         *
+         * sstack: NULL
+         *
+         * bstack: -
+         */
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndLookaround arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackEndLookaround(MatchState state)
+    {
+        /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change */
+
+        // D11 M2: the cut taint an unblocked end moved here goes with the entry.
+        if (state.WMarks.Count != 0)
+        {
+            state.DropWMarksFrom(state.Bstack.Count);
+        }
+
+        // The 'true' branch of a positive lookaround is being given up, so the captures
+        // its body made go with it. Leaving this out is invisible to any test that does
+        // not backtrack past the lookaround.
+        if (!state.Bstack.PopSize(out long endLookCaptureChange))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.CaptureChange = endLookCaptureChange;
+
+        if (!state.PopSubAttemptFuzzyState(state.Bstack))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (!state.Bstack.PopBool(out bool endLookHasGroups))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (endLookHasGroups && !PopCaptures(state, state.Bstack))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Lookaround arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackLookaround(MatchState state, ref Node node, bool search)
+    {
+        PatternObject pattern = state.Pattern;
+        int status;
+
+        /* sstack: node slice_start slice_end text_pos ...
+         *
+         * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack
+         *
+         * pstack: bstack
+         */
+
+        // D11 M2: the frame's marks go with it. A cut taint means a success of the body
+        // was blocked, so a negative lookaround holds only for some continuations.
+        bool lookWasBlocked = false;
+        bool lookRunOutWaits = false;
+        if (state.WMarks.Count != 0)
+        {
+            lookWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
+            lookRunOutWaits = HasWMarkAt(state, state.Bstack.Count, WMarkKind.RunOutPending);
+            state.DropWMarksFrom(state.Bstack.Count);
+        }
+
+        if (state.LookaroundSuccesses.Count != 0)
+        {
+            state.DropLookaroundSuccessesFrom(state.Bstack.Count);
+        }
+
+        // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
+        // the parked count, here the body's own entries have already been popped by the
+        // backtracking that brought us here, so the pstack entry is simply dropped.
+        if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long lookSstackCount))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.Sstack.Count = (int)lookSstackCount;
+        CloseFramesAbove(state);
+
+        if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = lookData.TextPos;
+        state.SliceEnd = lookData.SliceEnd;
+        state.SliceStart = lookData.SliceStart;
+        Node lookNode = lookData.Node;
+
+        /* sstack: -
+         *
+         * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
+         *
+         * pstack: -
+         */
+
+        if (!state.Bstack.PopSize(out long lookCaptureChange))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.CaptureChange = lookCaptureChange;
+
+        if (!state.PopSubAttemptFuzzyState(state.Bstack))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (!state.Bstack.PopBool(out bool lookHasGroups))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (lookHasGroups && !PopCaptures(state, state.Bstack))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        if (!lookNode.Match)
+        {
+            // It's a negative lookaround that's failed, which means the lookaround as a
+            // whole has succeeded: for every continuation, unless a success of its body
+            // was blocked (D11 M2).
+            if (lookWasBlocked)
+            {
+                PushTouchMark(state);
+                state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                CountFork(state);
+            }
+
+            node = lookNode.Next2.Node!;
+            return _armAdvance;
+        }
+
+        // D11 (RunOutCanWaitForTheBody): no path of the body succeeded on the held text,
+        // and a run-out waited, so the lookaround holds for the continuations where that
+        // path goes on. Its body sets no group and nothing fuzzy is left open, so what
+        // the arm put back is the state its end would leave.
+        if (lookRunOutWaits)
+        {
+            PushTouchMark(state);
+            state.NotePartialEvent(PartialEvent.RunOutInBody);
+            CountFork(state);
+            node = lookNode.Next2.Node!;
+            return _armAdvance;
+        }
+
+        // It's a positive lookaround that's failed. NOT UPSTREAM (ledger entry 50): try
+        // an insertion in front of it before backtracking further.
+        if ((lookNode.Status & NodeStatus.Fuzzy) != 0)
+        {
+            status = InsertBeforeAFailedLookaround(state, search, ref node, lookNode);
+
+            if (status < 0)
+            {
+                // D11: the insertion ran out of text in front of the lookaround, which
+                // is the item that ran out. `node` is stale here (whatever matched
+                // last, possibly outside the enclosing body: assert A10).
+                if (status == MatchStatus.Partial)
+                {
+                    node = lookNode;
+                    return _armRunOut;
+                }
+
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                return _armAdvance;
+            }
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Reopen arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackReopen(MatchState state)
+    {
+        /* bstack: pstack_mark */
+
+        if (!state.Bstack.PopSize(out long reopenedFrameEnd) || !state.Bstack.PopSize(out long reopenedCallBase))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // Repair 1: the frame's saved-stack depth follows the call frame below it.
+        if (RebaseTheReopenedFrame(state, (int)reopenedFrameEnd, reopenedCallBase) is not { } reopenedDelta)
+        {
+            return MatchStatus.Illegal;
+        }
+
+        Debug.Assert(
+            ReopenedFrameIsTheBlockedOne(state, (int)reopenedFrameEnd),
+            "D11 A9: a reopened group's mark is its own frame's, which its blocked end tainted"
+        );
+
+        // The group is open again, as it was before its end, so that the body's other
+        // paths end at the group's end once more. A lookaround's body, and a condition's
+        // test, match over the whole text, as their forward arms set them up to, and get
+        // back the saved-stack bytes and section link their blocked end moved off
+        // (amendment 2).
+        if (
+            state.Bstack.ReadUInt8Below((int)reopenedFrameEnd, out byte reopenedOp)
+            && reopenedOp is (byte)Opcode.Lookaround or (byte)Opcode.Conditional
+        )
+        {
+            /* bstack: sstack_bytes length section_frame */
+
+            if (
+                !state.Bstack.PopSize(out long reopenedSection)
+                || !state.Bstack.PopSize(out long reopenedLength)
+                || !state.Bstack.ReadSizeBelow((int)reopenedFrameEnd - 1, out long reopenedSaved)
+            )
+            {
+                return MatchStatus.Illegal;
+            }
+
+            Debug.Assert(
+                state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize,
+                "D11 amendment 2, assert 4: the continuation is undone in full"
+            );
+            if (!state.Bstack.MoveTopTo(state.Sstack, (int)reopenedLength))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            Debug.Assert(
+                state.Sstack.Count == (int)reopenedSaved - _lookaroundStateDataSize + (int)reopenedLength,
+                "D11 amendment 2, assert 4: the body's bytes are back"
+            );
+            // Repair 2: the open-section link. Below the parked state the backtracking
+            // arms have already restored it, at the depths the stack has now (a section
+            // re-opened by END_FUZZY's backtrack arm records the depth it finds, and one
+            // opened in an outer call's body moves with that call's frame, not the
+            // innermost's). Only a section the body left open, which lies in the bytes
+            // just put back, takes the saved value, moved with them. That happens only
+            // after a run-out, which a pattern with group calls does not continue
+            // (RunOutInALookaroundBody), so no call frame has moved then.
+            int parkedS0 = (int)reopenedSaved - _lookaroundStateDataSize - reopenedDelta;
+            Debug.Assert(
+                reopenedDelta == 0 || reopenedLength == _lookaroundStateDataSize,
+                "D11 amendment 2, repair 2: only a run-out moves more than the parked state, and no call frame moves then"
+            );
+            Debug.Assert(
+                reopenedSection > parkedS0 || reopenedDelta != 0 || state.SectionFrame == reopenedSection,
+                "D11 amendment 2, repair 2: below the parked state the backtracking arms restored the section link"
+            );
+            if (reopenedSection > parkedS0)
+            {
+                state.SectionFrame = (int)reopenedSection + reopenedDelta;
+            }
+            state.SliceStart = state.TextStart;
+            state.SliceEnd = state.TextEnd;
+            state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
+        }
+
+        state.Pstack.PushSize(reopenedFrameEnd);
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Skip arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackSkip(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* bstack: text_pos node */
+
+        if (!state.Bstack.PopNode(pattern, out Node? skipNode) || !state.Bstack.PopSize(out long skipPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // D11 M2: a verb whose path read the text to come does nothing, and the attempt
+        // keeps its ordinary bump-along, which visits every start the skip would.
+        if (state.WMarks.Count != 0 && SkipABlockedVerb(state, skipPos))
+        {
+            return _armContinue;
+        }
+
+        // Ledger entry 47: in an unfinished atomic group or positive lookaround the verb
+        // unwinds to its target now. Only the attempt takes the skip position; a
+        // negative lookaround or condition puts its own slice back.
+        if (VerbIsInsideATransparentGroup(state))
+        {
+            if (!UnwindToTheVerbTarget(state, out bool skipEndsTheAttempt))
+            {
+                return MatchStatus.Illegal;
+            }
+
+            if (skipEndsTheAttempt)
+            {
+                MoveTheSliceForAnUnwoundSkip(state, (int)skipPos);
+            }
+
+            return _armContinue;
+        }
+
+        // Everything the verb's arm pruned is gone, so what backtracking reaches next is
+        // the point the prune stopped at: FAILURE, which starts the next attempt from the
+        // moved slice, or the start of the negative lookaround or condition the verb is
+        // directly in.
+        MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Prune arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackPrune(MatchState state)
+    {
+        /* bstack: - */
+
+        // D11 M2: a verb whose path read the text to come does nothing.
+        if (state.WMarks.Count != 0 && SkipABlockedVerb(state, -1))
+        {
+            return _armContinue;
+        }
+
+        // Pushed only inside an unfinished atomic group or positive lookaround, so the
+        // unwind always has somewhere to go.
+        if (!UnwindToTheVerbTarget(state, out _))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The CallRef arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackCallRef(MatchState state)
+    {
+        /* sstack: NULL
+         *
+         * bstack: -
+         */
+
+        if (!state.Sstack.DropSize())
+        {
+            return MatchStatus.Illegal;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The WTouch arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackWTouch(MatchState state)
+    {
+        // The popped entry was at the stack's new count, which is the mark's position.
+        Debug.Assert(
+            state.WMarks.Count > 0 && state.WMarks[^1] == new WMark(state.Bstack.Count, WMarkKind.Touch),
+            "D11: a touch entry carries its own mark, the newest"
+        );
+        state.DropWMarksFrom(state.Bstack.Count);
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RunOutClosedSection arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackRunOutClosedSection(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* bstack: fuzzy_counts change_count fuzzy_node total_errors total_cost */
+
+        if (
+            !state.Bstack.PopSize(out long closedCost)
+            || !state.Bstack.PopSize(out long closedErrors)
+            || !state.Bstack.PopNode(pattern, out Node? closedNode)
+            || !state.PopFuzzyCountsMerging(state.Bstack, state.FuzzyCounts, out _)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.FuzzyNode = closedNode;
+        state.TotalErrors = closedErrors;
+        state.TotalCost = closedCost;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The UnknownCapture arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackUnknownCapture(MatchState state)
+    {
+        /* bstack: 0 current capture_change private_index public_index */
+
+        if (!PopGroupStateData(state.Bstack, out GroupStateData unknownData))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.CaptureChange = unknownData.CaptureChange;
+        state.Groups[unknownData.PrivateIndex - 1].Current = unknownData.Current;
+        state.UnsaveCapture(unknownData.PrivateIndex, unknownData.PublicIndex);
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Any arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryChar(MatchState state, ref Node node, bool search, byte op)
+    {
+        int status;
+
+        status = RetryFuzzyMatchItem(state, op, search, ref node, advance: true);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The FuzzyLookaround arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryZeroWidth(MatchState state, ref Node node, bool search, byte op)
+    {
+        int status;
+
+        status = RetryFuzzyMatchItem(state, op, search, ref node, advance: false);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroup arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryString(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        bool stringPosIsText =
+            (Opcode)op is Opcode.RefGroup or Opcode.RefGroupIgn or Opcode.RefGroupIgnRev or Opcode.RefGroupRev;
+
+        status = RetryFuzzyMatchString(state, op, search, ref node, ref stringPos, stringPosIsText);
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The RefGroupFld arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="gfoldedPos">The position within the group's folded character ('gfolded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryGroupFld(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int gfoldedPos,
+        ref int foldChangesStart,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        status = RetryFuzzyMatchGroupFld(
+            state,
+            op,
+            search,
+            ref node,
+            ref foldedPos,
+            ref stringPos,
+            ref gfoldedPos,
+            ref foldChangesStart
+        );
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The StringFld arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="op">The opcode popped from the backtracking stack.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackFuzzyRetryStringFld(
+        MatchState state,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int foldChangesStart,
+        bool search,
+        byte op
+    )
+    {
+        int status;
+
+        status = RetryFuzzyMatchStringFld(
+            state,
+            op,
+            search,
+            ref node,
+            ref stringPos,
+            ref foldedPos,
+            ref foldChangesStart
+        );
+
+        if (status < 0)
+        {
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            return _armAdvance;
+        }
+
+        stringPos = -1;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The <c>runOut</c> block of <see cref="BasicMatchCore"/>, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunOut(MatchState state, ref Node node, ref int stringPos)
+    {
+        PatternObject pattern = state.Pattern;
+
+        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        {
+            state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        if (RunOutCanWaitForTheBody(state))
+        {
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
+        if (runOutFails)
+        {
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
+        if (runOutEnd is null)
+        {
+            return MatchStatus.Partial;
+        }
+
+        // The item that ran out is abandoned, so the next STRING item starts at its own first
+        // character: `(?!ab)ac` over 'a' otherwise resumed 'ac' at the 'c' the body's 'ab' had reached
+        // (review of chunk 6, round 1).
+        stringPos = -1;
+        node = runOutEnd;
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The NoBranch arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackNoBranch(MatchState state, ref Node node)
+    {
+        PatternObject pattern = state.Pattern;
+
+        /* bstack: text_pos node */
+
+        if (!state.Bstack.PopNode(pattern, out Node? noBranchNode) || !state.Bstack.PopSize(out long noBranchPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        // The continuations in which a success of the test's body held: the condition
+        // does not hold there, so the no-branch runs from where the condition stood.
+        state.TextPos = (int)noBranchPos;
+        node = noBranchNode!;
+        PushTouchMark(state);
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The Keep arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceKeep(MatchState state, ref Node node)
+    {
+        state.Bstack.PushSize(state.MatchPos);
+        state.Bstack.PushUInt8((byte)Opcode.Keep);
+
+        /* bstack: match_pos KEEP */
+
+        state.MatchPos = state.TextPos;
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The Keep arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackKeep(MatchState state)
+    {
+        /* bstack: match_pos */
+
+        if (!state.Bstack.PopSize(out long keepMatchPos))
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.MatchPos = (int)keepMatchPos;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndOptionalPass arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceEndOptionalPass(MatchState state, ref Node node)
+    {
+        if (!OptionalPassAdmitted(state, state.OptionalPasses[node.Values[0]]))
+        {
+            return _armBacktrack;
+        }
+
+        node = node.Next1.Node!;
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndOptionalPass arm of <see cref="BasicMatchCore"/>'s backtracking switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackEndOptionalPass(MatchState state, ref Node node)
+    {
+        /* bstack: previous_start slot text_pos node */
+
+        // Leaving the pass through its 2-way branch: the slot gets its previous value,
+        // and the branch tries its next alternative, as BRANCH's arm below does.
+        if (PopOptionalPass(state) is not { } nextAlternative)
+        {
+            return MatchStatus.Illegal;
+        }
+
+        node = nextAlternative;
+        return _armAdvance;
+    }
+
+    /// <summary>
+    /// The AnyRev arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceAnyRev(MatchState state, ref Node node, bool search)
+    {
+        int status;
+
+        status = node.Op switch
+        {
+            Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
+            Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
+            _ => TryMatchAnyURev(state, node, state.TextPos),
+        };
+
+        if (status < 0)
+        {
+            if (status == MatchStatus.Partial)
+            {
+                return _armRunOut;
+            }
+
+            return status;
+        }
+
+        if (status == MatchStatus.Success)
+        {
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                PushExactItemDeletion(state, node, -1);
+            }
+
+            state.TextPos = state.PrevPos(state.TextPos);
+            node = node.Next1.Node!;
+        }
+        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            status = FuzzyMatchItem(state, search, ref node, -1);
+
+            if (status < 0)
+            {
+                if (status == MatchStatus.Partial)
+                {
+                    return _armRunOut;
+                }
+
+                return status;
+            }
+
+            if (status == MatchStatus.Failure)
+            {
+                return _armBacktrack;
+            }
+        }
+        else
+        {
+            return _armBacktrack;
+        }
+
+        return _armContinue;
+    }
+
+    /// <summary>
+    /// The CharacterRev arm, with the labels that share its body, of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlined calls are not part of that method's frame (cold-arm, D82).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node; the next one on return.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int AdvanceCharacterRev(MatchState state, ref Node node, bool search)
+    {
+        int status;
+
+        if (RanOutOnTheLeft(state, state.TextPos))
+        {
+            if (node.Step == 0 && ZeroWidthTestDefersAtTheEdge(state, node))
+            {
+                node = node.Next1.Node!;
+                return _armContinue;
+            }
+
+            return _armRunOut;
+        }
+
+        if (
+            state.TextPos > state.SliceStart
+            && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
+        )
+        {
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                PushExactItemDeletion(state, node, -1);
+            }
+
+            state.TextPos = Step(state, state.TextPos, node.Step);
+            node = node.Next1.Node!;
+        }
+        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            status = FuzzyMatchItem(state, search, ref node, -1);
+
+            if (status < 0)
+            {
+                if (status == MatchStatus.Partial)
+                {
+                    return _armRunOut;
+                }
+
+                return status;
+            }
+
+            if (status == MatchStatus.Failure)
+            {
+                return _armBacktrack;
+            }
+        }
+        else
+        {
+            return _armBacktrack;
+        }
+
+        return _armContinue;
     }
 
     /// <summary>
