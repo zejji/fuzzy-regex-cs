@@ -6844,13 +6844,24 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="bodyStatus">The body's test.</param>
     /// <param name="tailStatus">The tail's test.</param>
-    /// <param name="kept">The entry for the alternative that did not run out, in the shape this arm
-    /// parks for it when both could match.</param>
+    /// <param name="position">Where the alternative that did not run out resumes.</param>
+    /// <param name="count">The repeat count to restore first.</param>
+    /// <param name="start">The repeat start to restore first.</param>
+    /// <param name="captureChange">The capture-change counter to restore first.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position that alternative is tried at, for its own guard.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33).</param>
     private static void KeepTheAlternativeThatDidNotRunOut(
         MatchState state,
         int bodyStatus,
         int tailStatus,
-        MatchBodyTailStateData kept
+        Position position,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart
     )
     {
         Debug.Assert(
@@ -6877,7 +6888,17 @@ internal static class Matcher
             return;
         }
 
-        PushMatchBodyTailStateData(state.Bstack, kept, state.IsFuzzy);
+        PushMatchBodyTailStateData(
+            state.Bstack,
+            position,
+            count,
+            start,
+            captureChange,
+            index,
+            textPos,
+            changesAtStart,
+            state.IsFuzzy
+        );
         state.Bstack.PushUInt8((byte)op);
 
         /* bstack: position count start capture_change index text_pos MATCH_BODY | MATCH_TAIL */
@@ -6912,7 +6933,7 @@ internal static class Matcher
         if (count > node.Values[1])
         {
             rpData.Count = count;
-            PushRepeatOneStateData(state.Bstack, new RepeatOneStateData(savedCount, start, node, index));
+            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
             /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -7327,17 +7348,29 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_be, sizeof(data_be))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data, bool fuzzy)
+    private static void PushBodyEndStateData(
+        ByteStack stack,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7371,18 +7404,32 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_r, sizeof(data_r))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The text position to park.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data, bool fuzzy)
+    private static void PushRepeatStateData(
+        ByteStack stack,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
-        stack.PushSize(data.TextPos);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
+        stack.PushSize(textPos);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7417,20 +7464,36 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_mbt, sizeof(data_mbt))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
+    /// <param name="position">Where to resume - the node and the text position.</param>
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="captureChange">The capture-change counter to park.</param>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position the loser is tried at, for its own guard.</param>
+    /// <param name="changesAtStart">The section-edit snapshot (ledger 33); pushed only for a fuzzy pattern.</param>
     /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
-    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data, bool fuzzy)
+    private static void PushMatchBodyTailStateData(
+        ByteStack stack,
+        Position position,
+        long count,
+        int start,
+        long captureChange,
+        int index,
+        int textPos,
+        long changesAtStart,
+        bool fuzzy
+    )
     {
-        stack.PushNode(data.Position.Node);
-        stack.PushSize(data.Position.TextPos);
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.Index);
-        stack.PushSize(data.TextPos);
+        stack.PushNode(position.Node);
+        stack.PushSize(position.TextPos);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushSize(captureChange);
+        stack.PushSize(index);
+        stack.PushSize(textPos);
         if (fuzzy)
         {
-            stack.PushSize(data.ChangesAtStart);
+            stack.PushSize(changesAtStart);
         }
     }
 
@@ -7482,13 +7545,16 @@ internal static class Matcher
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_ro, sizeof(data_ro))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
-    /// <param name="data">What to push.</param>
-    private static void PushRepeatOneStateData(ByteStack stack, RepeatOneStateData data)
+    /// <param name="count">The repeat count to park.</param>
+    /// <param name="start">The repeat start to park.</param>
+    /// <param name="node">The repeat node, which the backtrack case resumes from.</param>
+    /// <param name="index">The repeat index.</param>
+    private static void PushRepeatOneStateData(ByteStack stack, long count, int start, Node node, int index)
     {
-        stack.PushSize(data.Count);
-        stack.PushSize(data.Start);
-        stack.PushNode(data.Node);
-        stack.PushSize(data.Index);
+        stack.PushSize(count);
+        stack.PushSize(start);
+        stack.PushNode(node);
+        stack.PushSize(index);
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
@@ -12749,24 +12815,12 @@ internal static class Matcher
         // STRING_FLD or REF_GROUP_FLD item began, kept across a retry the way 'foldedPos' is. See
         // TakeBackFoldedComparison.
         int foldChangesStart = 0;
-        // Inline arrays rather than stackalloc, which would keep the JIT from tiering this method:
-        // a method with loops and a localloc gets no on-stack replacement, so it is compiled once,
-        // with no profile data. See JitTieringTests.
-        FoldBuffer foldedBuffer = default;
-        FoldBuffer gfoldedBuffer = default;
-        Span<uint> folded = foldedBuffer;
-        Span<uint> gfolded = gfoldedBuffer;
-
-        // The three scratch buffers FUZZY and END_FUZZY need, allocated here for the same reason
-        // 'folded' is: a stackalloc inside either loop is not released until this method returns, so
-        // one per backtrack step grows the stack without bound (CA2014). That analyzer does not see
-        // a stackalloc nested inside a switch case, so this is the rule and not the tool.
-        FuzzyCountBuffer outerBuffer = default;
-        FuzzyCountBuffer totalBuffer = default;
-        FuzzyCountBuffer innerBuffer = default;
-        Span<long> fuzzyOuterCounts = outerBuffer;
-        Span<long> fuzzyTotalCounts = totalBuffer;
-        Span<long> fuzzyInnerCounts = innerBuffer;
+        // Scratch on the state rather than stackalloc, which would keep the JIT from tiering this
+        // method (a method with loops and a localloc gets no on-stack replacement; see
+        // JitTieringTests), and rather than inline-array locals, which counted against this
+        // method's JIT local budget (cold-arm round 3). See MatchState.FoldedScratch.
+        Span<uint> folded = state.FoldedScratch;
+        Span<uint> gfolded = state.GFoldedScratch;
 
         state.FewestErrors = state.MaxErrors;
 
@@ -13521,7 +13575,7 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndFuzzy: // End of fuzzy matching (:12448).
-                    status = AdvanceEndFuzzy(state, ref node, fuzzyOuterCounts, fuzzyTotalCounts);
+                    status = AdvanceEndFuzzy(state, ref node);
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -13678,13 +13732,11 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(
-                            rpData.Count - 1,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count - 1,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
@@ -13701,15 +13753,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            state.TextPos,
+                            state.CaptureChange,
+                            index,
+                            state.TextPos,
+                            bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
                         );
                         goto runOut;
                     }
@@ -13723,15 +13773,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextTailPosition,
-                                    rpData.Count,
-                                    state.TextPos,
-                                    state.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    state.FuzzyChanges.Count
-                                ),
+                                nextTailPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
@@ -13894,13 +13942,11 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(
-                            rpData.Count - 1,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count - 1,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
@@ -13914,15 +13960,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                state.FuzzyChanges.Count
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            state.TextPos,
+                            state.CaptureChange,
+                            index,
+                            state.TextPos,
+                            state.FuzzyChanges.Count
                         );
                         goto runOut;
                     }
@@ -13936,15 +13980,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextBodyPosition,
-                                    rpData.Count,
-                                    state.TextPos,
-                                    state.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    state.FuzzyChanges.Count
-                                ),
+                                nextBodyPosition,
+                                rpData.Count,
+                                state.TextPos,
+                                state.CaptureChange,
+                                index,
+                                state.TextPos,
+                                state.FuzzyChanges.Count,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
@@ -14204,14 +14246,12 @@ internal static class Matcher
 
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(
-                            rpData.Count,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            state.TextPos,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        state.TextPos,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
@@ -14296,15 +14336,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                rpData.Start,
-                                rpData.CaptureChange,
-                                index,
-                                state.TextPos,
-                                rpData.ChangesAtStart
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
                         );
                         goto runOut;
                     }
@@ -14324,15 +14362,13 @@ internal static class Matcher
                             // upstream's own and is kept.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextTailPosition,
-                                    rpData.Count,
-                                    rpData.Start,
-                                    rpData.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    rpData.ChangesAtStart
-                                ),
+                                nextTailPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
@@ -14452,10 +14488,7 @@ internal static class Matcher
                     if (count > node.Values[1])
                     {
                         // Record the backtracking info.
-                        PushRepeatOneStateData(
-                            state.Bstack,
-                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
-                        );
+                        PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
                         /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -14584,14 +14617,12 @@ internal static class Matcher
 
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(
-                            rpData.Count,
-                            rpData.Start,
-                            rpData.CaptureChange,
-                            index,
-                            state.TextPos,
-                            rpData.ChangesAtStart
-                        ),
+                        rpData.Count,
+                        rpData.Start,
+                        rpData.CaptureChange,
+                        index,
+                        state.TextPos,
+                        rpData.ChangesAtStart,
                         state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
@@ -14675,15 +14706,13 @@ internal static class Matcher
                             state,
                             bodyStatus,
                             tailStatus,
-                            new MatchBodyTailStateData(
-                                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                                rpData.Count,
-                                rpData.Start,
-                                rpData.CaptureChange,
-                                index,
-                                state.TextPos,
-                                rpData.ChangesAtStart
-                            )
+                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.ChangesAtStart
                         );
                         goto runOut;
                     }
@@ -14697,15 +14726,13 @@ internal static class Matcher
                             // backtracking further.
                             PushMatchBodyTailStateData(
                                 state.Bstack,
-                                new MatchBodyTailStateData(
-                                    nextBodyPosition,
-                                    rpData.Count,
-                                    rpData.Start,
-                                    rpData.CaptureChange,
-                                    index,
-                                    state.TextPos,
-                                    rpData.ChangesAtStart
-                                ),
+                                nextBodyPosition,
+                                rpData.Count,
+                                rpData.Start,
+                                rpData.CaptureChange,
+                                index,
+                                state.TextPos,
+                                rpData.ChangesAtStart,
                                 state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
@@ -14780,10 +14807,7 @@ internal static class Matcher
                     {
                         // The match is shorter than the maximum, so we might need to backtrack the
                         // repeat to consume more.
-                        PushRepeatOneStateData(
-                            state.Bstack,
-                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
-                        );
+                        PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
                         /* bstack: count start node index LAZY_REPEAT_ONE */
@@ -15680,7 +15704,7 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndFuzzy: // End of fuzzy matching (:15488).
-                    status = BacktrackEndFuzzy(state, ref node, fuzzyInnerCounts);
+                    status = BacktrackEndFuzzy(state, ref node);
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16136,10 +16160,7 @@ internal static class Matcher
                             // repeat again to consume less.
                             rpData.Count = count;
 
-                            PushRepeatOneStateData(
-                                state.Bstack,
-                                new RepeatOneStateData(savedCount, start, node, index)
-                            );
+                            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
                             /* bstack: count start node index GREEDY_REPEAT_ONE */
@@ -16345,10 +16366,7 @@ internal static class Matcher
                             // the repeat again to consume more.
                             rpData.Count = count;
 
-                            PushRepeatOneStateData(
-                                state.Bstack,
-                                new RepeatOneStateData(savedCount, start, node, index)
-                            );
+                            PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
                             /* bstack: count start node index LAZY_REPEAT_ONE */
@@ -16557,21 +16575,19 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The current node; the next one on return.</param>
-    /// <param name="fuzzyOuterCounts">Scratch for the enclosing fuzzy counts.</param>
-    /// <param name="fuzzyTotalCounts">Scratch for the total fuzzy counts.</param>
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int AdvanceEndFuzzy(
-        MatchState state,
-        ref Node node,
-        Span<long> fuzzyOuterCounts,
-        Span<long> fuzzyTotalCounts
-    )
+    private static int AdvanceEndFuzzy(MatchState state, ref Node node)
     {
         PatternObject pattern = state.Pattern;
 
-        Span<long> outerCounts = fuzzyOuterCounts;
-        Span<long> totalCounts = fuzzyTotalCounts;
+        // Scratch in this helper's own frame (cold-arm round 3): BasicMatchCore used to hold these
+        // for its whole run, which counted against its JIT local budget. Inline arrays, not
+        // stackalloc, for the tiering reason in InlineBuffers.cs.
+        FuzzyCountBuffer outerBuffer = default;
+        FuzzyCountBuffer totalBuffer = default;
+        Span<long> outerCounts = outerBuffer;
+        Span<long> totalCounts = totalBuffer;
 
         /* sstack: outer_counts outer_node
          *
@@ -17699,14 +17715,15 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The current node; the next one on return.</param>
-    /// <param name="fuzzyInnerCounts">Scratch for the inner fuzzy counts.</param>
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int BacktrackEndFuzzy(MatchState state, ref Node node, Span<long> fuzzyInnerCounts)
+    private static int BacktrackEndFuzzy(MatchState state, ref Node node)
     {
         PatternObject pattern = state.Pattern;
 
-        Span<long> innerCounts = fuzzyInnerCounts;
+        // Scratch in this helper's own frame: see AdvanceEndFuzzy.
+        FuzzyCountBuffer innerBuffer = default;
+        Span<long> innerCounts = innerBuffer;
 
         /* sstack: -
          *
