@@ -105,6 +105,30 @@ in the main checkout.
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
 
+## Measured by cold-arm, BasicMatchCore's rarely used arms out of line (2026-10-14)
+
+Cause and history: D82 part 2 in `docs/KNOWN-DEFECTS.md` and `.scratch/cold-arm/notes.md`. Kept:
+50 rarely used arms (fuzzy, backreference, lookaround, conditional, call, verb, reverse string)
+moved to NoInlining helpers, fewer locals in `BasicMatchCore`, AggressiveInlining on the guard
+helpers, and a direct fast path for ByteStack's size and code pushes and pops. Rejected: taking
+the case-folding buffers out of the frame (step 3b; it bought 9 inlinees and no frame size), and
+NoInlining on the multi-site cold helpers (two are `[Conditional("DEBUG")]`, the third is a
+one-line forwarder). Branch merged onto `fc5b190c` and measured against it, Release, pinned:
+
+- Harness (`.scratch/cold-arm/next-time.txt`, min of 3, alternated): every row 0.74-0.93x
+  (conditional per token 0.750, dense 0.779, backreference 0.858, nested 0.931), except a 1.3 us
+  fuzzy word row, flat at the timer's resolution. Native AOT: no row slower.
+- BDN `--job medium` (`.scratch/cold-arm/next-bdn-cmp-*.log`): nothing slower than the 1.10 floor;
+  BCL controls flat (within 3%). CaseFoldedScan 0.75x, ParseLogLines 0.76x, ValidateEmails
+  0.78x, ClassScanPort 0.79x, MatchesToEndDense 0.80x, SplitLong 0.80x, ClassScan 0.84x,
+  ReplaceTemplate 0.87x, TestedGroupRepeat 0.88x, ConditionalPerTokenNoMemo 0.88x, every
+  ManyInputs row 0.76-0.90x.
+- The method is still at the JIT's local limit. Every inline it still refuses is refused as
+  unprofitable, not for want of locals: RyuJIT scales an inline's profitability down continuously
+  with the caller's local count, so further trimming buys a little each time and never reaches
+  the code that `DOTNET_JitMaxLocalsToTrack=0x2000` produces. Further gains here mean splitting the
+  loop itself, which is a design question rather than a trim.
+
 ## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
 
 `FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).
