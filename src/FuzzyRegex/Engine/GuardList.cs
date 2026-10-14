@@ -193,6 +193,53 @@ internal sealed class GuardList
         return false;
     }
 
+    /// <summary>
+    /// The span holding <paramref name="textPos"/>, protecting or not. <b>Not upstream</b> (C5,
+    /// G2): <see cref="IsGuarded"/>'s search, returning the span, so that a caller walking back
+    /// over guarded positions can pass the span in one move. Spans merge only when exactly
+    /// adjacent and of the same kind (<see cref="Guard"/>), so the span may end where the next
+    /// one begins.
+    /// </summary>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <param name="span">The span, when one holds the position.</param>
+    /// <returns><see langword="true"/> if a span holds the position.</returns>
+    internal bool TryGetSpan(int textPos, out GuardSpan span)
+    {
+        GuardSpan[] spans = _spans;
+        int count = Count;
+        span = default;
+
+        if (count == 0 || textPos < spans[0].Low || textPos > spans[count - 1].High)
+        {
+            return false;
+        }
+
+        int below = -1;
+        int above = count;
+
+        while (above - below > 1)
+        {
+            int mid = (below + above) / 2;
+            GuardSpan candidate = spans[mid];
+
+            if (textPos < candidate.Low)
+            {
+                above = mid;
+            }
+            else if (textPos > candidate.High)
+            {
+                below = mid;
+            }
+            else
+            {
+                span = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Upstream <c>guard</c> (line 9378): guards one position.</summary>
     /// <param name="textPos">The position to guard.</param>
     /// <param name="protect">Whether the span blocks matching or merely records.</param>

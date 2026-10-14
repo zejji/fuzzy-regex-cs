@@ -60,6 +60,14 @@ are not repeated here.
 - **`(a+)+b` is not the catastrophic shape in this port; `(a|a)*b` is.** Measured S54: `(a+)+b` is
   flat at 0.2-0.7 ms from n=18 to n=24, `(a|a)*b` goes 161 ms to 10.6 s over the same range. Both
   are pinned, so a change that moves a shape between the two classes is visible.
+- **Nested repeats after C5 (2026-10-14).** The failure memo (Option B) left `(a+)+c` quadratic
+  because the compiler copies the first iteration out of the outer repeat and every start walked
+  the run again through the copy. C5 fails a start the outer repeat's body guard already holds
+  (S2d) and walks back over a guarded span in one move (G2): `(a+)+c` at n = 400 takes 7,188 Debug
+  steps against 407,784, PathologicalNestedRepeat 0.07x and PathologicalWordsToEnd 0.37x of
+  a3d79986. Still open, in `docs/plan/2026-10-13-linear-nested-repeats-design.md`: `CountOne`
+  scans the run once per entry (quadratic in characters, as plain `a+c` is in Python), and
+  `(?:(?:a|a)+)+$` stays exponential in its first attempt (option N).
 - Native AOT: the classic .NET regex `Compiled` route (IL emit) is unavailable; the constraint and the
   fast-path alternative are in ROADMAP.md under Phase 7.
 - Every optimisation must keep the oracle GREEN at three seeds and `ExpectedDivergences` strict; an

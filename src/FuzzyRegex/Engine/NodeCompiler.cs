@@ -1608,6 +1608,12 @@ internal static class NodeCompiler
             // the places to start) rather than assumed. Parked as post-1.0, its own slice.
             var subargs = default(CompileArgs);
 
+            // NOT UPSTREAM (C5, S2d): where the one copied iteration starts, for
+            // RepeatInfo.FirstIterationStart. Only a minimum of exactly 1 has a copy that is the
+            // remaining repeat's first iteration; with two copies the first is not.
+            bool oneCopy = minCount == 1;
+            Node? copyStart = null;
+
             if (minCount > 0)
             {
                 uint doneCount;
@@ -1630,6 +1636,7 @@ internal static class NodeCompiler
 
                     args.VisibleCaptureCount = subargs.VisibleCaptureCount;
 
+                    copyStart = subargs.Start;
                     AddNode(args.End!, subargs.Start!);
                     args.End = subargs.End;
                 }
@@ -1684,6 +1691,11 @@ internal static class NodeCompiler
                     && !args.WithinFuzzy
                     && ~maxCount == 0
                     && minCount <= 1;
+
+                if (oneCopy && args.Pattern.RepeatInfoAt(index).FailureMemo)
+                {
+                    args.Pattern.RepeatInfoAt(index).FirstIterationStart = copyStart;
+                }
 
                 repeatNode.Values[0] = (uint)index;
                 repeatNode.Values[1] = minCount;
