@@ -58,7 +58,7 @@ internal static class Iteration
     /// <param name="partial">Upstream's <c>partial</c>, which the scanner takes (<c>:21089</c>).</param>
     /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
     /// <returns>The matches.</returns>
-    internal static List<Match> FindAll(
+    internal static MatchList FindAll(
         FuzzyRegex regex,
         string input,
         int start,
@@ -68,7 +68,7 @@ internal static class Iteration
         MatchLimits limits
     )
     {
-        List<Match> matches = [];
+        MatchList matches = [];
 
         // pattern_scanner (:21122): "The MatchObject, and therefore repeated captures, will be
         // visible." pattern_findall passes FALSE there because it never builds one; this always

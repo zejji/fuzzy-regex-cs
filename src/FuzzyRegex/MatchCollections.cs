@@ -269,3 +269,96 @@ public sealed class MatchCollection : IReadOnlyList<Match>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
+
+/// <summary>
+/// The matches an eager scan found, in the order it found them: the list behind a
+/// <see cref="MatchCollection"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Kept in chunks of 1,024 rather than in one array that doubles</b>, which is what a
+/// <see cref="List{T}"/> did until C2. A doubling array copies every reference it holds each time it
+/// grows and leaves the old array behind, 16 to 32 bytes a match in all, and from 8,193 matches on
+/// each new array is over the 85,000 bytes that put it on the large object heap, whose allocations
+/// count towards a full collection. The <c>MatchesToEnd</c> row's 214,000-odd matches put five arrays
+/// on that heap per call, 4 MB in all. Here the first 1,024 grow by doubling, so a scan that finds a
+/// handful of matches pays for a handful, and every later 1,024 get an 8 KB array of their own that
+/// never moves: 8 bytes a match, nothing copied, nothing on the large object heap.
+/// </para>
+/// <para>
+/// Written only by <see cref="Engine.Iteration.FindAll"/>, which builds it before the
+/// <see cref="MatchCollection"/> holding it is handed out, and never written again.
+/// </para>
+/// </remarks>
+internal sealed class MatchList : IReadOnlyList<Match>
+{
+    /// <summary>log2 of <see cref="_chunkSize"/>.</summary>
+    private const int _chunkShift = 10;
+
+    /// <summary>How many matches a chunk holds: 1,024 references, 8 KB on a 64-bit runtime.</summary>
+    private const int _chunkSize = 1 << _chunkShift;
+
+    /// <summary>The first <see cref="_chunkSize"/> matches, in an array that doubles up to that size.</summary>
+    private Match[] _head = [];
+
+    /// <summary>Every later run of <see cref="_chunkSize"/> matches, each in an array of its own.</summary>
+    private List<Match[]>? _tail;
+
+    /// <summary>The number of matches.</summary>
+    public int Count { get; private set; }
+
+    /// <summary>Gets a match by position.</summary>
+    /// <param name="index">The zero-based position of the match.</param>
+    /// <returns>The match at that position.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">There is no match at that position.</exception>
+    public Match this[int index]
+    {
+        get
+        {
+            // The unsigned compare is the range check List<T> makes, and throws the same exception.
+            if ((uint)index >= (uint)Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index), index, "there is no match at that position");
+            }
+
+            return index < _chunkSize ? _head[index] : _tail![(index >> _chunkShift) - 1][index & (_chunkSize - 1)];
+        }
+    }
+
+    /// <summary>Adds the next match.</summary>
+    /// <param name="match">The match.</param>
+    internal void Add(Match match)
+    {
+        if (Count < _chunkSize)
+        {
+            if (Count == _head.Length)
+            {
+                Array.Resize(ref _head, Math.Max(4, Count * 2));
+            }
+
+            _head[Count++] = match;
+            return;
+        }
+
+        int slot = Count & (_chunkSize - 1);
+        if (slot == 0)
+        {
+            (_tail ??= []).Add(new Match[_chunkSize]);
+        }
+
+        _tail![^1][slot] = match;
+        Count++;
+    }
+
+    /// <summary>Enumerates the matches, leftmost first.</summary>
+    /// <returns>An enumerator over the matches.</returns>
+    public IEnumerator<Match> GetEnumerator()
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            yield return this[i];
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
