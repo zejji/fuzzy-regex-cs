@@ -8089,11 +8089,13 @@ internal static class Matcher
     /// backtracking loop, on top of the <see cref="System.Diagnostics.Stopwatch"/> read that was
     /// already there. S60 added one more caller, <see cref="SimpleStringSearch"/>, on the same gate:
     /// it is a character-at-a-time loop and it can run the length of a subject. S60b added
-    /// <see cref="SearchStart"/>'s retry loop, for the same reason.
+    /// <see cref="SearchStart"/>'s retry loop, for the same reason. C3 added the fuzzy-literal scan
+    /// (<see cref="FuzzyLiteralFilter"/>), which polls once per <see cref="FuzzyLiteralFilter.ScanChunk"/>
+    /// characters, because it can read the rest of a subject in one call.
     /// <see cref="StringSearch"/> deliberately has no poll - the reasoning, and the measurement
     /// behind it, are at the sweep itself.
     /// </remarks>
-    private static bool SafeCheckCancel(MatchState state) =>
+    internal static bool SafeCheckCancel(MatchState state) =>
         state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
 
     /// <summary>
@@ -12942,10 +12944,17 @@ internal static class Matcher
             }
             else
             {
-                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!);
+                // C3: the filter's bit-parallel scan can read the rest of a long subject in one call,
+                // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk).
+                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!, state);
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
+                }
+
+                if (next == FuzzyLiteralFilter.Cancelled)
+                {
+                    return MatchStatus.Cancelled;
                 }
 
                 if (next == FuzzyLiteralFilter.CannotTell)
