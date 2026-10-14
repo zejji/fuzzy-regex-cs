@@ -1028,7 +1028,7 @@ public sealed class FuzzyRegex
             success: true,
             // Copied, because the state's arrays are about to be disposed and are reused by the next
             // match: a Match sharing them would change under its owner (copy_groups, :20621).
-            Engine.GroupData.CopyGroups(state.Groups, _compiled.GroupCount),
+            Engine.GroupData.PackSpans(state.Groups, _compiled.GroupCount),
             // The slice, not the match, because Match.NextMatch resumes inside it - and the slice the
             // CALLER asked for, not whatever a `(*SKIP)` left behind. `DoMatch` puts the slice back
             // at the start of every match (see the reset there), so a scan is unaffected by a verb in
