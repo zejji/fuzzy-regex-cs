@@ -519,7 +519,7 @@ internal static class Iteration
             // Get segment before this match. A reverse split walks the subject backwards and
             // upstream does NOT reverse the list afterwards, unlike pattern_subx's join list:
             // verified 2026-09-01, regex.split('(?r)x', 'xaxbxc') is ['c', 'b', 'a', ''].
-            yield return state.Reverse ? input[state.MatchPos..lastPos] : input[lastPos..state.MatchPos];
+            yield return state.Reverse ? Piece(input, state.MatchPos, lastPos) : Piece(input, lastPos, state.MatchPos);
 
             // Add groups (if any).
             for (int g = 1; g <= regex.GroupCount; g++)
@@ -536,8 +536,54 @@ internal static class Iteration
         }
 
         // Get segment following last match (even if empty).
-        yield return state.Reverse ? input[..lastPos] : input[lastPos..];
+        yield return state.Reverse ? Piece(input, 0, lastPos) : Piece(input, lastPos, input.Length);
     }
+
+    /// <summary>
+    /// One string per Latin-1 character, shared by every piece <see cref="EnumerateSplits"/> hands
+    /// out that is that character alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>CPython keeps one string for each Latin-1 character and hands it out for every slice of
+    /// that one character</b>, so upstream's <c>split</c> allocates nothing for the separator between
+    /// two words. Measured 2026-10-13, regex 2026.9.10 on CPython 3.14.7:
+    /// <c>regex.split(r'\w+', 'ab cd')[1] is regex.split(r'\w+', 'x y')[1]</c> is <c>True</c>. The
+    /// port allocated a 24-byte string for each one, which was most of the 6.9 MB the
+    /// <c>SplitLong</c> row allocates over a megabyte of words.
+    /// </para>
+    /// <para>
+    /// Filled once, when the type is first used, and never written again, so every thread reads the
+    /// same strings (<c>ThreadSafetyTests.Matching_writes_nothing_in_the_librarys_static_tables</c>).
+    /// A caller can tell only through <see cref="object.ReferenceEquals"/>, which promises nothing
+    /// about strings.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] _latin1 = BuildLatin1();
+
+    /// <summary>Builds <see cref="_latin1"/>.</summary>
+    /// <returns>The 256 one-character strings, indexed by their character.</returns>
+    private static string[] BuildLatin1()
+    {
+        var strings = new string[256];
+        for (int c = 0; c < strings.Length; c++)
+        {
+            strings[c] = new string((char)c, 1);
+        }
+
+        return strings;
+    }
+
+    /// <summary>
+    /// <c>input[start..end]</c>, without a new string when it is one Latin-1 character - see
+    /// <see cref="_latin1"/>.
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="start">Where the piece starts.</param>
+    /// <param name="end">One past where it ends.</param>
+    /// <returns>The piece.</returns>
+    private static string Piece(string input, int start, int end) =>
+        end - start == 1 && input[start] < _latin1.Length ? _latin1[input[start]] : input[start..end];
 
     /// <summary>
     /// Upstream <c>state_get_group</c> (<c>upstream/src/_regex.c</c> line 20818) with
@@ -557,7 +603,7 @@ internal static class Iteration
         }
 
         GroupSpan span = group.Captures[group.Current];
-        return input[span.Start..span.End];
+        return Piece(input, span.Start, span.End);
     }
 
     // The local Timeout helper this file used to carry is gone: a cancelled scan can now mean the
