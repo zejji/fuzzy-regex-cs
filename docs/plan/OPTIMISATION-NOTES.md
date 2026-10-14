@@ -137,7 +137,7 @@ so the build is ruled out. The suspect is code generation around `NextStart`, wh
 one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
 `NextStart` bodies.
 
-## D84, the ignore-case first-set look-through (2026-10-14, in progress)
+## D84, the ignore-case first-set look-through (2026-10-14, correctness done, timing owed)
 
 Option A of `docs/plan/2026-10-14-multi-string-search-design.md`, on `fix/d84-ignorecase-screen`.
 `FindLeadingStrings` now looks through the zero-width ignore-case first-set check
@@ -145,21 +145,20 @@ Option A of `docs/plan/2026-10-14-multi-string-search-design.md`, on `fix/d84-ig
 `LeadingUnits`. Logs are in the main checkout's `.scratch/d84/`.
 
 **State at the 15:40 stop.** Done: the new tests were red before the fix (`red2.log`, 18 of 90
-failed, all of them new rows) and green after (`green2.log`, 90 of 90). `ops.txt` shows which
-start node each shape compiles to: `(?ai)(c)at|cow` is the only probed shape with a step-0
-`CharacterIgn`, and no probed shape had a step-0 `RangeIgn`. Owed: the ratchet is red on
-`ThreadSafetyTests` (see below), so nothing has a green commit yet; the differential against main
-over `.scratch/s62/rows-c`/`rows-d` and `.scratch/d84/rows-d84.jsonl` (80,000 generated
-case-insensitive alternation rows, `gen.py`); the rule-11 counters (`count/`); oracle seeds 7, 4242
-and 20260927; AOT tests and smoke; doc examples; BDN medium A/B against main on ManyInputs (with the
-new `CaseBlindAlternation` row) and Reference (the BCL controls).
+failed, all of them new rows) and green after (`green2.log`, 90 of 90); the ratchet is green
+(`ratchet.log`, 8,830 of 8,830, baseline updated) and the fix is committed. `ops.txt` shows which
+start node each probed shape compiles to: `(?ai)(c)at|cow` is the only one with a step-0
+`CharacterIgn`, and none had a step-0 `RangeIgn`, `SetDiffIgn`, `SetInterIgn` or `SetSymDiffIgn`;
+those four stay in the look-through list beside their case-sensitive twins, which it already
+named, on the argument that a step-0 test of any kind moves nothing. Also done, all logs in the main checkout's `.scratch/d84/`: the differential against main (`dotnet run`, never `--no-build`) over 240,000 rows (`.scratch/s62/rows-c`, `rows-d` and the 80,000 generated case-insensitive alternation rows of `rows-d84.jsonl`, `gen.py`) gives identical answers once the elapsed-time column is stripped (`strip-*.txt`, `cmp`); the counters (`count-*.txt`) show the new mechanism live on 18,839 rows of `rows-d84` (a step-0 ignore-case start with `LeadingUnits`, 15,968 distinct patterns; 30,068 rows screened against 18,604 on main) and 1,036 of `rows-c`. Oracle seeds 7, 4242 and 20260927 GREEN (`oracle-*.log`); AOT tests GREEN and AOT smoke GREEN at 7,611,904 bytes (`aot-*.log`); doc examples GREEN (`doc-examples.log`). **Owed:** the BDN medium A/B against main (ManyInputs with the new `CaseBlindAlternation` row, and Reference for the BCL controls; script `phase5.sh`, one class per hold), so there is no measured speed-up yet and the SYNC-DIVERGENCE row 68 gain column is not updated; the Python pair for `CaseBlindAlternation` in `python-regex.json` is not measured either.
 
-**Open: ThreadSafetyTests runs out of memory.** Three of its walks
-(`Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted` and two more) throw
-`OutOfMemoryException` in `ObjectGraph.Walk` on this branch and pass on main
-(`diag-br-ThreadSafetyTests.log`, `diag-main-ThreadSafetyTests.log`). The likely cause is the
-named-lists family (`\L<words>` with IgnoreCase), which now carries a `SearchValues<char>` whose
-internals the walk descends into; `sv/sv.cs` walks that object the same way to find out.
+**ThreadSafetyTests ran out of memory, fixed in the test walk.** Three of its walks threw
+`OutOfMemoryException` in `ObjectGraph.Walk` on this branch and passed on main
+(`diag-br-ThreadSafetyTests.log`, `diag-main-ThreadSafetyTests.log`). The named-lists family
+(`\L<words>` with IgnoreCase) now carries a `ProbabilisticWithAsciiCharSearchValues` as its
+`LeadingUnits`, and walking that object did not finish in five minutes (`sv/sv.cs`, `sv.txt`).
+The walk now treats `SearchValues<char>` and `SearchValues<string>` as leaves, as it does `Type`:
+they are immutable BCL objects, and the field holding them was already allowlisted on that ground.
 
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
