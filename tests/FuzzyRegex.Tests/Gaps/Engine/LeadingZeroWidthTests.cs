@@ -8,9 +8,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// <summary>
 /// C6 option C: the leading screen (<c>PatternObject.LeadingStrings</c> or <c>LeadingUnits</c>)
 /// looks through a zero-width test in front of the literals, so <c>\b(?:cat|dog)\b</c> searches
-/// for <c>cat</c> and <c>dog</c> the way <c>cat|dog</c> does. A word boundary or line anchor tests
+/// for <c>cat</c> and <c>dog</c> the way <c>cat|dog</c> does. A word boundary or ^ anchor tests
 /// the position an attempt stands on and moves nothing, so a match starting there still opens
-/// with one of the literals. Design: <c>docs/plan/2026-10-14-multi-string-search-design.md</c>,
+/// with one of the literals, and so does a lookaround, which runs its body and goes on from the
+/// position it started at. Design: <c>docs/plan/2026-10-14-multi-string-search-design.md</c>,
 /// section 3.
 /// </summary>
 public sealed class LeadingZeroWidthTests
@@ -200,6 +201,100 @@ public sealed class LeadingZeroWidthTests
                 .Select(static m => (m.Index, m.Index + m.Length))
                 .Should()
                 .Equal((0, 3), (4, 6));
+        }
+    }
+
+    /// <summary>
+    /// A lookaround in front, positive or negative, ahead or behind, alone or beside a word
+    /// boundary: the walk goes on from the lookaround's continuation (<c>Next2</c>).
+    /// </summary>
+    /// <param name="pattern">A pattern opening with a lookaround and then literals.</param>
+    [Test]
+    [Arguments(@"(?<![a-z])(?:cat|dog)")]
+    [Arguments(@"(?<=\s)(?:cat|dog)")]
+    [Arguments(@"(?=[cd])(?:cat|dog)")]
+    [Arguments(@"(?!x)(?:cat|dog)")]
+    [Arguments(@"(?<!\w)(?!\d)(?:cat|dog)")]
+    [Arguments(@"\b(?<!-)(?:cat|dog)\b")]
+    [Arguments(@"(?<![a-z])\L<w>(?![a-z])")]
+    [Arguments("(?fi)(?<=a)bc|de")]
+    public void A_lookaround_in_front_of_the_literals_is_looked_through(string pattern)
+    {
+        PatternObject compiled = Compile(pattern, FuzzyRegexOptions.None);
+
+        (compiled.LeadingStrings ?? (object?)compiled.LeadingUnits).Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// The lookarounds the walk refuses. A <c>\K</c> in the body moves the next attempt's start
+    /// (<c>PatternObject.AnAttemptCanMoveTheNextStart</c>): the attempt at 0 over <c>xcat</c> sets
+    /// the match start to 2 and fails, so the next attempt is at 3 and the one at 1, where
+    /// <c>cat</c> starts, never runs. A screen that jumped straight to 1 would find (3, 4), which
+    /// upstream does not; taking the guard out turns this row and two answer rows below red. A
+    /// verb or a group call in the body is refused as unproved.
+    /// </summary>
+    /// <param name="pattern">A pattern the screen must leave alone.</param>
+    [Test]
+    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)")]
+    [Arguments(@"(?=c(*PRUNE)a|d)(?:cat|dog)")]
+    [Arguments(@"(?=(?&w))(?:cat|dog)(?<w>c)?")]
+    public void The_walk_refuses_a_lookaround_that_can_move_the_next_start_or_is_unproved(string pattern)
+    {
+        PatternObject compiled = Compile(pattern, FuzzyRegexOptions.None);
+
+        compiled.LeadingStrings.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Every match behind a lookaround, in UTF-16 units. The <c>\K</c> rows are the witness for
+    /// that refusal: with the screen they would answer <c>3-4</c> and <c>3-4 7-8</c>.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="options">The options.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Every match's span, <c>start-end</c>, space-separated.</param>
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, finditer, 2026-10-14 (.scratch/c6/up2.py)")]
+    [Arguments(@"(?<![a-z])(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat -dog dogs", "5-8 10-13 14-17")]
+    [Arguments(@"(?<=\s)(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat -dog dogs", "5-8 14-17")]
+    [Arguments(@"(?=[cd])(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat -dog", "1-4 5-8 10-13")]
+    [Arguments(@"(?!cats)(?:cat|dog)", FuzzyRegexOptions.None, "cats cat dogs", "5-8 9-12")]
+    [Arguments(@"(?<!\w)(?!\d)(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat 1dog dog", "5-8 14-17")]
+    [Arguments(@"\b(?<!-)(?:cat|dog)\b", FuzzyRegexOptions.None, "xcat cat -dog dog", "5-8 14-17")]
+    [Arguments(@"(?<![a-z])(?:cat|dog)", FuzzyRegexOptions.IgnoreCase, "xCAT Cat -dOg", "5-8 10-13")]
+    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat", "")]
+    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat dog", "7-8")]
+    [Arguments(@"(?=c(*PRUNE)a|d)(?:cat|dog)", FuzzyRegexOptions.None, "xcat cot dog", "1-4 9-12")]
+    [Arguments(@"(?<=(\w))(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat", "1-4")]
+    [Arguments(@"(?=(\w))(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat", "1-4 5-8")]
+    public void A_lookaround_in_front_still_finds_every_match(
+        string pattern,
+        FuzzyRegexOptions options,
+        string subject,
+        string expected
+    )
+    {
+        Spans(pattern, options, subject).Should().Be(expected);
+    }
+
+    [Test]
+    [Property(
+        "Upstream",
+        @"regex 2026.9.10, 2026-10-14: finditer(r'(?<![a-z])\L<w>(?![a-z])', 'amberx amber copper xviolet violet', w=[amber, copper, violet]) -> (7, 12), (13, 19), (28, 34); "
+            + @"search(r'(?<=x)(?:cat|dog)', 'xcat', pos=1) -> (1, 4), pos=2 -> None; search(r'(?=cat\b)(?:cat|dog)', 'cats', endpos=3) -> (0, 3)"
+    )]
+    public void A_lookaround_in_front_keeps_its_answers_at_the_slice_edges()
+    {
+        var behind = new FuzzyRegex(@"(?<=x)(?:cat|dog)");
+
+        using (new AssertionScope())
+        {
+            Spans(@"(?<![a-z])\L<w>(?![a-z])", FuzzyRegexOptions.None, "amberx amber copper xviolet violet")
+                .Should()
+                .Be("7-12 13-19 28-34");
+            behind.Match("xcat", 1).Index.Should().Be(1);
+            behind.Match("xcat", 2).Success.Should().BeFalse();
+            new FuzzyRegex(@"(?=cat\b)(?:cat|dog)").Match("cats", 0, 3).Length.Should().Be(3);
         }
     }
 
