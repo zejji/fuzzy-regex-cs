@@ -62,25 +62,34 @@ public class Capture
 public class Group : Capture
 {
     /// <summary>
-    /// Every span this group captured, or <see langword="null"/> for group 0, whose single capture
-    /// is the group itself - which is exactly what <c>match_get_captures_by_index</c> answers for
-    /// index 0 (<c>upstream/src/_regex.c</c> line 19137).
+    /// The match this group belongs to, which holds its capture list and its name, or
+    /// <see langword="null"/> for group 0, whose single capture is the group itself - which is
+    /// exactly what <c>match_get_captures_by_index</c> answers for index 0
+    /// (<c>upstream/src/_regex.c</c> line 19137).
     /// </summary>
-    private readonly Engine.GroupSpan[]? _captures;
+    /// <remarks>
+    /// The match rather than a copy of the list and the name, because a <see cref="Match"/> is a
+    /// <see cref="Group"/> too and every field here is paid for once per match, read or not: a
+    /// list reference and a name reference cost 8 bytes a match more than this and the number.
+    /// </remarks>
+    private readonly Match? _owner;
 
-    internal Group(string subject, int start, int end, bool success, string name, Engine.GroupSpan[]? captures = null)
+    /// <summary>The group's number in <see cref="_owner"/>; unused for group 0.</summary>
+    private readonly int _number;
+
+    internal Group(string subject, int start, int end, bool success, Match? owner, int number)
         : base(subject, start, end)
     {
         Success = success;
-        Name = name;
-        _captures = captures;
+        _owner = owner;
+        _number = number;
     }
 
     /// <summary>Whether the group took part in the match.</summary>
     public bool Success { get; }
 
     /// <summary>The group's name, or its number as text if it has none.</summary>
-    public string Name { get; }
+    public string Name => _owner is null ? "0" : _owner.GroupNameFromNumber(_number);
 
     /// <summary>
     /// Every capture the group made, oldest first. Upstream
@@ -92,10 +101,7 @@ public class Group : Capture
     /// needs none of the machinery real capture lists do. Upstream's own accessor special-cases
     /// index 0 the same way (<c>match_get_spans_by_index</c>, <c>:19081</c>).
     /// </remarks>
-    public CaptureCollection Captures =>
-        _captures is null
-            ? new([this])
-            : new([.. _captures.Select(span => new Capture(_subject, span.Start, span.End))]);
+    public CaptureCollection Captures => _owner is null ? new([this]) : _owner.CapturesOf(_number);
 }
 
 /// <summary>
@@ -129,7 +135,15 @@ public class Group : Capture
 public sealed class Match : Group
 {
     private readonly FuzzyRegex _regex;
-    private readonly Engine.GroupData[] _groups;
+
+    /// <summary>
+    /// Every group's capture list in one array, laid out by <see cref="Engine.GroupData.PackSpans"/>:
+    /// three numbers per group (where its spans start in this array, how many it has, and which one
+    /// is current), then the spans as start and end pairs. Empty for an unsuccessful match and for a
+    /// pattern without groups.
+    /// </summary>
+    private readonly int[] _spans;
+
     private readonly int _lastGroup;
     private readonly int _sliceStart;
     private readonly int _sliceEnd;
@@ -177,9 +191,10 @@ public sealed class Match : Group
     /// <param name="start">Where the match starts, in UTF-16 code units.</param>
     /// <param name="end">One past where it ends.</param>
     /// <param name="success">Whether the pattern matched at all.</param>
-    /// <param name="groups">
-    /// The engine's group data, already copied out of the state - the state's arrays are reused by
-    /// the next match, so a match that shared them would change under its owner.
+    /// <param name="spans">
+    /// The engine's group data, already packed out of the state by
+    /// <see cref="Engine.GroupData.PackSpans"/> - the state's arrays are reused by the next match,
+    /// so a match that shared them would change under its owner.
     /// </param>
     /// <param name="sliceStart">
     /// Where the slice this match was found in starts, which <see cref="NextMatch"/> resumes inside
@@ -205,7 +220,7 @@ public sealed class Match : Group
         int start,
         int end,
         bool success,
-        Engine.GroupData[] groups,
+        int[] spans,
         int sliceStart,
         int sliceEnd,
         bool overlapped,
@@ -216,10 +231,10 @@ public sealed class Match : Group
         Engine.FuzzyChange[]? fuzzyChanges = null,
         Engine.SubjectScan scan = default
     )
-        : base(subject, start, end, success, "0")
+        : base(subject, start, end, success, owner: null, number: 0)
     {
         _regex = regex;
-        _groups = groups;
+        _spans = spans;
         _lastGroup = lastGroup;
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
@@ -275,19 +290,18 @@ public sealed class Match : Group
     /// <returns>The group.</returns>
     internal Group GroupAt(int number)
     {
-        string name = _regex.GroupNameFromNumber(number);
-
         // An unsuccessful match holds no group data at all (see FuzzyRegex.NoMatch), and every one
         // of its groups is absent.
-        if (_groups.Length == 0)
+        if (_spans.Length == 0)
         {
-            return new Group(_subject, 0, 0, success: false, name, []);
+            return new Group(_subject, 0, 0, success: false, this, number);
         }
 
         // Capture group indexes are 1-based (excluding group 0, which is the entire matched string).
-        Engine.GroupData group = _groups[number - 1];
+        int header = Engine.GroupData.PackedHeader(number);
+        int current = _spans[header + Engine.GroupData.PackedCurrent];
 
-        if (group.Current < 0)
+        if (current < 0)
         {
             // The group has no current capture. Upstream reports -1 from start, end and span and
             // None from group; this surface reports Success == false, and an unsuccessful group's
@@ -303,12 +317,37 @@ public sealed class Match : Group
             //
             //     regex.match(r'(?&routine)(?(DEFINE)(?<routine>.))', 'a')
             //     .group('routine') is None, .captures('routine') == ['a']
-            return new Group(_subject, 0, 0, success: false, name, group.Captures);
+            return new Group(_subject, 0, 0, success: false, this, number);
         }
 
-        Engine.GroupSpan span = group.Captures[group.Current];
+        int span = _spans[header + Engine.GroupData.PackedOffset] + (2 * current);
 
-        return new Group(_subject, span.Start, span.End, success: true, name, group.Captures);
+        return new Group(_subject, _spans[span], _spans[span + 1], success: true, this, number);
+    }
+
+    /// <summary>
+    /// Every capture group <paramref name="number"/> made, oldest first, whether or not it has a
+    /// current one. Port of <c>match_get_captures_by_index</c> (<c>upstream/src/_regex.c</c>
+    /// line 19137), which walks the group's <c>count</c> and never looks at <c>current</c>.
+    /// </summary>
+    /// <param name="number">The group number, one or more.</param>
+    /// <returns>The captures, built when asked for rather than with the match.</returns>
+    internal CaptureCollection CapturesOf(int number)
+    {
+        if (_spans.Length == 0)
+        {
+            return new([]);
+        }
+
+        int header = Engine.GroupData.PackedHeader(number);
+        int first = _spans[header + Engine.GroupData.PackedOffset];
+        var captures = new Capture[_spans[header + Engine.GroupData.PackedCount]];
+        for (int i = 0; i < captures.Length; i++)
+        {
+            captures[i] = new Capture(_subject, _spans[first + (2 * i)], _spans[first + (2 * i) + 1]);
+        }
+
+        return new(captures);
     }
 
     /// <summary>The number of the group with that name, or <c>-1</c> if the pattern has none.</summary>
