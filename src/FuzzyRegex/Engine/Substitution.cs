@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -122,59 +124,190 @@ internal static class Substitution
             limits
         );
 
-        // Upstream's join list (init_join_list, :19686), which a garbage-collected heap reduces to
-        // a list of strings concatenated at the end. It stays a list rather than becoming a
-        // StringBuilder because a reverse match reverses it whole once the last match is in.
-        List<string> joined = [];
-        int subCount = 0;
-        int lastPos = state.Reverse ? state.TextLength : 0;
-
-        while (subCount < maxSub)
+        // Upstream's join list (init_join_list, :19706): the pieces of the result, joined once the
+        // last match is in. A reverse match adds them back to front and the join reads them the
+        // other way round, which is upstream's list reversal (join_list_info, :19852).
+        JoinList joined = default;
+        try
         {
-            int status = Matcher.DoMatch(state, search: true);
-            if (status == MatchStatus.Cancelled)
+            int subCount = 0;
+            int lastPos = state.Reverse ? state.TextLength : 0;
+
+            while (subCount < maxSub)
             {
-                throw limits.Cancelled(input, regex.Pattern);
+                int status = Matcher.DoMatch(state, search: true);
+                if (status == MatchStatus.Cancelled)
+                {
+                    throw limits.Cancelled(input, regex.Pattern);
+                }
+
+                if (status != MatchStatus.Success)
+                {
+                    break;
+                }
+
+                // The segment before this match. An empty one adds nothing (JoinList.Add).
+                joined.Add(
+                    state.Reverse
+                        ? input.AsMemory(state.MatchPos, lastPos - state.MatchPos)
+                        : input.AsMemory(lastPos, state.MatchPos - lastPos)
+                );
+
+                AddReplacement(
+                    ref joined,
+                    regex,
+                    input,
+                    state,
+                    status,
+                    template,
+                    evaluator,
+                    isLiteral,
+                    isFormat,
+                    compiled
+                );
+
+                subCount++;
+                lastPos = state.TextPos;
+
+                // Upstream's own line here is `state->must_advance = state->text_pos ==
+                // state->match_pos` (:22047), which is what AdvancePastMatch does for a state whose
+                // `overlapped` is false - and subx never sets it. Shared rather than repeated because
+                // the scanner and the splitter run the same rule, and a slip in one of three copies
+                // would be invisible.
+                state.AdvancePastMatch();
             }
 
-            if (status != MatchStatus.Success)
+            // The segment following the last match.
+            joined.Add(state.Reverse ? input.AsMemory(0, lastPos) : input.AsMemory(lastPos));
+
+            replacements = subCount;
+            return joined.Join(reverse: state.Reverse);
+        }
+        finally
+        {
+            joined.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Upstream's join list (<c>RE_JoinInfo</c>, <c>upstream/src/_regex.c</c> line 670): the
+    /// pieces of a substitution's result, held as stretches of the strings they come from and
+    /// copied once, into the result, when the last match is in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No piece is copied out of the subject before the join.</b> Until C2 this was a
+    /// <c>List&lt;string&gt;</c> of substrings joined by <c>string.Concat</c>, so every piece was
+    /// allocated and copied twice, and a pass over a megabyte with two group references in its
+    /// template allocated 19.9 MB for a 2 MB answer (the <c>ReplaceTemplate</c> row of the
+    /// 2026-10-13 gap table). The pieces live in an array rented from
+    /// <see cref="ArrayPool{T}.Shared"/>, cleared and handed back by <see cref="Dispose"/>, which
+    /// <c>Subx</c> calls in a <c>finally</c> so a timeout, a cancellation or a throwing evaluator
+    /// returns it too.
+    /// </para>
+    /// <para>
+    /// A <c>ref struct</c>, so it cannot outlive the call that owns the rented array, and
+    /// <c>default</c> is an empty list: nothing is rented until the first non-empty piece.
+    /// </para>
+    /// </remarks>
+    [StructLayout(LayoutKind.Auto)]
+    private ref struct JoinList
+    {
+        private ReadOnlyMemory<char>[]? _items;
+        private int _count;
+        private long _length;
+
+        /// <summary>Adds a piece. An empty piece adds nothing, exactly as upstream skips one.</summary>
+        /// <param name="item">The piece, a stretch of the subject, the template or a returned string.</param>
+        internal void Add(ReadOnlyMemory<char> item)
+        {
+            if (item.IsEmpty)
             {
-                break;
+                return;
             }
 
-            // The segment before this match.
-            if (state.MatchPos != lastPos)
+            if (_items is null || _count == _items.Length)
             {
-                joined.Add(state.Reverse ? input[state.MatchPos..lastPos] : input[lastPos..state.MatchPos]);
+                Grow();
             }
 
-            AddReplacement(joined, regex, input, state, status, template, evaluator, isLiteral, isFormat, compiled);
-
-            subCount++;
-            lastPos = state.TextPos;
-
-            // Upstream's own line here is `state->must_advance = state->text_pos ==
-            // state->match_pos` (:22047), which is what AdvancePastMatch does for a state whose
-            // `overlapped` is false - and subx never sets it. Shared rather than repeated because
-            // the scanner and the splitter run the same rule, and a slip in one of three copies
-            // would be invisible.
-            state.AdvancePastMatch();
+            _items![_count++] = item;
+            _length += item.Length;
         }
 
-        // The segment following the last match.
-        int endPos = state.Reverse ? 0 : input.Length;
-        if (lastPos != endPos)
+        /// <summary>The pieces joined, in order, or back to front for a reverse match.</summary>
+        /// <param name="reverse">Whether the pieces were added back to front.</param>
+        /// <returns>The joined text.</returns>
+        /// <remarks>
+        /// One piece that is a whole string is that string, so a call that replaced nothing hands
+        /// back the subject itself, as <c>string.Concat</c> did over a one-item list. A total past
+        /// <see cref="int.MaxValue"/> asks for the longest string instead, which the runtime refuses
+        /// with the <see cref="OutOfMemoryException"/> <c>string.Concat</c> threw for it.
+        /// </remarks>
+        internal readonly string Join(bool reverse)
         {
-            joined.Add(state.Reverse ? input[..lastPos] : input[lastPos..]);
+            if (_count == 0)
+            {
+                return "";
+            }
+
+            if (
+                _count == 1
+                && MemoryMarshal.TryGetString(_items![0], out string? whole, out int start, out int length)
+                && start == 0
+                && length == whole.Length
+            )
+            {
+                return whole;
+            }
+
+            return string.Create(
+                _length > int.MaxValue ? int.MaxValue : (int)_length,
+                (Items: _items!, Count: _count, Reverse: reverse),
+                static (destination, join) =>
+                {
+                    int written = 0;
+                    for (int i = 0; i < join.Count; i++)
+                    {
+                        ReadOnlySpan<char> item = join.Items[join.Reverse ? join.Count - 1 - i : i].Span;
+                        item.CopyTo(destination[written..]);
+                        written += item.Length;
+                    }
+                }
+            );
         }
 
-        if (state.Reverse)
+        /// <summary>Clears the pieces, so the pool holds no reference to a subject, and returns the array.</summary>
+        internal void Dispose()
         {
-            joined.Reverse();
+            if (_items is null)
+            {
+                return;
+            }
+
+            _items.AsSpan(0, _count).Clear();
+            ArrayPool<ReadOnlyMemory<char>>.Shared.Return(_items);
+            _items = null;
+            _count = 0;
+            _length = 0;
         }
 
-        replacements = subCount;
-        return string.Concat(joined);
+        /// <summary>Doubles the array, starting at sixteen pieces.</summary>
+        private void Grow()
+        {
+            ReadOnlyMemory<char>[] grown = ArrayPool<ReadOnlyMemory<char>>.Shared.Rent(
+                _items is null ? 16 : _items.Length * 2
+            );
+
+            if (_items is not null)
+            {
+                _items.AsSpan(0, _count).CopyTo(grown);
+                _items.AsSpan(0, _count).Clear();
+                ArrayPool<ReadOnlyMemory<char>>.Shared.Return(_items);
+            }
+
+            _items = grown;
+        }
     }
 
     /// <summary>
@@ -233,7 +366,7 @@ internal static class Substitution
     /// <param name="isFormat">Whether the template is a format string.</param>
     /// <param name="compiled">The compiled template, if there is one.</param>
     private static void AddReplacement(
-        List<string> joined,
+        ref JoinList joined,
         FuzzyRegex regex,
         string input,
         MatchState state,
@@ -247,25 +380,25 @@ internal static class Substitution
     {
         if (isLiteral)
         {
-            joined.Add(template!);
+            joined.Add(template.AsMemory());
             return;
         }
 
         if (isFormat)
         {
-            joined.Add(regex.NewMatch(state, input, status).ResultFormat(template!));
+            joined.Add(regex.NewMatch(state, input, status).ResultFormat(template!).AsMemory());
             return;
         }
 
         if (compiled is null)
         {
             // Upstream adds nothing when the callable returns None; a null string is the same.
-            joined.Add(evaluator!(regex.NewMatch(state, input, status)) ?? "");
+            joined.Add(evaluator!(regex.NewMatch(state, input, status)).AsMemory());
             return;
         }
 
-        // Searching backwards means the whole list is reversed at the end, so the template's own
-        // items go on in reverse order to come out in the right one.
+        // Searching backwards means the whole list is read back to front at the end, so the
+        // template's own items go on in reverse order to come out in the right one.
         for (int i = 0; i < compiled.Count; i++)
         {
             object item = compiled[state.Reverse ? compiled.Count - 1 - i : i];
@@ -301,18 +434,18 @@ internal static class Substitution
     /// <param name="subject">The subject being searched.</param>
     /// <param name="state">The state holding the match.</param>
     /// <param name="groupCount">The pattern's <c>public_group_count</c>.</param>
-    /// <returns>The text the item stands for.</returns>
+    /// <returns>The text the item stands for, as a stretch of the subject or of the template.</returns>
     /// <exception cref="FuzzyRegexParseException">The template references a group the pattern has not got.</exception>
     /// <remarks>
     /// Upstream returns <c>None</c> for a zero-width whole match and for a group that took no part,
-    /// and its caller then adds nothing to the join list. Both cases join as an empty string, which
-    /// is what the slice of a zero-width span already gives, so this returns the text in every case.
+    /// and its caller then adds nothing to the join list. Both cases are an empty stretch here,
+    /// which the join list skips, so this returns the text in every case.
     /// </remarks>
-    internal static string GetSubReplacement(object item, string subject, MatchState state, int groupCount)
+    private static ReadOnlyMemory<char> GetSubReplacement(object item, string subject, MatchState state, int groupCount)
     {
         if (item is string literal)
         {
-            return literal;
+            return literal.AsMemory();
         }
 
         int index = (int)item;
@@ -320,7 +453,9 @@ internal static class Substitution
         {
             // The entire matched portion of the string. A reverse match reports its two ends the
             // other way round, exactly as pattern_new_match does.
-            return state.Reverse ? subject[state.TextPos..state.MatchPos] : subject[state.MatchPos..state.TextPos];
+            return state.Reverse
+                ? subject.AsMemory(state.TextPos, state.MatchPos - state.TextPos)
+                : subject.AsMemory(state.MatchPos, state.TextPos - state.MatchPos);
         }
 
         if (index >= 1 && index <= groupCount)
@@ -328,11 +463,11 @@ internal static class Substitution
             GroupData group = state.Groups[index - 1];
             if (group.Current < 0)
             {
-                return "";
+                return ReadOnlyMemory<char>.Empty;
             }
 
             GroupSpan span = group.Captures[group.Current];
-            return subject[span.Start..span.End];
+            return subject.AsMemory(span.Start, span.End - span.Start);
         }
 
         // RE_ERROR_INVALID_GROUP_REF (:21721), which set_error renders as regex.error with the
