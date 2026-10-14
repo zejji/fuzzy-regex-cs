@@ -217,6 +217,57 @@ against the branch; a second main run showed that was drift on the main side (ma
 The walk now treats `SearchValues<char>` and `SearchValues<string>` as leaves, as it does `Type`:
 they are immutable BCL objects, and the field holding them was already allowlisted on that ground.
 
+## C6 option C, the leading screen looks through zero-width tests (2026-10-14)
+
+Option C of `docs/plan/2026-10-14-multi-string-search-design.md`, on `perf/c6-zero-width`, two
+commits: word boundaries and the MULTILINE `^` (84dc713f), then lookarounds (657a3cee).
+`FindLeadingStrings` walks past `\b`, `\B`, `\m`, `\M`, their default-word forms, `(?m)^` and its
+Unicode-line form, and a lookaround (following its continuation, `Next2`), so `\b(?:cat|dog)\b`,
+`\b\L<words>\b` and `(?<![a-z])(?:cat|dog)` get the screen `cat|dog` has. Logs are in the main
+checkout's `.scratch/c6/`.
+
+**Why it is sound.** Each of these tests the position an attempt stands on and goes on from that
+same position (the zero-width arm calls `TryMatchZeroWidth` at `TextPos` and takes `Next1`;
+`AdvanceLookaround` saves `TextPos` and both a passing positive body and a failing negative one
+lead to `Next2`), so a match starting at `p` still opens with a literal at `p`, and the engine still
+runs the test there. A Debug assertion in `BasicMatch` checks that premise on every whole match of
+a screened pattern, screened or not; the Debug ratchet (8,931 tests) ran with it.
+
+**What is refused, and why.** `\A` and `^` without MULTILINE anchor the search, which then never
+consults a screen. `\Z` can be followed by no literal. The end-of-line anchors can only be followed
+by a newline, which the compiler factors out in front of the branch, so the walk stops at that one
+character anyway (the first build looked through them and its four structural rows stayed red).
+`\G` holds at one position. A lookaround is refused when the pattern has a `\K` or `(*SKIP)`
+(`AnAttemptCanMoveTheNextStart`): a `\K` in the body sets the match start, the body's end discards
+its entry, and the bump-along then starts past it, so `(?=[a-z][a-z]\K)(?:cat|dog)` over `xcat` is
+no match upstream and here, and `(3, 4)` with the screen. Taking that guard out turns 3 tests red
+(`p3-noKeep.log`) and 81 of the 90,000 generated differential rows (`out-noKeep-c6.txt`). A
+lookaround is also refused with a `(*PRUNE)` or a group call, which this change has not proved;
+each guard has a structural witness (`p3-noVerb.log`, `p3-noCalls.log`) and no test's answer changes
+without it. A lookaround whose body yields a `Property` first-set check, such as `(?=(\w))`, is not
+screened: the walk does not look through that check.
+
+**Evidence.** The ops probe (`ops/ops.cs`, `ops.txt`, `ops2.txt`) gives a witness shape for every
+opcode added. Red before each change: 17 structural rows and 3 reference-loop rows for the first
+(`red1-*.log`), 8 structural rows and 1 loop row for the second (`red2-*.log`); every answer row,
+pinned to regex 2026.9.10, was already green. The differential against main b32a00e5 over 250,000
+rows (`.scratch/s62/rows-c`, `rows-d` and 90,000 generated rows, `rows-c6.jsonl` from `gen.py`) is
+identical once the elapsed-time column is stripped (`strip-*`, `cmp`). The counters
+(`count-*-c6.txt`) show the screen running on 24,384 generated rows against main's 1,110, through a
+lookaround on 14,546, `\b` 5,417, `(?w)\b` 1,364, `\m` 1,171, `\M` 1,108, `(?m)^` 354,
+`(?mw)^` 206 and the default start and end of word 285 and 283. Oracle seeds 7, 4242 and 20260927,
+AOT tests and smoke (7,606,272 bytes) and doc examples are green.
+
+**Timing** (single process per side, Release, tiering off, pinned to FFF8, best of 7 runs, min of 5
+alternating processes; `time-*.txt`). Over a megabyte of word-shaped text: `\b(?:cat|dog)\b` 7.00
+to 0.11 ms, `\b\L<ten>\b` 24.2 to 0.15 ms, `(?<![a-z])(?:cat|dog)` 9.50 to 0.08 ms. Two shapes do
+not gain. `(?i)\b(?:cat|dog)\b` (6.88 to 6.43 ms) gets the code-unit screen, which stops on every
+`c` and `d` as the first-set check already did. `(?m)^(?:cat|dog)` over text with no newline (6.03
+to 5.80 ms) does not return to the screen: after the first jump, `SearchStart` keeps scanning for
+the first-set character and tries `^` at each one itself (its look-ahead loop), to the end of the
+text. Adversaries, a literal at every hit where the zero-width test then fails, all within 0.88 to
+1.02 of main: `\b\L<ten>\b` over `xamber ` repeated 1.02, `\b(?:th|ht)` over `xth ` 1.01.
+
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
 S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and

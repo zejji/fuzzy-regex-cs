@@ -24,7 +24,9 @@ public sealed class LeadingUnitsTests
     /// plus the special characters <c>RequiredStringScreen.FirstUnits</c>'s rule adds, so it
     /// cannot quietly grow to "everything". A branch of one character merges with its neighbours
     /// into a set, which the walk does not take, so each pattern keeps one branch longer.
-    /// <c>(?fi)st|x</c> and <c>(?fi)k|xy</c> have a <c>CharacterIgn</c> branch.
+    /// <c>(?fi)st|x</c> and <c>(?fi)k|xy</c> have a <c>CharacterIgn</c> branch. The last rows put a
+    /// zero-width test in front (C6), each one that holds at the start of a one-character subject
+    /// on a word character, so the reference still sees every start.
     /// </summary>
     /// <param name="pattern">A pattern opening with an alternation of literals.</param>
     [Test]
@@ -60,6 +62,10 @@ public sealed class LeadingUnitsTests
     [Arguments("(?fi)in|on")]
     [Arguments("(?i)(?:amber|copper|violet)+")]
     [Arguments("(?ai)straße|café")]
+    [Arguments(@"(?i)\b(?:kit|sit)\b")]
+    [Arguments(@"(?fi)\m(?:straße|café)")]
+    [Arguments("(?im)^(?:kit|sit)")]
+    [Arguments("(?i)(?<![a-z])(?:kit|sit)")]
     public void Every_character_a_match_can_start_with_is_searched_for(string pattern)
     {
         var regex = new FuzzyRegex(pattern);
@@ -167,7 +173,7 @@ public sealed class LeadingUnitsTests
     /// <summary>
     /// The shapes the walk refuses. A fuzzy pattern can delete or replace its first character; a
     /// reversed one reads from the other end; a lone surrogate could be found in the middle of a
-    /// pair; a lookbehind or <c>\G</c> at the head is not a literal, and neither is the set that
+    /// pair; <c>\G</c> at the head is not a literal, and neither is the set that
     /// single-character branches merge into. LOCALE never gets here: construction rejects
     /// every case-insensitive LOCALE node (<c>LocaleFlagTests</c>).
     /// </summary>
@@ -177,7 +183,6 @@ public sealed class LeadingUnitsTests
     [Arguments("(?fi)straße{e<=1}|café")]
     [Arguments("(?rfi)straße|café")]
     [Arguments(@"(?fi)\udc00x|ßz")]
-    [Arguments("(?fi)(?<=a)bc|de")]
     [Arguments(@"(?fi)\Gbc|de")]
     [Arguments("(?fi)bc|")]
     [Arguments("(?fi)ﬅ|x")]
