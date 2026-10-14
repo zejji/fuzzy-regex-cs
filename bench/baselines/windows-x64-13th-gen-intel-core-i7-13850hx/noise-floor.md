@@ -8,6 +8,31 @@ different hardware).
 run log rather than from documentation.
 **BenchmarkDotNet:** 0.15.8. **Runtime:** .NET 10, Release.
 
+**Current floor (2026-10-13): 1.10 for time, unchanged 1.0001 for allocation.** The section "The
+pinned re-take, 2026-10-13" below records it. Everything after that section is the original S58
+measurement, kept because it explains how a run is taken so that it counts.
+
+## The pinned re-take, 2026-10-13
+
+The S58 floor was taken unpinned. On this hybrid processor an efficiency core runs the engine about
+1.6x slower than a performance core, and Windows moves a process between them freely. Since
+`758fba81`, `tools/compare-benchmarks.ps1` pins the benchmark processes to the performance cores by
+default (`-Cores performance`), so the floor was re-taken the same way.
+
+- **Tree:** main `a3d79986`, unchanged between the two runs.
+- **Runs:** A 20:16-21:11 and B 21:11-22:06, each the whole suite (81 benchmarks), `--job medium`,
+  pinned. Both are committed beside this file: `2026-10-13-pinned-noise-A.json` and
+  `2026-10-13-pinned-noise-B.json`. A is also the committed baseline `net10.0.json`.
+- **Machine state:** owner away, no builds or tests (the test lock was held for the whole run), no
+  agents running anything but file edits. A sampler logged every other process that used more than
+  5% of one core over a 30 s window. Only JetBrains Toolbox (up to 10% of one core, three times) and
+  Edge WebView (5%, once) appeared.
+- **Result:** B/A time ratios ran from 0.914 (`ManyInputsBenchmarks.FuzzyPhraseThreeSeparatePasses`)
+  to 1.061 (`WorkloadBenchmarks.FuzzyNoMatchLong`). The wider side is 1/0.914 = 1.094, rounded up to
+  **1.10**. Allocated bytes were identical on every row.
+
+Pinning narrowed the band from 0.889-1.077 to 0.914-1.061, so a change of 10% or more now counts.
+
 ## What a noise floor is, and why this file exists
 
 `tools/compare-benchmarks.ps1` calls a benchmark regressed when it is more than `-Threshold` times

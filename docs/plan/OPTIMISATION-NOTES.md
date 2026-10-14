@@ -60,6 +60,14 @@ are not repeated here.
 - **`(a+)+b` is not the catastrophic shape in this port; `(a|a)*b` is.** Measured S54: `(a+)+b` is
   flat at 0.2-0.7 ms from n=18 to n=24, `(a|a)*b` goes 161 ms to 10.6 s over the same range. Both
   are pinned, so a change that moves a shape between the two classes is visible.
+- **Nested repeats after C5 (2026-10-14).** The failure memo (Option B) left `(a+)+c` quadratic
+  because the compiler copies the first iteration out of the outer repeat and every start walked
+  the run again through the copy. C5 fails a start the outer repeat's body guard already holds
+  (S2d) and walks back over a guarded span in one move (G2): `(a+)+c` at n = 400 takes 7,188 Debug
+  steps against 407,784, PathologicalNestedRepeat 0.07x and PathologicalWordsToEnd 0.37x of
+  a3d79986. Still open, in `docs/plan/2026-10-13-linear-nested-repeats-design.md`: `CountOne`
+  scans the run once per entry (quadratic in characters, as plain `a+c` is in Python), and
+  `(?:(?:a|a)+)+$` stays exponential in its first attempt (option N).
 - Native AOT: the classic .NET regex `Compiled` route (IL emit) is unavailable; the constraint and the
   fast-path alternative are in ROADMAP.md under Phase 7.
 - Every optimisation must keep the oracle GREEN at three seeds and `ExpectedDivergences` strict; an
@@ -96,6 +104,38 @@ in the main checkout.
 
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
+
+## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
+
+`FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).
+Main `fd2ad87e` against perf/c3-myers, Release, affinity 0xFFF8. Two instruments:
+
+- BDN, `--job medium`, Workload and ManyInputs, branch before the lazy arm against tonight's
+  pinned main baseline (`.claude/worktrees/c3-myers/.scratch/c3/gates/bdn-*`): FuzzyBudgetThree
+  0.016x, EnhanceMatch 0.037x, BestMatch 0.044x, FuzzyPhraseOne* 0.90-0.92x,
+  FuzzyPhraseThreeSeparatePasses 0.84x, the other rows 0.95-1.02x, and **FuzzyShort 1.120x**
+  (283.7 ns to about 318 ns).
+- A harness (`.scratch/c3/h.cs`, min of 5 reps per process, main, before and after alternated in
+  9 processes each over two locked runs; the minimum of all is quoted):
+
+| Row | Main | Before the lazy arm | After | After / main |
+|---|---|---|---|---|
+| FuzzyShort | 313.2 ns | 343.4 ns | 304.3 ns | 0.97x |
+| FuzzyBudgetThree | 73,809 ns | 1,191 ns | 1,648 ns | 0.022x |
+| FuzzyPhraseOneMatch (100,000 records) | 52.13 ms | 49.52 ms | 50.21 ms | 0.96x |
+
+**The FuzzyShort slowdown was real and is fixed.** Its one search reaches the pieces' answer at the
+real match, so the scan behind the pieces read about 20 characters and saved nothing. Behind the
+pieces the scan now sits out a scan's first query (`ScanMemory.ArmSecondStage`): a Match that
+succeeds at the first piece answer pays nothing, and one that fails pays one attempt before the
+scan arms. The cost is about 1.4% on FuzzyPhraseOneMatch (49.52 to 50.21 ms).
+
+**Unexplained, recorded rather than chased tonight:** FuzzyBudgetThree, which takes the
+stand-alone path that the lazy arm does not touch, measured 1,191 ns before and 1,648 ns after.
+A copy of the "after" source built the same way as "before" measured the same as "after" (1,626 ns),
+so the build is ruled out. The suspect is code generation around `NextStart`, which grew by
+one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
+`NextStart` bodies.
 
 ## Measured by S61's quiet-machine gates (2026-09-23)
 

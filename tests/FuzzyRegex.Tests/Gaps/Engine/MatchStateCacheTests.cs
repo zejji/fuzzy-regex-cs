@@ -400,6 +400,11 @@ public sealed class MatchStateCacheTests
                 memory.SliceEnd = 7;
                 memory.SliceStart = 7;
                 memory.WitnessEnd = 7;
+                memory.ScanPaused = 7;
+                memory.ScanQueries = 7;
+                memory.ScanSkipped = 7;
+                memory.ScanRead = 7;
+                memory.SecondStageArmed = true;
                 _ = memory.IsAscii("scribbled", 3, 5);
                 break;
             case HashSet<(long Key, int Reach)> set:
@@ -538,7 +543,8 @@ public sealed class MatchStateCacheTests
                 RenderItems($"{path}.Found", memory.Found, lines);
                 RenderItems($"{path}.AbsentBelow", memory.AbsentBelow, lines);
                 lines.Add(
-                    $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd})"
+                    $"{path}=({memory.SliceEnd},{memory.SliceStart},{memory.WitnessEnd},{memory.AsciiFrom},{memory.AsciiEnd},"
+                        + $"{memory.ScanPaused},{memory.ScanQueries},{memory.ScanSkipped},{memory.ScanRead},{memory.SecondStageArmed})"
                 );
                 break;
             case HashSet<(long Key, int Reach)> set:

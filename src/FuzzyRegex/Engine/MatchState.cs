@@ -196,6 +196,82 @@ internal sealed class GroupData
 
         return copies;
     }
+
+    /// <summary>Where a group's spans start in a packed array, relative to its header.</summary>
+    internal const int PackedOffset = 0;
+
+    /// <summary>How many spans the group has, relative to its header.</summary>
+    internal const int PackedCount = 1;
+
+    /// <summary>Which span is current, or <c>-1</c>, relative to its header.</summary>
+    internal const int PackedCurrent = 2;
+
+    /// <summary>How many numbers each group's header takes.</summary>
+    private const int _packedHeaderSize = 3;
+
+    /// <summary>Where group <paramref name="number"/>'s header sits in a packed array.</summary>
+    /// <param name="number">The public group number, one-based.</param>
+    /// <returns>The index of its <see cref="PackedOffset"/>.</returns>
+    internal static int PackedHeader(int number) => (number - 1) * _packedHeaderSize;
+
+    /// <summary>
+    /// What <see cref="Match"/> keeps of the groups: <see cref="CopyGroups"/> packed into one
+    /// array, which is the shape of upstream's own copy: <c>copy_groups</c>
+    /// (<c>upstream/src/_regex.c</c> line 20641) allocates "the storage for the group info in a
+    /// single block", the group headers first and every span after them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The array opens with a header of three numbers per group, at <see cref="PackedHeader"/>:
+    /// where the group's spans start in this same array, how many there are, and which one is
+    /// current. The spans follow as start and end pairs, oldest first, group by group.
+    /// </para>
+    /// <para>
+    /// One array rather than a <see cref="GroupData"/> and a span array per group, because a
+    /// match pays for these whether or not anyone reads a group: three groups with one capture each
+    /// cost 240 bytes as seven objects and 88 as this one (C2, the <c>ParseLogLines</c> row).
+    /// </para>
+    /// </remarks>
+    /// <param name="groups">The state's groups.</param>
+    /// <param name="groupCount">How many to pack - upstream's <c>public_group_count</c>.</param>
+    /// <returns>The packed groups, or the shared empty array for a pattern without groups.</returns>
+    internal static int[] PackSpans(GroupData[] groups, int groupCount)
+    {
+        if (groupCount == 0)
+        {
+            return [];
+        }
+
+        int length = groupCount * _packedHeaderSize;
+        for (int g = 0; g < groupCount; g++)
+        {
+            length += 2 * groups[g].Count;
+        }
+
+        int[] packed = new int[length];
+        int at = groupCount * _packedHeaderSize;
+        for (int g = 0; g < groupCount; g++)
+        {
+            GroupData group = groups[g];
+
+            // The reader indexes the current span inside this group's own pairs, so an index past
+            // them would read the next group's span instead of failing as the old copy's array did.
+            Debug.Assert(group.Current < group.Count, "a group's current capture is one of its live captures");
+
+            int header = PackedHeader(g + 1);
+            packed[header + PackedOffset] = at;
+            packed[header + PackedCount] = group.Count;
+            packed[header + PackedCurrent] = group.Current;
+
+            foreach (GroupSpan span in group.Captures.AsSpan(0, group.Count))
+            {
+                packed[at++] = span.Start;
+                packed[at++] = span.End;
+            }
+        }
+
+        return packed;
+    }
 }
 
 /// <summary>
@@ -2380,6 +2456,32 @@ internal sealed class MatchState : IDisposable
 
         WorkCounter.GuardChecked();
         bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        NoteSecondPassGuard(guarded);
+
+        return guarded;
+    }
+
+    /// <summary>
+    /// <see cref="IsRepeatGuarded(int, int, uint)"/>, also giving the span that guards the
+    /// position, so a caller can pass over the whole span at once. <b>Not upstream</b> (C5, G2):
+    /// same answer and the same side effects, one lookup counted.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="span">The protecting span holding <paramref name="textPos"/> when guarded.</param>
+    /// <returns><see langword="true"/> if that position is guarded for that repeat.</returns>
+    internal bool IsRepeatGuarded(int index, int textPos, uint guardType, out GuardSpan span)
+    {
+        span = default;
+        if (IsFuzzy)
+        {
+            return false;
+        }
+
+        WorkCounter.GuardChecked();
+        bool guarded =
+            ActiveGuardList(index, guardType) is GuardList list && list.TryGetSpan(textPos, out span) && span.Protect;
         NoteSecondPassGuard(guarded);
 
         return guarded;

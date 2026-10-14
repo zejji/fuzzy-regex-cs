@@ -50,6 +50,7 @@ internal static class Optimiser
         // NOT UPSTREAM. Withdraw the failure memo from a pattern that can read more than the
         // position; see RepeatInfo.FailureMemo.
         KeepFailureMemosSound(pattern);
+        FindFirstIterationAtStart(pattern);
 
         // NOT UPSTREAM (D17). List the groups an empty iteration's state is keyed by.
         CollectTestedGroups(pattern);
@@ -682,6 +683,60 @@ internal static class Optimiser
 
         // Upstream frees the rest; here dropping the reference is the same act.
         _ = pattern.NodeList.RemoveAll(static node => (node.Status & NodeStatus.Used) == 0);
+    }
+
+    /// <summary>
+    /// Finds <see cref="PatternObject.FirstIterationAtStart"/>: the failure-memo repeat whose copied
+    /// first iteration is the node every attempt starts at. <b>Not an upstream pass.</b>
+    /// </summary>
+    /// <remarks>
+    /// Runs after <see cref="KeepFailureMemosSound"/>, since only a memo that survived it may skip
+    /// an attempt. The start node is compared after <see cref="SkipOneWayBranches"/> has moved it
+    /// past the one-way branches, which is how the copy's placeholder is looked through too.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    private static void FindFirstIterationAtStart(PatternObject pattern)
+    {
+        if (!pattern.KeepsFailureMemosAcrossAttempts)
+        {
+            return;
+        }
+
+        // The compiler hoists a one-character test with a step of 0 in front of a leading item
+        // (FindAnchorGuards' remarks): `(a+)+c` starts CHARACTER(step 0) - START_GROUP - ...
+        // It reads the character at the start without moving, so the copy is still entered at
+        // the attempt's start, and the attempt still fails wherever the copy does.
+        Node? start = pattern.StartNode;
+        while (start is not null && start.Step == 0 && NodeQueries.MatchesOneCharacter(start))
+        {
+            start = start.Next1.Node;
+        }
+
+        for (int index = 0; index < pattern.RepeatInfoList.Count; index++)
+        {
+            RepeatInfo info = pattern.RepeatInfoList[index];
+            if (!info.FailureMemo || info.FirstIterationStart is not Node node || (info.Status & NodeStatus.Body) == 0)
+            {
+                continue;
+            }
+
+            // The copy was built from a placeholder branch; SkipOneWayBranches steered every link
+            // past it, so look through it the same way.
+            while (node.Op == Opcode.Branch && node.Next2.Node is null && node.Next1.Node is not null)
+            {
+                node = node.Next1.Node;
+            }
+
+            // An empty copy leaves nothing in front of R itself, and then the attempt starts with
+            // R's head, whose tail can match where the body cannot.
+            bool isTheRepeat = (node.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat) && node.Values[0] == (uint)index;
+
+            if (node == start && !isTheRepeat)
+            {
+                pattern.FirstIterationAtStart = index;
+                return;
+            }
+        }
     }
 
     /// <summary>

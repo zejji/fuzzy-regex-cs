@@ -240,6 +240,19 @@ Describe 'compare-benchmarks.ps1 noise floor' {
             -Job medium 2>&1 | Out-String
         $report | Should -Match 'Floor:\s+time 1\.25x, allocation 1\.02x or 512 B'
     }
+
+    # 2026-10-14: two gate scripts passed a rooted -ArtifactsPath, which was joined onto the repo
+    # root ("...\repo\C:\Users\..."), so BenchmarkDotNet died before running and the hour-long
+    # run measured nothing. -BaselinePath already accepted a rooted path; this one must too.
+    It 'reads a rooted -ArtifactsPath as it is, not under the repository root' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
+
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Artifacts `
+            -BaselinePath $Baseline -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $report | Should -Match 'GREEN'
+    }
 }
 
 Describe 'compare-benchmarks.ps1 job recording' {

@@ -385,7 +385,7 @@ public sealed class AllocationTests
     /// and returns the call to measure. It may run more than once, each time before its own call.
     /// </param>
     /// <returns>The bytes allocated.</returns>
-    private static long AllocatedBy(Func<Action> arrange)
+    internal static long AllocatedBy(Func<Action> arrange)
     {
         long allocated = 0;
         for (int attempt = 0; attempt < 10; attempt++)

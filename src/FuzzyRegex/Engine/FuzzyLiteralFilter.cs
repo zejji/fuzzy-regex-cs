@@ -61,6 +61,18 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// A string node keeps the ASCII rule, because its values are compared a folded character at a time.
 /// </para>
 /// <para>
+/// <b>C3: a bit-parallel scan, alone or behind the pieces.</b> One forward literal of at most 64
+/// single-value ASCII units, with <c>0 &lt; k &lt; m</c>, also gets <see cref="LiteralScan"/>: Myers'
+/// bit-vector edit distance, which finds the first place a stretch within <c>k</c> edits of the
+/// literal ends, then the leftmost place one starts. Where the pieces would be shorter than
+/// <see cref="MinPieceLength"/> it is the whole filter; otherwise it reads only a window after each
+/// piece answer, from a scan's second query on (<see cref="NextStart"/>). The argument is the same as the pieces': every match is within <c>k</c> edits, so a
+/// position no such stretch starts at holds none. Partial matching is refused for the same reason
+/// as the pieces. A batch of queries that saves less than it reads pauses the scan for a while
+/// (<see cref="ScanMemory.CountScan"/>). Design and evidence:
+/// <c>docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md</c>.
+/// </para>
+/// <para>
 /// sync-divergence: upstream's <c>basic_match</c> (<c>upstream/src/_regex.c:11767-11814</c>) runs
 /// no prefilter at all under a fuzzy section / this type screens the start positions of a fuzzy
 /// literal before each attempt / a fuzzy phrase search over short records otherwise tries every
@@ -91,16 +103,44 @@ internal sealed class FuzzyLiteralFilter
     // against a no-match subject, keeping the shortest length that still wins.
     internal const int MinPieceLength = 3;
 
+    /// <summary>C3: the queries over which the scan's usefulness is judged; see <see cref="ScanMemory.CountScan"/>.</summary>
+    internal const int ScanBatch = 40;
+
+    /// <summary>C3: about what one engine attempt costs, in characters of scanning.</summary>
+    internal const int AttemptCostInCharacters = 64;
+
+    /// <summary>C3: how many queries a scan that did not pay for itself sits out.</summary>
+    internal const int ScanPauseQueries = 256;
+
+    /// <summary>
+    /// C3: how many characters the scan reads between two checks that the search's budget is not
+    /// spent. Also how far ahead it checks that the subject is ASCII.
+    /// </summary>
+    internal const int ScanChunk = 4096;
+
     /// <summary>Returned by <see cref="NextStart"/> when the subject holds no piece.</summary>
     internal const int NoMatch = -1;
 
     /// <summary>Returned by <see cref="NextStart"/> when the stretch it searched is not ASCII.</summary>
     internal const int CannotTell = -2;
 
+    /// <summary>
+    /// Returned by <see cref="NextStart"/> when the scan polled the search's budget at a chunk
+    /// boundary and found it spent: the caller answers <c>MatchStatus.Cancelled</c>.
+    /// </summary>
+    internal const int Cancelled = -3;
+
     /// <summary>A remembered piece position meaning the piece is not in the rest of the slice.</summary>
     internal const int Absent = int.MaxValue;
 
-    private FuzzyLiteralFilter(string[] pieces, int[] offsets, int maxErrors, bool ignoreCase, bool reverse)
+    private FuzzyLiteralFilter(
+        string[] pieces,
+        int[] offsets,
+        int maxErrors,
+        bool ignoreCase,
+        bool reverse,
+        LiteralScan? scan
+    )
     {
         Pieces = pieces;
         Offsets = offsets;
@@ -108,7 +148,18 @@ internal sealed class FuzzyLiteralFilter
         _comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         Reverse = reverse;
         _asciiPiece = [.. pieces.Select(static piece => Ascii.IsValid(piece))];
+        _scan = scan;
     }
+
+    /// <summary>
+    /// The literal as a bit-parallel scan (C3), or <see langword="null"/> when the literal does not
+    /// qualify: see <see cref="LiteralScan.ForLiteral"/>. With no pieces it is the whole filter; with
+    /// pieces it checks the stretch around each piece hit.
+    /// </summary>
+    private readonly LiteralScan? _scan;
+
+    /// <summary>Whether the filter carries the bit-parallel scan.</summary>
+    internal bool HasScan => _scan is not null;
 
     /// <summary>
     /// Per piece, whether it is ASCII. One that is not holds a lone character no ASCII character
@@ -139,7 +190,8 @@ internal sealed class FuzzyLiteralFilter
 
     /// <summary>
     /// Builds the filter for a compiled pattern, or returns <see langword="null"/> when the pattern
-    /// is not exactly one fuzzy section holding one ASCII literal with a small enough error budget.
+    /// is not exactly one fuzzy section holding ASCII literals with a bounded error budget, or when
+    /// neither the pieces nor the scan apply to it.
     /// </summary>
     /// <param name="pattern">The compiled pattern, after optimisation.</param>
     /// <returns>The filter, or <see langword="null"/>.</returns>
@@ -160,8 +212,36 @@ internal sealed class FuzzyLiteralFilter
         }
 
         long maxErrors = MostErrors(fuzzy.Values);
+        if (maxErrors < 0)
+        {
+            return null;
+        }
+
+        // C3: the scan stands alone where the pieces would be too short, and checks the pieces'
+        // hits where they are not. Either alone is a filter; neither is none.
+        LiteralScan? scan = LiteralScan.ForLiteral(walk, maxErrors);
+        (string[] Pieces, int[] Offsets)? cut = Cut(walk, maxErrors);
+        if (cut is not { } found)
+        {
+            return scan is null
+                ? null
+                : new FuzzyLiteralFilter([], [], (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+        }
+
+        return new FuzzyLiteralFilter(found.Pieces, found.Offsets, (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+    }
+
+    /// <summary>
+    /// Cuts every literal into <c>k + 1</c> pieces, or returns <see langword="null"/> when there
+    /// would be too many pieces in all, or any would be shorter than <see cref="MinPieceLength"/>.
+    /// </summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>, at least 0.</param>
+    /// <returns>The distinct pieces and their offsets, or <see langword="null"/>.</returns>
+    private static (string[] Pieces, int[] Offsets)? Cut(LiteralWalk walk, long maxErrors)
+    {
         int pieceCount = (int)Math.Min(maxErrors + 1, int.MaxValue);
-        if (maxErrors < 0 || (long)pieceCount * walk.Literals.Count > MaxPieces)
+        if ((long)pieceCount * walk.Literals.Count > MaxPieces)
         {
             return null;
         }
@@ -206,7 +286,7 @@ internal sealed class FuzzyLiteralFilter
             }
         }
 
-        return new FuzzyLiteralFilter([.. pieces], [.. offsets], (int)maxErrors, walk.IgnoreCase, isReverse);
+        return ([.. pieces], [.. offsets]);
     }
 
     /// <summary>
@@ -227,6 +307,26 @@ internal sealed class FuzzyLiteralFilter
 
         /// <summary>Whether the string nodes are the reverse kind; unset until one is seen.</summary>
         internal bool? Reverse { get; private set; }
+
+        /// <summary>
+        /// The case encoding of the nodes that ignore case, or <see langword="null"/> when none
+        /// does. <see cref="LiteralScan"/> builds its equalities from it.
+        /// </summary>
+        internal CaseEncoding? IgnoreCaseEncoding { get; private set; }
+
+        /// <summary>Whether two nodes that ignore case disagree on the encoding.</summary>
+        internal bool MixedEncodings { get; private set; }
+
+        private void NoteIgnoreCase(Node node)
+        {
+            IgnoreCase = true;
+            if (IgnoreCaseEncoding is CaseEncoding seen && seen != node.Encoding)
+            {
+                MixedEncodings = true;
+            }
+
+            IgnoreCaseEncoding = node.Encoding;
+        }
 
         /// <summary>
         /// Walks from <paramref name="node"/> to <c>END_FUZZY</c>, adding a literal per path. Returns
@@ -259,7 +359,7 @@ internal sealed class FuzzyLiteralFilter
                             return false;
                         }
 
-                        IgnoreCase = true;
+                        NoteIgnoreCase(run.Packed);
                         Reverse = run.Reverse;
                         values.AddUnits(run.Units, run.Reverse);
 
@@ -295,7 +395,7 @@ internal sealed class FuzzyLiteralFilter
                     case Opcode.CharacterIgn when node.Match && node.Step != 0:
                     case Opcode.StringIgn:
                     case Opcode.StringFld:
-                        IgnoreCase = true;
+                        NoteIgnoreCase(node);
                         nodeIsReverse = false;
                         break;
                     case Opcode.CharacterRev when node.Match && node.Step != 0:
@@ -305,7 +405,7 @@ internal sealed class FuzzyLiteralFilter
                     case Opcode.CharacterIgnRev when node.Match && node.Step != 0:
                     case Opcode.StringIgnRev:
                     case Opcode.StringFldRev:
-                        IgnoreCase = true;
+                        NoteIgnoreCase(node);
                         nodeIsReverse = true;
                         break;
                     default:
@@ -487,6 +587,231 @@ internal sealed class FuzzyLiteralFilter
         }
     }
 
+    /// <summary>
+    /// C3: one fuzzy literal as Myers' bit-vector edit-distance scan (JACM 46(3), 1999, in Hyyrö's
+    /// formulation) with the text start free, so that after reading <c>text[x..j)</c> it knows the
+    /// fewest edits that turn any <c>text[i..j)</c>, <c>x &lt;= i &lt;= j</c>, into the literal. One
+    /// 64-bit word per step: the literal is at most 64 units.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it only rejects.</b> A match's counted errors are edits of one unit each, aligned with
+    /// exact units in between, so the matched text is within <c>k</c> edits of the literal however
+    /// the section's constraints price or limit them (<see cref="MostErrors"/>). A position no such
+    /// stretch starts at holds no match. The converse fails (per-kind limits, costs, no insertion at
+    /// the search anchor), which costs an attempt and nothing else. It never picks a match: the
+    /// leftmost-first answer depends on the backtracking order, which no distance rule reproduces
+    /// (docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md, section 6).
+    /// </para>
+    /// <para>
+    /// <b>One unit, one value, one character.</b> Ledger entry 49's run holds an expanding
+    /// character as one unit of several values (<c>ß</c> is the unit <c>ss</c>, see
+    /// <see cref="LiteralWalk"/>), and the engine edits that unit with one error:
+    /// <c>(?fi)(?:ßx){s&lt;=1}</c> over <c>ax</c> is (0, 2) with one substitution
+    /// (<c>FullFoldFuzzyCharacterEditTests</c>). Read value by value the literal is <c>ssx</c>, two
+    /// edits from <c>ax</c>, and the match would be refused. So every unit must be one value, and the
+    /// length is counted in units. Every value must be ASCII, and so must the text the scan reads
+    /// (the class remarks): a Kelvin sign equals <c>k</c> to the engine and to no ASCII table, and an
+    /// astral character is one edit but two code units.
+    /// </para>
+    /// </remarks>
+    private sealed class LiteralScan
+    {
+        private readonly ulong[] _peq;
+        private readonly ulong[] _peqReversed;
+        private readonly ulong _high;
+
+        private LiteralScan(ulong[] peq, ulong[] peqReversed, int length, int maxErrors)
+        {
+            _peq = peq;
+            _peqReversed = peqReversed;
+            Length = length;
+            MaxErrors = maxErrors;
+            _high = 1UL << (length - 1);
+        }
+
+        /// <summary><c>m</c>: the literal's length in units, 2 to 64.</summary>
+        internal int Length { get; }
+
+        /// <summary><c>k</c>: at least 1 and less than <see cref="Length"/>.</summary>
+        internal int MaxErrors { get; }
+
+        /// <summary>
+        /// The scan for <paramref name="walk"/>'s literal, or <see langword="null"/> unless it is one
+        /// forward literal of at most 64 single-value ASCII units with <c>0 &lt; k &lt; m</c>, whose
+        /// case-insensitive nodes share one encoding that is not LOCALE.
+        /// </summary>
+        /// <param name="walk">The literals.</param>
+        /// <param name="maxErrors"><c>k</c>.</param>
+        /// <returns>The scan, or <see langword="null"/>.</returns>
+        // SHORTCUT: one forward ASCII literal of at most 64 units. Upgrades, each behind a benchmark
+        // (design note, section 7): the mirrored scan for (?r); several literals, one scan each or
+        // packed into one word; class equalities in the table; multi-word scans past 64 units.
+        internal static LiteralScan? ForLiteral(LiteralWalk walk, long maxErrors)
+        {
+            if (walk.Literals.Count != 1 || walk.Reverse != false || walk.MixedEncodings)
+            {
+                return null;
+            }
+
+            LiteralPath literal = walk.Literals[0];
+            int m = literal.Values.Count;
+
+            // k >= m: the empty stretch is already within k, so the scan could refuse nothing.
+            if (maxErrors <= 0 || maxErrors >= m || m > 64)
+            {
+                return null;
+            }
+
+            if (literal.UnitStarts.Contains(false) || literal.Values.Exists(static v => v > 0x7F))
+            {
+                return null;
+            }
+
+            CaseEncoding? encoding = walk.IgnoreCase ? walk.IgnoreCaseEncoding : null;
+            if (encoding == CaseEncoding.Locale)
+            {
+                return null;
+            }
+
+            var peq = new ulong[128];
+            var peqReversed = new ulong[128];
+            for (int i = 0; i < m; i++)
+            {
+                uint value = literal.Values[i];
+                for (uint ch = 0; ch < 128; ch++)
+                {
+                    // The engine's own equality over ASCII. Every node is compared ignoring case
+                    // when any one is, which only adds equalities, so can only lower a distance.
+                    if (ch == value || (encoding is CaseEncoding e && Matcher.SameCharIgn(e, value, ch)))
+                    {
+                        peq[ch] |= 1UL << i;
+                        peqReversed[ch] |= 1UL << (m - 1 - i);
+                    }
+                }
+            }
+
+            return new LiteralScan(peq, peqReversed, m, (int)maxErrors);
+        }
+
+        /// <summary>
+        /// The first end <c>e</c> in <c>(from, limit]</c> - <paramref name="limit"/> included - such
+        /// that some <c>text[i..e)</c> with <c>i &gt;= from</c> is within <c>k</c> edits of the literal;
+        /// or <see cref="NoMatch"/>; or <see cref="CannotTell"/> at text that is not ASCII; or
+        /// <see cref="Cancelled"/> when the search's budget is spent at a chunk boundary. A chunk
+        /// boundary is only a place to poll: no answer is ever made of one.
+        /// </summary>
+        /// <param name="text">The whole subject.</param>
+        /// <param name="from">Where stretches may start.</param>
+        /// <param name="limit">The last end to check.</param>
+        /// <param name="memory">The scan's memory, for the ASCII check.</param>
+        /// <param name="state">The search, polled at each chunk boundary; none in tests.</param>
+        /// <param name="read">Adds the characters read.</param>
+        /// <returns>An end, or one of the three codes.</returns>
+        internal int FirstEnd(
+            ReadOnlySpan<char> text,
+            int from,
+            int limit,
+            ScanMemory memory,
+            MatchState? state,
+            ref long read
+        )
+        {
+            ulong pv = ulong.MaxValue;
+            ulong mv = 0;
+            int score = Length;
+            int pos = from;
+            while (pos < limit)
+            {
+                int chunkEnd = (int)Math.Min(limit, (long)pos + ScanChunk);
+                if (!memory.IsAscii(text, pos, chunkEnd))
+                {
+                    read += pos - from;
+                    return CannotTell;
+                }
+
+                for (; pos < chunkEnd; pos++)
+                {
+                    Step(_peq[text[pos]], ref pv, ref mv, ref score);
+                    if (score <= MaxErrors)
+                    {
+                        read += pos + 1 - from;
+                        return pos + 1;
+                    }
+                }
+
+                if (pos < limit && state is not null && Matcher.SafeCheckCancel(state))
+                {
+                    read += pos - from;
+                    return Cancelled;
+                }
+            }
+
+            read += Math.Max(0, limit - from);
+            return NoMatch;
+        }
+
+        /// <summary>
+        /// The leftmost <c>s</c> in <c>[low, high)</c> such that some <c>text[s..e)</c> with
+        /// <c>e &lt;= high</c> is within <c>k</c> edits, or -1: the scan run backwards with the literal
+        /// reversed, which is how edlib finds start positions (<c>edlib.cpp:230-260</c>). The stretch
+        /// must be ASCII.
+        /// </summary>
+        /// <param name="text">The whole subject.</param>
+        /// <param name="low">The first start to consider.</param>
+        /// <param name="high">The last end to consider.</param>
+        /// <param name="read">Adds the characters read.</param>
+        /// <returns>The start, or -1.</returns>
+        internal int LeftmostStart(ReadOnlySpan<char> text, int low, int high, ref long read)
+        {
+            ulong pv = ulong.MaxValue;
+            ulong mv = 0;
+            int score = Length;
+            int leftmost = -1;
+            for (int pos = high - 1; pos >= low; pos--)
+            {
+                Step(_peqReversed[text[pos]], ref pv, ref mv, ref score);
+                if (score <= MaxErrors)
+                {
+                    leftmost = pos;
+                }
+            }
+
+            read += Math.Max(0, high - low);
+            return leftmost;
+        }
+
+        /// <summary>
+        /// One column of Myers' algorithm with a free text start: nothing is carried into the bottom
+        /// row, so the distance there stays 0. Bits at and above <see cref="Length"/> hold garbage
+        /// that never reaches the bits below, since carries and shifts only move upwards.
+        /// </summary>
+        /// <param name="eq">The table's word for the character read.</param>
+        /// <param name="pv">The column's positive vertical deltas.</param>
+        /// <param name="mv">Its negative vertical deltas.</param>
+        /// <param name="score">The distance at the literal's last unit.</param>
+        private void Step(ulong eq, ref ulong pv, ref ulong mv, ref int score)
+        {
+            ulong xv = eq | mv;
+            ulong xh = (((eq & pv) + pv) ^ pv) | eq;
+            ulong ph = mv | ~(xh | pv);
+            ulong mh = pv & xh;
+            if ((ph & _high) != 0)
+            {
+                score++;
+            }
+            else if ((mh & _high) != 0)
+            {
+                score--;
+            }
+
+            ph <<= 1;
+            mh <<= 1;
+            pv = mh | ~(xv | ph);
+            mv = ph & xv;
+        }
+    }
+
     /// <summary>A recognised ledger-49 run: see <c>LiteralWalk.ReadRun</c>.</summary>
     /// <param name="Packed">The packed <c>STRING_FLD</c> node, whose successor the walk goes on from.</param>
     /// <param name="Units">One folding per pattern character, in reading order.</param>
@@ -580,24 +905,133 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>
     /// The earliest position at or after <paramref name="textPos"/> where a forward match could
     /// start, or <see cref="NoMatch"/> when none can, or <see cref="CannotTell"/> when the stretch
-    /// this call had to search is not all ASCII. The answer depends only on the subject and the two
-    /// positions; <paramref name="memory"/> only saves searching again.
+    /// this call had to search is not all ASCII, or <see cref="Cancelled"/> when the scan found the
+    /// search's budget spent. While the scan is armed the answer depends only on the subject and the
+    /// two positions; <paramref name="memory"/> only saves searching again. A paused scan (see
+    /// <see cref="ScanMemory.ScanPaused"/>) answers with the pieces alone, which is never later.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="textPos">Where the next attempt would start.</param>
     /// <param name="sliceEnd">The end of the slice; no piece is searched for beyond it.</param>
     /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
-    /// <returns>A position, <see cref="NoMatch"/> or <see cref="CannotTell"/>.</returns>
-    internal int NextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, ScanMemory memory)
+    /// <param name="state">The search, polled for cancellation at each chunk of a scan; none in tests.</param>
+    /// <returns>A position, <see cref="NoMatch"/>, <see cref="CannotTell"/> or <see cref="Cancelled"/>.</returns>
+    internal int NextStart(
+        ReadOnlySpan<char> text,
+        int textPos,
+        int sliceEnd,
+        ScanMemory memory,
+        MatchState? state = null
+    )
     {
-        int searchedWithoutFinding(int j) => _asciiPiece[j] ? Math.Max(0, sliceEnd - textPos) : 0;
-
         // A piece remembered as absent was searched for up to the old slice end only.
         if (memory.SliceEnd != sliceEnd)
         {
             memory.From.AsSpan().Fill(int.MaxValue);
             memory.SliceEnd = sliceEnd;
         }
+
+        // Behind the pieces, the scan arms only from the scan's second query: the first piece
+        // answer is attempted unscanned. A Match that succeeds there (FuzzyShort, the usual case
+        // for a hit) then pays nothing for the scan, which measured 1.12x on that row; one that
+        // fails pays one attempt, and every later query is scanned.
+        if (_scan is null || memory.TakePausedQuery() || (Pieces.Length != 0 && !memory.ArmSecondStage()))
+        {
+            return Pieces.Length == 0 ? textPos : PiecesNextStart(text, textPos, sliceEnd, memory);
+        }
+
+        return ScanNextStart(_scan, text, textPos, sliceEnd, memory, state);
+    }
+
+    /// <summary>
+    /// C3: the earliest admissible start at or after <paramref name="textPos"/> - the leftmost
+    /// position from which some stretch of the slice is within <c>k</c> edits of the literal - found
+    /// by the pieces (if any) and the bit-parallel scan together. Every match is within <c>k</c>
+    /// edits of the literal (the class remarks), so no match starts before it.
+    /// </summary>
+    /// <remarks>
+    /// With pieces, the scan reads only a window after each piece answer <c>x</c>: up to
+    /// <c>L = x + 2(m + k)</c>, inclusive (the last end it checks is <c>L</c> itself, after reading
+    /// <c>text[L - 1]</c>). Finding no end there means no occurrence starts at or after <c>x</c> and
+    /// ends by <c>L</c>; an occurrence is at most <c>m + k</c> long, so the next can start no earlier
+    /// than <c>L - m - k + 1</c>, at least <c>m + k + 1</c> past <c>x</c>. Without pieces the window
+    /// is the rest of the slice. See docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md.
+    /// </remarks>
+    private int ScanNextStart(
+        LiteralScan scan,
+        ReadOnlySpan<char> text,
+        int textPos,
+        int sliceEnd,
+        ScanMemory memory,
+        MatchState? state
+    )
+    {
+        int m = scan.Length;
+        int k = scan.MaxErrors;
+        int firstAnswer = -1;
+        long read = 0;
+        int p = textPos;
+        int answer;
+        while (true)
+        {
+            int x = Pieces.Length == 0 ? p : PiecesNextStart(text, p, sliceEnd, memory);
+            if (x < 0)
+            {
+                answer = x;
+                break;
+            }
+
+            if (firstAnswer < 0)
+            {
+                firstAnswer = x;
+            }
+
+            int limit = Pieces.Length == 0 ? sliceEnd : (int)Math.Min(sliceEnd, (long)x + 2L * (m + k));
+            int end = scan.FirstEnd(text, x, limit, memory, state, ref read);
+            if (end is CannotTell or Cancelled)
+            {
+                answer = end;
+                break;
+            }
+
+            if (end == NoMatch)
+            {
+                if (limit >= sliceEnd)
+                {
+                    answer = NoMatch;
+                    break;
+                }
+
+                p = limit - m - k + 1;
+                continue;
+            }
+
+            // Every occurrence starting at or after x ends at or after 'end' and is at most m + k
+            // long, so none starts before end - m - k. The leftmost one starts no later than the one
+            // ending at 'end', which ends by end + 2k, so the reverse window holds it.
+            int low = Math.Max(x, end - m - k);
+            int high = (int)Math.Min(sliceEnd, (long)end + 2L * k);
+            answer = memory.IsAscii(text, low, high) ? scan.LeftmostStart(text, low, high, ref read) : low;
+            System.Diagnostics.Debug.Assert(
+                answer >= low && answer <= end,
+                "the occurrence ending at 'end' starts in the window"
+            );
+            break;
+        }
+
+        WorkCounter.Searched((int)Math.Min(read, int.MaxValue));
+        if (firstAnswer >= 0 && answer is not (CannotTell or Cancelled))
+        {
+            memory.CountScan(answer == NoMatch ? (long)sliceEnd + 1 - firstAnswer : answer - firstAnswer, read);
+        }
+
+        return answer;
+    }
+
+    /// <summary>The pieces' answer to <see cref="NextStart"/>; see there.</summary>
+    private int PiecesNextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, ScanMemory memory)
+    {
+        int searchedWithoutFinding(int j) => _asciiPiece[j] ? Math.Max(0, sliceEnd - textPos) : 0;
 
         long start = long.MaxValue;
         for (int j = 0; j < Pieces.Length; j++)
@@ -764,6 +1198,36 @@ internal sealed class FuzzyLiteralFilter
         /// </summary>
         internal int AsciiEnd { get; private set; }
 
+        /// <summary>
+        /// C3, forward: how many more queries answer without the scan before it is armed again; 0
+        /// while it is armed. See <see cref="CountScan"/>.
+        /// </summary>
+        internal int ScanPaused { get; set; }
+
+        /// <summary>
+        /// C3: whether the scan has had its first query behind the pieces, which it sits out; see
+        /// <see cref="NextStart"/>.
+        /// </summary>
+        internal bool SecondStageArmed { get; set; }
+
+        /// <summary>Arms the second stage, returning whether it already was.</summary>
+        /// <returns><see langword="true"/> from the second call after a reset.</returns>
+        internal bool ArmSecondStage()
+        {
+            bool was = SecondStageArmed;
+            SecondStageArmed = true;
+            return was;
+        }
+
+        /// <summary>C3: queries answered by the scan in the batch being judged.</summary>
+        internal int ScanQueries { get; set; }
+
+        /// <summary>C3: start positions those queries skipped beyond what the pieces skipped.</summary>
+        internal long ScanSkipped { get; set; }
+
+        /// <summary>C3: characters the scan read for those queries.</summary>
+        internal long ScanRead { get; set; }
+
         /// <summary>Forgets everything, for a scan of a new subject.</summary>
         internal void Reset()
         {
@@ -775,6 +1239,62 @@ internal sealed class FuzzyLiteralFilter
             SliceStart = -1;
             AsciiFrom = 0;
             AsciiEnd = 0;
+            ScanPaused = 0;
+            ScanQueries = 0;
+            ScanSkipped = 0;
+            ScanRead = 0;
+            SecondStageArmed = false;
+        }
+
+        /// <summary>Whether this query is one the paused scan sits out. The last one re-arms it.</summary>
+        /// <returns><see langword="true"/> while the scan is paused.</returns>
+        internal bool TakePausedQuery()
+        {
+            if (ScanPaused == 0)
+            {
+                return false;
+            }
+
+            ScanPaused--;
+            return true;
+        }
+
+        /// <summary>
+        /// Records one scan query, and at the end of each batch of <see cref="ScanBatch"/> judges
+        /// whether the scan paid for itself, counting an engine attempt it saved as
+        /// <see cref="AttemptCostInCharacters"/> characters of scanning. A batch that did not pay
+        /// pauses the scan for <see cref="ScanPauseQueries"/> queries, after which it is tried again,
+        /// because the text can change along a subject. Pausing is always sound: the pieces' answer,
+        /// or the query position itself, is never later than the scan's.
+        /// </summary>
+        /// <remarks>
+        /// aho-corasick 0.7.20 retires its prefilter for good when it skips fewer than 2 bytes a call
+        /// over 40 calls (<c>prefilter.rs:184-261</c>, MIN_SKIPS and MIN_AVG_FACTOR), which suits a
+        /// cheap verify. Here an attempt costs about 1.3 us against a query of about 30 ns (design
+        /// note, section 4), so the rule weighs the two costs instead, and re-arms.
+        /// </remarks>
+        /// <param name="skipped">Start positions the scan skipped beyond the pieces' answer.</param>
+        /// <param name="read">Characters it read.</param>
+        // SHORTCUT: AttemptCostInCharacters is judged (64, against an estimated ratio of about 800
+        // at m = 8, k = 3), not measured. The upgrade is the toy timing in the design note's section
+        // 8, and a ratio scaled by m and k if the attempt cost moves with them.
+        internal void CountScan(long skipped, long read)
+        {
+            ScanSkipped += skipped;
+            ScanRead += read;
+            if (++ScanQueries < ScanBatch)
+            {
+                return;
+            }
+
+            if (ScanSkipped * AttemptCostInCharacters < ScanRead)
+            {
+                ScanPaused = ScanPauseQueries;
+            }
+
+            ScanQueries = 0;
+            ScanSkipped = 0;
+            ScanRead = 0;
         }
 
         /// <summary>

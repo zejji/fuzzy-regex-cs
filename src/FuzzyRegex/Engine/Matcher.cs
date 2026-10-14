@@ -8155,11 +8155,13 @@ internal static class Matcher
     /// backtracking loop, on top of the <see cref="System.Diagnostics.Stopwatch"/> read that was
     /// already there. S60 added one more caller, <see cref="SimpleStringSearch"/>, on the same gate:
     /// it is a character-at-a-time loop and it can run the length of a subject. S60b added
-    /// <see cref="SearchStart"/>'s retry loop, for the same reason.
+    /// <see cref="SearchStart"/>'s retry loop, for the same reason. C3 added the fuzzy-literal scan
+    /// (<see cref="FuzzyLiteralFilter"/>), which polls once per <see cref="FuzzyLiteralFilter.ScanChunk"/>
+    /// characters, because it can read the rest of a subject in one call.
     /// <see cref="StringSearch"/> deliberately has no poll - the reasoning, and the measurement
     /// behind it, are at the sweep itself.
     /// </remarks>
-    private static bool SafeCheckCancel(MatchState state) =>
+    internal static bool SafeCheckCancel(MatchState state) =>
         state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
 
     /// <summary>
@@ -12757,6 +12759,17 @@ internal static class Matcher
         // calls skips tracking it. See PatternObject.HasGroupCalls.
         bool tracksReach = pattern.HasGroupCalls;
 
+        // NOT UPSTREAM (C5, S2d): the repeat whose copied first iteration every attempt starts
+        // with, when its body guards are kept across attempts; an attempt that starts where that
+        // body is already guarded fails before it begins (PatternObject.FirstIterationAtStart).
+        // Same conditions as the keep at the FAILURE arm's ResetGuards: a search, not partial.
+        // sync-divergence: upstream runs every attempt (_regex.c basic_match, start_match) / an
+        // attempt whose start R's body guard already holds is failed unrun, through the FAILURE
+        // entry. Re-aligning: if upstream changes how BuildRepeat copies the minimum, or what a
+        // body guard means, re-check PatternObject.FirstIterationAtStart's argument.
+        int firstIterationRepeat =
+            search && state.PartialSide == MatchState.PartialNone ? pattern.FirstIterationAtStart : -1;
+
         // NOT UPSTREAM'S: when a conditional or backreference can read a group, the captures are
         // part of what makes a call a repeat, so the call guard keys on them too.
         int readGroupCount = pattern.CallReadGroups.Length;
@@ -13004,10 +13017,17 @@ internal static class Matcher
             }
             else
             {
-                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!);
+                // C3: the filter's bit-parallel scan can read the rest of a long subject in one call,
+                // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk).
+                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!, state);
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
+                }
+
+                if (next == FuzzyLiteralFilter.Cancelled)
+                {
+                    return MatchStatus.Cancelled;
                 }
 
                 if (next == FuzzyLiteralFilter.CannotTell)
@@ -13088,6 +13108,17 @@ internal static class Matcher
                 // 'do_search_start' may have been cleared (:11847-11848).
                 doSearchStart = state.DoSearchStart && searchStartAllowed;
 
+                // NOT UPSTREAM (C5, S2d): SearchStart chose this attempt's start (MatchPos). If R's
+                // body already failed there, so does the attempt; the FAILURE entry pushed at
+                // start_match takes it to the next start, as if its first node had failed.
+                if (
+                    firstIterationRepeat >= 0
+                    && state.IsRepeatGuarded(firstIterationRepeat, state.MatchPos, NodeStatus.Body)
+                )
+                {
+                    goto backtrack;
+                }
+
                 // Upstream falls out of its 'if (search)' block here; this port says the same thing
                 // with the 'goto advance' the rest of this method already uses, which keeps the slow
                 // arm below at the indentation it has had since S07.
@@ -13117,6 +13148,15 @@ internal static class Matcher
             state.MatchPos = state.TextPos;
             state.ForkAttemptStart = state.TextPos;
             state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
+
+            // NOT UPSTREAM (C5, S2d), as after SearchStart above.
+            if (
+                firstIterationRepeat >= 0
+                && state.IsRepeatGuarded(firstIterationRepeat, state.TextPos, NodeStatus.Body)
+            )
+            {
+                goto backtrack;
+            }
 
             if (node.Op == Opcode.Success)
             {
@@ -14456,11 +14496,33 @@ internal static class Matcher
                             break;
                         }
 
-                        if (!state.IsRepeatGuarded(index, pos, NodeStatus.Tail))
+                        if (!state.IsRepeatGuarded(index, pos, NodeStatus.Tail, out GuardSpan span))
                         {
                             // It's not guarded at this position.
                             match = true;
                             break;
+                        }
+
+                        // sync-divergence: upstream asks is_repeat_guarded once per character here
+                        // (_regex.c GREEDY_REPEAT_ONE) / one lookup per guarded span. Re-aligning:
+                        // if upstream changes how guard spans merge, re-check the clamp below.
+                        // NOT UPSTREAM (C5, G2): every position of a protecting span is guarded, so
+                        // walk to its far end in one move instead of a lookup per character. The
+                        // count comes down by the characters passed (CountBetween), and a span that
+                        // reaches past the minimum, or below this repeat's start, leaves nothing to
+                        // try. CountOne has already matched every character walked over here.
+                        int far = node.Step > 0 ? span.Low : span.High;
+                        Debug.Assert(node.Step > 0 ? far <= pos : far >= pos, "G2: the span holds pos");
+                        if (far != pos)
+                        {
+                            long passed = CountBetween(state, far, pos);
+                            if (passed > count - (long)node.Values[1])
+                            {
+                                break;
+                            }
+
+                            count -= passed;
+                            pos = far;
                         }
 
                         if (count == 0)
