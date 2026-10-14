@@ -139,6 +139,7 @@ public sealed class LeadingUnitsTests
     [Arguments("(?fi)cat|dog", FuzzyRegexOptions.None)]
     [Arguments("(?ai)kit|sit", FuzzyRegexOptions.None)]
     [Arguments("(?i)(cat)|(dog)", FuzzyRegexOptions.None)]
+    [Arguments("(?ai)(c)at|cow", FuzzyRegexOptions.None)]
     [Arguments("(?i)(?:amber|copper|violet)+", FuzzyRegexOptions.None)]
     [Arguments(@"\L<w>", FuzzyRegexOptions.IgnoreCase)]
     [Arguments(@"\L<w>", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase)]

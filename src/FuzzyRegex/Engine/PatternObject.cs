@@ -1440,17 +1440,16 @@ internal sealed class PatternObject
                     // (ParseFunctions.CheckFirstset) reads nothing; it can only refuse a position.
                     // Its ignore-case forms too (D84): which characters such a check admits,
                     // under any encoding, does not matter, since the heads alone decide the
-                    // screen and the check still runs at every attempt.
+                    // screen and the check still runs at every attempt. In front of literal heads
+                    // the ignore-case check is only ever one character or a union of characters
+                    // (CheckFirstset never merges characters into a range), so only those two
+                    // forms are looked through.
                     case Opcode.Character
                     or Opcode.CharacterIgn
                     or Opcode.Range
-                    or Opcode.RangeIgn
                     or Opcode.SetDiff
-                    or Opcode.SetDiffIgn
                     or Opcode.SetInter
-                    or Opcode.SetInterIgn
                     or Opcode.SetSymDiff
-                    or Opcode.SetSymDiffIgn
                     or Opcode.SetUnion
                     or Opcode.SetUnionIgn when node.Step == 0:
                         node = node.Next1.Node;
