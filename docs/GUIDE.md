@@ -64,10 +64,12 @@ you are asking:
 
 **All of them?**
 
-`Matches` builds the whole `MatchCollection` up front; `EnumerateMatches` finds each one lazily,
-so a `foreach` that stops early - a `break`, or a LINQ `First` - never pays for subject it never
-looked at. Prefer `EnumerateMatches` unless you need `Count` or random access before the scan
-finishes.
+Both are lazy: each match is found when it is first asked for, so a `foreach` that stops early - a
+`break`, or a LINQ `First` - never pays for subject it never looked at. `Matches` returns a
+`MatchCollection`, which keeps the matches it has found, so its indexer and a second `foreach`
+cost nothing for those, and `Count` finds them all. `EnumerateMatches` keeps nothing: walking it
+again matches again. Use `Matches` when you want `Count` or random access, and `EnumerateMatches`
+for a single pass over a long or unbounded subject.
 
 **How many?**
 
@@ -370,9 +372,11 @@ call passes no per-call `timeout`. `FuzzyRegex.InfiniteMatchTimeout` is the sent
 timeout", the same role `Regex.InfiniteMatchTimeout` plays, and is what an instance's
 `MatchTimeout` reads back as when none was set.
 
-A timeout bounds each **step** of a lazy walk rather than the walk as a whole: `EnumerateMatches` and
-`EnumerateSplits` re-arm the clock for every match they produce, where `Matches` and `Split` time
-the entire scan once. See "A per-call `timeout` on every input-dependent method" in
+A timeout bounds each **step** of a lazy walk rather than the walk as a whole: `Matches`,
+`EnumerateMatches` and `EnumerateSplits` re-arm the clock for every match they produce, where
+`Split`, `Replace` and `Count` time the entire scan once. Because `Matches` finds its matches as the
+collection is read, its timeout or cancellation surfaces from `Count`, the indexer or the `foreach`,
+not from the call to `Matches`; the matches found before it stay readable. See "A per-call `timeout` on every input-dependent method" in
 `docs/COMPARISON.md` for why a simple runaway pattern such as `(a|a)*b` no longer demonstrates a
 timeout at all, now that a compile-time prefilter (`docs/plan/slices/done/`, S60) rejects it
 before matching starts.

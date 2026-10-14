@@ -105,6 +105,28 @@ in the main checkout.
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
 
+## Measured by the lazy MatchCollection (2026-10-14)
+
+`Matches()` became lazy (owner decision, DECISIONS 2026-10-14; design
+`docs/plan/2026-10-14-lazy-matches.md`). Main `fc5b190c` against perf/lazy-matches, BDN
+`--job medium`, pinned to the performance cores, same session (12:25-12:53); raw output in
+`.scratch/lazy-matches/bdn-{main,br}-{M,Ref}` of the main checkout. **Kept.**
+
+| Row | Main | Branch | Ratio | Bytes main | Bytes branch |
+|---|---|---|---|---|---|
+| MatchesFirstTwo | 37,804 us | 0.427 us | 0.00001x | 27,477,924 | 2,536 |
+| MatchesToEnd | 42,492 us | 42,330 us | 1.00x | 27,477,940 | 27,478,055 |
+| MatchesToEndDense | 2,471 us | 2,652 us | 1.07x (inside the 1.10 floor) | 2,696,416 | 2,696,592 |
+| EnumerateMatchesToEndDense | 2,382 us | 2,320 us | 0.97x | 2,515,000 | 2,515,000 |
+| EnumerateMatchesFirstTwo | 0.270 us | 0.267 us | 0.99x | 456 | 456 |
+
+BCL control rows (`ReferenceBenchmarks`, 12 rows) moved 0.97x to 1.07x, all inside the floor.
+`MatchesFirstTwo` allocates 2.5 KB rather than `EnumerateMatchesFirstTwo`'s 456 B because a
+collection read part way keeps its engine state, so the pattern's cache builds a new one for the
+next call; that is the price of exact answers (the design note says why a state per match is not).
+`MatchesToEndDense` at 1.07x is the iterator step and lock per match on the first `Count`; flat
+on the megabyte row.
+
 ## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
 
 `FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).

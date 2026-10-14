@@ -164,12 +164,15 @@ public class WorkloadBenchmarks
     [Benchmark]
     public int PartialMatch() => _partial.Match(Corpus.LongPartial, partial: true).Index;
 
-    /// <summary>The eager walk: every match of <c>\w+</c> over a megabyte, materialised.</summary>
+    /// <summary>
+    /// Every match of <c>\w+</c> over a megabyte, materialised: the collection's <c>Count</c> runs
+    /// its walk to the end.
+    /// </summary>
     /// <returns>How many there were.</returns>
     [Benchmark]
     public int MatchesToEnd() => _words.Matches(Corpus.Long).Count;
 
-    /// <summary>The eager walk over a hundred kilobytes, the twin of <see cref="EnumerateMatchesToEndDense"/>.</summary>
+    /// <summary>The collection counted over a hundred kilobytes, the twin of <see cref="EnumerateMatchesToEndDense"/>.</summary>
     /// <returns>How many there were.</returns>
     [Benchmark]
     public int MatchesToEndDense() => _words.Matches(Corpus.Dense).Count;
@@ -204,9 +207,9 @@ public class WorkloadBenchmarks
     }
 
     /// <summary>
-    /// The eager walk read two matches deep. It still costs the whole megabyte, because
-    /// <see cref="MatchCollection"/> is materialised before the caller sees an element; the pair
-    /// with <see cref="EnumerateMatchesFirstTwo"/> is what laziness buys.
+    /// The collection read two matches deep. Until 2026-10-14 this cost the whole megabyte,
+    /// because <see cref="MatchCollection"/> was materialised before the caller saw an element;
+    /// now the collection is lazy and finds two matches, like <see cref="EnumerateMatchesFirstTwo"/>.
     /// </summary>
     /// <returns>Where the second match starts.</returns>
     [Benchmark]

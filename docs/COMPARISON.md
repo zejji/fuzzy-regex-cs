@@ -31,7 +31,7 @@ Module-level functions:
 | `regex.match(pattern, string)` | `FuzzyRegex.MatchAtStart(input, pattern, options, ...)` (static) | Anchored at the start position only; see the same row. |
 | `regex.fullmatch(pattern, string)` | `FuzzyRegex.FullMatch(input, pattern, options, ...)` (static) | Requires the whole subject. |
 | `regex.findall(pattern, string)` | no equivalent | See "**There is no `findall`.**" below. |
-| `regex.finditer(pattern, string)` | `FuzzyRegex.EnumerateMatches(input, pattern, options, ...)` (static) | Lazy, like `finditer`. `FuzzyRegex.Matches` is the eager counterpart - see "**A lazy walk times each STEP...**" below. |
+| `regex.finditer(pattern, string)` | `FuzzyRegex.EnumerateMatches(input, pattern, options, ...)` (static) | Lazy, like `finditer`. `FuzzyRegex.Matches` is lazy too and keeps what it finds - see "**A lazy walk times each STEP, `Matches` included.**" below. |
 | `regex.sub(pattern, repl, string)` | `FuzzyRegex.Replace(input, pattern, replacement, options, ...)` (static) | Template language is upstream's, not `$1` - see "**Replacement templates speak upstream's language**" below. |
 | `regex.subf(pattern, format, string)` | `FuzzyRegex.ReplaceFormat(input, pattern, format, options, ...)` (static) | `str.format`-style template. |
 | `regex.subn(pattern, repl, string)` | `regex.Replace(input, replacement, count, out int replacements, ...)` (instance overloads only; no static form) | Returns the count through an `out` parameter instead of a tuple. |
@@ -87,7 +87,7 @@ itself has none:
 | `Regex.IsMatch(input)` | `FuzzyRegex.IsMatch(input)` | Same shape; also a `ReadOnlySpan<char>` overload, which copies the span into a pooled buffer where `Regex`'s reads it in place, and a `ReadOnlyMemory<char>` one, which `Regex` lacks and which reads the buffer in place. `Count` has the same two. |
 | `Regex.Match(input)` | `FuzzyRegex.Match(input)` | Same meaning (search anywhere) - see "**`Match` means upstream's `search`...**" below for why this needed no rename. |
 | `regex.Match(input).Success` / `.Value` / `.Index` / `.Length` | `match.Success` / `.Value` / `.Index` / `.Length` | Same names, inherited from `Group`/`Capture` rather than declared on `Match`. No `Match.Span`; neither engine has one. |
-| `Regex.Matches(input)` | `FuzzyRegex.Matches(input)` | The built-in's `MatchCollection` is lazy (finds the next match as it is enumerated); this port's is eager - see "**A lazy walk times each STEP, where `Matches` times the whole scan.**" below. `EnumerateMatches` is the lazy one here. |
+| `Regex.Matches(input)` | `FuzzyRegex.Matches(input)` | Lazy, as the built-in's is: each match is found the first time `Count`, the indexer or a `foreach` needs it, and kept. A timeout or cancellation surfaces from those reads, not from `Matches` - see "**A lazy walk times each STEP, `Matches` included.**" below. |
 | `Regex.EnumerateMatches(ReadOnlySpan<char>)` | `FuzzyRegex.EnumerateMatches(ReadOnlySpan<char>)` | Same shape: a `ValueMatchEnumerator` of `ValueMatch` values holding `Index` and `Length`. This port's copies the span into a pooled buffer once, at the start of the walk, where `Regex`'s reads it in place. |
 | `Regex.Split(input)` | `FuzzyRegex.Split(input)` | See "**`Split` spells "no limit" as `maxSplits = -1`**" and "**`Split` returns `string?[]` and puts `null`...**" below - both the limit convention and the null handling differ. |
 | `Regex.Replace(input, replacement)` | `FuzzyRegex.Replace(input, replacement)` | See "**`Replace`'s `count` is inverted the same way**" and "**Replacement templates speak upstream's language**" below. |
@@ -100,7 +100,7 @@ itself has none:
 | `Capture.Value`, `.Index`, `.Length` | `Capture.Value`, `.Index`, `.Length`, plus `.ValueSpan` | Same shape, with an added zero-copy `ReadOnlySpan<char>` accessor. |
 | `GroupCollection[name]`, `[number]` | `GroupCollection[name]`, `[number]` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>` as well as a list**" below: the dictionary face here is total (every group), matching .NET 5+'s own `GroupCollection`, not upstream's named-only `groupdict`. |
 | `GroupCollection.Count` | `GroupCollection.Count` | Includes group 0 on both. |
-| `MatchCollection.Count`, `[index]` | `MatchCollection.Count`, `[index]` | Same shape; see the eager/lazy note above. |
+| `MatchCollection.Count`, `[index]` | `MatchCollection.Count`, `[index]` | Same shape and the same laziness: `Count` finds every match, `[index]` finds the matches up to it. Safe to read from several threads at once, which the built-in's is not documented to be. |
 
 ## Fuzzy syntax in one page
 
@@ -679,14 +679,17 @@ Match m = FuzzyRegex.Match("abc", @"(?<a>a)(b)(?<c>c)?");
 Console.WriteLine(string.Join(",", m.Groups.Keys));   // 0,a,2,c
 ```
 
-### A lazy walk times each STEP, where `Matches` times the whole scan
+### A lazy walk times each STEP, `Matches` included
 
-`EnumerateMatches` and `EnumerateSplits` take a `timeout` like every other entry point, but each
-match is found on a fresh engine state, so the clock restarts for every step rather than covering
-the whole walk. `Matches`, by contrast, holds one state for the entire scan and so has one budget
-for it - upstream's `finditer` scanner works the same way `Matches` does here. There is no single
-printable output that shows a restarting clock; a caller who needs the walk bounded as a whole uses
-`Matches` instead of `EnumerateMatches`.
+`Matches`, `EnumerateMatches` and `EnumerateSplits` take a `timeout` like every other entry point,
+but each finds its matches as they are asked for, and the clock restarts for every match rather
+than covering the whole walk. Upstream's `finditer` scanner has one budget for the whole walk. The
+built-in `Regex` times each match of its lazy walks, its `MatchCollection` included, and this port
+does the same, because the time between two reads is the caller's. Since `Matches` became lazy
+(2026-10-14), its timeout or cancellation surfaces from `Count`, the indexer or the `foreach`, not
+from the call; the matches found before it stay readable, and later reads that need more rethrow
+the same exception. There is no single printable output that shows a restarting clock; a caller who
+needs the walk bounded as a whole times it themselves or passes a `CancellationToken`.
 
 ### `Split` returns `string?[]` and puts `null` where a capturing group did not take part
 
