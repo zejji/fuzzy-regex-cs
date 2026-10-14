@@ -41,6 +41,12 @@ internal static class ObjectGraph
         typeof(Delegate),
         typeof(Thread),
         typeof(CancellationTokenSource),
+        // D84 (2026-10-14): the BCL's SearchValues are immutable and safe to search from many
+        // threads, and some implementations cannot be walked: ProbabilisticWithAsciiCharSearchValues,
+        // which a case-insensitive named list's LeadingUnits builds, ran a walk out of memory
+        // (OutOfMemoryException in Walk) and a five-minute probe of it never finished.
+        typeof(System.Buffers.SearchValues<char>),
+        typeof(System.Buffers.SearchValues<string>),
     ];
 
     /// <summary>

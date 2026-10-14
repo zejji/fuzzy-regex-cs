@@ -1351,8 +1351,10 @@ internal sealed class PatternObject
     /// A match of <c>cat|dog</c> starts where <c>cat</c> or <c>dog</c> does, so no attempt anywhere
     /// else can succeed, and the engine still chooses the branch. The walk follows each branch to
     /// its first node, looking through capture groups, which record where they open and do not read
-    /// text, and nested branches. Every path must reach a forward literal. Anything else, such as an
-    /// empty branch, a class, a lookaround or an anchor, gives <see langword="null"/>.
+    /// text, nested branches, and the zero-width first-set check the compiler puts in front of a
+    /// branch, case-sensitive or not, which tests the character an attempt starts on and moves
+    /// nothing. Every path must reach a forward literal. Anything else, such as an empty branch, a
+    /// class, a lookaround or an anchor, gives <see langword="null"/>.
     /// </para>
     /// <para>
     /// When every literal is case-sensitive the result is the literals themselves, since a search
@@ -1436,12 +1438,21 @@ internal sealed class PatternObject
                     case Opcode.StartGroup:
                     // The zero-width first-set check the compiler puts in front of a branch
                     // (ParseFunctions.CheckFirstset) reads nothing; it can only refuse a position.
+                    // Its ignore-case forms too (D84): which characters such a check admits,
+                    // under any encoding, does not matter, since the heads alone decide the
+                    // screen and the check still runs at every attempt.
                     case Opcode.Character
+                    or Opcode.CharacterIgn
                     or Opcode.Range
+                    or Opcode.RangeIgn
                     or Opcode.SetDiff
+                    or Opcode.SetDiffIgn
                     or Opcode.SetInter
+                    or Opcode.SetInterIgn
                     or Opcode.SetSymDiff
-                    or Opcode.SetUnion when node.Step == 0:
+                    or Opcode.SetSymDiffIgn
+                    or Opcode.SetUnion
+                    or Opcode.SetUnionIgn when node.Step == 0:
                         node = node.Next1.Node;
                         continue;
                     case Opcode.Character when node.Match && node.Step != 0:

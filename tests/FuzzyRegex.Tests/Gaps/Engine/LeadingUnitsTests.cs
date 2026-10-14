@@ -2,6 +2,7 @@ using System.Buffers;
 using AwesomeAssertions;
 using AwesomeAssertions.Execution;
 using Fuzzy.Text.RegularExpressions.Engine;
+using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -50,6 +51,15 @@ public sealed class LeadingUnitsTests
     [Arguments(@"(?fi)\U0001E900x|q")]
     [Arguments("(?-i:Abc)|(?fi:ß)x|(?fi:é)")]
     [Arguments("(?fi)(?:ﬅa|ba)c|(de)")]
+    [Arguments("(?i)cat|dog")]
+    [Arguments("(?fi)cat|dog")]
+    [Arguments("(?i)kit|sit")]
+    [Arguments("(?fi)kit|sit")]
+    [Arguments("(?ai)kit|sit")]
+    [Arguments("(?i)in|on")]
+    [Arguments("(?fi)in|on")]
+    [Arguments("(?i)(?:amber|copper|violet)+")]
+    [Arguments("(?ai)straße|café")]
     public void Every_character_a_match_can_start_with_is_searched_for(string pattern)
     {
         var regex = new FuzzyRegex(pattern);
@@ -113,12 +123,51 @@ public sealed class LeadingUnitsTests
     }
 
     /// <summary>
+    /// D84: a case-insensitive alternation whose literals have no full-folding special gets a
+    /// zero-width ignore-case first-set check in front of the branch (<c>SetUnionIgn</c> with a
+    /// step of 0, <c>ParseFunctions.CheckFirstset</c>). The check reads nothing and can only refuse
+    /// a position, so the walk looks through it as it does through the case-sensitive one, and the
+    /// alternation gets its screen whether the flag is inline, an option, with or without full
+    /// case folding, or a named list.
+    /// </summary>
+    /// <param name="pattern">A case-insensitive alternation of literals.</param>
+    /// <param name="options">The options it compiles with.</param>
+    [Test]
+    [Arguments("cat|dog", FuzzyRegexOptions.IgnoreCase)]
+    [Arguments("cat|dog", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase)]
+    [Arguments("(?i)cat|dog", FuzzyRegexOptions.None)]
+    [Arguments("(?fi)cat|dog", FuzzyRegexOptions.None)]
+    [Arguments("(?ai)kit|sit", FuzzyRegexOptions.None)]
+    [Arguments("(?i)(cat)|(dog)", FuzzyRegexOptions.None)]
+    [Arguments("(?i)(?:amber|copper|violet)+", FuzzyRegexOptions.None)]
+    [Arguments(@"\L<w>", FuzzyRegexOptions.IgnoreCase)]
+    [Arguments(@"\L<w>", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase)]
+    public void A_case_insensitive_alternation_behind_a_first_set_check_gets_leading_units(
+        string pattern,
+        FuzzyRegexOptions options
+    )
+    {
+        var lists = new Dictionary<string, IReadOnlyCollection<string>>();
+        if (pattern.Contains(@"\L<w>", StringComparison.Ordinal))
+        {
+            lists["w"] = ["amber", "copper", "violet"];
+        }
+
+        PatternObject compiled = new FuzzyRegex(pattern, options, lists).PatternObject;
+
+        using (new AssertionScope())
+        {
+            compiled.StartNode!.Op.Should().BeOneOf(Opcode.SetUnionIgn, Opcode.CharacterIgn, Opcode.RangeIgn);
+            compiled.StartNode.Step.Should().Be(0);
+            compiled.LeadingUnits.Should().NotBeNull();
+        }
+    }
+
+    /// <summary>
     /// The shapes the walk refuses. A fuzzy pattern can delete or replace its first character; a
     /// reversed one reads from the other end; a lone surrogate could be found in the middle of a
     /// pair; a lookbehind or <c>\G</c> at the head is not a literal, and neither is the set that
-    /// single-character branches merge into. Under simple case folding the compiler puts an
-    /// ignore-case first-set check in front of the branch, which <c>SearchStart</c> already sweeps
-    /// for, and the walk does not look through it. LOCALE never gets here: construction rejects
+    /// single-character branches merge into. LOCALE never gets here: construction rejects
     /// every case-insensitive LOCALE node (<c>LocaleFlagTests</c>).
     /// </summary>
     /// <param name="pattern">A pattern the screen must leave alone.</param>
@@ -131,7 +180,6 @@ public sealed class LeadingUnitsTests
     [Arguments(@"(?fi)\Gbc|de")]
     [Arguments("(?fi)bc|")]
     [Arguments("(?fi)ﬅ|x")]
-    [Arguments("(?ai)straße|café")]
     public void The_walk_refuses_what_it_cannot_screen(string pattern)
     {
         PatternObject compiled = new FuzzyRegex(pattern).PatternObject;
@@ -180,6 +228,103 @@ public sealed class LeadingUnitsTests
         Match match = new FuzzyRegex(pattern).Match(subject);
 
         (match.Success ? (match.Index, match.Index + match.Length) : (-1, -1)).Should().Be((start, end));
+    }
+
+    /// <summary>
+    /// D84's shapes, every match in UTF-16 units. Each subject starts a match on a character an
+    /// ordinal ignore-case search would miss (U+212A KELVIN SIGN, U+017F LONG S, sharp s under full
+    /// folding, U+0130 for <c>i</c>), and the reversed, partial and overlapped rows check the paths
+    /// the screen is withheld from or reads differently. Version 1 is the default, so IgnoreCase
+    /// alone folds fully, as <c>regex.V1 | regex.I</c> does. The two U+0130 rows keep this port's
+    /// documented answer, not upstream's <c>0-2 6-8</c>: the Turkic pairings are not applied by
+    /// default (<c>docs/DIVERGENCES.md</c>, ledger entry 7).
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="options">The options.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Every match's span, <c>start-end</c>, space-separated.</param>
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, finditer with regex.V1 unless Version0, 2026-10-14")]
+    [Arguments("kit|sit", FuzzyRegexOptions.IgnoreCase, "aKIT ſit Sit", "1-4 5-8 9-12")]
+    [Arguments("kit|sit", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase, "aKIT ſit Sit", "1-4 5-8 9-12")]
+    [Arguments("(?i)kit|sit", FuzzyRegexOptions.None, "aKIT ſit", "1-4 5-8")]
+    [Arguments(
+        "strasse|cafe",
+        FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase,
+        "xx STRAßE CAFE straẞe",
+        "3-9 10-14 15-21"
+    )]
+    [Arguments("strasse|cafe", FuzzyRegexOptions.IgnoreCase, "xx STRAßE CAFE", "3-9 10-14")]
+    [Arguments("ssa|xyz", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase, "ßa ẞA SSA", "0-2 3-5 6-9")]
+    [Arguments("ssa|xyz", FuzzyRegexOptions.IgnoreCase, "ßa ẞA SSA", "0-2 3-5 6-9")]
+    [Arguments("ssa|xyz", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0, "ßa ẞA SSA", "6-9")]
+    [Arguments("in|on", FuzzyRegexOptions.IgnoreCase, "İn ın IN", "6-8")]
+    [Arguments("in|on", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase, "İn ın IN", "6-8")]
+    [Arguments("(?ai)kit|sit", FuzzyRegexOptions.None, "aKit KIT", "5-8")]
+    [Arguments("kit|sit", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.RightToLeft, "aKIT ſit", "5-8 1-4")]
+    public void A_case_blind_alternation_finds_every_folded_match(
+        string pattern,
+        FuzzyRegexOptions options,
+        string subject,
+        string expected
+    )
+    {
+        string spans = string.Join(
+            ' ',
+            new FuzzyRegex(pattern, options).Matches(subject).Select(static m => $"{m.Index}-{m.Index + m.Length}")
+        );
+
+        spans.Should().Be(expected);
+    }
+
+    [Test]
+    [Property(
+        "Upstream",
+        "regex 2026.9.10, 2026-10-14: finditer(r'\\L<w>', 'a\\u212aIT \\u017fIT dog', I, w=[kit, sit, dog]) -> (1, 4), (5, 8), (9, 12); "
+            + "finditer(r'\\L<w>', 'STRAßE strasse', I | F, w=[strasse, cafe]) -> (0, 6), (7, 14)"
+    )]
+    public void A_case_blind_named_list_finds_every_folded_match()
+    {
+        var simple = new Dictionary<string, IReadOnlyCollection<string>> { ["w"] = ["kit", "sit", "dog"] };
+        var full = new Dictionary<string, IReadOnlyCollection<string>> { ["w"] = ["strasse", "cafe"] };
+
+        using (new AssertionScope())
+        {
+            new FuzzyRegex(@"\L<w>", FuzzyRegexOptions.IgnoreCase, simple)
+                .Matches("aKIT ſIT dog")
+                .Select(static m => (m.Index, m.Index + m.Length))
+                .Should()
+                .Equal((1, 4), (5, 8), (9, 12));
+            new FuzzyRegex(@"\L<w>", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase, full)
+                .Matches("STRAßE strasse")
+                .Select(static m => (m.Index, m.Index + m.Length))
+                .Should()
+                .Equal((0, 6), (7, 14));
+        }
+    }
+
+    [Test]
+    [Property(
+        "Upstream",
+        "regex 2026.9.10, 2026-10-14: search('cat|dog', 'xxDO', I, partial=True) -> (2, 4) partial; "
+            + "search('kit|sit', 'xx\\u212a', I, partial=True) -> (2, 3) partial; "
+            + "finditer('aba|bab', 'ABABA', I, overlapped=True) -> (0, 3), (1, 4), (2, 5)"
+    )]
+    public void A_case_blind_alternation_keeps_its_partial_and_overlapped_answers()
+    {
+        Match dog = new FuzzyRegex("cat|dog", FuzzyRegexOptions.IgnoreCase).Match("xxDO", partial: true);
+        Match kelvin = new FuzzyRegex("kit|sit", FuzzyRegexOptions.IgnoreCase).Match("xxK", partial: true);
+
+        using (new AssertionScope())
+        {
+            (dog.Index, dog.Length, dog.PartialMatch).Should().Be((2, 2, true));
+            (kelvin.Index, kelvin.Length, kelvin.PartialMatch).Should().Be((2, 1, true));
+            new FuzzyRegex("aba|bab", FuzzyRegexOptions.IgnoreCase)
+                .Matches("ABABA", overlapped: true)
+                .Select(static m => (m.Index, m.Index + m.Length))
+                .Should()
+                .Equal((0, 3), (1, 4), (2, 5));
+        }
     }
 
     [Test]

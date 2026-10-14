@@ -137,6 +137,30 @@ so the build is ruled out. The suspect is code generation around `NextStart`, wh
 one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
 `NextStart` bodies.
 
+## D84, the ignore-case first-set look-through (2026-10-14, in progress)
+
+Option A of `docs/plan/2026-10-14-multi-string-search-design.md`, on `fix/d84-ignorecase-screen`.
+`FindLeadingStrings` now looks through the zero-width ignore-case first-set check
+(`SetUnionIgn`, `CharacterIgn` and kin with step 0), so `cat|dog` under IgnoreCase gets
+`LeadingUnits`. Logs are in the main checkout's `.scratch/d84/`.
+
+**State at the 15:40 stop.** Done: the new tests were red before the fix (`red2.log`, 18 of 90
+failed, all of them new rows) and green after (`green2.log`, 90 of 90). `ops.txt` shows which
+start node each shape compiles to: `(?ai)(c)at|cow` is the only probed shape with a step-0
+`CharacterIgn`, and no probed shape had a step-0 `RangeIgn`. Owed: the ratchet is red on
+`ThreadSafetyTests` (see below), so nothing has a green commit yet; the differential against main
+over `.scratch/s62/rows-c`/`rows-d` and `.scratch/d84/rows-d84.jsonl` (80,000 generated
+case-insensitive alternation rows, `gen.py`); the rule-11 counters (`count/`); oracle seeds 7, 4242
+and 20260927; AOT tests and smoke; doc examples; BDN medium A/B against main on ManyInputs (with the
+new `CaseBlindAlternation` row) and Reference (the BCL controls).
+
+**Open: ThreadSafetyTests runs out of memory.** Three of its walks
+(`Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted` and two more) throw
+`OutOfMemoryException` in `ObjectGraph.Walk` on this branch and pass on main
+(`diag-br-ThreadSafetyTests.log`, `diag-main-ThreadSafetyTests.log`). The likely cause is the
+named-lists family (`\L<words>` with IgnoreCase), which now carries a `SearchValues<char>` whose
+internals the walk descends into; `sv/sv.cs` walks that object the same way to find out.
+
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
 S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and
