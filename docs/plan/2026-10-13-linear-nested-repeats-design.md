@@ -1,8 +1,8 @@
 # Nested repeats in near-linear time, and the memo extensions
 
-Date: 2026-10-13. Status: S2d and G2 written (amendment 1, after a blind review), not yet built
-or measured; the rest is design. Branch `perf/c5-nested` from main at a3d79986. No build, test or
-benchmark has run (the test lock was held all night); the gates are one locked script,
+Date: 2026-10-13. Status: S2d and G2 built and measured (amendment 1, after a blind review; numbers
+under "Measured"); the rest is design. Branch `perf/c5-nested` from main at a3d79986. Sections 1 to
+4 were written before anything ran and are kept as written; the gates are one locked script,
 `.claude/worktrees/c5-nested/.scratch/c5/gates.sh`. Every claim about our engine comes from reading the code (file:line below); every claim
 about Python `regex` comes from regex 2026.9.10 on the owner's laptop, run on 2026-10-13, with the
 output quoted. Estimates are labelled as estimates. Section 4 lists the experiments that settle them.
@@ -527,12 +527,21 @@ GREEDY_REPEAT 1 INF / BRANCH CHARACTER 'a' OR CHARACTER 'a'`), so that row is no
 
 ## Amendment 1: what was written (2026-10-13, after the blind review)
 
-S2d and G2 as described above, with the review's fixes; not built, no test run (lock queue full).
+S2d and G2 as described above, with the review's fixes.
 
 - `NodeCompiler.BuildRepeat`: records the one copy's start in `RepeatInfo.FirstIterationStart`.
 - `Optimiser.FindFirstIterationAtStart` (after `KeepFailureMemosSound`): sets
   `PatternObject.FirstIterationAtStart` when that start, looked through one-way branches, is the
-  pattern's start node and is not R itself (an empty copy).
+  pattern's start node and is not R itself (an empty copy). **The start node is compared after
+  stepping over any one-character test with a step of 0**: the compiler hoists one in front of a
+  leading item, so `(a+)+c` starts `CHARACTER(step 0) - START_GROUP - ...` (the remarks on
+  `Optimiser.FindAnchorGuards`). The first build compared the raw start node, so S2d never fired and
+  both step bounds stayed red; a reflection probe showed the hoisted `Character` in front of the
+  copy's `StartGroup`. Stepping over it is sound: the test reads the character at the start without
+  moving, so an attempt that passes it still enters the copy at its start.
+- The two new fields are allowlisted in `ThreadSafetyTests` (compile-time writes only), as
+  `RepeatInfo.FailureMemo` and `KeepsFailureMemosAcrossAttempts` are; they are written by optimiser
+  passes after construction, so they cannot be `readonly`.
 - `Matcher.BasicMatch`: the guarded-start skip after `SearchStart` and at `next_match_2`, by
   `goto backtrack`.
 - `GuardList.TryGetSpan`, `MatchState.IsRepeatGuarded(..., out GuardSpan)`, and the clamped jump in
@@ -546,6 +555,17 @@ S2d and G2 as described above, with the review's fixes; not built, no test run (
   before and after, the ratchet, a differential of 110,000 rows against a3d79986 (60,000 biased to
   patterns that start with a nested repeat), the oracle at seeds 7, 4242 and 20260927, and pinned
   BenchmarkDotNet Workload against the base.
+
+### Measured (2026-10-14, gates.sh)
+
+- Debug steps for the whole search at n = 400 (E1, `.scratch/c5/gc-*.txt`): `(a+)+c` 407,784 to
+  7,188; later starts of `(x+x+)+y` 584 to 12 steps each at n = 100; `(\w+\s?)+$` 19 to 0 per later
+  start. `(?:(?:a|a)+)+$` unchanged (attempt 0, as predicted).
+- BenchmarkDotNet `--job medium`, pinned, against a3d79986: PathologicalNestedRepeat 0.07x,
+  PathologicalWordsToEnd 0.37x, PathologicalPrefixBranches 0.53x, PathologicalSameBranches 0.58x,
+  nothing slower beyond the noise floor.
+- Differential: 105,002 rows identical to a3d79986. The single-process Stopwatch probe (`time.cs`)
+  was too noisy to quote (non-monotonic in n); BenchmarkDotNet is the record.
 
 ## Could not verify
 

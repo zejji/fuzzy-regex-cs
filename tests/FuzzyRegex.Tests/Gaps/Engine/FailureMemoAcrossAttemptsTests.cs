@@ -121,6 +121,11 @@ public sealed class FailureMemoAcrossAttemptsTests
     [Arguments(@"(?:a|a)+\Kc", "aaac", 3, 4)]
     [Arguments(@"(?r)c(?:a|a)+", "bcaab", 1, 4)]
     [Arguments(@"(a+)+b", "aaaab", 0, 5)]
+    // C5: the copy starts with a single-character repeat, so the FAILURE arm's leading-repeat skip
+    // runs after a skipped start as well.
+    [Arguments("(?:a*b)+c", "abaabxaabc", 6, 10)]
+    [Arguments("(?:a*b)+c", "babbc", 0, 5)]
+    [Arguments("(?:a?b?)+c", "abxabc", 3, 6)]
     public void A_search_that_keeps_the_memo_gives_upstreams_answer(string pattern, string subject, int start, int end)
     {
         Match m = FuzzyRegex.Match(subject, pattern);
@@ -137,6 +142,9 @@ public sealed class FailureMemoAcrossAttemptsTests
     [Arguments(@"(?r)(?:a|a)*(?<=b)", "baa", false, "1,1")]
     [Arguments(@"(?:a|a)+c", "aacaac", true, "0,3;1,3;3,6;4,6")]
     [Arguments(@"(?r)c(?:a|a)+", "caacaa", true, "3,6;3,5;0,3;0,2")]
+    // C5: patterns that start with a copied first iteration.
+    [Arguments("(a*)+", "aab", false, "0,2;2,2;3,3")]
+    [Arguments("(?:a+)+c", "aacaac", true, "0,3;1,3;3,6;4,6")]
     public void Matches_that_keep_the_memo_give_upstreams_answers(
         string pattern,
         string subject,
@@ -155,5 +163,109 @@ public sealed class FailureMemoAcrossAttemptsTests
         Match m = new FuzzyRegex("(?:a|a)+cd").Match("aacaac", partial: true);
 
         (m.Index, m.Index + m.Length, m.PartialMatch).Should().Be((3, 6, true));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // C5: the copied first iteration (S2d) and the guarded-span jump (G2).
+    // docs/plan/2026-10-13-linear-nested-repeats-design.md
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// S2d. <c>(a+)+c</c> over a run of <c>a</c>s: attempt 0 leaves R's body guarded at every
+    /// position, and every later attempt starts with the copy of R's first iteration, so it is
+    /// failed before it starts. Without that, each later attempt walks the run again through the
+    /// copy, a step per character, and the steps grow fourfold when the run doubles.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(a+)+c", "a", "bc")]
+    [Arguments("(x+x+)+y", "x", "z")]
+    public void A_search_skips_the_starts_the_first_iteration_already_failed_from(
+        string pattern,
+        string unit,
+        string tail
+    )
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+
+        long Steps(int run)
+        {
+            string subject = string.Concat(Enumerable.Repeat(unit, run)) + tail;
+            long before = WorkCounter.Steps;
+            regex.IsMatch(subject).Should().BeFalse();
+            return WorkCounter.Steps - before;
+        }
+
+        long small = Steps(200);
+        long large = Steps(400);
+        EngineWork.SkipUnlessCounting();
+
+        ((double)large / small).Should().BeLessThan(2.6, "the steps of a linear search double when the run doubles");
+    }
+
+    /// <summary>
+    /// G2. <c>\A(a+)+c</c> makes one attempt. Each entry into R's body walks the inner <c>a+</c>
+    /// back over positions the earlier entries guarded; one span holds them all, so the walk is
+    /// one lookup per entry rather than one per character, and the lookups double, not quadruple,
+    /// when the run doubles.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_repeat_walks_back_over_a_guarded_span_in_one_move()
+    {
+        var regex = new FuzzyRegex(@"\A(a+)+c", FuzzyRegexOptions.None, EngineWork.HangGuard);
+
+        long Lookups(int run)
+        {
+            string subject = new string('a', run) + "bc";
+            long before = WorkCounter.GuardChecks;
+            regex.IsMatch(subject).Should().BeFalse();
+            return WorkCounter.GuardChecks - before;
+        }
+
+        long small = Lookups(200);
+        long large = Lookups(400);
+        EngineWork.SkipUnlessCounting();
+
+        ((double)large / small).Should().BeLessThan(2.6, "one lookup per entry into the body is linear in the run");
+    }
+
+    [Test]
+    // The copy is the attempt's first node; R's body guards from earlier starts decide later ones.
+    [Arguments("(a+)+c", "aaabaac", 0, 4, 7, "aa")]
+    [Arguments("(a+)+c", "aaabaac", 1, 4, 7, "aa")]
+    // An empty first iteration: the copy at 3 matches empty and R's body runs at 3 again.
+    [Arguments("(a*)+c", "aabc", 0, 3, 4, ",")]
+    // Two copies: the pattern starts with the first, which is not R's first iteration.
+    [Arguments("(a+){2,}c", "aaxaaac", 0, 3, 7, "aa,a")]
+    [Arguments("(a+)+?c", "aaxaac", 0, 3, 6, "aa")]
+    [Arguments("(?r)c(a+)+", "xcaaba", 0, 1, 4, "aa")]
+    [Arguments("(x+x+)+y", "xxxzxxxy", 0, 4, 8, "xxx")]
+    [Arguments(@"(\w+\s?)+$", "ab cd!ef gh", 0, 6, 11, "ef ,gh")]
+    // A surrogate pair per character: guards two units apart never merge into one span.
+    [Arguments("(\U0001F600+)+c", "\U0001F600\U0001F600b\U0001F600c", 0, 5, 8, "\U0001F600")]
+    public void A_search_that_starts_with_a_first_iteration_gives_upstreams_answer(
+        string pattern,
+        string subject,
+        int beginning,
+        int start,
+        int end,
+        string captures
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, beginning);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        string.Join(',', m.Groups[1].Captures.Select(static c => c.Value)).Should().Be(captures);
+    }
+
+    [Test]
+    public void A_partial_search_that_starts_with_a_first_iteration_gives_upstreams_answer()
+    {
+        // regex.search('(a+)+c', 'aaab', partial=True): (4, 4), partial. A partial call keeps no
+        // guards across starts, so it skips none.
+        Match m = new FuzzyRegex("(a+)+c").Match("aaab", partial: true);
+
+        (m.Index, m.Index + m.Length, m.PartialMatch).Should().Be((4, 4, true));
     }
 }

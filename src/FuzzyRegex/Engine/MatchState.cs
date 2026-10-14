@@ -2363,6 +2363,32 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
+    /// <see cref="IsRepeatGuarded(int, int, uint)"/>, also giving the span that guards the
+    /// position, so a caller can pass over the whole span at once. <b>Not upstream</b> (C5, G2):
+    /// same answer and the same side effects, one lookup counted.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="span">The protecting span holding <paramref name="textPos"/> when guarded.</param>
+    /// <returns><see langword="true"/> if that position is guarded for that repeat.</returns>
+    internal bool IsRepeatGuarded(int index, int textPos, uint guardType, out GuardSpan span)
+    {
+        span = default;
+        if (IsFuzzy)
+        {
+            return false;
+        }
+
+        WorkCounter.GuardChecked();
+        bool guarded =
+            ActiveGuardList(index, guardType) is GuardList list && list.TryGetSpan(textPos, out span) && span.Protect;
+        NoteSecondPassGuard(guarded);
+
+        return guarded;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 build chunk 9 (rule 11): counts a guard that held in a partial call's
     /// second pass, which the failure memo there makes possible for memo repeats.
     /// </summary>

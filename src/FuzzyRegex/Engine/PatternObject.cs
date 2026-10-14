@@ -110,6 +110,15 @@ internal sealed class RepeatInfo
     /// </para>
     /// </remarks>
     internal bool FailureMemo;
+
+    /// <summary>
+    /// Where the copy of this repeat's first iteration starts, for a failure-memo repeat whose
+    /// minimum was 1: the placeholder node <c>NodeCompiler.BuildRepeat</c> built the copy from, so
+    /// a one-way branch that <c>Optimiser.FindFirstIterationAtStart</c> looks through. Otherwise
+    /// <see langword="null"/>. <b>Not upstream</b> (C5, S2d); see
+    /// <see cref="PatternObject.FirstIterationAtStart"/>.
+    /// </summary>
+    internal Node? FirstIterationStart;
 }
 
 /// <summary>
@@ -582,6 +591,28 @@ internal sealed class PatternObject
     /// <c>docs/plan/2026-10-11-memo-option-b.md</c> gives the argument row by row.
     /// </remarks>
     internal bool KeepsFailureMemosAcrossAttempts;
+
+    /// <summary>
+    /// The index of the failure-memo repeat whose copied first iteration is where every attempt
+    /// starts, or -1. <b>This port's own field</b> (C5, S2d), written by
+    /// <c>Optimiser.FindFirstIterationAtStart</c> only when
+    /// <see cref="KeepsFailureMemosAcrossAttempts"/> holds.
+    /// </summary>
+    /// <remarks>
+    /// <c>(a+)+c</c> compiles as <c>(a+)(a+)*c</c>: the compiler copies the first iteration out of
+    /// the repeat R (<c>NodeCompiler.BuildRepeat</c>), so an attempt at s enters the copy at s, and
+    /// the copy is not a memo repeat. But the copy at s can match only if R's body at s can: what
+    /// follows the copy is R with a count of 0, no maximum and a minimum of 0, which offers an
+    /// iteration and then the tail, exactly what <c>END_GREEDY_REPEAT</c> offers after R's body,
+    /// plus, after an empty copy, R's body at s once more, which fails too. So once R's body is
+    /// guarded at s, the attempt at s cannot match, and <c>Matcher.BasicMatch</c> fails it before
+    /// it starts. The guard was written in an earlier attempt of the same search, and holds there
+    /// for the reasons <see cref="KeepsFailureMemosAcrossAttempts"/> gives; a partial call does not
+    /// keep the guards and does not skip. That makes the later attempts of <c>(a+)+c</c> one
+    /// lookup each, and <c>(x+x+)+y</c> quadratic rather than cubic.
+    /// <c>docs/plan/2026-10-13-linear-nested-repeats-design.md</c>, option S2d.
+    /// </remarks>
+    internal int FirstIterationAtStart = -1;
 
     /// <summary>
     /// The private numbers of the groups a backreference or a conditional tests

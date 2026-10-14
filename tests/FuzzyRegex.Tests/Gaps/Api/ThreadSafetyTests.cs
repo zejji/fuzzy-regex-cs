@@ -753,6 +753,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.KeepInSubmatch",
             // Option B: written by Optimiser.KeepFailureMemosSound inside Compile.
             "PatternObject.KeepsFailureMemosAcrossAttempts",
+            // C5 (S2d): written once by Optimiser.FindFirstIterationAtStart inside Compile, after
+            // KeepFailureMemosSound; read by Matcher.BasicMatch, never written by matching.
+            "PatternObject.FirstIterationAtStart",
             // D17 added TestedGroups, written by Optimiser.CollectTestedGroups inside Compile.
             "PatternObject.TestedGroups",
             // And LargestFuzzyLimit, written by Optimiser.FindFuzzyLimit inside Compile.
@@ -970,5 +973,8 @@ public sealed class ThreadSafetyTests
             // Set by NodeCompiler.BuildRepeat and withdrawn by Optimiser.KeepFailureMemosSound, both
             // inside Compile. Read by MatchState.KeepsFailureMemo, never written by matching.
             "RepeatInfo.FailureMemo",
+            // C5 (S2d): written once by NodeCompiler.BuildRepeat inside Compile and read only by
+            // Optimiser.FindFirstIterationAtStart, also inside Compile; matching never touches it.
+            "RepeatInfo.FirstIterationStart",
         };
 }
