@@ -94,9 +94,53 @@ static string Describe(Match m)
         + $" d:{string.Join(",", changes.Deletions)}{partialMark}{groups}";
 }
 
-static string DescribeAll(MatchCollection matches) =>
-    matches.Count == 0 ? "[]" : string.Join(" | ", matches.Select(Describe));
+// The collection is lazy (2026-10-14), so how it is read decides which path finds the matches.
+// Rows take turns: enumeration first, the indexer first, or Count first; then the other two must
+// agree with the first, and a row where they do not says so instead of answering.
+static string DescribeAll(MatchCollection matches)
+{
+    List<string> found = [];
+    switch (Interlocked.Increment(ref Order.Next) % 3)
+    {
+        case 0:
+            found.AddRange(matches.Select(Describe));
+            break;
+        case 1:
+            for (bool more = true; more; )
+            {
+                try
+                {
+                    found.Add(Describe(matches[found.Count]));
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    more = false;
+                }
+            }
+
+            break;
+        default:
+            found.AddRange(Enumerable.Range(0, matches.Count).Select(i => Describe(matches[i])));
+            break;
+    }
+
+    bool agree =
+        matches.Count == found.Count
+        && matches.Select(Describe).SequenceEqual(found)
+        && Enumerable.Range(0, found.Count).All(i => Describe(matches[i]) == found[i]);
+
+    return !agree ? "COLLECTION READS DISAGREE"
+        : found.Count == 0 ? "[]"
+        : string.Join(" | ", found);
+}
 
 // A JSON string literal without the reflection-based serializer, so the probe stays trim-safe. The
 // relaxed encoder keeps < > + readable; the output goes to a terminal, never into HTML.
 static string Quote(string s) => "\"" + JsonEncodedText.Encode(s, JavaScriptEncoder.UnsafeRelaxedJsonEscaping) + "\"";
+
+/// <summary>Which way the next scan's collection is read first.</summary>
+internal static class Order
+{
+    /// <summary>A counter, so successive rows take each order in turn.</summary>
+    internal static int Next;
+}

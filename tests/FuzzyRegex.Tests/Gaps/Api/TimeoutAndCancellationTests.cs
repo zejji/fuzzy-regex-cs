@@ -90,7 +90,8 @@ public sealed class TimeoutAndCancellationTests
                 _ = pattern.FullMatch(input, timeout: timeout);
                 break;
             case nameof(FuzzyRegex.Matches):
-                _ = pattern.Matches(input, timeout: timeout);
+                // Read, because a lazy collection does its matching when it is read (2026-10-14).
+                _ = pattern.Matches(input, timeout: timeout).Count;
                 break;
             case nameof(FuzzyRegex.Count):
                 _ = pattern.Count(input, timeout: timeout);
@@ -169,7 +170,7 @@ public sealed class TimeoutAndCancellationTests
                 _ = pattern.FullMatch(input, cancellationToken: token);
                 break;
             case nameof(FuzzyRegex.Matches):
-                _ = pattern.Matches(input, cancellationToken: token);
+                _ = pattern.Matches(input, cancellationToken: token).Count;
                 break;
             case nameof(FuzzyRegex.Count):
                 _ = pattern.Count(input, cancellationToken: token);
@@ -318,6 +319,7 @@ public sealed class TimeoutAndCancellationTests
     [Test]
     [Arguments(nameof(FuzzyRegex.EnumerateMatches))]
     [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
+    [Arguments(nameof(FuzzyRegex.Matches))]
     public void A_lazy_walk_does_not_charge_the_callers_time_between_steps_to_its_budget(string method)
     {
         // S61 moved the lazy walks onto one state for the whole walk, and a state carries one
@@ -332,9 +334,14 @@ public sealed class TimeoutAndCancellationTests
         // walk charging them to itself could not survive.
         FuzzyRegex pattern = new(@"\w+");
         TimeSpan budget = TimeSpan.FromMilliseconds(500);
-        IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
-            ? pattern.EnumerateMatches("a b c d", timeout: budget)
-            : pattern.EnumerateSplits("a b c d", timeout: budget);
+        // Matches since 2026-10-14, when its collection became lazy: each match is found as the
+        // foreach asks for it, so it has to restart the clock just as the other two do.
+        IEnumerable<object?> walk = method switch
+        {
+            nameof(FuzzyRegex.EnumerateMatches) => pattern.EnumerateMatches("a b c d", timeout: budget),
+            nameof(FuzzyRegex.Matches) => pattern.Matches("a b c d", timeout: budget),
+            _ => pattern.EnumerateSplits("a b c d", timeout: budget),
+        };
 
         int steps = 0;
         Action pull = () =>
@@ -387,7 +394,7 @@ public sealed class TimeoutAndCancellationTests
         Action matchAtStart = static () => FuzzyRegex.MatchAtStart(_slowSubject, _slowPattern, timeout: _shortTimeout);
         Action fullMatch = static () => FuzzyRegex.FullMatch(_slowSubject, _slowPattern, timeout: _shortTimeout);
         Action isMatch = static () => FuzzyRegex.IsMatch(_slowSubject, _slowPattern, timeout: _shortTimeout);
-        Action matches = static () => FuzzyRegex.Matches(_slowSubject, _slowPattern, timeout: _shortTimeout);
+        Action matches = static () => _ = FuzzyRegex.Matches(_slowSubject, _slowPattern, timeout: _shortTimeout).Count;
         Action count = static () => FuzzyRegex.Count(_slowSubject, _slowPattern, timeout: _shortTimeout);
         Action replace = static () => FuzzyRegex.Replace(_slowSubject, _slowPattern, "x", timeout: _shortTimeout);
         Action replaceEvaluator = static () =>

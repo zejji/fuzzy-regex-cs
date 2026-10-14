@@ -48,50 +48,9 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 internal static class Iteration
 {
     /// <summary>
-    /// Every match in the given part of the subject, leftmost first. Upstream <c>finditer</c>.
-    /// </summary>
-    /// <param name="regex">Upstream's <c>self</c>: the pattern being scanned with.</param>
-    /// <param name="input">The subject.</param>
-    /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
-    /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
-    /// <param name="overlapped">Whether matches may overlap.</param>
-    /// <param name="partial">Upstream's <c>partial</c>, which the scanner takes (<c>:21089</c>).</param>
-    /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
-    /// <returns>The matches.</returns>
-    internal static MatchList FindAll(
-        FuzzyRegex regex,
-        string input,
-        int start,
-        int end,
-        bool overlapped,
-        bool partial,
-        MatchLimits limits
-    )
-    {
-        MatchList matches = [];
-
-        // pattern_scanner (:21122): "The MatchObject, and therefore repeated captures, will be
-        // visible." pattern_findall passes FALSE there because it never builds one; this always
-        // does, so it is the scanner's argument that applies.
-        Scan(
-            regex,
-            input.AsMemory(),
-            start,
-            end,
-            overlapped,
-            partial,
-            visibleCaptures: true,
-            onMatch: (state, status) => matches.Add(regex.NewMatch(state, input, status)),
-            limits
-        );
-
-        return matches;
-    }
-
-    /// <summary>
     /// How many matches the given part of the subject holds. No upstream counterpart - upstream
     /// spells this <c>len(finditer(...))</c> - so this is <see cref="Scan"/> with nothing built per
-    /// match, and it counts what <see cref="FindAll"/> returns.
+    /// match, and it counts what <see cref="Enumerate"/> yields.
     /// </summary>
     /// <param name="regex">The pattern being scanned with.</param>
     /// <param name="input">The subject.</param>
@@ -112,12 +71,12 @@ internal static class Iteration
         int end,
         bool overlapped,
         MatchLimits limits
-    ) => Scan(regex, input, start, end, overlapped, partial: false, visibleCaptures: false, onMatch: null, limits);
+    ) => Scan(regex, input, start, end, overlapped, partial: false, visibleCaptures: false, limits);
 
     /// <summary>
     /// The scan itself: <c>scanner_search_or_match</c> (<c>upstream/src/_regex.c</c> line 20874)
-    /// driven to exhaustion, with <paramref name="onMatch"/> standing in for what the caller of
-    /// <c>finditer</c> does with each match.
+    /// driven to exhaustion, counting the matches rather than building them. <see cref="Enumerate"/>
+    /// is the same loop yielding each match.
     /// </summary>
     /// <param name="regex">The pattern being scanned with.</param>
     /// <param name="input">The subject.</param>
@@ -126,7 +85,6 @@ internal static class Iteration
     /// <param name="overlapped">Whether matches may overlap.</param>
     /// <param name="partial">Whether to report a trailing partial match.</param>
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
-    /// <param name="onMatch">Called once per match, with the state holding it and its status.</param>
     /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
     /// <returns>How many matches there were.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
@@ -142,7 +100,6 @@ internal static class Iteration
         bool overlapped,
         bool partial,
         bool visibleCaptures,
-        Action<MatchState, int>? onMatch,
         MatchLimits limits
     )
     {
@@ -180,7 +137,6 @@ internal static class Iteration
             }
 
             count++;
-            onMatch?.Invoke(state, status);
 
             if (status == MatchStatus.Partial)
             {
@@ -332,9 +288,10 @@ internal static class Iteration
     }
 
     /// <summary>
-    /// Every match in the given part of the subject, produced one at a time. The lazy twin of
-    /// <see cref="FindAll"/>, and what upstream's <c>finditer</c> is - a scanner the caller pulls
-    /// from rather than a list.
+    /// Every match in the given part of the subject, produced one at a time: what upstream's
+    /// <c>finditer</c> is, a scanner the caller pulls from rather than a list. Behind both
+    /// <see cref="FuzzyRegex.EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// and, since 2026-10-14, the lazy <see cref="MatchCollection"/>.
     /// </summary>
     /// <param name="regex">The pattern being scanned with.</param>
     /// <param name="input">The subject.</param>
@@ -350,7 +307,7 @@ internal static class Iteration
     /// <b>One <see cref="MatchState"/> for the whole walk</b>, exactly as <see cref="Scan"/> and
     /// upstream's <c>Scanner_Type</c> keep one. S61 moved it here from one state per step, which
     /// cost a vectorised pass over the subject per match and made a walk to the end quadratic (S54
-    /// measured 12,643 ms for a 1 MB walk that <see cref="FindAll"/> does in 111 ms). The state's
+    /// measured 12,643 ms for a 1 MB walk that the eager scan did in 111 ms). The state's
     /// rented buffers are held across each <c>yield return</c> and handed back by the <c>using</c>,
     /// which runs when the walk ends and also when the caller's <c>foreach</c> breaks, because
     /// breaking disposes the enumerator. <c>PoolDisciplineTests</c> proves both halves against a
@@ -361,9 +318,10 @@ internal static class Iteration
     /// match. A walk's time between two steps belongs to the caller, who may do anything with a
     /// match before asking for the next, so a clock that ran across a <c>yield return</c> would
     /// time out a walk for work it did not do. The built-in <c>Regex</c> draws the same line: its
-    /// lazy walks time each match (<c>tools/probes/bcl-lazy-walk-timeout.cs</c>). <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
-    /// times the whole scan, as upstream's one state does. The cancellation token behaves the same
-    /// way either way.
+    /// lazy walks time each match (<c>tools/probes/bcl-lazy-walk-timeout.cs</c>), its
+    /// <c>MatchCollection</c> included. Upstream's one state times the whole scan, and so did this
+    /// port's <c>Matches</c> until it became lazy (2026-10-14); <see cref="Split"/> and
+    /// <see cref="Count"/> still do. The cancellation token behaves the same way either way.
     /// </para>
     /// </remarks>
     internal static IEnumerable<Match> Enumerate(
@@ -392,7 +350,7 @@ internal static class Iteration
             pool: pool
         );
 
-        // Scan's loop, with the match yielded where Scan calls back.
+        // Scan's loop, with the match yielded where Scan counts it.
         while (true)
         {
             state.RestartClock();
