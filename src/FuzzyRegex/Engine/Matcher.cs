@@ -12638,6 +12638,19 @@ internal static class Matcher
             status != MatchStatus.Partial || state.ForkBudgetSpent == state.ForkBudgetAnswered,
             "D11 M4: a partial with the fork budget spent comes from ForkBudgetPartial"
         );
+
+        // C6: the premise of the leading screen (PatternObject.FindLeadingStrings), checked on
+        // every whole match of a pattern that has one, screened or not: the match starts on one
+        // of the literals. A match found where the screen does not run, such as a match call, is
+        // the useful case, since a search would have skipped it had the premise failed. A
+        // (*SKIP) or \K can move the start a match reports, so those patterns are left out.
+        Debug.Assert(
+            status != MatchStatus.Success
+                || state.PartialSide != MatchState.PartialNone
+                || state.Pattern.AnAttemptCanMoveTheNextStart
+                || StartsOnALeadingLiteral(state),
+            "C6: a match starts on one of the leading literals"
+        );
 #endif
         if (
             status == MatchStatus.Partial
@@ -12663,6 +12676,23 @@ internal static class Matcher
 
         return status;
     }
+
+#if DEBUG
+    /// <summary>
+    /// Whether the match just found starts on one of the pattern's leading literals, or on one of
+    /// its leading code units; true when it has neither. See <see cref="BasicMatch"/>.
+    /// </summary>
+    /// <param name="state">The match state, stopped at a whole match.</param>
+    /// <returns>Whether the match start is one the leading screen admits.</returns>
+    private static bool StartsOnALeadingLiteral(MatchState state)
+    {
+        ReadOnlySpan<char> rest = state.Text.Span[state.MatchPos..state.TextEnd];
+
+        return state.Pattern.LeadingStrings is { } strings
+            ? rest.IndexOfAny(strings) == 0
+            : state.Pattern.LeadingUnits is not { } units || (!rest.IsEmpty && units.Contains(rest[0]));
+    }
+#endif
 
     /// <summary>
     /// NOT UPSTREAM'S (D62): puts every group back as it was when the outermost open call was made,

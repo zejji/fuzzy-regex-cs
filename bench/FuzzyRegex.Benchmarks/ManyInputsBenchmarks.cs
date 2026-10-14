@@ -87,6 +87,32 @@ public class ManyInputsBenchmarks
     /// </summary>
     private static readonly FuzzyRegex _caseBlind = new("(?i)(?:amber|copper|violet)");
 
+    /// <summary>
+    /// A whole-word search for ten words (C6), upper case as the records are: six are noise
+    /// words, <c>AMBER</c> opens a phrase, and <c>HARBOR</c>, <c>PARCELS</c> and <c>TIMBERLAND</c>
+    /// never occur whole.
+    /// </summary>
+    private static readonly FuzzyRegex _wholeWords = new(
+        @"\b\L<words>\b",
+        FuzzyRegexOptions.None,
+        new Dictionary<string, IReadOnlyCollection<string>>
+        {
+            ["words"] =
+            [
+                "ORBIT",
+                "MEADOW",
+                "GRANITE",
+                "FALCON",
+                "BEACON",
+                "THISTLE",
+                "AMBER",
+                "HARBOR",
+                "PARCELS",
+                "TIMBERLAND",
+            ],
+        }
+    );
+
     /// <summary>Which records carry the one phrase.</summary>
     /// <returns>How many records match.</returns>
     [Benchmark]
@@ -255,6 +281,19 @@ public class ManyInputsBenchmarks
         return hits;
     }
 
+    /// <summary>A whole-word search for ten words over 100,000 records.</summary>
+    /// <returns>How many matches there are in all.</returns>
+    [Benchmark]
+    public int WholeWordRecords()
+    {
+        int hits = 0;
+        foreach (string record in UsageCorpus.Records)
+        {
+            hits += _wholeWords.Count(record);
+        }
+        return hits;
+    }
+
     /// <summary>
     /// The full answer behind each row's returned number, per input, for the same-answer check
     /// against Python (<see cref="AnswerText"/>): which inputs matched, where, and what a
@@ -294,6 +333,8 @@ public class ManyInputsBenchmarks
             AnswerText.Bitmap(UsageCorpus.Accented.Select(s => _accented.IsMatch(s))),
         [nameof(CaseBlindAlternation)] = static () =>
             string.Join('\n', UsageCorpus.Records.Select(r => AnswerText.Spans(_caseBlind.Matches(r)))),
+        [nameof(WholeWordRecords)] = static () =>
+            string.Join('\n', UsageCorpus.Records.Select(r => AnswerText.Spans(_wholeWords.Matches(r)))),
     };
 }
 #pragma warning restore S3267

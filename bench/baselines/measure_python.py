@@ -207,6 +207,13 @@ def workload_rows() -> list[Row]:
         lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
         lambda p=p: spans(p.finditer(long_)))
 
+    # WholeWordList: _wholeWords.Count(Long), a whole-word search for ten words (C6).
+    p = compile_(r"\b\L<words>\b", V1, words=["amber", "copper", "violet", "harbour", "meadow",
+                                              "lantern", "granite", "jump", "fox", "needle"])
+    add("WholeWordList", p.pattern, V1, "len(findall())",
+        lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
+        lambda p=p: spans(p.finditer(long_)))
+
     # ReverseFailedScan: RightToLeft IsMatch.
     fl = V1 | R
     p = compile_("zebra", fl)
@@ -423,6 +430,12 @@ def usage_rows(inputs: str) -> list[Row]:
     add("CaseBlindAlternation", blind.pattern, V1, "len(findall()) per record, summed",
         lambda: sum(len(blind.findall(r)) for r in records),
         lambda: "\n".join(spans(blind.finditer(r)) for r in records))
+
+    whole = compile_(r"\b\L<words>\b", V1, words=["ORBIT", "MEADOW", "GRANITE", "FALCON", "BEACON",
+                                                  "THISTLE", "AMBER", "HARBOR", "PARCELS", "TIMBERLAND"])
+    add("WholeWordRecords", whole.pattern, V1, "len(findall()) per record, summed",
+        lambda: sum(len(whole.findall(r)) for r in records),
+        lambda: "\n".join(spans(whole.finditer(r)) for r in records))
 
     return rows
 

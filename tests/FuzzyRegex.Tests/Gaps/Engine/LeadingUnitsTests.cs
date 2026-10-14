@@ -24,7 +24,9 @@ public sealed class LeadingUnitsTests
     /// plus the special characters <c>RequiredStringScreen.FirstUnits</c>'s rule adds, so it
     /// cannot quietly grow to "everything". A branch of one character merges with its neighbours
     /// into a set, which the walk does not take, so each pattern keeps one branch longer.
-    /// <c>(?fi)st|x</c> and <c>(?fi)k|xy</c> have a <c>CharacterIgn</c> branch.
+    /// <c>(?fi)st|x</c> and <c>(?fi)k|xy</c> have a <c>CharacterIgn</c> branch. The last rows put a
+    /// zero-width test in front (C6), each one that holds at the start of a one-character subject
+    /// on a word character, so the reference still sees every start.
     /// </summary>
     /// <param name="pattern">A pattern opening with an alternation of literals.</param>
     [Test]
@@ -60,6 +62,9 @@ public sealed class LeadingUnitsTests
     [Arguments("(?fi)in|on")]
     [Arguments("(?i)(?:amber|copper|violet)+")]
     [Arguments("(?ai)straße|café")]
+    [Arguments(@"(?i)\b(?:kit|sit)\b")]
+    [Arguments(@"(?fi)\m(?:straße|café)")]
+    [Arguments("(?im)^(?:kit|sit)")]
     public void Every_character_a_match_can_start_with_is_searched_for(string pattern)
     {
         var regex = new FuzzyRegex(pattern);

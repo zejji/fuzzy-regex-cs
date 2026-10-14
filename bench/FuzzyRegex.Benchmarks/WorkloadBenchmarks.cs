@@ -42,6 +42,32 @@ public class WorkloadBenchmarks
     /// <summary>A reversed search that never matches, so it walks the whole subject backwards.</summary>
     private static readonly FuzzyRegex _reverse = new("zebra", FuzzyRegexOptions.RightToLeft);
 
+    /// <summary>
+    /// A whole-word search for ten words (C6): <c>fox</c> is in every filler sentence, <c>jump</c>
+    /// starts <c>jumps</c> in every one, so the closing boundary fails there, and <c>needle</c>
+    /// is at the end. The Python pair uses the same list.
+    /// </summary>
+    private static readonly FuzzyRegex _wholeWords = new(
+        @"\b\L<words>\b",
+        FuzzyRegexOptions.None,
+        new Dictionary<string, IReadOnlyCollection<string>>
+        {
+            ["words"] =
+            [
+                "amber",
+                "copper",
+                "violet",
+                "harbour",
+                "meadow",
+                "lantern",
+                "granite",
+                "jump",
+                "fox",
+                "needle",
+            ],
+        }
+    );
+
     /// <summary>The pattern whose strict prefix ends <see cref="Corpus.LongPartial"/>.</summary>
     private static readonly FuzzyRegex _partial = new(@"a needle in a haystack\.");
 
@@ -153,6 +179,11 @@ public class WorkloadBenchmarks
     /// <returns>How many there were.</returns>
     [Benchmark]
     public int CaseFoldedScan() => _caseFolded.Count(Corpus.Long);
+
+    /// <summary>Counts every whole-word match of a ten-word list over a megabyte.</summary>
+    /// <returns>How many there were.</returns>
+    [Benchmark]
+    public int WholeWordList() => _wholeWords.Count(Corpus.Long);
 
     /// <summary>Walks a megabyte backwards for a literal that is not there.</summary>
     /// <returns>Whether it matched, which it does not.</returns>
@@ -335,6 +366,7 @@ public class WorkloadBenchmarks
         [nameof(LiteralMatch)] = static () => AnswerText.Span(_literal.Match(Corpus.Long)),
         [nameof(ClassScan)] = static () => AnswerText.Spans(_classHeavy.Matches(Corpus.Long)),
         [nameof(CaseFoldedScan)] = static () => AnswerText.Spans(_caseFolded.Matches(Corpus.Long)),
+        [nameof(WholeWordList)] = static () => AnswerText.Spans(_wholeWords.Matches(Corpus.Long)),
         [nameof(PartialMatch)] = static () => AnswerText.Span(_partial.Match(Corpus.LongPartial, partial: true)),
         [nameof(MatchesToEnd)] = static () => AnswerText.Spans(_words.Matches(Corpus.Long)),
         [nameof(MatchesToEndDense)] = static () => AnswerText.Spans(_words.Matches(Corpus.Dense)),

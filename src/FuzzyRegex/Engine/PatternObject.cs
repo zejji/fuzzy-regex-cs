@@ -1353,8 +1353,11 @@ internal sealed class PatternObject
     /// its first node, looking through capture groups, which record where they open and do not read
     /// text, nested branches, and the zero-width first-set check the compiler puts in front of a
     /// branch, case-sensitive or not, which tests the character an attempt starts on and moves
-    /// nothing. Every path must reach a forward literal. Anything else, such as an empty branch, a
-    /// class, a lookaround or an anchor, gives <see langword="null"/>.
+    /// nothing. Since C6 it also looks through a word boundary or a start-of-line anchor in front,
+    /// so <c>\b(?:cat|dog)\b</c> searches for <c>cat</c> and <c>dog</c>: the test reads the text
+    /// around the position and moves nothing, so a match still starts on a literal. Every path
+    /// must reach a forward literal. Anything else, such as an empty branch, a class, a lookaround,
+    /// <c>\G</c>, a string anchor or an end anchor, gives <see langword="null"/>.
     /// </para>
     /// <para>
     /// When every literal is case-sensitive the result is the literals themselves, since a search
@@ -1452,6 +1455,23 @@ internal sealed class PatternObject
                     or Opcode.SetSymDiff
                     or Opcode.SetUnion
                     or Opcode.SetUnionIgn when node.Step == 0:
+                    // C6: a word boundary or start-of-line anchor tests the position the attempt
+                    // stands on and goes on from that same position (BasicMatchCore's zero-width
+                    // arm calls TryMatchZeroWidth at TextPos, then takes Next1), so a match
+                    // starting there still opens with one of the heads. The screen only moves the
+                    // attempt to the next head; the engine still runs the test there. Not
+                    // StartOfString, which anchors the search so that no screen is consulted, the
+                    // end anchors, after which only a newline can follow and the compiler factors
+                    // it out in front of the branch, or SearchAnchor (\G), which holds at one
+                    // position.
+                    case Opcode.Boundary
+                    or Opcode.DefaultBoundary
+                    or Opcode.StartOfWord
+                    or Opcode.EndOfWord
+                    or Opcode.DefaultStartOfWord
+                    or Opcode.DefaultEndOfWord
+                    or Opcode.StartOfLine
+                    or Opcode.StartOfLineU:
                         node = node.Next1.Node;
                         continue;
                     case Opcode.Character when node.Match && node.Step != 0:
