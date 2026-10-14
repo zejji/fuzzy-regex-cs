@@ -1208,13 +1208,21 @@ public sealed class FuzzyRegex
     /// EnhanceMatch it starts at the leftmost position some continuation could match from; see
     /// <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks.
     /// </param>
-    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
-    /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
-    /// <returns>The matches, leftmost first.</returns>
-    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
-    /// The scan ran out of time. The whole scan shares one budget, as upstream's does.
+    /// <param name="timeout">
+    /// How long finding ONE match may take, or <see langword="null"/> for the pattern's budget. The
+    /// collection finds its matches as they are read, so this bounds each match rather than the
+    /// whole scan; see the remarks.
+    /// </param>
+    /// <param name="cancellationToken">Stops the scan when it is cancelled, at whichever read is matching then.</param>
+    /// <returns>
+    /// The matches, leftmost first, found as they are read: nothing is matched until the collection
+    /// is read.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is neither positive nor infinite.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was already cancelled. A cancellation after the call
+    /// surfaces from reading the collection instead.
     /// </exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     /// <remarks>
     /// <para>
     /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
@@ -1223,16 +1231,18 @@ public sealed class FuzzyRegex
     /// objects instead, so a caller after upstream's group-text shape reads
     /// <c>Match.Groups[1].Value</c> over the result. See
     /// <see cref="Count(string, int, int, bool, TimeSpan?, CancellationToken)"/> for a count with
-    /// no per-match allocation, and
-    /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
-    /// for a lazy projection.
+    /// no per-match allocation.
     /// </para>
     /// <para>
-    /// <b>A lazy walk times each STEP, where <c>Matches</c> times the whole scan.</b> This method
-    /// holds one engine state for the entire scan, so <paramref name="timeout"/> bounds the
-    /// whole scan, matching upstream's <c>finditer</c>. See
+    /// <b>Lazy, as the built-in <c>Regex.Matches</c> is</b> (since 2026-10-14). The returned
+    /// <see cref="MatchCollection"/> finds each match the first time a read needs it and keeps it,
+    /// so reading the first two matches of a huge subject costs two matches, and
+    /// <see cref="MatchCollection.Count"/> finds them all. A timeout or cancellation therefore
+    /// surfaces later, from <see cref="MatchCollection.Count"/>, the indexer or enumeration, and <paramref name="timeout"/> bounds each match, as it does for
     /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
-    /// for a walk whose clock restarts per match instead.
+    /// and for the built-in collection. Upstream's <c>finditer</c> times the whole scan instead; a
+    /// caller who needs the scan bounded as a whole times it themselves or passes a token. The
+    /// answers are exactly <c>EnumerateMatches</c>' answers.
     /// </para>
     /// </remarks>
     public MatchCollection Matches(
@@ -1250,7 +1260,9 @@ public sealed class FuzzyRegex
         Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
         (int start, int end) = Limits(input.Length, beginning, length);
 
-        return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped, partial, limits));
+        // pattern_scanner (:21122): "The MatchObject, and therefore repeated captures, will be
+        // visible." Enumerate rents with visible captures, as FindAll did.
+        return new MatchCollection(Engine.Iteration.Enumerate(this, input, start, end, overlapped, partial, limits));
     }
 
     /// <summary>
@@ -1272,8 +1284,7 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="timeout">
     /// How long ONE step may run, or <see langword="null"/> for the pattern's budget. See the
-    /// remarks: this is not the whole walk's budget, which is what
-    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/> takes.
+    /// remarks: this is not the whole walk's budget.
     /// </param>
     /// <param name="cancellationToken">Stops the walk when it is cancelled.</param>
     /// <returns>The matches, leftmost first, found as they are asked for.</returns>
@@ -1284,17 +1295,15 @@ public sealed class FuzzyRegex
     /// <remarks>
     /// <para>
     /// Yields the same matches, in the same order, as
-    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>; the
-    /// difference is that it finds each one only when asked, so
-    /// <c>EnumerateMatches(huge).Take(2)</c> costs two matches rather than all of them. Use it for
-    /// an early exit or an unbounded stream, and <c>Matches</c> when you want a
-    /// <see cref="MatchCollection.Count"/> - which no lazy walk can answer without running to the
-    /// end anyway.
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>, and like
+    /// it finds each one only when asked, so <c>EnumerateMatches(huge).Take(2)</c> costs two
+    /// matches rather than all of them. The difference is that this keeps nothing: walking it again
+    /// matches again, where a <see cref="MatchCollection"/> keeps what it found for the next read.
     /// </para>
     /// <para>
     /// <b>The clock restarts at every step</b>, because the time between two steps is the caller's,
     /// so <paramref name="timeout"/> bounds each step rather than the walk. A caller who needs the
-    /// whole walk bounded should time it themselves, or use <c>Matches</c>.
+    /// whole walk bounded should time it themselves or pass a token.
     /// </para>
     /// </remarks>
     public IEnumerable<Match> EnumerateMatches(
@@ -1999,9 +2008,13 @@ public sealed class FuzzyRegex
     /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
     /// name, or <see langword="null"/> when the pattern references none.
     /// </param>
-    /// <param name="timeout">How long the scan may run, or <see langword="null"/> for no limit.</param>
-    /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
-    /// <returns>The matches, leftmost first.</returns>
+    /// <param name="timeout">
+    /// How long finding one match may take, or <see langword="null"/> for no limit. The collection
+    /// is lazy, so a timeout surfaces from reading it; see the instance
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>.
+    /// </param>
+    /// <param name="cancellationToken">Stops the scan when it is cancelled, at whichever read is matching then.</param>
+    /// <returns>The matches, leftmost first, found as they are read.</returns>
     public static MatchCollection Matches(
         string input,
         string pattern,

@@ -105,6 +105,52 @@ in the main checkout.
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
 
+## Measured by the lazy MatchCollection (2026-10-14)
+
+`Matches()` became lazy (owner decision, DECISIONS 2026-10-14; design
+`docs/plan/2026-10-14-lazy-matches.md`). Main `fc5b190c` against perf/lazy-matches, BDN
+`--job medium`, pinned to the performance cores, same session (12:25-12:53); raw output in
+`.scratch/lazy-matches/bdn-{main,br}-{M,Ref}` of the main checkout. **Kept.**
+
+| Row | Main | Branch | Ratio | Bytes main | Bytes branch |
+|---|---|---|---|---|---|
+| MatchesFirstTwo | 37,804 us | 0.427 us | 0.00001x | 27,477,924 | 2,536 |
+| MatchesToEnd | 42,492 us | 42,330 us | 1.00x | 27,477,940 | 27,478,055 |
+| MatchesToEndDense | 2,471 us | 2,652 us | 1.07x (inside the 1.10 floor) | 2,696,416 | 2,696,592 |
+| EnumerateMatchesToEndDense | 2,382 us | 2,320 us | 0.97x | 2,515,000 | 2,515,000 |
+| EnumerateMatchesFirstTwo | 0.270 us | 0.267 us | 0.99x | 456 | 456 |
+
+BCL control rows (`ReferenceBenchmarks`, 12 rows) moved 0.97x to 1.07x, all inside the floor.
+`MatchesFirstTwo` allocates 2.5 KB rather than `EnumerateMatchesFirstTwo`'s 456 B because a
+collection read part way keeps its engine state, so the pattern's cache builds a new one for the
+next call; that is the price of exact answers (the design note says why a state per match is not).
+`MatchesToEndDense` at 1.07x is the iterator step and lock per match on the first `Count`; flat
+on the megabyte row.
+
+## Measured by cold-arm, BasicMatchCore's rarely used arms out of line (2026-10-14)
+
+Cause and history: D82 part 2 in `docs/KNOWN-DEFECTS.md` and `.scratch/cold-arm/notes.md`. Kept:
+50 rarely used arms (fuzzy, backreference, lookaround, conditional, call, verb, reverse string)
+moved to NoInlining helpers, fewer locals in `BasicMatchCore`, AggressiveInlining on the guard
+helpers, and a direct fast path for ByteStack's size and code pushes and pops. Rejected: taking
+the case-folding buffers out of the frame (step 3b; it bought 9 inlinees and no frame size), and
+NoInlining on the multi-site cold helpers (two are `[Conditional("DEBUG")]`, the third is a
+one-line forwarder). Branch merged onto `fc5b190c` and measured against it, Release, pinned:
+
+- Harness (`.scratch/cold-arm/next-time.txt`, min of 3, alternated): every row 0.74-0.93x
+  (conditional per token 0.750, dense 0.779, backreference 0.858, nested 0.931), except a 1.3 us
+  fuzzy word row, flat at the timer's resolution. Native AOT: no row slower.
+- BDN `--job medium` (`.scratch/cold-arm/next-bdn-cmp-*.log`): nothing slower than the 1.10 floor;
+  BCL controls flat (within 3%). CaseFoldedScan 0.75x, ParseLogLines 0.76x, ValidateEmails
+  0.78x, ClassScanPort 0.79x, MatchesToEndDense 0.80x, SplitLong 0.80x, ClassScan 0.84x,
+  ReplaceTemplate 0.87x, TestedGroupRepeat 0.88x, ConditionalPerTokenNoMemo 0.88x, every
+  ManyInputs row 0.76-0.90x.
+- The method is still at the JIT's local limit. Every inline it still refuses is refused as
+  unprofitable, not for want of locals: RyuJIT scales an inline's profitability down continuously
+  with the caller's local count, so further trimming buys a little each time and never reaches
+  the code that `DOTNET_JitMaxLocalsToTrack=0x2000` produces. Further gains here mean splitting the
+  loop itself, which is a design question rather than a trim.
+
 ## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
 
 `FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).

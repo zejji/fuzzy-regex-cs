@@ -339,15 +339,39 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// so the width on the stack matches upstream's byte for byte and C# has one type for both.
     /// </summary>
     /// <param name="item">The value to push.</param>
-    internal void PushSize(long item) => PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<long>(in item)));
+    // Fast path (cold-arm round 3): one length check and one store, so that the call inlines
+    // cheaply into BasicMatchCore; a full buffer goes through PushBlock, which grows it exactly as
+    // before. MemoryMarshal reads and writes in native byte order, as the span copy did.
+    internal void PushSize(long item)
+    {
+        int count = Count;
+        byte[] storage = _storage;
+        if (storage.Length - count >= sizeof(long))
+        {
+            MemoryMarshal.Write(storage.AsSpan(count), in item);
+            Count = count + sizeof(long);
+        }
+        else
+        {
+            PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<long>(in item)));
+        }
+    }
 
     /// <summary>Upstream <c>pop_size</c> and <c>pop_ssize</c>.</summary>
     /// <param name="item">Receives the value.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopSize(out long item)
     {
-        item = 0;
-        return PopBlock(MemoryMarshal.AsBytes(new Span<long>(ref item)));
+        int count = Count - sizeof(long);
+        if (count < 0)
+        {
+            item = 0;
+            return false;
+        }
+
+        item = MemoryMarshal.Read<long>(_storage.AsSpan(count));
+        Count = count;
+        return true;
     }
 
     /// <summary>
@@ -356,15 +380,37 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// matters (ledger entry 18).
     /// </summary>
     /// <param name="item">The value to push.</param>
-    internal void PushCode(uint item) => PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<uint>(in item)));
+    // The same fast path as PushSize.
+    internal void PushCode(uint item)
+    {
+        int count = Count;
+        byte[] storage = _storage;
+        if (storage.Length - count >= sizeof(uint))
+        {
+            MemoryMarshal.Write(storage.AsSpan(count), in item);
+            Count = count + sizeof(uint);
+        }
+        else
+        {
+            PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<uint>(in item)));
+        }
+    }
 
     /// <summary>Upstream <c>pop_code</c> (line 2635).</summary>
     /// <param name="item">Receives the value.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopCode(out uint item)
     {
-        item = 0;
-        return PopBlock(MemoryMarshal.AsBytes(new Span<uint>(ref item)));
+        int count = Count - sizeof(uint);
+        if (count < 0)
+        {
+            item = 0;
+            return false;
+        }
+
+        item = MemoryMarshal.Read<uint>(_storage.AsSpan(count));
+        Count = count;
+        return true;
     }
 
     /// <summary>Upstream <c>drop_ssize</c> (line 2785).</summary>

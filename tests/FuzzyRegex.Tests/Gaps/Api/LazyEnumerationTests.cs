@@ -152,7 +152,7 @@ public sealed class LazyEnumerationTests
         FuzzyRegex pattern = new(_slowPattern);
         TimeSpan budget = TimeSpan.FromMilliseconds(250);
 
-        Action eager = () => pattern.Matches(_twoMatchesThenACliff, timeout: budget);
+        Action eager = () => _ = pattern.Matches(_twoMatchesThenACliff, timeout: budget).Count;
         eager.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
 
         // And the lazy call's cost is counted in engine steps rather than timed, because a busy
