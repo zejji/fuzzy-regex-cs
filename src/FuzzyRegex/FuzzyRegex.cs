@@ -684,6 +684,7 @@ public sealed class FuzzyRegex
             matchAll,
             // The Match object, and therefore repeated captures, will be visible.
             visibleCaptures: true,
+            readsGroups: true,
             timeout,
             static (regex, state, subject, status) => regex.NewMatch(state, subject, status),
             cancellationToken
@@ -755,6 +756,8 @@ public sealed class FuzzyRegex
             search,
             matchAll,
             visibleCaptures: false,
+            // Only the status is read.
+            readsGroups: false,
             timeout,
             // What NewMatch reports as a successful match.
             static (_, _, _, status) => status is Engine.MatchStatus.Success or Engine.MatchStatus.Partial,
@@ -775,6 +778,10 @@ public sealed class FuzzyRegex
     /// <param name="search">Whether to advance the start position (upstream's <c>search</c>).</param>
     /// <param name="matchAll">Whether the match must cover the slice (upstream's <c>match_all</c>).</param>
     /// <param name="visibleCaptures">Upstream's <c>visible_captures</c>.</param>
+    /// <param name="readsGroups">
+    /// Whether <paramref name="result"/> reads any group; when it does not, the engine may skip the
+    /// captures (<see cref="Engine.MatchState.SkipCapturesIfUnread"/>).
+    /// </param>
     /// <param name="timeout">The call's own time budget, or <see langword="null"/> for the pattern's.</param>
     /// <param name="result">Builds the answer from the state, the subject and the status.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
@@ -788,6 +795,7 @@ public sealed class FuzzyRegex
         bool search,
         bool matchAll,
         bool visibleCaptures,
+        bool readsGroups,
         TimeSpan? timeout,
         Func<FuzzyRegex, Engine.MatchState, TSubject, int, TResult> result,
         CancellationToken cancellationToken
@@ -810,6 +818,11 @@ public sealed class FuzzyRegex
 
         try
         {
+            if (!readsGroups)
+            {
+                state.SkipCapturesIfUnread();
+            }
+
             int status = Engine.Matcher.DoMatch(state, search);
 
             if (status == Engine.MatchStatus.Cancelled)
@@ -1015,6 +1028,11 @@ public sealed class FuzzyRegex
         {
             return NoMatch(input);
         }
+
+        System.Diagnostics.Debug.Assert(
+            !state.SkipsCaptures,
+            "C4: a Match reads its groups, so its call never skips the captures"
+        );
 
         // Upstream's rule that a reverse match reports its two ends the other way round (:20795).
         int matchStart = state.Reverse ? state.TextPos : state.MatchPos;

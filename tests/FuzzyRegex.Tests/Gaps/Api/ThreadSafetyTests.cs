@@ -290,6 +290,7 @@ public sealed class ThreadSafetyTests
         threadStatic
             .Should()
             .Equal(
+                "WorkCounter.<CapturesSaved>k__BackingField",
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",

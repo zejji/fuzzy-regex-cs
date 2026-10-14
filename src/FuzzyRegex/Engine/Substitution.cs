@@ -124,6 +124,13 @@ internal static class Substitution
             limits
         );
 
+        // A literal, or a template whose only group item is the whole match (item 0, read from
+        // MatchPos and TextPos in GetSubReplacement), reads no group.
+        if (isLiteral || (compiled is not null && compiled.All(static item => item is string or 0)))
+        {
+            state.SkipCapturesIfUnread();
+        }
+
         // Upstream's join list (init_join_list, :19706): the pieces of the result, joined once the
         // last match is in. A reverse match adds them back to front and the join reads them the
         // other way round, which is upstream's list reversal (join_list_info, :19852).
@@ -460,6 +467,10 @@ internal static class Substitution
 
         if (index >= 1 && index <= groupCount)
         {
+            System.Diagnostics.Debug.Assert(
+                !state.SkipsCaptures,
+                "C4: a template that reads a group must not skip the captures (Subx opts in only for a literal or item 0)"
+            );
             GroupData group = state.Groups[index - 1];
             if (group.Current < 0)
             {

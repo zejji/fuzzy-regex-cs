@@ -115,6 +115,10 @@ internal static class Iteration
             limits
         );
 
+        // Only Count scans here, and a count reads no group. The lazy MatchCollection's Count walks
+        // Enumerate instead, which builds every Match and so keeps the captures.
+        state.SkipCapturesIfUnread();
+
         int count = 0;
 
         // No loop condition, because the scanner has none: `do_match` returns FAILURE once there is
@@ -554,6 +558,10 @@ internal static class Iteration
     /// <returns>The captured text, or <see langword="null"/>.</returns>
     private static string? GetGroup(MatchState state, string input, int index)
     {
+        System.Diagnostics.Debug.Assert(
+            !state.SkipsCaptures,
+            "C4: Split reads every group, so it never skips the captures"
+        );
         GroupData group = state.Groups[index - 1];
         if (group.Current < 0)
         {

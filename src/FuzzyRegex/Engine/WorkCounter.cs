@@ -80,6 +80,14 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long SubjectUnitsScanned { get; private set; }
 
+    /// <summary>
+    /// Captures recorded on this thread (<see cref="MatchState.SaveCapture"/>). A call that reads no
+    /// group, on a pattern where nothing reads one while matching, has no use for them (stage C4,
+    /// <c>docs/plan/2026-10-11-capture-free-matching.md</c>).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CapturesSaved { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -141,6 +149,10 @@ internal static class WorkCounter
     /// <param name="units">How many.</param>
     [Conditional("DEBUG")]
     internal static void ScannedSubject(int units) => SubjectUnitsScanned += units;
+
+    /// <summary>Counts one capture recorded.</summary>
+    [Conditional("DEBUG")]
+    internal static void CaptureSaved() => CapturesSaved++;
 
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]
