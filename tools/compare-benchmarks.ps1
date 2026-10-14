@@ -186,7 +186,7 @@ public static class CpuSets {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $benchDir = Join-Path $repoRoot 'bench'
-$artifacts = Join-Path $repoRoot $ArtifactsPath
+$artifacts = if ([System.IO.Path]::IsPathRooted($ArtifactsPath)) { $ArtifactsPath } else { Join-Path $repoRoot $ArtifactsPath }
 
 if (-not $UseExisting) {
     if (Test-Path -LiteralPath $artifacts) { Remove-Item -LiteralPath $artifacts -Recurse -Force }
