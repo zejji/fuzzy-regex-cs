@@ -268,6 +268,52 @@ the first-set character and tries `^` at each one itself (its look-ahead loop), 
 text. Adversaries, a literal at every hit where the zero-width test then fails, all within 0.88 to
 1.02 of main: `\b\L<ten>\b` over `xamber ` repeated 1.02, `\b(?:th|ht)` over `xth ` 1.01.
 
+**Follow-up: no first-set prefilter behind an active screen (`perf/c6-searchstart`, 2026-10-15).**
+The `(?m)^` explanation above was a hypothesis; a trace proved it. Temporary counters in `Matcher`
+(`.scratch/c6/ss/trace/trace.cs`, `trace-before.txt`), one `Count` over the megabyte with no
+newline: `(?m)^(?:cat|dog)` made 1 attempt, 1 screen sweep and 1 `SearchStart` call, whose
+look-ahead loop scanned 50,094 first-set characters and refused 50,093 of them on `^` itself.
+Each shape opens with the zero-width first-set check, which is also its start test
+(`.scratch/c6/ss/shape`), so the loop applies to all of them. `\b(?:cat|dog)\b` drifts the same
+way, but `\b` passes at the next word-initial `c` or `d`, so the loop hands back after a few steps
+(301 refusals over 153 attempts). `(?i)\b(?:cat|dog)\b` made 6,529 attempts and 44,342 in-loop
+refusals; its code-unit screen and the first-set check both stop on every `c` and `d`.
+
+The change: `searchStartAllowed` in `BasicMatchCore` is false whenever `LeadingStrings` or
+`LeadingUnits` runs, so the search makes no `SearchStart` call (setup code, not a hot arm, D82).
+*Soundness:* a prefilter only skips positions where the matcher would fail. Not running it skips
+nothing, and each attempt still runs the start test itself. The screen stops only on a literal,
+and every literal begins with a first-set character, so the prefilter could not reject a screen
+hit on its first-set test. It could only reject one on the zero-width test after it, which the
+attempt then runs anyway. *Worst case:* every screen hit fails its zero-width test. Each one then
+costs a whole attempt (FAILURE push, group clear, bump-along) where the look-ahead loop paid one
+`TryMatch`. *Adversary:* exactly that, a hit every three to five characters that `^`, `\b` or a
+lookbehind refuses. The decision probe (`trace/mode.cs`, `mode-out-decision.txt`) put the units
+screen in scope because `(?i)` gained too: skipping behind it took `(?i)\b(?:cat|dog)\b` from 6.7
+to 2.7 ms. `SearchStart`'s scan for an ignore-case set goes one character at a time, while the
+screen is a vectorised `SearchValues<char>` sweep.
+
+Evidence. Test first: `LeadingZeroWidthTests.A_screened_search_does_not_also_run_the_first_set_prefilter`
+reads a new Debug-only `WorkCounter.SearchStartCalls`. Each row has a class-spelt control that
+keeps the prefilter, so the counter is shown to be live. The six rows were red (3 to 8 calls,
+`ss/red-LeadingZeroWidthTests.log`) and are green after the change. The Debug ratchet was green
+at 8,992 tests, and the three permanent files were unchanged and green. Differential against main
+7e7a59a7 (`ss-base`), with the elapsed column stripped: identical over 310,000 rows
+(`rows-c` 100,000, `rows-d` 60,000, `rows-c6` 90,000, and 60,000 new rows from `ss/gen-ss.py`
+aimed at `(?m)^`, `\b` and `(?i)` heads, 20% partial and 14% reverse). The change is live on
+47,963 of them (`ss/count1-*.txt`). Oracle seeds 7, 4242 and 20260927 are green.
+
+Timing (Release, tiering off, pinned to FFF8, best of 7, min of 5 alternating processes,
+`ss/timing-summary.txt`; main, then branch). `(?m)^(?:cat|dog)` over the megabyte: 6.81 to
+0.072 ms. `(?i)\b(?:cat|dog)\b`: 6.57 to 2.95 ms. `(?i)(?:cat|dog)`: 3.37 to 2.92 ms.
+`(?m)^(?:cat|dog)` with newlines: 0.124 to 0.086 ms. `\b(?:cat|dog)\b`: 0.121 to 0.072 ms.
+`\b\L<ten>\b`: 0.164 to 0.157 ms. `(?:cat|dog)`: 0.076 to 0.082 ms. That is 6 µs, in a run that
+makes fewer calls, so it is taken as noise. All twelve adversaries are 0.51 to 1.02 of main: the
+units screen keeps the dense-hit cases fast, and a whole attempt turned out no dearer than a
+`TryMatch` in the loop. The case-blind word list `(?i)\b\L<ten>\b` stays at 31 ms: its units
+screen stops on ten first letters in either case, the `t` of `the`, `that` and `this` among them.
+That is a limit of the units screen, not of this change.
+
 ## Measured by S61's quiet-machine gates (2026-09-23)
 
 S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and

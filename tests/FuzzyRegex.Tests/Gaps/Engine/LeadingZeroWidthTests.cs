@@ -298,6 +298,58 @@ public sealed class LeadingZeroWidthTests
         }
     }
 
+    /// <summary>
+    /// A search the leading screen moves from literal to literal does not also run the first-set
+    /// prefilter (<c>Matcher.SearchStart</c>). Every literal starts with a character of the first
+    /// set, so the prefilter could only stop where the screen already has; and once its first-set
+    /// scan had passed a literal it never came back to the screen: <c>(?m)^(?:cat|dog)</c> over a
+    /// megabyte with no newline made one attempt, in which the prefilter tried <c>^</c> at all
+    /// 50,094 <c>c</c> and <c>d</c> (<c>.scratch/c6/ss/trace</c>). The control is the same search
+    /// spelt with a class, which gets no screen and keeps the prefilter, so the counter is live;
+    /// both find the same matches.
+    /// </summary>
+    /// <param name="pattern">A pattern the leading screen applies to.</param>
+    /// <param name="control">The same matches, spelt so that no screen applies.</param>
+    /// <param name="options">The options.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?m)^(?:cat|dog)", @"(?m)^[cd](?:at|og)", FuzzyRegexOptions.None)]
+    [Arguments(@"\b(?:cat|dog)\b", @"\b[cd](?:at|og)\b", FuzzyRegexOptions.None)]
+    [Arguments(@"(?<![a-z])(?:cat|dog)", @"(?<![a-z])[cd](?:at|og)", FuzzyRegexOptions.None)]
+    [Arguments(@"(?:cat|dog)", @"[cd](?:at|og)", FuzzyRegexOptions.None)]
+    [Arguments(@"\b(?:cat|dog)\b", @"\b[cd](?:at|og)\b", FuzzyRegexOptions.IgnoreCase)]
+    [Arguments(@"(?m)^(?:cat|dog)", @"(?m)^[cd](?:at|og)", FuzzyRegexOptions.IgnoreCase)]
+    public void A_screened_search_does_not_also_run_the_first_set_prefilter(
+        string pattern,
+        string control,
+        FuzzyRegexOptions options
+    )
+    {
+        EngineWork.SkipUnlessCounting();
+        const string subject = "xcat\ncat catx\ndog\n dog Dog.cAT dcx";
+        var screened = new FuzzyRegex(pattern, options, EngineWork.HangGuard);
+        var unscreened = new FuzzyRegex(control, options, EngineWork.HangGuard);
+
+        using (new AssertionScope())
+        {
+            unscreened.PatternObject.LeadingStrings.Should().BeNull();
+            unscreened.PatternObject.LeadingUnits.Should().BeNull();
+            (screened.PatternObject.LeadingStrings ?? (object?)screened.PatternObject.LeadingUnits)
+                .Should()
+                .NotBeNull();
+            SearchStartCallsBy(() => unscreened.Count(subject)).Should().BePositive("the control keeps the prefilter");
+            SearchStartCallsBy(() => screened.Count(subject)).Should().Be(0, "the screen has done its work");
+            Spans(pattern, options, subject).Should().Be(Spans(control, options, subject));
+        }
+    }
+
+    private static long SearchStartCallsBy(Action action)
+    {
+        long before = WorkCounter.SearchStartCalls;
+        action();
+        return WorkCounter.SearchStartCalls - before;
+    }
+
     private static PatternObject Compile(string pattern, FuzzyRegexOptions options) =>
         pattern.Contains(@"\L<w>", StringComparison.Ordinal)
             ? new FuzzyRegex(pattern, options, _words).PatternObject

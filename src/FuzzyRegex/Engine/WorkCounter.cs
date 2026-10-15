@@ -88,6 +88,13 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long CapturesSaved { get; private set; }
 
+    /// <summary>
+    /// Calls of the start-position prefilter (<c>Matcher.SearchStart</c>) on this thread. A search
+    /// that a leading screen already moves from literal to literal has no use for it (C6).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long SearchStartCalls { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -153,6 +160,10 @@ internal static class WorkCounter
     /// <summary>Counts one capture recorded.</summary>
     [Conditional("DEBUG")]
     internal static void CaptureSaved() => CapturesSaved++;
+
+    /// <summary>Counts one call of the start-position prefilter.</summary>
+    [Conditional("DEBUG")]
+    internal static void SearchStartCalled() => SearchStartCalls++;
 
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]
