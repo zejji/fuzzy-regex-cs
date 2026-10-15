@@ -122,8 +122,12 @@ internal struct FuzzyData
 /// </remarks>
 /// <param name="MatchPos">Where the candidate match started.</param>
 /// <param name="TextPos">Where it ended.</param>
+/// <param name="AttemptStart">
+/// NOT UPSTREAM'S (D86): where its attempt began, which a <c>\K</c> leaves behind
+/// <paramref name="MatchPos"/>; the second pass re-runs the candidate from here.
+/// </param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-internal readonly record struct BestEntry(int MatchPos, int TextPos);
+internal readonly record struct BestEntry(int MatchPos, int TextPos, int AttemptStart);
 
 internal static class MatchStatus
 {
@@ -8129,7 +8133,7 @@ internal static class Matcher
     /// <returns><see cref="MatchStatus.Partial"/>.</returns>
     private static int ForkBudgetPartial(MatchState state)
     {
-        state.MatchPos = state.ForkAttemptStart;
+        state.MatchPos = state.AttemptStart;
         state.ClearGroups();
         state.NotePartialEvent(PartialEvent.BudgetFired);
 #if DEBUG
@@ -13126,6 +13130,7 @@ internal static class Matcher
 
                 node = newPosition.Node;
                 state.TextPos = newPosition.TextPos;
+                state.AttemptStart = state.MatchPos;
 
                 if (node.Op == Opcode.Success)
                 {
@@ -13188,7 +13193,7 @@ internal static class Matcher
             }
 
             state.MatchPos = state.TextPos;
-            state.ForkAttemptStart = state.TextPos;
+            state.AttemptStart = state.TextPos;
             state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
 
             // NOT UPSTREAM (C5, S2d), as after SearchStart above.
@@ -13228,7 +13233,7 @@ internal static class Matcher
             }
 
             node = startNode;
-            state.ForkAttemptStart = state.TextPos;
+            state.AttemptStart = state.TextPos;
             state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
         }
 
@@ -15992,8 +15997,9 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Can we advance?
-                    state.TextPos = state.MatchPos;
+                    // Can we advance? NOT UPSTREAM'S, D87: not from a start a \K left behind the
+                    // attempt; see MatchState.StartNotBehindTheAttempt.
+                    state.TextPos = state.StartNotBehindTheAttempt();
 
                     if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
@@ -20836,6 +20842,7 @@ internal static class Matcher
 
         int bestMatchPos = state.TextPos;
         int bestTextPos = 0;
+        int bestAttemptStart = state.TextPos; // D87: the scan's next step reads it.
         bool mustAdvance = state.MustAdvance;
         int firstTextPos = state.TextPos;
 
@@ -20924,6 +20931,7 @@ internal static class Matcher
 
                 bestMatchPos = state.MatchPos;
                 bestTextPos = state.TextPos;
+                bestAttemptStart = state.AttemptStart;
             }
 
             if (state.TotalErrors == 0)
@@ -20937,18 +20945,20 @@ internal static class Matcher
                 --state.MaxErrors;
             }
 
+            // D86: the span from where the attempt began, not from the start a \K reported, which
+            // would leave the part of the pattern before the \K nothing to match.
             if (state.Reverse)
             {
                 state.SliceStart = state.TextPos;
-                state.SliceEnd = state.MatchPos;
+                state.SliceEnd = state.AttemptStart;
             }
             else
             {
-                state.SliceStart = state.MatchPos;
+                state.SliceStart = state.AttemptStart;
                 state.SliceEnd = state.TextPos;
             }
 
-            state.TextPos = state.MatchPos;
+            state.TextPos = state.AttemptStart;
         }
 
         if (status is < 0 and not MatchStatus.Partial)
@@ -20973,6 +20983,7 @@ internal static class Matcher
 
                 state.MatchPos = bestMatchPos;
                 state.TextPos = bestTextPos;
+                state.AttemptStart = bestAttemptStart;
 
                 RestoreGroups(state, bestGroups);
                 RestoreFuzzyCounts(state, bestFuzzyCounts);
@@ -21296,7 +21307,7 @@ internal static class Matcher
 
                     // Forget all the previous worse matches and remember this one.
                     bestList.Clear();
-                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos, state.AttemptStart));
 
                     bestChangesList.Clear();
                     AddBestFuzzyChanges(state, bestChangesList);
@@ -21316,11 +21327,13 @@ internal static class Matcher
                     // run of unchanged cost for ever. The whole-match test at 'END_FUZZY' is what
                     // makes the sentence above true again, which is worth knowing before trusting
                     // any "unreachable" claim in this function.
-                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos, state.AttemptStart));
                     AddBestFuzzyChanges(state, bestChangesList);
                 }
 
-                startPos = state.MatchPos;
+                // D86: where the attempt began, not the start a \K reported, or the walk passes over
+                // the candidates in between.
+                startPos = state.AttemptStart;
 
                 // The budget, and each walk's only guarantee of progress: 'start_pos' does not
                 // advance, so a run that is not held to strictly better than the last re-finds it for
@@ -21387,6 +21400,7 @@ internal static class Matcher
         GroupData[]? bestGroups = null;
         int bestMatchPos = 0;
         int bestTextPos = 0;
+        int bestAttemptStart = 0;
 
         // Look again at the best of the matches that we've seen.
         for (int i = 0; i < bestList.Count; i++)
@@ -21406,7 +21420,7 @@ internal static class Matcher
                 // this offset is compared against two error COUNTS on the next two lines.
                 maxOffset = CountUpTo(
                     state,
-                    entry.MatchPos,
+                    entry.AttemptStart,
                     state.Reverse ? state.SliceStart : state.SliceEnd,
                     fewestErrors
                 );
@@ -21421,7 +21435,12 @@ internal static class Matcher
                 maxOffset = 0;
             }
 
-            startPos = entry.MatchPos;
+            // sync-divergence: upstream re-runs each candidate from match_pos, the start a \K reported
+            // (_regex.c :17680, :17732, :17741; do_enhanced_fuzzy_match :17986-17992) / this port re-runs
+            // it from MatchState.AttemptStart, where its attempt began, carried in BestEntry / anchored
+            // at the reported start, the part of the pattern before the \K had nothing to match (D86).
+            // Re-aligning: keep AttemptStart wherever upstream reads match_pos as a re-run's start.
+            startPos = entry.AttemptStart;
             long offset = 0;
 
             while (offset <= maxOffset)
@@ -21454,8 +21473,10 @@ internal static class Matcher
                         }
                         else if (state.TotalErrors == errorLimit)
                         {
-                            // The cost is as low as the current best, but is it earlier?
-                            better = state.Reverse ? state.MatchPos > bestMatchPos : state.MatchPos < bestMatchPos;
+                            // The cost is as low as the current best, but is it earlier? Earlier by
+                            // where the attempt began (D86): a \K can report a later attempt's match
+                            // as starting first. Without a \K the two are the same position.
+                            better = state.Reverse ? startPos > bestAttemptStart : startPos < bestAttemptStart;
                         }
                         else
                         {
@@ -21471,6 +21492,7 @@ internal static class Matcher
 
                             bestMatchPos = state.MatchPos;
                             bestTextPos = state.TextPos;
+                            bestAttemptStart = startPos;
                             errorLimit = state.TotalErrors;
                         }
 
@@ -21504,6 +21526,7 @@ internal static class Matcher
             status = MatchStatus.Success;
             state.MatchPos = bestMatchPos;
             state.TextPos = bestTextPos;
+            state.AttemptStart = bestAttemptStart; // D87: the scan's next step reads it.
 
             RestoreGroups(state, bestGroups);
             RestoreFuzzyCounts(state, bestFuzzyCounts);
@@ -21523,8 +21546,8 @@ internal static class Matcher
             // if there is not that much room" (':17812-17821'), and that is exactly what 'StepBy'
             // does against 'state.SliceStart'/'state.SliceEnd' - so both are computed HERE, while the
             // slice still holds what the caller asked for, and assigned afterwards.
-            int widenedStart = StepBy(state, state.Reverse ? entry.TextPos : entry.MatchPos, fewestErrors, -1);
-            int widenedEnd = StepBy(state, state.Reverse ? entry.MatchPos : entry.TextPos, fewestErrors, 1);
+            int widenedStart = StepBy(state, state.Reverse ? entry.TextPos : entry.AttemptStart, fewestErrors, -1);
+            int widenedEnd = StepBy(state, state.Reverse ? entry.AttemptStart : entry.TextPos, fewestErrors, 1);
 
             state.SliceStart = widenedStart;
             state.SliceEnd = widenedEnd;
@@ -21554,8 +21577,8 @@ internal static class Matcher
             state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;
-            state.TextPos = entry.MatchPos;
-            state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.MatchPos, firstStartPos);
+            state.TextPos = entry.AttemptStart;
+            state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.AttemptStart, firstStartPos);
             state.InitMatch();
             status = BasicMatch(state, search);
 

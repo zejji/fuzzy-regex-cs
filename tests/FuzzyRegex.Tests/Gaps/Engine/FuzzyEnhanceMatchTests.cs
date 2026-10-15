@@ -356,4 +356,20 @@ public sealed class FuzzyEnhanceMatchTests
         (m.Index, m.Index + m.Length).Should().Be((0, 4));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
+
+    // D86, the ENHANCEMATCH sibling. The improvement re-runs inside the first match's span, and a
+    // \K moved that span's start past where the attempt began, so the re-run could not see the
+    // text before the \K. Without \K, (?e)(?:ab){e<=1}c over 'aabc' improves the insertion fit
+    // (0,4) to the exact (1,4); with \K the same refinement reports (3,4) with no errors. Upstream
+    // 2026.9.10 keeps the first fit: (3,4) i:1, and (?er) (0,1) i:1 (measured 2026-10-15).
+    [Test]
+    [Arguments(@"(?e)(?:ab){e<=1}\Kc", "aabc", 3, 4)]
+    [Arguments(@"(?er)c\K(?:ab){e<=1}", "cabb", 0, 1)]
+    public void Enhancematch_refines_a_match_whose_start_a_K_moved(string pattern, string subject, int start, int end)
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
 }

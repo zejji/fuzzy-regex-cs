@@ -6625,3 +6625,86 @@ schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE
 '‍', upstream P(0,1), here P(1,1) with group 1 at (1,1) (groups set by a partial: entry 74).
 Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
 and the judged row 7/35060.
+
+## 83. BESTMATCH loses a fuzzy match whose start `\K` moved - SHARED, FIXED HERE ON `fix/oracle-rows-1015` (D86, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same defect, known defect
+D86, fixed on `fix/oracle-rows-1015` (d5afe9c9, not yet merged) and pinned by
+`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
+Draft report: `entry-83-bestmatch-keep-start.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`; this port answers the same on
+every row:
+
+```
+search(r'(?b)(?:By){e<=1}\K', 'Cy')                    -> None              expected (2,2) (1,0,0)
+search(r'(?:By){e<=1}\K', 'Cy')                        -> (2,2) (1,0,0)     the control: no (?b)
+search(r'(?b)a\K(?:By){e<=1}', 'aCy')                  -> None              expected (1,3) (1,0,0)
+search(r'(?e)a\K(?:By){e<=1}', 'aCy')                  -> (1,3) (1,0,0)     the control: ENHANCEMATCH
+search(r'(?b)a\K(?:By){e<=1}', 'aBy')                  -> (1,3)             the control: no errors
+search(r'(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}', 'aCy')    -> (1,3) (0,0,1)     expected (1,3) (1,0,0)
+```
+
+**Why upstream is wrong.** BESTMATCH ranks the matches fuzzy matching finds and returns the one
+with the fewest errors (`upstream/README.rst`, "BESTMATCH"). It may not lose a match plain fuzzy
+matching makes, and it may not return a match from an alternative that plain matching does not
+choose at that start.
+
+**Mechanism.** The second pass of `do_best_fuzzy_match` re-runs each candidate anchored at
+`entry->match_pos` (`_regex.c:17732`, `basic_match(state, FALSE)` at `:17741`), and the first pass
+walks on from `state->match_pos` (`:17680`). After a `\K`, `match_pos` is where the `\K` ran, not
+where the attempt began. The last row shows it: anchored at 1, only the second alternative matches,
+and its deletion is what comes back. Traced by that probe, not in a debugger.
+
+**This port.** `Matcher.DoBestFuzzyMatch` copies both reads (`entry.MatchPos` at `Matcher.cs:21424`,
+`startPos = state.MatchPos` in the walk). Found by scheduled-oracle row 138026906/24826, which
+diverges only because the two engines' partial answers differ there (port P(0,4), upstream None).
+
+**The fix here (d5afe9c9).** `MatchState.AttemptStart` records where each attempt began and
+`BestEntry` carries it beside `MatchPos`. The walk, the second pass's anchor and offset count, the
+widened fallback and the second pass's tie-break all read it; `MatchPos` stays the reported start.
+ENHANCEMATCH had the same read in its narrowed re-run (`_regex.c:17986-17992`):
+`(?e)(?:ab){e<=1}\Kc` over 'aabc' keeps (3,4) with an insertion, where the `\K`-free pattern improves
+to the exact fit; it now narrows to the attempt's span and answers (3,4) with no errors. Each
+expected answer is the flag-free search's, never upstream's. Without a `\K` the attempt start and
+`MatchPos` are the same position, and the differential against main moved only `\K` rows under
+`(?b)` or `(?e)`.
+
+## 85. A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever - SHARED, FIXED HERE ON `fix/d87` (D87, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Entry 84 is on `fix/d85`; this is the next
+free number. This port had the same defect, known defect D87, fixed on `fix/d87` (7388110d, not yet
+merged) and pinned by `Gaps/Engine/KeepInLookaroundScanTests`. Draft report:
+`entry-85-k-in-lookaround-loops.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15 (`.scratch/s1016/d87/up-probe.py`):
+
+```
+finditer(r'(?=y\K)', 'y')                          -> (1,0) for ever          expected (1,0)
+finditer(r'(?r)(?=y\K)', 'y')                      -> (0,1) for ever          expected (0,1)
+finditer(r'(?<=\Ky)', 'y')                         -> (0,1) for ever          expected (0,1)
+finditer(r'(?<=\Ka)b', 'abab', overlapped=True)    -> (0,2) for ever          expected (0,2), (2,4)
+finditer(r'(?r)(?=By\K)(?:z){e}', 'Byz')           -> (0,2) i, then (0,2) d for ever
+split(r'(?=y\K)', 'yy'), sub(r'(?=y\K)', ...)      -> never return
+search(r'(?er)(?:Cyy){1i+1d+1s<=2}(?=z\K)', 'bx-axyz-\U0001D49C')  -> loops; (?r) gives (3,7)
+```
+
+**Why upstream is wrong.** A scan must make progress: Python `re` documents that empty matches are
+included but never repeated at the same place, and a single search must end. Perl 5.42.3 and PCRE2
+10.47 refuse `\K` inside a lookaround at compile time; PCRE2's opt-in
+(`PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK`) comes with `pcre2_next_match`, which treats a match that ends
+where its search began but whose start a `\K` moved as no progress and bumps along.
+
+**Mechanism.** `state->must_advance = state->text_pos == state->match_pos` (`_regex.c:20932`, and
+`:21207`, `:22087`, `:22361`, `:22510`) tests the reported span; `(?=y\K)` reports (1,0), which
+ended where its attempt began. The overlapped step (`:20928`, `:22506`) and the advance after a
+failed attempt (`:15695`) step on from `match_pos`, which a lookbehind's `\K` (a lookahead's under
+`(?r)`) leaves behind the attempt; it outlives the attempt because `RE_OP_END_LOOKAROUND`
+(`:12918`) discards the entry that would undo it. Traced by probe in this port, which copied each
+line (`MatchState.AdvancePastMatch`, the `Matcher` failure arm); not traced in C.
+
+**The fix here (7388110d).** A match that ends where its attempt began counts as empty, and the
+overlapped step and the failure arm step on from `MatchState.AttemptStart` when the reported start
+lies behind it. BESTMATCH and ENHANCEMATCH restore `AttemptStart` with their best match, and a
+`Match` carries it for `NextMatch`. A start left ahead of the attempt is unchanged; that is known
+defect D88 (a failed attempt skips starts), not yet fixed.

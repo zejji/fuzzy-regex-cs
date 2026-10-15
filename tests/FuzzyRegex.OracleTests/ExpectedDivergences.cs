@@ -2214,7 +2214,6 @@ internal static class ExpectedDivergences
     /// </remarks>
     private const string _reversedSkipInventedMatchRows = """
         {"generator": "interactions", "pattern": "(?r)^(?:[^a]+(*SKIP)[^a-f]|\\p{Lu})(?P<g1>\\D)(?:(?(1)(?=(?P>g1))\\w))*$", "flags": 10, "namedLists": {}, "subject": "\ud83d\ude00\ufb03 _\ud801\udc00a\ufb03\ud801\udc00", "operation": "search", "partial": true, "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
-        {"generator": "interactions", "pattern": "(?b)(?r)(?:(?:𝟮([[:alpha:]])){1<=e<=2}(*SKIP)[^a]|\\s)\\K(?:(\\w)([^\\p{L}])[\\p{L}\\p{N}]*){e<=2,s<=1}", "flags": 8, "namedLists": {}, "subject": "𝟮𝟮‍‍😀 😀", "operation": "match", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 4, "captures": [[4, 4]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 2, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}, {"number": 3, "success": true, "index": 9, "length": 2, "captures": [[9, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [9, 6, 5], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "nomatch"}}
         {"generator": "verbs", "pattern": "(?r)(?>\\W+?(*SKIP)ß)$", "flags": 8, "namedLists": {}, "subject": "😀_😀ßß", "operation": "search", "oracle": "prefilter-free", "codepointSpan": [2, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "nomatch"}}
         """;
 
@@ -5429,7 +5428,16 @@ internal static class ExpectedDivergences
                 + "recording but does not change the judgement: a verb that only forbids attempts "
                 + "cannot create one, whatever is ranking the candidates. Measured 2026-09-16 on "
                 + "regex 2026.9.10 with `python tools/probes/sweep-ablation-matrix.py --emit <file> "
-                + "--rows 7,9` then `pwsh -File tools/run-oracle.ps1 -Rows <file>`.",
+                + "--rows 7,9` then `pwsh -File tools/run-oracle.ps1 -Rows <file>`.\n"
+                + "ROW 7 LEFT THIS ENTRY ON 2026-10-15 (D86, ledger 83). Its `(*PRUNE)` None was not "
+                + "pruning at work but BESTMATCH losing a candidate whose start `\\K` moved, the same "
+                + "None upstream gives with the verb deleted while its flag-free match gives (2, 5) "
+                + "with three substitutions. With D86 fixed this port answers that flag-free match, "
+                + "so the row no longer lands on upstream's `(*PRUNE)` rendering. Upstream's drawn "
+                + "(0, 3) is still impossible - its groups leave ' \\U0001F600' for "
+                + "`[\\p{L}\\p{N}]*` to match with the one error spent elsewhere - and this port's "
+                + "answer is pinned by FuzzyBestMatchTests.Bestmatch_keeps_the_K_moved_match_a_"
+                + "reversed_skip_row_lost.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_search_of_a_skip_finds_nothing_where_pruning_"
                 + "alone_finds_nothing",
             Example: _reversedSkipInventedMatchRows,
