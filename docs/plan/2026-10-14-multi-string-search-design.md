@@ -133,17 +133,26 @@ this case: an ignore-case `SearchValues<string>` call that hits at once costs ab
 searches skipping under 4 code units each on average, the call switches to the units
 (`PatternObject.LeadingFallbackUnits`) for the rest of its run, out of line (D82). With it: 73-75
 ms in either case, against 77 ms with no screen. A 3-character set, `(?i)(?:tht|hth)\d`: 79 ms
-(units 96 ms). Shared prefixes `(?i)abc|abd|abe|abf` over `abx` x 256K get no screen on either side
-(the compiler factors out `ab`, so the head is a class), 17 and 19 ms. A set holding a `k`
-member stays on units: 4.7 and 5.2 ms.
+(units 96 ms).
 
-*Gains over the word corpus* (same probe, main then branch): `(?i)cat|dog` 3.32 to 0.093 ms,
-`(?i)(?:amber|copper|violet)` 6.26 to 0.093 ms, `(?i)\b\L<ten>\b` 31.8 to 1.3-1.7 ms (the ten
-words without `s` or `k`), `(?i)\L<ten>` 50.9 to 1.6-1.8 ms. The probe's original ten words, with
-`thistle`, also get the strings (32.8 to 3.5-4.2 ms); why is being checked (`heads/Program.cs`).
+*Pinned run* (owner's quiet window, 13:00; P-cores `FFF8`, tiering off, main and branch
+alternating, min of 5 processes, `time.ps1`, `time-summary.txt`; main to branch). Adversaries:
+dense `(?i)(?:th|ht)\d` 63.9 to 66.8 ms (1.05x), mixed case 62.5 to 67.0 ms (1.07x); shared
+prefixes `(?i)abc|abd|abe|abf` over `abx` x 256K 16.0 to 15.6 ms and with `\b` 26.5 to 27.6 ms
+(no screen on either side: the compiler factors out `ab`, so the head is a class); a set holding a
+`k` member, which stays on units, 4.31 to 4.71 ms (1.09x, an untouched path, so the machine's
+spread). Gains over the word corpus: `(?i)cat|dog` 3.11 to 0.086 ms, `(?i)(?:amber|copper|violet)`
+6.05 to 0.084 ms, `(?i)\b\L<ten>\b` (ten words without `s` or `k`) 31.2 to 1.43 ms,
+`(?i)\L<ten>` 46.5 to 1.41 ms. The probe's original ten words, with `thistle`, also get the
+strings: 31.9 to 3.26 ms. The node dump (`heads/Program.cs`,
+`heads.txt`) shows why: under full case folding the compiler splits a literal where folding can
+change its length, so `thistle` is `StringIgn 'thi'`, `StringFld 'st'`, `StringIgn 'le'`. The
+screen only searches for the first node, `thi`, which the rule accepts. A `k` or `s` stops the set
+only when it falls in the first node.
 
-*Length floor.* Two-character literals already win: `(?i)th|he|an` 11.9 to 7.7-8.1 ms,
-`(?i)of|to|in` 11.5 to 4.8-5.0 ms, `(?i)(?:th|he|an)\d` 13.1 to 9.2-9.5 ms. So the floor is 2. A
+*Length floor.* Two-character literals already win (pinned run): `(?i)th|he|an` 11.2 to 7.3 ms,
+`(?i)of|to|in` 10.6 to 4.1 ms, `(?i)(?:th|he|an)\d` 13.1 to 8.6 ms; three-character `(?i)the|and`
+7.3 to 2.5 ms. So the floor is 2. A
 one-character literal is a `CharacterIgn`, and neighbouring ones merge into a set the walk does
 not take; a single one beside longer ones keeps the set on units. A shared one-character prefix
 does the same: `(?i)café|crème` factors to `c(?:afé|rème)`, a one-character head.

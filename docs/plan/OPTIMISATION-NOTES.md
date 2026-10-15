@@ -197,11 +197,36 @@ already handled `LeadingStrings`, and its Debug assertion that every match start
 literal now checks the ignore-case set on every whole match in the Debug suite and oracle. Logs in
 the main checkout's `.scratch/s1016/c6-oic/`.
 
-**Evidence.** TBD (red/green, mutations, differential, counters, oracle, AOT).
+An ignore-case `SearchValues<string>` call costs about 130 ns when it hits at once, so text where
+every position starts a literal ran 2.6x slower than no screen on the first build (212 against 81
+ms). The design note's Option F answers it: `Matcher.LeadingStringsSkipTooLittle`, out of line,
+switches the call to `PatternObject.LeadingFallbackUnits` once 32 searches have skipped under 4
+code units each on average.
 
-**Timing.** TBD: scheduled by the orchestrator. Rows to read: `WholeWordListIgnoreCase` (new,
-Workload, `(?i)\b\L<words>\b` over the long corpus, Python pair added), `CaseBlindAlternation`
-(ManyInputs, `(?i)(?:amber|copper|violet)`); every other row should be flat.
+**Evidence.** `LeadingIgnoreCaseStringsTests` was red with B switched off (16 failed,
+`rg/red-*.log`) and is green after. Rule-12 witnesses, each a mutation that leaves the suite
+compiling: the closure check off turns 7 tests red (Kelvin and long-s rows, the per-character rule
+over the BMP, the refused-set loops); the special-folding check off turns 5 red (`fit`, `flat`,
+`ﬂat`); Option F off turns its counter test red (`mutF2`). The Debug ratchet is green at 9,024
+tests. Differential against main 9b3819c4 (`c6-oic-base`, elapsed column stripped, `cmp`): identical
+over 236,000 rows (`s62/rows-c` 100,000, `rows-d` 60,000, `rows-oic.jsonl` 70,000 from `gen.py`,
+`rows-dense.jsonl` 6,000 from `gen-dense.py`). Counters (Debug build, `count/Program.cs`): the
+new screen runs on 13,820 of the `rows-oic` rows, and each of their 8,197 match starts is on a
+screened literal. On 18,644 rows the screen stays on units, and on 1,126 of those an ordinal
+ignore-case search for the literals would have missed a real match (917 through `k` or `s`). The
+fall-back fires on 1,040 `rows-dense` rows, 731 of them with matches. Oracle seeds 7, 4242 and
+20260927 are green, as are the AOT tests (9,024), the AOT smoke (7,618,560 bytes, 6,656 more than
+D84's 7,611,904) and the doc examples.
+
+**Indicative timing** (pinned, min of 5, owner's quiet window; the design note's build section has
+every row): `(?i)\b\L<ten>\b` 31.2 to 1.43 ms, `(?i)(?:amber|copper|violet)` 6.05 to 0.084 ms,
+`(?i)th|he|an` 11.2 to 7.3 ms, dense adversary 1.05-1.07x.
+
+**BDN** (medium, P-cores, the owner's quiet window, filtered to the targeted rows; the main side
+had the new row copied into its worktree, `.scratch/s1016/c6-oic/bdn-*`): `CaseBlindAlternation`
+33.80 to 8.83 ms (0.26x); `WholeWordListIgnoreCase` (new, `(?i)\b\L<words>\b` over the long
+corpus, Python pair added) 14.59 to 6.89 ms (0.47x); `WholeWordList`, untouched, 4.28 to 4.30 ms.
+The full Workload, ManyInputs and Reference sweep is still to run.
 
 ## D84, the ignore-case first-set look-through (2026-10-14)
 
