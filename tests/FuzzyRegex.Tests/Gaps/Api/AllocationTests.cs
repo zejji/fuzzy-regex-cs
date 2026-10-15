@@ -253,11 +253,14 @@ public sealed class AllocationTests
         // one empty group array (24 B a match before), and D83's scan record sits in Match's own
         // fields rather than a struct the runtime pads (16 B a match as a struct, 8 apart). The
         // difference of two lengths is the part that grows with the matches. Measured 2026-10-11:
-        // 160 B on main, 176 with D83's struct, 128 with both changes.
+        // 160 B on main, 176 with D83's struct, 128 with both changes; 120 on 9b3819c4, where the
+        // Match object is 8 B smaller. D87's attempt start as a field of its own took it back to 128
+        // (measured 2026-10-15 on d5910d10), so it rides in the spans array instead, and only for a
+        // pattern that needs it.
         long shorter = PerWalk(1_000);
         long longer = PerWalk(2_000);
 
-        ((longer - shorter) / 1_000).Should().BeLessThanOrEqualTo(128);
+        ((longer - shorter) / 1_000).Should().BeLessThanOrEqualTo(120);
 
         static long PerWalk(int words)
         {
@@ -269,6 +272,34 @@ public sealed class AllocationTests
                 FuzzyRegex regex = new(@"\w+");
                 _ = regex.EnumerateMatches(subject).Count();
                 return () => count = regex.EnumerateMatches(subject).Count();
+            });
+
+            count.Should().Be(words);
+            return allocated;
+        }
+    }
+
+    [Test]
+    public void An_eager_collection_of_a_pattern_without_groups_costs_its_match_objects_and_their_list()
+    {
+        // The MatchesToEnd row: Matches(...).Count builds every Match up front and keeps them in a
+        // list, which adds 8 B a match for the slot that holds it. Measured 2026-10-15: 128 B a
+        // match on 9b3819c4, 136 on d5910d10 (the D87 field).
+        long shorter = PerCollection(1_000);
+        long longer = PerCollection(2_000);
+
+        ((longer - shorter) / 1_000).Should().BeLessThanOrEqualTo(128);
+
+        static long PerCollection(int words)
+        {
+            string subject = string.Concat(Enumerable.Repeat("ab ", words));
+            int count = 0;
+
+            long allocated = AllocatedBy(() =>
+            {
+                FuzzyRegex regex = new(@"\w+");
+                _ = regex.Matches(subject).Count;
+                return () => count = regex.Matches(subject).Count;
             });
 
             count.Should().Be(words);

@@ -158,13 +158,6 @@ public sealed class Match : Group
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
 
     /// <summary>
-    /// Where the attempt that found this match began, which <see cref="NextMatch"/> needs when a
-    /// <c>\K</c> inside a lookaround moved the reported span away from it (D87; see
-    /// <c>MatchState.AdvancePastMatch</c>).
-    /// </summary>
-    private readonly int _attemptStart;
-
-    /// <summary>
     /// The cache behind <see cref="FuzzyChanges"/>, boxed so that publishing it is a single
     /// reference write.
     /// </summary>
@@ -201,7 +194,9 @@ public sealed class Match : Group
     /// <param name="spans">
     /// The engine's group data, already packed out of the state by
     /// <see cref="Engine.GroupData.PackSpans"/> - the state's arrays are reused by the next match,
-    /// so a match that shared them would change under its owner.
+    /// so a match that shared them would change under its owner. For a pattern with
+    /// <see cref="Engine.PatternObject.KeepInSubmatch"/> set it ends with where the match's attempt
+    /// began (<see cref="AttemptStart"/>).
     /// </param>
     /// <param name="sliceStart">
     /// Where the slice this match was found in starts, which <see cref="NextMatch"/> resumes inside
@@ -221,7 +216,6 @@ public sealed class Match : Group
     /// next state instead of searching the same units again. The default, nothing known, is always
     /// correct and only slower.
     /// </param>
-    /// <param name="attemptStart">Where the attempt that found the match began.</param>
     internal Match(
         FuzzyRegex regex,
         string subject,
@@ -237,8 +231,7 @@ public sealed class Match : Group
         bool partial = false,
         FuzzyCounts fuzzyCounts = default,
         Engine.FuzzyChange[]? fuzzyChanges = null,
-        Engine.SubjectScan scan = default,
-        int attemptStart = 0
+        Engine.SubjectScan scan = default
     )
         : base(subject, start, end, success, owner: null, number: 0)
     {
@@ -247,7 +240,6 @@ public sealed class Match : Group
         _lastGroup = lastGroup;
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
-        _attemptStart = attemptStart;
         _overlapped = overlapped;
         (_scanCleanStart, _scanCleanEnd, _scanFound) = scan;
         _fuzzyChanges = fuzzyChanges ?? [];
@@ -596,9 +588,23 @@ public sealed class Match : Group
                 _sliceEnd,
                 _overlapped,
                 new(_scanCleanStart, _scanCleanEnd, _scanFound),
-                _attemptStart
+                AttemptStart
             )
             : _regex.NoMatch(_subject);
+
+    /// <summary>
+    /// Where the attempt that found this match began, which <see cref="NextMatch"/> needs when a
+    /// <c>\K</c> inside a lookaround moved the reported span away from it (D87; see
+    /// <c>MatchState.AdvancePastMatch</c>).
+    /// </summary>
+    /// <remarks>
+    /// Only a pattern with <see cref="Engine.PatternObject.KeepInSubmatch"/> set reads it, so only
+    /// that pattern's matches carry it, as the last number in <see cref="_spans"/>. A field of its
+    /// own cost every match 8 bytes, a whole word of padding (measured 2026-10-15, the
+    /// <c>Matches</c> walks in <c>AllocationTests</c>). For any other pattern this answers the
+    /// reported start, which nothing reads.
+    /// </remarks>
+    private int AttemptStart => _regex.PatternObject.KeepInSubmatch ? _spans[^1] : _start;
 
     /// <summary>
     /// Expands a replacement template against this match, so <c>\1</c> and <c>\g&lt;name&gt;</c>
