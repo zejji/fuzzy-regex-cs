@@ -214,6 +214,13 @@ def workload_rows() -> list[Row]:
         lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
         lambda p=p: spans(p.finditer(long_)))
 
+    # WholeWordListIgnoreCase: the same list ignoring case (C6 option B).
+    p = compile_(r"(?i)\b\L<words>\b", V1, words=["amber", "copper", "violet", "harbour", "meadow",
+                                                  "lantern", "granite", "jump", "fox", "needle"])
+    add("WholeWordListIgnoreCase", p.pattern, V1, "len(findall())",
+        lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
+        lambda p=p: spans(p.finditer(long_)))
+
     # ReverseFailedScan: RightToLeft IsMatch.
     fl = V1 | R
     p = compile_("zebra", fl)

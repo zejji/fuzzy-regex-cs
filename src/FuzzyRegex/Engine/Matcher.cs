@@ -12757,6 +12757,54 @@ internal static class Matcher
         return at < 0 ? (-1, 0) : (foundPos + at, foundPos + at + 1);
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S (C6 option B, the design note's Option F): whether an ignore-case leading
+    /// string search should give way to <c>PatternObject.LeadingFallbackUnits</c> for the rest of
+    /// this <see cref="BasicMatchCore"/> call, after recording one search that skipped
+    /// <paramref name="skipped"/> code units.
+    /// </summary>
+    /// <remarks>
+    /// An ignore-case <see cref="SearchValues{T}"/> string search costs much more per call than an
+    /// ordinal one: over <c>th</c> repeated 512K times, where every position starts a literal and
+    /// every attempt fails, <c>(?i)(?:th|ht)\d</c> took 212 ms against 81 ms with no screen and 77
+    /// ms for the ordinal search (one call per attempt each). The code units sweep a run of hits
+    /// once (<see cref="NextLeadingUnit"/>). So, as aho-corasick's prefilter does (MIN_SKIPS 40,
+    /// MIN_AVG_FACTOR 2), once 32 searches have skipped fewer than 4 code units each on average the
+    /// call switches screens. Both are sound, so the switch changes no answer. Out of line to keep
+    /// its locals out of <see cref="BasicMatchCore"/>'s count (D82).
+    /// </remarks>
+    /// <param name="state">The match state, whose counters <see cref="BasicMatchCore"/> zeroes.</param>
+    /// <param name="skipped">How far the search just made moved the start.</param>
+    /// <returns><see langword="true"/> to switch to the code units.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool LeadingStringsSkipTooLittle(MatchState state, int skipped)
+    {
+        state.LeadingStringCalls++;
+        state.LeadingStringSkipped += skipped;
+        if (
+            state.LeadingStringCalls < _leadingStringMinCalls
+            || state.LeadingStringSkipped >= state.LeadingStringCalls * _leadingStringMinSkip
+        )
+        {
+            return false;
+        }
+
+        WorkCounter.LeadingStringFellBack();
+        return true;
+    }
+
+    /// <summary>
+    /// How many ignore-case leading-string searches <see cref="LeadingStringsSkipTooLittle"/> waits
+    /// for before judging them.
+    /// </summary>
+    private const int _leadingStringMinCalls = 32;
+
+    /// <summary>
+    /// The fewest code units each ignore-case leading-string search must skip on average to stay in
+    /// use.
+    /// </summary>
+    private const int _leadingStringMinSkip = 4;
+
     // cold-arm (D82): what an arm moved out of BasicMatchCore hands back, beside the MatchStatus
     // values (all below 3) it returns as they are. BasicMatchCore had reached the JIT's limit on
     // locals (JitMaxLocalsToTrack, 1,024 with inlinees' temporaries): past it, locals live on the
@@ -12889,6 +12937,8 @@ internal static class Matcher
         SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
         SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
         int leadingUnitsEnd = 0;
+        state.LeadingStringCalls = 0;
+        state.LeadingStringSkipped = 0;
 
         // NOT UPSTREAM'S (C6), the last two clauses: no prefilter when that leading screen runs.
         // The screen stops only on a literal, and every literal starts with a character of the
@@ -13095,6 +13145,14 @@ internal static class Matcher
             }
 
             foundPos += at;
+
+            // C6 option B: an ignore-case string search that keeps stopping close by gives way to
+            // the code units, which sweep a run of hits once. Either screen only skips.
+            if (pattern.LeadingFallbackUnits is { } fallback && LeadingStringsSkipTooLittle(state, at))
+            {
+                leadingStrings = null;
+                leadingUnits = fallback;
+            }
         }
         else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
         {

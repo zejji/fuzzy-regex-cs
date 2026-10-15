@@ -183,6 +183,26 @@ so the build is ruled out. The suspect is code generation around `NextStart`, wh
 one condition. It is still 0.022x of main. The upgrade is a `--disasm` comparison of the two
 `NextStart` bodies.
 
+## C6 option B, ignore-case strings for the leading screen (2026-10-15)
+
+Option B of `docs/plan/2026-10-14-multi-string-search-design.md`, restricted, on `perf/c6-oic`.
+A case-insensitive alternation of literals now gets `LeadingStrings` under
+`StringComparison.OrdinalIgnoreCase` (whole-string Teddy) instead of `LeadingUnits` (first code
+units) when `RequiredStringScreen.OrdinalIgnoreCaseCovers` says .NET's rule finds every match the
+engine's does, and every literal has at least two characters. The rule is computed from the case
+tables, so `k` and `s` (U+212A, U+017F) and, under full folding, the runs `ss`, `st`, `fi`, `ff`,
+`fl`, `ffi`, `ffl` fall out of it; the design note's build section has the probe. Any literal that
+fails sends the whole set to the units screen, as on main. No Matcher change: the string path
+already handled `LeadingStrings`, and its Debug assertion that every match starts on a screened
+literal now checks the ignore-case set on every whole match in the Debug suite and oracle. Logs in
+the main checkout's `.scratch/s1016/c6-oic/`.
+
+**Evidence.** TBD (red/green, mutations, differential, counters, oracle, AOT).
+
+**Timing.** TBD: scheduled by the orchestrator. Rows to read: `WholeWordListIgnoreCase` (new,
+Workload, `(?i)\b\L<words>\b` over the long corpus, Python pair added), `CaseBlindAlternation`
+(ManyInputs, `(?i)(?:amber|copper|violet)`); every other row should be flat.
+
 ## D84, the ignore-case first-set look-through (2026-10-14)
 
 Option A of `docs/plan/2026-10-14-multi-string-search-design.md`, on `fix/d84-ignorecase-screen`.

@@ -296,6 +296,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharactersWalked>k__BackingField",
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
+                "WorkCounter.<LeadingStringFallbacks>k__BackingField",
                 "WorkCounter.<SearchStartCalls>k__BackingField",
                 "WorkCounter.<StatesInitialised>k__BackingField",
                 "WorkCounter.<StepLimit>k__BackingField",
@@ -918,6 +919,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.LeadingStrings",
             // The fold-aware screen (2026-10-11) added LeadingUnits, written with LeadingStrings.
             "PatternObject.LeadingUnits",
+            // C6 option B (2026-10-15) added LeadingFallbackUnits, written with LeadingStrings.
+            "PatternObject.LeadingFallbackUnits",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never

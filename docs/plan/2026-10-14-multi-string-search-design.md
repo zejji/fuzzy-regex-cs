@@ -89,6 +89,65 @@ punctuation, no FULLCASE expansion (no `ss`, `st`, `fi` and the like). Else fall
 frequent short heads OIC Teddy is slower than units (`th|he|an` 4.66 ms against 1.24 ms), so B also
 needs a member-length floor (heads of 3+ characters) or a measured choice.
 
+**Option B, restricted: the build (2026-10-15, `perf/c6-oic`).** Probes in the main checkout's
+`.scratch/s1016/c6-oic/`.
+
+*The rule, from the tables.* `closure/Program.cs` (`closure.txt`) checks every BMP character `c`:
+is each member of `c`'s closure under `Encodings.AllCases` equal to `c` under OrdinalIgnoreCase,
+by `string.Equals` and by a `SearchValues<string>` built from `c`? The two .NET answers never
+disagree. Under the Unicode encoding 63,458 characters pass; in ASCII only `k`, `K`, `s` and `S`
+fail (U+212A, U+017F). Under the ASCII encoding every character passes. Through the public API, a
+single ASCII character under `(?i)` or `(?fi)` matches no other character beyond those two, and the
+runs a full folding can take are `ss` (`ß`, `ẞ`), `fi` (`ﬁ`), `st` (`ﬅ`, `ﬆ`) and `ff` (`ﬀ`), plus
+`fl`, `ffi`, `ffl` by the same table. So the rule (`RequiredStringScreen.OrdinalIgnoreCaseCovers`) is:
+a case-sensitive literal always qualifies (an exact match is an ignore-case one); a
+case-insensitive one qualifies when every character is in the BMP and its closure is inside its
+OrdinalIgnoreCase class, and, for a full-folding (`StringFld`) literal, when no run of it is spelt by
+the full folding of a case of a `RequiredStringScreen.Specials` character. A character outside the
+specials folds to one character of its own closure, so only a special can take a different run;
+the matcher takes a folding whole or fails (`Matcher.cs`, the `STRING_FLD` arm). `k` and `s` fall
+out of the rule rather than being listed. One literal that fails sends the whole set to the units
+screen, which is what main does today.
+
+*Options considered for the sets the rule refuses.* B1, refuse the set (built). B2, add the
+engine's extra spellings as more members (`thiſtle`, `thiﬅle`, `thiﬆle`). Measured raw over the
+megabyte, .NET still picked bucketised Teddy for that set and searched it in 0.23 ms, against
+1.49 ms without the variants and 2.89 ms for the units (`timing-*.txt`). Members multiply per `k`
+and `s`, though: two per character under simple folding, more under full. B3, keep
+the ASCII Teddy search and run a second scan for the outlier characters (`K`, `ſ`, `ß`, the
+ligatures), falling back to units only near one: sound, but a second cached position on the match
+state and a Matcher change. Left as an open question.
+
+*Worst case on paper.* The units screen sweeps a run of hits once (`NextLeadingUnit`); the string
+screen makes one `IndexOfAny` per attempt. Text where every position starts a member and every
+attempt fails therefore costs one call more per position than today, measured at 11-28 ns for an
+ordinal set (section 3). Compile cost: the closure of each distinct character, cached per pattern,
+and one pass of each literal against the special foldings.
+
+*Adversaries, measured* (`timing-*/Program.cs`, `timing2/Program.cs`; Release, tiering off, best
+of 7, single process on a shared machine, so good to a factor; main then branch). Dense
+`(?i)(?:th|ht)\d` over `th` x 512K, no match: 66 ms on main (units) but **212 ms** on the first
+build, against 81 ms with no screen and 77 ms for the ordinal set. The paper bound was wrong for
+this case: an ignore-case `SearchValues<string>` call that hits at once costs about 130 ns, not
+11-28. So Option F was built after all (`Matcher.LeadingStringsSkipTooLittle`): after 32 string
+searches skipping under 4 code units each on average, the call switches to the units
+(`PatternObject.LeadingFallbackUnits`) for the rest of its run, out of line (D82). With it: 73-75
+ms in either case, against 77 ms with no screen. A 3-character set, `(?i)(?:tht|hth)\d`: 79 ms
+(units 96 ms). Shared prefixes `(?i)abc|abd|abe|abf` over `abx` x 256K get no screen on either side
+(the compiler factors out `ab`, so the head is a class), 17 and 19 ms. A set holding a `k`
+member stays on units: 4.7 and 5.2 ms.
+
+*Gains over the word corpus* (same probe, main then branch): `(?i)cat|dog` 3.32 to 0.093 ms,
+`(?i)(?:amber|copper|violet)` 6.26 to 0.093 ms, `(?i)\b\L<ten>\b` 31.8 to 1.3-1.7 ms (the ten
+words without `s` or `k`), `(?i)\L<ten>` 50.9 to 1.6-1.8 ms. The probe's original ten words, with
+`thistle`, also get the strings (32.8 to 3.5-4.2 ms); why is being checked (`heads/Program.cs`).
+
+*Length floor.* Two-character literals already win: `(?i)th|he|an` 11.9 to 7.7-8.1 ms,
+`(?i)of|to|in` 11.5 to 4.8-5.0 ms, `(?i)(?:th|he|an)\d` 13.1 to 9.2-9.5 ms. So the floor is 2. A
+one-character literal is a `CharacterIgn`, and neighbouring ones merge into a set the walk does
+not take; a single one beside longer ones keeps the set on units. A shared one-character prefix
+does the same: `(?i)café|crème` factors to `c(?:afé|rème)`, a one-character head.
+
 **Option C. Look through zero-width nodes (L1).** Add to the walk's look-through list the nodes that
 read no text and cannot move the start: word boundaries (`\b`, `\B`, start/end of word, default
 boundary), line and string anchors, and lookarounds (skip the assertion, follow its continuation).

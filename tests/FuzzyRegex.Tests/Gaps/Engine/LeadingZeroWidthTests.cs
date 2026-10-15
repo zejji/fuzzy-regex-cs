@@ -57,7 +57,8 @@ public sealed class LeadingZeroWidthTests
 
     /// <summary>
     /// The same under IgnoreCase: the ignore-case first-set check, then the test, then
-    /// case-insensitive literals, which give code units rather than strings.
+    /// case-insensitive literals, which give ignore-case strings (C6 option B) or, where .NET's
+    /// ignore-case rule would miss a match, code units.
     /// </summary>
     /// <param name="pattern">A pattern opening with a zero-width test and then literals.</param>
     [Test]
@@ -71,7 +72,7 @@ public sealed class LeadingZeroWidthTests
         using (new AssertionScope())
         {
             compiled.StartNode!.Op.Should().Be(Opcode.SetUnionIgn);
-            compiled.LeadingUnits.Should().NotBeNull();
+            (compiled.LeadingStrings ?? (object?)compiled.LeadingUnits).Should().NotBeNull();
         }
     }
 

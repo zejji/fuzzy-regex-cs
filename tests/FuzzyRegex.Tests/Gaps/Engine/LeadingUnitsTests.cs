@@ -53,15 +53,8 @@ public sealed class LeadingUnitsTests
     [Arguments(@"(?fi)\U0001E900x|q")]
     [Arguments("(?-i:Abc)|(?fi:ß)x|(?fi:é)")]
     [Arguments("(?fi)(?:ﬅa|ba)c|(de)")]
-    [Arguments("(?i)cat|dog")]
-    [Arguments("(?fi)cat|dog")]
     [Arguments("(?i)kit|sit")]
     [Arguments("(?fi)kit|sit")]
-    [Arguments("(?ai)kit|sit")]
-    [Arguments("(?i)in|on")]
-    [Arguments("(?fi)in|on")]
-    [Arguments("(?i)(?:amber|copper|violet)+")]
-    [Arguments("(?ai)straße|café")]
     [Arguments(@"(?i)\b(?:kit|sit)\b")]
     [Arguments(@"(?fi)\m(?:straße|café)")]
     [Arguments("(?im)^(?:kit|sit)")]
@@ -134,7 +127,8 @@ public sealed class LeadingUnitsTests
     /// step of 0, <c>ParseFunctions.CheckFirstset</c>). The check reads nothing and can only refuse
     /// a position, so the walk looks through it as it does through the case-sensitive one, and the
     /// alternation gets its screen whether the flag is inline, an option, with or without full
-    /// case folding, or a named list.
+    /// case folding, or a named list. The screen is code units, or since C6 option B ignore-case
+    /// strings when .NET's rule finds every match (<c>LeadingIgnoreCaseStringsTests</c>).
     /// </summary>
     /// <param name="pattern">A case-insensitive alternation of literals.</param>
     /// <param name="options">The options it compiles with.</param>
@@ -166,7 +160,7 @@ public sealed class LeadingUnitsTests
         {
             compiled.StartNode!.Op.Should().BeOneOf(Opcode.SetUnionIgn, Opcode.CharacterIgn, Opcode.RangeIgn);
             compiled.StartNode.Step.Should().Be(0);
-            compiled.LeadingUnits.Should().NotBeNull();
+            (compiled.LeadingStrings ?? (object?)compiled.LeadingUnits).Should().NotBeNull();
         }
     }
 
