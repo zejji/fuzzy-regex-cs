@@ -6669,3 +6669,42 @@ to the exact fit; it now narrows to the attempt's span and answers (3,4) with no
 expected answer is the flag-free search's, never upstream's. Without a `\K` the attempt start and
 `MatchPos` are the same position, and the differential against main moved only `\K` rows under
 `(?b)` or `(?e)`.
+
+## 85. A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever - SHARED, FIXED HERE ON `fix/d87` (D87, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Entry 84 is on `fix/d85`; this is the next
+free number. This port had the same defect, known defect D87, fixed on `fix/d87` (7388110d, not yet
+merged) and pinned by `Gaps/Engine/KeepInLookaroundScanTests`. Draft report:
+`entry-85-k-in-lookaround-loops.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15 (`.scratch/s1016/d87/up-probe.py`):
+
+```
+finditer(r'(?=y\K)', 'y')                          -> (1,0) for ever          expected (1,0)
+finditer(r'(?r)(?=y\K)', 'y')                      -> (0,1) for ever          expected (0,1)
+finditer(r'(?<=\Ky)', 'y')                         -> (0,1) for ever          expected (0,1)
+finditer(r'(?<=\Ka)b', 'abab', overlapped=True)    -> (0,2) for ever          expected (0,2), (2,4)
+finditer(r'(?r)(?=By\K)(?:z){e}', 'Byz')           -> (0,2) i, then (0,2) d for ever
+split(r'(?=y\K)', 'yy'), sub(r'(?=y\K)', ...)      -> never return
+search(r'(?er)(?:Cyy){1i+1d+1s<=2}(?=z\K)', 'bx-axyz-\U0001D49C')  -> loops; (?r) gives (3,7)
+```
+
+**Why upstream is wrong.** A scan must make progress: Python `re` documents that empty matches are
+included but never repeated at the same place, and a single search must end. Perl 5.42.3 and PCRE2
+10.47 refuse `\K` inside a lookaround at compile time; PCRE2's opt-in
+(`PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK`) comes with `pcre2_next_match`, which treats a match that ends
+where its search began but whose start a `\K` moved as no progress and bumps along.
+
+**Mechanism.** `state->must_advance = state->text_pos == state->match_pos` (`_regex.c:20932`, and
+`:21207`, `:22087`, `:22361`, `:22510`) tests the reported span; `(?=y\K)` reports (1,0), which
+ended where its attempt began. The overlapped step (`:20928`, `:22506`) and the advance after a
+failed attempt (`:15695`) step on from `match_pos`, which a lookbehind's `\K` (a lookahead's under
+`(?r)`) leaves behind the attempt; it outlives the attempt because `RE_OP_END_LOOKAROUND`
+(`:12918`) discards the entry that would undo it. Traced by probe in this port, which copied each
+line (`MatchState.AdvancePastMatch`, the `Matcher` failure arm); not traced in C.
+
+**The fix here (7388110d).** A match that ends where its attempt began counts as empty, and the
+overlapped step and the failure arm step on from `MatchState.AttemptStart` when the reported start
+lies behind it. BESTMATCH and ENHANCEMATCH restore `AttemptStart` with their best match, and a
+`Match` carries it for `NextMatch`. A start left ahead of the attempt is unchanged; that is known
+defect D88 (a failed attempt skips starts), not yet fixed.
