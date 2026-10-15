@@ -15997,8 +15997,9 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Can we advance?
-                    state.TextPos = state.MatchPos;
+                    // Can we advance? NOT UPSTREAM'S, D87: not from a start a \K left behind the
+                    // attempt; see MatchState.StartNotBehindTheAttempt.
+                    state.TextPos = state.StartNotBehindTheAttempt();
 
                     if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
@@ -20841,6 +20842,7 @@ internal static class Matcher
 
         int bestMatchPos = state.TextPos;
         int bestTextPos = 0;
+        int bestAttemptStart = state.TextPos; // D87: the scan's next step reads it.
         bool mustAdvance = state.MustAdvance;
         int firstTextPos = state.TextPos;
 
@@ -20929,6 +20931,7 @@ internal static class Matcher
 
                 bestMatchPos = state.MatchPos;
                 bestTextPos = state.TextPos;
+                bestAttemptStart = state.AttemptStart;
             }
 
             if (state.TotalErrors == 0)
@@ -20980,6 +20983,7 @@ internal static class Matcher
 
                 state.MatchPos = bestMatchPos;
                 state.TextPos = bestTextPos;
+                state.AttemptStart = bestAttemptStart;
 
                 RestoreGroups(state, bestGroups);
                 RestoreFuzzyCounts(state, bestFuzzyCounts);
@@ -21522,6 +21526,7 @@ internal static class Matcher
             status = MatchStatus.Success;
             state.MatchPos = bestMatchPos;
             state.TextPos = bestTextPos;
+            state.AttemptStart = bestAttemptStart; // D87: the scan's next step reads it.
 
             RestoreGroups(state, bestGroups);
             RestoreFuzzyCounts(state, bestFuzzyCounts);

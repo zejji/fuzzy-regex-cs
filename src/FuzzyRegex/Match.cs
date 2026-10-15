@@ -158,6 +158,13 @@ public sealed class Match : Group
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
 
     /// <summary>
+    /// Where the attempt that found this match began, which <see cref="NextMatch"/> needs when a
+    /// <c>\K</c> inside a lookaround moved the reported span away from it (D87; see
+    /// <c>MatchState.AdvancePastMatch</c>).
+    /// </summary>
+    private readonly int _attemptStart;
+
+    /// <summary>
     /// The cache behind <see cref="FuzzyChanges"/>, boxed so that publishing it is a single
     /// reference write.
     /// </summary>
@@ -214,6 +221,7 @@ public sealed class Match : Group
     /// next state instead of searching the same units again. The default, nothing known, is always
     /// correct and only slower.
     /// </param>
+    /// <param name="attemptStart">Where the attempt that found the match began.</param>
     internal Match(
         FuzzyRegex regex,
         string subject,
@@ -229,7 +237,8 @@ public sealed class Match : Group
         bool partial = false,
         FuzzyCounts fuzzyCounts = default,
         Engine.FuzzyChange[]? fuzzyChanges = null,
-        Engine.SubjectScan scan = default
+        Engine.SubjectScan scan = default,
+        int attemptStart = 0
     )
         : base(subject, start, end, success, owner: null, number: 0)
     {
@@ -238,6 +247,7 @@ public sealed class Match : Group
         _lastGroup = lastGroup;
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
+        _attemptStart = attemptStart;
         _overlapped = overlapped;
         (_scanCleanStart, _scanCleanEnd, _scanFound) = scan;
         _fuzzyChanges = fuzzyChanges ?? [];
@@ -585,7 +595,8 @@ public sealed class Match : Group
                 _sliceStart,
                 _sliceEnd,
                 _overlapped,
-                new(_scanCleanStart, _scanCleanEnd, _scanFound)
+                new(_scanCleanStart, _scanCleanEnd, _scanFound),
+                _attemptStart
             )
             : _regex.NoMatch(_subject);
 
