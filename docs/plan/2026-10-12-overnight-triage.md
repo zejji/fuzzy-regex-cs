@@ -235,3 +235,9 @@ worst case is unchanged: the same number of re-runs, each starting at a position
 already reached. The cases a review should attack: `\K` under `(?r)`, `\K` inside a lookaround or a
 backtracked repeat, `\K` with a must-advance ban at the candidate, `\K` with `(*SKIP)`, partial,
 POSIX with BESTMATCH, and overlapped scans.
+
+**Built 2026-10-15 as d5afe9c9 on this branch**, as sized: the fork budget's `ForkAttemptStart` became
+`MatchState.AttemptStart` (also set on the search-start path), plus the second pass's tie-break, which
+compared reported starts and needed the attempt start too (`(?b)(?:xa\K|a)(?:By){e<=1}` over 'xaCy'
+gave (1,4) instead of (2,4)). 43 changed source lines, comments aside. Each attacked case above has a
+test, and the expected answers are the flag-free search's. Details in known-defects row D86.

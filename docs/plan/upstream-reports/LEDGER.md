@@ -6626,10 +6626,11 @@ schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE
 Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
 and the judged row 7/35060.
 
-## 83. BESTMATCH loses a fuzzy match whose start `\K` moved - SHARED, OPEN HERE (D86, 2026-10-15)
+## 83. BESTMATCH loses a fuzzy match whose start `\K` moved - SHARED, FIXED HERE ON `fix/oracle-rows-1015` (D86, 2026-10-15)
 
-**Status:** DRAFT - NOT FILED, per the owner's rule. This port has the same defect: known defect
-D86, red test `Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same defect, known defect
+D86, fixed on `fix/oracle-rows-1015` (d5afe9c9, not yet merged) and pinned by
+`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
 Draft report: `entry-83-bestmatch-keep-start.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`; this port answers the same on
@@ -6658,3 +6659,13 @@ and its deletion is what comes back. Traced by that probe, not in a debugger.
 **This port.** `Matcher.DoBestFuzzyMatch` copies both reads (`entry.MatchPos` at `Matcher.cs:21424`,
 `startPos = state.MatchPos` in the walk). Found by scheduled-oracle row 138026906/24826, which
 diverges only because the two engines' partial answers differ there (port P(0,4), upstream None).
+
+**The fix here (d5afe9c9).** `MatchState.AttemptStart` records where each attempt began and
+`BestEntry` carries it beside `MatchPos`. The walk, the second pass's anchor and offset count, the
+widened fallback and the second pass's tie-break all read it; `MatchPos` stays the reported start.
+ENHANCEMATCH had the same read in its narrowed re-run (`_regex.c:17986-17992`):
+`(?e)(?:ab){e<=1}\Kc` over 'aabc' keeps (3,4) with an insertion, where the `\K`-free pattern improves
+to the exact fit; it now narrows to the attempt's span and answers (3,4) with no errors. Each
+expected answer is the flag-free search's, never upstream's. Without a `\K` the attempt start and
+`MatchPos` are the same position, and the differential against main moved only `\K` rows under
+`(?b)` or `(?e)`.

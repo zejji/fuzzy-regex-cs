@@ -43,8 +43,20 @@ that place, BESTMATCH returns that instead:
 The deletion comes from the second alternative, the only one that can match anchored at 1. The
 first pass also advances its walk to `state->match_pos` (`:17680`), which has the same problem.
 
+ENHANCEMATCH has a milder form of the same read. It re-runs inside the span from `match_pos` to
+`text_pos` (`:17986-17992`), so after a `\K` the re-run cannot see the text before the `\K`, and a
+fit it should improve stays as it was:
+
+```python
+>>> regex.search(r'(?e)(?:ab){e<=1}c', 'aabc')
+<regex.Match object; span=(1, 4), match='abc'>
+>>> regex.search(r'(?e)(?:ab){e<=1}\Kc', 'aabc')
+<regex.Match object; span=(3, 4), match='c', fuzzy_counts=(0, 1, 0)>
+```
+
 A possible fix: record where each candidate's attempt began, beside `match_pos` in the best list,
-and anchor the second pass and the walk there, keeping `match_pos` for the reported span.
+and anchor the second pass and the walk there, keeping `match_pos` for the reported span; and
+narrow ENHANCEMATCH's re-run to start there too.
 
 ---
 
@@ -53,8 +65,10 @@ and anchor the second pass and the walk there, keeping `match_pos` for the repor
 - Found by scheduled-oracle row 138026906/24826 (`(?b)(?e)(?r)\K\b(?:[^a][^a]B){e<=1}` over
   '_aA AB ', match, MULTILINE, partial). Non-partial, both engines answer None; the oracle saw the
   row only because the partial answers differ (port P(0,4), upstream None).
-- This port copies the second pass and answers the same on every witness above: known defect D86.
-  Pinned (red until fixed) by
-  `FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
+- This port copied the second pass and answered the same on every witness above: known defect
+  D86. Fixed on `fix/oracle-rows-1015` (d5afe9c9) the way the report suggests, with an
+  attempt-start field (`MatchState.AttemptStart`) carried in each best-list entry; pinned by
+  `FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved` and
+  `FuzzyEnhanceMatchTests.Enhancematch_refines_a_match_whose_start_a_K_moved`.
 - The mechanism was traced by probe (the `|(?:Cyy){e<=1}` row), not in a debugger; the C line
   numbers were read.
