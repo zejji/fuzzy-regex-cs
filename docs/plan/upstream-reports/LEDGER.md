@@ -6625,3 +6625,36 @@ schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE
 '‍', upstream P(0,1), here P(1,1) with group 1 at (1,1) (groups set by a partial: entry 74).
 Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
 and the judged row 7/35060.
+
+## 83. BESTMATCH loses a fuzzy match whose start `\K` moved - SHARED, OPEN HERE (D86, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port has the same defect: known defect
+D86, red test `Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
+Draft report: `entry-83-bestmatch-keep-start.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`; this port answers the same on
+every row:
+
+```
+search(r'(?b)(?:By){e<=1}\K', 'Cy')                    -> None              expected (2,2) (1,0,0)
+search(r'(?:By){e<=1}\K', 'Cy')                        -> (2,2) (1,0,0)     the control: no (?b)
+search(r'(?b)a\K(?:By){e<=1}', 'aCy')                  -> None              expected (1,3) (1,0,0)
+search(r'(?e)a\K(?:By){e<=1}', 'aCy')                  -> (1,3) (1,0,0)     the control: ENHANCEMATCH
+search(r'(?b)a\K(?:By){e<=1}', 'aBy')                  -> (1,3)             the control: no errors
+search(r'(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}', 'aCy')    -> (1,3) (0,0,1)     expected (1,3) (1,0,0)
+```
+
+**Why upstream is wrong.** BESTMATCH ranks the matches fuzzy matching finds and returns the one
+with the fewest errors (`upstream/README.rst`, "BESTMATCH"). It may not lose a match plain fuzzy
+matching makes, and it may not return a match from an alternative that plain matching does not
+choose at that start.
+
+**Mechanism.** The second pass of `do_best_fuzzy_match` re-runs each candidate anchored at
+`entry->match_pos` (`_regex.c:17732`, `basic_match(state, FALSE)` at `:17741`), and the first pass
+walks on from `state->match_pos` (`:17680`). After a `\K`, `match_pos` is where the `\K` ran, not
+where the attempt began. The last row shows it: anchored at 1, only the second alternative matches,
+and its deletion is what comes back. Traced by that probe, not in a debugger.
+
+**This port.** `Matcher.DoBestFuzzyMatch` copies both reads (`entry.MatchPos` at `Matcher.cs:21424`,
+`startPos = state.MatchPos` in the walk). Found by scheduled-oracle row 138026906/24826, which
+diverges only because the two engines' partial answers differ there (port P(0,4), upstream None).

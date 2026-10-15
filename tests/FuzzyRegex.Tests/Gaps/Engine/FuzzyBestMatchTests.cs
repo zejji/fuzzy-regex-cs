@@ -1606,6 +1606,31 @@ public sealed class FuzzyBestMatchTests
         Scan(@"(?b)\m(?:Y){i}\M", "XY YX").Should().Equal("(0,2) 0,1,0 d:", "(3,5) 0,1,0 d:");
     }
 
+    // D86 (inherited, open): the second pass re-runs each best candidate anchored at its reported
+    // start, which a \K has moved off the place the attempt began, so a candidate with errors is
+    // lost or replaced by whatever matches from the \K position. BESTMATCH only ranks the matches
+    // plain fuzzy matching makes, so each answer here is the flag-free one: (2,2) s:0 and (1,3)
+    // s:1. Upstream 2026.9.10 answers None, None and (1,3) d:3 (the second alternative, the only
+    // one that matches anchored at 1), measured 2026-10-15; this port answers the same until D86
+    // is fixed. Found by scheduled-oracle row 138026906/24826.
+    [Test]
+    [Arguments(@"(?b)(?:By){e<=1}\K", "Cy", 2, 2)]
+    [Arguments(@"(?b)a\K(?:By){e<=1}", "aCy", 1, 3)]
+    [Arguments(@"(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}", "aCy", 1, 3)]
+    public void Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
     /// <summary>
     /// A scan as one line per match: span, counts as substitutions, insertions, deletions, the
     /// deletion positions, and "partial" when it is one.
