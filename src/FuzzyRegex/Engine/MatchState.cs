@@ -1345,12 +1345,6 @@ internal sealed class MatchState : IDisposable
         for (int r = 0; r < Repeats.Length; r++)
         {
             Repeats[r] = new RepeatData();
-
-            // NOT UPSTREAM (D85): see KeyedTailGuardList.
-            if (pattern.TestedGroups.Length > 0)
-            {
-                Repeats[r].TailGuardList.EnableKey(pattern.TestedGroups.Length);
-            }
         }
 
         EmptyIterationScratch =
@@ -2408,9 +2402,8 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     /// <param name="index">The repeat index.</param>
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
-    /// <param name="write">Whether the caller writes to the list rather than reads it (D85).</param>
     /// <returns>The list, or <see langword="null"/> if this repeat needs no guard of that type.</returns>
-    private GuardList? ActiveGuardList(int index, uint guardType, bool write)
+    private GuardList? ActiveGuardList(int index, uint guardType)
     {
         // Is a guard active here?
         if ((Pattern.RepeatInfoAt(index).Status & guardType) == 0)
@@ -2420,54 +2413,7 @@ internal sealed class MatchState : IDisposable
 
         // Which guard list?
         RepeatData repeat = Repeats[index];
-        if ((guardType & NodeStatus.Body) != 0)
-        {
-            return repeat.BodyGuardList;
-        }
-
-        GuardList tail = repeat.TailGuardList;
-        return tail.IsKeyed ? KeyedTailGuardList(tail, write) : tail;
-    }
-
-    /// <summary>
-    /// NOT UPSTREAM (D85): a tail guard list in a pattern that reads a group, which holds only the
-    /// failures recorded while the tested groups held the spans they hold now.
-    /// </summary>
-    /// <remarks>
-    /// A tail guard says the rest of the match failed from a position. When the rest of the match
-    /// reads a group, that is true only for the spans the group held at the time, and upstream's
-    /// <c>add_repeat_guards</c> leaves the guard on wherever its walk misses the reference (ledger
-    /// entry 84). So the list is keyed on the tested groups' spans: a read under another key finds
-    /// nothing, and a write under another key empties the list first. The tail of a repeat holds
-    /// only failures, written when the backtracking that undid the tail reaches the repeat's own
-    /// entry, by which time the captures are back to the ones the tail started with; so a span
-    /// written under a key is a failure under that key. Keyed on the spans rather than on a counter
-    /// of changes, so nothing is added where groups are set or restored, and a group that goes back
-    /// to its old span finds the old failures again.
-    /// </remarks>
-    /// <param name="tail">The repeat's tail guard list, keyed.</param>
-    /// <param name="write">Whether the caller writes to the list rather than reads it.</param>
-    /// <returns>The list, or <see langword="null"/> for a read under another key.</returns>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private GuardList? KeyedTailGuardList(GuardList tail, bool write)
-    {
-        if (tail.Count == 0 && !write)
-        {
-            return null;
-        }
-
-        if (tail.KeyMatches(Groups, Pattern.TestedGroups, Text.Span))
-        {
-            return tail;
-        }
-
-        if (!write)
-        {
-            return null;
-        }
-
-        tail.Rekey(Groups, Pattern.TestedGroups);
-        return tail;
+        return (guardType & NodeStatus.Body) != 0 ? repeat.BodyGuardList : repeat.TailGuardList;
     }
 
     /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>
@@ -2481,7 +2427,7 @@ internal sealed class MatchState : IDisposable
     // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
-        ActiveGuardList(index, guardType, write: true)?.Guard(textPos, protect);
+        ActiveGuardList(index, guardType)?.Guard(textPos, protect);
 
     /// <summary>Upstream <c>guard_repeat_range</c> (line 9534).</summary>
     /// <param name="index">The repeat index.</param>
@@ -2491,7 +2437,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
     internal void GuardRepeatRange(int index, int loPos, int hiPos, uint guardType, bool protect)
     {
-        GuardList? guardList = ActiveGuardList(index, guardType, write: true);
+        GuardList? guardList = ActiveGuardList(index, guardType);
 
         if (guardList is null)
         {
@@ -2555,7 +2501,7 @@ internal sealed class MatchState : IDisposable
         }
 
         WorkCounter.GuardChecked();
-        bool guarded = ActiveGuardList(index, guardType, write: false)?.IsGuarded(textPos) ?? false;
+        bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
         NoteSecondPassGuard(guarded);
 
         return guarded;
@@ -2581,9 +2527,7 @@ internal sealed class MatchState : IDisposable
 
         WorkCounter.GuardChecked();
         bool guarded =
-            ActiveGuardList(index, guardType, write: false) is GuardList list
-            && list.TryGetSpan(textPos, out span)
-            && span.Protect;
+            ActiveGuardList(index, guardType) is GuardList list && list.TryGetSpan(textPos, out span) && span.Protect;
         NoteSecondPassGuard(guarded);
 
         return guarded;

@@ -60,75 +60,6 @@ internal sealed class GuardList
     /// </summary>
     internal long Edits;
 
-    /// <summary>
-    /// NOT UPSTREAM (D85): for a keyed list, the spans the pattern's tested groups held when the
-    /// list was last written, one per group in <see cref="PatternObject.TestedGroups"/> order (an
-    /// unset group is <c>(-1, -1)</c>); <see langword="null"/> for a list that is not keyed. See
-    /// <c>MatchState.KeyedTailGuardList</c>.
-    /// </summary>
-    private GroupSpan[]? _key;
-
-    /// <summary>NOT UPSTREAM (D85): whether this list is keyed on the tested groups' spans.</summary>
-    internal bool IsKeyed => _key is not null;
-
-    /// <summary>NOT UPSTREAM (D85): keys this list on <paramref name="testedCount"/> group spans.</summary>
-    /// <param name="testedCount">How many groups the pattern tests.</param>
-    internal void EnableKey(int testedCount) => _key = new GroupSpan[testedCount];
-
-    /// <summary>
-    /// NOT UPSTREAM (D85): whether the tested groups hold the spans this list was written under.
-    /// </summary>
-    /// <param name="groups">The match's groups.</param>
-    /// <param name="tested">The pattern's tested groups, one-based.</param>
-    /// <param name="text">The subject, so two spans holding the same text count as the same.</param>
-    /// <returns><see langword="true"/> if every tested group holds the text in the key.</returns>
-    internal bool KeyMatches(GroupData[] groups, int[] tested, ReadOnlySpan<char> text)
-    {
-        GroupSpan[] key = _key!;
-        for (int i = 0; i < tested.Length; i++)
-        {
-            GroupSpan was = key[i];
-            GroupSpan now = CurrentSpan(groups[tested[i] - 1]);
-            if (was == now)
-            {
-                continue;
-            }
-
-            if (was.Start < 0 || now.Start < 0 || was.End - was.Start != now.End - now.Start)
-            {
-                return false;
-            }
-
-            if (!text[was.Start..was.End].SequenceEqual(text[now.Start..now.End]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// NOT UPSTREAM (D85): empties the list and keys it on the spans the tested groups hold now.
-    /// </summary>
-    /// <param name="groups">The match's groups.</param>
-    /// <param name="tested">The pattern's tested groups, one-based.</param>
-    internal void Rekey(GroupData[] groups, int[] tested)
-    {
-        Reset();
-        GroupSpan[] key = _key!;
-        for (int i = 0; i < tested.Length; i++)
-        {
-            key[i] = CurrentSpan(groups[tested[i] - 1]);
-        }
-    }
-
-    /// <summary>The span a group holds now, or <c>(-1, -1)</c> when it is unset.</summary>
-    /// <param name="group">The group.</param>
-    /// <returns>The span.</returns>
-    private static GroupSpan CurrentSpan(GroupData group) =>
-        group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1);
-
     /// <summary>Upstream <c>reset_guard_list</c> (<c>upstream/src/_regex.c</c> line 3363).</summary>
     internal void Reset()
     {
@@ -158,19 +89,12 @@ internal sealed class GuardList
         return true;
     }
 
-    /// <summary>
-    /// Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many. NOT UPSTREAM
-    /// (D85): a keyed list pushes its key last, since the spans mean nothing without it.
-    /// </summary>
+    /// <summary>Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many.</summary>
     /// <param name="stack">The stack to push onto.</param>
     internal void PushTo(ByteStack stack)
     {
         stack.PushBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));
         stack.PushSize(Count);
-        if (_key is not null)
-        {
-            stack.PushBlock(MemoryMarshal.AsBytes(_key.AsSpan()));
-        }
     }
 
     /// <summary>Upstream <c>pop_guard_data</c> (line 2712).</summary>
@@ -184,10 +108,7 @@ internal sealed class GuardList
     internal bool PopFrom(ByteStack stack)
     {
         NoteEdit();
-        if (
-            (_key is not null && !stack.PopBlock(MemoryMarshal.AsBytes(_key.AsSpan())))
-            || !stack.PopSize(out long count)
-        )
+        if (!stack.PopSize(out long count))
         {
             return false;
         }

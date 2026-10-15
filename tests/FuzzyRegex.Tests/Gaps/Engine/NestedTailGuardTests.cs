@@ -40,13 +40,27 @@ public sealed class NestedTailGuardTests
     [Arguments(@"(b?)(?:(?:a*|b)*x)*\1c", "baxc", 0, 4)] // regex (1, 4)
     // A group condition reads the captures the way a backreference does.
     [Arguments(@"(?:(b)|)(?:a*|b)*(?(1)z|c)", "bac", 0, 3)] // regex (1, 3)
+    // The group set inside the guarded loop itself, found by the option-E cost probe (2026-10-15,
+    // main against .NET over every subject on {a,b,c,x} up to length 7).
+    [Arguments(@"(?:(?:(x?)a)*a*)*\1c", "xaaaxc", 0, 6)] // regex None
+    // The body-guard half: a reference inside a bounded repeat, whose body the walk does not enter
+    // (:23383-23386), so the bounded repeat keeps its body guard, and so does a repeat enclosing
+    // it. A body guard blocks a position the body never reached its end from, which depends on
+    // the group the body reads. The unbounded form is walked and already right (the controls).
     // The reference earlier in the enclosing body, reached on the next iteration.
     [Arguments(@"(a?)(?:(?:\1d)?a*|b)*c", "adc", 0, 3)] // regex (1, 3)
-    // No enclosing repeat: the reference is inside a bounded repeat, whose body the walk does not
-    // enter (:23383-23386). The unbounded form is walked and already right.
+    [Arguments(@"(a?)(?:(?:\1d)?a*|b)*?c", "adc", 0, 3)] // regex (1, 3)
+    // No enclosing repeat at all.
     [Arguments(@"(a*)a*(?:d\1)?c", "adc", 0, 3)] // regex (1, 3)
     [Arguments(@"(a*)a*(?:\1d){0,2}c", "adc", 0, 3)] // regex (1, 3)
-    public void A_tail_guard_inside_a_repeat_does_not_cut_a_path_with_different_captures(
+    // A lazy and a possessive bounded repeat, a case-blind reference, the reference in an
+    // alternation, and a group condition in place of the reference.
+    [Arguments(@"(a*)a*(?:d\1)??c", "adc", 0, 3)] // regex (1, 3)
+    [Arguments(@"(a*)a*(?:d\1){0,1}+c", "adc", 0, 3)] // regex (1, 3)
+    [Arguments(@"(?i)(A*)a*(?:d\1)?c", "adc", 0, 3)] // regex (1, 3)
+    [Arguments(@"(a*)a*(?:d(?:\1|x))?c", "adc", 0, 3)] // regex (1, 3)
+    [Arguments(@"(?:(a)|)a*(?:d(?(1)z|))?c", "adc", 0, 3)] // regex (1, 3)
+    public void A_repeat_guard_does_not_cut_a_path_with_different_captures(
         string pattern,
         string subject,
         int start,
