@@ -1,6 +1,6 @@
 # DRAFT - NOT FILED
 
-Ledger entry 83. Written on 2026-10-15 against `regex` 2026.9.10.
+Ledger entry 84. Written on 2026-10-15 against `regex` 2026.9.10.
 
 **Nothing is filed on mrab-regex until everything else in the plan is done** (owner decision,
 2026-09-12). This file is the text that would be filed, held here for the owner to approve and
@@ -72,7 +72,11 @@ missed the same way as one after it:
 A possible fix, in `add_repeat_guards`: give the END_GREEDY_REPEAT and END_LAZY_REPEAT cases the
 reference status of the enclosing repeat's tail and body (the body runs again), and look for a
 reference inside a bounded body even though its repeat status stays LIMITED. Then a tail guard is
-off wherever the rest of the match can read a group.
+off wherever the rest of the match can read a group. That costs the guards' protection on nested
+repeats before a reference: `(x?)(?:a*a*)*\1c$` over 'a' * 12 + 'cx' is fast today and
+exponential without the tail guards, as it is in `re`. A gentler alternative keeps the guards and
+empties a tail guard list whenever a group the rest of the match reads has changed since the list
+was last written (a counter that only goes up, since `capture_change` is restored on backtracking).
 
 ---
 
@@ -82,6 +86,6 @@ off wherever the rest of the match can read a group.
   branch). Minimised, surveyed and traced 2026-10-15 (`.scratch/s1016/d85/`).
 - The port gives upstream's answers until the fix; the witnesses are `Gaps/Engine/NestedTailGuardTests`.
 - The line numbers were read; the mechanism was shown in the port by a guard trace and by
-  switching the guards off (LEDGER.md entry 83).
+  switching the guards off (LEDGER.md entry 84).
 - The title should change if the bounded-body half turns out to be a separate report; it shares
   the function and the fix, so it is kept here.

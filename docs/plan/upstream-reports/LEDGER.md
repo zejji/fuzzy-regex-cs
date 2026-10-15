@@ -6626,10 +6626,10 @@ schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE
 Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
 and the judged row 7/35060.
 
-## 83. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - OPEN HERE TOO (D85, 2026-10-15)
+## 84. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - OPEN HERE TOO (D85, 2026-10-15)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited: the port gives
-upstream's answers until the fix lands. Draft report: `entry-83-nested-tail-guard-before-a-backreference.md`.
+upstream's answers until the fix lands. Draft report: `entry-84-nested-tail-guard-before-a-backreference.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`:
 
@@ -6678,17 +6678,40 @@ exponential search, so each option names its adversary):
   reference (`(\w+)(?:,\s*\w+)*\s*\1`). Not viable.
 - **(R2) Restrict:** switch every tail guard off in any pattern holding a reference or group
   condition, beside `KeepFailureMemosSound`'s test. About 10 lines, trivially sound, no sync cost
-  beyond one row. Adversary: tail guards that were sound because the reference came before them,
-  as in `(a)\1(?:b*c*)*d` over a long run of b and c (COSTR2).
+  beyond one row. Adversary: guards that were sound because the reference comes first. Measured
+  with every tail guard switched off (the scratch toggle, Debug build, one call, subject n 'a's
+  then 'cx'): `(x?)\1(?:a*a*)*c$` 0.3-2.0 ms for n = 8-24 as it is, 80 ms at n = 8 and over the
+  5 s timeout at n = 12 without; `(x?)\1(?:a*b?)*c$` 1.0 ms at n = 24 as it is, 446 ms at n = 16
+  and over 5 s at n = 20 without. Not acceptable.
 - **(B) Propagate** the reference status through repeat ends and bounded bodies (the proposed
   upstream fix). About 30-40 lines in `Optimiser.AddRepeatGuards`, the same in C; one
-  SYNC-DIVERGENCE row until upstream takes it. Off exactly where the guard is unsound. Adversary:
-  a nested repeat before a reference, `(x?)(?:a*a*)*\1c` and kin over a run of a (COSTB).
+  SYNC-DIVERGENCE row until upstream takes it. Off exactly where the guard is unsound, so R2's
+  rows keep their guards. Adversary: a nested repeat before a reference, measured the same way:
+  `(x?)(?:a*a*)*\1c$` 2.3 ms at n = 24 as it is, 74 ms at n = 8 and over 5 s at n = 12 without;
+  `(x?)(?:a*|b)*\1c$` 1.3 ms at n = 24, 496 ms at n = 16 and over 5 s at n = 20 without; all eight
+  shapes tried go exponential (`.scratch/s1016/d85/cost-optionB.txt`). Python re takes 224 ms at
+  n = 12 and 31 s at n = 16 on the first, and PCRE2 10.47 stops with its match limit at n = 12,
+  so (B) is where the backtracking engines are; but it turns linear patterns here exponential.
+- **(E) Epoch:** keep the tail guards, and void them when a group the rest of the match can read
+  changes. A monotonic counter, bumped wherever such a group is set or restored (upstream's
+  `capture_change` will not do: it is restored on backtracking, `_regex.c:15631`, `:17348`); each
+  tail guard list remembers the counter at its last write and is treated as empty, and reset in
+  O(1), when the counter has moved. Sound without trusting the walk at all: a guard is consulted
+  only while every read group still holds the value it was written under. The witness is fixed
+  because group 1 goes from 'b' to '' between the write and the check. About 40-60 lines (the
+  counter at the capture set and restore sites, a stamp per guard list, the check in
+  `ActiveGuardList`, the restore of guard lists around atomic groups and lookarounds), no cost to
+  a pattern without references. Adversary: a read group set inside the guarded repeat's own loop,
+  which moves the counter every iteration and leaves (B)'s exponential search; measure before
+  building, with a grammar that puts the read group inside, before and after the repeat.
 - **(A) Key** the tail guard on the values the continuation reads (unset, or the captured text of
-  each read group), like `perf/memo-br`'s keyed failure memo. Keeps the pruning when the values
-  repeat. 150-250 lines (keyed guard storage, key per check on the hot path), high sync cost.
-  Adversary: a read group captured inside the repeat, O(n^2) distinct keys; BR refuses that case,
-  so it would fall back to (B) there anyway.
+  each read group), like `perf/memo-br`'s keyed failure memo. Keeps the pruning across epochs whose
+  values repeat. 150-250 lines (keyed guard storage, a key per check on the hot path), high sync
+  cost. Adversary: a read group captured inside the repeat, O(n^2) distinct keys; BR refuses that
+  case, so it would fall back to (B) there.
 
-Recommendation: (B) now, as the correctness fix; (A) only as later optimisation work folded into
-`perf/memo-br` if (B)'s measured cost on real patterns calls for it.
+Recommendation: (E), applied to every tail guard in a pattern that has a reference or group
+condition, so its soundness does not rest on the walk; the walk's two blind spots then cost
+nothing. Not (B) here: it gives the leftmost-first answer but turns the measured linear patterns
+exponential. The upstream report proposes (B) as the smallest change and mentions (E). (A) stays
+later optimisation work for `perf/memo-br`. Measure (E)'s adversary before building it.
