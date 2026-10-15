@@ -43,6 +43,19 @@ public sealed class NestedTailGuardTests
     // The group set inside the guarded loop itself, found by the option-E cost probe (2026-10-15,
     // main against .NET over every subject on {a,b,c,x} up to length 7).
     [Arguments(@"(?:(?:(x?)a)*a*)*\1c", "xaaaxc", 0, 6)] // regex None
+    // The design note's witnesses W1-W6 (.scratch/s1016/d85/design/note.md section 6, checked
+    // against regex 2026.9.10 and re): the read inside a lookahead, the reverse mirror, the read
+    // reached only through a group call, branch reset, a variable-width group set inside the loop,
+    // and a general repeat (not a one-character one) as the guarded one. Then the lookahead form
+    // of the witness above and the same shape in a fuzzy section, where no repeat guard applies.
+    [Arguments(@"(b?)(?:a*|b)*(?=\1c)", "bac", 0, 2)] // regex (1, 2)
+    [Arguments(@"(?r)c\1(?:a*|b)*(b?)", "cab", 0, 3)] // regex (0, 2)
+    [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1))", "bac", 0, 3)] // regex (1, 3)
+    [Arguments(@"(?|(b)|())(?:a*|b)*\1c", "bac", 0, 3)] // regex (1, 3)
+    [Arguments(@"(?:(?:(x*)a)*a*)*\1c", "xxaaaxxc", 0, 8)] // regex None
+    [Arguments(@"(?:(?:(x?)a)*(?:a|a)*)*\1c", "xaaaxc", 0, 6)] // regex None
+    [Arguments(@"(?:(?:(x?)a)*a*)*(?=\1c)", "xaaaxc", 0, 4)] // regex None
+    [Arguments(@"(?:(b?)(?:a*|b)*\1c){e<=0}", "bac", 0, 3)] // regex (1, 3)
     // The body-guard half: a reference inside a bounded repeat, whose body the walk does not enter
     // (:23383-23386), so the bounded repeat keeps its body guard, and so does a repeat enclosing
     // it. A body guard blocks a position the body never reached its end from, which depends on
@@ -70,6 +83,34 @@ public sealed class NestedTailGuardTests
         Match m = FuzzyRegex.Match(subject, pattern);
 
         (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+    }
+
+    [Test]
+    // The smallest rows of the test bed's triage (.scratch/s1016/triage-bed/NOTES.md, checked
+    // against regex 2026.9.10 and re with a guards-off control): the stale guard can change only
+    // which captures the match holds, and a group condition or a lookaround can be the reader.
+    // Group -1 means the row checks no group.
+    [Arguments(@"()(c+)*\2", "ccc", 0, 3, 2, 1, 2)] // regex (0, 2)
+    [Arguments(@"((d+))*\1", "dddd", 0, 4, 1, 2, 3)] // regex g1 (0, 2)
+    [Arguments(@"(?:()|(.?))*(?(1)x)", "b", 0, 1, -1, 0, 0)] // regex (0, 0)
+    [Arguments(@"(?:()|.?)+(?!\1)", "zb", 0, 2, -1, 0, 0)] // regex (0, 1)
+    public void A_repeat_guard_does_not_change_the_captures_a_match_holds(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int group,
+        int groupStart,
+        int groupEnd
+    )
+    {
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        if (group > 0)
+        {
+            (m.Groups[group].Index, m.Groups[group].Index + m.Groups[group].Length).Should().Be((groupStart, groupEnd));
+        }
     }
 
     [Test]

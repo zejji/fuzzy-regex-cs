@@ -59,6 +59,9 @@ internal static class Optimiser
         CollectTestedGroups(pattern);
         FindFuzzyLimit(pattern);
 
+        // NOT UPSTREAM (D85): what each tail guard must be keyed on.
+        TailGuardLiveness.FindTailKeys(pattern);
+
         // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
         // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
         FindAnchorGuards(pattern);

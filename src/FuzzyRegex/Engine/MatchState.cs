@@ -1345,7 +1345,17 @@ internal sealed class MatchState : IDisposable
         for (int r = 0; r < Repeats.Length; r++)
         {
             Repeats[r] = new RepeatData();
+
+            // NOT UPSTREAM (D85): see KeyedTailGuardList.
+            if (pattern.RepeatInfoAt(r).TailKey is not null)
+            {
+                Repeats[r].KeyedTail = new KeyedTailGuards();
+            }
         }
+
+        _tailKeyScratch = new long[MaxTailKeyLength(pattern)];
+        _tailTextSpans = new long[_tailKeyScratch.Length == 0 ? 0 : pattern.TrueGroupCount];
+        _tailTextValues = new long[_tailKeyScratch.Length == 0 ? 0 : pattern.TrueGroupCount];
 
         EmptyIterationScratch =
             pattern.TestedGroups.Length > 0 ? new long[2 + FuzzyValue.Count + (2 * pattern.TestedGroups.Length)] : null;
@@ -1481,6 +1491,7 @@ internal sealed class MatchState : IDisposable
         Text = text;
         TextLength = text.Length;
         CaptureTexts.Reset(text);
+        Array.Clear(_tailTextValues); // the ids above start again (D85)
 
         // Nothing is searched here: NoHighSurrogateIn looks only as far as the match asks (D83).
         (_cleanStart, _cleanEnd, _highSurrogateFound) = scan;
@@ -1507,6 +1518,7 @@ internal sealed class MatchState : IDisposable
         {
             repeat.BodyGuardList.Reset();
             repeat.TailGuardList.Reset();
+            repeat.KeyedTail?.Clear();
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
@@ -1521,6 +1533,10 @@ internal sealed class MatchState : IDisposable
         {
             Array.Clear(EmptyIterationScratch);
         }
+
+        KeyedTailWrites = 0;
+        Array.Clear(_tailKeyScratch);
+        Array.Clear(_tailTextSpans);
 
         // Every pass writes its slot before its end reads it, so this is for reuse alone.
         Array.Clear(OptionalPasses);
@@ -1737,6 +1753,7 @@ internal sealed class MatchState : IDisposable
 
         Text = default;
         CaptureTexts.Reset(default);
+        Array.Clear(_tailTextValues);
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
@@ -2381,7 +2398,10 @@ internal sealed class MatchState : IDisposable
             }
 
             repeat.TailGuardList.Reset();
+            repeat.KeyedTail?.Reset(newAttempt: true);
         }
+
+        KeyedTailWrites = 0;
 
         // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
         // begins new runs, so they could never be read again.
@@ -2403,7 +2423,9 @@ internal sealed class MatchState : IDisposable
     /// <param name="index">The repeat index.</param>
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     /// <returns>The list, or <see langword="null"/> if this repeat needs no guard of that type.</returns>
-    private GuardList? ActiveGuardList(int index, uint guardType)
+    /// <param name="textPos">The position asked about or guarded (D85: a keyed tail's key reads it).</param>
+    /// <param name="write">Whether the caller writes to the list rather than reads it (D85).</param>
+    private GuardList? ActiveGuardList(int index, uint guardType, int textPos, bool write)
     {
         // Is a guard active here?
         if ((Pattern.RepeatInfoAt(index).Status & guardType) == 0)
@@ -2413,7 +2435,173 @@ internal sealed class MatchState : IDisposable
 
         // Which guard list?
         RepeatData repeat = Repeats[index];
-        return (guardType & NodeStatus.Body) != 0 ? repeat.BodyGuardList : repeat.TailGuardList;
+        if ((guardType & NodeStatus.Body) != 0)
+        {
+            return repeat.BodyGuardList;
+        }
+
+        // NOT UPSTREAM (D85): a repeat whose tail reads group state keeps one list per key.
+        return repeat.KeyedTail is null ? repeat.TailGuardList : KeyedTailGuardList(index, textPos, write);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): how many keyed tail guard writes one attempt may make before further
+    /// ones are skipped, which bounds the memory the keyed lists take (each write adds at most one
+    /// span). Skipping a write only loses pruning. The same figure as the failure memo's cap.
+    /// </summary>
+    internal const long KeyedTailWriteCap = 1 << 20;
+
+    /// <summary>NOT UPSTREAM (D85): keyed tail guard writes made in this attempt; see <see cref="KeyedTailWriteCap"/>.</summary>
+    internal long KeyedTailWrites;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): where <see cref="TailGuardKeyOf"/> builds a key, so a lookup allocates
+    /// nothing; as long as the longest key, and zero past the end of a shorter one.
+    /// </summary>
+    private readonly long[] _tailKeyScratch;
+
+    /// <summary>The longest tail key any repeat of <paramref name="pattern"/> needs.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The length.</returns>
+    private static int MaxTailKeyLength(PatternObject pattern)
+    {
+        int longest = 0;
+        foreach (RepeatInfo info in pattern.RepeatInfoList)
+        {
+            if (info.TailKey is TailGuardKeySpec spec)
+            {
+                longest = Math.Max(longest, spec.Groups.Length + spec.ProgressRepeats.Length);
+            }
+        }
+
+        return longest;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the tail guard list of repeat <paramref name="index"/> for the group
+    /// state the rest of the match can read now, or <see langword="null"/> for a read under a key
+    /// with no list yet (or a write past the cap).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A tail guard at p records that the rest of the match, entered at p, failed. Upstream keys it
+    /// on p alone and switches it off where <c>add_repeat_guards</c> sees the rest read a group,
+    /// but that walk stops at the enclosing repeat's end and skips bounded bodies, so it leaves the
+    /// guard on where a group is read (ledger entry 84). The rest of the match is a deterministic
+    /// function of p and of the state it reads; the key is that state, as
+    /// <see cref="TailGuardLiveness"/> narrows it: for each live group, what the rest can see of it,
+    /// and for each enclosing repeat whose body captures a read group, whether its iteration has
+    /// already made progress.
+    /// </para>
+    /// <para>
+    /// The write is sound because a tail guard is written only when backtracking has undone the
+    /// whole tail back to the repeat (the TailStart entry, and the one-character repeat's arm), so
+    /// every capture and every repeat field the key reads is back to its value at the tail's entry:
+    /// they are restored from the backtrack stack (<c>PushGroupStateData</c>, <c>PushRepeatData</c>)
+    /// before that entry is popped.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position the tail is entered at.</param>
+    /// <param name="write">Whether the caller guards rather than asks.</param>
+    /// <returns>The list.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private GuardList? KeyedTailGuardList(int index, int textPos, bool write)
+    {
+        KeyedTailGuards store = Repeats[index].KeyedTail!;
+
+        // A fuzzy match never reads a repeat guard (IsRepeatGuarded), so its writes are skipped.
+        if (IsFuzzy || (!write && store.Count == 0))
+        {
+            return null;
+        }
+
+        long[] key = TailGuardKeyOf(Pattern.RepeatInfoAt(index).TailKey!, textPos);
+        return write ? store.ForWrite(key, mayAdd: KeyedTailWrites++ < KeyedTailWriteCap) : store.Find(key);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the last span whose text <see cref="CachedTextValue"/> looked up for each
+    /// group, packed, and the value it got (0 for none: no text value is 0), so a long capture's
+    /// text is hashed once rather than at every guard check.
+    /// </summary>
+    private readonly long[] _tailTextSpans;
+
+    /// <summary>NOT UPSTREAM (D85): see <see cref="_tailTextSpans"/>.</summary>
+    private readonly long[] _tailTextValues;
+
+    /// <summary>NOT UPSTREAM (D85): <c>Matcher.TextValue</c> of a group's span, cached per group.</summary>
+    /// <param name="group">The group, as an index into <see cref="Groups"/>.</param>
+    /// <param name="span">Its current span.</param>
+    /// <returns>The value.</returns>
+    private long CachedTextValue(int group, GroupSpan span)
+    {
+        long packed = ((long)span.Start << 32) | (uint)span.End;
+        if (_tailTextValues[group] != 0 && _tailTextSpans[group] == packed)
+        {
+            return _tailTextValues[group];
+        }
+
+        long value = Matcher.TextValue(this, span.Start, span.End - span.Start);
+        _tailTextSpans[group] = packed;
+        _tailTextValues[group] = value;
+        return value;
+    }
+
+    /// <summary>NOT UPSTREAM (D85): the key of a tail entered at <paramref name="textPos"/> now.</summary>
+    /// <remarks>
+    /// Per group: -1 when unset; else its exact span (made negative) when a new capture in the
+    /// tail could equal the current span, which decides whether the capture bumps the counter
+    /// (the repeat inside the group's brackets, a capture against the direction, or a span that
+    /// starts at or after p, or in reverse ends at or before p); else its text for a
+    /// backreferenced group (<c>Matcher.TextValue</c>), else 0. Per enclosing progress repeat: 1
+    /// when its iteration has already advanced or changed a capture, else 0.
+    /// </remarks>
+    /// <param name="spec">The repeat's key spec.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>The key, in <see cref="_tailKeyScratch"/>.</returns>
+    private long[] TailGuardKeyOf(TailGuardKeySpec spec, int textPos)
+    {
+        long[] key = _tailKeyScratch;
+        Array.Clear(
+            key,
+            spec.Groups.Length + spec.ProgressRepeats.Length,
+            key.Length - spec.Groups.Length - spec.ProgressRepeats.Length
+        );
+        for (int i = 0; i < spec.Groups.Length; i++)
+        {
+            GroupData group = Groups[spec.Groups[i]];
+            byte mode = spec.Modes[i];
+            if (group.Current < 0)
+            {
+                key[i] = -1;
+                continue;
+            }
+
+            GroupSpan span = group.Captures[group.Current];
+            bool mayMeet =
+                spec.ExactSpans
+                || (mode & TailGuardLiveness.Inside) != 0
+                || (
+                    (mode & TailGuardLiveness.Span) != 0 && (spec.Forward ? span.Start >= textPos : span.End <= textPos)
+                );
+            if (mayMeet)
+            {
+                key[i] = long.MinValue | ((long)span.Start << 32) | (uint)span.End;
+            }
+            else
+            {
+                key[i] = (mode & TailGuardLiveness.Text) != 0 ? CachedTextValue(spec.Groups[i], span) : 0;
+            }
+        }
+
+        for (int j = 0; j < spec.ProgressRepeats.Length; j++)
+        {
+            RepeatData around = Repeats[spec.ProgressRepeats[j]];
+            key[spec.Groups.Length + j] = around.Start != textPos || around.CaptureChange != CaptureChange ? 1 : 0;
+        }
+
+        return key;
     }
 
     /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>
@@ -2427,7 +2615,7 @@ internal sealed class MatchState : IDisposable
     // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
-        ActiveGuardList(index, guardType)?.Guard(textPos, protect);
+        ActiveGuardList(index, guardType, textPos, write: true)?.Guard(textPos, protect);
 
     /// <summary>Upstream <c>guard_repeat_range</c> (line 9534).</summary>
     /// <param name="index">The repeat index.</param>
@@ -2437,7 +2625,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
     internal void GuardRepeatRange(int index, int loPos, int hiPos, uint guardType, bool protect)
     {
-        GuardList? guardList = ActiveGuardList(index, guardType);
+        GuardList? guardList = ActiveGuardList(index, guardType, loPos, write: true);
 
         if (guardList is null)
         {
@@ -2501,7 +2689,7 @@ internal sealed class MatchState : IDisposable
         }
 
         WorkCounter.GuardChecked();
-        bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        bool guarded = ActiveGuardList(index, guardType, textPos, write: false)?.IsGuarded(textPos) ?? false;
         NoteSecondPassGuard(guarded);
 
         return guarded;
@@ -2527,8 +2715,23 @@ internal sealed class MatchState : IDisposable
 
         WorkCounter.GuardChecked();
         bool guarded =
-            ActiveGuardList(index, guardType) is GuardList list && list.TryGetSpan(textPos, out span) && span.Protect;
+            ActiveGuardList(index, guardType, textPos, write: false) is GuardList list
+            && list.TryGetSpan(textPos, out span)
+            && span.Protect;
         NoteSecondPassGuard(guarded);
+
+        // NOT UPSTREAM (D85): a keyed tail's key depends on the position as well (whether a span
+        // starts at or after it, whether an enclosing iteration started there), so the rest of a
+        // span written under this key need not be guarded under the key the caller would get at
+        // those positions. The caller then asks once per position, as upstream does.
+        if (
+            guarded
+            && (guardType & NodeStatus.Tail) != 0
+            && Pattern.RepeatInfoAt(index).TailKey is { DependsOnPosition: true }
+        )
+        {
+            span = new GuardSpan(textPos, textPos, true);
+        }
 
         return guarded;
     }

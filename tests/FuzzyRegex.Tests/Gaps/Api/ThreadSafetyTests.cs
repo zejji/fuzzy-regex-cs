@@ -993,5 +993,8 @@ public sealed class ThreadSafetyTests
             // C5 (S2d): written once by NodeCompiler.BuildRepeat inside Compile and read only by
             // Optimiser.FindFirstIterationAtStart, also inside Compile; matching never touches it.
             "RepeatInfo.FirstIterationStart",
+            // D85: written once by TailGuardLiveness.FindTailKeys inside Compile (Optimiser), read by
+            // MatchState.Create and MatchState.KeyedTailGuardList; matching never writes it.
+            "RepeatInfo.TailKey",
         };
 }

@@ -120,6 +120,13 @@ internal sealed class RepeatInfo
     /// <see cref="PatternObject.FirstIterationAtStart"/>.
     /// </summary>
     internal Node? FirstIterationStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): what this repeat's tail guard is keyed on, or <see langword="null"/>
+    /// when the rest of the match reads no group state and the position alone is the key. Set by
+    /// <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal TailGuardKeySpec? TailKey;
 }
 
 /// <summary>
