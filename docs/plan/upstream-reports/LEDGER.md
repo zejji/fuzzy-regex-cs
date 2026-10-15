@@ -6625,3 +6625,70 @@ schedule since 2026-09-28: `(\p{L}*?)(?P<g2>[\U0001F3FB])\2\K$` under IGNORECASE
 '‍', upstream P(0,1), here P(1,1) with group 1 at (1,1) (groups set by a partial: entry 74).
 Pinned by `Gaps/Engine/RepeatTests.A_lazy_repeat_before_a_full_folded_literal_reports_a_partial_only_where_one_can_start`
 and the judged row 7/35060.
+
+## 83. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - OPEN HERE TOO (D85, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited: the port gives
+upstream's answers until the fix lands. Draft report: `entry-83-nested-tail-guard-before-a-backreference.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`:
+
+```
+(b?)(?:a*|b)*\1c          over 'bac'     -> (1,3)   right (0,3)
+(b?)(?:a*|b)*\1c          over 'bbac'    -> (2,4)   right (0,4)
+(b?)(?:(?:a*|b)*x)*\1c    over 'baxc'    -> (1,4)   right (0,4)
+(?:(b)|)(?:a*|b)*(?(1)z|c) over 'bac'    -> (1,3)   right (0,3)
+(a?)(?:(?:\1d)?a*|b)*c    over 'adc'     -> (1,3)   right (0,3)
+(a*)a*(?:d\1)?c           over 'adc'     -> (1,3)   right (0,3)
+(b*)(?:a*|c|(b))*\1c      over 'baaaac'  -> (1,6)   right (0,6)   (the form it was found in)
+(b?)(?:a+|b)*\1c          over 'bac'     -> (0,3)   the same     (a+ writes no tail guard)
+(a*)a*(?:d\1)*c           over 'adc'     -> (0,3)   the same     (an unbounded body is walked)
+```
+
+**Why upstream is wrong.** Each right answer is an ordinary leftmost-first path: in the first row,
+group 1 = '', the star takes `b` then `a`, `\1` matches empty and `c` matches. Python re 3.14.7,
+PCRE2 10.47 (pcre2.py) and 10.45 (ripgrep), Perl 5.42, Java 26, Node 24 and .NET 10's
+System.Text.RegularExpressions (interpreted and compiled) all give it on every row
+(`.scratch/s1016/d85/survey-*.txt`); a blind reviewer given only the rows and the table derived
+each path by hand and reached the same verdict.
+
+**Mechanism, shown by trace.** A tail guard records "the rest of the match failed from this
+position" (GREEDY_REPEAT_ONE writes it while backtracking, `_regex.c:15855`, and checks it at
+`:13346`). That is sound only if the rest of the match reads no group, so `add_repeat_guards`
+(`:23273`) keeps the guard only when its walk of the tail meets no reference or group condition
+(`:23368`, `:23421`). The walk is blind in two places: it stops at the enclosing repeat's
+END_GREEDY_REPEAT/END_LAZY_REPEAT (`:23334-23337`), so it misses a reference after the enclosing
+repeat or earlier in its body (reached on the next iteration); and it marks a bounded repeat's
+body LIMITED without walking it (`:23383-23386`), so it misses a reference inside `(?:...)?` or
+`{m,n}`. A guard trace of the port on the first row (scratch instrumentation, `.scratch/s1016/d85/trace.txt`):
+with group 1 = 'b', a*'s tail guard (repeat 2) is written at 2; with group 1 = '', `check r2 tail
+@2 -> True` refuses a* its 'a', and the attempt at 0 fails. With the guards switched off the same
+build answers (0,3).
+
+**Proposed fix upstream:** in `add_repeat_guards`, give END_GREEDY_REPEAT/END_LAZY_REPEAT the
+reference status of the enclosing repeat's tail and body (the body runs again), and look for a
+reference in a bounded body even though its repeat status stays LIMITED; then every tail guard
+whose continuation can read a group is off.
+
+**Fix options here, sized 2026-10-15** (refuse/restrict priced first; the guards exist to stop
+exponential search, so each option names its adversary):
+
+- **(R1) Refuse** a pattern in which a guarded repeat is followed by a reference: zero engine
+  lines, but it rejects the commonest backreference shape there is, a repeated list followed by a
+  reference (`(\w+)(?:,\s*\w+)*\s*\1`). Not viable.
+- **(R2) Restrict:** switch every tail guard off in any pattern holding a reference or group
+  condition, beside `KeepFailureMemosSound`'s test. About 10 lines, trivially sound, no sync cost
+  beyond one row. Adversary: tail guards that were sound because the reference came before them,
+  as in `(a)\1(?:b*c*)*d` over a long run of b and c (COSTR2).
+- **(B) Propagate** the reference status through repeat ends and bounded bodies (the proposed
+  upstream fix). About 30-40 lines in `Optimiser.AddRepeatGuards`, the same in C; one
+  SYNC-DIVERGENCE row until upstream takes it. Off exactly where the guard is unsound. Adversary:
+  a nested repeat before a reference, `(x?)(?:a*a*)*\1c` and kin over a run of a (COSTB).
+- **(A) Key** the tail guard on the values the continuation reads (unset, or the captured text of
+  each read group), like `perf/memo-br`'s keyed failure memo. Keeps the pruning when the values
+  repeat. 150-250 lines (keyed guard storage, key per check on the hot path), high sync cost.
+  Adversary: a read group captured inside the repeat, O(n^2) distinct keys; BR refuses that case,
+  so it would fall back to (B) there anyway.
+
+Recommendation: (B) now, as the correctness fix; (A) only as later optimisation work folded into
+`perf/memo-br` if (B)'s measured cost on real patterns calls for it.
