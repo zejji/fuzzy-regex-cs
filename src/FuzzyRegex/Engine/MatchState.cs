@@ -493,12 +493,17 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S, D11 M4: set when <see cref="Forks"/> passes the budget. The matcher reads it
     /// at its next cancellation check (which the firing brings forward) and answers the partial at
-    /// the attempt's start (<see cref="ForkAttemptStart"/>).
+    /// the attempt's start (<see cref="AttemptStart"/>).
     /// </summary>
     internal bool ForkBudgetSpent;
 
-    /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
-    internal int ForkAttemptStart;
+    /// <summary>
+    /// NOT UPSTREAM'S: where the current attempt started. <see cref="MatchPos"/> starts there too, but
+    /// a <c>\K</c> moves it to report a later start, so whatever must know where the attempt
+    /// itself began reads this: the fork budget's partial (D11 M4), and the BESTMATCH and
+    /// ENHANCEMATCH re-runs, which re-run a candidate from where its attempt began (D86).
+    /// </summary>
+    internal int AttemptStart;
 
     /// <summary>No verb whose scope is the attempt has been skipped (<see cref="SkippedAttemptVerb"/>).</summary>
     internal const long NoSkippedVerb = long.MinValue;
@@ -1561,7 +1566,7 @@ internal sealed class MatchState : IDisposable
         Iterations = 0;
         ForkBudgetSpent = false;
         Forks = 0;
-        ForkAttemptStart = 0;
+        AttemptStart = 0;
         SkippedAttemptVerb = NoSkippedVerb;
 #if DEBUG
         ForkBudgetAnswered = false;
@@ -2096,7 +2101,7 @@ internal sealed class MatchState : IDisposable
         Iterations = 0;
         ForkBudgetSpent = false;
         Forks = 0;
-        ForkAttemptStart = 0;
+        AttemptStart = 0;
         SkippedAttemptVerb = NoSkippedVerb;
 
         // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
