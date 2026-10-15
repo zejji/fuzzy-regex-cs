@@ -294,8 +294,14 @@ public sealed class OptimiserTrapsTests
         // The '\1' was added on 2026-09-26: the failure memo makes '(a|a)*\b\B' fail in linear
         // time, and a pattern with a backreference gets no memo. 2,170 ms at n=22 with it
         // (Release, 2026-09-26).
-        var pattern = new FuzzyRegex(@"(a|a)*\1\b\B");
-        string subject = new('a', 22);
+        //
+        // SHORTCUT: since 2026-10-15 the shape is a repeat inside a lookahead, because the memo's
+        // planned backreference key would answer the '\1' form at once. No planned memo option
+        // reaches this one (6,412 ms at n=22 unbounded, Debug, 2026-10-15); Option C of the
+        // 2026-09-26 failure-memo design would, and then the timeout tests move to an engine-side
+        // step budget. The '!' keeps the lookahead's '$' from holding.
+        var pattern = new FuzzyRegex("(?=(a|a)+$)a");
+        string subject = new string('a', 22) + "!";
 
         Action act = () => pattern.IsMatch(subject, timeout: TimeSpan.FromMilliseconds(100));
 
@@ -336,8 +342,12 @@ public sealed class OptimiserTrapsTests
 
         act.Should().Throw<RegexMatchTimeoutException>();
 
-        // And the eager walk is bounded too, which is the other half of the contract.
-        Action walk = () => _ = new FuzzyRegex(@"\w+").Matches(_long, timeout: TimeSpan.FromMilliseconds(1)).Count;
+        // And the eager walk is bounded too, which is the other half of the contract. Count, not
+        // Matches(...).Count, since 2026-10-15: Matches became lazy on 2026-10-14 and a lazy walk
+        // gives each match a budget of its own (A_lazy_walk_does_not_charge_the_callers_time...),
+        // so a walk of short matches could only time out when a pause such as a collection landed
+        // inside one of them. It failed three runs in three on 2026-10-15, and one in two on main.
+        Action walk = () => _ = new FuzzyRegex(@"\w+").Count(_long, timeout: TimeSpan.FromMilliseconds(1));
 
         walk.Should().Throw<RegexMatchTimeoutException>();
     }

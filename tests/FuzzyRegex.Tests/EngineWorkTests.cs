@@ -18,8 +18,14 @@ public sealed class EngineWorkTests
         // The demo's interop boundary catches every exception, so the first stop can be swallowed
         // and matching can go on. The limit must fire at every step past it, not only at the step
         // that reaches it: with that, the second call ran on until its two-second timeout.
-        var regex = new FuzzyRegex(@"(a|a)*\1\b\B", FuzzyRegexOptions.None, TimeSpan.FromSeconds(2));
-        string subject = new('a', 30);
+        //
+        // SHORTCUT: the runaway is a repeat inside a lookahead, the one shape no planned memo option
+        // makes fast (it was '(a|a)*\1\b\B' until 2026-10-15, which the memo's planned
+        // backreference key would answer at once). Option C of the 2026-09-26 failure-memo design
+        // would make this fast too; the upgrade then is any pattern that takes over a thousand
+        // steps on a long subject, since only the count matters here.
+        var regex = new FuzzyRegex("(?=(a|a)+$)a", FuzzyRegexOptions.None, TimeSpan.FromSeconds(2));
+        string subject = new string('a', 30) + "!";
         long before = WorkCounter.Steps;
         WorkCounter.StepLimit = before + 1_000;
         try

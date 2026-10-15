@@ -303,8 +303,14 @@ public sealed class DemoEngineContractTests
     private static readonly TimeSpan _oneMillisecond = TimeSpan.FromMilliseconds(1);
 
     /// <summary>
-    /// The pathological pattern <c>TimeoutAndCancellationTests</c> and
-    /// <c>LazyEnumerationTests</c> already use: exponential backtracking with no way to succeed.
+    /// Exponential backtracking inside a lookahead, which fails wherever the subject does not end
+    /// in a run of <c>a</c>; see the runaway test for why this shape.
+    /// </summary>
+    private const string _runaway = "(?=(a|a)+$)a";
+
+    /// <summary>
+    /// The pathological pattern <c>TimeoutAndCancellationTests</c> uses for its real-clock tests:
+    /// exponential backtracking with no way to succeed.
     /// This is the fast common-case exit; <c>worker.terminate()</c> is the real safety net, and the
     /// harness proves that half in a browser.
     /// </summary>
@@ -325,9 +331,15 @@ public sealed class DemoEngineContractTests
         // the machine: thirty 'a's are about 2^30 steps, which no machine takes in a millisecond,
         // and a millisecond of steps is a few thousand here, so a machine would have to be
         // thousands of times faster to reach the bound. A walk that ignored the budget stops at it.
+        //
+        // SHORTCUT: since 2026-10-15 the runaway is a repeat inside a lookahead (the '!' keeps its
+        // '$' from holding), because the memo's planned backreference key would answer the '\1'
+        // form at once. DemoEngine builds its own pattern, so the test seam cannot reach it. No
+        // planned memo option makes this shape fast; Option C of the 2026-09-26 failure-memo design
+        // would, and the upgrade then is an engine-side step budget exposed through an option.
         EngineWork.ShouldTakeAtMostSteps(
             static () =>
-                Error(DemoEngine.Run(@"(a|a)*\1\b\B", "", new string('a', 30), "", "", "", _oneMillisecond))
+                Error(DemoEngine.Run(_runaway, "", new string('a', 30) + "!", "", "", "", _oneMillisecond))
                     .Should()
                     .Contain("timed out"),
             20_000_000,
@@ -378,13 +390,21 @@ public sealed class DemoEngineContractTests
     /// Robust to the machine in both directions. Slower, a single match may exceed the budget,
     /// which is a timeout too. Faster, the thousand still overrun one budget unless each match
     /// took under a fifth of a millisecond, about eleven times faster than Release here.
+    /// <para>
+    /// The figures are for <c>(a|a)*\1?b</c>, the pattern until 2026-10-15. The memo's planned
+    /// backreference key would make that one's matches cheap, so each match now pays for a repeat
+    /// inside a lookahead at every <c>a</c> before it, which costs the same: 11.5 ms a match in
+    /// Debug against 10.9 ms for the old pattern, measured side by side on 2026-10-15. SHORTCUT: no
+    /// planned memo option reaches this shape; Option C of the 2026-09-26 failure-memo design
+    /// would, and the upgrade then is an engine-side step budget exposed through an option.
+    /// </para>
     /// </remarks>
     [Test]
     public void A_search_hands_the_walk_one_deadline_for_every_match()
     {
         string subject = string.Concat(Enumerable.Repeat(new string('a', 12) + "cb", DemoEngine.MaxMatches));
 
-        string answer = DemoEngine.Run(@"(a|a)*\1?b", "", subject, "", "", "", TimeSpan.FromMilliseconds(200));
+        string answer = DemoEngine.Run(_runaway + "|b", "", subject, "", "", "", TimeSpan.FromMilliseconds(200));
 
         Error(answer).Should().Contain("timed out");
     }
@@ -878,14 +898,16 @@ public sealed class DemoEngineContractTests
     {
         string subject = string.Concat(Enumerable.Repeat(new string('a', 22) + "c", 10)) + "aaab";
 
-        // The optional '\1' keeps the search exponential; see the runaway test above. Twenty-two
-        // 'a's a chunk rather than eighteen since 2026-09-26: with the '\1', the eighteen-'a'
+        // Twenty-two 'a's a chunk rather than eighteen since 2026-09-26: with '(a|a)*\1?b', the
+        // pattern then, the eighteen-'a'
         // subject's whole replacement pass took 1.1 s in Release, inside the two-second budget.
         // Bounded in engine steps with a one-millisecond budget, for the reasons the runaway test
-        // gives, where until 2026-09-28 it was bounded at six seconds (D13).
+        // gives, where until 2026-09-28 it was bounded at six seconds (D13). Since 2026-10-15 the
+        // exponential part is a repeat inside a lookahead rather than the '\1' (SHORTCUT, for the
+        // reason the runaway test gives), and a chunk of twenty-two 'a's costs it 2^22 steps.
         EngineWork.ShouldTakeAtMostSteps(
             () =>
-                Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "", _oneMillisecond))
+                Error(DemoEngine.Run(_runaway + "|b", "", subject, "replace", "X", "", _oneMillisecond))
                     .Should()
                     .Contain("timed out"),
             20_000_000,

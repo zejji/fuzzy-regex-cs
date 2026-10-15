@@ -23,11 +23,18 @@ internal readonly struct MatchLimits
     /// </param>
     /// <param name="matchTimeout">The same budget as the caller expressed it, for the exception.</param>
     /// <param name="cancellation">The caller's token.</param>
-    internal MatchLimits(long timeoutTicks, TimeSpan matchTimeout, CancellationToken cancellation)
+    /// <param name="expiresOnCheck">The test seam <see cref="ExpiresOnCheck"/>; 0 outside tests.</param>
+    internal MatchLimits(
+        long timeoutTicks,
+        TimeSpan matchTimeout,
+        CancellationToken cancellation,
+        int expiresOnCheck = 0
+    )
     {
         TimeoutTicks = timeoutTicks;
         MatchTimeout = matchTimeout;
         Cancellation = cancellation;
+        ExpiresOnCheck = expiresOnCheck;
     }
 
     /// <summary>The budget in <see cref="System.Diagnostics.Stopwatch"/> ticks.</summary>
@@ -38,6 +45,13 @@ internal readonly struct MatchLimits
 
     /// <summary>The caller's cancellation token.</summary>
     internal CancellationToken Cancellation { get; }
+
+    /// <summary>
+    /// A test seam, 0 outside tests: when positive, an operation with a time budget finds its budget
+    /// spent at its k-th clock check, whatever the clock says. See
+    /// <see cref="FuzzyRegex.ExpiresOnCheck"/>.
+    /// </summary>
+    internal int ExpiresOnCheck { get; }
 
     /// <summary>
     /// The exception for a run the engine abandoned - <c>MatchStatus.Cancelled</c>. Two things can

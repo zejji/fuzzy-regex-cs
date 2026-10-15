@@ -35,15 +35,26 @@ public sealed class RepeatTests
     /// is faster than upstream and changes no answer, but it is then no longer a pattern the guards
     /// cannot tame. A pattern with a backreference gets no memo, so this one still is.
     /// </para>
+    /// <para>
+    /// Since 2026-10-15 the repeat sits inside a lookahead instead, because the memo's planned
+    /// backreference key would tame <c>(a|a)*\1b</c> too. The figures above are for that pattern;
+    /// this one is the same 2^n curve (upstream 1.2, 4.7, 18.7 and 77.7 ms at n = 12, 14, 16 and
+    /// 18). It requires only <c>'a'</c>, which the subject is full of, and the subject's
+    /// <c>'xb'</c> tail is what stops the lookahead's <c>$</c> from ever holding. SHORTCUT: no
+    /// planned memo option reaches a repeat inside a lookahead; Option C of the 2026-09-26
+    /// failure-memo design would, and this test would then need an engine-side step budget exposed
+    /// through an option.
+    /// </para>
     /// </remarks>
-    private const string _catastrophicPattern = @"(a|a)*\1b";
+    private const string _catastrophicPattern = "(?=(a|a)+$)a";
 
     [Test]
     public void A_catastrophic_pattern_raises_the_match_timeout_rather_than_running_to_completion()
     {
         // The first real exercise of the S16 timeout plumbing: until S19 there was no pattern that
-        // could run long enough to trip it (MatchSpineTests says so). Thirty-two characters is about
-        // 8^2 times the 23 seconds upstream took for twenty-six, so a 200ms budget is not a race.
+        // could run long enough to trip it (MatchSpineTests says so). Thirty-two characters is 2^14
+        // times the 77.7 ms upstream takes for eighteen, about twenty minutes, so a 200ms budget is
+        // not a race.
         var pattern = new FuzzyRegex(_catastrophicPattern, FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(200));
 
         Action match = () => pattern.Match(new string('a', 32) + "xb");

@@ -909,8 +909,8 @@ public sealed class FuzzyRegex
         cancellationToken.ThrowIfCancellationRequested();
 
         return timeout is { } budget
-            ? new Engine.MatchLimits(ToTicks(budget), budget, cancellationToken)
-            : new Engine.MatchLimits(TimeoutTicks, MatchTimeout, cancellationToken);
+            ? new Engine.MatchLimits(ToTicks(budget), budget, cancellationToken, ExpiresOnCheck)
+            : new Engine.MatchLimits(TimeoutTicks, MatchTimeout, cancellationToken, ExpiresOnCheck);
     }
 
     /// <summary>
@@ -919,7 +919,8 @@ public sealed class FuzzyRegex
     /// built-in <c>Regex</c>, whose <c>Match.NextMatch</c> likewise runs under the pattern's
     /// <c>MatchTimeout</c> and has nowhere to take a per-call one.
     /// </summary>
-    internal Engine.MatchLimits PatternLimits => new(TimeoutTicks, MatchTimeout, CancellationToken.None);
+    internal Engine.MatchLimits PatternLimits =>
+        new(TimeoutTicks, MatchTimeout, CancellationToken.None, ExpiresOnCheck);
 
     /// <summary>
     /// Resolves this surface's <c>(beginning, length)</c> pair into upstream's <c>pos</c> and
@@ -1012,6 +1013,33 @@ public sealed class FuzzyRegex
 
     /// <summary>The match timeout in <see cref="System.Diagnostics.Stopwatch"/> ticks.</summary>
     internal long TimeoutTicks { get; }
+
+    /// <summary>
+    /// A test seam, 0 (off) everywhere but the test suite: when positive, every operation on this
+    /// instance that runs under a time budget finds the budget spent at its k-th clock check, as if
+    /// the deadline had passed, whatever the clock says. An operation with no budget is unaffected.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The timeout tests used to need a pattern too slow to finish inside the budget, and each
+    /// failure-memo extension made some of those patterns fast, so the tests broke for reasons that
+    /// had nothing to do with the timeout (the seam section of
+    /// <c>docs/plan/2026-10-13-linear-nested-repeats-design.md</c>). With this a test needs only a
+    /// pattern that reaches the engine's first check: the one at <c>start_match</c>, which every
+    /// match attempt makes before its first step because <c>MatchState.InitMatch</c> zeroes the
+    /// iteration counter. A call refused before that (the minimum-width check, a prefilter) never
+    /// checks the clock, so it cannot time out this way, exactly as it cannot time out for real.
+    /// </para>
+    /// <para>
+    /// The count runs for the whole operation, so a lazy walk's k-th check can fall on its third
+    /// match, which is how a test says "two matches fit inside the budget and the third does not".
+    /// It lives on the instance so that tests running in parallel each have their own, and it is
+    /// <c>init</c>-only, so a compiled pattern stays immutable. The cost outside tests is one more
+    /// integer carried into the state and one test of it where the clock is read, which happens
+    /// once per 256 turns of the matching loop.
+    /// </para>
+    /// </remarks>
+    internal int ExpiresOnCheck { get; init; }
 
     /// <summary>
     /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738).

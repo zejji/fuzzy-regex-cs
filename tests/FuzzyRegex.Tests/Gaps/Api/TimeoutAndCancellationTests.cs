@@ -17,45 +17,69 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// These are gap tests: the per-call surface is this port's, so they do not count towards parity.
 /// </para>
 /// <para>
-/// <b>The subject is chosen so the tests cannot race the machine.</b> <c>(a|a)*\b\B</c> over a run
-/// of <c>a</c> is exponential: the tail is false at every position, so at 26 characters the work is
-/// about 2^26 steps and a 50 ms budget is exceeded by a margin no plausible machine closes. Every
-/// assertion below is "this threw", which a FASTER machine cannot falsify; the one test that
-/// asserts a call COMPLETED uses a one-tick pattern budget and checks the elapsed time itself, so
-/// it reports an inconclusive run rather than passing silently.
+/// <b>Most of these tests do not need a slow pattern, and do not use one.</b> What they check is
+/// plumbing: that a budget given to a call reaches the engine's clock check, and that the check's
+/// answer comes back as the right exception. Until 2026-10-15 they needed a pattern too slow to
+/// finish inside the budget, and every failure-memo extension threatened to make that pattern fast
+/// (the seam section of <c>docs/plan/2026-10-13-linear-nested-repeats-design.md</c>). They now use
+/// the test seam <see cref="FuzzyRegex.ExpiresOnCheck"/>, under which a quick pattern's first clock
+/// check finds the budget spent. A budget of an hour on top means the real clock cannot fire
+/// either, so a pass depends on neither the machine nor the engine's speed.
+/// </para>
+/// <para>
+/// <b>The real clock is still exercised</b>: the per-method cancellation test and the two tests of
+/// the static conveniences, which cannot reach the seam, run a genuinely slow pattern against a
+/// genuine timer. That pattern is chosen so the subject cannot race the machine: at 26 characters
+/// the work is about 2^26 steps and a 50 ms budget is exceeded by a margin no plausible machine
+/// closes, and every assertion on it is "this threw", which a FASTER machine cannot falsify.
 /// </para>
 /// </remarks>
 [SkipUnderStryker]
 public sealed class TimeoutAndCancellationTests
 {
     /// <summary>
-    /// The pathological pattern: exponential backtracking with no way to succeed.
+    /// The pathological pattern, for the tests that need real work: exponential backtracking inside
+    /// a lookahead, with no way to succeed because the subject does not end in <c>a</c>.
     /// </summary>
     /// <remarks>
-    /// It used to end in a literal <c>b</c>, and S60 had to change that. A required-string
-    /// prefilter refuses a subject that does not hold the literal before the engine runs at all, so
-    /// <c>(a|a)*b</c> over a subject of <c>a</c>s now answers in microseconds and NO budget can
-    /// fire on it. That is the optimisation working, not a weaker test: what these tests assert is
-    /// that a long match notices its budget, so they need work that is still long.
-    /// <c>\b\B</c> is a contradiction - a position is either a word boundary or it is not - so it
-    /// is false everywhere, and it keeps the exponential failure while giving no literal for any
-    /// prefilter to key on. Deliberately not a literal or a character set: the rest of Phase 7
-    /// (a start-code bitmap, a rarity gate) would defeat those in turn.
+    /// It used to be <c>(a|a)*\1\b\B</c>. Each piece of that was added because an optimisation
+    /// defeated the one before: a literal tail fell to the required-string prefilter (S60), a
+    /// tail with no literal fell to the failure memo (2026-09-26), and the backreference that kept
+    /// the memo off will fall to the memo's planned backreference key. A repeat inside a lookahead
+    /// is the one shape no planned memo option reaches (upstream: 1.2, 4.7, 18.7 and 77.7 ms at
+    /// n = 12, 14, 16 and 18, 2^n; it is also the oracle's <c>alt-same-lookahead</c> row).
     /// <para>
-    /// The <c>\1</c> was added on 2026-09-26, for a reason of the same kind. The failure memo
-    /// (<c>RepeatInfo.FailureMemo</c>) remembers where a repeat's body has already failed, which
-    /// makes <c>(a|a)*\b\B</c> fail in linear time. A pattern with a backreference gets no memo,
-    /// because what follows a repeat can then depend on the captures as well as the position, so
-    /// this one is still exponential.
+    /// SHORTCUT: this holds only while nothing memoises failures inside a lookahead. Option C of the
+    /// 2026-09-26 failure-memo design (depth-tagged failures) would make it fast, and these tests
+    /// would then need an engine-side step budget exposed through an option, which is the upgrade
+    /// path if C is ever built.
     /// </para>
     /// </remarks>
-    private const string _slowPattern = @"(a|a)*\1\b\B";
+    private const string _slowPattern = "(?=(a|a)+$)a";
 
     /// <summary>A subject the pattern cannot match, long enough to make the search exponential.</summary>
-    private static readonly string _slowSubject = new('a', 26);
+    private static readonly string _slowSubject = new string('a', 26) + "!";
 
     /// <summary>A budget short enough to fire quickly and long enough not to fire on a fast call.</summary>
     private static readonly TimeSpan _shortTimeout = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// The pattern the seam tests use. Any pattern that reaches the engine's first clock check would
+    /// do; this one does on every method, including the splits and replacements.
+    /// </summary>
+    private const string _quickPattern = "a+";
+
+    /// <summary>A subject the quick pattern matches at once.</summary>
+    private const string _quickSubject = "baab";
+
+    /// <summary>A budget the real clock cannot spend, so only the seam can fire.</summary>
+    private static readonly TimeSpan _anHour = TimeSpan.FromHours(1);
+
+    /// <summary>A quick pattern whose first clock check, in any call with a budget, finds it spent.</summary>
+    /// <param name="budget">The pattern's own budget, or <see langword="null"/> for none.</param>
+    /// <returns>The pattern.</returns>
+    private static FuzzyRegex ExpiringAtOnce(TimeSpan? budget = null) =>
+        new(_quickPattern, FuzzyRegexOptions.None, budget ?? FuzzyRegex.InfiniteMatchTimeout) { ExpiresOnCheck = 1 };
 
     /// <summary>
     /// Every instance method whose running time depends on its input, called with a per-call
@@ -243,12 +267,16 @@ public sealed class TimeoutAndCancellationTests
     [Arguments("CountMemory")]
     public void A_per_call_timeout_fires_on_every_input_dependent_method(string method)
     {
-        // The pattern itself has NO budget, so anything that fires here came from the call.
-        FuzzyRegex pattern = new(_slowPattern);
+        // The pattern itself has NO budget, so anything that fires here came from the call: the
+        // seam fires only in a call that carries one. The second call is the control that shows
+        // it: the same method with no budget answers.
+        FuzzyRegex pattern = ExpiringAtOnce();
 
-        Action call = () => CallWithTimeout(method, pattern, _slowSubject, _shortTimeout);
+        Action call = () => CallWithTimeout(method, pattern, _quickSubject, _anHour);
+        Action unbounded = () => CallWithTimeout(method, pattern, _quickSubject, FuzzyRegex.InfiniteMatchTimeout);
 
         call.Should().Throw<RegexMatchTimeoutException>();
+        unbounded.Should().NotThrow();
     }
 
     [Test]
@@ -275,6 +303,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments("CountMemory")]
     public void Cancellation_stops_every_input_dependent_method(string method)
     {
+        // A real slow pattern and a real timer, on purpose: this is the test that keeps every
+        // method's polling exercised by genuine work rather than by the seam.
         FuzzyRegex pattern = new(_slowPattern);
         using CancellationTokenSource source = new();
         source.CancelAfter(_shortTimeout);
@@ -309,11 +339,11 @@ public sealed class TimeoutAndCancellationTests
     [Test]
     public void The_pattern_budget_applies_when_the_call_names_no_timeout()
     {
-        FuzzyRegex pattern = new(_slowPattern, FuzzyRegexOptions.None, _shortTimeout);
+        FuzzyRegex pattern = ExpiringAtOnce(budget: _anHour);
 
-        Action call = () => pattern.Match(_slowSubject);
+        Action call = () => pattern.Match(_quickSubject);
 
-        call.Should().Throw<RegexMatchTimeoutException>();
+        call.Should().Throw<RegexMatchTimeoutException>().Which.MatchTimeout.Should().Be(_anHour);
     }
 
     [Test]
@@ -366,30 +396,24 @@ public sealed class TimeoutAndCancellationTests
     [Test]
     public void A_per_call_timeout_replaces_the_pattern_budget_for_that_call()
     {
-        // One Stopwatch tick of budget, so the pattern's own budget fires on anything at all.
-        TimeSpan oneTick = TimeSpan.FromTicks(1);
-        FuzzyRegex pattern = new(_slowPattern, FuzzyRegexOptions.None, oneTick);
+        // The pattern's own budget fires at its first check, so a call that kept it could not
+        // answer. Until 2026-10-15 this used a one-tick budget and a slow subject and had to time
+        // itself to show the run was long enough to prove anything; the seam makes it exact.
+        FuzzyRegex pattern = ExpiringAtOnce(budget: _anHour);
 
-        // Short enough to finish, long enough that the one-tick budget would certainly have fired.
-        string subject = new('a', 20);
-
-        Action patternBudget = () => pattern.Match(subject);
+        Action patternBudget = () => pattern.Match(_quickSubject);
         patternBudget.Should().Throw<RegexMatchTimeoutException>();
 
-        long started = Stopwatch.GetTimestamp();
-        Match result = pattern.Match(subject, timeout: FuzzyRegex.InfiniteMatchTimeout);
-        TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
+        Match result = pattern.Match(_quickSubject, timeout: FuzzyRegex.InfiniteMatchTimeout);
 
-        result.Success.Should().BeFalse();
-
-        // Self-validating: if the call finished inside the pattern's own one-tick budget then it
-        // never proved the per-call value was used, and that is a failure of the test, not a pass.
-        elapsed.Should().BeGreaterThan(oneTick);
+        result.Value.Should().Be("aa");
     }
 
     [Test]
     public void A_per_call_timeout_reaches_the_static_conveniences()
     {
+        // The static conveniences build their pattern in the cache, out of the seam's reach, so this
+        // test and its token twin below keep the real slow pattern and the real clock.
         Action match = static () => FuzzyRegex.Match(_slowSubject, _slowPattern, timeout: _shortTimeout);
         Action matchAtStart = static () => FuzzyRegex.MatchAtStart(_slowSubject, _slowPattern, timeout: _shortTimeout);
         Action fullMatch = static () => FuzzyRegex.FullMatch(_slowSubject, _slowPattern, timeout: _shortTimeout);
@@ -520,17 +544,17 @@ public sealed class TimeoutAndCancellationTests
     [Test]
     public void The_timeout_exception_carries_the_pattern_the_input_and_the_per_call_budget()
     {
-        FuzzyRegex pattern = new(_slowPattern);
+        FuzzyRegex pattern = ExpiringAtOnce();
 
-        Action call = () => pattern.Match(_slowSubject, timeout: _shortTimeout);
+        Action call = () => pattern.Match(_quickSubject, timeout: _anHour);
 
         RegexMatchTimeoutException thrown = call.Should().Throw<RegexMatchTimeoutException>().Which;
-        thrown.Pattern.Should().Be(_slowPattern);
-        thrown.Input.Should().Be(_slowSubject);
+        thrown.Pattern.Should().Be(_quickPattern);
+        thrown.Input.Should().Be(_quickSubject);
 
         // The budget reported is the one the CALL asked for, not the pattern's - the pattern has
         // none, so reporting InfiniteMatchTimeout here would be actively misleading.
-        thrown.MatchTimeout.Should().Be(_shortTimeout);
+        thrown.MatchTimeout.Should().Be(_anHour);
     }
 
     [Test]
@@ -579,12 +603,13 @@ public sealed class TimeoutAndCancellationTests
     public void A_timeout_and_a_token_compose_and_the_token_wins_when_both_fire()
     {
         // Both are armed and the token is cancelled first, so the caller's own request is what is
-        // reported: OperationCanceledException, not "the library ran out of time".
-        FuzzyRegex pattern = new(_slowPattern);
+        // reported: OperationCanceledException, not "the library ran out of time". The seam makes
+        // the budget spent at the first check, so both really have fired.
+        FuzzyRegex pattern = ExpiringAtOnce();
         using CancellationTokenSource source = new();
         source.Cancel();
 
-        Action call = () => pattern.Match(_slowSubject, timeout: _shortTimeout, cancellationToken: source.Token);
+        Action call = () => pattern.Match(_quickSubject, timeout: _anHour, cancellationToken: source.Token);
 
         call.Should().Throw<OperationCanceledException>().Which.CancellationToken.Should().Be(source.Token);
     }
