@@ -31,6 +31,23 @@ internal sealed record TailGuardKeySpec(
 )
 {
     /// <summary>
+    /// EXPERIMENT (D85 night, open): for each keyed group with the repeat inside its brackets, how
+    /// many capture groups enclosing the repeat sit inside it, so its parked start is that many
+    /// entries below the top of the save stack; -1 for a group the repeat is not inside, or whose
+    /// place is unknown.
+    /// </summary>
+    internal int[] InsideDepths { get; init; } = [];
+
+    /// <summary>EXPERIMENT (D85 night, open): some inside group's place on the save stack is unknown (-2).</summary>
+    internal bool HasUnknownInside => InsideDepths.Contains(-2);
+
+    /// <summary>The key's length: a value per group, a bit per progress repeat, an open start per group.</summary>
+    internal int KeyLength => (2 * Groups.Length) + ProgressRepeats.Length;
+
+    /// <summary>EXPERIMENT (D85 night, ioff): whether some keyed group has the repeat inside its brackets.</summary>
+    internal bool HasInside { get; } = Modes.Any(static m => (m & TailGuardLiveness.Inside) != 0);
+
+    /// <summary>
     /// Whether the key can differ between two positions with the same captures: a group keyed on
     /// whether its span starts at or after the position, or a progress bit.
     /// </summary>
@@ -99,6 +116,7 @@ internal static class TailGuardLiveness
         bool everything = pattern.HasGroupCalls || tested.Length > _maxSlots;
         ulong[] liveIn = everything ? [] : Solve(nodes, indexOf, tested);
         Dictionary<int, List<int>> progress = FindProgressRepeats(pattern, tested);
+        Dictionary<object, int[]>? enclosing = null;
 
         foreach (Node repeat in nodes)
         {
@@ -145,14 +163,146 @@ internal static class TailGuardLiveness
                 continue;
             }
 
+            int[] depths = new int[groups.Count];
+            enclosing ??= EnclosingGroups(pattern);
+            for (int i = 0; i < groups.Count; i++)
+            {
+                // Count the capture groups enclosing the repeat inside this one; -2 when the repeat
+                // is not seen inside it, so its parked start cannot be found.
+                int depth = (modes[i] & Inside) == 0 ? -1 : DepthOf(enclosing, repeat, groups[i] + 1);
+                if (everything && depth == -2)
+                {
+                    // Every group is marked inside here; one that does not enclose the repeat is not.
+                    depth = -1;
+                }
+                else if (pattern.HasGroupCalls && depth >= 0)
+                {
+                    // SHORTCUT: a call's frames sit on the save stack too, so the parked start
+                    // cannot be found by depth; the guard is off instead.
+                    depth = -2;
+                }
+
+                depths[i] = depth;
+            }
+
             info.TailKey = new TailGuardKeySpec(
                 [.. groups],
                 [.. modes],
                 around,
                 repeat.Values[3] != 0,
                 everything || pattern.CapturesAgainstDirection
-            );
+            )
+            {
+                InsideDepths = depths,
+            };
         }
+
+        MarkBodiesHoldingKeyedTails(pattern);
+    }
+
+    /// <summary>
+    /// EXPERIMENT (D85 night, kbody): marks each repeat whose body holds a repeat with a keyed tail.
+    /// Its body guard ("the body never got to its end from p") then depends on group state too:
+    /// a keyed tail guard inside can stop the body under one value of a group the rest reads.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    private static void MarkBodiesHoldingKeyedTails(PatternObject pattern)
+    {
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var todo = new Stack<Node>();
+        foreach (Node loop in pattern.NodeList)
+        {
+            if (loop.Op is not (Opcode.GreedyRepeat or Opcode.LazyRepeat))
+            {
+                continue;
+            }
+
+            uint index = loop.Values[0];
+            seen.Clear();
+            todo.Clear();
+            todo.Push(loop.Next1.Node!);
+            while (todo.Count > 0)
+            {
+                Node n = todo.Pop();
+                if (!seen.Add(n) || (n.Op is Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat && n.Values[0] == index))
+                {
+                    continue;
+                }
+
+                if (
+                    n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat or Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne
+                    && pattern.RepeatInfoAt((int)n.Values[0]).TailKey is not null
+                )
+                {
+                    pattern.RepeatInfoAt((int)index).BodyHoldsKeyedTail = true;
+                    break;
+                }
+
+                foreach (Node next in Successors(n))
+                {
+                    todo.Push(next);
+                }
+            }
+        }
+    }
+
+    /// <summary>EXPERIMENT (D85 night, open): how many groups enclosing the repeat sit inside the group.</summary>
+    /// <param name="enclosing">The enclosing groups of each node.</param>
+    /// <param name="repeat">The repeat.</param>
+    /// <param name="group">The group, one-based.</param>
+    /// <returns>The depth, or -2 when the repeat is not seen inside the group.</returns>
+    private static int DepthOf(Dictionary<object, int[]> enclosing, Node repeat, int group)
+    {
+        if (!enclosing.TryGetValue(repeat, out int[]? stack))
+        {
+            return -2;
+        }
+
+        int at = Array.LastIndexOf(stack, group);
+        return at < 0 ? -2 : stack.Length - 1 - at;
+    }
+
+    /// <summary>
+    /// EXPERIMENT (D85 night, open): the capture groups open around each node, outermost first, by a
+    /// walk from the start that parks a group at the node that opens it in the matching direction
+    /// and drops it at the node that captures. Nesting is syntactic, so the first visit decides.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>Node to its enclosing groups.</returns>
+    private static Dictionary<object, int[]> EnclosingGroups(PatternObject pattern)
+    {
+        var result = new Dictionary<object, int[]>(ReferenceEqualityComparer.Instance);
+        var todo = new Stack<(Node Node, int[] Open)>();
+        todo.Push((pattern.StartNode!, []));
+        while (todo.Count > 0)
+        {
+            (Node node, int[] open) = todo.Pop();
+            if (!result.TryAdd(node, open))
+            {
+                continue;
+            }
+
+            int[] after = open;
+            if (node.Op is Opcode.StartGroup or Opcode.EndGroup)
+            {
+                int group = (int)node.Values[0];
+                if (node.Values[2] == 0)
+                {
+                    after = [.. open, group];
+                }
+                else if (open.Length > 0 && open[^1] == group)
+                {
+                    after = open[..^1];
+                }
+            }
+
+            foreach (Node next in Successors(node))
+            {
+                todo.Push((next, after));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>What reading a group means when nothing narrower is known.</summary>
@@ -250,7 +400,10 @@ internal static class TailGuardLiveness
                 // and, outside a lookaround body or a condition's test, replaces the value every
                 // later read sees. Inside one the capture may be thrown away (a negative test), so
                 // it kills nothing there.
-                ulong kept = inTest.Contains(node) ? liveOut : liveOut & ~Bit(slot, (byte)(Text | Set | Span));
+                ulong kept =
+                    inTest.Contains(node) || D85Switches.MutateNoKill
+                        ? liveOut
+                        : liveOut & ~Bit(slot, (byte)(Text | Set | Span));
                 return kept | Bit(slot, (byte)(Span | Inside));
             }
             default:
@@ -269,6 +422,11 @@ internal static class TailGuardLiveness
     /// <returns>Up to three successors.</returns>
     private static IEnumerable<Node> Successors(Node node)
     {
+        if (D85Switches.MutateStopAtEnd && node.Op is Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat)
+        {
+            yield break;
+        }
+
         if (node.Next1.Node is Node next1)
         {
             yield return next1;

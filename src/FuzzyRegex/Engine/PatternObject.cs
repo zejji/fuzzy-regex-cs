@@ -127,6 +127,9 @@ internal sealed class RepeatInfo
     /// <see cref="TailGuardLiveness.FindTailKeys"/>.
     /// </summary>
     internal TailGuardKeySpec? TailKey;
+
+    /// <summary>EXPERIMENT (D85 night, kbody): the body holds a repeat with a keyed tail.</summary>
+    internal bool BodyHoldsKeyedTail;
 }
 
 /// <summary>
