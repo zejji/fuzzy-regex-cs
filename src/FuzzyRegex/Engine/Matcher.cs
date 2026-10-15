@@ -12317,6 +12317,7 @@ internal static class Matcher
         // Upstream passes the two as an 'RE_NextNode' it builds on the stack (:11737-11738). Here
         // they are two arguments, because 'NextNode' is a class and one instance per matching
         // operation is an allocation upstream does not make.
+        WorkCounter.SearchStartCalled();
         int startPos = state.TextPos;
         newPosition = new Position(node, startPos);
 
@@ -12879,10 +12880,30 @@ internal static class Matcher
         // narrowing: with the STRING arm's step right, switching it off leaves the suite green, and
         // it earns its place by saving a second search rather than by changing an answer. Switching
         // it off is how the step was found wrong in the first place - 82 tests red, 2026-09-22.
+        //
+        // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
+        // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
+        // Withheld from a partial match, which can end part way through a literal, and from a
+        // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
+        SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
+        int leadingUnitsEnd = 0;
+
+        // NOT UPSTREAM'S (C6), the last two clauses: no prefilter when that leading screen runs.
+        // The screen stops only on a literal, and every literal starts with a character of the
+        // first set the prefilter scans for, so the prefilter could only stop where the screen
+        // already has; and once its scan passed a literal it never came back to the screen, trying
+        // the zero-width test after the first set itself at every first-set character to the end
+        // of the text ('(?m)^(?:cat|dog)' over a megabyte with no newline: 50,094 of them in one
+        // attempt). Withholding a prefilter changes no answer: each attempt still runs the start
+        // test, as it does for every pattern the prefilter cannot help.
         bool searchStartAllowed =
             state.PartialSide == MatchState.PartialNone
             && !pattern.HasSkipVerb
-            && !(pattern.ReqString is Node required && EquivalentNodes(startTest, required));
+            && !(pattern.ReqString is Node required && EquivalentNodes(startTest, required))
+            && leadingStrings is null
+            && leadingUnits is null;
 
         bool doSearchStart = state.DoSearchStart && searchStartAllowed;
 
@@ -12892,15 +12913,6 @@ internal static class Matcher
         // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
             search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
-
-        // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
-        // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
-        // Withheld from a partial match, which can end part way through a literal, and from a
-        // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
-        SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
-        SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
-        int leadingUnitsEnd = 0;
 
         Node node;
         int status;
