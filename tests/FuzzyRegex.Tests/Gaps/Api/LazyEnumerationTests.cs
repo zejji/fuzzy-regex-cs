@@ -17,27 +17,28 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// <para>
 /// What is left for this file is the part equality cannot see: that the walk really stops when the
 /// caller does. That is checked the only way that is not a stopwatch ratio - by giving both calls
-/// a time budget that two matches fit inside and a million do not, and requiring the eager one to
-/// fail and the lazy one to answer.
+/// a budget that two matches fit inside and a third does not, and requiring the eager one to fail
+/// and the lazy one to answer. Since 2026-10-15 the budget is the test seam
+/// <see cref="FuzzyRegex.ExpiresOnCheck"/> rather than a pattern too slow to finish, so the test
+/// no longer depends on the engine staying slow on that pattern.
 /// </para>
 /// </remarks>
 public sealed class LazyEnumerationTests
 {
     /// <summary>
-    /// The pathological pattern <c>TimeoutAndCancellationTests</c> already uses: exponential
-    /// backtracking with no way to succeed. Borrowed rather than invented, because it is the one
-    /// shape in this repo already proven to make the timeout fire. The optional <c>\1</c> keeps it
-    /// exponential now that a pattern without a backreference gets a failure memo; see the remarks
-    /// on that class's pattern.
+    /// Three matches, at 0, 2 and 4, of a pattern that reaches the engine's clock check once per
+    /// match. Measured 2026-10-15 by stepping <see cref="FuzzyRegex.ExpiresOnCheck"/> up from 1:
+    /// taking two matches makes two checks and counting all three makes four, the last for the
+    /// search that finds no fourth.
     /// </summary>
-    private const string _slowPattern = @"(a|a)*\1?(?:b|\b\B)";
+    private const string _threeMatches = "ababab";
 
     /// <summary>
-    /// Two easy matches at the front, then 26 characters the pattern can only fail on
-    /// exponentially. A walk that stops after the two never reaches the cliff; a walk that does
-    /// not, does.
+    /// "ab" with a budget spent at the third clock check: the first two matches fit inside it and
+    /// the search for the third does not.
     /// </summary>
-    private static readonly string _twoMatchesThenACliff = "abab" + new string('a', 26);
+    /// <returns>The pattern.</returns>
+    private static FuzzyRegex TwoMatchesFit() => new("ab") { ExpiresOnCheck = 3 };
 
     [Test]
     public void EnumerateMatches_yields_what_Matches_returns()
@@ -141,34 +142,26 @@ public sealed class LazyEnumerationTests
     }
 
     [Test]
-    [Category(EngineWork.Category)]
     public void An_early_exit_does_not_pay_for_the_rest_of_the_subject()
     {
-        // Not a stopwatch ratio, which would be a statement about the machine. The subject has two
-        // easy matches and then a cliff the pattern can only fail on exponentially: the eager call
-        // has to walk past the two matches and reach the cliff, so it times out, and the lazy one
-        // stops at the second match, so it answers. The eager call's timing out is what shows the
-        // cliff is really there, which makes it part of the test rather than decoration.
-        FuzzyRegex pattern = new(_slowPattern);
-        TimeSpan budget = TimeSpan.FromMilliseconds(250);
+        // Not a stopwatch ratio, which would be a statement about the machine. The budget is spent
+        // at the third clock check, which the search for a third match makes: the eager call has
+        // to make that search, so it times out, and the lazy one stops at the second match, so it
+        // answers. The eager call's timing out is what shows the budget is really there, which
+        // makes it part of the test rather than decoration. An hour of real budget means only the
+        // seam can fire.
+        FuzzyRegex pattern = TwoMatchesFit();
+        TimeSpan budget = TimeSpan.FromHours(1);
 
-        Action eager = () => _ = pattern.Matches(_twoMatchesThenACliff, timeout: budget).Count;
+        Action eager = () => _ = pattern.Matches(_threeMatches, timeout: budget).Count;
         eager.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
 
-        // And the lazy call's cost is counted in engine steps rather than timed, because a busy
-        // machine is not a slow engine (D13): 36 steps for the two matches (Debug, 2026-09-28),
-        // where the cliff is about 2^26.
-        EngineWork.ShouldTakeAtMostSteps(
-            () =>
-                pattern
-                    .EnumerateMatches(_twoMatchesThenACliff, timeout: budget)
-                    .Take(2)
-                    .Select(static m => m.Index)
-                    .Should()
-                    .Equal(0, 2),
-            10_000,
-            "two matches at the front of the subject are not the cliff"
-        );
+        pattern
+            .EnumerateMatches(_threeMatches, timeout: budget)
+            .Take(2)
+            .Select(static m => m.Index)
+            .Should()
+            .Equal(0, 2);
     }
 
     [Test]

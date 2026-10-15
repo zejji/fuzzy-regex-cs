@@ -1037,6 +1037,18 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>start_time</c>.</summary>
     internal long StartTime;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, a test seam: the clock check at which <see cref="CheckTimedOut"/> reports the
+    /// budget spent whatever the clock says, or 0 for none. See <see cref="FuzzyRegex.ExpiresOnCheck"/>.
+    /// </summary>
+    internal int ExpiresOnCheck;
+
+    /// <summary>
+    /// NOT UPSTREAM'S: clock checks made so far in this operation, counted only while
+    /// <see cref="ExpiresOnCheck"/> is set.
+    /// </summary>
+    internal int ClockChecks;
+
     /// <summary>Upstream <c>iterations</c>: how long since the last cancellation check.</summary>
     internal ushort Iterations;
 
@@ -1647,6 +1659,8 @@ internal sealed class MatchState : IDisposable
         Timeout = limits.TimeoutTicks;
         StartTime = limits.TimeoutTicks == NoTimeout ? 0 : Stopwatch.GetTimestamp();
         Cancellation = limits.Cancellation;
+        ExpiresOnCheck = limits.ExpiresOnCheck;
+        ClockChecks = 0;
 
         // NOT PORTED: search_positions, which only search_start reads (Phase 7).
     }
@@ -2597,6 +2611,14 @@ internal sealed class MatchState : IDisposable
         {
             // No timeout.
             return false;
+        }
+
+        // NOT UPSTREAM'S: the test seam. Read only here, after the no-budget test, so a call without
+        // a budget never reaches it, and behind the polling gates, which admit one turn in 256 of
+        // the matching loop plus each match's first attempt.
+        if (ExpiresOnCheck != 0 && ++ClockChecks >= ExpiresOnCheck)
+        {
+            return true;
         }
 
         // Hasn't timed out yet.

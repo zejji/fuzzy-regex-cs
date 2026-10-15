@@ -2319,7 +2319,7 @@ public sealed class OracleWaveTests
         ErrorOutcome timedOut = ErrorOutcome.From(
             new System.Text.RegularExpressions.RegexMatchTimeoutException(
                 "aaa",
-                @"(a|a)*\1b",
+                "(?=(a|a)+$)a",
                 OracleComparer.RowTimeout
             ),
             whileMatching: true
@@ -2344,10 +2344,13 @@ public sealed class OracleWaveTests
         // And the deadline reaches the engine, which is the half a value assertion cannot see: this
         // row does not stop on its own, so the test returning at all is the proof. 50ms rather than
         // `RowTimeout`, so proving it costs no wall clock - upstream's own figure for this pattern
-        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve. The
-        // \1 is there since 2026-09-26: without it this port's failure memo
-        // (RepeatInfo.FailureMemo) answers the row in microseconds, and a pattern with a
-        // backreference gets no memo. Upstream was still running after 8 s (2026-09-26).
+        // at this length is 20 seconds, answering None (regex 2026.9.10, 2026-10-15), and this
+        // port's is the same curve. The row was `(a|a)*\1b` until 2026-10-15, whose \1 kept this
+        // port's failure memo off; the memo's planned backreference key would answer that at once.
+        // SHORTCUT: a repeat inside a lookahead is the one shape no planned memo option reaches
+        // (the oracle's `alt-same-lookahead` row). Option C of the 2026-09-26 failure-memo design
+        // would make it fast too, and the upgrade then is an engine-side step budget exposed
+        // through an option.
         //
         // What is deliberately *not* pinned: that the one-argument `Run` passes `RowTimeout` rather
         // than something else. Pinning that token needs a row that runs for the whole deadline, so
@@ -2355,7 +2358,7 @@ public sealed class OracleWaveTests
         // sitting directly under the field whose remarks explain why it exists.
         OracleRow catastrophic = OracleWave.ParseRows(
             """
-            {"generator": "rows", "pattern": "(a|a)*\\1b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "rows", "pattern": "(?=(a|a)+$)a", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """
         )[0];
 

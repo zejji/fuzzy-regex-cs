@@ -11,9 +11,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// <remarks>
 /// <para>
 /// Laziness is shown the way <see cref="LazyEnumerationTests"/> shows it, without a stopwatch: a
-/// subject with two easy matches and then a cliff the pattern can only fail on exponentially, and a
-/// budget the two fit inside and the cliff does not. A collection that reads two matches and stops
-/// answers; one that scans on construction, or past what was asked for, times out.
+/// subject with three matches, and a budget the first two fit inside and the search for the third
+/// does not, made exact by the test seam <see cref="FuzzyRegex.ExpiresOnCheck"/>. A collection that
+/// reads two matches and stops answers; one that scans on construction, or past what was asked for,
+/// times out.
 /// </para>
 /// <para>
 /// The answers themselves are pinned against
@@ -24,60 +25,43 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// </remarks>
 public sealed class LazyMatchCollectionTests
 {
-    /// <summary>Exponential backtracking with no way to succeed; see <see cref="LazyEnumerationTests"/>.</summary>
-    private const string _slowPattern = @"(a|a)*\1?(?:b|\b\B)";
+    /// <summary>
+    /// Three matches, at 0, 2 and 4: two clock checks to read the first two and four to count all
+    /// three (measured 2026-10-15; see <see cref="LazyEnumerationTests"/>).
+    /// </summary>
+    private const string _threeMatches = "ababab";
 
-    /// <summary>Two easy matches, at 0 and 2, then 26 characters the pattern can only fail on exponentially.</summary>
-    private static readonly string _twoMatchesThenACliff = "abab" + new string('a', 26);
+    /// <summary>A budget the real clock cannot spend, so only the seam can fire.</summary>
+    private static readonly TimeSpan _budget = TimeSpan.FromHours(1);
 
-    /// <summary>A budget the two easy matches fit inside many times over and the cliff does not.</summary>
-    private static readonly TimeSpan _budget = TimeSpan.FromMilliseconds(250);
+    /// <summary>"ab" with its budget spent at the third clock check, the search for the third match.</summary>
+    /// <returns>The pattern.</returns>
+    private static FuzzyRegex TwoMatchesFit() => new("ab") { ExpiresOnCheck = 3 };
 
     [Test]
-    [Category(EngineWork.Category)]
     public void Reading_two_matches_by_index_does_not_scan_the_rest_of_the_subject()
     {
-        FuzzyRegex pattern = new(_slowPattern);
+        MatchCollection matches = TwoMatchesFit().Matches(_threeMatches, timeout: _budget);
 
-        // 36 steps for the two matches (Debug, 2026-09-28, the EnumerateMatches twin of this test),
-        // where the cliff is about 2^26.
-        EngineWork.ShouldTakeAtMostSteps(
-            () =>
-            {
-                MatchCollection matches = pattern.Matches(_twoMatchesThenACliff, timeout: _budget);
-                matches[0].Index.Should().Be(0);
-                matches[1].Index.Should().Be(2);
-            },
-            10_000,
-            "two matches at the front of the subject are not the cliff"
-        );
+        matches[0].Index.Should().Be(0);
+        matches[1].Index.Should().Be(2);
     }
 
     [Test]
-    [Category(EngineWork.Category)]
-    public void Enumerating_two_matches_and_stopping_does_not_scan_the_rest_of_the_subject()
-    {
-        FuzzyRegex pattern = new(_slowPattern);
-
-        EngineWork.ShouldTakeAtMostSteps(
-            () =>
-                pattern
-                    .Matches(_twoMatchesThenACliff, timeout: _budget)
-                    .Take(2)
-                    .Select(static m => m.Index)
-                    .Should()
-                    .Equal(0, 2),
-            10_000,
-            "two matches at the front of the subject are not the cliff"
-        );
-    }
+    public void Enumerating_two_matches_and_stopping_does_not_scan_the_rest_of_the_subject() =>
+        TwoMatchesFit()
+            .Matches(_threeMatches, timeout: _budget)
+            .Take(2)
+            .Select(static m => m.Index)
+            .Should()
+            .Equal(0, 2);
 
     [Test]
     public void A_timeout_surfaces_from_Count_and_the_matches_before_it_stay_readable()
     {
-        FuzzyRegex pattern = new(_slowPattern);
+        FuzzyRegex pattern = TwoMatchesFit();
 
-        MatchCollection matches = pattern.Matches(_twoMatchesThenACliff, timeout: _budget);
+        MatchCollection matches = pattern.Matches(_threeMatches, timeout: _budget);
 
         Action count = () => _ = matches.Count;
         RegexMatchTimeoutException thrown = count.Should().Throw<RegexMatchTimeoutException>().Which;
@@ -96,9 +80,9 @@ public sealed class LazyMatchCollectionTests
     [Test]
     public void A_timeout_surfaces_from_the_indexer_that_needs_the_match_past_the_cliff()
     {
-        FuzzyRegex pattern = new(_slowPattern);
+        FuzzyRegex pattern = TwoMatchesFit();
 
-        MatchCollection matches = pattern.Matches(_twoMatchesThenACliff, timeout: _budget);
+        MatchCollection matches = pattern.Matches(_threeMatches, timeout: _budget);
 
         matches[1].Index.Should().Be(2);
         Action third = () => _ = matches[2];
@@ -108,12 +92,12 @@ public sealed class LazyMatchCollectionTests
     [Test]
     public void A_timeout_surfaces_from_enumeration_after_the_matches_before_it_were_yielded()
     {
-        FuzzyRegex pattern = new(_slowPattern);
+        FuzzyRegex pattern = TwoMatchesFit();
         List<int> seen = [];
 
         Action walk = () =>
         {
-            foreach (Match match in pattern.Matches(_twoMatchesThenACliff, timeout: _budget))
+            foreach (Match match in pattern.Matches(_threeMatches, timeout: _budget))
             {
                 seen.Add(match.Index);
             }

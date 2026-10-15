@@ -371,6 +371,24 @@ the repeat to any of O(L) spans, so O(L²) keys per attempt. **Witnesses that mu
 `OracleWaveTests.cs:2322, 2358`, the demo's `checks.html:270` and `harness.html:159`, and the
 oracle's `alt-backref` row (`tools/record-oracle.py:6648`).
 
+**After the test seam (2026-10-15).** The C# tests above are off the `\1` shapes: onto the seam, or
+onto `(?=(a|a)+$)a` where the seam cannot reach. What still breaks under BR, all black-box and left
+for the BR slice:
+
+- `demo/FuzzyRegex.Demo.Wasm/wwwroot/checks.html:270` (`(a|a)*\1\b\B`, the timeout check; its
+  comment at 244-249 explains the `\1`). User-facing demo copy, so it needs the owner's review.
+- `demo/FuzzyRegex.Demo.Wasm/wwwroot/harness.html:159` (the same pattern; comment at 138).
+- `tools/record-oracle.py:6648`, `TIMEOUT_SHAPES` row `alt-backref`, `(a|a)+(\1)$`. Under BR the
+  port answers where upstream times out, which the timeout generator counts as a divergence; drop
+  the row or move it to the answer generators.
+- `docs/COMPARISON.md:551` (`(a|a)*\1\b\B`, the per-call timeout example) and its pin
+  `tests/FuzzyRegex.Tests/Docs/ComparisonSamples.cs:157`, which must match the doc and so moves with
+  it; `tools/check-doc-examples.ps1` runs the doc's copy. Doc copy, so it needs the owner's review.
+
+Checked and not broken by BR (no backreference): the AOT smoke app's `(a|aa){1,99}$`
+(`samples/FuzzyRegex.AotSmoke/Program.cs:495`) and `examples.json:124` `^(a|aa){1,99}$`, both of
+which K would break instead; `demo/web/tests/pool.test.ts:40`, which runs against a fake worker.
+
 ### CK: group-exists conditionals, keyed on which tested groups are set
 
 **What.** Add to the key one bit per group a conditional tests (set or unset). **Cost**: at most
@@ -393,6 +411,30 @@ two matches fit inside before the third times out. The redesign: a test-only lim
 the k-th `SafeCheckCancel`**, used only with patterns that reach `start_match`, with k chosen per
 test (1 for most, enough for two matches in `LazyEnumerationTests`). The first version is kept below
 for the record.
+
+**Built (2026-10-15, `perf/test-seam`).** The limit is `FuzzyRegex.ExpiresOnCheck`, an internal
+`init`-only integer on the instance (0, off, by default), carried through `MatchLimits` into
+`MatchState.ExpiresOnCheck` with a per-operation count, `MatchState.ClockChecks`. It is read in
+`MatchState.CheckTimedOut` after the no-budget return and before the `Stopwatch` read, so it costs
+nothing on a call with no budget and one integer test per clock read on a call with one, and the
+clock is read only behind the polling gates (once per 256 loop turns). It sits on the instance, not
+in a static, because the thread-safety tests forbid writable statics and pin the thread-statics to
+the Debug work counters, and because tests run in parallel. Two consequences of that choice:
+
+- The seam fires only in a call that carries a budget, so a seam test also proves the budget
+  arrived (the per-method test pairs each throwing call with an unbudgeted one that answers).
+- It cannot reach a pattern built where the test cannot set it: the static conveniences (built in
+  the pattern cache), `DemoEngine.Run` and the oracle's row runner. Those keep a real slow pattern,
+  `(?=(a|a)+$)a` (Debug 33, 118, 441, 1,643 and 6,412 ms at n = 14 to 22, 2^n, 2026-10-15),
+  each marked `SHORTCUT:`.
+
+Measured k, by stepping it up from 1: `ab` over `ababab` makes two clock checks for two matches and
+four for all three, so k = 3 is "two fit, the third does not". The per-method tests use `a+` over
+`baab` with k = 1. Red proofs (`.scratch/seam/redproof/summary*.txt`): with the engine never
+reporting expiry, with the per-call budget dropped, with the pattern budget dropped, with the seam
+moved ahead of the no-budget test, and with the match collection draining its walk on the first
+read, each converted test that checks that piece went red. The follow-up for BR, which this slice
+leaves alone, is the black-box list below the "Breaks" paragraph of BR.
 
 The handover's trap (`.claude/driver/optimisation-handover-2026-09-24.md:229-237`) is that about
 fifteen tests need a pattern that is slow, and every memo extension makes some of them fast. Two

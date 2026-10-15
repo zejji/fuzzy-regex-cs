@@ -240,13 +240,13 @@ public sealed class PoolDisciplineTests
     [Arguments(false)]
     public void A_span_call_that_times_out_returns_its_copy_of_the_subject(bool count)
     {
-        // The pattern and subject TimeoutAndCancellationTests uses: exponential, and no match.
+        // The test seam spends the budget at the engine's first clock check, as
+        // TimeoutAndCancellationTests does; an hour of real budget means only the seam can fire.
         var pool = new TrackingPool<char>();
-        FuzzyRegex regex = new(@"(a|a)*\1\b\B");
-        string subject = new('a', 26);
+        FuzzyRegex regex = new("a+") { ExpiresOnCheck = 1 };
+        const string subject = "baab";
 
-        Action call = () =>
-            CallWithSpan(count, regex, subject, pool, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        Action call = () => CallWithSpan(count, regex, subject, pool, TimeSpan.FromHours(1), CancellationToken.None);
 
         call.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
         pool.Rented.Should().Be(1);
@@ -320,15 +320,15 @@ public sealed class PoolDisciplineTests
     public void A_span_walk_that_times_out_returns_its_copy()
     {
         var pool = new TrackingPool<char>();
-        FuzzyRegex regex = new(@"(a|a)*\1\b\B");
-        string subject = new('a', 26);
+        FuzzyRegex regex = new("a+") { ExpiresOnCheck = 1 };
+        const string subject = "baab";
 
         Action call = () =>
         {
             ValueMatchEnumerator walk = regex.EnumerateMatches(
                 subject.AsSpan(),
                 pool,
-                TimeSpan.FromMilliseconds(50),
+                TimeSpan.FromHours(1),
                 CancellationToken.None
             );
             _ = walk.MoveNext();
