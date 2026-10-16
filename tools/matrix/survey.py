@@ -59,6 +59,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -187,6 +188,41 @@ _LOOKBEHIND = re.compile(r"\(\?<[=!]")
 _KEEP = re.compile(r"(?<!\\)(?:\\\\)*\\K")
 _SEARCH_ANCHOR = re.compile(r"(?<!\\)(?:\\\\)*\\G")
 _STRING_ANCHOR = re.compile(r"(?<!\\)(?:\\\\)*\\[AZ]")
+
+
+def _lookbehind_bodies(p):
+    """The text of every lookbehind's body in p (escapes and character classes skipped)."""
+    bodies, stack, i, in_class = [], [], 0, False
+    while i < len(p):
+        c = p[i]
+        if c == "\\":
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+            if p[i + 1:i + 2] == "^":
+                i += 1
+            if p[i + 1:i + 2] == "]":
+                i += 1
+        elif c == "(":
+            stack.append((i, bool(_LOOKBEHIND.match(p, i))))
+        elif c == ")" and stack:
+            start, behind = stack.pop()
+            if behind:
+                bodies.append(p[start + 4:i])
+        i += 1
+    return bodies
+
+
+def _cut_in_a_lookbehind(p):
+    """True if a lookbehind's body holds an atomic group, a possessive repeat or a verb. PCRE2, Perl
+    and Boost match a lookbehind's body forwards from a fixed start, regex and the port backwards
+    from where it stands, so a construct that discards choices picks a different path
+    (DIVERGENCES "A verb inside a lookbehind acts in right-to-left order"; battery run 20261016-1,
+    `a+(?<=(?<!(?:ab|a))(?:(?:ab|a)){1,2}+)` match 'abx': regex (0, 1), PCRE2 None)."""
+    return any(_ATOMIC.search(b) or _POSSESSIVE.search(b) or _VERB.search(b) for b in _lookbehind_bodies(p))
 
 
 def _backrefs(p, style):
@@ -350,6 +386,8 @@ def translate(row, info, engine):
                 return name
     if engine == "dotnet" and _POSSESSIVE.search(p):
         return "a possessive quantifier"
+    if engine in ("pcre2", "perl", "boost") and _cut_in_a_lookbehind(p):
+        return "an atomic group, possessive repeat or verb inside a lookbehind (matched forwards here)"
     if engine == "re" and _COND_LOOK.search(p):
         return "a lookaround condition"
     if engine == "boost" and not (row["subject"] + p).isascii():
@@ -384,15 +422,17 @@ def translate(row, info, engine):
     letters = info["letters"]
     out = {"subject": row["subject"], "op": op, "partial": partial, "ngroups": info["ngroups"],
            "groupnames": info["groupnames"]}
+    if engine in ("pcre2", "perl", "re"):
+        out["pos"], out["endpos"] = pos, endpos
     if engine == "re":
+        # The slice is set above: battery run 20261016-1 asked re about the whole subject on 90 rows
+        # because this return came first.
         flags = 0
         for c, bit in (("i", re.I), ("m", re.M), ("s", re.S)):
             if c in letters:
                 flags |= bit
         out.update(pattern=p, flags=flags)
         return out
-    if engine in ("pcre2", "perl", "re"):
-        out["pos"], out["endpos"] = pos, endpos
     if engine in ("perl", "dotnet") and op == "fullmatch":
         if _WHOLE_CALL.search(p):
             return "fullmatch of a pattern that calls itself (the \\A...\\z wrapper would be recursed into)"
@@ -430,6 +470,16 @@ def translate(row, info, engine):
 
 
 # ---------------------------------------------------------------- running the workers
+def _node():
+    """node on PATH, else nvm v2's shim folder, which shells started before nvm moved it lack (on
+    2026-10-16 c7.py failed every node row with WinError 2 from such a shell)."""
+    found = shutil.which("node")
+    if found:
+        return found
+    shim = Path.home() / "AppData" / "Local" / "Author Software" / "nvm" / ".shim" / "node.exe"
+    return str(shim) if shim.exists() else "node"
+
+
 def _commands(engine, rows_path, start):
     py = sys.executable
     if engine in ("regex", "re", "pcre2", "fuzzyref", "brute"):
@@ -437,7 +487,7 @@ def _commands(engine, rows_path, start):
     if engine == "perl":
         return ["perl", str(HERE / "survey_worker.pl"), rows_path, str(start)], {"PERL_SIGNALS": "unsafe"}
     if engine == "node":
-        return ["node", str(HERE / "survey_worker.mjs"), rows_path, str(start)], None
+        return [_node(), str(HERE / "survey_worker.mjs"), rows_path, str(start)], None
     if engine == "dotnet":
         return ["dotnet", "run", "-c", "Release",
                 str(HERE / "survey_bcl.cs"), "--", rows_path, str(start)], None
