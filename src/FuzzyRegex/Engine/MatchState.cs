@@ -2500,6 +2500,12 @@ internal sealed class MatchState : IDisposable
         }
 
         // NOT UPSTREAM (D85): a repeat whose tail reads group state keeps one list per key.
+        // sync-divergence: upstream keeps one tail_guard_list per repeat (_regex.c :339, :9458,
+        // :9546, :9559) and drops the tail guard only where add_repeat_guards sees a reference /
+        // a repeat whose tail can read a group keeps one list per value of the groups it reads
+        // (KeyedTailGuards, keys from TailGuardLiveness) / D85, ledger 84: a failure recorded under
+        // one group value cut a path that succeeds under another. Re-aligning: if upstream fixes
+        // ledger 84, compare answers and cost with its fix and adopt its shape if they agree.
         return repeat.KeyedTail is null ? repeat.TailGuardList : KeyedTailGuardList(index, textPos, write);
     }
 

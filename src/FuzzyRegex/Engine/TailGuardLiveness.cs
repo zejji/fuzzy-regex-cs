@@ -74,6 +74,11 @@ internal sealed record TailGuardKeySpec(
 /// finds live variables, so a group that every path re-captures before reading is left out of the
 /// key and the guard keeps the sharing that makes the position-only guard fast.
 /// </summary>
+/// <remarks>
+/// sync-divergence: upstream has no such pass; add_repeat_guards (_regex.c :23273) decides each tail
+/// guard by its own walk / this pass decides which tails read a group and on what to key them / D85,
+/// ledger 84. Re-aligning: see the KeyedTailGuards row; rerun the D85 rows if add_repeat_guards changes.
+/// </remarks>
 internal static class TailGuardLiveness
 {
     /// <summary>A backreference reads the group's text.</summary>

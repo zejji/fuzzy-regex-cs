@@ -10,6 +10,10 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// A key's list holds only failures recorded while the read state equalled that key, so a read
 /// under another key sees none of them, which is what makes the guard sound (ledger entry 84).
 /// Dropping a list or skipping a write only loses pruning, never an answer.
+/// <para>
+/// sync-divergence: upstream keeps one tail_guard_list per repeat (_regex.c :339) / this keeps one
+/// per key / D85, ledger 84. Re-aligning: see MatchState.ActiveGuardList.
+/// </para>
 /// </remarks>
 internal sealed class KeyedTailGuards
 {

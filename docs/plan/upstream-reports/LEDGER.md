@@ -6670,10 +6670,10 @@ expected answer is the flag-free search's, never upstream's. Without a `\K` the 
 `MatchPos` are the same position, and the differential against main moved only `\K` rows under
 `(?b)` or `(?e)`.
 
-## 84. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - OPEN HERE TOO (D85, 2026-10-15)
+## 84. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - SHARED, FIXED HERE ON `fix/d85-c9` (D85, 2026-10-15)
 
-**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited: the port gives
-upstream's answers until the fix lands. Draft report: `entry-84-nested-tail-guard-before-a-backreference.md`.
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited; fixed on
+`fix/d85-c9` (keyed tail guards, final addendum below), not yet merged. Draft report: `entry-84-nested-tail-guard-before-a-backreference.md`.
 
 **Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`:
 
@@ -6774,6 +6774,20 @@ A key on the group's last capture does not separate the two; only the position t
 at does. The second is a body guard ("the body never reached its end from here") written while a
 guard inside the body cut a path under another value of group 1; it fails with the tail guards
 fixed and is right with that body guard off.
+
+**Final addendum, 2026-10-16: the fix here.** Option (A), not (E): an epoch voids the guards on
+every change of a read group, which leaves (B)'s exponential search whenever the group is set
+inside the loop, and that is the commonest shape. Each repeat whose tail can read a group (found by
+a liveness pass over the compiled graph) keeps one tail guard list per value of the groups it
+reads; a group set inside the loop is keyed also on the position it opened at (the first form
+above); a body guard is off where its body holds a keyed tail (the second). Measured on the merge
+with main (`fix/d85-c9` d98b8dbc): every one of the 2,903 D85 rows in a 276,591-row test bed now
+gives Python re's answer, with no new wrong answer, and a differential of 269,000 rows against main
+moves 8 rows, all to re's answer. The cost, accepted by the owner: 1.0-1.3x where the read group
+is set outside the loop, 1.5-4.7x for a fixed-width group set inside it, and about 40x for a
+variable-width group set inside it and read after it (`(?:(a*)a*)*\1c$` over 96 a's, 0.49 s
+against 12 ms, growing as n^3.3). The upstream report still proposes (B) as the smallest change
+for upstream and now names (A) as the fix that keeps the pruning.
 
 ## 85. A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever - SHARED, FIXED HERE ON `fix/d87` (D87, 2026-10-15)
 

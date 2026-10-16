@@ -74,9 +74,11 @@ reference status of the enclosing repeat's tail and body (the body runs again), 
 reference inside a bounded body even though its repeat status stays LIMITED. Then a tail guard is
 off wherever the rest of the match can read a group. That costs the guards' protection on nested
 repeats before a reference: `(x?)(?:a*a*)*\1c$` over 'a' * 12 + 'cx' is fast today and
-exponential without the tail guards, as it is in `re`. A gentler alternative keeps the guards and
-empties a tail guard list whenever a group the rest of the match reads has changed since the list
-was last written (a counter that only goes up, since `capture_change` is restored on backtracking).
+exponential without the tail guards, as it is in `re`. A fix that keeps the protection keys each
+such tail guard list on the values of the groups the rest of the match can read, so a failure
+recorded under one value never blocks a path under another. A group set inside the loop must be
+keyed also on the position it opened at: `.?(a*)(?:b\1)?c` over 'aabaac' gives (2,6) for (0,6)
+with a key on the captured text alone.
 
 ---
 
@@ -84,7 +86,8 @@ was last written (a counter that only goes up, since `capture_change` is restore
 
 - Found 2026-10-15 by the `perf/memo-br` builder's differential (rows in `FailureMemoTests` on that
   branch). Minimised, surveyed and traced 2026-10-15 (`.scratch/s1016/d85/`).
-- The port gives upstream's answers until the fix; the witnesses are `Gaps/Engine/NestedTailGuardTests`.
+- Fixed in the port on `fix/d85-c9` with keyed tail guards (LEDGER.md entry 84, final addendum);
+  the witnesses are `Gaps/Engine/NestedTailGuardTests`.
 - The line numbers were read; the mechanism was shown in the port by a guard trace and by
   switching the guards off (LEDGER.md entry 84).
 - The title should change if the bounded-body half turns out to be a separate report; it shares
