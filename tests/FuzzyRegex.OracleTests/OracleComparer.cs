@@ -1183,6 +1183,30 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with upstream's step after a failed attempt, which goes on
+    /// from the start a <c>\K</c> left ahead of the attempt.
+    /// </summary>
+    /// <remarks>
+    /// D92 made the step go on from where the attempt began. Setting
+    /// <c>PatternObject.StepsOnFromTheKeptStart</c> restores upstream's step (<c>_regex.c:15695</c>).
+    /// The <c>keep-before-a-verb-skips-no-start</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's step, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamStepFromTheKeptStart(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.StepsOnFromTheKeptStart = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with upstream's BESTMATCH and ENHANCEMATCH ban on an empty
     /// match at every candidate run's start after an empty match.
     /// </summary>
@@ -1275,7 +1299,10 @@ internal static class OracleComparer
     /// <paramref name="lookarounds"/> adds <c>PatternObject.KeepOutlivesALookaround</c>, which covers
     /// lookarounds and conditions' tests. The <c>keep-undone-past-an-atomic-group</c> entry keys on
     /// the first alone and <c>keep-undone-past-a-lookaround</c> on the second, alone or with the
-    /// first, so a row both explain belongs to the lookaround entry.
+    /// first, so a row both explain belongs to the lookaround entry. Both also take upstream's step
+    /// after a failed attempt (<c>PatternObject.StepsOnFromTheKeptStart</c>, D92): a start that
+    /// outlives its construct is the one upstream steps on from, so its skipped starts are part of
+    /// what this ablation reproduces.
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <param name="atomicGroups">Leave a <c>\K</c> in an atomic group in force.</param>
@@ -1297,6 +1324,7 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.KeepOutlivesAnAtomicGroup = atomicGroups;
                 compiled.PatternObject.KeepOutlivesALookaround = lookarounds;
+                compiled.PatternObject.StepsOnFromTheKeptStart = true;
             },
             upstreamCallCaptures: true
         );

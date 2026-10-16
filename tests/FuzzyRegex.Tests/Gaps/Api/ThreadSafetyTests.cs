@@ -811,6 +811,9 @@ public sealed class ThreadSafetyTests
             // D77 added SkipsALazyRunDespiteAVerb, likewise set only by
             // OracleComparer.RunWithTheUpstreamLazyStartSkip.
             "PatternObject.SkipsALazyRunDespiteAVerb",
+            // D92 added StepsOnFromTheKeptStart, likewise set only by
+            // OracleComparer.RunWithTheUpstreamStepFromTheKeptStart and RunWithTheKeepOutlivingItsConstruct.
+            "PatternObject.StepsOnFromTheKeptStart",
             // D78 added BansAnEmptyMatchAtEveryCandidate, likewise set only by
             // OracleComparer.RunWithTheUpstreamBestMatchAdvance.
             "PatternObject.BansAnEmptyMatchAtEveryCandidate",

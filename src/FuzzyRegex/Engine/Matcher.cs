@@ -7163,6 +7163,7 @@ internal static class Matcher
             {
                 state.SliceEnd = state.SliceStart;
                 state.MatchPos = state.SliceStart;
+                state.AttemptStart = state.SliceStart;
             }
             else if (skipPos < state.SliceEnd)
             {
@@ -7173,6 +7174,7 @@ internal static class Matcher
         {
             state.SliceStart = state.SliceEnd;
             state.MatchPos = state.SliceEnd;
+            state.AttemptStart = state.SliceEnd;
         }
         else if (skipPos > state.SliceStart)
         {
@@ -12943,8 +12945,10 @@ internal static class Matcher
         state.Forks = 0;
 
         // D11 M3: the passes run the same code from the same start, and they try the same starts
-        // unless an attempt can move the next one. A (*SKIP) moves it, and so does a \K whose entry a
-        // cut discarded (FAILURE's bump-along starts from MatchPos). After a touched attempt the two
+        // unless an attempt can move the next one. A (*SKIP) moves it. A \K whose entry a cut
+        // discarded moved it too until D92, when FAILURE's bump-along started from MatchPos; it now
+        // starts from AttemptStart, though AnAttemptCanMoveTheNextStart still counts a \K (D92's
+        // open question in KNOWN-DEFECTS). After a touched attempt the two
         // passes may then try different starts, so the next attempt counts as touched too: a
         // success there is one the first pass did not find (review of chunk 8, round 1:
         // `(?=ab(*SKIP)c|a)a(*SKIP)x|b` search 'ab' was the complete match (1, 2)). A (*PRUNE)
@@ -16006,9 +16010,17 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Can we advance? NOT UPSTREAM'S, D87: not from a start a \K left behind the
-                    // attempt; see MatchState.StartNotBehindTheAttempt.
-                    state.TextPos = state.StartNotBehindTheAttempt();
+                    // Can we advance? NOT UPSTREAM'S, D87 and D92: from where the attempt began.
+                    // Upstream steps on from match_pos, which is the attempt's start unless a \K
+                    // moved it and a verb or a lookaround threw away the entry that moves it back.
+                    // Behind the attempt, the step lands on the attempt again and loops (D87);
+                    // ahead of it, starts are skipped: `a\K(*PRUNE)b` over 'aab' is None upstream
+                    // and (2, 3) in PCRE2 10.47, Perl 5.42.3 and Boost (D92). A (*SKIP) moves the
+                    // slice, and the step below goes to it. Pinned by KeepBeforeVerbTests. The
+                    // oracle's PatternObject.StepsOnFromTheKeptStart restores the step as it was.
+                    state.TextPos = pattern.StepsOnFromTheKeptStart
+                        ? state.StartNotBehindTheAttempt()
+                        : state.AttemptStart;
 
                     if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
                     {
