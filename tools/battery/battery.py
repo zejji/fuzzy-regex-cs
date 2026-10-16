@@ -107,8 +107,10 @@ def env() -> dict:
     if not shutil.which("node", path=e["PATH"]):
         # SHORTCUT: C7's survey runs node. On 2026-10-16 an nvm migration left node.exe in
         # C:\ProgramData\nvm\v<version> without its C:\nvm4w\nodejs link, and run.py's c7 stage then
-        # failed every chunk ("WinError 2"). Upgrade path: delete this once nvm's link is back.
-        found = sorted(Path(r"C:\ProgramData\nvm").glob("v*/node.exe"))
+        # failed every chunk ("WinError 2"); nvm v2 then put its shims in a new folder that shells
+        # started earlier do not have on PATH. Upgrade path: delete this once PATH has node again.
+        shim = Path.home() / "AppData" / "Local" / "Author Software" / "nvm" / ".shim" / "node.exe"
+        found = [shim] if shim.exists() else sorted(Path(r"C:\ProgramData\nvm").glob("v*/node.exe"))
         if found:
             e["PATH"] = str(found[-1].parent) + os.pathsep + e["PATH"]
     return e
