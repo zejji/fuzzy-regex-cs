@@ -1257,6 +1257,42 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with a <c>\K</c> left in force when matching backtracks
+    /// past the construct it is in, as upstream leaves it (D88).
+    /// </summary>
+    /// <remarks>
+    /// <c>PatternObject.KeepOutlivesAnAtomicGroup</c> covers atomic groups and possessive repeats;
+    /// <paramref name="lookarounds"/> adds <c>PatternObject.KeepOutlivesALookaround</c>, which covers
+    /// lookarounds and conditions' tests. The <c>keep-undone-past-an-atomic-group</c> entry keys on
+    /// the first alone and <c>keep-undone-past-a-lookaround</c> on the second, alone or with the
+    /// first, so a row both explain belongs to the lookaround entry.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="atomicGroups">Leave a <c>\K</c> in an atomic group in force.</param>
+    /// <param name="lookarounds">Leave a <c>\K</c> in a lookaround or a condition's test in force.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheKeepOutlivingItsConstruct(
+        OracleRow row,
+        bool atomicGroups,
+        bool lookarounds
+    )
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: compiled =>
+            {
+                compiled.PatternObject.KeepOutlivesAnAtomicGroup = atomicGroups;
+                compiled.PatternObject.KeepOutlivesALookaround = lookarounds;
+            },
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with <c>\X</c> compiled backwards in upstream's order.
     /// </summary>
     /// <remarks>

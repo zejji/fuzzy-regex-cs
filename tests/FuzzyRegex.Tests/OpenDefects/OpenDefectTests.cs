@@ -162,25 +162,6 @@ public sealed class OpenDefectTests
         (m.Index, m.Index + m.Length).Should().Be((1001, 1001));
     }
 
-    // D88 (candidate). A failed attempt leaves no trace, so `x|b` and `(?=ab\K)x|b` find the same
-    // `b`. A positive lookaround throws away the entry that would undo its \K, so after the attempt
-    // at 0 fails the failure arm steps on from the \K's position, 2, and never tries 1. Upstream
-    // 2026.9.10 answers None for the search (and (1, 2) when told to start at 1); the second row is
-    // the same skip in a scan, where search from pos=1 gives (2, 1).
-    [Test]
-    public void A_failed_attempt_with_a_K_in_a_lookahead_does_not_skip_the_next_start()
-    {
-        Match m = new FuzzyRegex(@"(?=ab\K)x|b").Match("ab");
-        (m.Index, m.Index + m.Length).Should().Be((1, 2));
-
-        new FuzzyRegex(@"(?=y\K)")
-            .EnumerateMatches("yy")
-            .Take(3)
-            .Select(static s => (s.Index, s.Index + s.Length))
-            .Should()
-            .Equal((1, 0), (2, 1));
-    }
-
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);
