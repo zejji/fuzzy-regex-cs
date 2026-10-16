@@ -4930,8 +4930,18 @@ internal static class Matcher
     private static long ActiveCallKey(int callIndex, int textPos) => ((long)callIndex << 32) | (uint)textPos;
 
     /// <summary>
-    /// NOT UPSTREAM'S (D93): the fuzzy section a group call is being made in, with its counts, as the
-    /// call guard compares them (<see cref="CallSection"/>).
+    /// Whether the call guard counts open calls per key and reach (<see cref="MatchState.ActiveCallCounts"/>)
+    /// rather than holding them in a set: where groups are read, or where a call can be made inside a
+    /// fuzzy section (D93), two open calls with one key and reach can differ in what the guard compares.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> to count them.</returns>
+    private static bool CountsOpenCalls(PatternObject pattern) =>
+        pattern.CallReadGroups.Length > 0 || pattern.NestsFuzzySections;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D93): the open fuzzy section a group call is being made in, with its counts,
+    /// as the call guard compares them (<see cref="CallSection"/>).
     /// </summary>
     /// <remarks>
     /// A count of a kind the section never limits, by its own maximum, its error maximum, a cost
@@ -4942,13 +4952,17 @@ internal static class Matcher
     /// over 'x'.
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <returns>The section and counts; all zero outside a section.</returns>
+    /// <returns>The section's frame and counts; frame -1 and no counts outside a section.</returns>
     private static CallSection CallSectionAt(MatchState state)
     {
         if (state.FuzzyNode is not { } fuzzyNode)
         {
-            return default;
+            return new CallSection(-1, 0, 0, 0);
         }
+
+        // A call inside a section means the section can be entered again from inside itself, so the
+        // pattern keeps the section links (PatternObject.NestsFuzzySections).
+        Debug.Assert(state.Pattern.KeepsSectionLinks, "a call in a fuzzy section keeps the section links");
 
         long[] counts = state.FuzzyCounts;
         uint[] values = fuzzyNode.Values;
@@ -4964,7 +4978,7 @@ internal static class Matcher
                 ? counts[kind]
                 : Math.Min(counts[kind], Math.Max(values[FuzzyValue.MinBase + kind], values[FuzzyValue.MinErr]));
 
-        return new CallSection(fuzzyNode.Index + 1, Kept(FuzzyValue.Sub), Kept(FuzzyValue.Ins), Kept(FuzzyValue.Del));
+        return new CallSection(state.SectionFrame, Kept(FuzzyValue.Sub), Kept(FuzzyValue.Ins), Kept(FuzzyValue.Del));
     }
 
     /// <summary>Pushes a <see cref="CallSection"/>, for <see cref="PopCallSection"/>.</summary>
@@ -4972,7 +4986,7 @@ internal static class Matcher
     /// <param name="section">The section.</param>
     private static void PushCallSection(ByteStack stack, CallSection section)
     {
-        stack.PushSize(section.Node);
+        stack.PushSize(section.Frame);
         stack.PushSize(section.Sub);
         stack.PushSize(section.Ins);
         stack.PushSize(section.Del);
@@ -4989,13 +5003,13 @@ internal static class Matcher
             !stack.PopSize(out long del)
             || !stack.PopSize(out long ins)
             || !stack.PopSize(out long sub)
-            || !stack.PopSize(out long node)
+            || !stack.PopSize(out long frame)
         )
         {
             return false;
         }
 
-        section = new CallSection((int)node, sub, ins, del);
+        section = new CallSection((int)frame, sub, ins, del);
         return true;
     }
 
@@ -5012,22 +5026,22 @@ internal static class Matcher
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
     private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, int reach, CallSection section, _, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         int readCount = state.Pattern.CallReadGroups.Length;
-        if (readCount == 0)
+        if (!CountsOpenCalls(state.Pattern))
         {
-            bool removed = state.ActiveCalls.Remove((key, reach, section));
+            bool removed = state.ActiveCalls.Remove((key, reach));
             Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
             return (key, reach);
         }
 
         // One lookup in the common case, where this was the only open call with its key and reach.
-        bool counted = state.ActiveCallCounts.Remove((key, reach, section), out int open);
+        bool counted = state.ActiveCallCounts.Remove((key, reach), out int open);
         Debug.Assert(counted && open > 0, "ActiveCallCounts counts exactly the calls OpenCalls holds");
         if (open > 1)
         {
-            state.ActiveCallCounts[(key, reach, section)] = open - 1;
+            state.ActiveCallCounts[(key, reach)] = open - 1;
         }
 
         CollectionsMarshal.SetCount(state.OpenCallSpans, state.OpenCallSpans.Count - readCount);
@@ -5036,8 +5050,9 @@ internal static class Matcher
 
     /// <summary>
     /// NOT UPSTREAM'S: the re-entry guard (<see cref="MatchState.ActiveCalls"/>). Opens a call with
-    /// this key, reach and section, recording the spans of the read groups, unless an open call with
-    /// the same key, reach and section saw the same read state, when the call could only repeat it.
+    /// this key and reach, recording the spans of the read groups, unless an open call with the same
+    /// key and reach saw the same read state, and was made in another section instance or with the
+    /// same counts (<see cref="CallSection"/>), when the call could only repeat it.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="key">The call's key (<see cref="ActiveCallKey"/>).</param>
@@ -5047,14 +5062,14 @@ internal static class Matcher
     private static bool TryOpenCall(MatchState state, long key, int reach, CallSection section)
     {
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
-        if (readGroups.Length == 0)
+        if (!CountsOpenCalls(state.Pattern))
         {
-            return state.ActiveCalls.Add((key, reach, section));
+            return state.ActiveCalls.Add((key, reach));
         }
 
         ref int open = ref CollectionsMarshal.GetValueRefOrAddDefault(
             state.ActiveCallCounts,
-            (key, reach, section),
+            (key, reach),
             out bool exists
         );
         if (exists && AnOpenCallSawThisReadState(state, key, reach, section))
@@ -5081,22 +5096,22 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="key">The call's key.</param>
     /// <param name="reach">The text reached when it was made.</param>
-    /// <param name="section">The fuzzy section it was made in.</param>
-    private static void ReopenCall(MatchState state, long key, int reach, CallSection section)
+    private static void ReopenCall(MatchState state, long key, int reach)
     {
-        if (state.Pattern.CallReadGroups.Length == 0)
+        if (!CountsOpenCalls(state.Pattern))
         {
-            bool reopened = state.ActiveCalls.Add((key, reach, section));
+            bool reopened = state.ActiveCalls.Add((key, reach));
             Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
             return;
         }
 
-        ++CollectionsMarshal.GetValueRefOrAddDefault(state.ActiveCallCounts, (key, reach, section), out _);
+        ++CollectionsMarshal.GetValueRefOrAddDefault(state.ActiveCallCounts, (key, reach), out _);
     }
 
     /// <summary>
     /// Whether an open call with this key and reach saw the read groups as they are now, compared
-    /// as <see cref="CallRead"/> says.
+    /// as <see cref="CallRead"/> says, and was made in another section instance or with the same
+    /// counts as now (<see cref="CallSection"/>).
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="key">The key.</param>
@@ -5112,7 +5127,7 @@ internal static class Matcher
             if (
                 state.OpenCalls[i].Key != key
                 || state.OpenCalls[i].Reach != reach
-                || state.OpenCalls[i].Section != section
+                || (state.OpenCalls[i].Section.Frame == section.Frame && state.OpenCalls[i].Section != section)
             )
             {
                 continue;
@@ -5370,6 +5385,7 @@ internal static class Matcher
         // The open calls the guard could refuse a call inside this one against, as a set: see the
         // remarks. Their reach is the reach now, so it is already in the key.
         int reach = state.ReachedWidth;
+        int sectionNow = state.FuzzyNode is null ? -1 : state.SectionFrame;
         List<int> ancestors = state.CallMemoAncestors;
         ancestors.Clear();
         for (int i = 0; i < state.OpenCalls.Count; i++)
@@ -5400,11 +5416,24 @@ internal static class Matcher
         foreach (int i in ancestors)
         {
             key.Add(state.OpenCalls[i].Key);
-            (int node, long sub, long ins, long del) = state.OpenCalls[i].Section;
-            key.Add(node);
-            key.Add(sub);
-            key.Add(ins);
-            key.Add(del);
+
+            // D93: the guard compares an ancestor's counts only with a call made in the section
+            // instance the ancestor was made in. A call inside this one is made in this call's section
+            // instance or in one opened inside it, so only an ancestor made in this call's instance
+            // has counts the guard can read; for any other, whether it is, is all the guard reads.
+            CallSection section = state.OpenCalls[i].Section;
+            if (section.Frame == sectionNow)
+            {
+                key.Add(1);
+                key.Add(section.Sub);
+                key.Add(section.Ins);
+                key.Add(section.Del);
+            }
+            else
+            {
+                key.Add(0);
+            }
+
             for (int g = 0; g < readGroups.Length; g++)
             {
                 key.Add(OpenReadValue(state, i, g));
@@ -13113,7 +13142,7 @@ internal static class Matcher
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
-        if (state.Pattern.CallReadGroups.Length > 0)
+        if (CountsOpenCalls(state.Pattern))
         {
             state.ActiveCallCounts.Clear();
             state.OpenCallSpans.Clear();
@@ -14735,7 +14764,7 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.GroupCall: // Group call (:13394).
-                    status = AdvanceGroupCall(state, ref node, readGroupCount);
+                    status = AdvanceGroupCall(state, ref node);
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -18640,10 +18669,9 @@ internal static class Matcher
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The current node; the next one on return.</param>
-    /// <param name="readGroupCount">How many groups the call guard keys on.</param>
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int AdvanceGroupCall(MatchState state, ref Node node, int readGroupCount)
+    private static int AdvanceGroupCall(MatchState state, ref Node node)
     {
         PatternObject pattern = state.Pattern;
 
@@ -18674,8 +18702,8 @@ internal static class Matcher
         }
 
         if (
-            readGroupCount == 0
-                ? !state.ActiveCalls.Add((groupCallKey, groupCallReach, groupCallSection))
+            !CountsOpenCalls(pattern)
+                ? !state.ActiveCalls.Add((groupCallKey, groupCallReach))
                 : !TryOpenCall(state, groupCallKey, groupCallReach, groupCallSection)
         )
         {
@@ -19703,7 +19731,7 @@ internal static class Matcher
             state.Sstack.PushNode(groupReturnBackNode);
 
             // The frame is back, so the call is open again and ends where it now ends.
-            ReopenCall(state, groupReturnBackKey, (int)groupReturnBackReach, groupReturnBackSection);
+            ReopenCall(state, groupReturnBackKey, (int)groupReturnBackReach);
             Debug.Assert(
                 state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
                 "a re-opened call is still inside the calls that were open when it returned"

@@ -40,22 +40,26 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
-/// NOT UPSTREAM'S (D93): the fuzzy section a group call was made in and that section's error counts,
-/// which the call guard compares (<see cref="MatchState.ActiveCalls"/>). All zero outside a section.
+/// NOT UPSTREAM'S (D93): the fuzzy section a group call was made in, as the call guard compares it
+/// (<see cref="MatchState.ActiveCalls"/>): which open section, and the errors it had counted.
 /// </summary>
 /// <remarks>
-/// A call made with other counts is not a repeat of an open one: every error the called group tries
-/// is judged against them, and a nested section starts its own from zero, so the deeper call can
-/// take errors, and pass verbs, that the open one could not. A count the section never limits is
-/// kept only up to the minimums it must reach (<c>Matcher.CallSectionAt</c>), so that a recursion
-/// spending such errors at one position is still refused.
+/// A call that re-enters a group inside the section instance an open call of it was made in, with
+/// other counts, is not a repeat of that call: every error the called group tries is judged against
+/// those counts, so the deeper call takes paths in another order, and the written-out group finds its
+/// first fit down one of them (<c>(?:(?P&lt;g&gt;a(?&amp;g)b|c)){d&lt;=2}</c> over 'cbb'). Counts only
+/// grow along a path within one instance, so such calls nest no deeper than the section's budget. A
+/// count the section never limits is kept only up to the minimums it must reach
+/// (<c>Matcher.CallSectionAt</c>), so a recursion spending such errors is still refused. A re-entry
+/// inside a section opened after the open call is refused as before, whatever its counts: there the
+/// counts start again from zero at every level, and comparing them made such recursion exponential.
 /// </remarks>
-/// <param name="Node">The section's node index plus one; 0 outside a section.</param>
+/// <param name="Frame">The section's frame on the saved stack (<see cref="MatchState.SectionFrame"/>); -1 outside a section.</param>
 /// <param name="Sub">The substitutions it has counted.</param>
 /// <param name="Ins">The insertions.</param>
 /// <param name="Del">The deletions.</param>
 [StructLayout(LayoutKind.Auto)]
-internal readonly record struct CallSection(int Node, long Sub, long Ins, long Del);
+internal readonly record struct CallSection(int Frame, long Sub, long Ins, long Del);
 
 /// <summary>
 /// NOT UPSTREAM'S: what of a group that a conditional or backreference reads the call guard
@@ -620,8 +624,9 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
     /// <c>(call index &lt;&lt; 32) | text position</c>, the <see cref="ReachedWidth"/> when the
-    /// call was made, and the fuzzy section it was made in (<see cref="CallSection"/>). In a pattern where a conditional or backreference reads a group, two open
-    /// calls can share an entry, so <see cref="ActiveCallCounts"/> is used in its place.
+    /// call was made. In a pattern where a conditional or backreference reads a group, or where a
+    /// call can be made inside a fuzzy section, two open calls can share an entry, so
+    /// <see cref="ActiveCallCounts"/> is used in its place.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -629,8 +634,8 @@ internal sealed class MatchState : IDisposable
     /// re-enters a group at the text position where a call of that group is already open, when the
     /// attempt has reached no text since that call opened AND with every group a conditional or
     /// backreference reads showing what it showed then (<see cref="CallRead"/>: set or not for a
-    /// conditional, the text for a backreference) AND in the same fuzzy section with the same
-    /// counts (D93: <see cref="CallSection"/>), can only repeat the open call's work one level
+    /// conditional, the text for a backreference) AND, if it is made in the section instance that
+    /// call was made in, with the same counts (D93: <see cref="CallSection"/>), can only repeat the open call's work one level
     /// deeper, so that path recurses for ever and is failed. The captures matter
     /// because a group set between the two calls can change what a conditional or backreference
     /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
@@ -650,12 +655,12 @@ internal sealed class MatchState : IDisposable
     /// number of groups read. Groups nothing reads are left out
     /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
     /// for every order of setting the empty groups, about k! paths. When no group is read at all
-    /// the bound is <c>n + 1</c>. The section multiplies the bound by a constant of the pattern: there
-    /// are finitely many sections, and each count is either capped by a finite limit of its
-    /// section or kept only up to the section's minimums.
+    /// the bound is <c>n + 1</c>. The counts multiply the bound by a constant of the pattern: only a call in
+    /// the same section instance is compared by them, and there each count is either capped by a
+    /// finite limit of the section or kept only up to its minimums.
     /// </para>
     /// <para>
-    /// A set rather than a counter where no group is read, because an entry is only ever added when
+    /// A set rather than a counter where no group is read and no call can be made in a section, because an entry is only ever added when
     /// it is absent - that is what the guard tests. Where groups are read, a count per key
     /// (<see cref="ActiveCallCounts"/>), so a call whose key and reach no open call shares is let
     /// through without looking at any capture; only when one does are the open calls with that key
@@ -664,14 +669,14 @@ internal sealed class MatchState : IDisposable
     /// as a stack, and is what keeps them in step.
     /// </para>
     /// </remarks>
-    internal readonly HashSet<(long Key, int Reach, CallSection Section)> ActiveCalls = [];
+    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: <see cref="ActiveCalls"/> for a pattern with a group a conditional or
     /// backreference reads: how many calls are open for each key and reach. Only keys with an open
     /// call are present.
     /// </summary>
-    internal readonly Dictionary<(long Key, int Reach, CallSection Section), int> ActiveCallCounts = [];
+    internal readonly Dictionary<(long Key, int Reach), int> ActiveCallCounts = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a

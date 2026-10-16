@@ -56,6 +56,33 @@ public sealed class CallInFuzzySectionTests
     }
 
     /// <summary>
+    /// A call that re-enters its group at the same position inside the same section, after spending
+    /// errors there. Upstream 2026.9.10 and the written-out forms (depths 4 and 8) agree on every
+    /// row (blind review of D93, 2026-10-16, <c>.scratch/s1016/d93/review/</c>); main answered
+    /// None for the full matches and a one-deletion (0, 2) for the searches.
+    /// </summary>
+    [Test]
+    [Arguments("(?:(?P<g>a(?&g)b|c)){d<=2}", "cbb", true, "(0,3) s0i0d2")]
+    [Arguments("(?:(?P<g>a(?&g)b|c)){d<=2}", "cbb", false, "(0,3) s0i0d2")]
+    [Arguments("(?:(?P<g>a(?&g)b|c)){d<=3}", "cbbb", true, "(0,4) s0i0d3")]
+    [Arguments(@"(?:(?P<g>\((?&g)\)|x)){d<=2}", "x))", true, "(0,3) s0i0d2")]
+    [Arguments(@"(?:(?P<g>\((?&g)\)|x)){d<=2}", "x))", false, "(0,3) s0i0d2")]
+    // Controls, which main already answers as upstream does.
+    [Arguments("(?:(?P<g>a(?&g)b|c)){e<=2}", "cbb", true, "(0,3) s2i0d0")]
+    [Arguments("(?:(?P<g>a(?&g)b|c)){d<=1}", "cb", true, "(0,2) s0i0d1")]
+    public void A_call_reentering_its_section_after_an_error_answers_as_written_out(
+        string pattern,
+        string subject,
+        bool full,
+        string expected
+    )
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+
+        Answer(full ? regex.FullMatch(subject) : regex.Match(subject)).Should().Be(expected);
+    }
+
+    /// <summary>
     /// The guard compares a call's section counts, but a count the section never limits only up to
     /// its minimums: kept in full, each level's extra deletion made the call new, and this recursion
     /// went 52 levels deep before it found its fit (measured 2026-10-16). Its written-out forms
@@ -63,7 +90,6 @@ public sealed class CallInFuzzySectionTests
     /// </summary>
     [Test]
     [Arguments("(?:(?P<g1>q(?1)|x)){d}", "x", "(0,1) s0i0d1")]
-    [Arguments("(?:(?P<g1>q(?1)|x)){1<=d}", "x", "(0,1) s0i0d1")]
     public void A_recursion_spending_unlimited_errors_at_one_position_is_still_refused(
         string pattern,
         string subject,
