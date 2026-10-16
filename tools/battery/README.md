@@ -36,7 +36,7 @@ oracle consumer's own test project (about 6 minutes in Debug whatever the row co
 | Part | Rows | Reference | How |
 |---|---|---|---|
 | `oracle`, `oracle2` | 10 seeds x 26 generators x 2,000, alternate seeds each | upstream `regex` 2026.9.10 | `tools/sweep-seeds.ps1`, one seed per call, Debug consumer |
-| `probe` | the D85 bed, 276,591 | Python `re`, `regex` | `probe.cs` (Debug), then the bed's `compare.py` |
+| `probe` | the D85 bed, 276,591 | Python `re`, `regex`; F6 model | `probe.cs` (Debug, timeouts again in Release), then the bed's `compare.py` |
 | `probe` (control) | pair and matrix rows it applies to | the same pattern with the repeat guards off | `probe.cs`, plain and wrapped |
 | `pa`, `pb` | 35 cells x 2,500 (two halves) | upstream, PCRE2 + Perl, `re`, reference matcher, TRE | `gen/pairs.py`, then `tools/matrix/run.py` |
 | `matrix` | the complete matrix at two new seeds | as above | `tools/matrix/gen.py` and `run.py` |
@@ -46,12 +46,17 @@ Notes on what each part does and why:
 - **Debug consumer.** The oracle runs with `-Configuration Debug` so the engine's `Debug.Assert`
   invariants run. A Debug consumer is slow enough to time out on long rows, and
   `run-oracle.ps1` warns that such a timeout is not a divergence, so every diverging row is re-asked
-  with a Release consumer and a row that agrees there is counted as a Debug timeout. A failed assert
-  ends the test host (a failed `Debug.Assert` calls `Environment.FailFast` when no listener is
-  installed), so that seed gets no verdict; its wave is then run through
+  with a Release consumer and a row that agrees there is counted as a Debug timeout. Since 504ff956
+  a failed assert in the oracle consumer is a FAULT row of that seed's report, so the seed keeps its
+  verdict. A seed whose consumer still dies without a report has its wave run through
   `tools/matrix/port-runner.cs`, which turns asserts into answers, to name the rows.
 - **The probe.** `probe.cs` is `tools/probes/port-probe.cs` with a listener that turns a failed
-  assert into an exception, so a Debug run reports the row instead of dying.
+  assert into an exception, so a Debug run reports the row instead of dying (without it a failed
+  `Debug.Assert` calls `Environment.FailFast`: exit 35). It compiles each row with its own `flags`
+  and the recorder's default version, V0, as `re` and upstream do; run 20261016-1 used the port's
+  V1 default and 589 bed rows threw on a `[` inside a set.
+- **The bed's timeouts.** The bed runs in Debug with a 5 s timeout; every row that times out is
+  asked again in Release with 30 s, and that answer stands (`bed/release-recheck.txt`).
 - **Guards-off control.** Upstream does not consult the repeat guards inside a fuzzy section. Wrapping
   a pattern as `(?:P){s<=1:[\x00]}` makes it fuzzy without allowing any edit (the subjects never hold
   `\x00`), so the guards are off and nothing else changes. It is applied only where that holds: no
@@ -73,4 +78,9 @@ constructs (matrix, oracle). Attribution is automatic only where an existing scr
 (ExpectedDivergences, judged rows, the MemorySanitizer screen); a cluster that matches a known
 signature gets a HINT; the rest are UNJUDGED. Each cluster's witness is its smallest row, shrunk by
 a batch delta reducer while the port still differs from upstream and the row keeps its constructs.
-Nothing is fixed or registered here; that is the orchestrator's job.
+Screens that count a row as known: a bed row whose answer equals `f6model.py`'s model of upstream's
+empty-iteration rule (A12u, KNOWN-DEFECTS F6); a C4 phantom partial (the F63/F64 partial contract); and
+run.py's own `expected` verdicts (C2 and C4 partial starts under F66). The table is written before the
+reducer runs, and upstream is asked in child processes, so a row that crashes `regex` (ledger 56) or a
+reducer failure leaves the table with "not reduced". Nothing is fixed or registered here; that is the
+orchestrator's job.
