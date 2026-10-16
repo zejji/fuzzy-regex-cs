@@ -155,9 +155,7 @@ internal static class Substitution
 
                 // The segment before this match. An empty one adds nothing (JoinList.Add).
                 joined.Add(
-                    state.Reverse
-                        ? input.AsMemory(state.MatchPos, lastPos - state.MatchPos)
-                        : input.AsMemory(lastPos, state.MatchPos - lastPos)
+                    state.Reverse ? Slice(input, state.MatchPos, lastPos) : Slice(input, lastPos, state.MatchPos)
                 );
 
                 AddReplacement(
@@ -461,8 +459,8 @@ internal static class Substitution
             // The entire matched portion of the string. A reverse match reports its two ends the
             // other way round, exactly as pattern_new_match does.
             return state.Reverse
-                ? subject.AsMemory(state.TextPos, state.MatchPos - state.TextPos)
-                : subject.AsMemory(state.MatchPos, state.TextPos - state.MatchPos);
+                ? Slice(subject, state.TextPos, state.MatchPos)
+                : Slice(subject, state.MatchPos, state.TextPos);
         }
 
         if (index >= 1 && index <= groupCount)
@@ -478,7 +476,7 @@ internal static class Substitution
             }
 
             GroupSpan span = group.Captures[group.Current];
-            return subject.AsMemory(span.Start, span.End - span.Start);
+            return Slice(subject, span.Start, span.End);
         }
 
         // RE_ERROR_INVALID_GROUP_REF (:21721), which set_error renders as regex.error with the
@@ -487,6 +485,19 @@ internal static class Substitution
         // see GetMatchReplacement, which is the same check with upstream's other answer.
         throw new FuzzyRegexParseException("invalid group reference");
     }
+
+    /// <summary>
+    /// Upstream <c>get_slice</c> (<c>upstream/src/_regex.c</c> line 18842): the subject from
+    /// <paramref name="start"/> to <paramref name="end"/>, empty when the end lies before the start.
+    /// A <c>\K</c> inside a lookaround leaves such a match, as <c>(?=y\K)</c> over <c>yy</c> does with
+    /// (1, 0), and <c>PyUnicode_Substring</c> answers '' for it (D89).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="start">Where the stretch starts.</param>
+    /// <param name="end">One past where it ends.</param>
+    /// <returns>The stretch.</returns>
+    private static ReadOnlyMemory<char> Slice(string subject, int start, int end) =>
+        end <= start ? ReadOnlyMemory<char>.Empty : subject.AsMemory(start, end - start);
 
     /// <summary>
     /// Upstream <c>get_match_replacement</c> (<c>upstream/src/_regex.c</c> line 19635): one item of

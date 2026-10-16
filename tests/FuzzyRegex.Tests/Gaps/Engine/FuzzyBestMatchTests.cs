@@ -1606,6 +1606,116 @@ public sealed class FuzzyBestMatchTests
         Scan(@"(?b)\m(?:Y){i}\M", "XY YX").Should().Equal("(0,2) 0,1,0 d:", "(3,5) 0,1,0 d:");
     }
 
+    // D86 (inherited, open): the second pass re-runs each best candidate anchored at its reported
+    // start, which a \K has moved off the place the attempt began, so a candidate with errors is
+    // lost or replaced by whatever matches from the \K position. BESTMATCH only ranks the matches
+    // plain fuzzy matching makes, so each answer here is the flag-free one: (2,2) s:0 and (1,3)
+    // s:1. Upstream 2026.9.10 answers None, None and (1,3) d:3 (the second alternative, the only
+    // one that matches anchored at 1), measured 2026-10-15; this port answers the same until D86
+    // is fixed. Found by scheduled-oracle row 138026906/24826.
+    [Test]
+    [Arguments(@"(?b)(?:By){e<=1}\K", "Cy", 2, 2)]
+    [Arguments(@"(?b)a\K(?:By){e<=1}", "aCy", 1, 3)]
+    [Arguments(@"(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}", "aCy", 1, 3)]
+    // The adversaries, each answered flag-free as listed, and None by upstream: \K under (?r),
+    // inside a lookahead, inside a backtracked repeat, before a (*SKIP), and with POSIX.
+    [Arguments(@"(?br)\K(?:By){e<=1}", "Cy", 0, 0)]
+    [Arguments(@"(?br)(?:By){e<=1}\Ka", "Cya", 0, 2)]
+    [Arguments(@"(?b)(?=a\K)(?:aBy){e<=1}", "aCy", 1, 3)]
+    [Arguments(@"(?b)(?:a\K){1,2}?c(?:By){e<=1}", "aacCy", 2, 5)]
+    [Arguments(@"(?b)a\K(*SKIP)(?:By){e<=1}", "aCy", 1, 3)]
+    [Arguments(@"(?bp)a\K(?:By){e<=1}", "aCy", 1, 3)]
+    public void Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_with_a_K_still_prefers_an_exact_match_further_on()
+    {
+        // The walk restarts where the attempt began, so it still reaches the exact 'aBy' at 4 that
+        // a (*SKIP) leaves the second attempt to find. Upstream 2026.9.10 agrees: (5,7) s:0.
+        Match m = new FuzzyRegex(@"(?b)a(*SKIP)\K(?:By){e<=1}").Match("aCy aBy");
+
+        (m.Index, m.Index + m.Length).Should().Be((5, 7));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_breaks_a_tie_by_where_the_attempt_began_not_the_start_a_K_reported()
+    {
+        // Flag-free: (2,4) s:1, the attempt at 0 through the first alternative. The second pass
+        // also re-runs from 1, where 'a' gives (1,4) s:1: the same error count, and an earlier
+        // reported start, but a later attempt, so the attempt at 0 keeps its place. Upstream: None.
+        Match m = new FuzzyRegex(@"(?b)(?:xa\K|a)(?:By){e<=1}").Match("xaCy");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_keeps_the_K_moved_match_a_reversed_skip_row_lost()
+    {
+        // Sweep row 7 of reversed-skip-invents-a-match (ExpectedDivergences), a reversed match: one
+        // attempt, from the end. Flag-free, this port and upstream agree on (4,8) with three
+        // substitutions (codepoints (2,5)). Before D86 was fixed this port answered None, as
+        // upstream does with the verb spelled (*PRUNE) or deleted; upstream as drawn answers
+        // codepoints (0,3), a match the attempt cannot make (regex 2026.9.10, 2026-10-15).
+        Match m = new FuzzyRegex(
+            @"(?m)(?b)(?r)(?:(?:𝟮([[:alpha:]])){1<=e<=2}(*SKIP)[^a]|\s)\K(?:(\w)([^\p{L}])[\p{L}\p{N}]*){e<=2,s<=1}"
+        ).MatchAtStart("𝟮𝟮\u200D\u200D😀 😀");
+
+        (m.Index, m.Index + m.Length).Should().Be((4, 8));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(3, 0, 0));
+        (m.Groups[3].Index, m.Groups[3].Length).Should().Be((9, 2));
+    }
+
+    [Test]
+    public void Bestmatch_with_a_cost_equation_falls_back_without_throwing_when_K_moved_the_start()
+    {
+        // A single fuzzy section with a cost equation ranks by cost. Anchored at 0 with a \K, this
+        // threw ArgumentOutOfRangeException before D86 was fixed (differential row, 2026-10-15).
+        // The answer is the flag-free one, (2,2) s:0,1. Upstream 2026.9.10 answers (6,6) with one
+        // substitution, which no attempt at 0 can make: 'ab' with one insertion spans at most 3.
+        Match m = new FuzzyRegex(@"(?b)(?:ab){2i+2d+1s<=3}\K").MatchAtStart("-Bay\U0001D49Cba");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_scans_keep_K_moved_candidates()
+    {
+        // Plain scan: (1,3) s:1 and (4,6) s:1, and BESTMATCH finds no better. Upstream: [] both.
+        Scan(@"(?b)a\K(?:By){e<=1}", "aCyaBx").Should().Equal("(1,3) 1,0,0 d:", "(4,6) 1,0,0 d:");
+        Scan(@"(?b)a\K(?:By){e<=1}", "aCyaBx", overlapped: true).Should().Equal("(1,3) 1,0,0 d:", "(4,6) 1,0,0 d:");
+
+        // The must-advance ban: the first step's best is the substitution at 0, which \K reports
+        // as the empty match at 1. Upstream skips it and answers only the one at 2.
+        Scan(@"(?b)(?:a){e<=1}\K", "bb").Should().Equal("(1,1) 1,0,0 d:", "(2,2) 1,0,0 d:");
+    }
+
+    [Test]
+    public void Bestmatch_partial_prefers_the_complete_K_moved_match()
+    {
+        // Without \K, (?b) partial over 'aCy' answers the complete (0,3) s:1 (upstream agrees), so
+        // with \K the answer is the same match reported from 1. Upstream: (3,3) partial, s:0.
+        Match m = new FuzzyRegex(@"(?b)a\K(?:By){e<=1}").Match("aCy", 0, 3, partial: true);
+
+        m.PartialMatch.Should().BeFalse();
+        (m.Index, m.Index + m.Length).Should().Be((1, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
     /// <summary>
     /// A scan as one line per match: span, counts as substitutions, insertions, deletions, the
     /// deletion positions, and "partial" when it is one.

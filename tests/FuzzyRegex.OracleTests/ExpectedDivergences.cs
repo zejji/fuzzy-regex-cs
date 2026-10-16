@@ -2214,7 +2214,6 @@ internal static class ExpectedDivergences
     /// </remarks>
     private const string _reversedSkipInventedMatchRows = """
         {"generator": "interactions", "pattern": "(?r)^(?:[^a]+(*SKIP)[^a-f]|\\p{Lu})(?P<g1>\\D)(?:(?(1)(?=(?P>g1))\\w))*$", "flags": 10, "namedLists": {}, "subject": "\ud83d\ude00\ufb03 _\ud801\udc00a\ufb03\ud801\udc00", "operation": "search", "partial": true, "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
-        {"generator": "interactions", "pattern": "(?b)(?r)(?:(?:𝟮([[:alpha:]])){1<=e<=2}(*SKIP)[^a]|\\s)\\K(?:(\\w)([^\\p{L}])[\\p{L}\\p{N}]*){e<=2,s<=1}", "flags": 8, "namedLists": {}, "subject": "𝟮𝟮‍‍😀 😀", "operation": "match", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 4, "captures": [[4, 4]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 2, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}, {"number": 3, "success": true, "index": 9, "length": 2, "captures": [[9, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [9, 6, 5], "insertions": [], "deletions": []}}, "pruneOutcome": {"kind": "nomatch"}}
         {"generator": "verbs", "pattern": "(?r)(?>\\W+?(*SKIP)ß)$", "flags": 8, "namedLists": {}, "subject": "😀_😀ßß", "operation": "search", "oracle": "prefilter-free", "codepointSpan": [2, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "nomatch"}}
         """;
 
@@ -3568,6 +3567,33 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?>aa(*SKIP)b)|a", "flags": 0, "namedLists": {}, "subject": "aaca", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?=a(*PRUNE)b)..|a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?>a(*PRUNE)b)?a", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// The rows of <c>keep-undone-past-an-atomic-group</c> (D88), recorded 2026-10-16: an atomic
+    /// group, a possessive repeat, an optional atomic group and a reversed atomic group. PCRE2 10.47
+    /// gives this port's answer to the first three; Perl 5.42.3 gives upstream's.
+    /// </summary>
+    private const string _keepPastAnAtomicGroupRows = """
+        {"generator": "rows", "pattern": "(?>a\\K)x|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?:a\\K)++x|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?>a\\K)?a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?r)x(?>\\Ka)|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
+    /// The rows of <c>keep-undone-past-a-lookaround</c> (D88), recorded 2026-10-16: a lost match and a
+    /// leaked start behind a lookahead, a lookbehind, a negative lookahead, a condition's test, a
+    /// reversed lookbehind, and a fuzzy body under a scan.
+    /// </summary>
+    private const string _keepPastALookaroundRows = """
+        {"generator": "rows", "pattern": "(?=ab\\K)x|b", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?=a\\K)x|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "ax(?<=\\Kx)y|axz", "flags": 0, "namedLists": {}, "subject": "axz", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?!a\\K)x|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?(?=ab\\K)x|b)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?r)x(?<=\\Ka)|a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?=(?:ab){e<=1}\\K)x|b", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         """;
 
     /// <summary>
@@ -5429,7 +5455,16 @@ internal static class ExpectedDivergences
                 + "recording but does not change the judgement: a verb that only forbids attempts "
                 + "cannot create one, whatever is ranking the candidates. Measured 2026-09-16 on "
                 + "regex 2026.9.10 with `python tools/probes/sweep-ablation-matrix.py --emit <file> "
-                + "--rows 7,9` then `pwsh -File tools/run-oracle.ps1 -Rows <file>`.",
+                + "--rows 7,9` then `pwsh -File tools/run-oracle.ps1 -Rows <file>`.\n"
+                + "ROW 7 LEFT THIS ENTRY ON 2026-10-15 (D86, ledger 83). Its `(*PRUNE)` None was not "
+                + "pruning at work but BESTMATCH losing a candidate whose start `\\K` moved, the same "
+                + "None upstream gives with the verb deleted while its flag-free match gives (2, 5) "
+                + "with three substitutions. With D86 fixed this port answers that flag-free match, "
+                + "so the row no longer lands on upstream's `(*PRUNE)` rendering. Upstream's drawn "
+                + "(0, 3) is still impossible - its groups leave ' \\U0001F600' for "
+                + "`[\\p{L}\\p{N}]*` to match with the one error spent elsewhere - and this port's "
+                + "answer is pinned by FuzzyBestMatchTests.Bestmatch_keeps_the_K_moved_match_a_"
+                + "reversed_skip_row_lost.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_search_of_a_skip_finds_nothing_where_pruning_"
                 + "alone_finds_nothing",
             Example: _reversedSkipInventedMatchRows,
@@ -8245,6 +8280,75 @@ internal static class ExpectedDivergences
                     row,
                     ours,
                     OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
+                )
+        ),
+        new(
+            Id: "keep-undone-past-an-atomic-group",
+            Reason: "A `\\K` INSIDE AN ATOMIC GROUP OR POSSESSIVE REPEAT IS UNDONE HERE WHEN MATCHING "
+                + "BACKTRACKS PAST THE GROUP, AND OUTLIVES THE GROUP UPSTREAM. Known defect D88, ledger "
+                + "entry 86; decided 2026-10-16 under the owner's semantic-decision rule (DECISIONS) and "
+                + "recorded as a deliberate divergence in `docs/DIVERGENCES.md`. Kept apart from the "
+                + "lookaround entry below because the engines split here: PCRE2 10.47 and Ruby 3.2.3 "
+                + "undo the `\\K`, Perl 5.42.3 keeps upstream's answer.\n"
+                + "THE UPSTREAM BEHAVIOUR: the group's end cuts the backtracking stack to its frame "
+                + "(`RE_OP_END_ATOMIC`), which throws away the entry the `\\K` pushed to put the start "
+                + "back, so `regex.search(r'(?>a\\K)x|a', 'a')` is (1, 1) although `x` failed and the "
+                + "answer is `a`'s, (0, 1).\n"
+                + "THE FIX pushes the start as it was before the body below the group's frame "
+                + "(`Matcher.PushTheStartBeforeABody`), so the cut keeps it and backtracking past the "
+                + "group pops it.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheKeepOutlivingItsConstruct`, with "
+                + "`PatternObject.KeepOutlivesAnAtomicGroup` alone, reproduces upstream's recorded "
+                + "answer exactly, AND this port's live answer is the one being judged. The control is "
+                + "`A_row_the_keep_undone_past_its_construct_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "KeepAcrossCutTests",
+            Example: _keepPastAnAtomicGroupRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheKeepOutlivingItsConstruct(row, atomicGroups: true, lookarounds: false)
+                )
+        ),
+        new(
+            Id: "keep-undone-past-a-lookaround",
+            Reason: "A `\\K` INSIDE A LOOKAROUND OR A CONDITION'S TEST IS UNDONE HERE WHEN MATCHING "
+                + "BACKTRACKS PAST THE CONSTRUCT, OR AT ONCE WHEN A NEGATIVE LOOKAROUND'S BODY MATCHED, "
+                + "AND OUTLIVES THE CONSTRUCT UPSTREAM. Known defect D88, ledger entry 86; decided "
+                + "2026-10-16 under the owner's semantic-decision rule (DECISIONS) and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`. Ruby 3.2.3, the one surveyed engine "
+                + "that accepts the construct, answers as this port; Perl 5.42.3 and PCRE2 10.47 refuse "
+                + "`\\K` in a lookaround.\n"
+                + "THE UPSTREAM BEHAVIOUR: a lookaround or condition that succeeds cuts the "
+                + "backtracking stack (`RE_OP_END_LOOKAROUND`, `_regex.c:12918`; a negative one whose "
+                + "body matched, :12985-13009), which throws away the entry the `\\K` pushed. A later "
+                + "alternative then reports a start it never set: `regex.search(r'(?=a\\K)x|a', 'a')` "
+                + "is (1, 1). And a failed attempt steps on from the moved start, skipping starts: "
+                + "`regex.search(r'(?=ab\\K)x|b', 'ab')` is None, though upstream finds (1, 2) when "
+                + "told to start at 1.\n"
+                + "THE FIX pushes the start as it was before the body below the construct's frame "
+                + "(`Matcher.PushTheStartBeforeABody`), so the cut keeps it and backtracking past the "
+                + "construct pops it; a negative lookaround whose body matched pops it at once.\n"
+                + "KEYED ON AN ABLATION. A row belongs here when "
+                + "`OracleComparer.RunWithTheKeepOutlivingItsConstruct`, with "
+                + "`PatternObject.KeepOutlivesALookaround` alone or with the atomic group's switch, "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
+                + "being judged. A row the atomic group's switch alone explains was claimed by the "
+                + "entry above. The control is "
+                + "`A_row_the_keep_undone_past_its_construct_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "KeepAcrossCutTests",
+            Example: _keepPastALookaroundRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheKeepOutlivingItsConstruct(row, atomicGroups: false, lookarounds: true)
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheKeepOutlivingItsConstruct(row, atomicGroups: true, lookarounds: true)
                 )
         ),
         new(

@@ -804,6 +804,10 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // D88 (ledger entry 86) added KeepOutlivesALookaround and KeepOutlivesAnAtomicGroup,
+            // likewise set only by OracleComparer.RunWithTheKeepOutlivingItsConstruct.
+            "PatternObject.KeepOutlivesALookaround",
+            "PatternObject.KeepOutlivesAnAtomicGroup",
             // D77 added SkipsALazyRunDespiteAVerb, likewise set only by
             // OracleComparer.RunWithTheUpstreamLazyStartSkip.
             "PatternObject.SkipsALazyRunDespiteAVerb",

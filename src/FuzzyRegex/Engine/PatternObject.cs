@@ -839,6 +839,22 @@ internal sealed class PatternObject
     internal bool VerbsAreConfinedToTheInnermostGroup;
 
     /// <summary>
+    /// Oracle-only: a <c>\K</c> inside a lookaround or a condition's test outlives the construct's
+    /// cut, as upstream's <c>RE_OP_END_LOOKAROUND</c> (<c>_regex.c:12918</c>) lets it, instead of
+    /// being undone when matching backtracks past the construct (D88). Set only by
+    /// <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool KeepOutlivesALookaround;
+
+    /// <summary>
+    /// Oracle-only: a <c>\K</c> inside an atomic group or possessive repeat outlives the group's
+    /// cut, as upstream's <c>RE_OP_END_ATOMIC</c> lets it, instead of being undone when matching
+    /// backtracks past the group (D88). Set only by <c>OracleComparer</c>'s ablation; never by the
+    /// library.
+    /// </summary>
+    internal bool KeepOutlivesAnAtomicGroup;
+
+    /// <summary>
     /// Oracle-only: a failed attempt skips past the run of a lazy leading repeat even when the
     /// pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, as upstream does (<c>_regex.c:15705-15723</c>),
     /// instead of bumping along (D77). Set only by <c>OracleComparer</c>'s ablation; never by the library.

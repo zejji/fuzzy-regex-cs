@@ -382,8 +382,16 @@ public sealed class PartialEdgeReadTests
     /// refuses the held text's match (3, 5), which upstream's own non-partial matcher refuses too.
     /// From 5f3d184 to fa3880d M3 turned that raw success into the partial (3, 6), which depends on
     /// nothing to come. Now only a success whose attempt read the text to come is a partial (the
-    /// design's assert A1), and the answer is upstream's (6, 6) with group 1 at (3, 4), whose
+    /// design's assert A1), and the answer was upstream's (6, 6) with group 1 at (3, 4), whose
     /// completions put <c>\K</c> at 6 ('bba\r\na' + '\n' matches at (6, 7)).
+    /// <para>
+    /// D86 (2026-10-15) moved it again, and this time the success stays one. The refusal of (3, 5)
+    /// was BESTMATCH re-running the candidate from the start the <c>\K</c> reported rather than from
+    /// 0, where its attempt began. Without <c>(?b)</c>, partial or not, both engines answer the
+    /// complete (3, 5) with one deletion and group 1 at (0, 1), and without the <c>\K</c> both answer
+    /// (0, 5) under <c>(?b)</c>; nothing ranks better, so (3, 5) is the answer. Upstream 2026.9.10
+    /// still gives the partial (6, 6) (ledger 83).
+    /// </para>
     /// </remarks>
     [Test]
     public void A_second_pass_success_that_read_nothing_to_come_is_refined_as_before()
@@ -393,8 +401,9 @@ public sealed class PartialEdgeReadTests
             partial: true
         );
 
-        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 6, 0));
-        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((3, 1));
+        (m.PartialMatch, m.Index, m.Length).Should().Be((false, 3, 2));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     /// <summary>

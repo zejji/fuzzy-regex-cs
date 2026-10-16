@@ -111,6 +111,7 @@ Every run of the workflow since 2026-09-21 failed. The first two were infrastruc
 | 37295584525 | 10-05, 9672d557 | oracle | 7: 35060; 4242: 34781; 20261005: 25346, 25732, 40458 | all accounted (35060 judged here) |
 | 37758544541 | 10-08, 9672d557 | sweep, 6 seeds | 21 rows | all accounted |
 | 38237349305 | 10-12, a9ea2c95 | oracle | 7: 24857, 35060; 20261012: 24184, 24238, 24272, 33186, 42649, FAULT 38391; reuse test: 36404 | 24857, 35060 judged here; **24184, 24238, 24272, 33186, 42649 and FAULT 38391 not**; 36404 see below |
+| 38701487487 | 10-15, 9b3819c4 | sweep, 6 seeds | 21 rows | 20 judged 2026-10-15 (section below); 138026906/24826 is D86, a new shared defect |
 
 **Not accounted for on 2026-10-12** (all eleven judged on 2026-10-13, in the next section):
 
@@ -176,3 +177,86 @@ same way for the observable part (`regex.compile('a').sub(r'\1', 'zzz')` returns
 only when a match needs the template). The comparison, in the reuse and the lazy-walk tests, now
 reads the one-line answer only (`OracleWave.SameAnswer`), pinned by
 `OracleWaveTests.Two_errors_that_differ_only_in_their_stack_trace_are_the_same_answer`.
+
+### Run 38701487487 (main 9b3819c4, 2026-10-15): twenty rows judged, one new defect (D86)
+
+The scheduled sweep at master seed 20261015 (seeds 916340941, 890772808, 996334534, 1048398143,
+592390900 and 138026906, 2,000 rows a generator) was red on all six seeds. After the known examples
+were re-asked, 21 rows were left diverging (6, 4, 1, 4, 3, 3). The 30 UNDEFINED rows and the five
+FAULT rows that became them were all MSan origins the registry already lists under ledger 5. A local
+sweep of the same seeds on branch `fix/oracle-rows-1015` (the same src tree) gave the same 21
+DIVERGE rows and no FAULT row. Each witness below was run on regex 2026.9.10 and on this port; the
+rows of the `verbs` and `partial-sliced` generators were asked with the required-string prefilter
+off, as the recorder asks them.
+
+Twenty rows are ledger entries already known, on fresh shapes, and are in `JudgedDivergences.jsonl`.
+None is a port bug that upstream gets right. The twenty-first is a defect both engines share:
+
+| Row | Cause | The evidence that settles it |
+|---|---|---|
+| 916340941/24715 | ledger 5 | Upstream's None needs `(?b)` and `(*SKIP)` together. With `(*PRUNE)`, with no verb, or without `(?b)`, its partial fullmatch is P(0,3) with one insertion, the port's answer. |
+| 916340941/32073 | ledger 2 | `[^a]*?b` over 'a' is a partial upstream and None here; the greedy twin is None on both. The `\K` and the flags play no part. |
+| 916340941/32568 | ledger 5 | Upstream's own reversed match with endpos 4 is P(0,4), the port's answer. With `(*PRUNE)` or no verb both give P(0,5). |
+| 916340941/33817 | ledger 8 + ledger 63 | With the call written out, upstream gives the port's complete (0,5); the call's captures stay on group 1 upstream. |
+| 916340941/39416 | ledger 7 | `(?fi)[\w\s]` over 'ﬀİ' matches upstream as the ligature ffi, because upstream folds İ to a lone i. With i for İ both match (0,4). |
+| 916340941/48090 | ledger 29 | `(?fi)(f)(?:\1){s<=1}` over 'fﬀ' is None upstream and (0,2) here; with the reference written out as f both give the port's answer. |
+| 890772808/25681 | ledger 5 | Upstream's anchored match at 3 gives a deletion with `(*SKIP)` and a substitution with `(*PRUNE)`. One anchored attempt cannot depend on the verb; the port gives the substitution. |
+| 890772808/33324 | ledger 8 | With the call written out, upstream gives the port's complete (2,5); the row non-partial is None upstream. |
+| 890772808/34097 | ledger 24 | Upstream's reversed partial at the slice start is P(1,1) under IGNORECASE\|FULLCASE and None under no flags, MULTILINE or IGNORECASE alone. The port gives P(1,2) under all four. |
+| 890772808/49931 | ledger 51 + ledger 12 | The port's insertion at 11 meets the inner section's minimum, which upstream never tries; without `(?b)` upstream fullmatches with a trailing insertion and `(?b)` loses it. |
+| 996334534/24993 | ledger 5 | As 24715: only `(?b)` with `(*SKIP)` loses the port's (3,6). |
+| 1048398143/24187 | ledger 81 + ledger 11 | The outer `{e<=2,s<=1}` allows no insertion, but upstream's partial spends one; no completion of up to three characters exists upstream. Its counts (0,1,0) list a substitution. |
+| 1048398143/32547 | ledger 5 | With `(*PRUNE)` both engines give P(1,3), the port's answer. |
+| 1048398143/38837 | ledger 35 | `(?i)(?r)\p{Lu}$` matches U+FB01 upstream, `(?:x\|\p{Lu})` does not. The port matches and the template then names a group the pattern lacks; upstream raises IndexError on the same template once it matches. |
+| 1048398143/41369 | ledger 28 | `(?fi)(?:ßa){d<=1}` over 'ßx' is None upstream; with ß written ss both give the port's (0,3). |
+| 592390900/27291 | ledger 6 | `(?r)\bﬃxﬃ` under IGNORECASE\|FULLCASE raises IndexError compiling upstream; the row compiles without `(?r)` and is None on both. |
+| 592390900/33540 | ledger 2 | `(?r)a\d*?` over 'c' is a partial upstream, None here; the greedy twin is P(0,0) on both. |
+| 592390900/35526 | ledger 2 | `\p{Ll}??İx` over 'ss' is a partial upstream; no text beginning 'ss' completes it. |
+| 138026906/24364 | ledger 16 | POSIX with BESTMATCH loses the match; without POSIX upstream gives (0,5) and the port's replacement. |
+| 138026906/38833 | ledger 5 | Upstream's (1,6) needs a multiline `$` before a space; with `(*PRUNE)` or no verb it is None, the port's answer. |
+| 138026906/24826 | **D86, new** | Not judged; see below. |
+
+**D86: BESTMATCH loses a fuzzy match whose start `\K` moved.** Both engines answer
+`(?b)(?:By){e<=1}\K` over 'Cy' with None, where plain fuzzy matching and ENHANCEMATCH give (2,2) with
+one substitution. The second pass re-runs each best candidate anchored at its reported start, which
+a `\K` has moved. `(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}` over 'aCy' proves it: the answer is the
+second alternative's deletion, the only thing that matches anchored at 1. The row diverges only
+because the two engines' partial answers differ there (port P(0,4), upstream None); non-partial,
+both answer None. Known-defects row D86, ledger entry 83 (draft), and a red test in the suite,
+`FuzzyBestMatchTests.Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved`.
+
+**Sizing the D86 fix, not built.** Record where each attempt began beside `MatchPos`: one field on
+`MatchState`, set where an attempt starts (`InitMatch` and the search loop's sites that set
+`MatchPos` to the start), and a third field on `BestEntry`. `DoBestFuzzyMatch` then walks on from
+it and anchors the second pass and the widened-slice fallback there, keeping `MatchPos` for the
+reported span. ENHANCEMATCH narrows its slice to `MatchPos .. TextPos` and re-runs at `MatchPos`
+(`Matcher.cs` near 20943), so it needs the same change. About 20 to 30 lines and a dozen tests. The
+worst case is unchanged: the same number of re-runs, each starting at a position the first pass
+already reached. The cases a review should attack: `\K` under `(?r)`, `\K` inside a lookaround or a
+backtracked repeat, `\K` with a must-advance ban at the candidate, `\K` with `(*SKIP)`, partial,
+POSIX with BESTMATCH, and overlapped scans.
+
+**Built 2026-10-15 as d5afe9c9 on this branch**, as sized: the fork budget's `ForkAttemptStart` became
+`MatchState.AttemptStart` (also set on the search-start path), plus the second pass's tie-break, which
+compared reported starts and needed the attempt start too (`(?b)(?:xa\K|a)(?:By){e<=1}` over 'xaCy'
+gave (1,4) instead of (2,4)). 43 changed source lines, comments aside. Each attacked case above has a
+test, and the expected answers are the flag-free search's. Details in known-defects row D86.
+
+### Seed 20260927 at 2,000 rows (fix/night-small, 2026-10-16): five rows judged, no new defect
+
+The five rows the 300-row gate does not reach and the 2,000-row sweeps on 9b3819c4, `fix/d87` and
+this branch all leave unaccounted. Each was reproduced against regex 2026.9.10, minimised, and
+checked with a control that removes the mechanism (scripts and outputs in
+`.scratch/s1016/night/small/`: `abl*.jsonl`, `abl*-up.txt`, `abl*-port.raw`).
+
+| row | generator | cause | witness |
+|---|---|---|---|
+| 25114 | interactions | ledger 44 + ledger 11 | `(?:\d+){d<=2}` over 'X': upstream deletes twice, the port once; upstream's change list holds an insertion its counts deny |
+| 32438 | partial | ledger 2 | `(?i)(\p{Ll}+?)` + U+10400 over U+10400 U+1F600, partial fullmatch: upstream P(0,2), port None; greedy None on both |
+| 33741 | partial | ledger 5 | `( *)\1\w(*SKIP)\d` over ' B', partial search: upstream P(2,2); `(*PRUNE)`, no verb and pos=1 give P(1,2), the port's answer |
+| 38631 | verbs | ledger 5 | `(?m)(?r)[^a]*?(*SKIP)\s$` over CR LF CR LF 'xx', finditer: upstream adds (1,2), its own answer for endpos=2 |
+| 41409 | fuzzy | ledger 70 + D19 | `(?:\Z){i<=1}a` over 'x', partial match: upstream P(0,1) with `\Z` true at the edge, port None; the port's row answer is a trailing insertion's run-out, which presumes the rest |
+
+41409 is worth a second look by whoever next revisits the partial contract: neither engine's answer
+can be completed (`a+` must follow `\Z`), so both are phantoms, and the port's is the one F64 (D19)
+accepts by contract. Every row's judgement is in `JudgedDivergences.jsonl`.

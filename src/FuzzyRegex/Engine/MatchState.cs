@@ -231,13 +231,22 @@ internal sealed class GroupData
     /// match pays for these whether or not anyone reads a group: three groups with one capture each
     /// cost 240 bytes as seven objects and 88 as this one (C2, the <c>ParseLogLines</c> row).
     /// </para>
+    /// <para>
+    /// NOT UPSTREAM'S, D87: <paramref name="attemptStart"/>, when given, is one more number after
+    /// the spans, which nothing indexed by group reaches. It rides here so that only the matches of
+    /// a pattern that needs it pay for it (<c>Match.AttemptStart</c>).
+    /// </para>
     /// </remarks>
     /// <param name="groups">The state's groups.</param>
     /// <param name="groupCount">How many to pack - upstream's <c>public_group_count</c>.</param>
-    /// <returns>The packed groups, or the shared empty array for a pattern without groups.</returns>
-    internal static int[] PackSpans(GroupData[] groups, int groupCount)
+    /// <param name="attemptStart">Where the match's attempt began, to keep after the spans, or nothing.</param>
+    /// <returns>
+    /// The packed groups, or the shared empty array for a pattern without groups and no
+    /// <paramref name="attemptStart"/>.
+    /// </returns>
+    internal static int[] PackSpans(GroupData[] groups, int groupCount, int? attemptStart)
     {
-        if (groupCount == 0)
+        if (groupCount == 0 && attemptStart is null)
         {
             return [];
         }
@@ -248,7 +257,12 @@ internal sealed class GroupData
             length += 2 * groups[g].Count;
         }
 
-        int[] packed = new int[length];
+        int[] packed = new int[attemptStart is null ? length : length + 1];
+        if (attemptStart is { } attempt)
+        {
+            packed[length] = attempt;
+        }
+
         int at = groupCount * _packedHeaderSize;
         for (int g = 0; g < groupCount; g++)
         {
@@ -493,12 +507,17 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S, D11 M4: set when <see cref="Forks"/> passes the budget. The matcher reads it
     /// at its next cancellation check (which the firing brings forward) and answers the partial at
-    /// the attempt's start (<see cref="ForkAttemptStart"/>).
+    /// the attempt's start (<see cref="AttemptStart"/>).
     /// </summary>
     internal bool ForkBudgetSpent;
 
-    /// <summary>NOT UPSTREAM'S, D11 M4: where the current attempt started.</summary>
-    internal int ForkAttemptStart;
+    /// <summary>
+    /// NOT UPSTREAM'S: where the current attempt started. <see cref="MatchPos"/> starts there too, but
+    /// a <c>\K</c> moves it to report a later start, so whatever must know where the attempt
+    /// itself began reads this: the fork budget's partial (D11 M4), and the BESTMATCH and
+    /// ENHANCEMATCH re-runs, which re-run a candidate from where its attempt began (D86).
+    /// </summary>
+    internal int AttemptStart;
 
     /// <summary>No verb whose scope is the attempt has been skipped (<see cref="SkippedAttemptVerb"/>).</summary>
     internal const long NoSkippedVerb = long.MinValue;
@@ -1577,7 +1596,7 @@ internal sealed class MatchState : IDisposable
         Iterations = 0;
         ForkBudgetSpent = false;
         Forks = 0;
-        ForkAttemptStart = 0;
+        AttemptStart = 0;
         SkippedAttemptVerb = NoSkippedVerb;
 #if DEBUG
         ForkBudgetAnswered = false;
@@ -2113,7 +2132,7 @@ internal sealed class MatchState : IDisposable
         Iterations = 0;
         ForkBudgetSpent = false;
         Forks = 0;
-        ForkAttemptStart = 0;
+        AttemptStart = 0;
         SkippedAttemptVerb = NoSkippedVerb;
 
         // NOT UPSTREAM'S (the failed-call memo): a fresh set for the pass. A pattern that cannot use
@@ -2175,20 +2194,53 @@ internal sealed class MatchState : IDisposable
     /// off either end of the slice is left to show as a <see cref="TextPos"/> outside
     /// <see cref="SliceStart"/>..<see cref="SliceEnd"/>, which <c>do_match</c> tests on the next
     /// turn (<c>upstream/src/_regex.c</c> line 18128), so the matcher catches it rather than this.
+    /// <para>
+    /// NOT UPSTREAM'S, D87: both halves also read <see cref="AttemptStart"/>. A <c>\K</c> inside a
+    /// lookaround can report a span unrelated to where the attempt was: <c>(?=y\K)</c> over 'y'
+    /// reports (1, 0), ending where its attempt began. Upstream's rule sees a non-empty span, bans
+    /// nothing, and the next search from 0 finds the same match for ever; the overlapped step from
+    /// a start a lookbehind put before the attempt lands on the attempt again. So a match that ends
+    /// where its attempt began counts as empty, and the overlapped step starts from the attempt when
+    /// the reported start lies behind it. Only a pattern with a <c>\K</c> inside a discarding
+    /// construct (<see cref="PatternObject.KeepInSubmatch"/>) can tell the two apart, so every
+    /// other pattern takes upstream's lines unchanged. Pinned by <c>KeepInLookaroundScanTests</c>.
+    /// </para>
     /// </remarks>
     internal void AdvancePastMatch()
     {
         if (Overlapped)
         {
             // Advance one character.
-            TextPos = Reverse ? PrevPos(MatchPos) : NextPos(MatchPos);
+            int from = StartNotBehindTheAttempt();
+            TextPos = Reverse ? PrevPos(from) : NextPos(from);
             MustAdvance = false;
         }
         else
         {
             // Don't allow 2 contiguous zero-width matches.
-            MustAdvance = TextPos == MatchPos;
+            MustAdvance = TextPos == MatchPos || (Pattern.KeepInSubmatch && TextPos == AttemptStart);
         }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D87: <see cref="MatchPos"/>, unless a <c>\K</c> inside a lookaround left it
+    /// behind <see cref="AttemptStart"/> in the scan's direction, when it is the attempt's start.
+    /// </summary>
+    /// <remarks>
+    /// The scan steps on from <see cref="MatchPos"/> after a match (overlapped) and after a failed
+    /// attempt (<c>Matcher</c>'s failure arm, upstream <c>_regex.c:15695</c>), taking it to be where
+    /// the attempt began. A positive lookaround throws away the entry that would undo its
+    /// <c>\K</c>, so the reported start can outlive the attempt, and a lookbehind (or a lookahead in
+    /// a reversed pattern) leaves it behind the attempt: the step then lands on the attempt again,
+    /// and the scan or the search loops for ever. Stepping from the attempt instead cannot land
+    /// behind it. A start left AHEAD of the attempt is not changed here; that skips attempts rather
+    /// than repeating one, and is upstream's answer.
+    /// </remarks>
+    /// <returns>The position to step on from.</returns>
+    internal int StartNotBehindTheAttempt()
+    {
+        bool behind = Reverse ? AttemptStart < MatchPos : AttemptStart > MatchPos;
+        return Pattern.KeepInSubmatch && behind ? AttemptStart : MatchPos;
     }
 
     /// <summary>
