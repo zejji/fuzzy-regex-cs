@@ -55,6 +55,24 @@ public sealed class CallInFuzzySectionTests
         string.Join(" | ", regex.Matches(subject).Select(Answer)).Should().Be(expected);
     }
 
+    /// <summary>
+    /// The guard compares a call's section counts, but a count the section never limits only up to
+    /// its minimums: kept in full, each level's extra deletion made the call new, and this recursion
+    /// went 52 levels deep before it found its fit (measured 2026-10-16). Its written-out forms
+    /// differ at every depth, one deletion per level, so they set no answer here; this is main's.
+    /// </summary>
+    [Test]
+    [Arguments("(?:(?P<g1>q(?1)|x)){d}", "x", "(0,1) s0i0d1")]
+    [Arguments("(?:(?P<g1>q(?1)|x)){1<=d}", "x", "(0,1) s0i0d1")]
+    public void A_recursion_spending_unlimited_errors_at_one_position_is_still_refused(
+        string pattern,
+        string subject,
+        string expected
+    ) =>
+        Answer(new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard).Match(subject))
+            .Should()
+            .Be(expected);
+
     private static string Answer(Match match)
     {
         if (!match.Success)
