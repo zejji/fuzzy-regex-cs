@@ -130,6 +130,16 @@ internal static class OracleComparer
             }
 
             IOracleOutcome? actual = engine(row);
+
+            // A broken invariant in this port, whatever upstream answered. Checked before Compare so
+            // that no expected-divergence entry can claim the row as a known difference.
+            if (actual is ErrorOutcome { Exception: nameof(FailedAssertException) })
+            {
+                tally[OracleVerdict.Fault] = tally.GetValueOrDefault(OracleVerdict.Fault) + 1;
+                faults.Add(OracleWave.Describe(row, actual, heading: "FAULT"));
+                continue;
+            }
+
             OracleVerdict verdict = Compare(row, actual);
 
             // A divergence only. An agreement is never reclassified: the entries exist to account
