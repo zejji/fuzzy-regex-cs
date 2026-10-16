@@ -2433,18 +2433,6 @@ internal sealed class MatchState : IDisposable
             return null;
         }
 
-        // NOT UPSTREAM (D85 follow-up): in a partial call's second pass a blocked cut keeps the
-        // other paths of a lookaround or atomic group that sets a group, so a body can leave the
-        // same start with other captures, and a tail can run on past the construct's end into
-        // state no guard holds (PatternObject.CutsCanBeBlocked). `a*(?:(?=(?:(a)|b)*)a)+\1ab?`
-        // over 'ab' with the guards on reports (2, 2), not (0, 2). SHORTCUT: the ceiling is every
-        // guard off in that pass for such a pattern, found by search rather than proved minimal;
-        // keeping the guards of repeats that neither hold nor sit in such a construct would narrow it.
-        if (PartialSide != PartialNone && Pattern.CutsCanBeBlocked)
-        {
-            return null;
-        }
-
         // Which guard list?
         RepeatData repeat = Repeats[index];
         if ((guardType & NodeStatus.Body) != 0)
@@ -2617,9 +2605,9 @@ internal sealed class MatchState : IDisposable
             if (span.Start < 0)
             {
                 // A capture a run-out in a partial call's second pass made unknown (Matcher.UnknownSpan)
-                // has no text to key on; it keys as itself. ActiveGuardList keeps the guards out of
-                // the passes where one can arise, so this is a backstop:
-                // `x?(?:(?=(?:(a)|b)*a?)a){2,}\1a` over 'aab' threw here before.
+                // has no text to key on, and a backreference or condition reads it unlike any known
+                // capture, so it keys as itself. `x?(?:(?=(?:(a)|b)*a?)a){2,}\1a` over 'aab' threw
+                // here before.
                 key[i] = long.MinValue | ((long)span.Start << 32) | (uint)span.End;
                 continue;
             }

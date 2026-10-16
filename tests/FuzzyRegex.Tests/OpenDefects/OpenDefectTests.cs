@@ -162,6 +162,30 @@ public sealed class OpenDefectTests
         (m.Index, m.Index + m.Length).Should().Be((1001, 1001));
     }
 
+    // D90. In a partial call's second pass a blocked cut keeps the other paths of a lookahead that
+    // sets a group, and those paths leave it with other captures, which no repeat guard allows for:
+    // a body guard cuts the path that matches. The expected answer is the same call's with every
+    // repeat guard off (guards only prune; .scratch/s1016/d85/c9/n3). Switching the guards off in
+    // that pass fixes both rows but makes such partial calls exponential, so the fix waits for a
+    // key on the captures the blocked construct leaves.
+    [Test]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*)a)+\1ab?", "ab", 0, 2, false)] // port (2, 2)
+    [Arguments(@"a*(?:(?=(?:a|(b))*)a)*\1cb?", "ab", 0, 2, false)] // port group 1 (1, 2)
+    public void No_repeat_guard_cuts_a_path_a_partial_calls_second_pass_keeps(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        bool group1Set
+    )
+    {
+        Match m = Partial("search", pattern, subject);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length, m.Groups[1].Success)
+            .Should()
+            .Be((true, true, start, end, group1Set));
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

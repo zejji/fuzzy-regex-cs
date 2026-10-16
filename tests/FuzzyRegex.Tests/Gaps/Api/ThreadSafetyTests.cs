@@ -999,8 +999,5 @@ public sealed class ThreadSafetyTests
             // D85: set by TailGuardLiveness.MarkBodiesHoldingKeyedTails inside Compile, read by
             // MatchState.ActiveGuardList; matching never writes it.
             "RepeatInfo.BodyHoldsKeyedTail",
-            // D85 follow-up: set once by Optimiser.OptimisePattern inside Compile, read by
-            // MatchState.ActiveGuardList; matching never writes it.
-            "PatternObject.CutsCanBeBlocked",
         };
 }

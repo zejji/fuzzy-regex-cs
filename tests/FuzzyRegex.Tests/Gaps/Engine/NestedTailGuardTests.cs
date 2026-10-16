@@ -129,16 +129,13 @@ public sealed class NestedTailGuardTests
 
     [Test]
     // A partial call's second pass, found by the 2026-10-16 gap search (.scratch/s1016/d85/c9/n3):
-    // a blocked cut keeps a lookahead's other paths, which no repeat guard's record allows for.
-    // The expected answer is the same call's with every repeat guard switched off. The first two
-    // are wrong on main as well (a body guard); on the three after them the keyed tail guards
-    // threw ArgumentOutOfRangeException, keying on the text of a capture a run-out had made unknown.
-    [Arguments(@"a*(?:(?=(?:(a)|b)*)a)+\1ab?", "ab", 0, 2, false)] // guards on: (2, 2)
-    [Arguments(@"a*(?:(?=(?:a|(b))*)a)*\1cb?", "ab", 0, 2, false)] // guards on: group 1 (1, 2)
+    // the keyed tail guards threw ArgumentOutOfRangeException, keying on the text of a capture a
+    // run-out had made unknown. The expected answer is the same call's with every repeat guard
+    // off. (D90's rows, where a body guard is wrong in this pass, are in OpenDefectTests.)
     [Arguments(@"x?(?:(?=(?:(a)|b)*a?)a){2,}\1a", "aab", 0, 3, false)]
     [Arguments(@"[ab]*?(?:a?(?=(b*)a*))+a*\1c", "xaaabab", 1, 7, false)]
     [Arguments(@"x?(?<=(?:a|b)*(?:a*){2,}(?=(a*b?)))b?(?:x\1)?c", "xa", 2, 2, false)]
-    public void No_repeat_guard_cuts_a_path_a_partial_calls_second_pass_keeps(
+    public void A_keyed_tail_guard_keys_an_unknown_capture_on_itself(
         string pattern,
         string subject,
         int start,
