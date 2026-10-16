@@ -12692,10 +12692,23 @@ internal static class Matcher
     private static bool StartsOnALeadingLiteral(MatchState state)
     {
         ReadOnlySpan<char> rest = state.Text.Span[state.MatchPos..state.TextEnd];
+        PatternObject pattern = state.Pattern;
 
-        return state.Pattern.LeadingStrings is { } strings
+        // C6 option B3: a match the ignore-case strings miss holds an outlier within a literal's
+        // length and starts on one of the fall-back units.
+        if (
+            pattern.LeadingOutliers is { } outliers
+            && !rest.IsEmpty
+            && pattern.LeadingFallbackUnits!.Contains(rest[0])
+            && rest[..Math.Min(rest.Length, pattern.LeadingStringsMaxLength)].IndexOfAny(outliers) >= 0
+        )
+        {
+            return true;
+        }
+
+        return pattern.LeadingStrings is { } strings
             ? rest.IndexOfAny(strings) == 0
-            : state.Pattern.LeadingUnits is not { } units || (!rest.IsEmpty && units.Contains(rest[0]));
+            : pattern.LeadingUnits is not { } units || (!rest.IsEmpty && units.Contains(rest[0]));
     }
 #endif
 
@@ -12795,6 +12808,83 @@ internal static class Matcher
 
         WorkCounter.LeadingStringFellBack();
         return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (C6 option B3): the next start <c>PatternObject.LeadingStrings</c> admits when
+    /// that ignore-case search would miss a match holding one of <c>PatternObject.LeadingOutliers</c>,
+    /// as <c>(?i)kit</c> over <c>Kit</c>.
+    /// </summary>
+    /// <remarks>
+    /// Such a match holds an outlier and is as long as its literal, so it starts at most
+    /// <c>LeadingStringsMaxLength</c> - 1 units before the outlier. The string search runs over text
+    /// that ends at the outlier and its hit is taken only when it starts before that window, since a
+    /// missed match inside the window could come first; from the window's start to the outlier
+    /// <c>LeadingFallbackUnits</c>, which every match starts on, takes over. No match is missed and
+    /// each stretch of text is searched at most twice. The outlier found is kept in
+    /// <paramref name="state"/>, so a search that stops often does not look for the same one again.
+    /// Text with no outlier costs one extra sweep for them in all; text dense with them costs what
+    /// the units screen costs. Out of line, as <see cref="NextLeadingUnit"/> is.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pattern">The pattern, whose leading strings have outliers.</param>
+    /// <param name="foundPos">Where the next attempt would start, at most the slice end.</param>
+    /// <returns>How far past <paramref name="foundPos"/> the next start is, or -1 if there is none.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int NextLeadingStringPastOutliers(MatchState state, PatternObject pattern, int foundPos)
+    {
+        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        int reach = pattern.LeadingStringsMaxLength - 1;
+        int pos = foundPos;
+
+        while (pos <= text.Length)
+        {
+            if (pos < state.LeadingOutlierFrom || pos > state.LeadingOutlierAt)
+            {
+                // The whole text, not the slice, so the answer kept holds for any slice.
+                int found = state.Text.Span[pos..].IndexOfAny(pattern.LeadingOutliers!);
+                state.LeadingOutlierFrom = pos;
+                state.LeadingOutlierAt = found < 0 ? int.MaxValue : pos + found;
+            }
+
+            int outlier = state.LeadingOutlierAt;
+            int windowStart = outlier == int.MaxValue ? int.MaxValue : outlier - reach;
+            if (windowStart > text.Length)
+            {
+                // No match can hold that outlier and still end inside the slice.
+                outlier = int.MaxValue;
+                windowStart = int.MaxValue;
+            }
+
+            if (pos < windowStart)
+            {
+                int end = Math.Min(outlier, text.Length);
+                int at = text[pos..end].IndexOfAny(pattern.LeadingStrings!);
+
+                // A hit inside the window may come after a match the search missed there.
+                if (at >= 0 && pos + at < windowStart)
+                {
+                    return pos + at - foundPos;
+                }
+
+                if (outlier == int.MaxValue)
+                {
+                    return -1;
+                }
+
+                pos = windowStart;
+            }
+
+            int unit = text[pos..Math.Min(outlier + 1, text.Length)].IndexOfAny(pattern.LeadingFallbackUnits!);
+            if (unit >= 0)
+            {
+                return pos + unit - foundPos;
+            }
+
+            pos = outlier + 1;
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -13142,7 +13232,9 @@ internal static class Matcher
         // with no poll, for the reasons StringSearch gives.
         if (leadingStrings is not null && foundPos <= state.SliceEnd)
         {
-            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            int at = pattern.LeadingOutliers is null
+                ? state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings)
+                : NextLeadingStringPastOutliers(state, pattern, foundPos);
             if (at < 0)
             {
                 return MatchStatus.Failure;

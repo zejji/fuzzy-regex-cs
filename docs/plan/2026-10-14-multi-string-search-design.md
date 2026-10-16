@@ -157,6 +157,31 @@ one-character literal is a `CharacterIgn`, and neighbouring ones merge into a se
 not take; a single one beside longer ones keeps the set on units. A shared one-character prefix
 does the same: `(?i)café|crème` factors to `c(?:afé|rème)`, a one-character head.
 
+**Option B3: keep the strings, hand over near outliers (2026-10-16, `perf/c6-b3`, prototype).**
+Option B refuses any head holding `k` or `s`, since under the Unicode encoding they also match
+U+212A KELVIN SIGN and U+017F LONG S, which `OrdinalIgnoreCase` does not. Over 20,000 random
+ten-word lists drawn from the words in this repository's docs, B gives 85 of them strings (0.4%).
+B3 keeps the string search for such a set and records the missed cases as outliers, derived per
+character from the case tables (`RequiredStringScreen.OrdinalIgnoreCaseOutliers`: closure members
+.NET does not count as equal). Over ASCII letters the outliers are exactly the Kelvin sign and long
+s; the ASCII encoding has none. A match the search misses holds an outlier and, since every
+closure member is one code unit, is as long as its literal, so it starts at most `L - 1` units
+before the outlier (`L` the longest literal). The search (`Matcher.NextLeadingStringPastOutliers`)
+finds the next outlier with one vectorised `IndexOfAny`, kept in the match state so it is not looked
+for again; takes a string hit only when it starts before that window; and inside the window uses the
+first units, which every match starts on. Full-folding runs (`ss`, `st`, `fi`) stay refused.
+
+*Worst case on paper.* Text with no outlier: one extra sweep of the text for them in all, per
+search. Text that is all outliers: every attempt sits in a window, so the cost is the units
+screen's plus a constant per attempt. Outliers spaced closer than `L`: windows cover the text,
+units again. Each stretch of text is searched at most twice (once by the strings up to the outlier,
+once by the units inside the window). Compile: one closure per distinct character, cached.
+
+*Measured* (pinned probe, min of 7, three sides; `.scratch/s1016/night/c6/bt/`): see the build's
+report. The first build took a string hit that fell inside a window before the units had searched
+it, which skipped an earlier match holding the outlier; the 40,000-row differential caught it (3
+rows) and `A_string_hit_inside_an_outlier_window_waits_for_the_units` pins it.
+
 **Option C. Look through zero-width nodes (L1).** Add to the walk's look-through list the nodes that
 read no text and cannot move the start: word boundaries (`\b`, `\B`, start/end of word, default
 boundary), line and string anchors, and lookarounds (skip the assertion, follow its continuation).

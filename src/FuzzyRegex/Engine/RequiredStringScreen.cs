@@ -355,14 +355,33 @@ internal static class RequiredStringScreen
     /// A match the ordinal search makes and the engine would not, such as a case-sensitive literal's
     /// other case, costs only an attempt that fails; only a missed one matters.
     /// </para>
+    /// <para>
+    /// C6 option B3 (2026-10-16): a character whose closure holds BMP characters outside its .NET
+    /// class, as <c>k</c> holds the Kelvin sign, is not refused but adds them to
+    /// <paramref name="outliers"/>. A match the search misses then holds one of them, and every
+    /// such match is the same length as its literal (every closure member is one code unit), so
+    /// the search can hand over to the code units near each outlier in the text
+    /// (<c>Matcher.NextLeadingStringPastOutliers</c>).
+    /// </para>
     /// </remarks>
     /// <param name="node">
     /// A forward <c>String</c>, <c>Character</c>, <c>StringIgn</c>, <c>StringFld</c> or
     /// <c>CharacterIgn</c> node, not <c>LOCALE</c> if it ignores case.
     /// </param>
-    /// <param name="covered">A cache of the per-character answers, keyed by encoding and character.</param>
-    /// <returns><see langword="true"/> if the search finds every match of the node.</returns>
-    internal static bool OrdinalIgnoreCaseCovers(Node node, Dictionary<(CaseEncoding, uint), bool> covered)
+    /// <param name="perCharacter">
+    /// A cache of <see cref="OrdinalIgnoreCaseOutliers(CaseEncoding, uint)"/>, keyed by encoding and
+    /// character.
+    /// </param>
+    /// <param name="outliers">Gains the characters the search would miss in this node's matches.</param>
+    /// <returns>
+    /// <see langword="true"/> if the search finds every match of the node, or every one that holds
+    /// none of <paramref name="outliers"/>.
+    /// </returns>
+    internal static bool OrdinalIgnoreCaseCovers(
+        Node node,
+        Dictionary<(CaseEncoding, uint), char[]?> perCharacter,
+        HashSet<char> outliers
+    )
     {
         if (node.Op is Opcode.String or Opcode.Character)
         {
@@ -377,16 +396,18 @@ internal static class RequiredStringScreen
 
         foreach (uint ch in node.Values)
         {
-            if (!covered.TryGetValue((node.Encoding, ch), out bool answer))
+            if (!perCharacter.TryGetValue((node.Encoding, ch), out char[]? missed))
             {
-                answer = OrdinalIgnoreCaseCovers(node.Encoding, ch);
-                covered[(node.Encoding, ch)] = answer;
+                missed = OrdinalIgnoreCaseOutliers(node.Encoding, ch);
+                perCharacter[(node.Encoding, ch)] = missed;
             }
 
-            if (!answer)
+            if (missed is null)
             {
                 return false;
             }
+
+            outliers.UnionWith(missed);
         }
 
         if (node.Op != Opcode.StringFld)
@@ -422,19 +443,47 @@ internal static class RequiredStringScreen
     /// <summary>
     /// Whether every character a case-insensitive comparison here can take for <paramref name="ch"/>
     /// one for one is <paramref name="ch"/> under <see cref="StringComparison.OrdinalIgnoreCase"/>.
-    /// See <see cref="OrdinalIgnoreCaseCovers(Node, Dictionary{ValueTuple{CaseEncoding, uint}, bool})"/>.
+    /// See <see cref="OrdinalIgnoreCaseCovers(Node, Dictionary{ValueTuple{CaseEncoding, uint}, char[]}, HashSet{char})"/>.
     /// </summary>
     /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
     /// <param name="ch">The pattern character.</param>
     /// <returns><see langword="true"/> if it is.</returns>
-    internal static bool OrdinalIgnoreCaseCovers(CaseEncoding encoding, uint ch)
+    internal static bool OrdinalIgnoreCaseCovers(CaseEncoding encoding, uint ch) =>
+        OrdinalIgnoreCaseOutliers(encoding, ch) is { Length: 0 };
+
+    /// <summary>
+    /// The characters a case-insensitive comparison here can take for <paramref name="ch"/> one for
+    /// one that <see cref="StringComparison.OrdinalIgnoreCase"/> does not count as equal to it (C6
+    /// option B3), or <see langword="null"/> when <paramref name="ch"/> or one of them is outside the
+    /// BMP or a surrogate.
+    /// </summary>
+    /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
+    /// <param name="ch">The pattern character.</param>
+    /// <returns>The outliers, empty when the search finds every case of the character.</returns>
+    internal static char[]? OrdinalIgnoreCaseOutliers(CaseEncoding encoding, uint ch)
     {
         if (ch > char.MaxValue || char.IsSurrogate((char)ch))
         {
-            return false;
+            return null;
         }
 
-        return CaseClosure(encoding, ch).All(other => OrdinalIgnoreCaseEquals(other, ch));
+        var missed = new List<char>();
+        foreach (uint other in CaseClosure(encoding, ch))
+        {
+            if (OrdinalIgnoreCaseEquals(other, ch))
+            {
+                continue;
+            }
+
+            if (other > char.MaxValue || char.IsSurrogate((char)other))
+            {
+                return null;
+            }
+
+            missed.Add((char)other);
+        }
+
+        return [.. missed];
     }
 
     /// <summary>

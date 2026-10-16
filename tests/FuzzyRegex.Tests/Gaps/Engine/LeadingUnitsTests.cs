@@ -62,8 +62,14 @@ public sealed class LeadingUnitsTests
     public void Every_character_a_match_can_start_with_is_searched_for(string pattern)
     {
         var regex = new FuzzyRegex(pattern);
-        SearchValues<char> units = regex.PatternObject.LeadingUnits!;
+        // Since C6 option B3 a set with k or s keeps ignore-case strings, whose fall-back units are
+        // the same set.
+        SearchValues<char>? units = regex.PatternObject.LeadingUnits ?? regex.PatternObject.LeadingFallbackUnits;
         units.Should().NotBeNull();
+        if (units is null)
+        {
+            return;
+        }
 
         var bound = new HashSet<char>();
         foreach (uint special in RequiredStringScreen.Specials)

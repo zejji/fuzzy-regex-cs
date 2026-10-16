@@ -921,6 +921,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.LeadingUnits",
             // C6 option B (2026-10-15) added LeadingFallbackUnits, written with LeadingStrings.
             "PatternObject.LeadingFallbackUnits",
+            // C6 option B3 (2026-10-16) added LeadingOutliers and LeadingStringsMaxLength, written
+            // with LeadingStrings.
+            "PatternObject.LeadingOutliers",
+            "PatternObject.LeadingStringsMaxLength",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             // D49 added UpstreamMinWidth, written once by NodeCompiler beside MinWidth and never

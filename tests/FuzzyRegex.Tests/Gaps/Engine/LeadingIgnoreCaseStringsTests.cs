@@ -19,9 +19,9 @@ public sealed class LeadingIgnoreCaseStringsTests
     /// <summary>
     /// Which screen a pattern gets. The eligible rows hold only characters whose case closure here
     /// is inside .NET's ignore-case class, and under full folding no run a ligature or sharp s can
-    /// take. Each refused row breaks exactly one of those: <c>k</c> (U+212A KELVIN SIGN), <c>s</c>
-    /// (U+017F LONG S), <c>fi</c>/<c>fl</c>/<c>ff</c> under full folding (a ligature), an astral
-    /// character. <c>(?V0i)</c> folds simply, so <c>fi</c> is eligible there; <c>(?ai)</c> uses the ASCII encoding, where <c>k</c> and <c>s</c> have no
+    /// take. Each refused row breaks exactly one of those: <c>fi</c>/<c>fl</c>/<c>ff</c> under full
+    /// folding (a ligature), an astral character. <c>k</c> (U+212A KELVIN SIGN) and <c>s</c> (U+017F
+    /// LONG S) are eligible since option B3, with those characters as outliers. <c>(?V0i)</c> folds simply, so <c>fi</c> is eligible there; <c>(?ai)</c> uses the ASCII encoding, where <c>k</c> and <c>s</c> have no
     /// third case.
     /// </summary>
     /// <param name="pattern">A pattern opening with an alternation of literals.</param>
@@ -38,8 +38,8 @@ public sealed class LeadingIgnoreCaseStringsTests
     [Arguments("(?V0i)xfiy|qz", true)]
     [Arguments(@"(?i)\b(?:cat|dog)\b", true)]
     [Arguments("(?-i:Kit)|(?i:dog)", true)]
-    [Arguments("(?i)kit|dog", false)]
-    [Arguments("(?i)sit|dog", false)]
+    [Arguments("(?i)kit|dog", true)]
+    [Arguments("(?i)sit|dog", true)]
     [Arguments("(?i)fit|dog", false)]
     [Arguments("(?fi)flat|dog", false)]
     [Arguments("(?fi)off|dog", false)]
@@ -85,7 +85,7 @@ public sealed class LeadingIgnoreCaseStringsTests
         string[] literals = members.Split(',');
         SearchValues<string> search = SearchValues.Create(literals, StringComparison.OrdinalIgnoreCase);
 
-        List<string> missed = [];
+        List<(string Label, string Subject)> missed = [];
         foreach (string literal in literals)
         {
             for (int width = 1; width <= 3; width++)
@@ -102,7 +102,7 @@ public sealed class LeadingIgnoreCaseStringsTests
                         string subject = string.Concat(literal.AsSpan(0, at), [(char)ch], literal.AsSpan(at + width));
                         if (regex.IsMatchAtStart(subject) && subject.AsSpan().IndexOfAny(search) != 0)
                         {
-                            missed.Add($"{literal}: U+{ch:X4} for [{at}, {at + width})");
+                            missed.Add(($"{literal}: U+{ch:X4} for [{at}, {at + width})", subject));
                         }
                     }
                 }
@@ -111,7 +111,8 @@ public sealed class LeadingIgnoreCaseStringsTests
 
         using (new AssertionScope())
         {
-            (regex.PatternObject.LeadingStrings is not null).Should().Be(eligible);
+            PatternObject compiled = regex.PatternObject;
+            (compiled.LeadingStrings is not null && compiled.LeadingOutliers is null).Should().Be(eligible);
             if (eligible)
             {
                 missed.Should().BeEmpty();
@@ -119,6 +120,14 @@ public sealed class LeadingIgnoreCaseStringsTests
             else
             {
                 missed.Should().NotBeEmpty();
+
+                // Option B3: a set with outliers keeps the string search only when every match it
+                // misses holds one of them.
+                if (compiled.LeadingOutliers is { } outliers)
+                {
+                    compiled.LeadingStrings.Should().NotBeNull();
+                    missed.Where(miss => miss.Subject.AsSpan().IndexOfAny(outliers) < 0).Should().BeEmpty();
+                }
             }
         }
     }
@@ -245,7 +254,7 @@ public sealed class LeadingIgnoreCaseStringsTests
         {
             new FuzzyRegex("(?i)cat|dog").PatternObject.LeadingFallbackUnits.Should().NotBeNull();
             new FuzzyRegex("cat|dog").PatternObject.LeadingFallbackUnits.Should().BeNull();
-            new FuzzyRegex("(?i)kit|dog").PatternObject.LeadingFallbackUnits.Should().BeNull();
+            new FuzzyRegex("(?i)fit|dog").PatternObject.LeadingFallbackUnits.Should().BeNull();
         }
     }
 
