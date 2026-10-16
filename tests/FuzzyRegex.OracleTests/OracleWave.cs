@@ -589,10 +589,22 @@ internal static class OracleWave
     /// the heading from <c>DIVERGE</c> to <c>EXPECTED</c> and names the entry, so a reader can tell a
     /// classified row from an unaccounted one at a glance.
     /// </param>
+    /// <param name="heading">
+    /// Replaces the heading <paramref name="accounted"/> would choose: <c>FAULT</c> for a row on which
+    /// this port failed an assert.
+    /// </param>
     /// <returns>The rendered block.</returns>
-    public static string Describe(OracleRow row, IOracleOutcome? actual, ExpectedDivergence? accounted = null)
+    public static string Describe(
+        OracleRow row,
+        IOracleOutcome? actual,
+        ExpectedDivergence? accounted = null,
+        string? heading = null
+    )
     {
-        StringBuilder block = DescribeQuestion(row, accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id);
+        StringBuilder block = DescribeQuestion(
+            row,
+            heading ?? (accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id)
+        );
         string codepoints = row.CodepointSpan is { } span
             ? string.Create(CultureInfo.InvariantCulture, $"   [python codepoints {span.Start},{span.End}]")
             : "";
@@ -733,7 +745,7 @@ internal sealed record OracleWaveFile(OracleHeader Header, IReadOnlyList<OracleR
 /// </param>
 /// <param name="Faults">
 /// One rendered block per row upstream crashed on, or read uninitialised memory on, that no known
-/// defect accounts for. Each fails the run.
+/// defect accounts for, and one per row on which this port failed an assert. Each fails the run.
 /// </param>
 /// <param name="Undefined">
 /// One rendered block per row the MSan screen attributed to a known upstream defect. Not compared,

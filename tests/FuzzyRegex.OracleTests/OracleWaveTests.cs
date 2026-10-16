@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using AwesomeAssertions;
 
@@ -107,6 +108,53 @@ public sealed class OracleWaveTests
             .Contain("version=V1");
     }
 
+    /// <summary>
+    /// A failed assert in this port is a FAULT row, and the rows around it are still compared. Before
+    /// <see cref="FailedAssertListener"/>, the row came out as an ordinary DIVERGE answering
+    /// <c>TUnitException</c>, from TUnit's own listener (measured 2026-10-16 with a planted assert
+    /// in a Debug consumer), and the run survived only because TUnit happens to install one: a
+    /// process without a throwing listener ends at a failed assert (<c>Environment.FailFast</c>, exit
+    /// code 35). <c>Trace.Fail</c> rather than <c>Debug.Assert</c> so the test fires in Release too;
+    /// both reach the same <c>Trace.Listeners</c>.
+    /// </summary>
+    [Test]
+    public void A_failed_assert_in_this_port_is_a_FAULT_row_and_the_wave_still_reports()
+    {
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(_recordedRows);
+        OracleRow asserting = rows[1];
+
+        OracleRunSummary run = OracleComparer.RunWave(
+            rows,
+            row => ReferenceEquals(row, asserting) ? AnswerOfAFailedAssert() : OracleComparer.Run(row)
+        );
+
+        run.Tally.GetValueOrDefault(OracleVerdict.Fault).Should().Be(1);
+        run.Tally.GetValueOrDefault(OracleVerdict.Agree)
+            .Should()
+            .Be(2, "the rows around the assert are still compared");
+        run.Divergences.Should().BeEmpty("a failed assert is a fault, not a question of which engine is right");
+        run.Faults.Should()
+            .ContainSingle()
+            .Which.Should()
+            .StartWith($"FAULT row {asserting.Number} ")
+            .And.Contain(nameof(FailedAssertException))
+            .And.Contain("the probe's invariant");
+
+        static IOracleOutcome? AnswerOfAFailedAssert()
+        {
+            // What OracleComparer.Run does with an exception out of the match call.
+            try
+            {
+                Trace.Fail("the probe's invariant");
+                return null;
+            }
+            catch (Exception e)
+            {
+                return ErrorOutcome.From(e, whileMatching: true);
+            }
+        }
+    }
+
     [Test]
     [Category(OracleWave.NeedsARecordedWave)]
     public void The_wave_agrees_with_upstream()
@@ -143,9 +191,10 @@ public sealed class OracleWaveTests
         run.Faults.Count.Should()
             .Be(
                 0,
-                "{0}. Upstream gave no usable answer on these rows, and no known defect accounts for "
-                    + "them - run tools/screen-undefined.py, then triage any new origin into "
-                    + "docs/plan/upstream-reports/LEDGER.md. Full report at {1}. First:{2}{3}",
+                "{0}. On these rows this port failed an assert (a FailedAssertException: fix the "
+                    + "engine), or upstream gave no usable answer and no known defect accounts for it (run "
+                    + "tools/screen-undefined.py, then triage any new origin into "
+                    + "docs/plan/upstream-reports/LEDGER.md). Full report at {1}. First:{2}{3}",
                 summary,
                 OracleWave.ReportPath,
                 Environment.NewLine,
