@@ -2608,7 +2608,11 @@ internal sealed class MatchState : IDisposable
                 || (
                     (mode & TailGuardLiveness.Span) != 0 && (spec.Forward ? span.Start >= textPos : span.End <= textPos)
                 );
-            if (mayMeet)
+            if (mayMeet && CollapsesInside(spec, i, mode, span, key))
+            {
+                key[i] = -2;
+            }
+            else if (mayMeet)
             {
                 key[i] = long.MinValue | ((long)span.Start << 32) | (uint)span.End;
             }
@@ -2625,6 +2629,35 @@ internal sealed class MatchState : IDisposable
         }
 
         return key;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): whether an inside group's last capture can be left out of the key. The
+    /// tail captures the group from its parked start (already in the key) and compares the new span
+    /// with the last one only to decide whether the capture counts as a change; a last capture that
+    /// does not start (forward) or end (reverse) at the parked start can never be equal, so its exact
+    /// value does not matter. Not when the rest reads the group's value before capturing it again.
+    /// </summary>
+    /// <param name="spec">The repeat's key spec.</param>
+    /// <param name="i">The group's place in the spec.</param>
+    /// <param name="mode">Its mode.</param>
+    /// <param name="span">Its last capture.</param>
+    /// <param name="key">The key so far, its parked starts already filled in.</param>
+    /// <returns><see langword="true"/> when the last capture can be left out.</returns>
+    private static bool CollapsesInside(TailGuardKeySpec spec, int i, byte mode, GroupSpan span, long[] key)
+    {
+        if (
+            spec.ExactSpans
+            || (mode & TailGuardLiveness.Inside) == 0
+            || (mode & (TailGuardLiveness.Text | TailGuardLiveness.Set)) != 0
+            || spec.InsideDepths[i] < 0
+        )
+        {
+            return false;
+        }
+
+        long open = key[spec.Groups.Length + spec.ProgressRepeats.Length + i];
+        return (spec.Forward ? span.Start : span.End) != open;
     }
 
     /// <summary>
