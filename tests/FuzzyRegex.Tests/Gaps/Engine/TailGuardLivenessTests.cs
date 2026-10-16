@@ -29,11 +29,46 @@ public sealed class TailGuardLivenessTests
     [Arguments(@"(?r)c\1(?:a*|b)*(b?)", "r2:1:t")]
     // A group call: every read group, exact spans.
     [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1))", "r2:1:tpi|X")]
+    // A loop in a lookbehind runs backwards while the lookahead capture in its body runs forwards,
+    // so the span compare's "at or after the position" no longer holds: exact spans there, and
+    // only there (2026-10-16 review gap 1).
+    [Arguments(@"x?(?<=(?:(?=(a*))b*a*)*)\1c", "r2:1:tp|L1|X r3:1:tp|L1|X r4:1:tpi|L1")]
     // A group set inside the loop around the repeat: progress bits for the enclosing loops.
     [Arguments(@"(?:(?:(x?)a)*a*)*\1c", "r1:1:tp|L0 r2:1:pi|L0,1 r3:1:tp|L0")]
     public void The_tail_key_holds_what_the_rest_of_the_match_can_read(string pattern, string expected)
     {
         Describe(new FuzzyRegex(pattern).PatternObject).Should().Be(expected);
+    }
+
+    [Test]
+    // MatchState.CollapsesInside leaves an inside group's last capture out of the key on the
+    // premise that the close of the bracket around the repeat is the first capture of the group on
+    // every path from the tail. A group that a second node can capture (a branch reset) breaks the
+    // premise, so it never collapses (2026-10-16 review gap 2). Each repeat inside a group: its
+    // index, the group and whether it may collapse.
+    [Arguments(@"(?:(a*)a*)*\1c$", "r1:1:c")]
+    [Arguments(@"(?:(?|(a*)|(b))a*)*\1c$", "r1:1:-")]
+    public void Only_a_group_one_node_captures_may_leave_its_last_capture_out(string pattern, string expected)
+    {
+        PatternObject compiled = new FuzzyRegex(pattern).PatternObject;
+        var parts = new List<string>();
+        for (int i = 0; i < compiled.RepeatInfoList.Count; i++)
+        {
+            if (compiled.RepeatInfoList[i].TailKey is not TailGuardKeySpec key)
+            {
+                continue;
+            }
+
+            for (int j = 0; j < key.Groups.Length; j++)
+            {
+                if (key.InsideDepths[j] >= 0)
+                {
+                    parts.Add($"r{i}:{key.Groups[j] + 1}:{(key.Collapsible[j] ? "c" : "-")}");
+                }
+            }
+        }
+
+        string.Join(" ", parts).Should().Be(expected);
     }
 
     private static string Describe(PatternObject pattern)

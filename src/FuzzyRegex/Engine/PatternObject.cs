@@ -372,6 +372,18 @@ internal sealed class PatternObject
     internal bool HasBacktrackingVerb;
 
     /// <summary>
+    /// NOT UPSTREAM (D85 follow-up, 2026-10-16): whether the pattern holds a lookaround, atomic group
+    /// (or possessive repeat) or condition test that sets a group. A partial call's second pass can
+    /// block such a construct's cut, which keeps its other paths, and those can leave it with other
+    /// captures, which no repeat guard's record allows for; <c>MatchState.ActiveGuardList</c>
+    /// switches the guards off in that pass. A construct that sets no group leaves the same state on
+    /// every kept path, and the second pass's dedup already covers it, so its guards stay on (the
+    /// D11 tests in <c>FailureMemoTests</c> and <c>PartialLookaroundRuleTests</c> pin their cost).
+    /// Set by <c>Optimiser.OptimisePattern</c>.
+    /// </summary>
+    internal bool CutsCanBeBlocked;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether an attempt can choose a next start other than the ordinary
     /// bump-along's: a <c>(*SKIP)</c> moves the slice, and a <c>\K</c> whose backtracking entry a cut
     /// discards leaves the match position where it was set. A second-pass attempt that follows a

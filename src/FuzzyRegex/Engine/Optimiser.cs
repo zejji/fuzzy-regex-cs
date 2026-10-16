@@ -32,6 +32,11 @@ internal static class Optimiser
         // NOT UPSTREAM (D85): the body guards that walk missed a reference for.
         DropBodyGuardsThatReadAGroup(pattern);
 
+        // NOT UPSTREAM (D85 follow-up): see PatternObject.CutsCanBeBlocked.
+        pattern.CutsCanBeBlocked = pattern.NodeList.Exists(static n =>
+            (n.Op is Opcode.Lookaround or Opcode.Atomic or Opcode.Conditional) && (n.Status & NodeStatus.HasGroups) != 0
+        );
+
         // Record the index of repeats and fuzzy sections within the body of atomic and lookaround
         // nodes.
         RecordSubpatternRepeatsAndFuzzySections(null, 0, pattern.RepeatCount, pattern.StartNode);

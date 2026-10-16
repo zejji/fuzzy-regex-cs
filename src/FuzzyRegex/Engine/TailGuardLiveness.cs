@@ -21,7 +21,7 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// can depend on the counter; the key holds one bit for each (see <c>MatchState.TailGuardKeyOf</c>).
 /// </param>
 /// <param name="Forward">Whether the repeat matches forwards.</param>
-/// <param name="ExactSpans">Whether every group is keyed on its exact span (group calls, lookbehind captures).</param>
+/// <param name="ExactSpans">Whether every group is keyed on its exact span (group calls, a capture that runs against the repeat).</param>
 internal sealed record TailGuardKeySpec(
     int[] Groups,
     byte[] Modes,
@@ -37,6 +37,14 @@ internal sealed record TailGuardKeySpec(
     /// place is unknown.
     /// </summary>
     internal int[] InsideDepths { get; init; } = [];
+
+    /// <summary>
+    /// for each keyed group, whether <c>MatchState.CollapsesInside</c> may leave its last capture out
+    /// of the key: only for a group that one node in the pattern captures, so the first capture of
+    /// it on every path from the tail is the close of the bracket around the repeat. A second
+    /// capturing node (a branch reset, a duplicate name) could capture it first, from elsewhere.
+    /// </summary>
+    internal bool[] Collapsible { get; init; } = [];
 
     /// <summary>some inside group's place on the save stack is unknown (-2).</summary>
     internal bool HasUnknownInside => InsideDepths.Contains(-2);
@@ -115,6 +123,27 @@ internal static class TailGuardLiveness
         Dictionary<int, List<int>> progress = FindProgressRepeats(pattern, tested);
         Dictionary<object, int[]>? enclosing = null;
 
+        // Which way the pattern's captures run, and how many nodes capture each group (by either
+        // of its numbers).
+        bool capturesForward = false;
+        bool capturesBackward = false;
+        var captureNodes = new Dictionary<int, int>();
+        foreach (Node node in nodes)
+        {
+            if (node.Op is Opcode.StartGroup or Opcode.EndGroup && node.Values[2] != 0)
+            {
+                capturesForward |= node.Op == Opcode.EndGroup;
+                capturesBackward |= node.Op == Opcode.StartGroup;
+                int own = (int)node.Values[0];
+                int shown = (int)node.Values[1];
+                captureNodes[own] = captureNodes.GetValueOrDefault(own) + 1;
+                if (shown != own)
+                {
+                    captureNodes[shown] = captureNodes.GetValueOrDefault(shown) + 1;
+                }
+            }
+        }
+
         foreach (Node repeat in nodes)
         {
             if (
@@ -182,15 +211,19 @@ internal static class TailGuardLiveness
                 depths[i] = depth;
             }
 
-            info.TailKey = new TailGuardKeySpec(
-                [.. groups],
-                [.. modes],
-                around,
-                repeat.Values[3] != 0,
-                everything || pattern.CapturesAgainstDirection
-            )
+            // The span-compare and collapse rules assume every capture in the tail runs the way the
+            // repeat does, so it can meet the current span only at or after the position (forward).
+            // A repeat in a lookbehind runs backwards while a lookahead inside it captures forwards,
+            // so any capture running the other way keys every group on its exact span. SHORTCUT:
+            // the ceiling is any such capture anywhere in the pattern; looking only at the captures
+            // the tail can reach would narrow it.
+            bool forward = repeat.Values[3] != 0;
+            bool againstRepeat = forward ? capturesBackward : capturesForward;
+
+            info.TailKey = new TailGuardKeySpec([.. groups], [.. modes], around, forward, everything || againstRepeat)
             {
                 InsideDepths = depths,
+                Collapsible = [.. groups.Select(g => captureNodes.GetValueOrDefault(g + 1) == 1)],
             };
         }
 
