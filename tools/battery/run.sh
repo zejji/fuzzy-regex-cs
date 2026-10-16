@@ -21,7 +21,9 @@ if [ -f "$out/driver.pid" ] && tasklist //FI "PID eq $(cat "$out/driver.pid")" 2
     echo "run $1 is already running as PID $(cat "$out/driver.pid")" >&2
     exit 1
 fi
-export PATH="/c/Program Files/dotnet:$PATH"
+# The recorder needs the Python that has regex and psutil installed; a newer Python put first on PATH
+# by an installer has neither. BATTERY_PYTHON_DIR overrides.
+export PATH="${BATTERY_PYTHON_DIR:-/c/Python314}:/c/Program Files/dotnet:$PATH"
 export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 # Git Bash has no setsid; nohup plus a subshell detaches the driver from this shell and its console.
 (nohup python "$here/battery.py" all "$@" >> "$out/driver.log" 2>&1 &)
