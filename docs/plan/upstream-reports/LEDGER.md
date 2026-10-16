@@ -6873,3 +6873,38 @@ stops at the frame, so the entry survives it, and backtracking past the construc
 start, however many `\K`s the body ran. A negative lookaround whose body matched restores it at
 once. A verb's cut to the attempt still discards it, so `a\K(*PRUNE)x|a` stays None, as upstream
 and PCRE2 answer.
+
+## 87. After a `\K`, a `(*PRUNE)` or `(*SKIP)` that ends an attempt makes the search skip start positions - SHARED, FIXED HERE ON `fix/d92` (D92, 2026-10-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D92, found by battery run 1 (`.scratch/battery/20261016-1/triage-pairs.md`, clusters 118-119),
+fixed on `fix/d92` and pinned by `Gaps/Engine/KeepBeforeVerbTests` and the ExpectedDivergences
+entry `keep-before-a-verb-skips-no-start`. Evidence: `.scratch/s1016/d92/`.
+
+**Reproduction**, `regex` 2026.9.10 against PCRE2 10.47, Perl 5.42.3 and Boost.Regex, measured
+2026-10-16 (`tools/matrix/survey.py` on `d92-rows.jsonl`):
+
+```
+search(r'a\K(*PRUNE)b', 'aab')         -> None     PCRE2, Perl, Boost (2,3)
+search(r'a\K(*SKIP)b', 'aab')          -> None     PCRE2, Perl, Boost (2,3)
+search(r'.\Kb*(*SKIP)ab', 'xxab')      -> None     PCRE2, Perl, Boost (2,4)
+search(r'a\K(*PRUNE)x|b', 'ab')        -> None     PCRE2, Perl, Boost (1,2)
+finditer(r'a\K(*PRUNE)b', 'aabaab')    -> []       PCRE2, Perl, Boost (2,3) (5,6)
+search(r'a(*PRUNE)b', 'aab')           -> (1,3)    every engine (control: no \K)
+search(r'a\Kb', 'aab')                 -> (2,3)    every engine (control: no verb)
+```
+
+**Why upstream is wrong.** `\K` changes the start a match reports, not where the attempt began.
+pcre2pattern ("Backtracking control"): after `(*PRUNE)` ends an attempt, the search advances to the
+next starting character as usual, and `(*SKIP)` moves the next start to where the verb was reached.
+Neither verb's next start depends on a `\K`, and every surveyed engine agrees.
+
+**Mechanism.** `\K` sets `match_pos` and pushes a `KEEP` entry that puts it back on backtracking.
+The verb prunes the backtracking stack to the attempt, and that entry with it, so when the attempt
+fails `match_pos` still holds the moved start. The advance after a failed attempt (`_regex.c:15695`)
+steps on from `match_pos`, so it skips every start between the attempt's and the moved one. Traced
+in this port, which copied the line: the failure arm stepped from 1 after the attempt at 0 for
+`a\K(*PRUNE)b` over 'aab' (`.scratch/s1016/d92/trace-main.txt`).
+
+**The fix here.** The advance steps on from `MatchState.AttemptStart`, where the attempt began. A
+`(*SKIP)` has already moved the slice, and the step goes to it as before.

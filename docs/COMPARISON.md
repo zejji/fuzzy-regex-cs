@@ -2244,6 +2244,23 @@ Console.WriteLine(new FuzzyRegex(@"(?=a\K)a").Match("a").Index);       // 1 - up
 Ruby, the one surveyed engine that accepts `\K` in a lookaround, answers as here. There is no option
 to restore the upstream answer. Ledger entry 86.
 
+### A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions
+
+When a `(*PRUNE)` or `(*SKIP)` ends a failed attempt, the next attempt starts one character after
+where the failed one began, or at the `(*SKIP)`. Upstream steps on from the start a `\K` moved
+instead, so the start just after the failed attempt is never tried.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"a\K(*PRUNE)b").Match("aab").Index);     // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@".\Kb*(*SKIP)ab").Match("xxab").Index);  // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"a(*PRUNE)b").Match("aab").Index);       // 1 - upstream: 1
+```
+
+PCRE2, Perl and Boost.Regex all answer as here. There is no option to restore the upstream answer.
+Ledger entry 87.
+
 ### A search that reads a group after a guarded repeat finds the leftmost match
 
 To avoid trying the same thing twice, upstream records where the rest of a match has already

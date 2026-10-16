@@ -1872,6 +1872,35 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_step_from_the_attempt_does_not_explain_is_not_accounted_for()
+    {
+        // The control for D92's entry (ledger entry 87), built like D88's. Upstream's own answer is
+        // what this port gave before the fix; a match at (0, 0), which no example gives on either
+        // side, stands in for an unrelated defect; and this port's live answer must be accepted.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "keep-before-a-verb-skips-no-start", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergence? live = ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!);
+            live.Should().NotBeNull("this port's live answer to {0} is the family", row.Pattern);
+            live.Id.Should().Be(entry.Id, "{0} belongs to its own entry", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null))
+                .Should()
+                .BeNull("a match at (0, 0) over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_trailing_dollar_before_a_carriage_return_is_false_only_without_the_word_flag()
     {
         // The control for `EndsWhereATrailingDollarIsFalse` reading the WORD flag, added when seed

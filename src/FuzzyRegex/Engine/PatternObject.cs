@@ -862,6 +862,13 @@ internal sealed class PatternObject
     internal bool SkipsALazyRunDespiteAVerb;
 
     /// <summary>
+    /// Oracle-only: a failed attempt steps on from the reported start a <c>\K</c> left ahead of it,
+    /// as upstream steps on from <c>match_pos</c> (<c>_regex.c:15695</c>), instead of from where the
+    /// attempt began (D92). Set only by <c>OracleComparer</c>'s ablations; never by the library.
+    /// </summary>
+    internal bool StepsOnFromTheKeptStart;
+
+    /// <summary>
     /// Oracle-only: a BESTMATCH or ENHANCEMATCH scan step bans an empty match at every candidate run's
     /// start after an empty match, as upstream's <c>do_best_fuzzy_match</c> and
     /// <c>do_enhanced_fuzzy_match</c> do, instead of only at the resume position (D78). Set only by

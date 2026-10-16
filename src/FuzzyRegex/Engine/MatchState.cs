@@ -2227,14 +2227,14 @@ internal sealed class MatchState : IDisposable
     /// behind <see cref="AttemptStart"/> in the scan's direction, when it is the attempt's start.
     /// </summary>
     /// <remarks>
-    /// The scan steps on from <see cref="MatchPos"/> after a match (overlapped) and after a failed
-    /// attempt (<c>Matcher</c>'s failure arm, upstream <c>_regex.c:15695</c>), taking it to be where
+    /// The overlapped scan steps on from <see cref="MatchPos"/> after a match, taking it to be where
     /// the attempt began. A positive lookaround throws away the entry that would undo its
     /// <c>\K</c>, so the reported start can outlive the attempt, and a lookbehind (or a lookahead in
     /// a reversed pattern) leaves it behind the attempt: the step then lands on the attempt again,
-    /// and the scan or the search loops for ever. Stepping from the attempt instead cannot land
-    /// behind it. A start left AHEAD of the attempt is not changed here; that skips attempts rather
-    /// than repeating one, and is upstream's answer.
+    /// and the scan loops for ever. Stepping from the attempt instead cannot land behind it. A
+    /// start AHEAD of the attempt is the start the match reports, and the overlapped scan steps
+    /// from it, as upstream does. After a failed attempt there is no reported start, and
+    /// <c>Matcher</c>'s failure arm always steps from the attempt (D92).
     /// </remarks>
     /// <returns>The position to step on from.</returns>
     internal int StartNotBehindTheAttempt()

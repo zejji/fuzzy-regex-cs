@@ -3582,6 +3582,22 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>keep-before-a-verb-skips-no-start</c> (D92), recorded 2026-10-16 by
+    /// <c>python tools/record-oracle.py --rows</c>: a (*PRUNE), a (*SKIP), a (*SKIP) before an
+    /// alternative, a scan, a reversed search, a partial search and a fuzzy section after the verb.
+    /// PCRE2 10.47, Perl 5.42.3 and Boost give this port's answer to the first four.
+    /// </summary>
+    private const string _keepBeforeAVerbRows = """
+        {"generator": "rows", "pattern": "a\\K(*PRUNE)b", "flags": 0, "namedLists": {}, "subject": "aab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": ".\\Kb*(*SKIP)ab", "flags": 0, "namedLists": {}, "subject": "xxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "a\\K(*SKIP)x|b", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "a\\K(*PRUNE)b", "flags": 0, "namedLists": {}, "subject": "aabaab", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?r)b(*PRUNE)\\Ka", "flags": 0, "namedLists": {}, "subject": "baa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "a\\K(*PRUNE)ab", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "rows", "pattern": "a\\K(*PRUNE)(?:b){s<=1}x", "flags": 0, "namedLists": {}, "subject": "aabx", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The rows of <c>keep-undone-past-a-lookaround</c> (D88), recorded 2026-10-16: a lost match and a
     /// leaked start behind a lookahead, a lookbehind, a negative lookahead, a condition's test, a
     /// reversed lookbehind, and a fuzzy body under a scan.
@@ -8281,6 +8297,29 @@ internal static class ExpectedDivergences
                     ours,
                     OracleComparer.RunWithTheUpstreamVerbScope(row, withUpstreamSkipTiming: true)
                 )
+        ),
+        new(
+            Id: "keep-before-a-verb-skips-no-start",
+            Reason: "AFTER A `\\K`, A (*PRUNE) OR (*SKIP) THAT ENDS THE ATTEMPT LETS THE NEXT ATTEMPT "
+                + "START ONE STEP AFTER WHERE THE FAILED ONE BEGAN HERE (OR AT THE SKIP), AND ONE STEP "
+                + "AFTER THE START THE `\\K` MOVED UPSTREAM, SKIPPING STARTS. Known defect D92, ledger "
+                + "entry 87; fixed 2026-10-16 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM BEHAVIOUR: a failed attempt steps on from `match_pos` "
+                + "(`_regex.c:15695`), the reported start. The verb threw away the entry that would "
+                + "move it back, so after a `\\K` it lies ahead of the attempt: "
+                + "`regex.search(r'a\\K(*PRUNE)b', 'aab')` is None, where PCRE2 10.47, Perl 5.42.3 and "
+                + "Boost.Regex give (2, 3), and `a(*PRUNE)b` and `a\\Kb` agree on every engine.\n"
+                + "THE FIX steps on from `MatchState.AttemptStart` in `Matcher`'s FAILURE arm.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamStepFromTheKeptStart`, which sets "
+                + "`PatternObject.StepsOnFromTheKeptStart` and nothing else, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is `A_row_the_step_from_the_attempt_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "KeepBeforeVerbTests",
+            Example: _keepBeforeAVerbRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamStepFromTheKeptStart(row))
         ),
         new(
             Id: "keep-undone-past-an-atomic-group",
