@@ -6707,4 +6707,50 @@ line (`MatchState.AdvancePastMatch`, the `Matcher` failure arm); not traced in C
 overlapped step and the failure arm step on from `MatchState.AttemptStart` when the reported start
 lies behind it. BESTMATCH and ENHANCEMATCH restore `AttemptStart` with their best match, and a
 `Match` carries it for `NextMatch`. A start left ahead of the attempt is unchanged; that is known
-defect D88 (a failed attempt skips starts), not yet fixed.
+defect D88 (a failed attempt skips starts), fixed by entry 86.
+
+## 86. A `\K` inside a lookaround or atomic group outlives a path that failed - SHARED, FIXED HERE ON `fix/d88` (D88, 2026-10-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D88, fixed on `fix/d88` and pinned by `Gaps/Engine/KeepAcrossCutTests` and the ExpectedDivergences
+entries `keep-undone-past-a-lookaround` and `keep-undone-past-an-atomic-group`. Draft report:
+`entry-86-k-outlives-a-failed-path.md`. The decision (DECISIONS, 2026-10-16) rests on
+`.scratch/s1016/night/small/d88-analysis.md` and its blind review,
+`.scratch/s1016/night/d88-review/review.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-16 (`.scratch/s1016/night/d88/up.py` on
+`cases.jsonl`, table in `cases-table.txt`):
+
+```
+search(r'(?=ab\K)x|b', 'ab')         -> None     expected (1,2): upstream gives it from pos=1
+search(r'(?!ab\K)|b', 'ab')          -> None     expected (1,1)
+search(r'(?(?=ab\K)x|b)', 'ab')      -> None     expected (1,2), as (?(?=ab)x|b) gives
+search(r'(?=a\K)x|a', 'a')           -> (1,1)    expected (0,1), the answer of `a`
+search(r'(?!a\K)x|a', 'a')           -> (1,1)    expected (0,1)
+search(r'ax(?<=\Kx)y|axz', 'axz')    -> (1,3)    expected (0,3)
+search(r'(?r)x(?<=\Ka)|a', 'a')      -> (0,0)    expected (0,1)
+search(r'(?>a\K)x|a', 'a')           -> (1,1)    expected (0,1); Perl 5.42.3 agrees with upstream
+search(r'(?:a\K)++x|a', 'a')         -> (1,1)    expected (0,1)
+```
+
+**Why upstream is wrong.** A path that fails leaves no trace: that is what backtracking means, and
+upstream keeps the rule for captures, repeats and fuzzy counts, which every one of these constructs
+saves and restores. The first row contradicts itself: the attempt at 0 fails, yet changes the
+answer, since a search from 1 finds (1,2). Ruby 3.2.3, the one surveyed engine that accepts `\K` in
+a lookaround, answers every row as expected; PCRE2 10.47 and Ruby undo it in atomic groups, Perl
+5.42.3 does not. Perl and PCRE2 refuse `\K` in a lookaround.
+
+**Mechanism.** `\K` pushes `match_pos` and a `KEEP` entry so that backtracking puts the start back.
+A construct that succeeds cuts the backtracking stack to its frame: `RE_OP_END_LOOKAROUND`
+(`_regex.c:12918`), a negative lookaround whose body matched (`:12985-13009`, which restores
+captures and fuzzy counts but not `match_pos`), a condition's test, and `RE_OP_END_ATOMIC`. The
+`KEEP` entry goes with the cut, so the moved start survives, and the advance after a failed
+attempt (`:15695`) steps on from it. Traced by probe in this port, which copied each line; not
+traced in C.
+
+**The fix here.** When the pattern has a `\K` inside such a construct, each construct pushes a
+`KEEP` entry holding the current start below its frame (`Matcher.PushTheStartBeforeABody`). The cut
+stops at the frame, so the entry survives it, and backtracking past the construct restores the
+start, however many `\K`s the body ran. A negative lookaround whose body matched restores it at
+once. A verb's cut to the attempt still discards it, so `a\K(*PRUNE)x|a` stays None, as upstream
+and PCRE2 answer.

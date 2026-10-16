@@ -202,7 +202,9 @@ public sealed class PartialVerbRuleTests
     /// An attempt whose start a touched attempt chose has touched the text to come too. The first
     /// pass and the second run the same code only from the same start, and after a touched attempt
     /// the next start is the ordinary bump-along's only when nothing can move it: a <c>(*SKIP)</c>
-    /// moves it, and so does a <c>\K</c> whose entry a cut discarded. In each row the first pass
+    /// moves it, and so does a <c>\K</c> whose entry a verb's cut discarded (D88 restores one a
+    /// construct's cut discarded, so <c>a(?=b\Z)(?>\K)x|b</c> left these rows; see
+    /// <c>KeepAcrossCutTests</c>). In each row the first pass
     /// jumps past start 1, the second pass reaches it, and <c>b</c> matches there on the held text:
     /// a success some continuations need, so a partial. Answered as a complete match, the port
     /// reported a match the held text does not have. The first two rows' completions are the port's
@@ -212,12 +214,11 @@ public sealed class PartialVerbRuleTests
     /// the second pass tries a start no continuation reaches. The other rows are the judge's.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers the first two rows F(1, 2) and F(1, 3)
-    // (its skip moves the slice when it runs) and the last three P(2, 2), a start too late.
+    // (its skip moves the slice when it runs) and the last two P(2, 2), a start too late.
     [Test]
     [Arguments(@"(?=ab(*SKIP)c|a)a(*SKIP)x|b", "ab", 1, 2)]
     [Arguments(@"(?:(a)|b)(?=a(.)(*SKIP)b|a)a(*SKIP)\1|ab", "aab", 1, 3)]
     [Arguments(@"ab\Z(*SKIP)(*F)|b", "ab", 1, 2)]
-    [Arguments(@"a(?=b\Z)(?>\K)x|b", "ab", 1, 2)]
     [Arguments(@"a(?=b\Z)\K(*PRUNE)x|b", "ab", 1, 2)]
     public void A_start_a_touched_attempt_chose_is_touched_too(string pattern, string text, int start, int end)
     {

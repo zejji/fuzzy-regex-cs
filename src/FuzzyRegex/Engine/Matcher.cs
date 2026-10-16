@@ -13417,6 +13417,7 @@ internal static class Matcher
 
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
+                    PushTheStartBeforeABody(state, atomic: true);
                     PushCaptures(state, state.Bstack);
                     state.PushSubAttemptFuzzyState(state.Bstack);
                     state.Bstack.PushSize(state.CaptureChange);
@@ -18198,6 +18199,7 @@ internal static class Matcher
     private static int AdvanceConditional(MatchState state, ref Node node)
     {
         // The condition is a lookaround, so it parks exactly what LOOKAROUND parks.
+        PushTheStartBeforeABody(state, atomic: false);
         PushLookaroundStateData(
             state.Sstack,
             new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
@@ -18497,7 +18499,7 @@ internal static class Matcher
                 return MatchStatus.Illegal;
             }
 
-            if (endLookHasGroups && !PopCaptures(state, state.Bstack))
+            if ((endLookHasGroups && !PopCaptures(state, state.Bstack)) || !PopTheStartBeforeABody(state))
             {
                 return MatchStatus.Illegal;
             }
@@ -18739,6 +18741,7 @@ internal static class Matcher
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int AdvanceLookaround(MatchState state, ref Node node)
     {
+        PushTheStartBeforeABody(state, atomic: false);
         PushLookaroundStateData(
             state.Sstack,
             new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
@@ -20363,6 +20366,74 @@ internal static class Matcher
 
         node = node.Next1.Node!;
         return _armContinue;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D88: below the frame of an atomic group, possessive repeat, lookaround or
+    /// condition's test, the entry a <c>\K</c> pushes, so that backtracking past the construct puts
+    /// the reported start back however many <c>\K</c>s its body ran.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A construct that succeeds cuts the backtracking stack to its frame, which throws away the
+    /// entry each <c>\K</c> in its body pushed, and upstream lets the moved start outlive the path
+    /// that moved it: <c>(?=a\K)x|a</c> over 'a' is (1, 1) upstream, though <c>x</c> failed and the
+    /// answer is <c>a</c>'s, and <c>(?=ab\K)x|b</c> over 'ab' is None, because the failed attempt
+    /// at 0 steps on from 2 and never tries 1. The owner's rule (DECISIONS, 2026-10-16): a failed
+    /// path leaves no trace.
+    /// </para>
+    /// <para>
+    /// One entry, pushed before the frame, is enough. The cut stops at the frame, so the entry
+    /// survives it, and it holds the start as it was before the body, which is all that any number
+    /// of <c>\K</c>s in the body, nested constructs included, has to go back to. When the body
+    /// fails, the body's own entries have put the start back already and this one restores the
+    /// same value. A verb's cut to the attempt discards it, so verbs are unchanged
+    /// (<c>a\K(*PRUNE)x|a</c> stays None, as upstream and PCRE2 answer). Only a pattern with a
+    /// <c>\K</c> inside such a construct or a called group pays for it
+    /// (<see cref="PatternObject.KeepInSubmatch"/>).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="atomic">Whether the construct is an atomic group or possessive repeat, rather
+    /// than a lookaround or a condition's test; only the oracle's ablations tell them apart.</param>
+    private static void PushTheStartBeforeABody(MatchState state, bool atomic)
+    {
+        // sync-divergence: upstream's ATOMIC, LOOKAROUND and CONDITIONAL push their frames straight
+        // onto the backtracking stack / a pattern with a \K in such a construct gets a KEEP entry
+        // below each frame first / D88, a failed path must not keep a \K its construct's cut hid.
+        // Re-aligning: keep the entry below the frame if upstream reshapes these arms.
+        PatternObject pattern = state.Pattern;
+        if (pattern.KeepInSubmatch && !(atomic ? pattern.KeepOutlivesAnAtomicGroup : pattern.KeepOutlivesALookaround))
+        {
+            state.Bstack.PushSize(state.MatchPos);
+            state.Bstack.PushUInt8((byte)Opcode.Keep);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D88: a negative lookaround whose body matched has failed, so the start goes
+    /// back now, from the entry <see cref="PushTheStartBeforeABody"/> left below its frame.
+    /// </summary>
+    /// <remarks>
+    /// Backtracking would pop the entry anyway, but in a fuzzy section an insertion is tried in
+    /// front of the lookaround first (ledger entry 50), and that carries on forwards.
+    /// </remarks>
+    /// <param name="state">The match state, with the lookaround's frame popped.</param>
+    /// <returns><see langword="false"/> if the entry is not there.</returns>
+    private static bool PopTheStartBeforeABody(MatchState state)
+    {
+        if (!state.Pattern.KeepInSubmatch || state.Pattern.KeepOutlivesALookaround)
+        {
+            return true;
+        }
+
+        if (!state.Bstack.PopUInt8(out byte op) || op != (byte)Opcode.Keep || !state.Bstack.PopSize(out long start))
+        {
+            return false;
+        }
+
+        state.MatchPos = (int)start;
+        return true;
     }
 
     /// <summary>

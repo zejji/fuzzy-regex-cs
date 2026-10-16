@@ -226,12 +226,13 @@ public sealed class LeadingZeroWidthTests
     }
 
     /// <summary>
-    /// The lookarounds the walk refuses. A <c>\K</c> in the body moves the next attempt's start
-    /// (<c>PatternObject.AnAttemptCanMoveTheNextStart</c>): the attempt at 0 over <c>xcat</c> sets
-    /// the match start to 2 and fails, so the next attempt is at 3 and the one at 1, where
-    /// <c>cat</c> starts, never runs. A screen that jumped straight to 1 would find (3, 4), which
-    /// upstream does not; taking the guard out turns this row and two answer rows below red. A
-    /// verb or a group call in the body is refused as unproved.
+    /// The lookarounds the walk refuses. A <c>\K</c> in the body could move the next attempt's
+    /// start (<c>PatternObject.AnAttemptCanMoveTheNextStart</c>): upstream's attempt at 0 over
+    /// <c>xcat</c> sets the match start to 2 and fails, so its next attempt is at 3 and the one at
+    /// 1, where <c>cat</c> starts, never runs. Since D88 (ledger entry 86) the failed attempt puts
+    /// the start back and the search finds (3, 4), the answer a screen would give, so the guard is
+    /// now only conservative for this row. A verb or a group call in the body is refused as
+    /// unproved.
     /// </summary>
     /// <param name="pattern">A pattern the screen must leave alone.</param>
     [Test]
@@ -246,8 +247,9 @@ public sealed class LeadingZeroWidthTests
     }
 
     /// <summary>
-    /// Every match behind a lookaround, in UTF-16 units. The <c>\K</c> rows are the witness for
-    /// that refusal: with the screen they would answer <c>3-4</c> and <c>3-4 7-8</c>.
+    /// Every match behind a lookaround, in UTF-16 units. The <c>\K</c> rows answered <c>""</c> and
+    /// <c>7-8</c> before D88, as upstream 2026.9.10 does, which skips the start where <c>cat</c>
+    /// begins; they now find it.
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="options">The options.</param>
@@ -262,8 +264,8 @@ public sealed class LeadingZeroWidthTests
     [Arguments(@"(?<!\w)(?!\d)(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat 1dog dog", "5-8 14-17")]
     [Arguments(@"\b(?<!-)(?:cat|dog)\b", FuzzyRegexOptions.None, "xcat cat -dog dog", "5-8 14-17")]
     [Arguments(@"(?<![a-z])(?:cat|dog)", FuzzyRegexOptions.IgnoreCase, "xCAT Cat -dOg", "5-8 10-13")]
-    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat", "")]
-    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat dog", "7-8")]
+    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat", "3-4")]
+    [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)", FuzzyRegexOptions.None, "xcat dog", "3-4 7-8")]
     [Arguments(@"(?=c(*PRUNE)a|d)(?:cat|dog)", FuzzyRegexOptions.None, "xcat cot dog", "1-4 9-12")]
     [Arguments(@"(?<=(\w))(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat", "1-4")]
     [Arguments(@"(?=(\w))(?:cat|dog)", FuzzyRegexOptions.None, "xcat cat", "1-4 5-8")]

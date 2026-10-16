@@ -260,10 +260,10 @@ public sealed class FailureMemoTests
     }
 
     [Test]
-    [Arguments(@"(?:(?=\K)b|)+.c", "aabc", 3, 1)]
-    [Arguments(@"(?:(?=\K)b|)+.c", "abc", 2, 1)]
-    [Arguments(@"(?:(?>\K)b|)+.c", "abc", 2, 1)]
-    [Arguments(@"(?i)(?:b|((?(?=\K)(?i:A)|\b)|\b|(?:\w|a))){1,}?\w.[^a]c", "aabc", 4, 0)]
+    [Arguments(@"(?:(?=\K)b|)+.c", "aabc", 2, 2)]
+    [Arguments(@"(?:(?=\K)b|)+.c", "abc", 1, 2)]
+    [Arguments(@"(?:(?>\K)b|)+.c", "abc", 1, 2)]
+    [Arguments(@"(?i)(?:b|((?(?=\K)(?i:A)|\b)|\b|(?:\w|a))){1,}?\w.[^a]c", "aabc", 0, 4)]
     public void A_keep_inside_a_lookaround_or_atomic_group_keeps_the_memo_off(
         string pattern,
         string subject,
@@ -272,13 +272,14 @@ public sealed class FailureMemoTests
     )
     {
         // A '\K' moves the reported start and pushes an entry that moves it back when the path
-        // fails. Inside a lookaround, an atomic group or a conditional's test, that entry is thrown
-        // away as soon as the construct succeeds, so the moved start outlives the path that moved
-        // it. A failing path then has a lasting effect, and a memo that skips an equivalent failing
-        // path skips that effect too. In the first row the path that tries 'b' at 2 moves the start
-        // to 2 and fails; the path that tries it again later moves it to 3, and '.c' then matches
-        // with the start at 3. Upstream: regex.search(pattern, subject).span() is (index,
-        // index + length) in every row, regex 2026.9.10.
+        // fails. Inside a lookaround, an atomic group or a conditional's test, upstream throws that
+        // entry away as soon as the construct succeeds, so the moved start outlives the path that
+        // moved it, and a memo that skips an equivalent failing path skips that effect too: the
+        // first row was (3, 4) upstream and (2, 4) with the memo. Since D88 (ledger entry 86) the
+        // start is put back when matching backtracks past the construct, so each row answers as
+        // its pattern with the '\K' deleted does ((?:b|)+.c over 'aabc' is (2, 4)), where upstream
+        // 2026.9.10 answers (3, 4), (2, 3), (2, 3) and (4, 4). The memo stays off for these
+        // patterns all the same (KeepInSubmatch).
         Match m = FuzzyRegex.Match(subject, pattern);
 
         (m.Index, m.Length).Should().Be((index, length));
