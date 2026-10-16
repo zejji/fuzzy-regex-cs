@@ -89,6 +89,10 @@ internal sealed class GuardList
         return true;
     }
 
+    /// <summary>NOT UPSTREAM (D85): a copy of the live spans, for <see cref="KeyedTailGuards.PushTo"/>.</summary>
+    /// <returns>The copy.</returns>
+    internal GuardList Copy() => new() { _spans = _spans.AsSpan(0, Count).ToArray(), Count = Count };
+
     /// <summary>Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many.</summary>
     /// <param name="stack">The stack to push onto.</param>
     internal void PushTo(ByteStack stack)
@@ -429,6 +433,13 @@ internal sealed class RepeatData
 
     /// <summary>Upstream <c>tail_guard_list</c>: where the tail has already failed.</summary>
     internal readonly GuardList TailGuardList = new();
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the tail guards, one list per key, for a repeat whose tail reads group
+    /// state (<see cref="RepeatInfo.TailKey"/>); <see langword="null"/> otherwise, when
+    /// <see cref="TailGuardList"/> is used as upstream uses it.
+    /// </summary>
+    internal KeyedTailGuards? KeyedTail;
 
     /// <summary>Upstream <c>count</c>: how many times the body has matched.</summary>
     internal long Count;

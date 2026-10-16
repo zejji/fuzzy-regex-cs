@@ -4674,6 +4674,7 @@ internal static class Matcher
         {
             repeatData.BodyGuardList.PushTo(stack);
             repeatData.TailGuardList.PushTo(stack);
+            repeatData.KeyedTail?.PushTo(stack);
         }
 
         stack.PushSize(repeatData.Count);
@@ -4726,7 +4727,14 @@ internal static class Matcher
             !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long start)
             || !stack.PopSize(out long count)
-            || (!keepGuards && (!repeatData.TailGuardList.PopFrom(stack) || !repeatData.BodyGuardList.PopFrom(stack)))
+            || (
+                !keepGuards
+                && (
+                    (repeatData.KeyedTail is not null && !repeatData.KeyedTail.PopFrom(stack))
+                    || !repeatData.TailGuardList.PopFrom(stack)
+                    || !repeatData.BodyGuardList.PopFrom(stack)
+                )
+            )
         )
         {
             return false;
@@ -5123,7 +5131,7 @@ internal static class Matcher
     /// <param name="start">Where the text starts.</param>
     /// <param name="length">Its length.</param>
     /// <returns>The value, always positive.</returns>
-    private static long TextValue(MatchState state, int start, int length)
+    internal static long TextValue(MatchState state, int start, int length)
     {
         if (length > 3)
         {
@@ -18622,6 +18630,7 @@ internal static class Matcher
         {
             groupCallRepeat.BodyGuardList.Reset();
             groupCallRepeat.TailGuardList.Reset();
+            groupCallRepeat.KeyedTail?.Reset(newAttempt: false);
         }
 
         // Call a group, skipping its CALL_REF node. Be aware that we might be calling

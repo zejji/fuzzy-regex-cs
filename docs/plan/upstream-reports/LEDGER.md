@@ -6670,6 +6670,125 @@ expected answer is the flag-free search's, never upstream's. Without a `\K` the 
 `MatchPos` are the same position, and the differential against main moved only `\K` rows under
 `(?b)` or `(?e)`.
 
+## 84. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - SHARED, FIXED HERE ON `fix/d85-c9` (D85, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited; fixed on
+`fix/d85-c9` (keyed tail guards, final addendum below), not yet merged. Draft report: `entry-84-nested-tail-guard-before-a-backreference.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`:
+
+```
+(b?)(?:a*|b)*\1c          over 'bac'     -> (1,3)   right (0,3)
+(b?)(?:a*|b)*\1c          over 'bbac'    -> (2,4)   right (0,4)
+(b?)(?:(?:a*|b)*x)*\1c    over 'baxc'    -> (1,4)   right (0,4)
+(?:(b)|)(?:a*|b)*(?(1)z|c) over 'bac'    -> (1,3)   right (0,3)
+(a?)(?:(?:\1d)?a*|b)*c    over 'adc'     -> (1,3)   right (0,3)
+(a*)a*(?:d\1)?c           over 'adc'     -> (1,3)   right (0,3)
+(b*)(?:a*|c|(b))*\1c      over 'baaaac'  -> (1,6)   right (0,6)   (the form it was found in)
+(b?)(?:a+|b)*\1c          over 'bac'     -> (0,3)   the same     (a+ writes no tail guard)
+(a*)a*(?:d\1)*c           over 'adc'     -> (0,3)   the same     (an unbounded body is walked)
+```
+
+**Why upstream is wrong.** Each right answer is an ordinary leftmost-first path: in the first row,
+group 1 = '', the star takes `b` then `a`, `\1` matches empty and `c` matches. Python re 3.14.7,
+PCRE2 10.47 (pcre2.py) and 10.45 (ripgrep), Perl 5.42, Java 26, Node 24 and .NET 10's
+System.Text.RegularExpressions (interpreted and compiled) all give it on every row
+(`.scratch/s1016/d85/survey-*.txt`); a blind reviewer given only the rows and the table derived
+each path by hand and reached the same verdict.
+
+**Mechanism, shown by trace.** A tail guard records "the rest of the match failed from this
+position" (GREEDY_REPEAT_ONE writes it while backtracking, `_regex.c:15855`, and checks it at
+`:13346`). That is sound only if the rest of the match reads no group, so `add_repeat_guards`
+(`:23273`) keeps the guard only when its walk of the tail meets no reference or group condition
+(`:23368`, `:23421`). The walk is blind in two places: it stops at the enclosing repeat's
+END_GREEDY_REPEAT/END_LAZY_REPEAT (`:23334-23337`), so it misses a reference after the enclosing
+repeat or earlier in its body (reached on the next iteration); and it marks a bounded repeat's
+body LIMITED without walking it (`:23383-23386`), so it misses a reference inside `(?:...)?` or
+`{m,n}`. A guard trace of the port on the first row (scratch instrumentation, `.scratch/s1016/d85/trace.txt`):
+with group 1 = 'b', a*'s tail guard (repeat 2) is written at 2; with group 1 = '', `check r2 tail
+@2 -> True` refuses a* its 'a', and the attempt at 0 fails. With the guards switched off the same
+build answers (0,3).
+
+**Proposed fix upstream:** in `add_repeat_guards`, give END_GREEDY_REPEAT/END_LAZY_REPEAT the
+reference status of the enclosing repeat's tail and body (the body runs again), and look for a
+reference in a bounded body even though its repeat status stays LIMITED; then every tail guard
+whose continuation can read a group is off.
+
+**Fix options here, sized 2026-10-15** (refuse/restrict priced first; the guards exist to stop
+exponential search, so each option names its adversary):
+
+- **(R1) Refuse** a pattern in which a guarded repeat is followed by a reference: zero engine
+  lines, but it rejects the commonest backreference shape there is, a repeated list followed by a
+  reference (`(\w+)(?:,\s*\w+)*\s*\1`). Not viable.
+- **(R2) Restrict:** switch every tail guard off in any pattern holding a reference or group
+  condition, beside `KeepFailureMemosSound`'s test. About 10 lines, trivially sound, no sync cost
+  beyond one row. Adversary: guards that were sound because the reference comes first. Measured
+  with every tail guard switched off (the scratch toggle, Debug build, one call, subject n 'a's
+  then 'cx'): `(x?)\1(?:a*a*)*c$` 0.3-2.0 ms for n = 8-24 as it is, 80 ms at n = 8 and over the
+  5 s timeout at n = 12 without; `(x?)\1(?:a*b?)*c$` 1.0 ms at n = 24 as it is, 446 ms at n = 16
+  and over 5 s at n = 20 without. Not acceptable.
+- **(B) Propagate** the reference status through repeat ends and bounded bodies (the proposed
+  upstream fix). About 30-40 lines in `Optimiser.AddRepeatGuards`, the same in C; one
+  SYNC-DIVERGENCE row until upstream takes it. Off exactly where the guard is unsound, so R2's
+  rows keep their guards. Adversary: a nested repeat before a reference, measured the same way:
+  `(x?)(?:a*a*)*\1c$` 2.3 ms at n = 24 as it is, 74 ms at n = 8 and over 5 s at n = 12 without;
+  `(x?)(?:a*|b)*\1c$` 1.3 ms at n = 24, 496 ms at n = 16 and over 5 s at n = 20 without; all eight
+  shapes tried go exponential (`.scratch/s1016/d85/cost-optionB.txt`). Python re takes 224 ms at
+  n = 12 and 31 s at n = 16 on the first, and PCRE2 10.47 stops with its match limit at n = 12,
+  so (B) is where the backtracking engines are; but it turns linear patterns here exponential.
+- **(E) Epoch:** keep the tail guards, and void them when a group the rest of the match can read
+  changes. A monotonic counter, bumped wherever such a group is set or restored (upstream's
+  `capture_change` will not do: it is restored on backtracking, `_regex.c:15631`, `:17348`); each
+  tail guard list remembers the counter at its last write and is treated as empty, and reset in
+  O(1), when the counter has moved. Sound without trusting the walk at all: a guard is consulted
+  only while every read group still holds the value it was written under. The witness is fixed
+  because group 1 goes from 'b' to '' between the write and the check. About 40-60 lines (the
+  counter at the capture set and restore sites, a stamp per guard list, the check in
+  `ActiveGuardList`, the restore of guard lists around atomic groups and lookarounds), no cost to
+  a pattern without references. Adversary: a read group set inside the guarded repeat's own loop,
+  which moves the counter every iteration and leaves (B)'s exponential search; measure before
+  building, with a grammar that puts the read group inside, before and after the repeat.
+- **(A) Key** the tail guard on the values the continuation reads (unset, or the captured text of
+  each read group), like `perf/memo-br`'s keyed failure memo. Keeps the pruning across epochs whose
+  values repeat. 150-250 lines (keyed guard storage, a key per check on the hot path), high sync
+  cost. Adversary: a read group captured inside the repeat, O(n^2) distinct keys; BR refuses that
+  case, so it would fall back to (B) there.
+
+Recommendation: (E), applied to every tail guard in a pattern that has a reference or group
+condition, so its soundness does not rest on the walk; the walk's two blind spots then cost
+nothing. Not (B) here: it gives the leftmost-first answer but turns the measured linear patterns
+exponential. The upstream report proposes (B) as the smallest change and mentions (E). (A) stays
+later optimisation work for `perf/memo-br`. Measure (E)'s adversary before building it.
+
+**Addendum, 2026-10-15 night (fix/d85-c9).** Two more forms, each measured on `regex` 2026.9.10
+against Python re 3.14.7 (`search`):
+
+```
+.?(a*)(?:b\1)?c                   over 'aabaac'   -> (2,6)   right (0,6)
+(c*).?(?:(?:a|d)*ac{1,3})*\1d     over 'cadaacd'  -> (1,7)   right (0,7)
+```
+
+The first is the smallest yet with no enclosing repeat: the tail of `a*` is entered at 2 twice,
+with group 1 opened at 1 and then at 0, so the guard written in the first pass blocks the second.
+A key on the group's last capture does not separate the two; only the position the group opened
+at does. The second is a body guard ("the body never reached its end from here") written while a
+guard inside the body cut a path under another value of group 1; it fails with the tail guards
+fixed and is right with that body guard off.
+
+**Final addendum, 2026-10-16: the fix here.** Option (A), not (E): an epoch voids the guards on
+every change of a read group, which leaves (B)'s exponential search whenever the group is set
+inside the loop, and that is the commonest shape. Each repeat whose tail can read a group (found by
+a liveness pass over the compiled graph) keeps one tail guard list per value of the groups it
+reads; a group set inside the loop is keyed also on the position it opened at (the first form
+above); a body guard is off where its body holds a keyed tail (the second). Measured on the merge
+with main (`fix/d85-c9` d98b8dbc): every one of the 2,903 D85 rows in a 276,591-row test bed now
+gives Python re's answer, with no new wrong answer, and a differential of 269,000 rows against main
+moves 8 rows, all to re's answer. The cost, accepted by the owner: 1.0-1.3x where the read group
+is set outside the loop, 1.5-4.7x for a fixed-width group set inside it, and about 40x for a
+variable-width group set inside it and read after it (`(?:(a*)a*)*\1c$` over 96 a's, 0.49 s
+against 12 ms, growing as n^3.3). The upstream report still proposes (B) as the smallest change
+for upstream and now names (A) as the fix that keeps the pruning.
+
 ## 85. A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever - SHARED, FIXED HERE ON `fix/d87` (D87, 2026-10-15)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Entry 84 is on `fix/d85`; this is the next
