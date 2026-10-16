@@ -2208,6 +2208,61 @@ Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=3}").FullMatch("bab").FuzzyC
 Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=2}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 2
 ```
 
+### A `\K` inside a lookaround cannot make a scan or a search repeat itself
+
+`\K` moves the reported start of a match to where it stands. Inside a lookaround it can leave the
+reported start behind or ahead of where the attempt began, so a match that consumed nothing looks
+as if it did. Upstream's scan then reports the same match for ever: `finditer`, `split` and `sub`
+never return. Here a match that ends where its attempt began counts as empty, and the scan moves on
+from the attempt rather than from the reported start.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?=y\K)").Matches("y").Count());   // 1 - upstream: the same match for ever
+Console.WriteLine(new FuzzyRegex(@"(?<=\Ky)").Matches("y").Count());  // 1 - upstream: the same match for ever
+```
+
+Perl and PCRE2 refuse `\K` in a lookaround. There is no option to restore the upstream behaviour.
+Ledger entry 85.
+
+### A `\K` inside a lookaround, a condition's test, an atomic group or a possessive repeat is undone when matching backtracks past the construct
+
+Upstream lets a `\K` outlive the construct it sits in, so an alternative that failed after it can
+still move the start of a match found by another alternative. Here the start is restored when
+matching backtracks past the construct, so each match reports the start of the path that matched.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?=a\K)x|a").Match("a").Index);     // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(?>a\K)x|a").Match("a").Index);     // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(?=ab\K)x|b").Match("ab").Index);   // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?=a\K)a").Match("a").Index);       // 1 - upstream: 1
+```
+
+Ruby, the one surveyed engine that accepts `\K` in a lookaround, answers as here. There is no option
+to restore the upstream answer. Ledger entry 86.
+
+### A search that reads a group after a guarded repeat finds the leftmost match
+
+To avoid trying the same thing twice, upstream records where the rest of a match has already
+failed after a repeat, and skips that position next time. When the rest of the match reads a group,
+a failure under one value of the group says nothing about another value, and upstream can skip
+the path that finds the leftmost match. Here the record is kept per value of the groups the rest of the
+match reads. Python's `re`, PCRE2, Perl, Java, JavaScript and .NET all give the earlier start.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(b?)(?:a*|b)*\1c").Match("bac").Index);  // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(a*)a*(?:d\1)?c").Match("adc").Index);   // 0 - upstream: 1
+```
+
+A pattern that sets a variable-width group inside a repeat and reads it after the repeat, such as
+`(?:(a*)a*)*\1c$`, can be much slower than upstream, because more of the work has to be redone.
+There is no option to restore the upstream answer. Ledger entry 84.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,
