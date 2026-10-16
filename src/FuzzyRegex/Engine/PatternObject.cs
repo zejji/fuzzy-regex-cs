@@ -137,6 +137,14 @@ internal sealed class RepeatInfo
     /// <see cref="TailGuardLiveness.FindTailKeys"/>.
     /// </summary>
     internal bool BodyHoldsKeyedTail;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85), and never read by this library: <see cref="Status"/> lost its body guard
+    /// in <c>Optimiser.DropBodyGuardsThatReadAGroup</c>, where upstream would have kept it. The
+    /// oracle reads it to put upstream's guards back on a pattern it compiled for one call, to show
+    /// that D85 is the whole of a divergence.
+    /// </summary>
+    internal bool BodyGuardDroppedForD85;
 }
 
 /// <summary>
