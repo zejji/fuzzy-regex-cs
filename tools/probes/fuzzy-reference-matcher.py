@@ -72,6 +72,14 @@ of mrab-regex 2026.9.10):
    Upstream checks them first (_regex.c:12461-12462, before the frame that
    offers trailing insertions is pushed at :12500-12511), so a section that
    ends below its minimum never tries one (ledger entry 51, known defect D9).
+6a. While an open section is below one of its minimums, an item that matched
+   exactly is also offered an insertion in front of it (after the exact path,
+   before rule 3's deletion), so the item can move on and a later item can
+   take the error the minimum asks for. Without it fullmatch
+   "(?:ba[ab]){1<=s<=1,i<=1}" "baax" has no fit, where upstream and the port
+   give (0, 4) with 'a' inserted and 'x' substituted for [ab]. A substitution
+   is never offered on an item that matched: it would edit a character into
+   itself. ERRORS_FOR_A_MINIMUM = False gives rule 1 alone.
 7. Constraint defaults: if any of i, s, d has its own limit, the unnamed
    types are not permitted (README.rst:565, "{i<=2,d<=2,e<=3} ... but no
    substitutions"); a cost equation permits only the types it names
@@ -84,7 +92,10 @@ of mrab-regex 2026.9.10):
    deletions empty a repeat body; see EMPTY_DELETION_ITERATIONS, whose
    "needed" and "unrestricted" modes also follow upstream in treating an
    error-free empty iteration that changed a referenced group as progress
-   (_regex.c:12552).
+   (_regex.c:12552). In "needed" mode an alternative written empty is the exit
+   of an optional (the rule's 2026-09-28 addendum, DIVERGENCES row 79): in
+   (?:X|) a pass through X that consumed no text and took errors stands only
+   under the same conditions, so (?:X|) answers as X? does.
 9. (*SKIP): when backtracking reaches it, the attempt ends and the next one
    starts where the verb was executed (README.rst:209; perlre v5.42), or one
    character later if that is not past the current start. (*PRUNE) ends the
@@ -203,6 +214,9 @@ LOOKAROUND_INSERTION = True
 # Rule 6 switch: False gives upstream's order (a section below its minimum at
 # its end fails before any trailing insertion is tried).
 MINIMUM_AFTER_TRAILING_INSERTIONS = True
+# Rule 6a switch: False offers an insertion only where the exact test failed (the
+# matcher before 2026-10-16).
+ERRORS_FOR_A_MINIMUM = True
 # Rule 5's ruled exception: False gives upstream's rule (never an insertion at the search anchor).
 PINNED_ANCHOR = True
 # "unrestricted" only: the most empty iterations in a row at one position, for
@@ -818,8 +832,23 @@ def seq(parts, st, ctx, k):
 
 
 def alt(node, st, ctx, k):
-    for branch in node.branches:  # left to right (rule 8)
-        yield from run(branch, st, ctx, k)
+    empty = Seq(())
+    for n, branch in enumerate(node.branches):  # left to right (rule 8)
+        if EMPTY_DELETION_ITERATIONS == "needed" and branch != empty and empty in node.branches[n + 1:]:
+            # The 2026-09-28 addendum to the "needed" rule (DIVERGENCES row 79): an alternative
+            # written empty is the exit of an optional, so (?:X|) answers as X? does. A pass through
+            # X that consumed no text and spent errors stands only if it changed a tested group or
+            # its errors raise an unmet minimum of an open section.
+            yield from run(branch, st, ctx, lambda s: k(s) if alternative_stands(st, s, ctx) else iter(()))
+        else:
+            yield from run(branch, st, ctx, k)
+
+
+def alternative_stands(before, after, ctx):
+    if after.pos != before.pos or after.path == before.path:
+        return True
+    return (any(after.groups[g] != before.groups[g] for g in ctx.referenced)
+            or advances_unmet_minimum(before, after))
 
 
 def group(node, st, ctx, k):
@@ -913,13 +942,29 @@ def item(node, st, ctx, k):
         yield from k(replace(st, pos=pos + 1))
     if st.counts is None:
         return
-    if not exact:  # rule 1: substitution and insertion only on a mismatch
-        if pos < len(text) and permitted(st, 0):
-            yield from k(add_error(st, 0, pos + 1, node))
-        if pos < len(text) and permitted(st, 1) and insertion_allowed_here(st, node, ctx):  # rule 5
-            yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
+    # Rule 1: substitution and insertion on a mismatch; rule 6a: an insertion after an exact match
+    # too, while an open section is below a minimum.
+    if not exact and pos < len(text) and permitted(st, 0):
+        yield from k(add_error(st, 0, pos + 1, node))
+    if (pos < len(text) and permitted(st, 1) and (not exact or minimum_unmet(st))
+            and insertion_allowed_here(st, node, ctx)):  # rule 5
+        yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
     if (DELETE_AFTER_EXACT or not exact) and permitted(st, 2):  # rule 3
         yield from k(add_error(st, 2, pos, node))
+
+
+def minimum_unmet(st):
+    """Rule 6a: an open section, or one enclosing it, is below one of its minimums."""
+    if not ERRORS_FOR_A_MINIMUM or st.counts is None:
+        return False
+    counts, lim = st.counts, st.limits
+    chain = [(counts, lim)]
+    for saved, limits in reversed(st.outer):
+        if saved is None:
+            break
+        counts = tuple(a + b for a, b in zip(saved, counts))
+        chain.append((counts, limits))
+    return any(any(c[t] < m.mins[t] for t in range(3)) or sum(c) < m.mins[3] for c, m in chain)
 
 
 def permitted(st, t):
