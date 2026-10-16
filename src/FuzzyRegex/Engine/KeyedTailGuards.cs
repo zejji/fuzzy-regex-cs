@@ -20,6 +20,12 @@ internal sealed class KeyedTailGuards
     private bool _hasCurrent;
 
     /// <summary>
+    /// Lists and key arrays forgotten by <see cref="Reset"/>, kept for the next attempt so that a
+    /// warm call on a compiled pattern allocates nothing once its keys have been seen.
+    /// </summary>
+    private readonly Stack<(long[] Key, GuardList List)> _spare = [];
+
+    /// <summary>
     /// How many times a list was written, reset or restored since the match began, so a restore
     /// can tell that nothing changed since the matching save.
     /// </summary>
@@ -59,9 +65,20 @@ internal sealed class KeyedTailGuards
             return list;
         }
 
-        list = new GuardList();
-        var stored = new TailKeyValues([.. key]);
-        _lists[stored] = list;
+        long[] copy;
+        if (_spare.Count > 0 && _spare.Peek().Key.Length == key.Length)
+        {
+            (copy, list) = _spare.Pop();
+            key.AsSpan().CopyTo(copy);
+            list.Reset();
+        }
+        else
+        {
+            copy = [.. key];
+            list = new GuardList();
+        }
+
+        _lists[new TailKeyValues(copy)] = list;
         Remember(key, list);
         return list;
     }
@@ -83,6 +100,11 @@ internal sealed class KeyedTailGuards
 
         if (_lists.Count > 0)
         {
+            foreach (KeyValuePair<TailKeyValues, GuardList> pair in _lists)
+            {
+                _spare.Push((pair.Key.Values, pair.Value));
+            }
+
             _lists.Clear();
         }
     }
@@ -92,7 +114,6 @@ internal sealed class KeyedTailGuards
     {
         Reset(newAttempt: true);
         _changes = 0;
-        _currentKey = [];
     }
 
     /// <summary>
@@ -178,14 +199,16 @@ internal sealed class KeyedTailGuards
 /// <summary>NOT UPSTREAM (D85): a tail guard key's values with their hash, for a dictionary.</summary>
 internal readonly struct TailKeyValues : IEquatable<TailKeyValues>
 {
-    private readonly long[] _values;
     private readonly int _hash;
+
+    /// <summary>The key's values (the array the key was made from).</summary>
+    internal long[] Values { get; }
 
     /// <summary>Wraps <paramref name="values"/> without copying them.</summary>
     /// <param name="values">The values.</param>
     internal TailKeyValues(long[] values)
     {
-        _values = values;
+        Values = values;
         var hash = new HashCode();
         foreach (long value in values)
         {
@@ -196,7 +219,7 @@ internal readonly struct TailKeyValues : IEquatable<TailKeyValues>
     }
 
     /// <inheritdoc/>
-    public bool Equals(TailKeyValues other) => _hash == other._hash && _values.AsSpan().SequenceEqual(other._values);
+    public bool Equals(TailKeyValues other) => _hash == other._hash && Values.AsSpan().SequenceEqual(other.Values);
 
     /// <inheritdoc/>
     public override bool Equals(object? obj) => obj is TailKeyValues other && Equals(other);

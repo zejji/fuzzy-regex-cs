@@ -2437,18 +2437,12 @@ internal sealed class MatchState : IDisposable
         RepeatData repeat = Repeats[index];
         if ((guardType & NodeStatus.Body) != 0)
         {
-            return D85Switches.NoBody || (D85Switches.KBodyOff && Pattern.RepeatInfoAt(index).BodyHoldsKeyedTail)
-                ? null
-                : repeat.BodyGuardList;
+            // NOT UPSTREAM (D85): see RepeatInfo.BodyHoldsKeyedTail.
+            return Pattern.RepeatInfoAt(index).BodyHoldsKeyedTail ? null : repeat.BodyGuardList;
         }
 
-        if (
-            D85Switches.NoTail
-            || (D85Switches.NoUnkeyed && repeat.KeyedTail is null)
-            || (D85Switches.NoKeyed && repeat.KeyedTail is not null)
-            || (D85Switches.InsideOff && Pattern.RepeatInfoAt(index).TailKey is { HasInside: true })
-            || (D85Switches.OpenStart && Pattern.RepeatInfoAt(index).TailKey is { HasUnknownInside: true })
-        )
+        // NOT UPSTREAM (D85): a repeat inside a group whose parked start the key cannot find.
+        if (Pattern.RepeatInfoAt(index).TailKey is { HasUnknownInside: true })
         {
             return null;
         }
@@ -2581,21 +2575,22 @@ internal sealed class MatchState : IDisposable
             spec.Groups.Length + spec.ProgressRepeats.Length,
             key.Length - spec.Groups.Length - spec.ProgressRepeats.Length
         );
-        if (D85Switches.OpenStart)
+        // The parked start of each group the repeat is inside: the tail's capture of it runs
+        // from there, so the text it captures depends on it. `.?(a*)(?:b\1)?c` over aabaac
+        // reaches the tail of a* at 2 with g1 open at 1 and then open at 0, and only the second
+        // matches. Outside fuzzy sections and group calls the save stack holds exactly the
+        // parked starts of the groups open around the repeat, innermost on top.
+        int extra = spec.Groups.Length + spec.ProgressRepeats.Length;
+        for (int i = 0; i < spec.InsideDepths.Length; i++)
         {
-            // The parked start of each group the repeat is inside: the tail's capture of it runs
-            // from there, so its text after the capture depends on it (night hypothesis H1).
-            int extra = spec.Groups.Length + spec.ProgressRepeats.Length;
-            for (int i = 0; i < spec.InsideDepths.Length; i++)
+            int depth = spec.InsideDepths[i];
+            if (depth >= 0)
             {
-                int depth = spec.InsideDepths[i];
-                if (depth >= 0)
-                {
-                    int offset = Sstack.Count - (sizeof(long) * (depth + 1));
-                    key[extra + i] = offset >= 0 ? Sstack.SizeAt(offset) : long.MinValue;
-                }
+                int offset = Sstack.Count - (sizeof(long) * (depth + 1));
+                key[extra + i] = offset >= 0 ? Sstack.SizeAt(offset) : long.MinValue;
             }
         }
+
         for (int i = 0; i < spec.Groups.Length; i++)
         {
             GroupData group = Groups[spec.Groups[i]];
@@ -2608,13 +2603,10 @@ internal sealed class MatchState : IDisposable
 
             GroupSpan span = group.Captures[group.Current];
             bool mayMeet =
-                D85Switches.Exact
-                || spec.ExactSpans
-                || (!D85Switches.NoInside && (mode & TailGuardLiveness.Inside) != 0)
+                spec.ExactSpans
+                || (mode & TailGuardLiveness.Inside) != 0
                 || (
-                    !D85Switches.NoSpan
-                    && (mode & TailGuardLiveness.Span) != 0
-                    && (spec.Forward ? span.Start >= textPos : span.End <= textPos)
+                    (mode & TailGuardLiveness.Span) != 0 && (spec.Forward ? span.Start >= textPos : span.End <= textPos)
                 );
             if (mayMeet)
             {
@@ -2629,15 +2621,14 @@ internal sealed class MatchState : IDisposable
         for (int j = 0; j < spec.ProgressRepeats.Length; j++)
         {
             RepeatData around = Repeats[spec.ProgressRepeats[j]];
-            key[spec.Groups.Length + j] =
-                !D85Switches.NoProgress && (around.Start != textPos || around.CaptureChange != CaptureChange) ? 1 : 0;
+            key[spec.Groups.Length + j] = around.Start != textPos || around.CaptureChange != CaptureChange ? 1 : 0;
         }
 
         return key;
     }
 
     /// <summary>
-    /// EXPERIMENT (D85 night, clip2): the part of a guarded span around <paramref name="textPos"/>
+    /// NOT UPSTREAM (D85): the part of a guarded span around <paramref name="textPos"/>
     /// over which the current state's key is the same as at <paramref name="textPos"/>. The key moves
     /// only where a span-keyed group's span starts (forward) or ends (reverse), and at an enclosing
     /// progress repeat's iteration start while its counter has not moved.
@@ -2650,17 +2641,13 @@ internal sealed class MatchState : IDisposable
     {
         int low = span.Low;
         int high = span.High;
-        if (!spec.ExactSpans && !D85Switches.Exact && !D85Switches.NoSpan)
+        if (!spec.ExactSpans)
         {
             for (int i = 0; i < spec.Groups.Length; i++)
             {
                 byte mode = spec.Modes[i];
                 GroupData group = Groups[spec.Groups[i]];
-                if (
-                    group.Current < 0
-                    || (mode & TailGuardLiveness.Span) == 0
-                    || (!D85Switches.NoInside && (mode & TailGuardLiveness.Inside) != 0)
-                )
+                if (group.Current < 0 || (mode & TailGuardLiveness.Span) == 0 || (mode & TailGuardLiveness.Inside) != 0)
                 {
                     continue;
                 }
@@ -2695,29 +2682,26 @@ internal sealed class MatchState : IDisposable
             }
         }
 
-        if (!D85Switches.NoProgress)
+        foreach (int r in spec.ProgressRepeats)
         {
-            foreach (int r in spec.ProgressRepeats)
+            RepeatData around = Repeats[r];
+            if (around.CaptureChange != CaptureChange)
             {
-                RepeatData around = Repeats[r];
-                if (around.CaptureChange != CaptureChange)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                int start = around.Start;
-                if (start == textPos)
-                {
-                    low = high = textPos;
-                }
-                else if (low <= start && start < textPos)
-                {
-                    low = start + 1;
-                }
-                else if (textPos < start && start <= high)
-                {
-                    high = start - 1;
-                }
+            int start = around.Start;
+            if (start == textPos)
+            {
+                low = high = textPos;
+            }
+            else if (low <= start && start < textPos)
+            {
+                low = start + 1;
+            }
+            else if (textPos < start && start <= high)
+            {
+                high = start - 1;
             }
         }
 
@@ -2840,22 +2824,17 @@ internal sealed class MatchState : IDisposable
             && span.Protect;
         NoteSecondPassGuard(guarded);
 
-        // NOT UPSTREAM (D85): a keyed tail's key depends on the position as well (whether a span
+        // NOT UPSTREAM (D85): a keyed tail's key can depend on the position as well (whether a span
         // starts at or after it, whether an enclosing iteration started there), so the rest of a
         // span written under this key need not be guarded under the key the caller would get at
-        // those positions. The caller then asks once per position, as upstream does.
-        if (guarded && D85Switches.NoG2)
-        {
-            span = new GuardSpan(textPos, textPos, true);
-        }
-        else if (
+        // those positions. The span is cut where the key would change (ClipTailSpan).
+        if (
             guarded
-            && !D85Switches.NoClip
             && (guardType & NodeStatus.Tail) != 0
             && Pattern.RepeatInfoAt(index).TailKey is { DependsOnPosition: true } clipSpec
         )
         {
-            span = D85Switches.Clip2 ? ClipTailSpan(clipSpec, textPos, span) : new GuardSpan(textPos, textPos, true);
+            span = ClipTailSpan(clipSpec, textPos, span);
         }
 
         return guarded;

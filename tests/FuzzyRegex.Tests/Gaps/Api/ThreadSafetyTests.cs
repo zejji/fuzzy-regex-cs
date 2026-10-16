@@ -996,5 +996,8 @@ public sealed class ThreadSafetyTests
             // D85: written once by TailGuardLiveness.FindTailKeys inside Compile (Optimiser), read by
             // MatchState.Create and MatchState.KeyedTailGuardList; matching never writes it.
             "RepeatInfo.TailKey",
+            // D85: set by TailGuardLiveness.MarkBodiesHoldingKeyedTails inside Compile, read by
+            // MatchState.ActiveGuardList; matching never writes it.
+            "RepeatInfo.BodyHoldsKeyedTail",
         };
 }

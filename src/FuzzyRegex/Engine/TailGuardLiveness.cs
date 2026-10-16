@@ -31,21 +31,18 @@ internal sealed record TailGuardKeySpec(
 )
 {
     /// <summary>
-    /// EXPERIMENT (D85 night, open): for each keyed group with the repeat inside its brackets, how
+    /// for each keyed group with the repeat inside its brackets, how
     /// many capture groups enclosing the repeat sit inside it, so its parked start is that many
     /// entries below the top of the save stack; -1 for a group the repeat is not inside, or whose
     /// place is unknown.
     /// </summary>
     internal int[] InsideDepths { get; init; } = [];
 
-    /// <summary>EXPERIMENT (D85 night, open): some inside group's place on the save stack is unknown (-2).</summary>
+    /// <summary>some inside group's place on the save stack is unknown (-2).</summary>
     internal bool HasUnknownInside => InsideDepths.Contains(-2);
 
     /// <summary>The key's length: a value per group, a bit per progress repeat, an open start per group.</summary>
     internal int KeyLength => (2 * Groups.Length) + ProgressRepeats.Length;
-
-    /// <summary>EXPERIMENT (D85 night, ioff): whether some keyed group has the repeat inside its brackets.</summary>
-    internal bool HasInside { get; } = Modes.Any(static m => (m & TailGuardLiveness.Inside) != 0);
 
     /// <summary>
     /// Whether the key can differ between two positions with the same captures: a group keyed on
@@ -201,7 +198,7 @@ internal static class TailGuardLiveness
     }
 
     /// <summary>
-    /// EXPERIMENT (D85 night, kbody): marks each repeat whose body holds a repeat with a keyed tail.
+    /// marks each repeat whose body holds a repeat with a keyed tail.
     /// Its body guard ("the body never got to its end from p") then depends on group state too:
     /// a keyed tail guard inside can stop the body under one value of a group the rest reads.
     /// </summary>
@@ -246,7 +243,7 @@ internal static class TailGuardLiveness
         }
     }
 
-    /// <summary>EXPERIMENT (D85 night, open): how many groups enclosing the repeat sit inside the group.</summary>
+    /// <summary>how many groups enclosing the repeat sit inside the group.</summary>
     /// <param name="enclosing">The enclosing groups of each node.</param>
     /// <param name="repeat">The repeat.</param>
     /// <param name="group">The group, one-based.</param>
@@ -263,7 +260,7 @@ internal static class TailGuardLiveness
     }
 
     /// <summary>
-    /// EXPERIMENT (D85 night, open): the capture groups open around each node, outermost first, by a
+    /// the capture groups open around each node, outermost first, by a
     /// walk from the start that parks a group at the node that opens it in the matching direction
     /// and drops it at the node that captures. Nesting is syntactic, so the first visit decides.
     /// </summary>
@@ -400,10 +397,7 @@ internal static class TailGuardLiveness
                 // and, outside a lookaround body or a condition's test, replaces the value every
                 // later read sees. Inside one the capture may be thrown away (a negative test), so
                 // it kills nothing there.
-                ulong kept =
-                    inTest.Contains(node) || D85Switches.MutateNoKill
-                        ? liveOut
-                        : liveOut & ~Bit(slot, (byte)(Text | Set | Span));
+                ulong kept = inTest.Contains(node) ? liveOut : liveOut & ~Bit(slot, (byte)(Text | Set | Span));
                 return kept | Bit(slot, (byte)(Span | Inside));
             }
             default:
@@ -422,11 +416,6 @@ internal static class TailGuardLiveness
     /// <returns>Up to three successors.</returns>
     private static IEnumerable<Node> Successors(Node node)
     {
-        if (D85Switches.MutateStopAtEnd && node.Op is Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat)
-        {
-            yield break;
-        }
-
         if (node.Next1.Node is Node next1)
         {
             yield return next1;

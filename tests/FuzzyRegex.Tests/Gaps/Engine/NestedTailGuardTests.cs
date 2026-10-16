@@ -56,6 +56,20 @@ public sealed class NestedTailGuardTests
     [Arguments(@"(?:(?:(x?)a)*(?:a|a)*)*\1c", "xaaaxc", 0, 6)] // regex None
     [Arguments(@"(?:(?:(x?)a)*a*)*(?=\1c)", "xaaaxc", 0, 4)] // regex None
     [Arguments(@"(?:(b?)(?:a*|b)*\1c){e<=0}", "bac", 0, 3)] // regex (1, 3)
+    // Keyed tails (2026-10-15 night). The repeat sits inside the group the rest reads, and the
+    // group opens at different places: the key needs the parked start, not the last capture.
+    [Arguments(@".?(a*)(?:b\1)?c", "aabaac", 0, 6)] // regex (2, 6)
+    [Arguments(@"[ab]*((?:a{1,3})*)(c)(?:|\2)\1\b", "bbaaaacaaaa", 0, 11)] // regex None
+    [Arguments(@"(x?)(?:a*((?:a*)*))*?b?\1\2c", "abac", 0, 4)] // regex (2, 4)
+    // A body guard over a body that holds a keyed tail guard.
+    [Arguments(@"(c*).?(?:(?:a|d)*ac{1,3})*\1d", "cadaacd", 0, 7)] // regex (1, 7)
+    // The key parts beyond the text, each from a witness search that switched one part off: the
+    // exact span of a group the repeat is inside, the progress bit of an enclosing repeat, and
+    // the cut of a guarded span where the key changes.
+    [Arguments(@"x?(?:((?:x?)*))*a*\1c", "xxaaaxxc", 0, 8)] // regex (5, 8)
+    [Arguments(@"(?:((?:a|b)*)a+|((?:a|b)*))*\1", "bac", 0, 2)] // regex (1, 2)
+    [Arguments(@"(x?)(?:(?:(x?)a)*|(x*))+?b?\1\2c", "xac", 0, 3)] // regex (1, 3)
+    [Arguments(@"(b?)(?:(?:((?:a|b)*)ba*?)+)*?\2c", "baabcb", 0, 5)] // regex (3, 5)
     // The body-guard half: a reference inside a bounded repeat, whose body the walk does not enter
     // (:23383-23386), so the bounded repeat keeps its body guard, and so does a repeat enclosing
     // it. A body guard blocks a position the body never reached its end from, which depends on

@@ -128,7 +128,14 @@ internal sealed class RepeatInfo
     /// </summary>
     internal TailGuardKeySpec? TailKey;
 
-    /// <summary>EXPERIMENT (D85 night, kbody): the body holds a repeat with a keyed tail.</summary>
+    /// <summary>
+    /// NOT UPSTREAM (D85): the body holds a repeat whose tail guard is keyed, so this repeat's body
+    /// guard is off. A body guard records that the body never got to its end from a position; a
+    /// keyed tail guard inside can stop the body under one value of a group the rest of the match
+    /// reads, so the record would block the body under another value
+    /// (<c>(c*).?(?:(?:a|d)*ac{1,3})*\1d</c> over <c>cadaacd</c>). Set by
+    /// <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
     internal bool BodyHoldsKeyedTail;
 }
 

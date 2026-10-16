@@ -6715,3 +6715,18 @@ condition, so its soundness does not rest on the walk; the walk's two blind spot
 nothing. Not (B) here: it gives the leftmost-first answer but turns the measured linear patterns
 exponential. The upstream report proposes (B) as the smallest change and mentions (E). (A) stays
 later optimisation work for `perf/memo-br`. Measure (E)'s adversary before building it.
+
+**Addendum, 2026-10-15 night (fix/d85-c9).** Two more forms, each measured on `regex` 2026.9.10
+against Python re 3.14.7 (`search`):
+
+```
+.?(a*)(?:b\1)?c                   over 'aabaac'   -> (2,6)   right (0,6)
+(c*).?(?:(?:a|d)*ac{1,3})*\1d     over 'cadaacd'  -> (1,7)   right (0,7)
+```
+
+The first is the smallest yet with no enclosing repeat: the tail of `a*` is entered at 2 twice,
+with group 1 opened at 1 and then at 0, so the guard written in the first pass blocks the second.
+A key on the group's last capture does not separate the two; only the position the group opened
+at does. The second is a body guard ("the body never reached its end from here") written while a
+guard inside the body cut a path under another value of group 1; it fails with the tail guards
+fixed and is right with that body guard off.
