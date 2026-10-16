@@ -55,6 +55,9 @@ HINTS = [
      "a partial match no continuation completes (inherited, pinned)"),
     ("D51 (call captures)", lambda t, c, k: c == "C2" and "groups" in k, "captures made inside a call"),
 ]
+# A self-check "failure" that is the port refusing the pattern at compile time (a left-recursion
+# refusal, for example): a decided rule to look up in DIVERGENCES, not a crash.
+REFUSAL = "FuzzyRegexParseException"
 
 
 def load(path: Path) -> list[dict]:
@@ -103,8 +106,8 @@ def norm_probe_one(ans: str):
     return ((int(m.group(1)), int(m.group(2))), tuple(int(m.group(i)) for i in (3, 4, 5)), " partial" in ans, groups)
 
 
-def norm_probe(ans: str):
-    if ans.startswith("[") or " | " in ans:
+def norm_probe(ans: str, op: str = ""):
+    if op == "finditer" or ans.startswith("[") or " | " in ans:
         return tuple(norm_probe_one(a) for a in ([] if ans == "[]" else ans.split(" | ")))
     return norm_probe_one(ans)
 
@@ -170,14 +173,19 @@ def oracle_source(run: Path, f: Findings) -> None:
     if not out.exists():
         f.notes.append("oracle: no output")
         return
-    log = {e["seed"]: e for e in load(out / "sweep.jsonl")}
-    origin = load(out / "recheck-origin.jsonl")
-    recheck = (out / "recheck-report.txt").read_text(encoding="utf-8") if (out / "recheck-report.txt").exists() else ""
-    still = {int(m.group(1)) for m in re.finditer(r"^(?:DIVERGE|FAULT) row (\d+) ", recheck, re.M)}
-    rechecked = {(o["seed"], o["row"]): n for n, o in enumerate(origin, start=1)}
-    tally = re.search(r"^agree .*$", recheck, re.M)
-    f.notes.append(f"oracle Release re-check of the diverging rows: {tally.group(0) if tally else recheck[:120]}")
-    for d in sorted(out.glob("sweep-*")):
+    log = {e["seed"]: e for p in sorted(out.glob("sweep-*.jsonl")) for e in load(p)}
+    # Per oracle part: which (seed, row) went into its Release re-check, and whether it still diverged.
+    recheck_state = {}
+    for rep in sorted(out.glob("recheck-*-report.txt")):
+        slot = rep.name[len("recheck-"):-len("-report.txt")]
+        text = rep.read_text(encoding="utf-8")
+        still = {int(m.group(1)) for m in re.finditer(r"^(?:DIVERGE|FAULT) row (\d+) ", text, re.M)}
+        tally = re.search(r"^agree .*$", text, re.M)
+        f.notes.append(f"{slot} Release re-check of the diverging rows: {tally.group(0) if tally else text[:120].strip()}")
+        for n, o in enumerate(load(out / f"recheck-{slot}-origin.jsonl"), start=1):
+            if tally:
+                recheck_state[(o["seed"], o["row"])] = n in still
+    for d in sorted(p for p in out.glob("sweep-*") if p.is_dir()):
         seed = int(d.name.split("-")[1])
         e = log.get(seed)
         f.notes.append(f"oracle seed {seed}: " + (e["tally"] if e else (d / "crashed.txt").read_text(encoding="utf-8").strip()
@@ -203,8 +211,7 @@ def oracle_source(run: Path, f: Findings) -> None:
             row = dict(wave[n - 1]) if 1 <= n <= len(wave) else {"pattern": "?", "subject": "?", "operation": "?"}
             up = next((l.strip() for l in block.splitlines() if l.strip().startswith("upstream")), "")
             mine = next((l.strip() for l in block.splitlines() if l.strip().startswith("port")), "")
-            r = rechecked.get((seed, n))
-            if r is not None and r not in still and recheck.startswith("agree"):
+            if recheck_state.get((seed, n)) is False:
                 f.known["oracle: diverged in Debug only (agrees in Release: a Debug timeout)"] += 1
                 continue
             f.add("oracle", "C1 only", "C1", m.group(1).lower(), row, mine, up,
@@ -314,6 +321,10 @@ def harness_source(run: Path, f: Findings, label: str, results: Path, rows_path:
             if status in ("fail", "phantom"):
                 kind_s = kind if check != "C3" else (a or "").split(" ")[0]
                 counts[f"{check} {status}"] += 1
+                if check == "C3" and REFUSAL in (a or "") and "(compile)" in (a or ""):
+                    msg = re.sub(r"group '[^']*'|the pattern", "<group>", (a or "").split(") ", 1)[-1].split(" @ ")[0])
+                    f.known[f"{label}: the port refuses the pattern at compile time: {msg[:90]}"] += 1
+                    continue
                 f.add(label, "self", check, kind_s or status, row, a, b, refs)
         failing = [c for c in REFS if refs[c] == "fail"]
         passing = [c for c in REFS if refs[c] == "pass"]
@@ -376,16 +387,17 @@ def reduce_witnesses(witnesses: dict, probe_run, rounds: int = 12) -> dict:
     """{cluster: row} -> {cluster: reduced row}. The predicate: the port still differs from upstream
     and the row keeps its risky constructs. probe_run(rows) -> list of probe answers."""
     def differs(row, ans):
-        return norm_probe(ans) != upstream(row) and not (ans.startswith(("RegexMatchTimeout", "CRASH")))
+        return norm_probe(ans, row["operation"]) != upstream(row) and not (ans.startswith(("RegexMatchTimeout", "CRASH")))
 
     current = {}
     first = probe_run(list(witnesses.values()))
     for (k, row), ans in zip(witnesses.items(), first):
         if differs(row, ans):
-            current[k] = (row, risky(tags_of(row)))
+            current[k] = (row, risky(tags_of(row)), ans)
+    start = {k: v[0] for k, v in current.items()}
     for _ in range(rounds):
         batch, owner = [], []
-        for k, (row, sig) in current.items():
+        for k, (row, sig, _a) in current.items():
             for c in candidates(row):
                 batch.append(c)
                 owner.append(k)
@@ -397,15 +409,16 @@ def reduce_witnesses(witnesses: dict, probe_run, rounds: int = 12) -> dict:
         for k, c, ans in zip(owner, batch, answers):
             size = len(c["pattern"]) + len(c["subject"])
             if (k not in best or size < best[k][0]) and differs(c, ans) and risky(tags_of(c)) == current[k][1]:
-                best[k] = (size, c)
-        for k, (size, c) in best.items():
-            row, sig = current[k]
+                best[k] = (size, c, ans)
+        for k, (size, c, ans) in best.items():
+            row, sig, _a = current[k]
             if size < len(row["pattern"]) + len(row["subject"]):
-                current[k] = (c, sig)
+                current[k] = (c, sig, ans)
                 improved = True
         if not improved:
             break
-    return {k: v[0] for k, v in current.items()}
+    # Only witnesses that actually shrank; each with the port's answer and upstream's normal form.
+    return {k: (row, ans, upstream(row)) for k, (row, _s, ans) in current.items() if row is not start[k]}
 
 
 def make_probe_runner(run: Path):
@@ -486,25 +499,36 @@ def main(argv: list[str]) -> int:
     cfg = json.loads((run / "config.json").read_text(encoding="utf-8")) if (run / "config.json").exists() else {}
     lines += [f"Commit {cfg.get('commit', '?')}, master seed {cfg.get('master', '?')}, smoke {cfg.get('smoke')}.", "",
               "Attribution: KNOWN = decided by an existing screen; HINT = a signature match, to be judged; "
-              "UNJUDGED = nothing matched. Witness: the smallest row of the cluster; `reduced` where the delta "
-              "reducer shrank it while the port still differed from upstream (normal form: span, counts, partial, "
-              "sorted captures).", "",
-              "| # | Cluster | Rows | Attribution | Witness (pattern, subject, op) | Port | Other |", "|---|---|---|---|---|---|---|"]
+              "UNJUDGED = nothing matched. Witness: the smallest row of the cluster, with its answers as the "
+              "harness recorded them. Reduced: the witness shrunk by the delta reducer while the port still "
+              "differed from upstream in a rough normal form (span, counts, partial, sorted captures) and kept "
+              "its risky constructs; it ignores ExpectedDivergences, so it can drift onto a known divergence "
+              "and must be checked before use.", "",
+              "| # | Cluster | Rows | Attribution | Witness (pattern, subject, op) | Port | Other | Reduced: row; port; upstream |",
+              "|---|---|---|---|---|---|---|---|"]
     order = sorted(clusters, key=lambda k: (-len(clusters[k]), k))
-    for n, k in enumerate(order, start=1):
-        xs, w = clusters[k], witness[k]
-        hints = sorted({x["hint"] for x in xs if x["hint"]})
-        attribution = ("HINT " + ", ".join(hints)) if hints else "UNJUDGED"
-        r = reduced.get(k) or w["row"]
-        tag = " (reduced)" if k in reduced else ""
+
+    def question(r):
         q = f"`{r.get('pattern')!s}` `{r.get('subject')!s}` {r.get('operation')}{' partial' if r.get('partial') else ''}"
         if "pos" in r or "endpos" in r:
             q += f" pos={r.get('pos')} endpos={r.get('endpos')}"
         if r.get("flags"):
             q += f" flags={r['flags']}"
-        cell = lambda s: str(s).replace("|", "\\|").replace("\n", " ")[:160]  # noqa: E731
-        lines.append(f"| {n} | {cell(k)} | {len(xs)} | {attribution} | {cell(q)}{tag} | {cell(w['port'])} | "
-                     f"{cell(w['other'])} |")
+        return q
+
+    def cell(s, n=160):
+        return str(s).replace("|", "\\|").replace("\n", " ")[:n]
+
+    for n, k in enumerate(order, start=1):
+        xs, w = clusters[k], witness[k]
+        hints = sorted({x["hint"] for x in xs if x["hint"]})
+        attribution = ("HINT " + ", ".join(hints)) if hints else "UNJUDGED"
+        red = ""
+        if k in reduced:
+            rr, pa, up = reduced[k]
+            red = f"{cell(question(rr))}; port {cell(pa, 80)}; upstream {cell(up, 80)}"
+        lines.append(f"| {n} | {cell(k)} | {len(xs)} | {attribution} | {cell(question(w['row']))} | {cell(w['port'])} | "
+                     f"{cell(w['other'])} | {red} |")
     lines += ["", "## Known (accounted for by an existing screen)", "", "| What | Rows |", "|---|---|"]
     lines += [f"| {k} | {n} |" for k, n in sorted(f.known.items(), key=lambda kv: -kv[1])]
     lines += ["", "## Counts and notes", ""] + [f"- {x}" for x in f.notes]

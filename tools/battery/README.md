@@ -29,11 +29,13 @@ triage has been read, `python tools/battery/battery.py clean <run-id>` removes t
 
 The commit under test is checked out in detached worktrees, `.claude/worktrees/bat-<run-id>-<part>`,
 one per part, so parts running at once never share a build folder. Each heavy step first waits
-until no timing run holds the lock, 6 GB plus the step's own need is free, and the CPU is under 85%.
+until no timing run holds the lock, 6 GB plus the step's own need (1-2 GB) is free, and the CPU is
+under 85%. A smoke run (`--smoke`) takes about 8 minutes, most of it the first builds and the
+oracle consumer's own test project (about 6 minutes in Debug whatever the row count).
 
 | Part | Rows | Reference | How |
 |---|---|---|---|
-| `oracle` | 10 seeds x 26 generators x 2,000 | upstream `regex` 2026.9.10 | `tools/sweep-seeds.ps1`, one seed per call, Debug consumer |
+| `oracle`, `oracle2` | 10 seeds x 26 generators x 2,000, alternate seeds each | upstream `regex` 2026.9.10 | `tools/sweep-seeds.ps1`, one seed per call, Debug consumer |
 | `probe` | the D85 bed, 276,591 | Python `re`, `regex` | `probe.cs` (Debug), then the bed's `compare.py` |
 | `probe` (control) | pair and matrix rows it applies to | the same pattern with the repeat guards off | `probe.cs`, plain and wrapped |
 | `pa`, `pb` | 35 cells x 2,500 (two halves) | upstream, PCRE2 + Perl, `re`, reference matcher, TRE | `gen/pairs.py`, then `tools/matrix/run.py` |

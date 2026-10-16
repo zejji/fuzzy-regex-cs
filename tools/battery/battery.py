@@ -11,11 +11,11 @@ same RUN_ID resumes the same run. Every part writes its results as it goes and a
 marker at the end; a re-launch skips finished parts and finished steps inside a part.
 
 The commit under test is checked out in detached worktrees, one per part that builds, so parts
-running at once never share a build folder: .claude/worktrees/bat-RUN_ID-{oracle,probe,pa,pb,matrix}.
+running at once never share a build folder: .claude/worktrees/bat-RUN_ID-{oracle,oracle2,probe,pa,pb,matrix}.
 
 Parts (run in parallel, each behind the resource gate):
-  oracle   tools/sweep-seeds.ps1, one seed at a time, Debug consumer; diverging rows re-asked in
-           Release (a Debug consumer's timeout is not a divergence, run-oracle.ps1 -Configuration);
+  oracle   tools/sweep-seeds.ps1, one seed at a time, Debug consumer, as two parts (oracle and
+           oracle2) on alternate seeds; diverging rows re-asked in Release (a Debug consumer's timeout is not a divergence, run-oracle.ps1 -Configuration);
            a seed whose consumer dies (a failed Debug.Assert ends the test host) gets its wave run
            through tools/matrix/port-runner.cs, whose listener names the asserting rows.
   probe    the D85 real-pattern bed through tools/battery/probe.cs (Debug, asserts reported per
@@ -49,7 +49,7 @@ MAIN = Path(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--path-format=
 OUT_ROOT = MAIN / ".scratch" / "battery"
 LOCK = MAIN / ".scratch" / "test-lock"
 FREE_FLOOR_GB = 6
-PARTS = ("oracle", "probe", "pa", "pb", "matrix")
+PARTS = ("oracle", "oracle2", "probe", "pa", "pb", "matrix")
 RUN_PY_CHUNK = 500
 RUN_PY_MINUTES = 10  # run.py returns after this, so the gate is re-checked between its stretches
 BED = MAIN / ".scratch" / "s1016" / "d85" / "bed"
@@ -104,7 +104,23 @@ def env() -> dict:
     e["PYTHONDONTWRITEBYTECODE"] = "1"
     e["PYTHONUNBUFFERED"] = "1"
     e["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+    if not shutil.which("node", path=e["PATH"]):
+        # SHORTCUT: C7's survey runs node. On 2026-10-16 an nvm migration left node.exe in
+        # C:\ProgramData\nvm\v<version> without its C:\nvm4w\nodejs link, and run.py's c7 stage then
+        # failed every chunk ("WinError 2"). Upgrade path: delete this once nvm's link is back.
+        found = sorted(Path(r"C:\ProgramData\nvm").glob("v*/node.exe"))
+        if found:
+            e["PATH"] = str(found[-1].parent) + os.pathsep + e["PATH"]
     return e
+
+
+def preflight(run: Run) -> None:
+    """Every outside engine the parts call, found or not, in the status file before anything runs."""
+    e = env()
+    missing = [x for x in ("dotnet", "pwsh", "python", "perl", "node", "wsl") if not shutil.which(x, path=e["PATH"])]
+    run.status("preflight: " + (f"MISSING {', '.join(missing)}" if missing else "dotnet, pwsh, python, perl, node, wsl found"))
+    if {"dotnet", "pwsh", "node", "perl"} & set(missing):
+        raise SystemExit(f"cannot run without {', '.join(missing)}")
 
 
 def gate(run: Run, who: str, need_gb: float) -> None:
@@ -237,20 +253,25 @@ def generate_rows(run: Run) -> None:
 # Part: oracle sweep
 
 
-def part_oracle(run: Run) -> None:
+def slot_seeds(run: Run, slot: str) -> list[int]:
+    """The two oracle parts take alternate seeds, each in its own worktree."""
+    return run.cfg["oracleSeeds"][0 if slot == "oracle" else 1::2]
+
+
+def part_oracle(run: Run, slot: str) -> None:
     out = run.out / "oracle"
     out.mkdir(exist_ok=True)
-    sut = run.ensure_sut("oracle")
+    sut = run.ensure_sut(slot)
     count = run.cfg["oracleCount"]
-    log = out / "sweep.jsonl"
+    log = out / f"sweep-{slot}.jsonl"
     question = f"{count}||Debug"
-    for seed in run.cfg["oracleSeeds"]:
+    for seed in slot_seeds(run, slot):
         done = {e["seed"] for e in jsonl(log) if e.get("question") == question}
         keep = out / f"sweep-{seed}"
         if seed in done or (keep / "crashed.txt").exists():
             continue
-        gate(run, "oracle", 3)
-        run.status(f"oracle: seed {seed} ({count} rows a generator, Debug) starting")
+        gate(run, slot, 1.5)
+        run.status(f"{slot}: seed {seed} ({count} rows a generator, Debug) starting")
         t = time.time()
         rc = call(["pwsh", "-NoProfile", "-File", str(sut / "tools" / "sweep-seeds.ps1"), "-Seeds", str(seed),
                    "-Count", str(count), "-Configuration", "Debug", "-Log", str(log)],
@@ -269,17 +290,17 @@ def part_oracle(run: Run) -> None:
                 shutil.copy2(wave, keep / "wave.jsonl")
             (keep / "crashed.txt").write_text(f"sweep-seeds exit {rc}; no log line; see ../seed-{seed}.log\n",
                                               encoding="utf-8")
-            run.status(f"oracle: seed {seed} produced no verdict (exit {rc}) in {time.time() - t:.0f} s")
+            run.status(f"{slot}: seed {seed} produced no verdict (exit {rc}) in {time.time() - t:.0f} s")
         else:
-            run.status(f"oracle: seed {seed} {'green' if entry['green'] else 'RED'} in {time.time() - t:.0f} s: "
+            run.status(f"{slot}: seed {seed} {'green' if entry['green'] else 'RED'} in {time.time() - t:.0f} s: "
                        f"{entry['tally']}")
-    for seed in run.cfg["oracleSeeds"]:
+    for seed in slot_seeds(run, slot):
         keep = out / f"sweep-{seed}"
         if (keep / "crashed.txt").exists() and not (keep / "asserts.jsonl").exists():
             assert_hunt(run, sut, keep)
-    recheck_in_release(run, sut, out)
-    (out / "DONE").write_text(now() + "\n", encoding="utf-8")
-    run.status("oracle: DONE")
+    recheck_in_release(run, sut, out, slot)
+    (run.out / f"{slot}.DONE").write_text(now() + "\n", encoding="utf-8")
+    run.status(f"{slot}: DONE")
 
 
 def wave_rows(wave: Path) -> list[dict]:
@@ -295,36 +316,36 @@ def diverging_rows(report: Path) -> list[int]:
                                                 re.M)]
 
 
-def recheck_in_release(run: Run, sut: Path, out: Path) -> None:
-    """Every DIVERGE/FAULT row of every seed, re-recorded and compared with a Release consumer."""
-    target = out / "recheck-report.txt"
+def recheck_in_release(run: Run, sut: Path, out: Path, slot: str) -> None:
+    """Every DIVERGE/FAULT row of the slot's seeds, re-recorded and compared with a Release consumer."""
+    target = out / f"recheck-{slot}-report.txt"
     if target.exists():
         return
     keys = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "partial", "pos", "endpos")
     rows, origin = [], []
-    for seed in run.cfg["oracleSeeds"]:
+    for seed in slot_seeds(run, slot):
         keep = out / f"sweep-{seed}"
         wave = wave_rows(keep / "wave.jsonl")
         for n in diverging_rows(keep / "report.txt"):
             if 1 <= n <= len(wave):
                 rows.append({k: wave[n - 1][k] for k in keys if k in wave[n - 1]})
                 origin.append({"seed": seed, "row": n})
-    write_jsonl(out / "recheck-origin.jsonl", origin)
+    write_jsonl(out / f"recheck-{slot}-origin.jsonl", origin)
     if not rows:
         target.write_text("no diverging rows to re-check\n", encoding="utf-8")
         return
-    write_jsonl(out / "recheck-rows.jsonl", rows)
-    gate(run, "oracle", 2)
-    run.status(f"oracle: re-checking {len(rows)} diverging rows in Release")
+    write_jsonl(out / f"recheck-{slot}-rows.jsonl", rows)
+    gate(run, slot, 1.5)
+    run.status(f"{slot}: re-checking {len(rows)} diverging rows in Release")
     legacy = sut / "TestResults" / "oracle" / "report.txt"
     if legacy.exists():
         legacy.unlink()
-    call(["pwsh", "-NoProfile", "-File", str(sut / "tools" / "run-oracle.ps1"), "-Rows", str(out / "recheck-rows.jsonl"),
-          "-Configuration", "Release"], out / "recheck.log", sut)
+    call(["pwsh", "-NoProfile", "-File", str(sut / "tools" / "run-oracle.ps1"), "-Rows",
+          str(out / f"recheck-{slot}-rows.jsonl"), "-Configuration", "Release"], out / f"recheck-{slot}.log", sut)
     if legacy.exists():
         shutil.copy2(legacy, target)
     else:
-        target.write_text("the Release re-check produced no report; see recheck.log\n", encoding="utf-8")
+        target.write_text(f"the Release re-check produced no report; see recheck-{slot}.log\n", encoding="utf-8")
 
 
 def assert_hunt(run: Run, sut: Path, keep: Path) -> None:
@@ -337,7 +358,7 @@ def assert_hunt(run: Run, sut: Path, keep: Path) -> None:
         r.update({"id": i, "cell": w.get("generator", "?"), "tags": []})
         rows.append(r)
     write_jsonl(keep / "hunt-rows.jsonl", rows)
-    gate(run, "oracle", 3)
+    gate(run, "oracle", 2)
     run.status(f"oracle: assert hunt over {len(rows)} rows of {keep.name}")
     target = keep / "hunt.port.jsonl"
     call(["dotnet", "run", "-c", "Debug", str(sut / "tools" / "matrix" / "port-runner.cs"), "--",
@@ -377,7 +398,7 @@ def probe_chunks(run: Run, sut: Path, probe: Path, rows: list[dict], d: Path, ch
         if probe_lines(dst) >= len(part):
             continue
         write_jsonl(src, part)
-        gate(run, who, 2)
+        gate(run, who, 1)
         t = time.time()
         rc = call(["dotnet", "run", "-c", "Debug", str(probe), "--", str(src), "5"], d / "probe.log", sut,
                   {"DOTNET_GCHeapHardLimit": "0xC0000000"}, stdout=dst)
@@ -492,7 +513,7 @@ def run_py(run: Run, slot: str, rows: Path, name: str) -> Path:
     while True:
         if (results / "summary.md").exists() and (results / "cost.json").exists() and (results / "judged.ok").exists():
             return results
-        gate(run, slot, 3)
+        gate(run, slot, 2)
         rc = call([sys.executable, str(sut / "tools" / "matrix" / "run.py"), str(rows), "--run", name, "--chunk",
                    str(RUN_PY_CHUNK), "--max-minutes", str(RUN_PY_MINUTES)], log, sut)
         done = len(list(results.glob("chunk-*.c8.done")))
@@ -541,13 +562,12 @@ def part_matrix(run: Run) -> None:
 
 
 def part_done(run: Run, name: str) -> bool:
-    marker = {"oracle": run.out / "oracle" / "DONE"}.get(name, run.out / f"{name}.DONE")
-    return marker.exists()
+    return (run.out / f"{name}.DONE").exists()
 
 
 def cmd_part(run: Run, name: str) -> None:
     try:
-        {"oracle": part_oracle, "probe": part_probe, "matrix": part_matrix,
+        {"oracle": lambda r: part_oracle(r, "oracle"), "oracle2": lambda r: part_oracle(r, "oracle2"), "probe": part_probe, "matrix": part_matrix,
          "pa": lambda r: part_pairs(r, "pa"), "pb": lambda r: part_pairs(r, "pb")}[name](run)
     except SystemExit:
         raise
@@ -560,6 +580,7 @@ def cmd_all(run: Run, commit: str | None, smoke: bool) -> int:
     configure(run, commit, smoke)
     (run.out / "driver.pid").write_text(str(os.getpid()) + "\n", encoding="utf-8")
     run.status(f"driver: pid {os.getpid()}, commit {run.cfg['commit'][:8]}")
+    preflight(run)
     generate_rows(run)
     procs = {}
     for name in PARTS:
