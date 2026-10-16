@@ -1663,6 +1663,45 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with every repeat guard set up as upstream sets it up,
+    /// without D85 (ledger entry 84): one tail guard per repeat, whatever the rest of the match
+    /// reads, and a body guard wherever upstream's walk missed a reference in the body.
+    /// </summary>
+    /// <remarks>
+    /// D85 is three compile-time decisions, all on <c>RepeatInfo</c>: a tail key
+    /// (<c>TailKey</c>), a body guard switched off around a keyed tail
+    /// (<c>BodyHoldsKeyedTail</c>), and a body guard switched off where the body reads a group
+    /// (<c>BodyGuardDroppedForD85</c>). Undoing the three on a pattern compiled for this one call
+    /// leaves upstream's guards; the matcher takes upstream's path wherever <c>TailKey</c> is
+    /// <see langword="null"/>. The <c>keyed-tail-guard</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without D85, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamRepeatGuards(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                foreach (RepeatInfo info in compiled.PatternObject.RepeatInfoList)
+                {
+                    info.TailKey = null;
+                    info.BodyHoldsKeyedTail = false;
+                    if (info.BodyGuardDroppedForD85)
+                    {
+                        info.Status |= NodeStatus.Body;
+                    }
+                }
+            },
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with a fuzzy full-folded string editing a subject
     /// character that expands under full case folding one folded character at a time, as upstream
     /// does, and never whole.

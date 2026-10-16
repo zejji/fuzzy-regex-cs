@@ -3558,6 +3558,23 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>keyed-tail-guard</c>. Four were recorded 2026-10-16 by
+    /// <c>python tools/record-oracle.py --rows</c>: the smallest tail-guard form, the tail-guard
+    /// witness and the two body-guard witnesses of docs/DIVERGENCES.md. Three are battery
+    /// 20261016-1 rows (seed 608631196 row 24048, seed 180007244 row 24684, seed 94908142 row
+    /// 24089), a split, a sub and a search. Python re 3.14 gives this port's answer to the first.
+    /// </summary>
+    private const string _keyedTailGuardRows = """
+        {"generator": "rows", "pattern": "( +)*\\1", "flags": 0, "namedLists": {}, "subject": "    ", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(b?)(?:a*|b)*\\1c", "flags": 0, "namedLists": {}, "subject": "bac", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a*)a*(?:d\\1)?c", "flags": 0, "namedLists": {}, "subject": "adc", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": ".?(a*)(?:b\\1)?c", "flags": 0, "namedLists": {}, "subject": "aabaac", "operation": "search", "codepointSpan": [2, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 4, "captures": [[2, 4]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "interactions", "pattern": "^([\\w\\s]{1,3})+\\1", "flags": 0, "namedLists": {}, "subject": "ssİİﬁﬁ", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "İ", "ﬁﬁ"]}}
+        {"generator": "interactions", "pattern": "^([\\w\\s]+)*\\1", "flags": 16514, "namedLists": {}, "subject": "AAAA𝟮\r\n𝟮", "operation": "sub", "template": "\\x41>\\1", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "A>AA𝟮\r\n𝟮", "count": 1}}
+        {"generator": "interactions", "pattern": "([\\ ]+)*\\1", "flags": 16650, "namedLists": {}, "subject": "    ", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// The four rows of <c>verb-unwinds-through-unfinished-groups</c>, recorded 2026-09-26: an atomic
     /// group, a (*SKIP) in one, a positive lookahead and a quantified atomic group. PCRE2 10.47 gives
     /// this port's answer to each.
@@ -8440,6 +8457,28 @@ internal static class ExpectedDivergences
             """,
             Applies: static (row, ours) =>
                 row.Partial && OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamTailRunOut(row))
+        ),
+        new(
+            Id: "keyed-tail-guard",
+            Reason: "PORT RIGHT, D85 (ledger entry 84, owner 2026-10-16): a repeat's guard records that "
+                + "the rest of the match failed from a position, and upstream keeps that record "
+                + "although the rest reads a group, so a failure under one value of the group cuts a "
+                + "path that succeeds under another. `( +)*\\1` over four spaces is (0, 4) with "
+                + "g1 = (0, 2) upstream and g1 = (2, 3) here; `(b?)(?:a*|b)*\\1c` over 'bac' is (1, 3) "
+                + "upstream and (0, 3) here. Python re 3.14, PCRE2 10.47, Perl 5.42, Java 26, Node 24 "
+                + "and .NET 10 all give this port's answers (docs/DIVERGENCES.md). This port keys a "
+                + "tail guard on the groups the rest of the match reads and drops a body guard whose "
+                + "body reads a group (`TailGuardLiveness`, `Optimiser.DropBodyGuardsThatReadAGroup`).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamRepeatGuards`, which undoes those three "
+                + "compile-time decisions on the pattern it compiled and nothing else, reproduces "
+                + "upstream's recorded answer exactly, AND this port's live answer is the one being "
+                + "judged. A row this port gets wrong for any other reason still diverges with "
+                + "upstream's guards and is reported.",
+            PinnedBy: "NestedTailGuardTests",
+            Example: _keyedTailGuardRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamRepeatGuards(row))
         ),
         new(
             Id: "partial-edge-read",

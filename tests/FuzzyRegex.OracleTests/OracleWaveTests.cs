@@ -1764,6 +1764,51 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_keyed_tail_guard_does_not_explain_is_not_accounted_for()
+    {
+        // The controls for `keyed-tail-guard` (D85). This port's live answer to each example row is
+        // the family; upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert of the fix as the fix; and an empty match at 0 stands in for an
+        // unrelated defect on the same pattern.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "keyed-tail-guard", StringComparison.Ordinal))
+            .Subject;
+
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(entry.Example);
+        foreach (OracleRow row in rows)
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+
+        // A port bug on the same pattern: upstream recorded an answer that neither this port nor
+        // upstream's guards give (here, no match for `( +)*\1` over four spaces). This port's live
+        // answer diverges from it, but the ablation does not reproduce it, so the entry must leave
+        // the row to fail the sweep.
+        OracleRow portBug = rows[0] with
+        {
+            Expected = new NoMatchOutcome(),
+        };
+        IOracleOutcome live = OracleComparer.Run(portBug, TimeSpan.FromSeconds(5))!;
+        OracleComparer.Compare(portBug, live).Should().Be(OracleVerdict.Diverge);
+        entry.Applies(portBug, live).Should().BeFalse("upstream's guards do not give no match either");
+        ExpectedDivergences.For(portBug, live).Should().BeNull("no entry explains a no-match over four spaces");
+    }
+
+    [Test]
     [Arguments("partial-retry-reversed-slice")]
     [Arguments("bestmatch-walk-truncated-by-a-skip")]
     [Arguments("bounded-lazy-repeat-partial")]

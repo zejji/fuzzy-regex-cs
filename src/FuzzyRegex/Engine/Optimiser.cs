@@ -600,6 +600,7 @@ internal static class Optimiser
                 if (ReadsAGroup(node))
                 {
                     info.Status &= ~NodeStatus.Body;
+                    info.BodyGuardDroppedForD85 = true;
                     break;
                 }
 

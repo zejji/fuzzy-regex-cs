@@ -1006,5 +1006,9 @@ public sealed class ThreadSafetyTests
             // D85: set by TailGuardLiveness.MarkBodiesHoldingKeyedTails inside Compile, read by
             // MatchState.ActiveGuardList; matching never writes it.
             "RepeatInfo.BodyHoldsKeyedTail",
+            // D85: set by Optimiser.DropBodyGuardsThatReadAGroup inside Compile; the library never
+            // reads it. Only OracleComparer.RunWithTheUpstreamRepeatGuards does, on a pattern it
+            // compiled for that one call.
+            "RepeatInfo.BodyGuardDroppedForD85",
         };
 }
