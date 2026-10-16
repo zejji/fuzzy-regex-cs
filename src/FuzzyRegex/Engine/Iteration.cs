@@ -546,9 +546,16 @@ internal static class Iteration
     /// <param name="input">The subject.</param>
     /// <param name="start">Where the piece starts.</param>
     /// <param name="end">One past where it ends.</param>
-    /// <returns>The piece.</returns>
-    private static string Piece(string input, int start, int end) =>
-        end - start == 1 && input[start] < _latin1.Length ? _latin1[input[start]] : input[start..end];
+    /// <returns>The piece, empty when the start lies after the end, as upstream's <c>get_slice</c> answers (D89).</returns>
+    private static string Piece(string input, int start, int end)
+    {
+        if (end <= start)
+        {
+            return "";
+        }
+
+        return end - start == 1 && input[start] < _latin1.Length ? _latin1[input[start]] : input[start..end];
+    }
 
     /// <summary>
     /// Upstream <c>state_get_group</c> (<c>upstream/src/_regex.c</c> line 20818) with

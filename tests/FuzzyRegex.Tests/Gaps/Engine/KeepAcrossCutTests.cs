@@ -205,6 +205,15 @@ public sealed class KeepAcrossCutTests
         Span(new FuzzyRegex(@"(?>a\K)x|a").FullMatch("a")).Should().Be((0, 1)); // (1, 1)
         Span(new FuzzyRegex(@"(?=a\K)x|a").Match("a", partial: true)).Should().Be((0, 1)); // (1, 1)
 
+        // Attempt 0 fails for every continuation, since x cannot sit where b\Z needs b, so the
+        // attempt at 1 is reached whatever follows and b there is complete. Before D88 the
+        // discarded \K moved the next start, which made it a partial, pinned until now in
+        // PartialVerbRuleTests. Upstream 2026.9.10 answers a partial at (2, 2).
+        Match touched = new FuzzyRegex(@"a(?=b\Z)(?>\K)x|b").Match("ab", partial: true);
+        touched.PartialMatch.Should().BeFalse();
+        Span(touched).Should().Be((1, 2));
+        Span(new FuzzyRegex(@"a(?=b\Z)(?>\K)x|b").Match("ab")).Should().Be((1, 2)); // None
+
         // The partial path did not fail, so its \K stands: (1, 1) as upstream.
         Match partial = new FuzzyRegex(@"(?>a\K)x|ab").Match("a", partial: true);
         partial.PartialMatch.Should().BeTrue();

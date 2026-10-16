@@ -40,14 +40,21 @@ public class Capture
     /// <summary>The position in the subject at which the captured text starts.</summary>
     public int Index => _start;
 
-    /// <summary>The length of the captured text.</summary>
+    /// <summary>
+    /// The length of the captured text: negative when a <c>\K</c> inside a lookaround left the
+    /// start after the end, as <c>(?=y\K)</c> over <c>yy</c> does with (1, 0).
+    /// </summary>
     public int Length => _end - _start;
 
-    /// <summary>The captured text.</summary>
-    public string Value => _subject[_start.._end];
+    /// <summary>The captured text, empty when the start lies after the end (D89).</summary>
+    /// <remarks>
+    /// Upstream slices with <c>PyUnicode_Substring</c> (<c>get_slice</c>, <c>upstream/src/_regex.c</c>
+    /// line 18842), which answers '' for an end before the start.
+    /// </remarks>
+    public string Value => _end <= _start ? "" : _subject[_start.._end];
 
-    /// <summary>The captured text, without copying it out of the subject.</summary>
-    public ReadOnlySpan<char> ValueSpan => _subject.AsSpan(_start, _end - _start);
+    /// <summary>The captured text, without copying it out of the subject; empty as <see cref="Value"/> is.</summary>
+    public ReadOnlySpan<char> ValueSpan => _end <= _start ? default : _subject.AsSpan(_start, _end - _start);
 
     /// <summary>Returns <see cref="Value"/>.</summary>
     /// <returns>The captured text.</returns>
