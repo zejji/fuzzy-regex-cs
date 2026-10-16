@@ -30,9 +30,11 @@ from __future__ import annotations
 import collections
 import importlib.util
 import json
+import queue
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import regex
@@ -40,6 +42,9 @@ import regex
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "matrix"))
 import tagger  # noqa: E402
+
+sys.path.insert(0, str(HERE))
+import f6model  # noqa: E402
 
 RISKY = ("fuzzy", "backref", "lookahead", "neg-lookahead", "lookbehind", "neg-lookbehind", "atomic", "possessive",
          "verb", "conditional", "keep", "call", "flag-r", "partial", "slice", "flag-b", "flag-e", "flag-p")
@@ -51,8 +56,8 @@ HINTS = [
     ("D90?", lambda t, c, k: "partial" in t and {"lookahead", "lookbehind", "neg-lookahead", "neg-lookbehind"} & t
      and {"atomic", "possessive", "verb"} & t and "capture" in t,
      "partial + lookaround setting a group + a cut (D90, open)"),
-    ("D19/D28 (phantom partial)", lambda t, c, k: c == "C4" and k == "phantom",
-     "a partial match no continuation completes (inherited, pinned)"),
+    ("F63/F64 (phantom partial)", lambda t, c, k: c == "C4" and k == "phantom",
+     "a partial match no continuation completes: the decided partial contract"),
     ("D51 (call captures)", lambda t, c, k: c == "C2" and "groups" in k, "captures made inside a call"),
 ]
 # A self-check "failure" that is the port refusing the pattern at compile time (a left-recursion
@@ -120,9 +125,10 @@ def norm_regex_match(m):
 
 
 def upstream(row: dict):
-    """Upstream's answer to a probe row in the normal form, or ("ERR", type)."""
+    """Upstream's answer to a probe row in the normal form, or ("ERR", type). In this process: call it
+    only through upstream_many, since some rows crash `regex` itself (ledger entries 9 and 56)."""
     try:
-        p = regex.compile(row["pattern"])
+        p = regex.compile(row["pattern"], int(row.get("flags") or 0), **(row.get("namedLists") or {}))
         kw = {"partial": bool(row.get("partial")), "timeout": 2}
         s = row["subject"]
         args = [s] + ([row["pos"]] if "pos" in row else []) + ([row["endpos"]] if "endpos" in row else [])
@@ -136,6 +142,66 @@ def upstream(row: dict):
         return norm_regex_match(p.search(*args, **kw))
     except Exception as e:  # noqa: BLE001
         return ("ERR", type(e).__name__)
+
+
+def _tuples(x):
+    return tuple(_tuples(v) for v in x) if isinstance(x, list) else x
+
+
+UPSTREAM_ROW_SECONDS = 20
+
+
+def _pump(stream, lines: queue.Queue) -> None:
+    for line in stream:
+        lines.put(line)
+    lines.put(None)
+
+
+def write_jsonl(path: Path, rows) -> None:
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=True) + "\n")
+
+
+def upstream_many(rows: list[dict], work: Path) -> list:
+    """upstream() for every row, in child processes. A row that kills the child (battery run
+    20261016-1: `(?:(?P<g2>(?P<g1>(?:ba(?2)b|ab)))){d<=1}(?&g2)` match 'abbababa' partial, ledger
+    56, exit 0xC0000005 took the whole triage with it) or hangs it is answered ("ERR", "Crash") or
+    ("ERR", "Hang"), and the next child starts after it."""
+    src = work / "upstream-in.jsonl"
+    write_jsonl(src, rows)
+    out, start = [], 0
+    while start < len(rows):
+        proc = subprocess.Popen([sys.executable, str(Path(__file__)), "--upstream-worker", str(src), str(start)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, encoding="utf-8")
+        lines: queue.Queue = queue.Queue()
+        threading.Thread(target=_pump, args=(proc.stdout, lines), daemon=True).start()
+        while True:
+            try:
+                line = lines.get(timeout=UPSTREAM_ROW_SECONDS)
+            except queue.Empty:
+                proc.kill()
+                out.append(("ERR", "Hang"))
+                start += 1
+                break
+            if line is None:
+                proc.wait()
+                if start < len(rows):
+                    out.append(("ERR", "Crash"))
+                    start += 1
+                break
+            out.append(_tuples(json.loads(line)))
+            start += 1
+        proc.wait()
+    return out
+
+
+def upstream_worker(src: str, start: int) -> int:
+    rows = [json.loads(line) for line in open(src, encoding="utf-8") if line.strip()]
+    for row in rows[start:]:
+        print(json.dumps(upstream(row)), flush=True)
+    return 0
 
 
 def read_probe(path: Path) -> list[str]:
@@ -230,6 +296,8 @@ def bed_source(run: Path, f: Findings, bed_dir: Path) -> None:
     rows = load(bed_dir / "rows.jsonl")
     exp = load(bed_dir / "expected.jsonl")
     key = {(r["operation"], r["pattern"], r["subject"]): i for i, r in enumerate(rows)}
+    if (out / "release-recheck.txt").exists():
+        f.notes.append("bed Release re-check: " + (out / "release-recheck.txt").read_text(encoding="utf-8").strip())
     if (out / "compare.txt").exists():
         f.notes.append("bed compare.py: " + " / ".join(
             l.strip() for l in (out / "compare.txt").read_text(encoding="utf-8").splitlines()[:7]))
@@ -248,9 +316,18 @@ def bed_source(run: Path, f: Findings, bed_dir: Path) -> None:
         want, like, got = cmpm._norm(e["re"], ng), cmpm._norm(e["regex"], ng), cmpm.parse_answer(ans, ng)
         if got == want:
             continue
+        if not isinstance(got, str):
+            # KNOWN-DEFECTS F6: an empty iteration that changes a tested group is progress
+            # (upstream's rule, kept). f6model's A12u is a guard-free model of that rule; a port
+            # answer equal to it is the decided rule (run 20261016-1: 187 such rows came back
+            # UNJUDGED, 182 where regex agrees and 5 where regex's D85 tail guard breaks its own rule).
+            model = f6model.safe_run(row["pattern"], row["subject"], row["operation"], "A12u")
+            if (model is None or isinstance(model, dict)) and cmpm._norm(model, ng) == got:
+                f.known["bed: F6 (port = the model of upstream's empty-iteration rule, A12u)"] += 1
+                continue
         tags = {"backref"} | ({"conditional"} if "(?(" in row["pattern"] else set())
         if isinstance(got, str):
-            what = "timeout (Debug, 5 s)" if "Timeout" in got else got[7:].split(":")[0]
+            what = "timeout (Debug 5 s, then Release 30 s)" if "Timeout" in got else got[7:].split(":")[0]
             f.add("bed", "self" if "Assert" in got else "error", "C3" if "Assert" in got else "ERR", what, row, ans,
                   None, cluster=f"bed | {what} | {e['source']}", tags=tags)
         elif got == like:
@@ -318,7 +395,19 @@ def harness_source(run: Path, f: Findings, label: str, results: Path, rows_path:
             f.known[f"{label}: C1 expected {v['C1'][1]}"] += 1
         for check in SELF:
             status, kind, a, b = v[check]
-            if status in ("fail", "phantom"):
+            if status == "expected":
+                # run.py's own screens for the partial contract: C2 partial starts, C4 F66 starts.
+                f.known[f"{label}: {check} {kind}"] += 1
+                continue
+            if status == "phantom":
+                # A partial no continuation completes is the decided partial contract (KNOWN-DEFECTS
+                # F63/F64: a run-out presumes the rest of the pattern). Run 20261016-1: 755 of 799
+                # pair phantoms gave upstream's answer exactly and the other 44 were known
+                # divergences, which C1 reports in its own right.
+                counts[f"{check} phantom"] += 1
+                f.known[f"{label}: C4 phantom partial (F63/F64 partial contract)"] += 1
+                continue
+            if status == "fail":
                 kind_s = kind if check != "C3" else (a or "").split(" ")[0]
                 counts[f"{check} {status}"] += 1
                 if check == "C3" and REFUSAL in (a or "") and "(compile)" in (a or ""):
@@ -376,49 +465,52 @@ def candidates(row: dict) -> list[dict]:
     good = []
     for c in out:
         try:
-            regex.compile(c["pattern"])
+            regex.compile(c["pattern"], int(c.get("flags") or 0), **(c.get("namedLists") or {}))
         except Exception:  # noqa: BLE001
             continue
         good.append(c)
     return good
 
 
-def reduce_witnesses(witnesses: dict, probe_run, rounds: int = 12) -> dict:
+def reduce_witnesses(witnesses: dict, probe_run, work: Path, rounds: int = 12) -> dict:
     """{cluster: row} -> {cluster: reduced row}. The predicate: the port still differs from upstream
     and the row keeps its risky constructs. probe_run(rows) -> list of probe answers."""
-    def differs(row, ans):
-        return norm_probe(ans, row["operation"]) != upstream(row) and not (ans.startswith(("RegexMatchTimeout", "CRASH")))
+    def differs(row, ans, up):
+        return (norm_probe(ans, row["operation"]) != up and not ans.startswith(("RegexMatchTimeout", "CRASH"))
+                and up not in (("ERR", "Crash"), ("ERR", "Hang")))
 
     current = {}
-    first = probe_run(list(witnesses.values()))
-    for (k, row), ans in zip(witnesses.items(), first):
-        if differs(row, ans):
-            current[k] = (row, risky(tags_of(row)), ans)
+    first_rows = list(witnesses.values())
+    first = probe_run(first_rows)
+    for (k, row), ans, up in zip(witnesses.items(), first, upstream_many(first_rows, work)):
+        if differs(row, ans, up):
+            current[k] = (row, risky(tags_of(row)), ans, up)
     start = {k: v[0] for k, v in current.items()}
     for _ in range(rounds):
         batch, owner = [], []
-        for k, (row, sig, _a) in current.items():
+        for k, (row, sig, _a, _u) in current.items():
             for c in candidates(row):
                 batch.append(c)
                 owner.append(k)
         if not batch:
             break
         answers = probe_run(batch)
+        ups = upstream_many(batch, work)
         improved = False
         best = {}
-        for k, c, ans in zip(owner, batch, answers):
+        for k, c, ans, up in zip(owner, batch, answers, ups):
             size = len(c["pattern"]) + len(c["subject"])
-            if (k not in best or size < best[k][0]) and differs(c, ans) and risky(tags_of(c)) == current[k][1]:
-                best[k] = (size, c, ans)
-        for k, (size, c, ans) in best.items():
-            row, sig, _a = current[k]
+            if (k not in best or size < best[k][0]) and differs(c, ans, up) and risky(tags_of(c)) == current[k][1]:
+                best[k] = (size, c, ans, up)
+        for k, (size, c, ans, up) in best.items():
+            row, sig, _a, _u = current[k]
             if size < len(row["pattern"]) + len(row["subject"]):
-                current[k] = (c, sig, ans)
+                current[k] = (c, sig, ans, up)
                 improved = True
         if not improved:
             break
     # Only witnesses that actually shrank; each with the port's answer and upstream's normal form.
-    return {k: (row, ans, upstream(row)) for k, (row, _s, ans) in current.items() if row is not start[k]}
+    return {k: (row, ans, up) for k, (row, _s, ans, up) in current.items() if row is not start[k]}
 
 
 def make_probe_runner(run: Path):
@@ -435,7 +527,8 @@ def make_probe_runner(run: Path):
         src, dst = work / f"round-{counter[0]:02}.jsonl", work / f"round-{counter[0]:02}.out.txt"
         with open(src, "w", encoding="utf-8", newline="\n") as fh:
             for r in rows:
-                q = {k: r[k] for k in ("pattern", "subject", "operation", "partial", "pos", "endpos") if k in r}
+                q = {k: r[k] for k in ("pattern", "flags", "subject", "operation", "partial", "pos", "endpos",
+                                       "namedLists") if k in r}
                 fh.write(json.dumps(q, ensure_ascii=True) + "\n")
         with open(dst, "wb") as out:
             subprocess.run(["dotnet", "run", "-c", "Debug", str(probe), "--", str(src), "2"], cwd=sut, stdout=out,
@@ -485,16 +578,25 @@ def main(argv: list[str]) -> int:
         w = min(xs, key=lambda x: (len(x["row"].get("pattern", "")) + len(x["row"].get("subject", "")),
                                    x["row"].get("pattern", "")))
         witness[k] = w
-    reduced = {}
-    if do_reduce:
+    # The table is written first, without reductions, so a reducer failure can never lose it.
+    write_report(run, f, clusters, witness, {}, "not reduced yet" if do_reduce else "reduction off (--no-reduce)")
+    if not do_reduce:
+        return 0
+    try:
         runner = make_probe_runner(run)
         eligible = {k: w["row"] for k, w in witness.items()
-                    if runner and w["category"] != "self" and not w["row"].get("flags") and not w["row"].get("namedLists")
+                    if runner and w["category"] != "self"
                     and w["row"].get("operation") in ("search", "match", "fullmatch", "finditer")
                     and all(ord(ch) < 128 for ch in w["row"].get("pattern", "") + w["row"].get("subject", ""))}
-        if eligible:
-            reduced = reduce_witnesses(eligible, runner)
+        reduced = reduce_witnesses(eligible, runner, run / "reduce") if eligible else {}
+        note = f"{len(reduced)} of {len(eligible)} eligible witnesses reduced"
+    except Exception as e:  # noqa: BLE001 - a reducer failure degrades to "not reduced"
+        reduced, note = {}, f"NOT REDUCED: the reducer failed ({type(e).__name__}: {str(e)[:200]})"
+    write_report(run, f, clusters, witness, reduced, note)
+    return 0
 
+
+def write_report(run: Path, f: Findings, clusters: dict, witness: dict, reduced: dict, note: str) -> None:
     lines = [f"# Battery triage: {run.name}", ""]
     cfg = json.loads((run / "config.json").read_text(encoding="utf-8")) if (run / "config.json").exists() else {}
     lines += [f"Commit {cfg.get('commit', '?')}, master seed {cfg.get('master', '?')}, smoke {cfg.get('smoke')}.", "",
@@ -531,11 +633,12 @@ def main(argv: list[str]) -> int:
                      f"{cell(w['other'])} | {red} |")
     lines += ["", "## Known (accounted for by an existing screen)", "", "| What | Rows |", "|---|---|"]
     lines += [f"| {k} | {n} |" for k, n in sorted(f.known.items(), key=lambda kv: -kv[1])]
-    lines += ["", "## Counts and notes", ""] + [f"- {x}" for x in f.notes]
+    lines += ["", "## Counts and notes", ""] + [f"- {x}" for x in f.notes] + [f"- witness reduction: {note}"]
     (run / "triage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"{len(clusters)} clusters, {len(f.rows)} interesting rows, {sum(f.known.values())} known")
-    return 0
+    print(f"{len(clusters)} clusters, {len(f.rows)} interesting rows, {sum(f.known.values())} known; {note}")
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--upstream-worker"]:
+        sys.exit(upstream_worker(sys.argv[2], int(sys.argv[3])))
     sys.exit(main(sys.argv[1:]))

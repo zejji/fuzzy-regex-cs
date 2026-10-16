@@ -447,13 +447,53 @@ def part_probe(run: Run) -> None:
         outs = probe_chunks(run, sut, probe, rows, out / "chunks", 20000, "bed")
         with open(out / "probe-all.txt", "w", encoding="utf-8", newline="\n") as f:
             for o in outs:
-                f.write(o.read_text(encoding="utf-8", errors="replace"))
+                f.write("".join(ln for ln in open(o, encoding="utf-8", errors="replace") if is_answer(ln)))
+        recheck_bed_timeouts(run, sut, probe, rows, out)
         call([sys.executable, str(BED / "compare.py"), str(out / "probe-all.txt"), "--show", "0"], out / "compare.log",
              BED, stdout=out / "compare.txt")
         (out / "DONE").write_text(now() + "\n", encoding="utf-8")
         run.status("bed: DONE")
     part_control(run, sut, probe)
     (run.out / "probe.DONE").write_text(now() + "\n", encoding="utf-8")
+
+
+# 10 s was the brief's figure, but on a loaded machine (2026-10-16, an IDE holding 9 GB) two of run
+# 20261016-1's 35 slow rows still took over 10 s in Release; 30 s costs little on a few dozen rows.
+BED_RELEASE_TIMEOUT = 30
+
+
+def recheck_bed_timeouts(run: Run, sut: Path, probe: Path, rows: list[dict], out: Path) -> None:
+    """The bed's Debug timeouts asked again in Release with BED_RELEASE_TIMEOUT; an answer there replaces
+    the timeout in probe-all.txt. The bed's patterns are heavy on purpose: in run 20261016-1, 35 rows
+    timed out at 5 s in Debug and every one answered as re does in Release within 5 s (7 needed over
+    2 s). A row that still times out stays a timeout."""
+    answers = [ln for ln in open(out / "probe-all.txt", encoding="utf-8", errors="replace")]
+    slow = [i for i, ln in enumerate(answers) if "RegexMatchTimeoutException" in ln.split("\t")[3]]
+    if not slow:
+        (out / "release-recheck.txt").write_text("0 Debug timeouts\n", encoding="utf-8")
+        return
+    d = out / "release"
+    d.mkdir(exist_ok=True)
+    write_jsonl(d / "rows.jsonl", (rows[i] for i in slow))
+    gate(run, "bed", 1)
+    run.status(f"bed: {len(slow)} Debug timeouts asked again in Release ({BED_RELEASE_TIMEOUT} s)")
+    call(["dotnet", "run", "-c", "Release", str(probe), "--", str(d / "rows.jsonl"), str(BED_RELEASE_TIMEOUT)],
+         d / "probe.log", sut, {"DOTNET_GCHeapHardLimit": "0xC0000000"}, stdout=d / "out.txt")
+    got = [ln for ln in open(d / "out.txt", encoding="utf-8", errors="replace") if is_answer(ln)] \
+        if (d / "out.txt").exists() else []
+    replaced = still = 0
+    for i, ln in zip(slow, got):
+        if "RegexMatchTimeoutException" in ln.split("\t")[3]:
+            still += 1
+        else:
+            answers[i] = ln
+            replaced += 1
+    with open(out / "probe-all.txt", "w", encoding="utf-8", newline="\n") as f:
+        f.writelines(answers)
+    msg = (f"{len(slow)} Debug timeouts: {replaced} answered in Release, {still} still time out, "
+           f"{len(slow) - len(got)} unanswered")
+    (out / "release-recheck.txt").write_text(msg + "\n", encoding="utf-8")
+    run.status(f"bed: {msg}")
 
 
 def control_pattern(pattern: str) -> str | None:
