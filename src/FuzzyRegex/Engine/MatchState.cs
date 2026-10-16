@@ -231,13 +231,22 @@ internal sealed class GroupData
     /// match pays for these whether or not anyone reads a group: three groups with one capture each
     /// cost 240 bytes as seven objects and 88 as this one (C2, the <c>ParseLogLines</c> row).
     /// </para>
+    /// <para>
+    /// NOT UPSTREAM'S, D87: <paramref name="attemptStart"/>, when given, is one more number after
+    /// the spans, which nothing indexed by group reaches. It rides here so that only the matches of
+    /// a pattern that needs it pay for it (<c>Match.AttemptStart</c>).
+    /// </para>
     /// </remarks>
     /// <param name="groups">The state's groups.</param>
     /// <param name="groupCount">How many to pack - upstream's <c>public_group_count</c>.</param>
-    /// <returns>The packed groups, or the shared empty array for a pattern without groups.</returns>
-    internal static int[] PackSpans(GroupData[] groups, int groupCount)
+    /// <param name="attemptStart">Where the match's attempt began, to keep after the spans, or nothing.</param>
+    /// <returns>
+    /// The packed groups, or the shared empty array for a pattern without groups and no
+    /// <paramref name="attemptStart"/>.
+    /// </returns>
+    internal static int[] PackSpans(GroupData[] groups, int groupCount, int? attemptStart)
     {
-        if (groupCount == 0)
+        if (groupCount == 0 && attemptStart is null)
         {
             return [];
         }
@@ -248,7 +257,12 @@ internal sealed class GroupData
             length += 2 * groups[g].Count;
         }
 
-        int[] packed = new int[length];
+        int[] packed = new int[attemptStart is null ? length : length + 1];
+        if (attemptStart is { } attempt)
+        {
+            packed[length] = attempt;
+        }
+
         int at = groupCount * _packedHeaderSize;
         for (int g = 0; g < groupCount; g++)
         {

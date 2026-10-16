@@ -1065,6 +1065,7 @@ public sealed class FuzzyRegex
         // Upstream's rule that a reverse match reports its two ends the other way round (:20795).
         int matchStart = state.Reverse ? state.TextPos : state.MatchPos;
         int matchEnd = state.Reverse ? state.MatchPos : state.TextPos;
+        int? attemptStart = PatternObject.KeepInSubmatch ? state.AttemptStart : null;
 
         return new Match(
             this,
@@ -1074,7 +1075,9 @@ public sealed class FuzzyRegex
             success: true,
             // Copied, because the state's arrays are about to be disposed and are reused by the next
             // match: a Match sharing them would change under its owner (copy_groups, :20621).
-            Engine.GroupData.PackSpans(state.Groups, _compiled.GroupCount),
+            // D87: with the attempt's start after them for a pattern that can need it (see
+            // Match.AttemptStart).
+            Engine.GroupData.PackSpans(state.Groups, _compiled.GroupCount, attemptStart),
             // The slice, not the match, because Match.NextMatch resumes inside it - and the slice the
             // CALLER asked for, not whatever a `(*SKIP)` left behind. `DoMatch` puts the slice back
             // at the start of every match (see the reset there), so a scan is unaffected by a verb in
@@ -1103,8 +1106,7 @@ public sealed class FuzzyRegex
                 : default,
             // Copied for the same reason the groups are: the state is reused by the next match.
             fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null,
-            scan: state.Scan,
-            attemptStart: state.AttemptStart
+            scan: state.Scan
         );
     }
 
