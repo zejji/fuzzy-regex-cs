@@ -325,7 +325,10 @@ def recheck_in_release(run: Run, sut: Path, out: Path, slot: str) -> None:
     target = out / f"recheck-{slot}-report.txt"
     if target.exists():
         return
-    keys = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "partial", "pos", "endpos")
+    # The recorder's row inputs (record-oracle.py reads template, count and timeout as well); a sub
+    # row without its template is refused and the whole re-check records nothing (run 20261016-1).
+    keys = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "partial", "pos", "endpos",
+            "template", "count", "timeout")
     rows, origin = [], []
     for seed in slot_seeds(run, slot):
         keep = out / f"sweep-{seed}"
