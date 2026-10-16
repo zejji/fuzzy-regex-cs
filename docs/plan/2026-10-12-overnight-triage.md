@@ -241,3 +241,22 @@ POSIX with BESTMATCH, and overlapped scans.
 compared reported starts and needed the attempt start too (`(?b)(?:xa\K|a)(?:By){e<=1}` over 'xaCy'
 gave (1,4) instead of (2,4)). 43 changed source lines, comments aside. Each attacked case above has a
 test, and the expected answers are the flag-free search's. Details in known-defects row D86.
+
+### Seed 20260927 at 2,000 rows (fix/night-small, 2026-10-16): five rows judged, no new defect
+
+The five rows the 300-row gate does not reach and the 2,000-row sweeps on 9b3819c4, `fix/d87` and
+this branch all leave unaccounted. Each was reproduced against regex 2026.9.10, minimised, and
+checked with a control that removes the mechanism (scripts and outputs in
+`.scratch/s1016/night/small/`: `abl*.jsonl`, `abl*-up.txt`, `abl*-port.raw`).
+
+| row | generator | cause | witness |
+|---|---|---|---|
+| 25114 | interactions | ledger 44 + ledger 11 | `(?:\d+){d<=2}` over 'X': upstream deletes twice, the port once; upstream's change list holds an insertion its counts deny |
+| 32438 | partial | ledger 2 | `(?i)(\p{Ll}+?)` + U+10400 over U+10400 U+1F600, partial fullmatch: upstream P(0,2), port None; greedy None on both |
+| 33741 | partial | ledger 5 | `( *)\1\w(*SKIP)\d` over ' B', partial search: upstream P(2,2); `(*PRUNE)`, no verb and pos=1 give P(1,2), the port's answer |
+| 38631 | verbs | ledger 5 | `(?m)(?r)[^a]*?(*SKIP)\s$` over CR LF CR LF 'xx', finditer: upstream adds (1,2), its own answer for endpos=2 |
+| 41409 | fuzzy | ledger 70 + D19 | `(?:\Z){i<=1}a` over 'x', partial match: upstream P(0,1) with `\Z` true at the edge, port None; the port's row answer is a trailing insertion's run-out, which presumes the rest |
+
+41409 is worth a second look by whoever next revisits the partial contract: neither engine's answer
+can be completed (`a+` must follow `\Z`), so both are phantoms, and the port's is the one F64 (D19)
+accepts by contract. Every row's judgement is in `JudgedDivergences.jsonl`.
