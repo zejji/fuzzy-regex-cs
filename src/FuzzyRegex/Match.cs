@@ -40,14 +40,21 @@ public class Capture
     /// <summary>The position in the subject at which the captured text starts.</summary>
     public int Index => _start;
 
-    /// <summary>The length of the captured text.</summary>
+    /// <summary>
+    /// The length of the captured text: negative when a <c>\K</c> inside a lookaround left the
+    /// start after the end, as <c>(?=y\K)</c> over <c>yy</c> does with (1, 0).
+    /// </summary>
     public int Length => _end - _start;
 
-    /// <summary>The captured text.</summary>
-    public string Value => _subject[_start.._end];
+    /// <summary>The captured text, empty when the start lies after the end (D89).</summary>
+    /// <remarks>
+    /// Upstream slices with <c>PyUnicode_Substring</c> (<c>get_slice</c>, <c>upstream/src/_regex.c</c>
+    /// line 18842), which answers '' for an end before the start.
+    /// </remarks>
+    public string Value => _end <= _start ? "" : _subject[_start.._end];
 
-    /// <summary>The captured text, without copying it out of the subject.</summary>
-    public ReadOnlySpan<char> ValueSpan => _subject.AsSpan(_start, _end - _start);
+    /// <summary>The captured text, without copying it out of the subject; empty as <see cref="Value"/> is.</summary>
+    public ReadOnlySpan<char> ValueSpan => _end <= _start ? default : _subject.AsSpan(_start, _end - _start);
 
     /// <summary>Returns <see cref="Value"/>.</summary>
     /// <returns>The captured text.</returns>
@@ -194,7 +201,9 @@ public sealed class Match : Group
     /// <param name="spans">
     /// The engine's group data, already packed out of the state by
     /// <see cref="Engine.GroupData.PackSpans"/> - the state's arrays are reused by the next match,
-    /// so a match that shared them would change under its owner.
+    /// so a match that shared them would change under its owner. For a pattern with
+    /// <see cref="Engine.PatternObject.KeepInSubmatch"/> set it ends with where the match's attempt
+    /// began (<see cref="AttemptStart"/>).
     /// </param>
     /// <param name="sliceStart">
     /// Where the slice this match was found in starts, which <see cref="NextMatch"/> resumes inside
@@ -585,9 +594,24 @@ public sealed class Match : Group
                 _sliceStart,
                 _sliceEnd,
                 _overlapped,
-                new(_scanCleanStart, _scanCleanEnd, _scanFound)
+                new(_scanCleanStart, _scanCleanEnd, _scanFound),
+                AttemptStart
             )
             : _regex.NoMatch(_subject);
+
+    /// <summary>
+    /// Where the attempt that found this match began, which <see cref="NextMatch"/> needs when a
+    /// <c>\K</c> inside a lookaround moved the reported span away from it (D87; see
+    /// <c>MatchState.AdvancePastMatch</c>).
+    /// </summary>
+    /// <remarks>
+    /// Only a pattern with <see cref="Engine.PatternObject.KeepInSubmatch"/> set reads it, so only
+    /// that pattern's matches carry it, as the last number in <see cref="_spans"/>. A field of its
+    /// own cost every match 8 bytes, a whole word of padding (measured 2026-10-15, the
+    /// <c>Matches</c> walks in <c>AllocationTests</c>). For any other pattern this answers the
+    /// reported start, which nothing reads.
+    /// </remarks>
+    private int AttemptStart => _regex.PatternObject.KeepInSubmatch ? _spans[^1] : _start;
 
     /// <summary>
     /// Expands a replacement template against this match, so <c>\1</c> and <c>\g&lt;name&gt;</c>

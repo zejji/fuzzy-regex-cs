@@ -194,6 +194,7 @@ internal static class Iteration
     /// What the state that found the match knew about the subject; see
     /// <see cref="MatchState.Create"/>.
     /// </param>
+    /// <param name="attemptStart">Where the attempt that found the match began (D87).</param>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The search ran out of time, against the PATTERN's budget. This is the one matching
@@ -212,7 +213,8 @@ internal static class Iteration
         int sliceStart,
         int sliceEnd,
         bool overlapped,
-        SubjectScan scan
+        SubjectScan scan,
+        int attemptStart
     ) =>
         Step(
             regex,
@@ -222,7 +224,7 @@ internal static class Iteration
             overlapped,
             partial: false,
             regex.PatternLimits,
-            resumeAfter: (matchStart, matchEnd),
+            resumeAfter: (matchStart, matchEnd, attemptStart),
             scan
         );
 
@@ -239,8 +241,8 @@ internal static class Iteration
     /// <param name="partial">Whether a trailing partial match may be reported.</param>
     /// <param name="limits">The time budget and cancellation token bounding this step.</param>
     /// <param name="resumeAfter">
-    /// The previous match's (start, end) in the subject, or <see langword="null"/> to start the
-    /// walk.
+    /// The previous match's (start, end) in the subject and where its attempt began, or
+    /// <see langword="null"/> to start the walk.
     /// </param>
     /// <param name="scan">Passed to <see cref="MatchState.Create"/>.</param>
     /// <returns>The match, or an unsuccessful match if there is none.</returns>
@@ -252,7 +254,7 @@ internal static class Iteration
         bool overlapped,
         bool partial,
         MatchLimits limits,
-        (int Start, int End)? resumeAfter,
+        (int Start, int End, int AttemptStart)? resumeAfter,
         SubjectScan scan
     )
     {
@@ -277,6 +279,7 @@ internal static class Iteration
             // inverted.
             state.MatchPos = state.Reverse ? previous.End : previous.Start;
             state.TextPos = state.Reverse ? previous.Start : previous.End;
+            state.AttemptStart = previous.AttemptStart;
             state.AdvancePastMatch();
         }
 
@@ -543,9 +546,16 @@ internal static class Iteration
     /// <param name="input">The subject.</param>
     /// <param name="start">Where the piece starts.</param>
     /// <param name="end">One past where it ends.</param>
-    /// <returns>The piece.</returns>
-    private static string Piece(string input, int start, int end) =>
-        end - start == 1 && input[start] < _latin1.Length ? _latin1[input[start]] : input[start..end];
+    /// <returns>The piece, empty when the start lies after the end, as upstream's <c>get_slice</c> answers (D89).</returns>
+    private static string Piece(string input, int start, int end)
+    {
+        if (end <= start)
+        {
+            return "";
+        }
+
+        return end - start == 1 && input[start] < _latin1.Length ? _latin1[input[start]] : input[start..end];
+    }
 
     /// <summary>
     /// Upstream <c>state_get_group</c> (<c>upstream/src/_regex.c</c> line 20818) with
