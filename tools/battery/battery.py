@@ -48,7 +48,9 @@ MAIN = Path(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--path-format=
                            capture_output=True, text=True, check=True).stdout.strip()).parent
 OUT_ROOT = MAIN / ".scratch" / "battery"
 LOCK = MAIN / ".scratch" / "test-lock"
-FREE_FLOOR_GB = 6
+# BATTERY_FREE_FLOOR_GB lowers the floor for a resumed run whose remaining parts are light (owner's
+# call; 2026-10-16 the last pair chunks peaked at 190 MB while an IDE held the machine under 6 GB).
+FREE_FLOOR_GB = float(os.environ.get("BATTERY_FREE_FLOOR_GB", "6"))
 PARTS = ("oracle", "oracle2", "probe", "pa", "pb", "matrix")
 RUN_PY_CHUNK = 500
 RUN_PY_MINUTES = 10  # run.py returns after this, so the gate is re-checked between its stretches
