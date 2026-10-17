@@ -1352,6 +1352,108 @@ public sealed class FuzzyBestMatchTests
         (plain.Index, plain.Index + plain.Length).Should().Be((0, 1));
     }
 
+    // D102: the budget BESTMATCH and ENHANCEMATCH hold a run to is a search device, and it must not
+    // decide a test. A negative lookaround's body, and a conditional's test, run with the budget
+    // lifted, so a body that matches with errors still matches. Before the fix, at 0 in 'x' the
+    // lookahead spent one deletion, the budget then had no room for the body's substitution, the
+    // body failed, and `(?!a{s<=1})` passed although `a{s<=1}` matches 'x'. Expected answers are
+    // the flagless engine's own matches ranked by the flag; `regex` 2026.9.10 runs away on most of
+    // the BESTMATCH rows (ledger entry 32) and answers the ENHANCEMATCH rows as below
+    // (.scratch/s1016/d102/NOTES.md).
+    [Test]
+    [Arguments("(?b)(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
+    [Arguments("(?b)(?:b){d<=1}x??(?!a{s<=1})", "xx", 1, 2, 0, 0, 1)]
+    [Arguments("(?b)(?r)(?<!a{s<=1})\\w??(?<=a{d<=1})", "xx", 0, 1, 0, 0, 1)]
+    [Arguments("(?b)(?:(?:yy){d<=2}^|x(?=a{d<=1})\\w??(?<!a{s<=1}))", "xx", 0, 0, 0, 0, 2)]
+    [Arguments("(?b)(?=a{d<=1})(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 1, 1, 0, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 0, 1, 0, 0, 2)]
+    [Arguments("(?b)(?=a{d<=1})(?(?!a{s<=1})\\w??|x)", "x", 1, 1, 0, 0, 1)]
+    [Arguments("(?b)(?=a{d<=1})(?(?=a{s<=1})x|\\w??)", "x", 1, 1, 0, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})(?(?!a{s<=1})\\w??|x)", "x", 0, 1, 1, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})(?(?=a{s<=1})x|\\w??)", "x", 0, 1, 1, 0, 1)]
+    public void The_ranking_budget_does_not_stop_a_test_s_body_from_matching(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((start, end, new FuzzyCounts(substitutions, insertions, deletions)));
+    }
+
+    // D102's witness through each operation, with the flagless pattern as the control: (0, 0) is
+    // not a match, because `a{s<=1}` matches 'x' at 0.
+    [Test]
+    public void A_bestmatch_negative_lookahead_whose_body_needs_an_error_fails_in_every_operation()
+    {
+        const string pattern = "(?b)(?=a{d<=1})\\w??(?!a{s<=1})";
+        var regex = new FuzzyRegex(pattern);
+
+        Match matched = regex.MatchAtStart("x");
+        (matched.Index, matched.Index + matched.Length).Should().Be((0, 1));
+
+        Match full = regex.FullMatch("x");
+        (full.Index, full.Index + full.Length).Should().Be((0, 1));
+
+        Scan(pattern, "xx").Should().Equal("(1,2) 0,0,1 d:1", "(2,2) 0,0,1 d:2");
+        Scan(pattern[4..], "xx").Should().Equal("(1,2) 0,0,1 d:1", "(2,2) 0,0,1 d:2");
+    }
+
+    // The controls D102's fix must not move: the flagless witness and its ENHANCEMATCH twin, which
+    // never tightened the budget before the body ran, and a positive lookahead, whose body's errors
+    // belong to the match, so the budget does bound them. `regex` 2026.9.10 answers all three
+    // rows the same.
+    [Test]
+    [Arguments("(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
+    [Arguments("(?b)(?=a{d<=1})\\w??(?=a{s<=1})", "x", 0, 0, 1, 0, 1)]
+    public void A_test_s_body_is_unchanged_where_the_budget_never_reached_it(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Index, m.Index + m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((start, end, new FuzzyCounts(substitutions, insertions, deletions)));
+    }
+
+    // D102's oracle row (battery run 6, R1): a reversed, POSIX, overlapped BESTMATCH scan whose
+    // negative lookbehind's body matches 'AA\n\n' with one \W substitution, so (8, 12), the first
+    // match the port reported, is not a match.
+    [Test]
+    public void The_battery_row_with_a_fuzzy_negative_lookbehind_reports_only_matches()
+    {
+        const string pattern =
+            "(?b)(?r)(?p)(?<!(?:([\\p{L}\\p{N}]{3,}?)(?:[^\\d]){s<=1}){s<=1:\\W})[\\w--[0-9]]{1,2}?"
+            + "(?<=(?:[[a-z]--[aei]]+[\\w--[0-9]]){d<=1})";
+        const FuzzyRegexOptions options =
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version1;
+
+        string[] spans =
+        [
+            .. new FuzzyRegex(pattern, options)
+                .Matches("\U0001D518\U0001D518AA\n\n\U0001D518\U0001D518\U0001F600", overlapped: true)
+                .Select(static m => $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts}"),
+        ];
+
+        spans.Should().NotContain(static s => s.StartsWith("(8,12)", StringComparison.Ordinal));
+    }
+
     // D78: AFTER AN EMPTY MATCH, A BESTMATCH SCAN EXCLUDES ONLY THE EMPTY MATCH AT THE RESUME
     // POSITION. Upstream's ban on a second empty match (`_regex.c:15164`) compares with the search
     // anchor, and every candidate re-run of `do_best_fuzzy_match` resets the anchor to its own start
