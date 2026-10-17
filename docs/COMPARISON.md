@@ -1858,7 +1858,7 @@ Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
 A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
 neither. There is no option to restore the upstream answer. Ledger entry 51.
 
-### Below a minimum, an exact item can have a character inserted in front of it
+### Below a fuzzy section's minimum, an item that matched exactly is also tried with a text character inserted in front of it
 
 The same order problem one step earlier. Upstream tries errors on an item only when it fails to
 match, so when a later item has to take the error a minimum asks for, and only an extra character
