@@ -6858,15 +6858,21 @@ internal static class Matcher
     /// on the saved stack when it opened (the depth sits under its backtracking entry), so a call
     /// opened inside its body is one whose depth lies above that state, as amendment 2's assert 3
     /// reads it. A call open around the construct lies below it and does not count.
+    /// <para>
+    /// A pattern that reads captures is modelled (D97): a call's return restores every group's
+    /// count and current (<see cref="AdvanceGroupCall"/>), so a call the body makes after the item
+    /// changes no capture, and the groups a run-out leaves unknown (<see cref="Node.RunOutGroups"/>)
+    /// are those the body reaches with each call stepped over. Until D97 any call there answered
+    /// every run-out at once, a phantom partial: `(x)(?1)(?=\1)\Z` over 'xx'.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="mark">The construct's pruning mark.</param>
     /// <returns><see langword="true"/> if a call opened in the body is open, or the pattern needs a
-    /// model the compiler skips for patterns with calls: the groups a run-out leaves unknown
-    /// (<see cref="Node.RunOutGroups"/>, only where captures are read) and the section around a
-    /// lookaround (<see cref="Node.EnclosingSection"/>, only where something is fuzzy).</returns>
+    /// model the compiler skips for patterns with calls: the section around a lookaround
+    /// (<see cref="Node.EnclosingSection"/>, only where something is fuzzy).</returns>
     private static bool ACallOpenedInTheBodyIsOpenOrUnmodelled(MatchState state, long mark) =>
-        state.Pattern.ReadsCapturesWhileMatching || state.Pattern.IsFuzzy || ACallOpenedInTheBodyIsOpen(state, mark);
+        state.Pattern.IsFuzzy || ACallOpenedInTheBodyIsOpen(state, mark);
 
     /// <summary>NOT UPSTREAM'S, D11: the half of <see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/> that reads the stacks.</summary>
     /// <param name="state">The match state.</param>

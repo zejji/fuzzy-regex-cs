@@ -1673,8 +1673,8 @@ internal sealed class PatternObject
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
-    /// group call's target is not followed, and a pattern with group calls does not continue a
-    /// run-out (<c>Matcher.RunOutInALookaroundBody</c>), so its bodies are never read.
+    /// group call's target is not followed: the walk goes on at its return node, and a run-out
+    /// inside a call the body opened is answered at once (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </remarks>
     /// <param name="pattern">The pattern, with its nodes numbered.</param>
     private static void SetLookaroundBodies(PatternObject pattern)
@@ -1724,7 +1724,8 @@ internal sealed class PatternObject
             test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
         }
 
-        if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
+        // A call is stepped over (D97): its return restores every capture, so it adds no group.
+        if (pattern.ReadsCapturesWhileMatching)
         {
             SetRunOutGroups(pattern);
         }

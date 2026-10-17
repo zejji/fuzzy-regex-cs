@@ -1194,6 +1194,8 @@ Match m = new FuzzyRegex(@"(?=..)[ab]").MatchAtStart("x", partial: true);
 Console.WriteLine(m.Success);   // False - upstream answers a partial at (0, 1)
 // The branch x of the negative lookahead matches the text held, so the lookahead fails for every continuation.
 Console.WriteLine(new FuzzyRegex(@"(?!.a|x)x").MatchAtStart("x", partial: true).Success);   // False - upstream: True
+// The same for a backreference, with a group call in the pattern: \1 needs an 'x' at 2, \Z the end.
+Console.WriteLine(new FuzzyRegex(@"(x)(?1)(?=\1)\Z").MatchAtStart("xx", partial: true).Success);   // False - upstream: True
 // A search can still start at the edge, where a longer text could begin a match.
 Match s = new FuzzyRegex(@"(?=..)[ab]").Match("x", partial: true);
 Console.WriteLine((s.Success, s.PartialMatch, s.Index, s.Length));   // (True, True, 1, 0)
