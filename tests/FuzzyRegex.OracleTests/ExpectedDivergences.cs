@@ -3558,6 +3558,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>call-reentry-opening-a-section-is-refused</c>, recorded 2026-10-17 by
+    /// <c>python tools/record-oracle.py --rows</c>: the (*SKIP) witness of D93 over 'b' and 'bb',
+    /// and its (*PRUNE) twin. Upstream's change positions on all three contradict its own counts
+    /// (ledger entry 11); its anchored re-ask gives two deletions, as this port does.
+    /// </summary>
+    private const string _reentryInANewSectionRows = """
+        {"generator": "rows", "pattern": "(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [1]}}, "selfContradiction": ["fuzzy-counts-match-changes"]}
+        {"generator": "rows", "pattern": "(?:a(*PRUNE)|(?:a(?R)|bb){2s+1d<=2})", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}], "selfContradiction": ["fuzzy-counts-match-changes"]}
+        {"generator": "rows", "pattern": "(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "flags": 0, "namedLists": {}, "subject": "bb", "operation": "search", "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [], "deletions": []}}, "selfContradiction": ["fuzzy-counts-match-changes"]}
+        """;
+
+    /// <summary>
     /// The rows of <c>keyed-tail-guard</c>. Four were recorded 2026-10-16 by
     /// <c>python tools/record-oracle.py --rows</c>: the smallest tail-guard form, the tail-guard
     /// witness and the two body-guard witnesses of docs/DIVERGENCES.md. Three are battery
@@ -8457,6 +8469,25 @@ internal static class ExpectedDivergences
             """,
             Applies: static (row, ours) =>
                 row.Partial && OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamTailRunOut(row))
+        ),
+        new(
+            Id: "call-reentry-opening-a-section-is-refused",
+            Reason: "PORT DECISION, D93 (DECISIONS 2026-10-17, amending D40): a call that re-enters a "
+                + "call of the same group already open at the same position, where the re-entry opens a "
+                + "new fuzzy section, is refused, as left recursion is; Perl and PCRE2 raise an error on "
+                + "recursion at the same position. Upstream runs it, and the deeper level can pass a "
+                + "(*SKIP) or (*PRUNE) on a path the outer section rejects: "
+                + "`(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})` over 'b' is (1, 1) upstream and (0, 0) here, "
+                + "both with two deletions (docs/DIVERGENCES.md).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheReentryInANewSection`, which lets such a re-entry run and "
+                + "changes nothing else, reproduces upstream's recorded answer, bar change positions "
+                + "upstream's own re-ask proves leaked, AND this port's live answer is the one being "
+                + "judged.",
+            PinnedBy: "CallInFuzzySectionTests",
+            Example: _reentryInANewSectionRows,
+            Applies: static (row, ours) =>
+                TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithTheReentryInANewSection(row))
         ),
         new(
             Id: "keyed-tail-guard",

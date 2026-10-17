@@ -1663,6 +1663,29 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with the call guard comparing section counts across a
+    /// newly opened fuzzy section (D93's exception switched off), so a call that re-enters an open
+    /// call of its group at the same position inside a new section runs, as upstream runs it.
+    /// </summary>
+    /// <remarks>
+    /// <c>CallGuardComparesAcrossSections</c> is the one switch, read only by the guard. The
+    /// <c>call-reentry-opening-a-section-is-refused</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without D93's exception, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheReentryInANewSection(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.CallGuardComparesAcrossSections = true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with every repeat guard set up as upstream sets it up,
     /// without D85 (ledger entry 84): one tail guard per repeat, whatever the rest of the match
     /// reads, and a body guard wherever upstream's walk missed a reference in the body.

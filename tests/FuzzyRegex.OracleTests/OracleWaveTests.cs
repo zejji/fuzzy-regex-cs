@@ -1764,6 +1764,40 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_section_reentry_refusal_does_not_explain_is_not_accounted_for()
+    {
+        // The controls for `call-reentry-opening-a-section-is-refused` (D93). This port's live answer
+        // to each example row is the family; upstream's own answer is not; and an empty match at 0
+        // stands in for an unrelated defect on the same pattern. On the first row an empty match at 0
+        // is this port's answer, so the control uses a no-match there instead.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "call-reentry-opening-a-section-is-refused", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(entry.Example);
+        rows.Should().HaveCount(3);
+        foreach (OracleRow row in rows)
+        {
+            IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+            OracleComparer
+                .Compare(row, live)
+                .Should()
+                .Be(OracleVerdict.Diverge, "{0} over {1}", row.Pattern, row.Subject);
+            (ExpectedDivergences.For(row, live)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} over {1} is the family", row.Pattern, row.Subject);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry.Applies(row, new NoMatchOutcome()).Should().BeFalse("no match over {0} is a defect", row.Subject);
+        }
+    }
+
+    [Test]
     public void A_row_the_keyed_tail_guard_does_not_explain_is_not_accounted_for()
     {
         // The controls for `keyed-tail-guard` (D85). This port's live answer to each example row is

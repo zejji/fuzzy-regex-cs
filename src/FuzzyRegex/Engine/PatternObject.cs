@@ -580,6 +580,15 @@ internal sealed class PatternObject
     internal bool CallMemoKeyOmitsPosition;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library (D93): whether the call guard compares a
+    /// re-entry's section counts with an open call's even when the re-entry has opened a new fuzzy
+    /// section, so such a re-entry runs where the library refuses it (DECISIONS, 2026-10-17). The
+    /// oracle and the matrix set it to show that the refusal is the whole of a difference from the
+    /// written-out form or from upstream (<c>OracleComparer.RunWithTheReentryInANewSection</c>).
+    /// </summary>
+    internal bool CallGuardComparesAcrossSections;
+
+    /// <summary>
     /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
     /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
     /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which

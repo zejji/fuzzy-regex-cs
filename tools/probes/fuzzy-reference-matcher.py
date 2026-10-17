@@ -65,6 +65,12 @@ of mrab-regex 2026.9.10):
    never swallows text where a later match could start, and u is the leftmost
    later start, so c is kept exactly when nothing later lies inside it.
    PINNED_ANCHOR = False gives upstream's rule.
+5a. A pattern whose first item, looking into leading groups, is ^ or \A is
+   searched as a match at the start of the text, so rule 5's ban does not
+   apply (basic_match turns such a search into an anchored match,
+   _regex.c:11751-11760; DECISIONS 2026-09-14, S50). Measured 2026-10-17:
+   search "^(?:a){i<=1,d<=1}" "ba" is (0, 2) with one insertion in upstream
+   and the port; with the ban the reference gave (0, 0) with one deletion.
 6. Error limits are checked before each error (this_error_permitted,
    _regex.c:9676-9690); minimums at the section end (fuzzy_within_constraints,
    _regex.c:9709-9745). Here minimums are checked after the trailing
@@ -73,9 +79,14 @@ of mrab-regex 2026.9.10):
    offers trailing insertions is pushed at :12500-12511), so a section that
    ends below its minimum never tries one (ledger entry 51, known defect D9).
 6a. While an open section is below one of its minimums, an item that matched
-   exactly is also offered an insertion in front of it (after the exact path,
-   before rule 3's deletion), so the item can move on and a later item can
-   take the error the minimum asks for. Without it fullmatch
+   exactly is also offered an insertion in front of it (after the exact path
+   and after rule 3's deletion), so the item can move on and a later item can
+   take the error the minimum asks for. The order is the port's and
+   upstream's wherever both find the fit: they delete the matched item (ledger
+   42) before they would insert in front of it. Battery run 20261016-2 had 17
+   rows where offering the insertion first was the only difference (the
+   matrix triage, R2). Where neither engine tries the insertion at all, the fit
+   is missed outright: known defect D94, open, which this rule still finds. Without it fullmatch
    "(?:ba[ab]){1<=s<=1,i<=1}" "baax" has no fit, where upstream and the port
    give (0, 4) with 'a' inserted and 'x' substituted for [ab]. A substitution
    is never offered on an item that matched: it would edit a character into
@@ -541,9 +552,12 @@ class Parser:
                 # and a lookbehind's body is matched backwards (A2 "lookaround"); measured
                 # 2026-09-30: "(?:ab|a)(?<=(?:a*a)?+)" over "aba" is (0, 2) in upstream and the port, but
                 # (0, 1) matched forwards. Rule 13 applies only outside a lookbehind.
+                # A conditional's test is made where the body has reached, which depends on the
+                # direction too: `[ab](?<=(?(?<!a).|ba))` over 'a' is None in upstream and the port,
+                # (0, 1) in PCRE2, Perl and here (battery run 20261016-2, m92; DIVERGENCES row 100).
                 if not ahead and (contains(body, Verb) or contains(body, Group, lambda g: g.index)
-                                  or contains(body, Atomic)):
-                    raise ValueError(f"unsupported verb, capture or atomic group inside a lookbehind in {self.p!r}")
+                                  or contains(body, Atomic) or contains(body, Cond) or contains(body, CondLook)):
+                    raise ValueError(f"unsupported verb, capture, atomic group or conditional inside a lookbehind in {self.p!r}")
                 # Rule 12 has no rule for \K inside a lookaround: perlre, "The use of \K inside of
                 # another lookaround assertion is allowed, but the behaviour is currently not well
                 # defined" (fetched 2026-09-30); upstream and the port move the start (row 4301).
@@ -942,15 +956,18 @@ def item(node, st, ctx, k):
         yield from k(replace(st, pos=pos + 1))
     if st.counts is None:
         return
-    # Rule 1: substitution and insertion on a mismatch; rule 6a: an insertion after an exact match
-    # too, while an open section is below a minimum.
+    # Rule 1: substitution and insertion on a mismatch.
     if not exact and pos < len(text) and permitted(st, 0):
         yield from k(add_error(st, 0, pos + 1, node))
-    if (pos < len(text) and permitted(st, 1) and (not exact or minimum_unmet(st))
-            and insertion_allowed_here(st, node, ctx)):  # rule 5
+    if pos < len(text) and permitted(st, 1) and not exact and insertion_allowed_here(st, node, ctx):  # rule 5
         yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
     if (DELETE_AFTER_EXACT or not exact) and permitted(st, 2):  # rule 3
         yield from k(add_error(st, 2, pos, node))
+    # Rule 6a: an insertion in front of an item that matched, while an open section is below a
+    # minimum, after rule 3's deletion.
+    if (pos < len(text) and permitted(st, 1) and exact and minimum_unmet(st)
+            and insertion_allowed_here(st, node, ctx)):  # rule 5
+        yield from item(node, add_error(st, 1, pos + 1, node), ctx, k)
 
 
 def minimum_unmet(st):
@@ -1078,6 +1095,20 @@ class Compiled:
     ignorecase: bool
     posix: bool = False
     ascii_classes: bool = False
+    start_anchored: bool = False
+
+
+def starts_anchored(node) -> bool:
+    """Rule 5a: the pattern's first item, looking into leading sequences and groups, is ^ or \\A."""
+    while True:
+        if isinstance(node, Seq):
+            if not node.parts:
+                return False
+            node = node.parts[0]
+        elif isinstance(node, Group):
+            node = node.body
+        else:
+            return isinstance(node, Anchor) and node.kind in ("^", "A")
 
 
 def attempt(c, text, start, anchor, must_end, search_start, not_empty=False):
@@ -1114,7 +1145,7 @@ def compile_pattern(pattern, flags=0):
     if contains(tree, CondLook, lambda n: contains(n.test, Fuzzy)):
         raise ValueError(f"unsupported fuzzy section in a conditional's test in {pattern!r}")  # rule 15
     return Compiled(tree, p.groups, frozenset(p.referenced), bool(flags & IGNORECASE), bool(flags & POSIX),
-                    ascii_classes=p.ascii_classes)
+                    ascii_classes=p.ascii_classes, start_anchored=starts_anchored(tree))
 
 
 def checked(c, text):
@@ -1126,7 +1157,15 @@ def checked(c, text):
 
 
 def search_from(c, text, pos, not_empty=False):
-    """One search from pos under rule 5 and rule H'."""
+    """One search from pos under rule 5 and rule H'. A start-anchored pattern is a match at the
+    start of the text instead (rule 5a)."""
+    if c.start_anchored:
+        if pos != 0:
+            return None
+        try:
+            return attempt(c, text, pos, -1, False, pos, not_empty)
+        except Prune:
+            return None
     u = banned_search_from(c, text, pos, not_empty)
     if u is not None and u.span[0] == pos or not PINNED_ANCHOR:
         return u

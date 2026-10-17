@@ -84,7 +84,8 @@ FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
     doubledInsertions = F("DoubleCountTrailingInsertions"),
     dropNegativeTestCaptures = F("DropNegativeTestCaptures"),
     keepCallCaptures = F("KeepCallCaptures"),
-    secondPassAsBeforeD11 = F("SecondPassAsBeforeD11");
+    secondPassAsBeforeD11 = F("SecondPassAsBeforeD11"),
+    reentryAcrossSections = F("CallGuardComparesAcrossSections");
 
 // Check C1x's pinned divergences: the fuzzy ablations OracleComparer's RunWith.../RunWithout...
 // helpers apply for ExpectedDivergences, one variant each. A C1x row whose difference from upstream
@@ -191,6 +192,8 @@ foreach (string line in File.ReadLines(input))
                 ? "ERR RowBudget"
                 : Answer(form.Value.GetString()!, subject, op, partial, pos, endpos, "wo");
         result["wo"] = forms;
+        // C2's one exception (D93): the answer with a call re-entering in a new section let run.
+        result["xreentry"] = Spent() ? "ERR RowBudget" : Answer(pattern, subject, op, partial, pos, endpos, "xreentry");
     }
     // A row may also ask for them itself (`askPinned`), for triaging a C1 row by hand.
     if (
@@ -216,7 +219,10 @@ foreach (string line in File.ReadLines(input))
 FuzzyRegex Compile(string pattern, string variant)
 {
     bool d37 = ablate == "d37" && variant != "wo";
-    bool callFeatures = (ablate == "callfeatures" && variant == "base") || variant == "xcallfeatures";
+    // C2's D93 variant carries the row's ablation too: without it a control that switches the
+    // call-features fix off had its xreentry answer taken from the live engine, which gives the
+    // written-out form, so the firing control read as D93's exception (2026-10-17).
+    bool callFeatures = (ablate == "callfeatures" && variant is "base" or "xreentry") || variant == "xcallfeatures";
     var regex = (FuzzyRegex)
         withDefaultVersion.Invoke(
             null,
@@ -285,6 +291,8 @@ FuzzyRegex Compile(string pattern, string variant)
         if (variant == "xdoubled")
             doubledInsertions.SetValue(pobj, true); // RunWithTheDoubledInsertionGuard
     }
+    if (variant == "xreentry")
+        reentryAcrossSections.SetValue(pobj, true); // OracleComparer.RunWithTheReentryInANewSection
     if (variant == "off")
     {
         skipCallMemo.SetValue(pobj, true);

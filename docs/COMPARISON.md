@@ -2032,6 +2032,24 @@ Console.WriteLine(new FuzzyRegex("(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)").Matc
 Upstream gives this port's answers with the calls written out. There is no option to restore the
 upstream answer. Ledger entry 56.
 
+### A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused
+
+Inside a fuzzy section, `(?R)` calls the whole pattern, which opens the section again with its error
+counts at zero. When that call is made at the position where the same call is already open, this port
+refuses it, as it refuses any recursion that has read nothing new; Perl and PCRE2 raise an error there.
+Upstream runs it, and the deeper level can reach a `(*SKIP)` or `(*PRUNE)` on a path the outer section
+rejects, which moves the search on.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})").Match("b").Index); // 0 - upstream: 1
+```
+
+A call that stays in the section it was made in still runs when the section's counts have changed, so
+`(?:(?P<g>a(?&g)b|c)){d<=2}` matches all of 'cbb' with two deletions in both engines. There is no option
+to restore the upstream answer.
+
 ### A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does
 
 A lookaround's body is exact even inside a fuzzy section, in both engines. Upstream nevertheless

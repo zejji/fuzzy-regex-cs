@@ -84,3 +84,35 @@ run.py's own `expected` verdicts (C2 and C4 partial starts under F66). The table
 reducer runs, and upstream is asked in child processes, so a row that crashes `regex` (ledger 56) or a
 reducer failure leaves the table with "not reduced". Nothing is fixed or registered here; that is the
 orchestrator's job.
+
+### The second screen
+
+ExpectedDivergences keys each entry on its own, so in run 20261016-2 about 360 rows came back
+UNJUDGED that three judges then traced to known causes by hand. `screen.py` does what they did, on
+every row whose only failing reference is upstream, and claims a row only on one of these proofs:
+
+- **Ablation**: one oracle-only switch, or two together, gives upstream's answer exactly
+  (`abl.cs`, which sets only the switches it names). Change positions may differ only where
+  upstream's own list contradicts its counts (ledger 11).
+- **Twin**: a twin both engines answer alike is the port's answer: `(*SKIP)` made `(*PRUNE)` on a
+  partial row (ledger 5), lazy made greedy on a partial row (ledger 2/27), `\K` removed under
+  BESTMATCH or ENHANCEMATCH with only the start moved (ledger 83, D86), and the POSIX-free
+  fullmatch over each of the port's spans when upstream charges a POSIX match more (ledger 9).
+- **Leak**: only the change positions differ, and upstream's list contradicts its own counts.
+
+A switch that reproduces an open register row is reported, not claimed (`OPEN` in `screen.py`:
+the H'-off switch on a `\K` row is D96). Claims go to the known counts under their proof; the
+evidence is `screen/screen.jsonl`. Upstream runs one row per process, capped at 2 GB and 20 s.
+
+A finished run can be judged again after its judges change, without running an engine on the
+whole run: `triage.py RUN --no-reduce --out DIR --tools CHECKOUT --refresh-c6`. Run 20261016-2
+re-judged with the fixes of 2026-10-17 went from 360 interesting rows to 134
+(`.scratch/battery/rejudge2/`).
+
+### Memory
+
+Every process that asks upstream runs under a job-object memory cap (`tools/memcap.py`): 4 GB for
+the recorder's worker, 2 GB for the matrix and triage workers. A row past it raises MemoryError,
+which is recorded as that row's answer (`resource` in the oracle), and the run goes on. One row
+took regex to 19 GB in run 2's triage. `BATTERY_MEMCAP_GB=0` turns the cap off;
+`tools/tests/memcap_check.py` proves it on that row.
