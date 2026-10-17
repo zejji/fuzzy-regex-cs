@@ -121,11 +121,11 @@ def ref_answer(op, p, s):
 
 def fewest_errors(op, p, s, cap=20000):
     """The fewest errors any reference path from 0 has, 'None' without one, or '?' past the cap."""
-    tree, ngroups, referenced = ref.compile_pattern(p)
-    st = ref.State(0, ((-1, -1),) * (ngroups + 1), (0, 0, 0), None, None, (), -1)
+    c = ref.compile_pattern(p)
+    st = ref.State(0, ((-1, -1),) * (c.ngroups + 1), (0, 0, 0), None, None, (), -1)
     best = None
     try:
-        for n, final in enumerate(ref.run(tree, st, ref.Ctx(s, referenced), lambda x: iter([x]))):
+        for n, final in enumerate(ref.run(c.tree, st, ref.Ctx(s, c.referenced, 0, c.ignorecase), lambda x: iter([x]))):
             if n > cap:
                 return "?"
             if op == "fullmatch" and final.pos != len(s):

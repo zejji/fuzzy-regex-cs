@@ -41,6 +41,8 @@ public sealed class FuzzyMinimumInsertionBeforeExactItemTests
     [Arguments(@"(?i)(?:ab){1<=s<=1,i<=1}", "ABB", 1, 1)]
     [Arguments(@"(?fi)(?:ab){1<=s<=1,i<=1}", "ABB", 1, 1)]
     [Arguments(@"(?fi)(?:ss){1<=s<=1,i<=1}", "ssx", 1, 1)]
+    [Arguments(@"(?fi)(ss)(?:\1){1<=s<=1,i<=1}", "ssssx", 1, 1)]
+    [Arguments(@"(?fi)(ab)(?:\1){1<=s<=1,i<=1}", "ababb", 1, 1)]
     [Arguments(@"(?r)(?:a){1<=s<=1,i<=1}", "ba", 1, 1)]
     [Arguments(@"(?r)(?:ab){1<=s<=1,i<=1}", "aab", 1, 1)]
     [Arguments(@"(?:aa){2<=s<=2,i<=2}", "aabb", 2, 2)]
@@ -169,6 +171,7 @@ public sealed class FuzzyMinimumInsertionBeforeExactItemTests
     [Arguments(@"(?:a+){1<=s<=1,i<=1}", "ab", false, 0, 2, 1, 0)]
     [Arguments(@"(?:a|c){1<=s<=1,i<=1}", "ab", false, 0, 2, 1, 1)]
     [Arguments(@"(?:a){i<=1,s<=1}", "ab", false, 0, 2, 0, 1)]
+    [Arguments(@"(?fi)(ab)(?:\1){1<=s<=1,i<=1}", "abaab", false, 0, 5, 1, 1)]
     public void A_fit_found_without_the_new_insertion_keeps_its_answer(
         string pattern,
         string text,

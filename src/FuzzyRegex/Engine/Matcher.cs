@@ -8877,6 +8877,97 @@ internal static class Matcher
     private const byte _exactDeletionDone = byte.MaxValue - 1;
 
     /// <summary>
+    /// NOT UPSTREAM (D94): the fuzzy type of the frame an item that matched exactly pushes while an
+    /// open section is below one of its minimums (<see cref="InsertionMayMeetMinimum"/>). Its retry
+    /// tries an insertion in front of the item and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream tries errors on an item only when it fails to match, so in
+    /// <c>(?:a){1&lt;=s&lt;=1,i&lt;=1}</c> over 'ab' the <c>a</c> matches, the section ends with no
+    /// substitution, and the fit that inserts the 'a' and substitutes the 'b' for the item is never
+    /// tried. A substitution is never offered on an item that matched: it would edit a character
+    /// into one the item already accepts.
+    /// </para>
+    /// <para>
+    /// The frame is pushed beneath the deletion frame of <see cref="_exactFuzzyType"/>, so the
+    /// insertion comes after everything that follows the exact match, then the deletion, have
+    /// failed, and before any earlier choice.
+    /// </para>
+    /// </remarks>
+    private const byte _exactInsertionOnly = byte.MaxValue - 2;
+
+    /// <summary>
+    /// NOT UPSTREAM (D94): the fuzzy type of a frame whose <see cref="_exactInsertionOnly"/>
+    /// insertion has been taken. Its retry takes the insertion back and fails.
+    /// </summary>
+    private const byte _exactInsertionDone = byte.MaxValue - 3;
+
+    /// <summary>
+    /// NOT UPSTREAM (D94): whether an item that matched exactly here should also be tried with an
+    /// insertion in front of it: an open section, or one around it, is below one of its minimums,
+    /// so a later item may take the error the minimum asks for, and an insertion fits the budget.
+    /// </summary>
+    /// <remarks>
+    /// A pattern with no minimum pays the one test of <see cref="PatternObject.HasFuzzyMinimum"/>.
+    /// Off under <see cref="PatternObject.CheckMinimumBeforeTrailingInsertions"/>, the oracle's
+    /// ablation of the same order defect at a section's end (ledger entry 51), and under
+    /// <see cref="PatternObject.SkipExactDeletionRetry"/>, since the insertion rides the frame
+    /// ledger entry 42 added and its retry goes on to that entry's deletion.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if it should.</returns>
+    private static bool InsertionMayMeetMinimum(MatchState state) =>
+        state.Pattern.HasFuzzyMinimum
+        && !state.Pattern.CheckMinimumBeforeTrailingInsertions
+        && !state.Pattern.SkipExactDeletionRetry
+        && ThisErrorPermitted(state, FuzzyValue.Ins)
+        && !AllMinimumsMet(state)
+        && EnclosingSectionsAdmitAnInsertion(state);
+
+    /// <summary>
+    /// NOT UPSTREAM (D94): whether every section around the current one can take one more insertion
+    /// and one more error, as each will count it once the sections inside it close.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ThisErrorPermitted"/> asks only the current section. Where an enclosing one
+    /// permits no insertion, an insertion leads only to its own <c>END_FUZZY</c> failing, after a
+    /// search of everything in between: row A of <c>FailedCallMemoTests</c>, whose outer section
+    /// takes no insertion, went past its step bound without this check.
+    /// See <see cref="InsertionsCanMeetMinimum"/>, which asks the same of trailing insertions.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if they can.</returns>
+    private static bool EnclosingSectionsAdmitAnInsertion(MatchState state)
+    {
+        int frame = state.SectionFrame;
+        if (frame < 0)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long ins = counts[FuzzyValue.Ins] + 1;
+        long errors = TotalErrors(counts) + 1;
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+        {
+            ins += outerCounts[FuzzyValue.Ins];
+            errors += outerCounts[FuzzyValue.Sub] + outerCounts[FuzzyValue.Ins] + outerCounts[FuzzyValue.Del];
+            uint[] values = outer.Values;
+            if (ins > values[FuzzyValue.MaxIns] || errors > values[FuzzyValue.MaxErr])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The "needed" rule: whether a repeat iteration that consumed no text and spent fuzzy edits may
     /// stand. Otherwise it fails.
     /// </summary>
@@ -9575,6 +9666,13 @@ internal static class Matcher
     /// <param name="step">The item's character step, which the retry needs.</param>
     private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
     {
+        // NOT UPSTREAM (D94): below a minimum, an insertion in front of the item, tried after the
+        // deletion pushed above it.
+        if (InsertionMayMeetMinimum(state))
+        {
+            PushExactItemFrame(state, node, step, _exactInsertionOnly);
+        }
+
         if (
             !ExactDeletionMayMatch(state, 1, node.Next1.Node, node)
             || DeletionRepeatsAnEarlierAlternative(state, node, step)
@@ -9608,12 +9706,25 @@ internal static class Matcher
             return;
         }
 
+        PushExactItemFrame(state, node, step, _exactFuzzyType);
+    }
+
+    /// <summary>
+    /// Pushes the retry frame of a one-character fuzzy item that matched exactly at
+    /// <c>state.TextPos</c>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item.</param>
+    /// <param name="step">The item's character step.</param>
+    /// <param name="marker"><see cref="_exactFuzzyType"/> or <see cref="_exactInsertionOnly"/>.</param>
+    private static void PushExactItemFrame(MatchState state, Node node, sbyte step, byte marker)
+    {
         /* bstack: node step text_pos fuzzy_type op, the frame fuzzy_match_item pushes */
 
         state.Bstack.PushNode(node);
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8(marker);
         state.Bstack.PushUInt8((byte)node.Op);
     }
 
@@ -9627,6 +9738,12 @@ internal static class Matcher
     /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
     private static void PushExactStringDeletion(MatchState state, Node node, int stringPos, sbyte step)
     {
+        // NOT UPSTREAM (D94): see PushExactItemDeletion.
+        if (InsertionMayMeetMinimum(state))
+        {
+            PushExactStringFrame(state, node, stringPos, step, _exactInsertionOnly);
+        }
+
         // A group reference's 'stringPos' is a subject position, and how much of the group is left
         // is not modelled, so it keeps every choice that fits the budget.
         bool mayMatch;
@@ -9640,18 +9757,30 @@ internal static class Matcher
             mayMatch = ExactDeletionMayMatch(state, remaining, node.Next1.Node);
         }
 
-        if (!mayMatch)
+        if (mayMatch)
         {
-            return;
+            PushExactStringFrame(state, node, stringPos, step, _exactFuzzyType);
         }
+    }
 
+    /// <summary>
+    /// Pushes the retry frame of a character of a fuzzy string or group reference that matched
+    /// exactly at <c>state.TextPos</c>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string or group reference.</param>
+    /// <param name="stringPos">How far into the item the comparison had got.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="marker"><see cref="_exactFuzzyType"/> or <see cref="_exactInsertionOnly"/>.</param>
+    private static void PushExactStringFrame(MatchState state, Node node, int stringPos, sbyte step, byte marker)
+    {
         /* bstack: node step string_pos text_pos fuzzy_type op, the frame fuzzy_match_string pushes */
 
         state.Bstack.PushNode(node);
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(stringPos);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8(marker);
         state.Bstack.PushUInt8((byte)node.Op);
     }
 
@@ -9676,11 +9805,58 @@ internal static class Matcher
         int foldChangesStart
     )
     {
-        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
+        // NOT UPSTREAM (D94): see PushExactItemDeletion.
+        if (InsertionMayMeetMinimum(state))
         {
-            return;
+            PushExactStringFldFrame(
+                state,
+                node,
+                stringPos,
+                foldedPos,
+                foldedLen,
+                step,
+                foldChangesStart,
+                _exactInsertionOnly
+            );
         }
 
+        if (!state.Pattern.SkipExactDeletionRetry && ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            PushExactStringFldFrame(
+                state,
+                node,
+                stringPos,
+                foldedPos,
+                foldedLen,
+                step,
+                foldChangesStart,
+                _exactFuzzyType
+            );
+        }
+    }
+
+    /// <summary>
+    /// Pushes the retry frame of a character of a full-case-folded fuzzy string that matched exactly.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string.</param>
+    /// <param name="stringPos">How far into the string the comparison had got.</param>
+    /// <param name="foldedPos">How far into the subject character's folding.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the string travels.</param>
+    /// <param name="foldChangesStart">The change count when the string began.</param>
+    /// <param name="marker"><see cref="_exactFuzzyType"/> or <see cref="_exactInsertionOnly"/>.</param>
+    private static void PushExactStringFldFrame(
+        MatchState state,
+        Node node,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        sbyte step,
+        int foldChangesStart,
+        byte marker
+    )
+    {
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
         state.Bstack.PushSize(foldChangesStart);
@@ -9690,7 +9866,7 @@ internal static class Matcher
         state.Bstack.PushSize(foldedPos);
         state.Bstack.PushSize(foldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8(marker);
         state.Bstack.PushUInt8((byte)node.Op);
     }
 
@@ -9719,11 +9895,67 @@ internal static class Matcher
         int foldChangesStart
     )
     {
-        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
+        // NOT UPSTREAM (D94): see PushExactItemDeletion.
+        if (InsertionMayMeetMinimum(state))
         {
-            return;
+            PushExactGroupFldFrame(
+                state,
+                node,
+                foldedPos,
+                foldedLen,
+                groupPos,
+                gfoldedPos,
+                gfoldedLen,
+                step,
+                foldChangesStart,
+                _exactInsertionOnly
+            );
         }
 
+        if (!state.Pattern.SkipExactDeletionRetry && ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            PushExactGroupFldFrame(
+                state,
+                node,
+                foldedPos,
+                foldedLen,
+                groupPos,
+                gfoldedPos,
+                gfoldedLen,
+                step,
+                foldChangesStart,
+                _exactFuzzyType
+            );
+        }
+    }
+
+    /// <summary>
+    /// Pushes the retry frame of a folding character of a full-case-folded fuzzy group reference
+    /// that matched exactly.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The group reference.</param>
+    /// <param name="foldedPos">Where in the subject folding the comparison is.</param>
+    /// <param name="foldedLen">The length of the subject folding.</param>
+    /// <param name="groupPos">The position in the referenced capture.</param>
+    /// <param name="gfoldedPos">Where in the group character's folding the comparison is.</param>
+    /// <param name="gfoldedLen">The length of the group character's folding.</param>
+    /// <param name="step">Which way the item travels.</param>
+    /// <param name="foldChangesStart">The change count when the reference began.</param>
+    /// <param name="marker"><see cref="_exactFuzzyType"/> or <see cref="_exactInsertionOnly"/>.</param>
+    private static void PushExactGroupFldFrame(
+        MatchState state,
+        Node node,
+        int foldedPos,
+        int foldedLen,
+        int groupPos,
+        int gfoldedPos,
+        int gfoldedLen,
+        sbyte step,
+        int foldChangesStart,
+        byte marker
+    )
+    {
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len
          * text_pos fuzzy_type op
          */
@@ -9737,7 +9969,7 @@ internal static class Matcher
         state.Bstack.PushSize(foldedPos);
         state.Bstack.PushSize(foldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8(marker);
         state.Bstack.PushUInt8((byte)node.Op);
     }
 
@@ -9916,9 +10148,23 @@ internal static class Matcher
         FuzzyData data = default;
         data.NewNode = currNode;
 
+        // NOT UPSTREAM (D94): an exact match's insertion frame tries the insertion alone, and once
+        // it has been taken, takes it back and fails.
+        int kinds = FuzzyValue.Count;
         if (poppedType == _exactFuzzyType)
         {
             data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else if (poppedType == _exactInsertionOnly)
+        {
+            data.FuzzyType = FuzzyValue.Ins - 1;
+            kinds = FuzzyValue.Ins + 1;
+        }
+        else if (poppedType == _exactInsertionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Ins];
+            return MatchStatus.Failure;
         }
         else
         {
@@ -9946,7 +10192,7 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchItem(state, ref data, false, step);
 
@@ -9969,7 +10215,7 @@ internal static class Matcher
         state.Bstack.PushNode(currNode);
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(kinds == FuzzyValue.Count ? (byte)data.FuzzyType : _exactInsertionDone);
         state.Bstack.PushUInt8(op);
 
         /* bstack: node step text_pos fuzzy_type op */
@@ -10199,9 +10445,23 @@ internal static class Matcher
         data.NewStringPos = stringPos;
         data.StringPosIsText = stringPosIsText;
 
+        // NOT UPSTREAM (D94): an exact match's insertion frame tries the insertion alone, and once
+        // it has been taken, takes it back and fails.
+        int kinds = FuzzyValue.Count;
         if (poppedType == _exactFuzzyType)
         {
             data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else if (poppedType == _exactInsertionOnly)
+        {
+            data.FuzzyType = FuzzyValue.Ins - 1;
+            kinds = FuzzyValue.Ins + 1;
+        }
+        else if (poppedType == _exactInsertionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Ins];
+            return MatchStatus.Failure;
         }
         else
         {
@@ -10216,7 +10476,7 @@ internal static class Matcher
 
         int status = MatchStatus.Failure;
 
-        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
             status = NextFuzzyMatchItem(state, ref data, true, data.Step);
 
@@ -10240,7 +10500,7 @@ internal static class Matcher
         state.Bstack.PushInt8(data.Step);
         state.Bstack.PushSize(stringPos);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(kinds == FuzzyValue.Count ? (byte)data.FuzzyType : _exactInsertionDone);
         state.Bstack.PushUInt8(op);
 
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
@@ -10992,14 +11252,24 @@ internal static class Matcher
         // to the whole-character kinds. Nor did one left by PushExactStringFldDeletion (finding
         // F-A), which tries a deletion alone: the whole-character kinds at that comparison belong to
         // OfferWholeFoldedCharEdit's frame, pushed beneath it.
+        // NOT UPSTREAM (D94): PushExactStringFldDeletion's insertion frame tries the insertion alone,
+        // and once it has been taken, takes it back and fails.
+        bool exactInsertion = poppedType == _exactInsertionOnly;
         bool exactDeletion = poppedType == _exactFuzzyType;
-        bool exactTaken = exactDeletion || poppedType is FoldExactTaken or FoldExactTakenInsOnly;
+        bool exactTaken = exactDeletion || exactInsertion || poppedType is FoldExactTaken or FoldExactTakenInsOnly;
 
         // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
         if (poppedType == _exactDeletionDone)
         {
             state.UnrecordFuzzy();
             --fuzzyCounts[FuzzyValue.Del];
+            return MatchStatus.Failure;
+        }
+
+        if (poppedType == _exactInsertionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Ins];
             return MatchStatus.Failure;
         }
 
@@ -11015,6 +11285,7 @@ internal static class Matcher
             FoldExactTaken => FoldWholeSub - 1,
             FoldExactTakenInsOnly => FoldWholeIns - 1,
             _exactFuzzyType => FuzzyValue.Del - 1,
+            _exactInsertionOnly => FuzzyValue.Ins - 1,
             _ => poppedType,
         };
         data.FoldedLen = (int)poppedFoldedLen;
@@ -11029,6 +11300,10 @@ internal static class Matcher
         int status = MatchStatus.Failure;
 
         int kinds = !exactDeletion && AtStartOfAnExpandingFolding(state, in data) ? FoldEditKinds : FuzzyValue.Count;
+        if (exactInsertion)
+        {
+            kinds = FuzzyValue.Ins + 1;
+        }
 
         for (++data.FuzzyType; data.FuzzyType < kinds; data.FuzzyType++)
         {
@@ -11057,7 +11332,17 @@ internal static class Matcher
         state.Bstack.PushSize(currFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
+        byte pushedType = (byte)data.FuzzyType;
+        if (exactDeletion)
+        {
+            pushedType = _exactDeletionDone;
+        }
+        else if (exactInsertion)
+        {
+            pushedType = _exactInsertionDone;
+        }
+
+        state.Bstack.PushUInt8(pushedType);
         state.Bstack.PushUInt8(op);
 
         state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
@@ -11587,6 +11872,8 @@ internal static class Matcher
         // reads the record, so doing it here is the same. Nor did a frame left by
         // PushExactGroupFldDeletion (finding F-A), which tries a deletion alone: the whole-character
         // kinds at that comparison belong to OfferWholeFoldedGroupCharEdit's frame, pushed beneath it.
+        // NOT UPSTREAM (D94): the insertion frame, as in RetryFuzzyMatchStringFld.
+        bool exactInsertion = poppedType == _exactInsertionOnly;
         bool exactDeletion = poppedType == _exactFuzzyType;
 
         // The exact-deletion retry has been tried: take its deletion back, and nothing is left.
@@ -11597,7 +11884,14 @@ internal static class Matcher
             return MatchStatus.Failure;
         }
 
-        if (poppedType != FoldExactTaken && !exactDeletion)
+        if (poppedType == _exactInsertionDone)
+        {
+            state.UnrecordFuzzy();
+            --fuzzyCounts[FuzzyValue.Ins];
+            return MatchStatus.Failure;
+        }
+
+        if (poppedType != FoldExactTaken && !exactDeletion && !exactInsertion)
         {
             state.UnrecordFuzzy();
             --fuzzyCounts[FoldCountedAs(poppedType)];
@@ -11607,6 +11901,10 @@ internal static class Matcher
         if (exactDeletion)
         {
             data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else if (exactInsertion)
+        {
+            data.FuzzyType = FuzzyValue.Ins - 1;
         }
         else
         {
@@ -11635,7 +11933,11 @@ internal static class Matcher
         int status = MatchStatus.Failure;
 
         int kinds;
-        if (exactDeletion)
+        if (exactInsertion)
+        {
+            kinds = FuzzyValue.Ins + 1;
+        }
+        else if (exactDeletion)
         {
             kinds = FuzzyValue.Count;
         }
@@ -11673,7 +11975,17 @@ internal static class Matcher
         state.Bstack.PushSize(newFoldedPos);
         state.Bstack.PushSize(data.FoldedLen);
         state.Bstack.PushSize(state.TextPos);
-        state.Bstack.PushUInt8(exactDeletion ? _exactDeletionDone : (byte)data.FuzzyType);
+        byte pushedType = (byte)data.FuzzyType;
+        if (exactDeletion)
+        {
+            pushedType = _exactDeletionDone;
+        }
+        else if (exactInsertion)
+        {
+            pushedType = _exactInsertionDone;
+        }
+
+        state.Bstack.PushUInt8(pushedType);
         state.Bstack.PushUInt8(op);
 
         state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
