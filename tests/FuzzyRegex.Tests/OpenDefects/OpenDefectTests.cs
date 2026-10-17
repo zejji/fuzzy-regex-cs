@@ -202,6 +202,13 @@ public sealed class OpenDefectTests
     [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2)]
     [Arguments(@"(?r)(?:ba){1<=i<=2}", "ax", 0, 2)]
     [Arguments(@"(?:a){i<=1}\b", "x", 1, 1)]
+    // Five more from the triage of the rows main and fix/d100 both got wrong
+    // (.scratch/s1016/partial-44/triage.md, causes A to E), judged at continuations of up to 5.
+    [Arguments(@"(?:(?=a)a){e<=1}", "b", 1, 1)] // too early: 'ba' is (1, 2)
+    [Arguments(@"(?:ab){1<=d<=1,i<=1}", " ", 1, 1)] // too early: a deletion needs no more text
+    [Arguments(@"(?r)(?:b){i<=2}\B", "a ", 0, 0)] // too early (reversed): 'ba ' completes inside
+    [Arguments(@"(?:b){2<=i<=2}", " b", 0, 2)] // too late: ' ba' is (0, 3)
+    [Arguments(@"(?r)(?:b\b){i<=2}", "xx", 0, 2)] // too late (reversed): 'bxx' is (0, 3)
     public void A_partial_starts_where_the_full_search_of_some_continuation_starts(
         string pattern,
         string text,
