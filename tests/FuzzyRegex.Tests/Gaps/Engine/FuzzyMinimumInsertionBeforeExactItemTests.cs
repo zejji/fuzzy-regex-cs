@@ -212,4 +212,26 @@ public sealed class FuzzyMinimumInsertionBeforeExactItemTests
     {
         new FuzzyRegex(pattern).FullMatch(text).Success.Should().BeFalse();
     }
+
+    // Bounded in engine steps, not seconds (D13). Every character is one each item accepts, so no
+    // substitution can ever be taken and the insertions D94 adds in front of each 'a' cannot help.
+    // Measured in Debug on 2026-10-17 over 200 characters: 142,908 steps before D94, 1,151,234 with
+    // D94 alone (the i<=2 row; 502,099 for the others), 143,308 with the pruning. Each bound is
+    // about twice the pruned count.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:a+){1<=s<=1,i<=2}", "a")]
+    [Arguments(@"(?:a+){1<=s<=1,i<=1}", "a")]
+    [Arguments(@"(?:[a-z]+){1<=s<=1,i<=1}", "hello")]
+    public void Insertions_are_not_tried_where_no_substitution_can_follow(string pattern, string unit)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string text = string.Concat(Enumerable.Repeat(unit, 200 / unit.Length));
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Match(text).Success.Should().BeFalse(),
+            300_000,
+            "an insertion is skipped when no later character can take the missing substitution"
+        );
+    }
 }

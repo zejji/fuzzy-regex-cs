@@ -445,6 +445,16 @@ internal sealed class PatternObject
     internal bool HasFuzzyMinimum;
 
     /// <summary>
+    /// NOT UPSTREAM (D94 performance): every one-character test inside a fuzzy section, when a
+    /// substitution can only be taken where one of them rejects the subject character; null when
+    /// the pattern holds an item this does not model (a fuzzy string, '.' or assertion, a
+    /// reference, a reverse item, a lookaround or a call), and then nothing is pruned. Read by
+    /// <c>Matcher.ASubstitutionMayFollow</c>. Set when the pattern is compiled, for a pattern with a
+    /// fuzzy minimum only.
+    /// </summary>
+    internal Node[]? SubstitutionTests;
+
+    /// <summary>
     /// NOT UPSTREAM (D81): whether one fuzzy section can be open inside another: the pattern has two
     /// or more, or one and a group call, which can enter it again from inside itself. Only then can
     /// a run-out find an enclosing section's limits broken (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
@@ -1311,6 +1321,12 @@ internal sealed class PatternObject
         // NOT UPSTREAM (D81): see NestsFuzzySections and KeepsSectionLinks.
         self.NestsFuzzySections = sections > 1 || (sections == 1 && self.HasGroupCalls);
         self.KeepsSectionLinks = self.HasFuzzyMinimum || self.NestsFuzzySections;
+
+        // NOT UPSTREAM (D94 performance): see SubstitutionTests.
+        if (self.HasFuzzyMinimum)
+        {
+            self.SubstitutionTests = Matcher.CollectSubstitutionTests(self.NodeList);
+        }
 
         // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
         Optimiser.FindAnchorBanLift(self);

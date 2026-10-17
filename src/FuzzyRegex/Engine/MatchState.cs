@@ -386,6 +386,13 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
 
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): the last subject position where some test of
+    /// <see cref="PatternObject.SubstitutionTests"/> rejects the character, so where a substitution
+    /// could last be taken; -1 for none, <see cref="int.MinValue"/> until first asked.
+    /// </summary>
+    internal int LastSubstitutablePos = int.MinValue;
+
     /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
     internal int SliceStart;
 
@@ -1535,6 +1542,7 @@ internal sealed class MatchState : IDisposable
 
         Text = text;
         TextLength = text.Length;
+        LastSubstitutablePos = int.MinValue; // D94 performance: worked out on first use
         CaptureTexts.Reset(text);
         Array.Clear(_tailTextValues); // the ids above start again (D85)
 

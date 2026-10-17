@@ -9044,7 +9044,240 @@ internal static class Matcher
         && !state.Pattern.SkipExactDeletionRetry
         && ThisErrorPermitted(state, FuzzyValue.Ins)
         && !AllMinimumsMet(state)
-        && EnclosingSectionsAdmitAnInsertion(state);
+        && EnclosingSectionsAdmitAnInsertion(state)
+        && ASubstitutionMayFollow(state);
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): whether an insertion in front of the item at
+    /// <c>state.TextPos</c> can still lead to every minimum being met.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Where every open section has its insertion, deletion and total minimums met, only a
+    /// substitution minimum is unmet, and the insertion does not count towards it: it can help only
+    /// by lining a later item up with a character it rejects, as a substitution is tried only on an
+    /// item that fails. After the insertion every item reads from <c>TextPos + 1</c> on (the
+    /// pattern has no reverse item), so if no one-character test of the pattern rejects any
+    /// character from there to the end of the subject, no substitution can be taken, every open
+    /// section's <c>END_FUZZY</c> fails its minimum, and the insertion holds no match.
+    /// </para>
+    /// <para>
+    /// Witness: <c>(?:a+){1&lt;=s&lt;=1,i&lt;=1}</c> searched over a run of 'a' tried an
+    /// insertion before every 'a' at every start. A partial match can end at the subject's end
+    /// with a minimum unmet, so it is never pruned.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="false"/> only when the insertion certainly holds no match.</returns>
+    private static bool ASubstitutionMayFollow(MatchState state)
+    {
+        if (
+            state.Pattern.SubstitutionTests is not { } tests
+            || state.PartialSide != MatchState.PartialNone
+            || !OnlySubstitutionMinimumsUnmet(state)
+        )
+        {
+            return true;
+        }
+
+        if (state.LastSubstitutablePos == int.MinValue)
+        {
+            state.LastSubstitutablePos = LastSubstitutablePos(state, tests);
+        }
+
+        return state.TextPos + 1 <= state.LastSubstitutablePos;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): the last subject position whose character one of
+    /// <paramref name="tests"/> rejects, or -1. A surrogate code unit counts as rejected, so the
+    /// answer is never too low. Searched from the end, so it stops at once on most subjects.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="tests">The pattern's one-character tests.</param>
+    /// <returns>The position, or -1.</returns>
+    private static int LastSubstitutablePos(MatchState state, Node[] tests)
+    {
+        ReadOnlySpan<char> text = state.Text.Span;
+        for (int pos = state.TextLength - 1; pos >= 0; pos--)
+        {
+            char ch = text[pos];
+            if (char.IsSurrogate(ch))
+            {
+                return pos;
+            }
+
+            foreach (Node test in tests)
+            {
+                WorkCounter.Step();
+                if (MatchesOne(test.Encoding, test, ch) != test.Match)
+                {
+                    return pos;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): whether every open section meets its insertion, deletion
+    /// and total minimums, counting the errors of the sections inside it, so only a substitution
+    /// minimum can be unmet.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if they all do.</returns>
+    private static bool OnlySubstitutionMinimumsUnmet(MatchState state)
+    {
+        if (state.SectionFrame < 0 || state.FuzzyNode is not { } section)
+        {
+            return false;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long sub = counts[FuzzyValue.Sub];
+        long ins = counts[FuzzyValue.Ins];
+        long del = counts[FuzzyValue.Del];
+        int frame = state.SectionFrame;
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (true)
+        {
+            uint[] values = section.Values;
+            if (
+                ins < values[FuzzyValue.MinIns]
+                || del < values[FuzzyValue.MinDel]
+                || sub + ins + del < values[FuzzyValue.MinErr]
+            )
+            {
+                return false;
+            }
+
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
+            {
+                return true;
+            }
+
+            sub += outerCounts[FuzzyValue.Sub];
+            ins += outerCounts[FuzzyValue.Ins];
+            del += outerCounts[FuzzyValue.Del];
+            section = outer;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): the one-character tests of a pattern for
+    /// <see cref="PatternObject.SubstitutionTests"/>, or null if it holds an item a substitution
+    /// could be taken on that is not one of them, or a reverse item.
+    /// </summary>
+    /// <remarks>
+    /// SHORTCUT: a fuzzy string, '.' or zero-width assertion, and anywhere in the pattern a
+    /// reference, reverse item, lookaround or call, turn the pruning off. Modelling a fuzzy
+    /// string's characters and '.' would extend it to literals; each needs its own proof that a
+    /// substitution is taken only where it rejects.
+    /// </remarks>
+    /// <param name="nodes">The pattern's nodes.</param>
+    /// <returns>The tests, or null.</returns>
+    internal static Node[]? CollectSubstitutionTests(List<Node> nodes)
+    {
+        // A set's members are the set's own business: the set node is the test.
+        // Node.Index is set by then: PatternObject numbers the nodes first.
+        bool[] isMember = new bool[nodes.Count];
+        foreach (Node set in nodes.Where(n => n.Op is >= Opcode.SetDiff and <= Opcode.SetUnionRev))
+        {
+            for (Node? member = set.Next2.Node; member is not null; member = member.Next1.Node)
+            {
+                isMember[member.Index] = true;
+            }
+        }
+
+        var tests = new List<Node>();
+        foreach (Node node in nodes.Where(n => !isMember[n.Index]))
+        {
+            switch (node.Op)
+            {
+                case Opcode.Character
+                or Opcode.CharacterIgn
+                or Opcode.Property
+                or Opcode.PropertyIgn
+                or Opcode.Range
+                or Opcode.RangeIgn
+                or Opcode.SetDiff
+                or Opcode.SetDiffIgn
+                or Opcode.SetInter
+                or Opcode.SetInterIgn
+                or Opcode.SetSymDiff
+                or Opcode.SetSymDiffIgn
+                or Opcode.SetUnion
+                or Opcode.SetUnionIgn:
+                    // Outside a fuzzy section a test takes no substitution.
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        tests.Add(node);
+                    }
+
+                    break;
+                case Opcode.String
+                or Opcode.StringIgn
+                or Opcode.Any
+                or Opcode.AnyU
+                or Opcode.Boundary
+                or Opcode.DefaultBoundary
+                or Opcode.StartOfWord
+                or Opcode.EndOfWord
+                or Opcode.DefaultStartOfWord
+                or Opcode.DefaultEndOfWord
+                or Opcode.GraphemeBoundary
+                or Opcode.StartOfLine
+                or Opcode.StartOfLineU
+                or Opcode.EndOfLine
+                or Opcode.EndOfLineU
+                or Opcode.StartOfString
+                or Opcode.EndOfString
+                or Opcode.EndOfStringLine
+                or Opcode.EndOfStringLineU
+                or Opcode.SearchAnchor:
+                    // Forward items that take no error outside a fuzzy section.
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        return null;
+                    }
+
+                    break;
+                case Opcode.Success
+                or Opcode.Failure
+                or Opcode.AnyAll
+                or Opcode.Atomic
+                or Opcode.EndAtomic
+                or Opcode.Branch
+                or Opcode.NoBranch
+                or Opcode.Next
+                or Opcode.Fuzzy
+                or Opcode.EndFuzzy
+                or Opcode.GreedyRepeat
+                or Opcode.LazyRepeat
+                or Opcode.GreedyRepeatOne
+                or Opcode.LazyRepeatOne
+                or Opcode.EndGreedyRepeat
+                or Opcode.EndLazyRepeat
+                or Opcode.BodyStart
+                or Opcode.BodyEnd
+                or Opcode.MatchBody
+                or Opcode.MatchTail
+                or Opcode.TailStart
+                or Opcode.Group
+                or Opcode.StartGroup
+                or Opcode.EndGroup:
+                    break;
+                default:
+                    return null;
+            }
+        }
+
+        return [.. tests];
+    }
 
     /// <summary>
     /// NOT UPSTREAM (D94): whether every section around the current one can take one more insertion
