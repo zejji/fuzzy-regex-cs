@@ -1445,6 +1445,47 @@ public sealed class FuzzyBestMatchTests
             .Be((m.Index, m.Index + m.Length, m.FuzzyCounts));
     }
 
+    // D102, round 2. The test's verdict is the flagless one, but when its body matched, the errors
+    // it keeps must fit the budget, and the body may take any of its matches that does. The first
+    // fix took the body's first match, found it over the budget and failed the whole conditional,
+    // so `(?b)(?(?=a{s<=1}|x)x|y)` over 'x' answered (0, 1) with a substitution where the body's
+    // exact 'x' gives the same verdict for nothing. The body now goes on under the budget, as a
+    // positive lookaround's would, and the conditional fails only if no match of the body fits.
+    // `regex` 2026.9.10 answers each row as below, and so did main before D102.
+    [Test]
+    [Arguments("(?b)(?(?=a{s<=1}|x)x|y)", "x", 0, 1)]
+    [Arguments("(?e)(?(?=a{s<=1}|x)x|y)", "x", 0, 1)]
+    [Arguments("(?b)(?(?=(?:ab|xb){s<=1})x|y)", "xb", 0, 1)]
+    [Arguments("(?b)(?(?!a{s<=1}|x)y|x)", "x", 0, 1)]
+    [Arguments("(?e)(?(?!a{s<=1}|x)y|x)", "x", 0, 1)]
+    [Arguments("(?b)(?(?=(?:a|b){s<=1}c)\\w)", "bc", 0, 1)]
+    public void A_conditional_s_test_takes_a_match_of_its_body_that_fits_the_budget(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        (m.Index, m.Index + m.Length, m.FuzzyCounts).Should().Be((start, end, new FuzzyCounts(0, 0, 0)));
+    }
+
+    // Round 2's rows through fullmatch and a scan.
+    [Test]
+    public void A_conditional_s_test_takes_a_match_of_its_body_that_fits_the_budget_in_every_operation()
+    {
+        Match full = new FuzzyRegex("(?b)(?(?=a{s<=1}|x)x|y)").FullMatch("x");
+        (full.Index, full.Index + full.Length, full.FuzzyCounts).Should().Be((0, 1, new FuzzyCounts(0, 0, 0)));
+
+        Match negative = new FuzzyRegex("(?b)(?(?!a{s<=1}|x)y|x)").FullMatch("x");
+        (negative.Index, negative.Index + negative.Length, negative.FuzzyCounts)
+            .Should()
+            .Be((0, 1, new FuzzyCounts(0, 0, 0)));
+
+        Scan("(?b)(?(?=a{s<=1}|x)x|y)", "xx").Should().Equal("(0,1) 0,0,0 d:", "(1,2) 0,0,0 d:");
+    }
+
     // D102's witness through each operation, with the flagless pattern as the control: (0, 0) is
     // not a match, because `a{s<=1}` matches 'x' at 0.
     [Test]

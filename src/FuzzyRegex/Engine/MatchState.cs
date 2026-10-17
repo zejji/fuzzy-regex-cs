@@ -943,6 +943,13 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal int BoundlessBodies;
 
+    /// <summary>
+    /// NOT UPSTREAM (D102): the pruning marks of the conditional tests whose body matched over the
+    /// budget and now goes on under it for a match that fits (<c>Matcher.HoldTheTestToTheBudget</c>),
+    /// innermost last. Such a test's body no longer counts in <see cref="BoundlessBodies"/>.
+    /// </summary>
+    internal readonly List<long> TestsHeldToTheBudget = [];
+
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
 
@@ -988,6 +995,7 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal void CloseEveryBoundlessBody()
     {
+        TestsHeldToTheBudget.Clear();
         if (BoundlessBodies != 0)
         {
             BoundlessBodies = 0;
@@ -1725,6 +1733,7 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
+        TestsHeldToTheBudget.Clear();
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;

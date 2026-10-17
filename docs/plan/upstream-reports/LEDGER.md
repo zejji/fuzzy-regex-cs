@@ -4213,8 +4213,8 @@ BESTMATCH rows run away in memory, as this entry's other rows do.
 
 **This port** had the same fault on the forward rows: `(?b)(?=a{d<=1})\w??(?!a{s<=1})` over 'x'
 was (0, 0) where the flagless answer is (0, 1). Known defect D102 (F94) lifts the budget inside
-those bodies and holds a conditional test's kept errors to it when the test ends (DECISIONS
-2026-10-17). The port answers (1, 1) with no error on the first row, (0, 1) on the third, and
+those bodies, and a conditional's test then takes a match of its body that fits the budget
+(DECISIONS 2026-10-17). The port answers (1, 1) with no error on the first row, (0, 1) on the third, and
 (0, 1) with one deletion on the fifth. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs`
 (`The_ranking_budget_does_not_stop_a_test_s_body_from_matching` and the controls beside it).
 
