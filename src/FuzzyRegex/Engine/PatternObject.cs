@@ -777,6 +777,14 @@ internal sealed class PatternObject
     internal bool LiftsAnchorBan;
 
     /// <summary>
+    /// Whether every match of a pattern rule H' applies to consumes at least one character: its
+    /// exact minimum width is above zero and no fuzzy section permits a deletion. Rule H' reads it
+    /// when it compares two partial matches (<c>Matcher.TheAttemptWins</c>, D100). Filled by
+    /// <c>Optimiser.FindAnchorBanLift</c>; false for a pattern H' does not apply to.
+    /// </summary>
+    internal bool EveryMatchConsumes;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
     /// reference treats a subject folding it loaded but never used as half-matched, which is
     /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the

@@ -21978,10 +21978,14 @@ internal static class Matcher
     /// search start at the anchor, which is not computable in general. The rule kept
     /// (DECISIONS 2026-10-17): u keeps the ban only when its attempt began one character from the
     /// anchor, where the attempt's own path less its leading insertion begins, and u already meets
-    /// every open section's minimum, so the continuation that completes the attempt completes u
-    /// inside it. Otherwise some continuation can complete the attempt and not u:
+    /// every open section's minimum, so the continuation that completes the attempt completes u,
+    /// and u's completion consumes a character (u has consumed one already, or every match does,
+    /// <see cref="PatternObject.EveryMatchConsumes"/>), so it starts inside the attempt's completion
+    /// rather than at its end. Otherwise some continuation can complete the attempt and not u:
     /// <c>(?:ab){1&lt;=i&lt;=2}</c> partial over 'ba' is P(0, 2), as 'bab' is (0, 3), while over
-    /// 'xxa' it stays P(1, 3), as every completion of 'xxa' has a match from 1.
+    /// 'xxa' it stays P(1, 3), as every completion of 'xxa' has a match from 1. And
+    /// <c>(?:(?=a)){e&lt;=1}</c> partial over 's' is P(0, 1), as 'sa' is (0, 1): u, (1, 1), ends
+    /// where the attempt ends.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state, holding the attempt at the anchor.</param>
@@ -21999,7 +22003,8 @@ internal static class Matcher
         if (upstream.IsPartial && attempt == MatchStatus.Partial)
         {
             int oneOn = state.Reverse ? state.PrevPos(anchor) : state.NextPos(anchor);
-            return upstream.AttemptStart != oneOn || !upstream.MeetsItsMinimums;
+            bool consumes = upstream.TextPos != upstream.AttemptStart || state.Pattern.EveryMatchConsumes;
+            return upstream.AttemptStart != oneOn || !upstream.MeetsItsMinimums || !consumes;
         }
 
         return state.Reverse ? upstream.AttemptStart <= state.TextPos : upstream.AttemptStart >= state.TextPos;

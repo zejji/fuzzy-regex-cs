@@ -235,6 +235,9 @@ public sealed class FuzzyAnchorPinTests
     // u is P(2, 2), at the edge, not one character on: 'xab' is (0, 3) here, as `\b` fails at 1
     // and 2. Upstream P(2, 2). Passed on main.
     [Arguments(@"\b(?:ab){i<=1}", "xa", 0, 2, 1)]
+    // u is P(1, 1), one character on, but its completion can be empty: 'sa' is (0, 1) with 's'
+    // inserted, and u's (1, 1) starts at its end, not inside it. Passed on main (upstream P(1, 1)).
+    [Arguments(@"(?:(?=a)){e<=1}", "s", 0, 1, 1)]
     public void A_partial_keeps_the_anchor_when_a_continuation_lets_H_prime_lift_the_ban(
         string pattern,
         string text,
