@@ -512,6 +512,25 @@ public sealed class BacktrackingVerbTests
             .Equal((0, 8, 0, 2));
     }
 
+    // DIVERGES FROM UPSTREAM's Windows build, whose answer rests on the read the test above names.
+    [Test]
+    public void A_partial_search_where_upstream_reads_an_uninitialised_position_answers_its_clean_build()
+    {
+        // Battery run 20261017-3, oracle2 FAULT row 16. Upstream's Windows wheel answers P(0, 6)
+        // with group 1 unset, a span no path can reach: from 0, `\1` with group 1 unset fails.
+        // MemorySanitizer names `new_position` in `basic_match` and a heap block from `re_realloc`.
+        // A build with `new_position` initialised reports neither and answers P(6, 6), as this port
+        // does (screened 2026-10-17). The `(*PRUNE)` spelling and the subject 'xxxx\r\n' answer
+        // P(6, 6) on both engines.
+        Match m = new FuzzyRegex(
+            @"^([[a-f]~~[d-k]])*?\1(?:[[:alpha:]](*SKIP)[^a]|[\w\s])$",
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version1
+        ).Match("İİİİ\r\n", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 6, 0));
+        m.Groups[1].Success.Should().BeFalse();
+    }
+
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
     public void An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves()

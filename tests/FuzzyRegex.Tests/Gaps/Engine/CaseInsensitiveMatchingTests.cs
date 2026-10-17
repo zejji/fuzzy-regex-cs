@@ -659,4 +659,37 @@ public sealed class CaseInsensitiveMatchingTests
         string pattern,
         string subject
     ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeFalse(pattern);
+
+    /// <summary>
+    /// Under ASCII a case-insensitive literal folds simply even when full folding is asked for, and
+    /// a non-capturing group around it does not change that: <c>(?:ß)</c> matches 'ß' and refuses
+    /// 'ss', as the bare literal does.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 91, found by battery run 20261017-4 (oracle cluster 20). Upstream 2026.9.10
+    /// compiles the grouped literal with full folding, although its own <c>make_case_flags</c>
+    /// turns FULLCASE off under ASCII, so <c>(?:ß)</c> refuses 'ß' and matches 'ss' and 'SS'
+    /// (measured 2026-10-17). Its bare and capturing spellings answer as this port does, and so do
+    /// Python <c>re</c> (ASCII|IGNORECASE) and Perl 5.42 (<c>/aai</c>), grouped or not.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="matches">Whether it matches the whole subject.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments("(?:ß)", "ß", true)]
+    [Arguments("(?:ß)", "ss", false)]
+    [Arguments("(?:ß)", "SS", false)]
+    [Arguments("ß", "ß", true)]
+    [Arguments("ß", "ss", false)]
+    [Arguments("(ß)", "ß", true)]
+    public void Under_ascii_a_grouped_literal_folds_as_the_bare_literal_does(
+        string pattern,
+        string subject,
+        bool matches
+    ) =>
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Ascii | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
+            .Match(subject)
+            .Success.Should()
+            .Be(matches, pattern);
 }
