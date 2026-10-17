@@ -732,8 +732,21 @@ internal sealed class MatchState : IDisposable
     /// <c>SstackDepth</c> again for the caller's own call when the caller pushed nothing else
     /// between; <c>Matcher.DeletionsPastReturns</c> walks the frames with it.
     /// </para>
+    /// <para>
+    /// <c>BstackAt</c> is where the call's <c>GROUP_CALL</c> entry lies on <see cref="Bstack"/>, so
+    /// that a run-out inside a call a lookaround's body opened can undo the call as that entry's
+    /// backtrack arm would (D98, <c>Matcher.AbandonTheCallsTheBodyOpened</c>). A call re-opened by
+    /// <c>GROUP_RETURN</c>'s backtrack arm gets it back from that entry.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase)> OpenCalls = [];
+    internal readonly List<(
+        long Key,
+        int Reach,
+        int SstackDepth,
+        long[]? MemoKey,
+        int FrameBase,
+        int BstackAt
+    )> OpenCalls = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (D93): for each entry of <see cref="OpenCalls"/>, in the same order, the fuzzy

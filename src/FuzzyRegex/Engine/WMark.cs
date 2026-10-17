@@ -235,4 +235,10 @@ internal enum PartialEvent
     /// failed (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
     /// </summary>
     RunOutOverASectionsLimits,
+
+    /// <summary>
+    /// D98: a run-out inside a group call the body opened, in a body that feeds no decision,
+    /// undid the call and was taken at the call (<c>Matcher.AbandonTheCallsTheBodyOpened</c>).
+    /// </summary>
+    RunOutCallAbandoned,
 }

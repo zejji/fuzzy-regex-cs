@@ -1674,7 +1674,8 @@ internal sealed class PatternObject
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
     /// group call's target is not followed: the walk goes on at its return node, and a run-out
-    /// inside a call the body opened is answered at once (<c>Matcher.RunOutInALookaroundBody</c>).
+    /// inside a call the body opened is taken at the call node, or answered at once where the body
+    /// feeds a decision (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </remarks>
     /// <param name="pattern">The pattern, with its nodes numbered.</param>
     private static void SetLookaroundBodies(PatternObject pattern)

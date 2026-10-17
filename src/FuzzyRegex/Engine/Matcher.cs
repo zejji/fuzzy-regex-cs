@@ -5033,7 +5033,7 @@ internal static class Matcher
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
     private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, int reach, _, _, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         if (state.Pattern.NestsFuzzySections)
         {
@@ -5409,7 +5409,7 @@ internal static class Matcher
         ancestors.Clear();
         for (int i = 0; i < state.OpenCalls.Count; i++)
         {
-            (long openCall, int openReach, _, _, _) = state.OpenCalls[i];
+            (long openCall, int openReach, _, _, _, _) = state.OpenCalls[i];
             int openPos = (int)(uint)openCall;
             if (
                 (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
@@ -6664,13 +6664,21 @@ internal static class Matcher
     /// branches and a backreference to one runs out.
     /// </para>
     /// <para>
-    /// SHORTCUT: a run-out inside a group call that the body opened, and every run-out under the
-    /// oracle's pre-D11 ablation, answers the partial at the attempt's start
-    /// (<see cref="ACallOpenedInTheBodyIsOpen"/>). Such a call is still open at the run-out, and
-    /// REOPEN would have to open it again as well (amendment 2). Ceiling: a partial at the attempt's
-    /// start whatever follows, a phantom where main may answer None (`(?!(?1))ab((?=(?:ab)*(?&lt;=b)))?`
-    /// over 'ab', P(0, 2), judge None). Upgrade: REOPEN re-opens the calls opened in the body. Until
-    /// the second pre-merge review (R1) any group call anywhere in the pattern switched the rule off.
+    /// D98: a run-out inside a group call that the body opened (<see cref="ACallOpenedInTheBodyIsOpen"/>),
+    /// in a body that feeds no decision, undoes the outermost such call and is taken at the call's
+    /// node (<see cref="AbandonTheCallsTheBodyOpened"/>), so `(x)(?=(?1)\1)\Z` over 'x' answers
+    /// None, as `(x)(?=x\1)\Z` does. Until D98 every such run-out answered at once.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the same run-out in a body whose outcome feeds a decision
+    /// (<see cref="RunOutFeedsADecision"/>: a negative lookaround, a condition's test, a positive
+    /// lookaround inside an atomic group, a negative lookaround or a test, or any pattern with a
+    /// verb), in a fuzzy pattern, and every run-out under the oracle's pre-D11 ablation, answers the
+    /// partial at the attempt's start. There the call's other paths can decide the construct, so
+    /// they cannot be cut, and REOPEN would have to open the call again (amendment 2). Ceiling: a
+    /// partial at the attempt's start whatever follows, a phantom where the judge says None
+    /// (`(?!(?1))ab((?=(?:ab)*(?&lt;=b)))?` over 'ab', P(0, 2); D98's witness search in
+    /// <c>.scratch/s1016/d98/NOTES.md</c>). Upgrade: REOPEN re-opens the calls opened in the body.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -6721,7 +6729,26 @@ internal static class Matcher
 
         if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark))
         {
-            return null;
+            // D98: where the body feeds no decision, the run-out is taken at the call the body made.
+            if (
+                pattern.IsFuzzy
+                || RunOutFeedsADecisionIf(state, callsAnswerAtOnce: false)
+                || AbandonTheCallsTheBodyOpened(state, look.Node, lookMark) is not { } call
+            )
+            {
+                return null;
+            }
+
+            item = call;
+            atomics = 0;
+            for (
+                offset = state.Pstack.Count - sizeof(long);
+                state.Pstack.SizeAt(offset) != lookMark;
+                offset -= sizeof(long)
+            )
+            {
+                atomics++;
+            }
         }
 
         // A fuzzy section the body opened and left open: the continuation runs in the section
@@ -6886,6 +6913,101 @@ internal static class Matcher
         );
 
     /// <summary>
+    /// NOT UPSTREAM'S, D98: a run-out lies inside a group call that the innermost body opened, and
+    /// the body feeds no decision. Undoes the outermost such call as its <c>GROUP_CALL</c> entry's
+    /// backtrack arm would, with everything above that entry, and gives back the call's node, where
+    /// the run-out is then taken.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The paths the cut throws away are the call's own and those of anything opened inside it. A
+    /// call's return restores every capture and repeat (<see cref="AdvanceGroupReturn"/>), so any
+    /// of those paths that reaches the lookaround's end does so with the caller's captures, changed
+    /// only by groups the body reaches after the call, which the run-out at the call node leaves
+    /// unknown (<see cref="Node.RunOutGroups"/>), and at the lookaround's start. So the run-out's own
+    /// continuation covers every continuation those paths could have had, as
+    /// <see cref="RunOutFeedsADecision"/> argues for the alternatives a choice point keeps: where no
+    /// decision is taken on the body's outcome, keeping them only costs time. The body's paths below
+    /// the call stay. The argument in steps: <c>.scratch/s1016/d98/NOTES.md</c>.
+    /// </para>
+    /// <para>
+    /// The frame comes back with the counts as well as the currents (<see cref="PopCaptures"/>),
+    /// where <see cref="BacktrackGroupCall"/> pops only the currents: the entries that would have
+    /// undone the counts lie above the cut. The failed-call memo records nothing, since the call
+    /// has not run out of choices.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="look">The lookaround or condition whose body opened the call.</param>
+    /// <param name="lookMark">Its pruning mark.</param>
+    /// <returns>The <c>GROUP_CALL</c> node to run out at, or <see langword="null"/>, with nothing
+    /// changed, if the stacks are not as the marks promise.</returns>
+    private static Node? AbandonTheCallsTheBodyOpened(MatchState state, Node look, long lookMark)
+    {
+        if (!state.Bstack.ReadSizeBelow((int)lookMark - 1, out long savedSstack))
+        {
+            return null;
+        }
+
+        long s0 = savedSstack - _lookaroundStateDataSize;
+        int outer = state.OpenCalls.Count - 1;
+        while (outer > 0 && state.OpenCalls[outer - 1].SstackDepth > s0)
+        {
+            outer--;
+        }
+
+        (_, _, int depth, _, _, int bstackAt) = state.OpenCalls[outer];
+        Node? returnNode = depth >= sizeof(long) ? state.Sstack.NodeAt(state.Pattern, depth - sizeof(long)) : null;
+        Node? call = null;
+        foreach (int i in look.BodyInfo!.Nodes)
+        {
+            Node n = state.Pattern.NodeList[i];
+            if (n.Op == Opcode.GroupCall && returnNode is not null && ReferenceEquals(n.Next1.Node, returnNode))
+            {
+                call = n;
+                break;
+            }
+        }
+
+        if (
+            call is null
+            || bstackAt < lookMark
+            || !state.Bstack.ReadUInt8Below(bstackAt + 1, out byte op)
+            || op != (byte)Opcode.GroupCall
+        )
+        {
+            Debug.Assert(false, "D98: the outermost call the body opened is a call node of the body, with its entry");
+            return null;
+        }
+
+        while (state.Pstack.TopSize(out long mark) && mark > bstackAt)
+        {
+            _ = state.Pstack.DropSize();
+        }
+
+        CutBstack(state, bstackAt);
+
+        /* sstack: caller_repeats capture_change caller_captures return_node */
+
+        state.Sstack.Count = depth;
+        if (
+            !state.Sstack.DropSize()
+            || !PopCaptures(state, state.Sstack)
+            || !state.Sstack.PopSize(out long captureChange)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+        )
+        {
+            Debug.Assert(false, "D98: the call's frame is whole");
+            return null;
+        }
+
+        state.CaptureChange = captureChange;
+        CloseFramesAbove(state);
+        state.NotePartialEvent(PartialEvent.RunOutCallAbandoned);
+        return call;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11, the run-out rule: whether a run-out here goes on in a body whose outcome
     /// feeds a decision, the only place where the alternatives a choice point keeps before it can
     /// change the answer.
@@ -6920,7 +7042,19 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
-    private static bool RunOutFeedsADecision(MatchState state)
+    private static bool RunOutFeedsADecision(MatchState state) =>
+        RunOutFeedsADecisionIf(state, callsAnswerAtOnce: true);
+
+    /// <summary>
+    /// <see cref="RunOutFeedsADecision"/>, which with <paramref name="callsAnswerAtOnce"/>
+    /// false leaves out its first clause, a call the innermost body opened that is still open: D98
+    /// asks whether the body feeds a decision before it abandons such a call
+    /// (<see cref="RunOutInALookaroundBody"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="callsAnswerAtOnce">Whether a call the innermost body opened makes the answer false.</param>
+    /// <returns><see langword="true"/> if the alternatives are worth keeping.</returns>
+    private static bool RunOutFeedsADecisionIf(MatchState state, bool callsAnswerAtOnce)
     {
         PatternObject pattern = state.Pattern;
         if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
@@ -6937,9 +7071,11 @@ internal static class Matcher
                 return false;
             }
 
-            // The innermost body: a run-out inside a call it opened is answered at once.
+            // The innermost body: a run-out inside a call it opened is answered at once, or (D98,
+            // where nothing else here returns true) taken at the call.
             if (
-                !inBody
+                callsAnswerAtOnce
+                && !inBody
                 && op is Opcode.Lookaround or Opcode.Conditional
                 && pattern.HasGroupCalls
                 && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark)
@@ -18868,6 +19004,7 @@ internal static class Matcher
         state.Sstack.PushSize(state.CaptureChange);
         PushCaptures(state, state.Sstack);
         state.Sstack.PushNode(groupCallReturnNode);
+        int groupCallBstackAt = state.Bstack.Count;
         state.Bstack.PushUInt8((byte)Opcode.GroupCall);
 
         // The call is open, and the frame it belongs to ends here. See
@@ -18883,7 +19020,8 @@ internal static class Matcher
                 groupCallReach,
                 state.Sstack.Count,
                 groupCallKeyed ? FailedCallKeyToRecord(state) : null,
-                groupCallFrameBase
+                groupCallFrameBase,
+                groupCallBstackAt
             )
         );
         if (groupCallSections)
@@ -18980,6 +19118,7 @@ internal static class Matcher
             // backtracking stack so the arm below can re-open it.
             state.Bstack.PushSize(state.OpenCalls[^1].Key);
             state.Bstack.PushSize(state.OpenCalls[^1].Reach);
+            state.Bstack.PushSize(state.OpenCalls[^1].BstackAt);
             if (pattern.NestsFuzzySections)
             {
                 PushCallSection(state.Bstack, state.OpenCallSections[^1]);
@@ -19007,6 +19146,7 @@ internal static class Matcher
          * sstack: -
          *
          * bstack: callee_captures callee_repeats capture_change call_key call_reach
+         *         call_bstack_at
          *         [call_section] read_spans return_node GROUP_RETURN
          *
          * else:
@@ -19815,6 +19955,7 @@ internal static class Matcher
          * sstack: -
          *
          * bstack: callee_captures callee_repeats capture_change call_key call_reach
+         *         call_bstack_at
          *         [call_section] read_spans return_node
          *
          * else:
@@ -19847,6 +19988,7 @@ internal static class Matcher
             CallSection groupReturnBackSection = default;
             if (
                 (pattern.NestsFuzzySections && !PopCallSection(state.Bstack, out groupReturnBackSection))
+                || !state.Bstack.PopSize(out long groupReturnBackBstackAt)
                 || !state.Bstack.PopSize(out long groupReturnBackReach)
                 || !state.Bstack.PopSize(out long groupReturnBackKey)
             )
@@ -19889,7 +20031,14 @@ internal static class Matcher
             );
             // It has returned, so it is not one the failed-call memo may record.
             state.OpenCalls.Add(
-                (groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null, groupReturnBackFrameBase)
+                (
+                    groupReturnBackKey,
+                    (int)groupReturnBackReach,
+                    state.Sstack.Count,
+                    null,
+                    groupReturnBackFrameBase,
+                    (int)groupReturnBackBstackAt
+                )
             );
             if (pattern.NestsFuzzySections)
             {
@@ -20179,7 +20328,7 @@ internal static class Matcher
             // opened in an outer call's body moves with that call's frame, not the
             // innermost's). Only a section the body left open, which lies in the bytes
             // just put back, takes the saved value, moved with them. That happens only
-            // after a run-out, which a pattern with group calls does not continue
+            // after a run-out, which a fuzzy pattern with group calls does not continue
             // (RunOutInALookaroundBody), so no call frame has moved then.
             int parkedS0 = (int)reopenedSaved - _lookaroundStateDataSize - reopenedDelta;
             Debug.Assert(
