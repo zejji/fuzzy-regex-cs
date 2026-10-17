@@ -205,23 +205,7 @@ internal static class Optimiser
                 || pattern.HasGroupCalls
                 || pattern.NodeList.Any(static n => DependsOnThePosition(n.Op))
             );
-
-        // D100: no fuzzy deletion can shorten a match below the pattern's exact minimum width.
-        pattern.EveryMatchConsumes =
-            pattern.LiftsAnchorBan && pattern.MinWidth > 0 && !pattern.NodeList.Any(static n => PermitsADeletion(n));
     }
-
-    /// <summary>
-    /// Whether a node is a fuzzy section that permits at least one deletion: its deletion and error
-    /// limits are above zero, and one deletion is within its cost limit.
-    /// </summary>
-    /// <param name="node">The node.</param>
-    /// <returns><see langword="true"/> for such a section.</returns>
-    private static bool PermitsADeletion(Node node) =>
-        node.Op == Opcode.Fuzzy
-        && node.Values[FuzzyValue.MaxDel] > 0
-        && node.Values[FuzzyValue.MaxErr] > 0
-        && node.Values[FuzzyValue.DelCost] <= node.Values[FuzzyValue.MaxCost];
 
     /// <summary>
     /// Whether a node is a fuzzy section that permits at least one insertion: its insertion and

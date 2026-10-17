@@ -760,8 +760,6 @@ public sealed class ThreadSafetyTests
             // Optimiser.FindAnchorBanLift, the last pass OptimisePattern runs, and cleared only by
             // OracleComparer.RunWithoutTheAnchorPin on a pattern compiled for that one call.
             "PatternObject.LiftsAnchorBan",
-            // D100 added EveryMatchConsumes, written beside it.
-            "PatternObject.EveryMatchConsumes",
             // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
             // only since D61.
             "PatternObject.AnchorGuards",

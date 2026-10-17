@@ -288,6 +288,38 @@ public sealed class FuzzyAnchorPinTests
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
     }
 
+    // D100's blind review (2026-10-17, .scratch/s1016/review-d100): rows where a local rule for two
+    // partials (the later one began one character on, meets its minimums, must consume) gave the
+    // wrong start, too late and too early. Each expected start (reversed: end) is the judge's, the
+    // least start of this port's own full search over every continuation of up to 5 characters
+    // (tools/probes/partial-contract-judge.py); main gives the same. The witness continuation is in
+    // the comment.
+    [Test]
+    [Arguments(@"(?V1)(?:^|x)(?:ab){i<=2}\B", "b", 0, 0)] // 'baba': (0, 4)
+    [Arguments(@"(?V1)(?:a(?=b)a+){i<=1,1<=e<=2}", "ba", 0, 1)] // 'baba'
+    [Arguments(@"\m(?:(?:)[^x]b){i<=2}(?=b)", "x a", 0, 2)] // 'x abb'
+    [Arguments(@"(?e)(?!b)(?:[^x]b(?:x|ab)){i<=2,e<=2}", "bxax", 3, 3)] // 'bxaxbbx'
+    [Arguments(@"\B(?:aba(?:x|ab)){i<=1}", "  ", 1, 1)] // '  abax'
+    [Arguments(@"(?i)(?r)(?<!a)(?:(?:a(?=b)){2<=i<=2}|a+){i<=2}", " b", 0, 1)] // 'a b'
+    [Arguments(@"(?r)x(?:[^x]b){i<=2}\B", " ", 0, 1)] // 'xab '
+    [Arguments(@"(?r)\A(?:(?:a\Bb){2<=i<=2}|a(?=b)){i<=2}", "ba", 0, 1)] // 'aba'
+    [Arguments(@"(?r)x(?:(a)b){i<=2,e<=2}\b", "a", 0, 1)] // 'xaba'
+    [Arguments(@"(?r)\M(?:(?:ab)*){2<=i<=2}", "aa", 0, 1)] // 'a aa'
+    [Arguments(@"(?i)(?r)(?:abc(?:ab)*){1<=i<=2}", "abx", 0, 2)] // 'abcabx'
+    [Arguments(@"(?r)a(?:(?:a|bc)){i<=2}\B", " ", 0, 1)] // 'aa '
+    public void A_partial_reports_the_least_start_the_full_search_reaches(
+        string pattern,
+        string text,
+        int pos,
+        int edge
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, pos, partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (pattern.Contains("(?r)", StringComparison.Ordinal) ? m.Index + m.Length : m.Index).Should().Be(edge);
+    }
+
     // D96: H' asks where u's attempt began, not the start a `\K` reports. In each row u's attempt
     // starts inside c, so u stands, as without the `\K`. Upstream's answers (regex 2026.9.10,
     // 2026-10-17), every one exact; before the fix the port kept c, with one insertion.

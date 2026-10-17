@@ -21910,8 +21910,7 @@ internal static class Matcher
     /// </para>
     /// <para>
     /// The caller runs this once per pass, so under partial matching the full pass decides first
-    /// and a full c beats a later partial u, which is upstream's own preference; two partials are
-    /// compared by <see cref="TheAttemptWins"/>'s own rule (D100). A pattern with no
+    /// and a full c beats a later partial u, which is upstream's own preference. A pattern with no
     /// construct that depends on position, or no section that permits an insertion
     /// (<see cref="PatternObject.LiftsAnchorBan"/>), keeps the plain ban and pays one field test.
     /// </para>
@@ -21938,14 +21937,14 @@ internal static class Matcher
             return banned;
         }
 
-        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state, banned) : null;
+        AnchorBanSnapshot? upstream = bannedMatched ? AnchorBanSnapshot.Take(state) : null;
 
         state.TextPos = anchor;
         state.SliceStart = sliceStart;
         state.SliceEnd = sliceEnd;
         int attempt = DoMatch2(state, search: false);
 
-        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream, attempt, anchor))
+        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream))
         {
             return attempt;
         }
@@ -21971,40 +21970,15 @@ internal static class Matcher
     /// "Starts" is where the banned match's attempt began. A <c>\K</c> moves only the start it
     /// reports, and must not decide which attempt wins (D96): <c>(?:a){i&lt;=1}\K</c> over 'ba' is
     /// (2, 2) exact, as <c>(?:a){i&lt;=1}</c> is (1, 2) exact.
-    /// <para>
-    /// When both are partial (D100), the test above compares the wrong things: the attempt's end is
-    /// the edge, not the end of any completed match, and u is only a match some continuation might
-    /// complete. The partial contract asks whether some continuation makes the port's own full
-    /// search start at the anchor, which is not computable in general. The rule kept
-    /// (DECISIONS 2026-10-17): u keeps the ban only when its attempt began one character from the
-    /// anchor, where the attempt's own path less its leading insertion begins, and u already meets
-    /// every open section's minimum, so the continuation that completes the attempt completes u,
-    /// and u's completion consumes a character (u has consumed one already, or every match does,
-    /// <see cref="PatternObject.EveryMatchConsumes"/>), so it starts inside the attempt's completion
-    /// rather than at its end. Otherwise some continuation can complete the attempt and not u:
-    /// <c>(?:ab){1&lt;=i&lt;=2}</c> partial over 'ba' is P(0, 2), as 'bab' is (0, 3), while over
-    /// 'xxa' it stays P(1, 3), as every completion of 'xxa' has a match from 1. And
-    /// <c>(?:(?=a)){e&lt;=1}</c> partial over 's' is P(0, 1), as 'sa' is (0, 1): u, (1, 1), ends
-    /// where the attempt ends.
-    /// </para>
     /// </remarks>
     /// <param name="state">The match state, holding the attempt at the anchor.</param>
     /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
-    /// <param name="attempt">The attempt's status.</param>
-    /// <param name="anchor">The search anchor.</param>
     /// <returns><see langword="true"/> if the attempt is the answer.</returns>
-    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream, int attempt, int anchor)
+    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
     {
         if (upstream is null)
         {
             return true;
-        }
-
-        if (upstream.IsPartial && attempt == MatchStatus.Partial)
-        {
-            int oneOn = state.Reverse ? state.PrevPos(anchor) : state.NextPos(anchor);
-            bool consumes = upstream.TextPos != upstream.AttemptStart || state.Pattern.EveryMatchConsumes;
-            return upstream.AttemptStart != oneOn || !upstream.MeetsItsMinimums || !consumes;
         }
 
         return state.Reverse ? upstream.AttemptStart <= state.TextPos : upstream.AttemptStart >= state.TextPos;
@@ -22036,27 +22010,15 @@ internal static class Matcher
         internal List<FuzzyChange> Changes = [];
         internal GroupData[] Groups = [];
 
-        /// <summary>Whether the match is a partial one (D100).</summary>
-        internal bool IsPartial;
-
-        /// <summary>
-        /// For a partial match, whether every section open at its run-out already meets its
-        /// minimums (D100); always true for a pattern without a fuzzy minimum.
-        /// </summary>
-        internal bool MeetsItsMinimums;
-
         /// <summary>
         /// Saves the match into the state's one snapshot, reusing its storage: at most one is live at
         /// a time, because the walk's snapshots are done with before the search's is taken.
         /// </summary>
-        /// <param name="state">The match state, as the banned search left it.</param>
-        /// <param name="status">The banned search's status.</param>
+        /// <param name="state">The match state.</param>
         /// <returns>The snapshot.</returns>
-        internal static AnchorBanSnapshot Take(MatchState state, int status)
+        internal static AnchorBanSnapshot Take(MatchState state)
         {
             AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
-            snapshot.IsPartial = status == MatchStatus.Partial;
-            snapshot.MeetsItsMinimums = !state.Pattern.HasFuzzyMinimum || AllMinimumsMet(state);
             snapshot.MatchPos = state.MatchPos;
             snapshot.TextPos = state.TextPos;
             snapshot.AttemptStart = state.AttemptStart;
