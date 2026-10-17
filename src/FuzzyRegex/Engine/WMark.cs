@@ -62,17 +62,7 @@ internal sealed record LookaroundSuccess(
     GroupSpan[] Captures,
     long[] FuzzyCounts,
     FuzzyChange[] FuzzyChanges
-)
-{
-    /// <summary>Whether another success of the same frame leads to the same continuation.</summary>
-    /// <param name="other">The other success.</param>
-    /// <returns><see langword="true"/> if the keys are equal.</returns>
-    internal bool SameContinuation(LookaroundSuccess other) =>
-        Frame == other.Frame
-        && Captures.AsSpan().SequenceEqual(other.Captures)
-        && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
-        && FuzzyChanges.AsSpan().SequenceEqual(other.FuzzyChanges);
-}
+);
 
 /// <summary>
 /// NOT UPSTREAM'S, D11: the second-pass events the port grid counts per row (design 8.1, item 2),

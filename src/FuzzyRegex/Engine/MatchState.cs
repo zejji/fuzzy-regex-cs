@@ -2083,23 +2083,59 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation was already continued
-    /// from the same frame (the dedup). Reads only the entries at or above the frame, from the end.
+    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation as the one the state
+    /// holds now was already continued from the same frame (the dedup). Reads only the entries at or
+    /// above the frame, from the end, and the state in place.
     /// </summary>
-    /// <param name="success">The success.</param>
-    /// <returns><see langword="true"/> if an entry of the same frame leads where it does.</returns>
-    internal bool HasSameContinuation(LookaroundSuccess success)
+    /// <remarks>
+    /// The state is compared in place, so a repeat costs no copy. Until D98's follow-up each
+    /// success was copied into a <see cref="LookaroundSuccess"/> first: `(x)(?=(?1)*y)\Z` searched
+    /// over 'x' * n reaches its blocked end twice per attempt, the second time a repeat, and
+    /// allocated 432 bytes per character.
+    /// </remarks>
+    /// <param name="frame">The lookaround's frame.</param>
+    /// <param name="withChanges">Whether the fuzzy changes are part of the key (<c>(?b)</c>, <c>(?e)</c>).</param>
+    /// <returns><see langword="true"/> if an earlier success of the frame had the same key.</returns>
+    internal bool HasSameContinuation(int frame, bool withChanges)
     {
-        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
+        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= frame; i--)
         {
             DedupEntriesExamined++;
-            if (success.SameContinuation(LookaroundSuccesses[i]))
+            LookaroundSuccess other = LookaroundSuccesses[i];
+            if (
+                other.Frame == frame
+                && SameCapturesAsNow(other.Captures)
+                && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
+                && (withChanges ? CollectionsMarshal.AsSpan(FuzzyChanges) : []).SequenceEqual(other.FuzzyChanges)
+            )
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>Whether each group's current capture is the one a dedup entry recorded.</summary>
+    /// <param name="captures">The entry's captures, (-1, -1) for a group with none.</param>
+    /// <returns><see langword="true"/> if all are the same.</returns>
+    private bool SameCapturesAsNow(GroupSpan[] captures)
+    {
+        if (captures.Length != Groups.Length)
+        {
+            return false;
+        }
+
+        for (int g = 0; g < Groups.Length; g++)
+        {
+            GroupData group = Groups[g];
+            if ((group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1)) != captures[g])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>

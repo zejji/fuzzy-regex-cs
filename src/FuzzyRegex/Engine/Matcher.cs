@@ -6151,13 +6151,8 @@ internal static class Matcher
             return LookaroundEnd.Cut;
         }
 
-        LookaroundSuccess success = new(
-            frame,
-            [.. state.Groups.Select(static g => g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1))],
-            [.. state.FuzzyCounts],
-            (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0 ? [.. state.FuzzyChanges] : []
-        );
-        if (state.HasSameContinuation(success))
+        bool withChanges = (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0;
+        if (state.HasSameContinuation(frame, withChanges))
         {
             state.NotePartialEvent(PartialEvent.Dedup);
             if (!blocked)
@@ -6186,7 +6181,14 @@ internal static class Matcher
         }
 
         TaintTheFrame(state, frame);
-        state.AddLookaroundSuccess(success);
+        state.AddLookaroundSuccess(
+            new LookaroundSuccess(
+                frame,
+                [.. state.Groups.Select(static g => g.Current >= 0 ? g.Captures[g.Current] : new GroupSpan(-1, -1))],
+                [.. state.FuzzyCounts],
+                withChanges ? [.. state.FuzzyChanges] : []
+            )
+        );
         _ = state.Pstack.DropSize();
 
         // Amendment 2: the continuation starts from the saved stack a normal end leaves (S0, the
