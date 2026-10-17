@@ -135,6 +135,22 @@ CONTROLS = [
     ({"pattern": "[[:alpha:]]", "subject": "a", "operation": "search"}, "C6", "n/a"),
     # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
     ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
+    # Battery run 20261016-2's harness fixes. C6 rule 6a after rule 3: both engines delete the
+    # matched item before they would insert in front of it, so this order-only row passes ...
+    ({"pattern": "(?:bx){e<=2}(?:ab){1<=e<=2}", "subject": "bxab", "operation": "search"}, "C6", "pass"),
+    # ... and D94 (open) still fails: both engines miss the fit an insertion before 'a' makes.
+    ({"pattern": "(?:a){1<=s<=1,i<=1}", "subject": "ab", "operation": "fullmatch"}, "C6", "fail"),
+    # C6 rule 5a: a ^-anchored search is a match at the start, with no search-anchor ban.
+    ({"pattern": "^(?:a+){e<=2,1i+2d<=2}", "subject": "ba", "operation": "finditer"}, "C6", "pass"),
+    # A conditional inside a lookbehind runs at the other end of the body in a forwards matcher.
+    ({"pattern": "(?:[ab](?<=(?(?<!a).|ba))){2i+2d+1s<=4}", "subject": "a", "operation": "search"}, "C6", "n/a"),
+    # C7: a lookbehind's capture or conditional splits the engines by direction.
+    ({"pattern": "(?:\\w(?<!(?(?<=ba)bax|a))){1,2}?.", "subject": "axbax", "operation": "finditer"}, "C7",
+     "engines-disagree"),
+    ({"pattern": "aa(?<=(?:a|)(a{1,2}))", "subject": "aa", "operation": "match"}, "C7", "engines-disagree"),
+    # C4: reversed, \K moves a partial's end, and the judges report the attempt's.
+    ({"pattern": "(?:[ab]\\w)+?\\w\\Ka*", "subject": "xaaxaaaa", "operation": "fullmatch", "flags": 1024,
+      "partial": True}, "C4", "pass"),
 ]
 
 

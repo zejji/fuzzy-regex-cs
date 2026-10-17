@@ -105,6 +105,11 @@ RULES = [
      "an optimisation must not change an answer, and pcre2pattern says it can with verbs and "
      "partial matching; over the 3,318 rows PCRE2 can ask with their flags as written, turning it off changed 3, all partial "
      "(single-engine) rows (measured 2026-09-30). Perl's optimisations cannot be turned off"),
+    ("a lookbehind holding a capture or a conditional", "engines-disagree, when the port agrees with upstream",
+     "PCRE2 and Perl run a lookbehind's body forwards from a chosen start, upstream regex, .NET and "
+     "node backwards (DIVERGENCES row 100), so a capture of variable length or a conditional's test "
+     "inside one can differ by direction alone: `aa(?<=(?:a|)(a{1,2}))` over 'aa' sets g1 (1,2) in PCRE2 "
+     "and Perl, (0,2) in regex, .NET and node (battery run 20261016-2)"),
     ("Boost.Regex", "recorded, not a judge",
      "a third backtracking Perl-syntax engine, asked on ASCII rows with no slice and no partial matching "
      "(no ICU, so non-ASCII text is n/a); it refuses variable-length lookbehind, which counts as not "
@@ -324,6 +329,35 @@ def negative_test_captures(pattern: str) -> bool:
     return False
 
 
+def _lookbehind_bodies(pattern: str):
+    """The text of every lookbehind's body, found by scanning parentheses outside sets."""
+    for m in re.finditer(r"\(\?<[=!]", pattern):
+        depth, k, in_set = 0, m.start(), False
+        while k < len(pattern):
+            c = pattern[k]
+            if c == "\\":
+                k += 2
+                continue
+            if in_set:
+                in_set = c != "]"
+            elif c == "[":
+                in_set = True
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        yield pattern[m.end():k]
+
+
+def lookbehind_direction(pattern: str) -> bool:
+    """A lookbehind whose body holds a capture or a conditional: its answer can depend on the
+    direction the body is run in, which PCRE2 and Perl take differently from upstream."""
+    return any(_CAPTURE_OPEN.search(b) or "(?(" in b for b in _lookbehind_bodies(pattern))
+
+
 def verdict(row: dict, base: str | None, rec: dict | None) -> tuple:
     """(status, kind, port answer, engines' answer) for check C7."""
     if rec is None:
@@ -359,6 +393,11 @@ def verdict(row: dict, base: str | None, rec: dict | None) -> tuple:
             return ("open", f"OPEN-2 ({e} only)", base, str(shown))
         diff = "capture history differs" if keys[e] == mine else _difference(mine, keys[e])
         return ("single-disagree", f"{e} only, {diff}; {other}: {refused}", base, str(shown))
+    if (keys["pcre2"] == keys["perl"] and keys["pcre2"] != mine and lookbehind_direction(row["pattern"])
+            and _engine_key(res.get("regex")) == mine):
+        backwards = ",".join(e for e in ("regex", "dotnet", "node") if _engine_key(res.get(e)) == mine)
+        return ("engines-disagree", f"lookbehind direction: pcre2 and perl run it forwards; port = {backwards}",
+                base, str(shown))
     if keys["pcre2"] != keys["perl"]:
         side = "port = pcre2" if mine == keys["pcre2"] else "port = perl" if mine == keys["perl"] else "port = neither"
         return ("engines-disagree", f"{_difference(keys['pcre2'], keys['perl'])}; {side}", base, str(shown))
