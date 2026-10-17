@@ -740,8 +740,21 @@ internal sealed class MatchState : IDisposable
     /// backtrack arm records a key it finds here; a call that returned is re-opened by
     /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
     /// </para>
+    /// <para>
+    /// <c>FrameBase</c> is the saved stack's count before the call pushed its frame, which is
+    /// <c>SstackDepth</c> again for the caller's own call when the caller pushed nothing else
+    /// between; <c>Matcher.DeletionsPastReturns</c> walks the frames with it.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, CallSection Section, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase)> OpenCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D93): for each entry of <see cref="OpenCalls"/>, in the same order, the fuzzy
+    /// section the call was made in (<see cref="CallSection"/>). Kept only where a call can be made
+    /// inside a fuzzy section (<see cref="PatternObject.NestsFuzzySections"/>), so a pattern with no
+    /// section pays nothing for it; empty otherwise.
+    /// </summary>
+    internal readonly List<CallSection> OpenCallSections = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: for each entry of <see cref="OpenCalls"/>, in the same order, the packed span
@@ -1605,6 +1618,7 @@ internal sealed class MatchState : IDisposable
         ActiveCalls.Clear();
         ActiveCallCounts.Clear();
         OpenCalls.Clear();
+        OpenCallSections.Clear();
         OpenCallSpans.Clear();
         FailedCalls = null;
         CallsThisPass = 0;

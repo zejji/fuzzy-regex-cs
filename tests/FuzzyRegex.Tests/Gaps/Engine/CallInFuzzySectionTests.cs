@@ -119,6 +119,27 @@ public sealed class CallInFuzzySectionTests
             .Should()
             .Be(expected);
 
+    /// <summary>
+    /// The deletion choice of a 'b' that matched exactly is left out when the caller's 'b's after
+    /// the return would have to be deleted too. Without that, each such 'b' offered its deletion on
+    /// the way back from the failed re-entries D93 allows, and each offer walked the rest of the
+    /// text: 17,343 steps at 80 'a's, against 1,385 with it (Debug, 2026-10-17).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_deletion_the_callers_items_would_have_to_repeat_is_not_tried()
+    {
+        EngineWork.SkipUnlessCounting();
+        var regex = new FuzzyRegex("(?:(?P<g>a(?&g)b|c)){d<=2}", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new string('a', 80) + "c" + new string('b', 78);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => Answer(regex.Match(subject)).Should().Be("(0,159) s0i0d2"),
+            3_000,
+            "the narrowing counts the caller's items after a return"
+        );
+    }
+
     private static string Answer(Match match)
     {
         if (!match.Success)

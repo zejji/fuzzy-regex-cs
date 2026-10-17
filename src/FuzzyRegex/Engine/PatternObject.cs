@@ -419,6 +419,14 @@ internal sealed class PatternObject
     internal bool NarrowExactDeletions;
 
     /// <summary>
+    /// NOT UPSTREAM (D93 performance): whether <c>Matcher.ExactDeletionMayMatch</c> may count the
+    /// items a match reads after a group call returns as part of an item's run
+    /// (<c>Matcher.DeletionsPastReturns</c>). Needs the narrowing and exactly one fuzzy section, so
+    /// a walk that crosses no <c>END_FUZZY</c> stays in the section instance it started in.
+    /// </summary>
+    internal bool NarrowsPastReturns;
+
+    /// <summary>
     /// NOT UPSTREAM (finding F-A): the most items an exact match's "delete it instead" choice can
     /// have left to delete and still be offered; <see cref="long.MaxValue"/> where there is no such
     /// ceiling. Set when the pattern is compiled; read first by <c>Matcher.ExactDeletionMayMatch</c>,
@@ -1341,6 +1349,7 @@ internal sealed class PatternObject
         Optimiser.FindAnchorBanLift(self);
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+        self.NarrowsPastReturns = self.NarrowExactDeletions && sections == 1 && self.HasGroupCalls;
         if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)
         {
             self.ExactDeletionCeiling = DeletionCeiling(self);
@@ -1689,8 +1698,8 @@ internal sealed class PatternObject
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
-    /// group call's target is not followed, and a pattern with group calls does not continue a
-    /// run-out (<c>Matcher.RunOutInALookaroundBody</c>), so its bodies are never read.
+    /// group call's target is not followed: the walk goes on at its return node, and a run-out
+    /// inside a call the body opened is answered at once (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </remarks>
     /// <param name="pattern">The pattern, with its nodes numbered.</param>
     private static void SetLookaroundBodies(PatternObject pattern)
@@ -1740,7 +1749,8 @@ internal sealed class PatternObject
             test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
         }
 
-        if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
+        // A call is stepped over (D97): its return restores every capture, so it adds no group.
+        if (pattern.ReadsCapturesWhileMatching)
         {
             SetRunOutGroups(pattern);
         }
