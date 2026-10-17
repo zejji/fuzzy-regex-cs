@@ -21976,6 +21976,11 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the attempt is the answer.</returns>
     private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
     {
+        // SHORTCUT (D100): when both are partial, the attempt's end is the edge, not the end of a
+        // completed match, so this test can pick a start the partial contract does not. The right
+        // answer needs one continuation that completes the attempt and leaves no match inside it,
+        // which no rule over the two partials settles (DECISIONS 2026-10-17). Upgrade path: reason
+        // over the continuations jointly, or refuse the combination.
         if (upstream is null)
         {
             return true;
