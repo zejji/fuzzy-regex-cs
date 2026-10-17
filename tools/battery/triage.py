@@ -45,6 +45,7 @@ import tagger  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import f6model  # noqa: E402
+import screen  # noqa: E402
 
 RISKY = ("fuzzy", "backref", "lookahead", "neg-lookahead", "lookbehind", "neg-lookbehind", "atomic", "possessive",
          "verb", "conditional", "keep", "call", "flag-r", "partial", "slice", "flag-b", "flag-e", "flag-p")
@@ -229,7 +230,7 @@ class Findings:
         key = cluster or f"{source} | {category} | {check} {kind} | {risky(tags)}"
         self.rows.append({"cluster": key, "source": source, "category": category, "check": check, "kind": kind,
                           "row": {k: row[k] for k in ("pattern", "flags", "subject", "operation", "partial", "pos",
-                                                       "endpos", "namedLists", "cell", "generator") if k in row},
+                                                       "endpos", "namedLists", "template", "count", "cell", "generator") if k in row},
                           "port": port, "other": other, "refs": refs or {}, "tags": sorted(tags),
                           "hint": hint(tags, check, kind)})
 
@@ -542,9 +543,40 @@ def make_probe_runner(run: Path):
 # ----------------------------------------------------------------------------------------------
 
 
+def second_screen(run: Path, f: Findings, out: Path) -> None:
+    """screen.py over every row whose one failing reference is upstream: a claimed row moves from
+    the table to the known counts under its proof; a row an open register row explains gets a HINT."""
+    picked = []
+    for n, x in enumerate(f.rows):
+        failing = [c for c in REFS if x["refs"].get(c) == "fail"]
+        if (x["source"] == "oracle" and x["check"] == "C1") or (x["category"] != "self" and failing == ["C1"]):
+            picked.append({"id": n, **x["row"]})
+    main_repo = run.parent.parent.parent
+    sut = main_repo / ".claude" / "worktrees" / f"bat-{run.name}-probe"
+    if not picked or not sut.exists():
+        f.notes.append(f"second screen: not run ({len(picked)} rows; probe worktree {'found' if sut.exists() else 'missing'})")
+        return
+    verdicts = screen.screen(picked, out / "screen", sut)
+    claimed = set()
+    for k, (kind, detail) in verdicts.items():
+        x = f.rows[int(k)]
+        if kind == "open":
+            x["hint"] = detail
+            continue
+        f.known[f"{x['source']}: second screen, {kind}: {detail}"] += 1
+        claimed.add(int(k))
+    f.rows = [x for n, x in enumerate(f.rows) if n not in claimed]
+    f.notes.append(f"second screen: {len(picked)} rows asked, {len(claimed)} claimed, "
+                   f"{sum(1 for v in verdicts.values() if v[0] == 'open')} left to an open register row "
+                   f"({out / 'screen' / 'screen.jsonl'})")
+
+
 def main(argv: list[str]) -> int:
     run = Path(argv[0]).resolve()
     do_reduce = "--no-reduce" not in argv
+    # --out DIR writes the table elsewhere (a re-judge of a finished run leaves its own table alone).
+    out = Path(argv[argv.index("--out") + 1]).resolve() if "--out" in argv else run
+    out.mkdir(parents=True, exist_ok=True)
     main_repo = run.parent.parent.parent
     bed_dir = main_repo / ".scratch" / "s1016" / "d85" / "bed"
     f = Findings()
@@ -564,12 +596,14 @@ def main(argv: list[str]) -> int:
             harness_source(run, f, f"matrix-{d.name}", Path(p.read_text(encoding="utf-8").strip()),
                            run / "rows" / f"matrix-{d.name}.jsonl", control, f"matrix-{d.name}")
 
+    if "--no-screen" not in argv:
+        second_screen(run, f, out)
     clusters = collections.defaultdict(list)
     for x in f.rows:
         # The pair halves are one source: merge their clusters.
         x["cluster"] = x["cluster"].replace("pairs-a |", "pairs |").replace("pairs-b |", "pairs |")
         clusters[x["cluster"]].append(x)
-    with open(run / "findings.jsonl", "w", encoding="utf-8", newline="\n") as fh:
+    with open(out / "findings.jsonl", "w", encoding="utf-8", newline="\n") as fh:
         for x in f.rows:
             fh.write(json.dumps(x, ensure_ascii=True) + "\n")
 
@@ -579,7 +613,7 @@ def main(argv: list[str]) -> int:
                                    x["row"].get("pattern", "")))
         witness[k] = w
     # The table is written first, without reductions, so a reducer failure can never lose it.
-    write_report(run, f, clusters, witness, {}, "not reduced yet" if do_reduce else "reduction off (--no-reduce)")
+    write_report(run, out, f, clusters, witness, {}, "not reduced yet" if do_reduce else "reduction off (--no-reduce)")
     if not do_reduce:
         return 0
     try:
@@ -592,11 +626,11 @@ def main(argv: list[str]) -> int:
         note = f"{len(reduced)} of {len(eligible)} eligible witnesses reduced"
     except Exception as e:  # noqa: BLE001 - a reducer failure degrades to "not reduced"
         reduced, note = {}, f"NOT REDUCED: the reducer failed ({type(e).__name__}: {str(e)[:200]})"
-    write_report(run, f, clusters, witness, reduced, note)
+    write_report(run, out, f, clusters, witness, reduced, note)
     return 0
 
 
-def write_report(run: Path, f: Findings, clusters: dict, witness: dict, reduced: dict, note: str) -> None:
+def write_report(run: Path, out: Path, f: Findings, clusters: dict, witness: dict, reduced: dict, note: str) -> None:
     lines = [f"# Battery triage: {run.name}", ""]
     cfg = json.loads((run / "config.json").read_text(encoding="utf-8")) if (run / "config.json").exists() else {}
     lines += [f"Commit {cfg.get('commit', '?')}, master seed {cfg.get('master', '?')}, smoke {cfg.get('smoke')}.", "",
@@ -634,7 +668,7 @@ def write_report(run: Path, f: Findings, clusters: dict, witness: dict, reduced:
     lines += ["", "## Known (accounted for by an existing screen)", "", "| What | Rows |", "|---|---|"]
     lines += [f"| {k} | {n} |" for k, n in sorted(f.known.items(), key=lambda kv: -kv[1])]
     lines += ["", "## Counts and notes", ""] + [f"- {x}" for x in f.notes] + [f"- witness reduction: {note}"]
-    (run / "triage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (out / "triage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"{len(clusters)} clusters, {len(f.rows)} interesting rows, {sum(f.known.values())} known; {note}")
 
 
