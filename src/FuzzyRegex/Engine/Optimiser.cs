@@ -193,12 +193,13 @@ internal static class Optimiser
         // re-searches from each candidate's start, is unresearched, and running it there gave answers
         // that were neither u nor c (`(?b)(?:\mdog){1<=e<=2}` finditer over 'do; xdog-dog').
         // Upgrade path: derive how H' composes with the walk's ranking, then refutation-review it.
-        pattern.LiftsAnchorBanWhenPartial =
+        // The same gate serves a partial search (D100): a partial reports the least start from which
+        // the full search matches some completion, and for a gated-out pattern that search keeps the
+        // ban on every completed text.
+        pattern.LiftsAnchorBan =
             pattern.IsFuzzy
             && (pattern.Flags & RegexFlags.BestMatch) == 0
-            && pattern.NodeList.Any(static n => PermitsAnInsertion(n));
-        pattern.LiftsAnchorBan =
-            pattern.LiftsAnchorBanWhenPartial
+            && pattern.NodeList.Any(static n => PermitsAnInsertion(n))
             && (
                 pattern.HasFuzzyMinimum
                 || pattern.HasGroupCalls

@@ -777,14 +777,6 @@ internal sealed class PatternObject
     internal bool LiftsAnchorBan;
 
     /// <summary>
-    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
-    /// section that permits an insertion, since removing leading insertions can leave a partial match
-    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
-    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
-    /// </summary>
-    internal bool LiftsAnchorBanWhenPartial;
-
-    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
     /// reference treats a subject folding it loaded but never used as half-matched, which is
     /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the

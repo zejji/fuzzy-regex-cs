@@ -211,7 +211,6 @@ string Answer(JsonElement row, string[] switches)
             if (s == "noLift")
             {
                 poType.GetField("LiftsAnchorBan", Field)!.SetValue(po, false);
-                poType.GetField("LiftsAnchorBanWhenPartial", Field)!.SetValue(po, false);
                 poType.GetField("AnchorGuards", Field)!.SetValue(po, null);
             }
             else if (s == "d85")

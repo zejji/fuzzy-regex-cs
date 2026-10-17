@@ -163,22 +163,29 @@ public sealed class FuzzyAnchorPinTests
         Spans(@"(?b)\m(?:Y){1i+1d+1s<=2}\M", " XY Z").Should().Equal((1, 3), (4, 5));
     }
 
-    // The gate. A search with partial matching on is gated in, whatever the pattern: dropping the
-    // leading insertion leaves the partial (1, 1), which starts later. A pattern whose fuzzy sections
-    // permit no insertion is gated out. DIVERGES FROM UPSTREAM on the partial row (upstream P(1, 1)).
+    // The gate, the same with partial matching on or off (D100, DECISIONS 2026-10-17). A pattern with
+    // no position-dependent construct and no fuzzy minimum keeps the ban: every completed text that
+    // the attempt at the anchor matches has a match from one character on, so the port's full
+    // search never starts at the anchor there, and the partial contract gives upstream's answer.
+    // 'x' + 'a' is (1, 2) in the port; the partial was P(0, 1) with one insertion before D100.
     [Test]
-    public void Partial_matching_is_gated_in_and_a_section_without_insertions_is_gated_out()
+    [Arguments(@"(?:a){i<=1}", "x")]
+    [Arguments(@"(?:ab){i<=1}", "x")]
+    public void A_partial_search_keeps_the_ban_where_the_full_search_always_does(string pattern, string text)
     {
-        Match partial = new FuzzyRegex("(?:a){i<=1}").Match("x", partial: true);
-        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Insertions)
-            .Should()
-            .Be((true, 0, 1, 1));
+        Match partial = new FuzzyRegex(pattern).Match(text, partial: true);
 
+        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Total).Should().Be((true, 1, 0, 0));
+    }
+
+    // A pattern whose fuzzy sections permit no insertion is gated out.
+    [Test]
+    public void A_section_without_insertions_is_gated_out()
+    {
         new FuzzyRegex("(?:a){i<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
         new FuzzyRegex(@"\b(?:dog){i<=1}").PatternObject.LiftsAnchorBan.Should().BeTrue();
         new FuzzyRegex(@"\b(?:dog){s<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
         new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
-        new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBanWhenPartial.Should().BeFalse();
     }
 
     // Partial matching: a full match is preferred to a partial one, so H' runs on the full pass
@@ -225,6 +232,9 @@ public sealed class FuzzyAnchorPinTests
     [Arguments(@"(?:ab){2<=i<=2}", "xya", 0, 3, 2)]
     [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2, 1)]
     [Arguments(@"(?r)(?:ba){1<=i<=2}", "ax", 0, 2, 1)]
+    // u is P(2, 2), at the edge, not one character on: 'xab' is (0, 3) here, as `\b` fails at 1
+    // and 2. Upstream P(2, 2). Passed on main.
+    [Arguments(@"\b(?:ab){i<=1}", "xa", 0, 2, 1)]
     public void A_partial_keeps_the_anchor_when_a_continuation_lets_H_prime_lift_the_ban(
         string pattern,
         string text,
@@ -252,13 +262,17 @@ public sealed class FuzzyAnchorPinTests
 
     // D100 controls: every continuation that completes the attempt at the anchor also completes a
     // match from inside it, so the port's full search never starts at 0 and the later partial
-    // stands. These pass on main and agree with upstream; the judge gives the same.
+    // stands. The partial u begins one character on, where the attempt's path less its leading
+    // insertion begins, and already meets the section's minimum. Upstream agrees, and so does the
+    // judge. The first three pass on main and are the rows a rule that let every partial u lose
+    // would turn into P(0, ...). The last, `(?:a){i<=1}\b`, was P(0, 1) on main.
     [Test]
     [Arguments(@"(?:ab){1<=i<=2}", "xxa", 1, 3)] // 'xxab': c (0, 4) i=2, u (1, 4) i=1
     [Arguments(@"(?:ab){1<=i<=2}", "xba", 1, 3)]
-    [Arguments(@"(?:ab){i<=1}", "xa", 1, 2)]
     [Arguments(@"(?=x|ab)(?:ab){i<=1}", "xa", 1, 2)]
+    [Arguments(@"(?:ab){i<=1}", "xa", 1, 2)]
     [Arguments(@"(?r)(?:ba){1<=i<=2}", "axx", 0, 2)]
+    [Arguments(@"(?:a){i<=1}\b", "x", 1, 1)]
     public void A_partial_keeps_the_later_start_when_every_continuation_has_a_match_inside_the_attempt(
         string pattern,
         string text,
