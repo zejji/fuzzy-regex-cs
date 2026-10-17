@@ -884,6 +884,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
+            // D93's performance follow-up added NarrowsPastReturns, written by Compile beside it.
+            "PatternObject.NarrowsPastReturns",
             // Its repair round added ExactDeletionCeiling, written by Compile after the node loop,
             // and moved two node fields onto the pattern as tables written by Compile once the
             // nodes are numbered: FuzzyRunExits (SetFuzzyRunLengths) and OptionalPassEndOf, built
