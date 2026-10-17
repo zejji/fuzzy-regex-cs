@@ -763,8 +763,6 @@ public sealed class ThreadSafetyTests
             // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
             // only since D61.
             "PatternObject.AnchorGuards",
-            // And LiftsAnchorBanWhenPartial, written beside it.
-            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",
@@ -901,6 +899,9 @@ public sealed class ThreadSafetyTests
             // D81 added these two, written by Compile after the node-numbering loop.
             "PatternObject.NestsFuzzySections",
             "PatternObject.KeepsSectionLinks",
+            // D94's insertion pruning added one, written by Compile beside KeepsSectionLinks.
+            "PatternObject.SubstitutionTests",
+            "PatternObject.RepeatStateMemoCaps",
             // The capture-dependent call guard added one, written in Compile beside MemoGroups.
             "PatternObject.CallReadGroups",
             "PatternObject.CapturesAgainstDirection",

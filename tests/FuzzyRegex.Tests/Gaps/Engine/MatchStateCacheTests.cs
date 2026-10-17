@@ -426,6 +426,16 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
+            case HashSet<RepeatStateKey> failed:
+                failed.Add(new RepeatStateKey(7, 7, 7, 7, 7, 7, 7, true));
+                break;
+            case null when field.FieldType == typeof(HashSet<RepeatStateKey>):
+                // D94's failed-state memo, made on first use.
+                field.SetValue(state, new HashSet<RepeatStateKey> { new(7, 7, 7, 7, 7, 7, 7, true) });
+                break;
+            case List<RepeatStateKey> marked:
+                marked.Add(new RepeatStateKey(7, 7, 7, 7, 7, 7, 7, true));
+                break;
             case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase, int BstackAt)> calls:
                 calls.Add((7, 7, 7, null, 7, 7));
                 break;
@@ -562,6 +572,10 @@ public sealed class MatchStateCacheTests
             case HashSet<EmptyIterationState> states:
                 // Allocated on first use and then kept, so an empty one is the same as none.
                 lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
+                break;
+            case HashSet<RepeatStateKey> failed:
+                // D94's failed-state memo: made on first use and then kept, so empty is none.
+                lines.Add(failed.Count == 0 ? $"{path}=null" : $"{path}.Count={failed.Count}");
                 break;
             case HashSet<long[]> keys:
                 RenderItems(

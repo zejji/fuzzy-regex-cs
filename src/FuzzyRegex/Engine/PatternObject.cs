@@ -453,6 +453,24 @@ internal sealed class PatternObject
     internal bool HasFuzzyMinimum;
 
     /// <summary>
+    /// NOT UPSTREAM (D94 performance): every one-character test inside a fuzzy section, when a
+    /// substitution can only be taken where one of them rejects the subject character; null when
+    /// the pattern holds an item this does not model (a fuzzy string, '.' or assertion, a
+    /// reference, a reverse item, a lookaround or a call), and then nothing is pruned. Read by
+    /// <c>Matcher.ASubstitutionMayFollow</c>. Set when the pattern is compiled, for a pattern with a
+    /// fuzzy minimum only.
+    /// </summary>
+    internal Node[]? SubstitutionTests;
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): null when the failed-state memo
+    /// (<c>Matcher.StateKnownToFail</c>) is off for this pattern; otherwise, per repeat, the count
+    /// above which its count no longer matters (its minimum when it has no maximum), or
+    /// <see cref="long.MaxValue"/> to keep it all. Set when a pattern with a fuzzy minimum is compiled.
+    /// </summary>
+    internal long[]? RepeatStateMemoCaps;
+
+    /// <summary>
     /// NOT UPSTREAM (D81): whether one fuzzy section can be open inside another: the pattern has two
     /// or more, or one and a group call, which can enter it again from inside itself. Only then can
     /// a run-out find an enclosing section's limits broken (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
@@ -783,14 +801,6 @@ internal sealed class PatternObject
     /// the oracle's ablation, and by nothing in the library.
     /// </summary>
     internal bool LiftsAnchorBan;
-
-    /// <summary>
-    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
-    /// section that permits an insertion, since removing leading insertions can leave a partial match
-    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
-    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
-    /// </summary>
-    internal bool LiftsAnchorBanWhenPartial;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
@@ -1319,6 +1329,13 @@ internal sealed class PatternObject
         // NOT UPSTREAM (D81): see NestsFuzzySections and KeepsSectionLinks.
         self.NestsFuzzySections = sections > 1 || (sections == 1 && self.HasGroupCalls);
         self.KeepsSectionLinks = self.HasFuzzyMinimum || self.NestsFuzzySections;
+
+        // NOT UPSTREAM (D94 performance): see SubstitutionTests.
+        if (self.HasFuzzyMinimum)
+        {
+            self.SubstitutionTests = Matcher.CollectSubstitutionTests(self.NodeList);
+            self.RepeatStateMemoCaps = Matcher.MemoCapsFor(self, sections);
+        }
 
         // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
         Optimiser.FindAnchorBanLift(self);
