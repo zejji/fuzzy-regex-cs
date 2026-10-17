@@ -5033,7 +5033,7 @@ internal static class Matcher
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
     private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, int reach, _, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         if (state.Pattern.NestsFuzzySections)
         {
@@ -5409,7 +5409,7 @@ internal static class Matcher
         ancestors.Clear();
         for (int i = 0; i < state.OpenCalls.Count; i++)
         {
-            (long openCall, int openReach, _, _) = state.OpenCalls[i];
+            (long openCall, int openReach, _, _, _) = state.OpenCalls[i];
             int openPos = (int)(uint)openCall;
             if (
                 (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
@@ -9581,7 +9581,99 @@ internal static class Matcher
             exit = PatternObject.SkipTextlessNodes(state.Pattern, next);
         }
 
-        return count <= room && ExitCanRead(state, exit);
+        if (count > room)
+        {
+            return false;
+        }
+
+        return exit is { Op: Opcode.GroupReturn } && state.Pattern.NarrowsPastReturns
+            ? DeletionsPastReturns(state, count, room, next)
+            : ExitCanRead(state, exit);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D93 performance): <see cref="ExactDeletionMayMatch"/>'s count for a run that
+    /// ends at a group return, carried on past the return into the items the caller reads next.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The exchange argument needs only that W is the first item after X to use the character at
+    /// p, that the two lie in one section instance, and that nothing between them reads a
+    /// capture. A called group's return goes to the node its frame on the saved stack names, so
+    /// the items after the return are as fixed as the items after an <c>END_GROUP</c>; the captures
+    /// the callee made are thrown away there (D51), and the walk stops at the boundary of any group
+    /// a backreference or conditional tests. With one fuzzy section, a walk that crosses no
+    /// <c>END_FUZZY</c> stays in the instance it started in. So every item it passes counts towards
+    /// the deletions X's choice needs, and more than the room rules the choice out.
+    /// </para>
+    /// <para>
+    /// The frame a return pops is the innermost open call's only when the saved stack holds nothing
+    /// above that frame once the group boundaries passed have taken their parked positions off;
+    /// the walk checks that before each return and otherwise keeps the choice.
+    /// <c>(?:(?P&lt;g&gt;a(?&amp;g)b|c)){d&lt;=2}</c> over 'a'*n+'c'+'b'*(n-2) is where it pays: after D93
+    /// each 'b' that matched exactly offered its deletion, and each deletion walked the rest of the
+    /// text, so the steps grew with the square of n.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="count">The items the choice must delete so far, at most <paramref name="room"/>.</param>
+    /// <param name="room">The deletions that still fit (<see cref="DeletionRoom"/>).</param>
+    /// <param name="node">The node after the item's own node.</param>
+    /// <returns><see langword="false"/> only when the choice certainly holds no new match.</returns>
+    private static bool DeletionsPastReturns(MatchState state, long count, long room, Node? node)
+    {
+        PatternObject pattern = state.Pattern;
+        int top = state.Sstack.Count;
+        int frame = state.OpenCalls.Count - 1;
+        bool returned = false;
+
+        // A bound only against a malformed cycle; each pass moves forward or out by one frame.
+        for (int i = 0; i < 1024 && node is not null; i++)
+        {
+            if (node.FuzzyRunLength > 0)
+            {
+                if (returned)
+                {
+                    count += node.FuzzyRunLength;
+                    if (count > room)
+                    {
+                        return false;
+                    }
+                }
+
+                while (node is { FuzzyRunLength: > 0 })
+                {
+                    node = node.Next1.Node;
+                }
+            }
+            else if (
+                node.Op is Opcode.StartGroup or Opcode.EndGroup
+                && !pattern.GroupInfoAt((int)node.Values[0]).Referenced
+            )
+            {
+                // The group boundary that opens a group parks the position on the saved stack
+                // and the one that closes it takes it off (START_GROUP's arm).
+                if (!state.SkipsCaptures)
+                {
+                    top += node.Values[2] != 0 ? -sizeof(long) : sizeof(long);
+                }
+
+                node = node.Next1.Node;
+            }
+            else if (node.Op == Opcode.GroupReturn && frame >= 0 && state.OpenCalls[frame].SstackDepth == top)
+            {
+                node = state.Sstack.NodeAt(pattern, top - sizeof(long));
+                top = state.OpenCalls[frame].FrameBase;
+                frame--;
+                returned = true;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -18765,6 +18857,7 @@ internal static class Matcher
         // call reference, the groups and repeats its body can write, and save only
         // those; D51 and D62 depend on what is restored, so it needs nested and
         // recursive witnesses. docs/plan/2026-10-03-d68-call-copy-perf.md.
+        int groupCallFrameBase = state.Sstack.Count;
         PushRepeats(state, state.Sstack);
         state.Sstack.PushSize(state.CaptureChange);
         PushCaptures(state, state.Sstack);
@@ -18779,7 +18872,13 @@ internal static class Matcher
             "the text reached never shrinks, so an inner call's reach is at least its caller's"
         );
         state.OpenCalls.Add(
-            (groupCallKey, groupCallReach, state.Sstack.Count, groupCallKeyed ? FailedCallKeyToRecord(state) : null)
+            (
+                groupCallKey,
+                groupCallReach,
+                state.Sstack.Count,
+                groupCallKeyed ? FailedCallKeyToRecord(state) : null,
+                groupCallFrameBase
+            )
         );
         if (groupCallSections)
         {
@@ -19755,6 +19854,7 @@ internal static class Matcher
             // captures it had made (D51, see PopCalleeCaptures). The repeats first:
             // they lie on top of the callee's groups here, and under the caller's
             // groups on the saved stack (D62).
+            int groupReturnBackFrameBase = state.Sstack.Count;
             PushRepeats(state, state.Sstack);
             state.Sstack.PushSize(state.CaptureChange);
             if (
@@ -19782,7 +19882,9 @@ internal static class Matcher
                 "a re-opened call is still inside the calls that were open when it returned"
             );
             // It has returned, so it is not one the failed-call memo may record.
-            state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
+            state.OpenCalls.Add(
+                (groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null, groupReturnBackFrameBase)
+            );
             if (pattern.NestsFuzzySections)
             {
                 state.OpenCallSections.Add(groupReturnBackSection);
