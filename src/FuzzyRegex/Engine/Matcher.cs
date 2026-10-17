@@ -21893,8 +21893,9 @@ internal static class Matcher
         int sliceEnd = state.SliceEnd;
         int banned = DoMatch2(state, search);
 
+        // D96: where u's attempt began, not the start a \K reports (MatchState.AttemptStart).
         bool bannedMatched = banned is MatchStatus.Success or MatchStatus.Partial;
-        if ((bannedMatched && state.MatchPos == anchor) || !(bannedMatched || banned == MatchStatus.Failure))
+        if ((bannedMatched && state.AttemptStart == anchor) || !(bannedMatched || banned == MatchStatus.Failure))
         {
             return banned;
         }
@@ -21928,6 +21929,11 @@ internal static class Matcher
     /// Rule H''s test, with the attempt at the anchor in <paramref name="state"/>: the banned match
     /// is absent or starts at or after the attempt's end.
     /// </summary>
+    /// <remarks>
+    /// "Starts" is where the banned match's attempt began. A <c>\K</c> moves only the start it
+    /// reports, and must not decide which attempt wins (D96): <c>(?:a){i&lt;=1}\K</c> over 'ba' is
+    /// (2, 2) exact, as <c>(?:a){i&lt;=1}</c> is (1, 2) exact.
+    /// </remarks>
     /// <param name="state">The match state, holding the attempt at the anchor.</param>
     /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
     /// <returns><see langword="true"/> if the attempt is the answer.</returns>
@@ -21938,7 +21944,7 @@ internal static class Matcher
             return true;
         }
 
-        return state.Reverse ? upstream.MatchPos <= state.TextPos : upstream.MatchPos >= state.TextPos;
+        return state.Reverse ? upstream.AttemptStart <= state.TextPos : upstream.AttemptStart >= state.TextPos;
     }
 
     /// <summary>Whether rule H' can change this search's answer (the compile-time gate).</summary>
@@ -21958,6 +21964,7 @@ internal static class Matcher
     {
         internal int MatchPos;
         internal int TextPos;
+        internal int AttemptStart;
         internal long Errors;
         internal long Cost;
         internal long[] Counts = [];
@@ -21975,6 +21982,7 @@ internal static class Matcher
             AnchorBanSnapshot snapshot = state.AnchorBanScratch ??= new AnchorBanSnapshot();
             snapshot.MatchPos = state.MatchPos;
             snapshot.TextPos = state.TextPos;
+            snapshot.AttemptStart = state.AttemptStart;
             snapshot.Errors = state.TotalErrors;
             snapshot.Cost = state.TotalCost;
 
@@ -21994,6 +22002,7 @@ internal static class Matcher
         {
             state.MatchPos = MatchPos;
             state.TextPos = TextPos;
+            state.AttemptStart = AttemptStart;
             state.TotalErrors = Errors;
             state.TotalCost = Cost;
             Counts.CopyTo(state.FuzzyCounts, 0);
