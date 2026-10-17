@@ -357,6 +357,7 @@ def upstream_answers(rows: list[dict], work: Path, log=print) -> dict:
 
 def port_answers(rows: list[dict], up: dict, work: Path, sut: Path) -> dict:
     """{id: (answer, [hits])} from abl.cs, built and run in the worktree of the commit under test."""
+    work.mkdir(parents=True, exist_ok=True)
     d = sut / ".battery"
     d.mkdir(exist_ok=True)
     shutil.copy2(HERE / "abl.cs", d / "abl.cs")
@@ -379,6 +380,63 @@ def port_answers(rows: list[dict], up: dict, work: Path, sut: Path) -> dict:
             if len(p) == 3:
                 out[p[0]] = (p[1], [] if p[2] == "-" else p[2].split(","))
     return out
+
+
+# ----------------------------------------------------------------------------------------------
+# POSIX (ledger entry 9): upstream may charge a POSIX match more than its own POSIX-free engine
+# charges the same span, because restore_best_match keeps a losing candidate's total
+# (_regex.c:11564-11576). POSIX chooses which match, never what a given match costs, so the control
+# is the POSIX-free fullmatch over each of the port's spans. ExpectedDivergences reads the recorded
+# POSIX-free answer to the same question, which can be a different, shorter match (battery run
+# 20261016-2, A1: POSIX (0,5), POSIX-free search (0,4)), so it missed A1, A8 and A29.
+
+_POSIX = 0x10000
+_INLINE_FLAGS = re.compile(r"\(\?([a-zA-Z0-9]*)\)")
+
+
+def is_posix(row: dict) -> bool:
+    return bool(int(row.get("flags") or 0) & _POSIX) or any("p" in m.group(1) for m in _INLINE_FLAGS.finditer(row["pattern"]))
+
+
+def without_posix(row: dict) -> dict:
+    def drop(m):
+        rest = m.group(1).replace("p", "")
+        return f"(?{rest})" if rest else ""
+    return {**row, "pattern": _INLINE_FLAGS.sub(drop, row["pattern"]), "flags": int(row.get("flags") or 0) & ~_POSIX}
+
+
+def posix_span_questions(row: dict, port: str | None) -> list[dict]:
+    """The POSIX-free fullmatch over each of the port's match spans."""
+    found = matches(port) if port else None
+    if (not is_posix(row) or row.get("partial") or not found
+            or row["operation"] not in ("search", "match", "fullmatch", "finditer")):
+        return []
+    free = without_posix(row)
+    q = {k: free[k] for k in QUESTION if k in free}
+    return [{**q, "operation": "fullmatch", "pos": s, "endpos": e, "plain": True} for _p, s, e, _r in found]
+
+
+def _errors(rest: str) -> int:
+    m = re.match(r"\s*\((\d+),(\d+),(\d+)\)", rest)
+    return sum(int(x) for x in m.groups()) if m else 0
+
+
+def posix_overcharge(up: str | None, port: str | None, free_up: list, free_port: list) -> bool:
+    """Whether upstream's POSIX answer has the port's spans at a higher cost, and both engines'
+    POSIX-free fullmatch over each span is the port's match."""
+    mu, mp = matches(up) if up else None, matches(port) if port else None
+    if not mu or not mp or len(mu) != len(mp) or len(free_up) != len(mp) or len(free_port) != len(mp):
+        return False
+    dearer = False
+    for (pu, su, eu, ru), (pp, sp, ep, rp), fu, fp in zip(mu, mp, free_up, free_port):
+        if (pu, su, eu) != (pp, sp, ep) or not is_answer(fu) or fu != fp:
+            return False
+        if without_positions(f"{pp}({sp},{ep}){rp}") != without_positions(fp):
+            return False
+        if _errors(ru) < _errors(rp):
+            return False
+        dearer |= _errors(ru) > _errors(rp)
+    return dearer
 
 
 QUESTION = ("pattern", "flags", "subject", "operation", "partial", "pos", "endpos", "namedLists", "template", "count")
@@ -406,6 +464,15 @@ def screen(rows: list[dict], work: Path, sut: Path, log=print) -> dict:
     t = time.time()
     port = port_answers(asked, {k: v for k, v in up.items() if "~" not in k}, work, sut)
     log(f"screen: the port answered {len(port)} of {len(asked)} in {time.time() - t:.0f} s")
+    # A second round for POSIX rows, whose questions depend on the port's spans.
+    second = {}
+    for r in rows:
+        k = str(r["id"])
+        second[k] = [{"id": f"{k}~posix{n}", **q} for n, q in enumerate(posix_span_questions(r, port.get(k, (None, []))[0]))]
+    flat = [q for qs in second.values() for q in qs]
+    if flat:
+        up.update(upstream_answers(flat, work / "up2", log))
+        port.update(port_answers(flat, {}, work / "posix", sut))
     out = {}
     with open(work / "screen.jsonl", "w", encoding="utf-8", newline="\n") as f:
         for r in rows:
@@ -414,6 +481,12 @@ def screen(rows: list[dict], work: Path, sut: Path, log=print) -> dict:
             tu = {n: up.get(f"{k}~{n}") for n in twins.get(k, [])}
             tp = {n: port.get(f"{k}~{n}", (None, []))[0] for n in twins.get(k, [])}
             verdict = classify(r, up.get(k), pa, hits, tu, tp)
+            if second.get(k):
+                tu["posix"] = [up.get(q["id"]) for q in second[k]]
+                tp["posix"] = [port.get(q["id"], (None, []))[0] for q in second[k]]
+                if verdict is None and posix_overcharge(up.get(k), pa, tu["posix"], tp["posix"]):
+                    verdict = ("twin", "ledger 9: POSIX charges more for the same span (the POSIX-free fullmatch "
+                                       "over each span is the port's match on both engines)")
             f.write(json.dumps({"id": k, "up": up.get(k), "port": pa, "hits": hits, "twinUp": tu, "twinPort": tp,
                                 "verdict": verdict}, ensure_ascii=True) + "\n")
             if verdict:

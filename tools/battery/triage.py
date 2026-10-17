@@ -1,6 +1,11 @@
 """Builds a battery run's triage table: one row per disagreement cluster.
 
-    python tools/battery/triage.py .scratch/battery/RUN_ID [--no-reduce]
+    python tools/battery/triage.py .scratch/battery/RUN_ID [--no-reduce] [--no-screen] [--out DIR]
+                                   [--tools CHECKOUT [--refresh-c6]]
+
+--out writes the table elsewhere; --tools judges the run's saved answers with another checkout's
+run.py and c7.py (and, with --refresh-c6, asks its reference matcher again), so a finished run can
+be re-judged after its judges change without running any engine again.
 
 Reads what the parts wrote (battery.py's docstring lists them) and writes, next to them:
   triage.md        the table, witnesses and the counts behind it
@@ -358,9 +363,28 @@ def control_verdicts(run: Path) -> dict:
     return out
 
 
-def harness_source(run: Path, f: Findings, label: str, results: Path, rows_path: Path, control: dict, src: str) -> None:
+# A re-judge of a finished run with newer judges (--tools CHECKOUT): run.py, c7.py and, with
+# --refresh-c6, the reference matcher come from that checkout instead of the run's own worktree.
+TOOLS_OVERRIDE: Path | None = None
+REFRESH_C6 = False
+
+
+def refreshed_c6(chunk: Path, matrix: Path, work: Path) -> dict:
+    """The reference matcher's answers to a chunk, asked again with the checkout's pyworker."""
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / (chunk.stem + ".c6.jsonl")
+    if not out.exists():
+        subprocess.run([sys.executable, str(matrix / "pyworker.py"), "c6", str(chunk), str(out)],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {d["id"]: d["c6"] for d in load(out)}
+
+
+def harness_source(run: Path, f: Findings, label: str, results: Path, rows_path: Path, control: dict, src: str,
+                   out: Path | None = None) -> None:
     """A tools/matrix/run.py result: every row judged again with run.py's own judge_row."""
     sut_matrix = results.parents[3] / "tools" / "matrix"  # <sut>/.scratch/matrix/results/<name>
+    if TOOLS_OVERRIDE is not None:
+        sut_matrix = TOOLS_OVERRIDE / "tools" / "matrix"
     spec = importlib.util.spec_from_file_location(f"runpy_{label}", sut_matrix / "run.py")
     sys.path.insert(0, str(sut_matrix))
     runpy = importlib.util.module_from_spec(spec)
@@ -378,6 +402,9 @@ def harness_source(run: Path, f: Findings, label: str, results: Path, rows_path:
                     extra[rid]["c1xLeakFree"] = d["c1xLeakFree"]
         if stem.with_name(stem.name + ".report.txt").exists():
             c1.update(runpy.oracle_verdicts(chunk))
+        if REFRESH_C6:
+            for rid, a in refreshed_c6(chunk, sut_matrix, (out or run) / "refresh-c6" / label).items():
+                extra[rid]["c6"] = a
     counts = collections.Counter()
     for row in rows:
         rid = row["id"]
@@ -577,6 +604,10 @@ def main(argv: list[str]) -> int:
     # --out DIR writes the table elsewhere (a re-judge of a finished run leaves its own table alone).
     out = Path(argv[argv.index("--out") + 1]).resolve() if "--out" in argv else run
     out.mkdir(parents=True, exist_ok=True)
+    global TOOLS_OVERRIDE, REFRESH_C6
+    if "--tools" in argv:
+        TOOLS_OVERRIDE = Path(argv[argv.index("--tools") + 1]).resolve()
+        REFRESH_C6 = "--refresh-c6" in argv
     main_repo = run.parent.parent.parent
     bed_dir = main_repo / ".scratch" / "s1016" / "d85" / "bed"
     f = Findings()
@@ -589,12 +620,12 @@ def main(argv: list[str]) -> int:
         p = run / "pairs" / half / "results-path.txt"
         if p.exists():
             harness_source(run, f, f"pairs-{half}", Path(p.read_text(encoding="utf-8").strip()),
-                           run / "rows" / f"pairs-{half}.jsonl", control, "pairs")
+                           run / "rows" / f"pairs-{half}.jsonl", control, "pairs", out)
     for d in sorted((run / "matrix").glob("*")) if (run / "matrix").exists() else []:
         p = d / "results-path.txt"
         if p.exists():
             harness_source(run, f, f"matrix-{d.name}", Path(p.read_text(encoding="utf-8").strip()),
-                           run / "rows" / f"matrix-{d.name}.jsonl", control, f"matrix-{d.name}")
+                           run / "rows" / f"matrix-{d.name}.jsonl", control, f"matrix-{d.name}", out)
 
     if "--no-screen" not in argv:
         second_screen(run, f, out)

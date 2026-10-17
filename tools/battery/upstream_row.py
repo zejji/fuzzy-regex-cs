@@ -13,6 +13,8 @@ counts and the change lists ([substitutions;insertions;deletions]), then every g
 import json
 import sys
 
+POSIX = 0x10000
+
 
 def u16(s: str, i: int) -> int:
     # A deletion can lie past the end of the subject (upstream shifts each by the deletions before
@@ -35,7 +37,11 @@ def describe(m, s: str) -> str:
     a, b = m.span()
     fuzzy = ""
     counts = tuple(getattr(m, "fuzzy_counts", (0, 0, 0)))
-    if sum(counts):
+    if sum(counts) and m.re.flags & POSIX:
+        # Reading a POSIX match's changes crashes regex 2026.9.10 (ledger entry 9), and it keeps
+        # none worth reading: the counts alone, marked so no port answer can equal it.
+        fuzzy = " (%d,%d,%d) [posix]" % counts
+    elif sum(counts):
         changes = m.fuzzy_changes
         fuzzy = " (%d,%d,%d)" % counts + " [" + ";".join(",".join(str(u16(s, x)) for x in c) for c in changes) + "]"
     groups = "".join(" g%d=" % i + ",".join("(%d,%d)" % (u16(s, x), u16(s, y)) for x, y in m.spans(i))

@@ -91,6 +91,20 @@ check("base, consistent list", screen.classify(cond, "(0,1) (0,0,1) [;;1]", "(0,
 # An exact hit is preferred to a loose one, and a single switch to a pair.
 check("exact first", screen.classify(cond, "(0,1) (0,0,1) [0;;]", "None", ["~KeepCallCaptures", "UpstreamEmptyIterations+d85"],
                                      {}, {})[1], screen.SWITCHES["UpstreamEmptyIterations"] + " + " + screen.SWITCHES["d85"])
+# POSIX: the POSIX-free fullmatch over each of the port's spans is the control.
+px = {"pattern": "(?b)(?e)(?p)(a+)b", "subject": "aab", "operation": "search", "flags": 2}
+check("posix found", screen.is_posix(px), True)
+check("posix removed", screen.without_posix(px)["pattern"], "(?b)(?e)(a+)b")
+check("posix flag removed", screen.without_posix({**px, "pattern": "(a+)b", "flags": 0x10002})["flags"], 2)
+check("posix questions", [(q["operation"], q["pos"], q["endpos"]) for q in screen.posix_span_questions(px, "(0,3) g1=(0,2)")],
+      [("fullmatch", 0, 3)])
+check("overcharge", screen.posix_overcharge("(0,3) (1,0,0) [posix] g1=(0,1)", "(0,3) g1=(0,2)", ["(0,3) g1=(0,2)"],
+                                            ["(0,3) g1=(0,2)"]), True)
+check("same cost", screen.posix_overcharge("(0,3) g1=(0,1)", "(0,3) g1=(0,2)", ["(0,3) g1=(0,2)"], ["(0,3) g1=(0,2)"]),
+      False)
+check("other span", screen.posix_overcharge("(0,2) (1,0,0) [posix]", "(0,3)", ["(0,3)"], ["(0,3)"]), False)
+check("engines split on the control", screen.posix_overcharge("(0,3) (1,0,0) [posix]", "(0,3)", ["(0,3) (0,0,1) [;;1]"],
+                                                              ["(0,3)"]), False)
 # Upstream crashing or refusing is never a claim.
 check("upstream crash", screen.classify(row, "RESOURCE-KILLED", "None", ["KeepCallCaptures"], {}, {}), None)
 
