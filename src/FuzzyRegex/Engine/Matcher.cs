@@ -5033,8 +5033,12 @@ internal static class Matcher
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
     private static (long Key, int Reach) PopOpenCall(MatchState state)
     {
-        (long key, int reach, _, _, _) = state.OpenCalls[^1];
+        (long key, int reach, _, _) = state.OpenCalls[^1];
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
+        if (state.Pattern.NestsFuzzySections)
+        {
+            state.OpenCallSections.RemoveAt(state.OpenCallSections.Count - 1);
+        }
         int readCount = state.Pattern.CallReadGroups.Length;
         if (!CountsOpenCalls(state.Pattern))
         {
@@ -5135,8 +5139,12 @@ internal static class Matcher
                 state.OpenCalls[i].Key != key
                 || state.OpenCalls[i].Reach != reach
                 || (
-                    (state.OpenCalls[i].Section.Frame == section.Frame || state.Pattern.CallGuardComparesAcrossSections)
-                    && !SameCounts(state.OpenCalls[i].Section, section)
+                    state.Pattern.NestsFuzzySections
+                    && (
+                        state.OpenCallSections[i].Frame == section.Frame
+                        || state.Pattern.CallGuardComparesAcrossSections
+                    )
+                    && !SameCounts(state.OpenCallSections[i], section)
                 )
             )
             {
@@ -5395,17 +5403,19 @@ internal static class Matcher
         // The open calls the guard could refuse a call inside this one against, as a set: see the
         // remarks. Their reach is the reach now, so it is already in the key.
         int reach = state.ReachedWidth;
-        int sectionNow = state.FuzzyNode is null ? -1 : state.SectionFrame;
+        bool sections = state.Pattern.NestsFuzzySections;
+        CallSection sectionNow = sections ? CallSectionAt(state) : default;
         List<int> ancestors = state.CallMemoAncestors;
         ancestors.Clear();
         for (int i = 0; i < state.OpenCalls.Count; i++)
         {
-            (long openCall, int openReach, _, _, _) = state.OpenCalls[i];
+            (long openCall, int openReach, _, _) = state.OpenCalls[i];
             int openPos = (int)(uint)openCall;
             if (
                 (state.Reverse ? openPos <= state.TextPos : openPos >= state.TextPos)
                 && openReach == reach
                 && CouldRefuseInside(state, i)
+                && (!sections || SectionCouldRefuseInside(state, i, sectionNow))
             )
             {
                 // Insertion sort: the calls that pass the filter are few, one per call target
@@ -5427,21 +5437,19 @@ internal static class Matcher
         {
             key.Add(state.OpenCalls[i].Key);
 
-            // D93: the guard compares an ancestor's counts only with a call made in the section
-            // instance the ancestor was made in. A call inside this one is made in this call's section
-            // instance or in one opened inside it, so only an ancestor made in this call's instance
-            // has counts the guard can read; for any other, whether it is, is all the guard reads.
-            CallSection section = state.OpenCalls[i].Section;
-            if (section.Frame == sectionNow)
+            // D93: whether the ancestor was made in this call's section instance, where the filter
+            // has kept it only with this call's own counts, already in the key; or under the
+            // oracle's ablation, its counts.
+            if (sections)
             {
-                key.Add(1);
-                key.Add(section.Sub);
-                key.Add(section.Ins);
-                key.Add(section.Del);
-            }
-            else
-            {
-                key.Add(0);
+                CallSection section = state.OpenCallSections[i];
+                key.Add(section.Frame == sectionNow.Frame ? 1 : 0);
+                if (state.Pattern.CallGuardComparesAcrossSections)
+                {
+                    key.Add(section.Sub);
+                    key.Add(section.Ins);
+                    key.Add(section.Del);
+                }
             }
 
             for (int g = 0; g < readGroups.Length; g++)
@@ -5465,6 +5473,29 @@ internal static class Matcher
     {
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
         return ReadValue(state, state.OpenCallSpans[(call * readGroups.Length) + group], readGroups[group].Read);
+    }
+
+    /// <summary>
+    /// D93's part of <see cref="CouldRefuseInside"/>: whether open call <paramref name="call"/>'s
+    /// section lets it refuse a call made inside the one about to be made.
+    /// </summary>
+    /// <remarks>
+    /// A call I made inside the new call C is made in C's section instance or in one opened inside
+    /// it. An ancestor made in another instance refuses I whatever the counts (the guard's rule), so
+    /// it stays. An ancestor made in C's instance refuses I only if I's counts equal its own; counts
+    /// only grow along a path within an instance, and the kept counts with them
+    /// (<see cref="CallSectionAt"/>), so the ancestor's are at most C's and I's at least, and they
+    /// can be equal only if the ancestor's equal C's now. Under the oracle's ablation every ancestor
+    /// stays, its counts in the key.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="call">An index into <see cref="MatchState.OpenCalls"/>.</param>
+    /// <param name="now">The section the new call is made in.</param>
+    /// <returns><see langword="false"/> if it can never refuse such a call.</returns>
+    private static bool SectionCouldRefuseInside(MatchState state, int call, CallSection now)
+    {
+        CallSection then = state.OpenCallSections[call];
+        return then.Frame != now.Frame || state.Pattern.CallGuardComparesAcrossSections || SameCounts(then, now);
     }
 
     /// <summary>
@@ -13152,6 +13183,7 @@ internal static class Matcher
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
+        state.OpenCallSections.Clear();
         if (CountsOpenCalls(state.Pattern))
         {
             state.ActiveCallCounts.Clear();
@@ -18693,7 +18725,8 @@ internal static class Matcher
         // See MatchState.ActiveCalls and ledger entry 14 - the path is infinite,
         // and failing it leaves every other path alone.
         long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
-        CallSection groupCallSection = CallSectionAt(state);
+        bool groupCallSections = pattern.NestsFuzzySections;
+        CallSection groupCallSection = groupCallSections ? CallSectionAt(state) : default;
         NoteReached(state, state.TextPos);
         int groupCallReach = state.ReachedWidth;
         Debug.Assert(
@@ -18746,14 +18779,12 @@ internal static class Matcher
             "the text reached never shrinks, so an inner call's reach is at least its caller's"
         );
         state.OpenCalls.Add(
-            (
-                groupCallKey,
-                groupCallReach,
-                groupCallSection,
-                state.Sstack.Count,
-                groupCallKeyed ? FailedCallKeyToRecord(state) : null
-            )
+            (groupCallKey, groupCallReach, state.Sstack.Count, groupCallKeyed ? FailedCallKeyToRecord(state) : null)
         );
+        if (groupCallSections)
+        {
+            state.OpenCallSections.Add(groupCallSection);
+        }
 
         /* sstack: caller_repeats capture_change caller_captures return_node
          *
@@ -18844,7 +18875,10 @@ internal static class Matcher
             // backtracking stack so the arm below can re-open it.
             state.Bstack.PushSize(state.OpenCalls[^1].Key);
             state.Bstack.PushSize(state.OpenCalls[^1].Reach);
-            PushCallSection(state.Bstack, state.OpenCalls[^1].Section);
+            if (pattern.NestsFuzzySections)
+            {
+                PushCallSection(state.Bstack, state.OpenCallSections[^1]);
+            }
             foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
             {
                 state.Bstack.PushSize(span);
@@ -18868,7 +18902,7 @@ internal static class Matcher
          * sstack: -
          *
          * bstack: callee_captures callee_repeats capture_change call_key call_reach
-         *         call_section read_spans return_node GROUP_RETURN
+         *         [call_section] read_spans return_node GROUP_RETURN
          *
          * else:
          *
@@ -19676,7 +19710,7 @@ internal static class Matcher
          * sstack: -
          *
          * bstack: callee_captures callee_repeats capture_change call_key call_reach
-         *         call_section read_spans return_node
+         *         [call_section] read_spans return_node
          *
          * else:
          *
@@ -19705,8 +19739,9 @@ internal static class Matcher
                 }
             }
 
+            CallSection groupReturnBackSection = default;
             if (
-                !PopCallSection(state.Bstack, out CallSection groupReturnBackSection)
+                (pattern.NestsFuzzySections && !PopCallSection(state.Bstack, out groupReturnBackSection))
                 || !state.Bstack.PopSize(out long groupReturnBackReach)
                 || !state.Bstack.PopSize(out long groupReturnBackKey)
             )
@@ -19747,9 +19782,11 @@ internal static class Matcher
                 "a re-opened call is still inside the calls that were open when it returned"
             );
             // It has returned, so it is not one the failed-call memo may record.
-            state.OpenCalls.Add(
-                (groupReturnBackKey, (int)groupReturnBackReach, groupReturnBackSection, state.Sstack.Count, null)
-            );
+            state.OpenCalls.Add((groupReturnBackKey, (int)groupReturnBackReach, state.Sstack.Count, null));
+            if (pattern.NestsFuzzySections)
+            {
+                state.OpenCallSections.Add(groupReturnBackSection);
+            }
 
             /* sstack: caller_repeats capture_change caller_captures return_node
              *
