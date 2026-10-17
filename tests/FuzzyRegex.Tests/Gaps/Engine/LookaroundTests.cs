@@ -197,4 +197,47 @@ public sealed class LookaroundTests
         Captures(own, 1).Should().Equal((0, 1));
         Captures(own, 2).Should().Equal((1, 2));
     }
+
+    /// <summary>
+    /// A lookbehind reads only text that is already there, so when it fails on that text a partial
+    /// match from that start is impossible whatever text follows.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 90, found by battery run 20261017-3 (bed pair 65). Upstream 2026.9.10 answers
+    /// P(2, 3) to the first four rows and P(3, 4) to the fifth (measured 2026-10-17); PCRE2 10.47
+    /// gives no partial on any of them. The cause is the reversed backtrack of a one-character
+    /// repeat before a string tail (<c>aba?</c> read right to left is <c>a?</c>, then "ab"), whose
+    /// tail search stops at the repeat's own start and reports reaching that limit as running out
+    /// of text.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="start">Where the match is asked to start.</param>
+    /// <param name="body">Text the lookbehind's body matches, for the control.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments("(?<=aba?)", "cab", 2, "ab")]
+    [Arguments("(?<=aba?)", "cax", 2, "ab")]
+    [Arguments("(?<=aba?)b", "cab", 2, "ab")]
+    [Arguments("(?i)(?<=aba?)", "cab", 2, "ab")]
+    [Arguments("(?<=abca?)", "ccab", 3, "abc")]
+    public void A_partial_match_after_a_lookbehind_that_fails_on_the_held_text_is_no_match(
+        string pattern,
+        string subject,
+        int start,
+        string body
+    )
+    {
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Version0)
+            .MatchAtStart(subject, start, partial: true)
+            .Success.Should()
+            .BeFalse(pattern);
+
+        // The control: the lookbehind reads before the start, so the same call holds once the
+        // text before the start spells the body.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Version0)
+            .MatchAtStart(body + subject[start..], body.Length, partial: true)
+            .Success.Should()
+            .BeTrue(pattern);
+    }
 }
