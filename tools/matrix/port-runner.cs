@@ -219,7 +219,10 @@ foreach (string line in File.ReadLines(input))
 FuzzyRegex Compile(string pattern, string variant)
 {
     bool d37 = ablate == "d37" && variant != "wo";
-    bool callFeatures = (ablate == "callfeatures" && variant == "base") || variant == "xcallfeatures";
+    // C2's D93 variant carries the row's ablation too: without it a control that switches the
+    // call-features fix off had its xreentry answer taken from the live engine, which gives the
+    // written-out form, so the firing control read as D93's exception (2026-10-17).
+    bool callFeatures = (ablate == "callfeatures" && variant is "base" or "xreentry") || variant == "xcallfeatures";
     var regex = (FuzzyRegex)
         withDefaultVersion.Invoke(
             null,

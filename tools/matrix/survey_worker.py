@@ -252,6 +252,13 @@ def _brute_engine():
 
 def main(argv):
     engine, path, start = argv[0], argv[1], int(argv[2])
+    # survey.py kills a worker above its RSS limit; this makes a single runaway row raise
+    # MemoryError first, so the worker answers it and goes on (tools/memcap.py).
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import memcap
+    memcap.cap_this_process(2)
     answer = {"pcre2": _pcre2_engine, "fuzzyref": _fuzzyref_engine, "brute": _brute_engine}.get(
         engine, lambda: _python_engine(engine))()
     with open(path, encoding="utf-8") as f:

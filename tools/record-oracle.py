@@ -7856,6 +7856,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.worker_rows is not None:
+        # One row once took regex 2026.9.10 to 19 GB (battery run 20261016-2). Capped, it raises
+        # MemoryError, which `_record_row` records as a `resource` row, and the wave goes on.
+        # 4 GB, not the 2 a single row gets elsewhere, because the worker also holds its share of
+        # the wave. tools/memcap.py; BATTERY_MEMCAP_GB=0 turns it off.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import memcap
+        memcap.cap_this_process(4)
         return _worker(args.worker_rows, args.worker_start, args.worker_output)
 
     if args.recheck is not None:

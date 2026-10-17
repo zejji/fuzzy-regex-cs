@@ -285,6 +285,16 @@ def partial_start_before_judges(ans: str, judge: str | None, reverse: bool) -> b
     return ms == js and me > je if reverse else me == je and ms < js
 
 
+def keep_moved_the_partial(ans: str, judge: str | None, reverse: bool) -> bool:
+    """Whether a partial differs from the judges' only where a \\K moves it: a later start, or
+    reversed, an earlier end, with the other edge where the judges have it."""
+    m, j = re.fullmatch(r"P\((\d+),(\d+)\)", ans), re.fullmatch(r"P\((\d+),(\d+)\)", judge or "")
+    if not (m and j):
+        return False
+    (ms, me), (js, je) = (int(m.group(1)), int(m.group(2))), (int(j.group(1)), int(j.group(2)))
+    return ms == js and me <= je if reverse else me == je and ms >= js
+
+
 def c2_verdict(base: str, written: str, depth: str, reentry: str | None = None) -> tuple:
     """A call means its body written out (D40), and a capture made inside a call is discarded on
     return (owner ruling D51 (a), 2026-09-30), which is what the non-capturing copy does. So the
@@ -395,15 +405,16 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
             kind = "phantom" if ans != "None" else "ok"
         if kind in ("ok", "phantom") and uj.startswith("P") and ans == "None":
             kind = "miss (upstream judge only)"
-        if (kind == "span-diff" and "\\K" in row["pattern"] and pj
-                and re.fullmatch(r"P\((\d+),(\d+)\)", ans) and ans.split(",")[1] == pj.split(",")[1]
-                and int(ans[2:].split(",")[0]) >= int(pj[2:].split(",")[0])):
+        reverse = bool(row["flags"] & 1024) or row["pattern"].startswith("(?r)")
+        if kind == "span-diff" and "\\K" in row["pattern"] and keep_moved_the_partial(ans, pj, reverse):
             # Both judges report a match/fullmatch partial as P(0,|t|), the attempt's start; with a
             # \K passed before the edge the reported start is where \K was passed, as upstream's own
             # partial answer has it (measured 2026-09-30: `(?:ba)*+.\K\w.` match 'baab' partial is
             # P(3,4) upstream and here). A judge convention, not a disagreement (matrix triage).
+            # Reversed, \K moves the reported end instead (battery run 20261016-2, m23:
+            # `(?r)(?:[ab]\w)+?\w\Ka*` fullmatch 'xaaxaaaa' partial is P(0,4) on both engines, and
+            # 'a' + the subject fullmatches (0,5) on both, so the end at 4 is right).
             kind = "ok"
-        reverse = bool(row["flags"] & 1024) or row["pattern"].startswith("(?r)")
         if kind == "span-diff" and partial_start_before_judges(ans, pj, reverse):
             kind = "F66"
         # How long a continuation the port judge tried: 3 characters, or up to 8 for a row the
