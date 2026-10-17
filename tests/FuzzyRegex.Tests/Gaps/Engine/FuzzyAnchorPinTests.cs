@@ -211,6 +211,66 @@ public sealed class FuzzyAnchorPinTests
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 1));
     }
 
+    // D100: a partial reports the least start from which some continuation matches (DECISIONS
+    // 2026-09-30, the partial contract), and the port's own full search decides what matches. Over
+    // 'ba', the continuation 'b' gives 'bab', where this port finds (0, 3) with 'b' inserted at 0
+    // (H' lifts the ban, as upstream's banned search finds nothing), so the partial starts at 0.
+    // u from 1 is only a partial: its own completion needs an insertion the continuation 'b' does
+    // not give. DIVERGES FROM UPSTREAM 2026.9.10, which gives P(1, 2) and None over 'bab' (the
+    // mirror P(0, 1)). Judged by the port's full search over every continuation of up to 3
+    // characters from 'abx ' (.scratch/s1016/d100/judge.py).
+    [Test]
+    [Arguments(@"(?:ab){1<=i<=2}", "ba", 0, 2, 1)]
+    [Arguments(@"(?:ab){1<=i<=2}", "xa", 0, 2, 1)]
+    [Arguments(@"(?:ab){2<=i<=2}", "xya", 0, 3, 2)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2, 1)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ax", 0, 2, 1)]
+    public void A_partial_keeps_the_anchor_when_a_continuation_lets_H_prime_lift_the_ban(
+        string pattern,
+        string text,
+        int start,
+        int end,
+        int insertions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+        m.FuzzyCounts.Insertions.Should().Be(insertions);
+    }
+
+    // D100 over finditer: the scan's one match is the same partial.
+    [Test]
+    public void A_partial_scan_keeps_the_anchor_when_a_continuation_lets_H_prime_lift_the_ban()
+    {
+        Match[] forward = [.. new FuzzyRegex(@"(?:ab){1<=i<=2}").Matches("ba", partial: true)];
+        Match[] reversed = [.. new FuzzyRegex(@"(?r)(?:ba){1<=i<=2}").Matches("ab", partial: true)];
+
+        forward.Select(static m => (m.PartialMatch, m.Index, m.Index + m.Length)).Should().Equal((true, 0, 2));
+        reversed.Select(static m => (m.PartialMatch, m.Index, m.Index + m.Length)).Should().Equal((true, 0, 2));
+    }
+
+    // D100 controls: every continuation that completes the attempt at the anchor also completes a
+    // match from inside it, so the port's full search never starts at 0 and the later partial
+    // stands. These pass on main and agree with upstream; the judge gives the same.
+    [Test]
+    [Arguments(@"(?:ab){1<=i<=2}", "xxa", 1, 3)] // 'xxab': c (0, 4) i=2, u (1, 4) i=1
+    [Arguments(@"(?:ab){1<=i<=2}", "xba", 1, 3)]
+    [Arguments(@"(?:ab){i<=1}", "xa", 1, 2)]
+    [Arguments(@"(?=x|ab)(?:ab){i<=1}", "xa", 1, 2)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "axx", 0, 2)]
+    public void A_partial_keeps_the_later_start_when_every_continuation_has_a_match_inside_the_attempt(
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+    }
+
     // D96: H' asks where u's attempt began, not the start a `\K` reports. In each row u's attempt
     // starts inside c, so u stands, as without the `\K`. Upstream's answers (regex 2026.9.10,
     // 2026-10-17), every one exact; before the fix the port kept c, with one insertion.
