@@ -9230,6 +9230,27 @@ internal static class Matcher
             return false;
         }
 
+        // What the key leaves out is read later only where the position is still where a repeat's
+        // iteration or an optional pass began (FuzzyIterationStands, RevisitsEmptyIterationState,
+        // EmptyIterationAdmitted, PushExactItemDeletion's empty-iteration test, the 'changed' test
+        // at a repeat's end, OptionalPassAdmitted), as positions only move forward here. So the memo
+        // stays out of such a state: .scratch/s1016/perf-research/D94.md, "Proof of the key".
+        for (int r = 0; r < state.Repeats.Length; r++)
+        {
+            if (state.Repeats[r].Start == state.TextPos)
+            {
+                return false;
+            }
+        }
+
+        for (int o = 0; o < state.OptionalPasses.Length; o++)
+        {
+            if (state.OptionalPasses[o].TextPos == state.TextPos)
+            {
+                return false;
+            }
+        }
+
         RepeatStateKey key = RepeatStateKeyOf(state, node, caps);
         state.FailedRepeatStates ??= [];
         if (state.FailedRepeatStates.Contains(key))
