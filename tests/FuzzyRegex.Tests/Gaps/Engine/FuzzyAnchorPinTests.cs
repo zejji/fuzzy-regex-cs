@@ -211,6 +211,73 @@ public sealed class FuzzyAnchorPinTests
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 1));
     }
 
+    // D96: H' asks where u's attempt began, not the start a `\K` reports. In each row u's attempt
+    // starts inside c, so u stands, as without the `\K`. Upstream's answers (regex 2026.9.10,
+    // 2026-10-17), every one exact; before the fix the port kept c, with one insertion.
+    [Test]
+    [Arguments(@"(?:a){i<=1}\K", "ba", 2, 2)] // without \K: (1, 2) exact on both
+    [Arguments(@"(?:ab){i<=1}\K", "xab", 3, 3)] // without \K: (1, 3)
+    [Arguments(@"(?e)(?:a){i<=1}\K", "ba", 2, 2)]
+    [Arguments(@"(?r)\K(?:a){i<=1}", "ab", 0, 0)] // without \K: (0, 1)
+    [Arguments(@"(?r)\K(?:ab){i<=1}", "abx", 0, 0)] // without \K: (0, 2)
+    // u's attempt starts AT the anchor, so it is the answer; without \K, (0, 2) exact through xa.
+    [Arguments(@"(?:a){i<=1}|xa\K", "xa", 2, 2)]
+    // The same rows without the `\K`, and one where u's reported start already lies inside c:
+    // these passed before D96's fix and must not move.
+    [Arguments(@"(?:a){i<=1}", "ba", 1, 2)]
+    [Arguments(@"(?:ab){i<=1}", "xab", 1, 3)]
+    [Arguments(@"(?r)(?:a){i<=1}", "ab", 0, 1)]
+    [Arguments(@"(?r)(?:ab){i<=1}", "abx", 0, 2)]
+    [Arguments(@"(?:a){i<=1}|xa", "xa", 0, 2)]
+    [Arguments(@"(?:ab){i<=1}\Kc", "xabc", 3, 4)]
+    public void A_keep_does_not_change_which_attempt_wins(string pattern, string text, int start, int end)
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // D96 under partial matching and finditer: upstream's answers (2026-10-17), all exact.
+    [Test]
+    public void A_keep_does_not_change_which_attempt_wins_in_a_scan_or_a_partial_search()
+    {
+        Match partial = new FuzzyRegex(@"(?:ab){i<=1}\K").Match("xab", partial: true);
+        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Total).Should().Be((false, 3, 0, 0));
+
+        SpansAndErrors(@"(?:ab){i<=1}\K", "xab").Should().Equal((3, 3, 0));
+        SpansAndErrors(@"(?r)\K(?:ab){i<=1}", "abx").Should().Equal((0, 0, 0));
+        SpansAndErrors(@"(?:ab){i<=1}|xab\K", "xab").Should().Equal((3, 3, 0));
+        // The second match was (8, 8) with two insertions: c ran from 3 over the two spaces.
+        SpansAndErrors(@"\b(?:dog){e<=2}\K", "dog  dog").Should().Equal((3, 3, 0), (8, 8, 0));
+        SpansAndErrors(@"\b(?:dog){e<=2}", "dog  dog").Should().Equal((0, 3, 0), (5, 8, 0));
+
+        // H' still keeps c where u's attempt begins after it, as it does without the `\K`
+        // (Finditer_keeps_a_match_at_an_anchor_no_later_match_overlaps). DIVERGES FROM UPSTREAM,
+        // which gives [(5, 5)] with one insertion.
+        SpansAndErrors(@"(?:\ba){i<=1}\K", "xa xa").Should().Equal((2, 2, 1), (5, 5, 1));
+    }
+
+    // D96: when u wins, its attempt's start comes back with it. The overlapped scan steps on from
+    // the attempt when a `\K` in a lookbehind reports a start behind it (D87). Here u begins at 2
+    // and reports (1, 4); the scan kept c's attempt start, 0, stepped from the reported 1 to 2, and
+    // found the attempt at 2 a second time. Each attempt now answers once: 2 with 'b' inserted, then
+    // 3 exact, which is what the port gives with H' off. Upstream loops for ever here (D87).
+    [Test]
+    public void An_overlapped_scan_steps_on_from_the_winning_attempt()
+    {
+        Match[] all = [.. new FuzzyRegex(@"(?:c){i<=1}(?<=\K...)").Matches("xxbc", overlapped: true)];
+
+        all.Select(static m => (m.Index, m.Index + m.Length, m.FuzzyCounts.Total)).Should().Equal((1, 4, 1), (1, 4, 0));
+    }
+
+    private static (int Start, int End, int Errors)[] SpansAndErrors(string pattern, string text) =>
+        [
+            .. new FuzzyRegex(pattern)
+                .Matches(text)
+                .Select(static m => (m.Index, m.Index + m.Length, m.FuzzyCounts.Total)),
+        ];
+
     private static (int Start, int End) Span(Match m) => (m.Index, m.Index + m.Length);
 
     private static (int Start, int End)[] Spans(string pattern, string text) =>
