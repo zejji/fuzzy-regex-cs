@@ -6319,6 +6319,29 @@ runs out in its own place. Pinned by
 `A_group_call_and_its_written_out_group_answer_the_same_partial`, and the oracle entry
 `partial-edge-read`.
 
+### Addendum to 72, 2026-10-17: a full-folded ligature answers before the `\b` in front (battery run 6, N2) - DRAFT - NOT FILED
+
+Battery run 20261017-6's oracle found a partial search that answers at a place its leading `\b`
+refuses. `regex` 2026.9.10, measured 2026-10-17, `compile(p).search(s, partial=True)`:
+
+```
+search(r'(?if)\bﬃA', 'xﬃ')         -> P(1, 2)   here P(2, 2)
+search(r'(?if)\bﬃA', 'xffi')       -> P(1, 4)   here P(4, 4)
+search(r'(?if)(?:z)?\bﬃA', 'xﬃ')   -> P(2, 2)   here P(2, 2)
+search(r'(?if)\BﬃA', 'xﬃ')         -> P(1, 2)   here P(1, 2)
+search(r'(?i)\bﬃA', 'xﬃ')          -> P(2, 2)   here P(2, 2)
+search(r'(?if)\bffiA', 'xffi')     -> P(4, 4)   here P(4, 4)
+search(r'(?if)\bﬃA', 'xﬃA')        -> None      here None     (not partial)
+```
+
+'x', 'f' and 'ﬃ' are all word characters, so `\b` fails at 1 whatever text follows, and the first
+two answers are wrong. The bug needs a partial search, full case folding and the ligature in the
+pattern (the plain `ffi` pattern and the non-partial search are right), and `(?:z)?` in front, which
+cannot change what the pattern matches, removes it: the same face as entry 72, a check at the
+pattern's start that answers before a zero-width test it skips. Which check it is was not traced.
+Pinned by `Gaps/Engine/PartialEdgeReadTests.A_full_case_folded_ligature_does_not_answer_before_the_word_boundary_in_front`
+(the first four rows).
+
 ## 73. A left-recursive group call compiles and then exhausts memory - DIVERGES HERE (D4, 2026-10-08)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defects D4 and D72, closed by refusing the
