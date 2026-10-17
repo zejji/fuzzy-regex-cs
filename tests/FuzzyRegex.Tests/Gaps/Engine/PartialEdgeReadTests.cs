@@ -234,6 +234,35 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// Ledger 72's addendum (battery run 6, N2): under full case folding a pattern that starts with
+    /// <c>\b</c> and the ligature 'ﬃ' reports no partial at 1 over 'xﬃ' or 'xffi', because 'x' and
+    /// 'f' (or 'ﬃ') are both word characters and <c>\b</c> fails between them whatever text follows.
+    /// Each text runs out after a word character, so the partial is at the edge.
+    /// </summary>
+    /// <remarks>
+    /// Controls, all of which upstream answers the same: <c>(?:z)?</c> in front, which cannot change
+    /// what the pattern matches, and <c>\B</c>, which does hold at 1. Measured 2026-10-17 against
+    /// <c>regex</c> 2026.9.10, which answers P(1, 2) and P(1, 4) to the first two rows.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM on the first two rows (ledger 72, addendum 2026-10-17).
+    [Test]
+    [Arguments(@"(?if)\bﬃA", "xﬃ", 2, 2)]
+    [Arguments(@"(?if)\bﬃA", "xffi", 4, 4)]
+    [Arguments(@"(?if)(?:z)?\bﬃA", "xﬃ", 2, 2)]
+    [Arguments(@"(?if)\BﬃA", "xﬃ", 1, 2)]
+    public void A_full_case_folded_ligature_does_not_answer_before_the_word_boundary_in_front(
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match m = Partial("search", pattern, text);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+    }
+
+    /// <summary>
     /// D64's face M: a group call and its written-out group answer the same partial. Each row's
     /// match can lie wholly in the text to come ('ababa' + '' matches the first pair at (0, 4),
     /// 'aax' + 'c' the second at (0, 2), 'c' + 'xaa' the third at (2, 4)), which a search reports
