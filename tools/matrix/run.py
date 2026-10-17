@@ -285,12 +285,18 @@ def partial_start_before_judges(ans: str, judge: str | None, reverse: bool) -> b
     return ms == js and me > je if reverse else me == je and ms < js
 
 
-def c2_verdict(base: str, written: str, depth: str) -> tuple:
+def c2_verdict(base: str, written: str, depth: str, reentry: str | None = None) -> tuple:
     """A call means its body written out (D40), and a capture made inside a call is discarded on
     return (owner ruling D51 (a), 2026-09-30), which is what the non-capturing copy does. So the
-    whole answer must agree; the kind says whether the span or counts differ, or only the groups."""
+    whole answer must agree; the kind says whether the span or counts differ, or only the groups.
+    The one exception is D93's (DECISIONS 2026-10-17): a call that re-enters an open call of its
+    group at the same position inside a newly opened fuzzy section is refused. A row is that
+    exception when port-runner's `xreentry` variant, which lets such a re-entry run and changes
+    nothing else, gives the written-out answer."""
     if written == base:
         return ("pass", "", base, written)
+    if reentry == written:
+        return ("expected", "call re-entry in a new fuzzy section refused (D93)" + depth, base, written)
     if partial_ends(written) is not None and partial_ends(written) == partial_ends(base):
         # Both are partial matches that end alike and differ only in where they start. Under the
         # partial contract (KNOWN-DEFECTS F63/F64, F66) a partial reports the first start whose path
@@ -351,19 +357,19 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         if not (answered(w8) and answered(w10)) or head(w8) != head(w10):
             out["C2"] = ("n/a", "written-out forms not stable at depths 8-10", base, w10)
         else:
-            out["C2"] = c2_verdict(base, w10, " (depth 10)")
+            out["C2"] = c2_verdict(base, w10, " (depth 10)", port.get("xreentry"))
     elif "8" in wo and "6" not in wo:
         w = wo["8"]
         if not answered(w):
             out["C2"] = ("n/a", "written-out unanswered", base, w)
         else:
-            out["C2"] = c2_verdict(base, w, "")
+            out["C2"] = c2_verdict(base, w, "", port.get("xreentry"))
     else:
         w4, w5, w6 = (wo.get(d) for d in ("4", "5", "6"))
         if not all(answered(w) for w in (w4, w5, w6)) or not head(w4) == head(w5) == head(w6):
             out["C2"] = ("n/a", "written-out forms not stable at depths 4-6", base, w6)
         else:
-            out["C2"] = c2_verdict(base, w6, " (depth 6)")
+            out["C2"] = c2_verdict(base, w6, " (depth 6)", port.get("xreentry"))
     # C3: asserts and crashes anywhere in the port's answers.
     everything = [port.get("base"), port.get("off"), port.get("on"), port.get("judge")] + list((wo or {}).values())
     bad = [a for a in everything if a and (a.startswith("ASSERT") or a.startswith("EXC"))]

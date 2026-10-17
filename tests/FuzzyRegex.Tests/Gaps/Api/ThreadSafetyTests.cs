@@ -916,6 +916,10 @@ public sealed class ThreadSafetyTests
             // (tools/matrix/port-runner.cs) and FailedCallMemoTests set it on a pattern compiled
             // for that one purpose.
             "PatternObject.CallMemoKeyOmitsPosition",
+            // D93's ablation, likewise never written by the library: the oracle's
+            // RunWithTheReentryInANewSection and the matrix's xreentry variant set it on a pattern
+            // compiled for that one call.
+            "PatternObject.CallGuardComparesAcrossSections",
             "PatternObject.IsFuzzy",
             // S60b added LeadingRepeat, written once by Compile after FuzzyLiteralFilter. It points
             // at a node of the compiled graph and matching only reads it.
