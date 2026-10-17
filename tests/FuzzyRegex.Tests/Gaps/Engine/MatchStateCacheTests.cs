@@ -426,8 +426,8 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
-                calls.Add((7, 7, 7, null));
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase)> calls:
+                calls.Add((7, 7, 7, null, 7));
                 break;
             case List<CallSection> sections:
                 sections.Add(new CallSection(7, 7, 7, 7));
