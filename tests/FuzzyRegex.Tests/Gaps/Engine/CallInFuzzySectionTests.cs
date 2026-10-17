@@ -3,25 +3,40 @@ using AwesomeAssertions;
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
 /// <summary>
-/// Known defect D93: inside a fuzzy section, a group call must answer as the group written out there
-/// (D40). Each row pins the written-out form's answer, span and counts, measured with this port at
-/// depths 4, 5, 6 and 10 on 2026-10-16 (all four agree). Upstream 2026.9.10's written-out forms gave
-/// the same span and counts on the first, fifth and finditer rows, the ones the battery's triage ran
+/// Known defect D93 (fixed as F87): inside a fuzzy section, a group call answers as the group written
+/// out there (D40), with one exception (DECISIONS, 2026-10-17). The written-out answers were measured
+/// with this port at depths 4, 5, 6 and 10 on 2026-10-16 (all four agree); upstream 2026.9.10's
+/// written-out forms gave the same span and counts where the battery's triage ran them
 /// (<c>.scratch/battery/20261016-1/triage-matrix.md</c>, NEW-1).
 /// </summary>
 public sealed class CallInFuzzySectionTests
 {
+    /// <summary>
+    /// The exception D93 pins (DECISIONS, 2026-10-17): a call that re-enters a call of the same group
+    /// already open at the same position, where the re-entry opens a new fuzzy section, is refused, as
+    /// left recursion is (Perl and PCRE2 raise an error on recursion at the same position). Each row is
+    /// the whole-pattern call <c>(?R)</c> inside the section, so the call re-opens the section; the
+    /// comment gives the written-out form's answer, which the refusal does not reach.
+    /// </summary>
     [Test]
-    // The minimal witness: a (*SKIP) or (*PRUNE) the written-out form reaches at a deeper level.
-    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "b", "(1,1) s0i0d2")]
-    [Arguments("(?:a(*SKIP)|(?:a(?R)|bb){2s+1d<=2})", "b", "(1,1) s0i0d2")]
-    [Arguments("(?:a(*PRUNE)|(?:a(?R)|bb){2s+1d<=2})", "b", "(1,1) s0i0d2")]
-    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "bb", "(2,2) s0i0d2")]
-    // No verb: the written-out form's first fit takes two deletions.
-    [Arguments("(?:(?:[ab](?R)|(?(?<=[ab]).|a*))){2i+2d+1s<=4}", "ab", "(0,2) s0i0d2")]
-    // A minimum on the section: the written-out form has no fit at all.
-    [Arguments("(?:(?:a+(*SKIP)|ab)(?R)?){1<=d<=2}", "ababaaaa", "None")]
-    // Controls, which already agree with their written-out forms.
+    // Written out: (1,1) s0i0d2 (upstream's call form too). A deeper level passes the (*SKIP) or
+    // (*PRUNE) on a path its enclosing section then rejects, and failing back across it moves the search.
+    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "b", "(0,0) s0i0d2")]
+    [Arguments("(?:a(*SKIP)|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
+    [Arguments("(?:a(*PRUNE)|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
+    // Written out: (2,2) s0i0d2.
+    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "bb", "(1,1) s0i0d2")]
+    // No verb. Written out: (0,2) s0i0d2, the deeper level's first fit.
+    [Arguments("(?:(?:[ab](?R)|(?(?<=[ab]).|a*))){2i+2d+1s<=4}", "ab", "(0,2) s0i0d1")]
+    // A minimum on the section. Written out: None at depths 3 to 10.
+    [Arguments("(?:(?:a+(*SKIP)|ab)(?R)?){1<=d<=2}", "ababaaaa", "(0,1) s0i0d2")]
+    public void A_reentry_that_opens_a_new_section_is_refused(string pattern, string subject, string expected) =>
+        Answer(new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard).Match(subject))
+            .Should()
+            .Be(expected);
+
+    [Test]
+    // Controls, which agree with their written-out forms.
     [Arguments("(?:a|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
     [Arguments("(?:a|(?:a(?R)|b){2s+1d<=1})", "bb", "(0,1) s0i0d1")]
     [Arguments("(?:a(*SKIP)|(?:a(?R)|bb){1s+1d<=2})", "b", "(0,1) s1i0d1")]
@@ -43,7 +58,9 @@ public sealed class CallInFuzzySectionTests
         "abaababa",
         "(0,5) s0i0d2 | (5,8) s0i0d2 | (8,8) s0i0d1"
     )]
-    [Arguments("(?:a+(*SKIP)|(?:(?:a(?R)|[ab]b)){2s+1d<=2})", "abbb", "(0,1) | (4,4) s0i0d2")]
+    // The exception (DECISIONS, 2026-10-17): the (?R) re-opens the section, so the re-entry is refused.
+    // Written out: (0,1) | (4,4) s0i0d2.
+    [Arguments("(?:a+(*SKIP)|(?:(?:a(?R)|[ab]b)){2s+1d<=2})", "abbb", "(0,1) | (3,3) s0i0d2 | (4,4) s0i0d2")]
     public void A_call_in_a_fuzzy_section_finds_what_its_written_out_form_finds(
         string pattern,
         string subject,
@@ -67,6 +84,9 @@ public sealed class CallInFuzzySectionTests
     [Arguments("(?:(?P<g>a(?&g)b|c)){d<=3}", "cbbb", true, "(0,4) s0i0d3")]
     [Arguments(@"(?:(?P<g>\((?&g)\)|x)){d<=2}", "x))", true, "(0,3) s0i0d2")]
     [Arguments(@"(?:(?P<g>\((?&g)\)|x)){d<=2}", "x))", false, "(0,3) s0i0d2")]
+    // The orchestrator's lead (2026-10-17): main answered (0,1) with one deletion. Upstream and the
+    // written-out form at depths 4 to 8 give three, the section's last error spent on each level.
+    [Arguments("(?:(?P<g1>q(?1)|x)){1<=d<=3}", "x", false, "(0,1) s0i0d3")]
     // Controls, which main already answers as upstream does.
     [Arguments("(?:(?P<g>a(?&g)b|c)){e<=2}", "cbb", true, "(0,3) s2i0d0")]
     [Arguments("(?:(?P<g>a(?&g)b|c)){d<=1}", "cb", true, "(0,2) s0i0d1")]

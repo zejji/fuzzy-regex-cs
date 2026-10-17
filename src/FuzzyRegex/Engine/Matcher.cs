@@ -4981,6 +4981,13 @@ internal static class Matcher
         return new CallSection(state.SectionFrame, Kept(FuzzyValue.Sub), Kept(FuzzyValue.Ins), Kept(FuzzyValue.Del));
     }
 
+    /// <summary>Whether two calls were made with the same section counts, wherever they were made.</summary>
+    /// <param name="first">One call's section.</param>
+    /// <param name="second">The other's.</param>
+    /// <returns><see langword="true"/> if every count is the same.</returns>
+    private static bool SameCounts(CallSection first, CallSection second) =>
+        first.Sub == second.Sub && first.Ins == second.Ins && first.Del == second.Del;
+
     /// <summary>Pushes a <see cref="CallSection"/>, for <see cref="PopCallSection"/>.</summary>
     /// <param name="stack">The stack.</param>
     /// <param name="section">The section.</param>
@@ -5127,7 +5134,10 @@ internal static class Matcher
             if (
                 state.OpenCalls[i].Key != key
                 || state.OpenCalls[i].Reach != reach
-                || (state.OpenCalls[i].Section.Frame == section.Frame && state.OpenCalls[i].Section != section)
+                || (
+                    (state.OpenCalls[i].Section.Frame == section.Frame || state.Pattern.CallGuardComparesAcrossSections)
+                    && !SameCounts(state.OpenCalls[i].Section, section)
+                )
             )
             {
                 continue;
