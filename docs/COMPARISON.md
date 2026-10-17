@@ -1355,6 +1355,19 @@ two ways according to where the caller started. Upstream issues 563 and 564 have
 17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to
 restore the upstream answer.
 
+A partial match follows from the same rule. It reports the earliest start from which some longer
+text gives a match, so where completing the text lets this port keep the match at the starting
+position, the partial starts there too:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var ab = new FuzzyRegex("(?:ab){1<=i<=2}");
+Match partial = ab.Match("ba", partial: true);
+Console.WriteLine($"{partial.Index} {partial.Length}");   // 0 2 - upstream: 1 1
+Console.WriteLine(ab.Match("bab").Index);                 // 0 - upstream: no match
+```
+
 ### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
 
 Under `IgnoreCase` with version 1, a literal holding a pair that one character can fold to (fi, ff,
