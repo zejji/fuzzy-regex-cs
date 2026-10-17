@@ -7945,7 +7945,7 @@ internal static class ExpectedDivergences
                 + "inside a best-match walk is researched.\n"
                 + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE. A row belongs here when "
                 + "`OracleComparer.RunWithoutTheAnchorPin`, which clears `PatternObject.LiftsAnchorBan` "
-                + "and `PatternObject.LiftsAnchorBanWhenPartial` and empties `PatternObject.AnchorGuards`, "
+                + "and empties `PatternObject.AnchorGuards`, "
                 + "makes this port reproduce upstream's "
                 + "recorded answer exactly, AND this port's live answer is the one being judged. The "
                 + "control is `A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.\n"
@@ -9115,7 +9115,7 @@ internal static class ExpectedDivergences
     /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
     /// </para>
     /// <para>
-    /// Clearing <c>PatternObject.LiftsAnchorBan</c> and <c>LiftsAnchorBanWhenPartial</c>, and emptying
+    /// Clearing <c>PatternObject.LiftsAnchorBan</c>, and emptying
     /// <c>AnchorGuards</c> (BESTMATCH's S57c exemption), on a compiled pattern makes every search keep
     /// upstream's ban, and the pattern they are changed on was compiled for that one call.
     /// </para>

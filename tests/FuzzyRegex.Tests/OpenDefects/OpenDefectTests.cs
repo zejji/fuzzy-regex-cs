@@ -186,6 +186,50 @@ public sealed class OpenDefectTests
             .Be((true, true, start, end, group1Set));
     }
 
+    // D100. A partial reports the least start from which this port's own full search matches some
+    // continuation (DECISIONS 2026-09-30), and that search follows rule H'. When the attempt at the
+    // anchor and a later partial are both live, H' compares the later partial's start with the
+    // attempt's end, which for a partial is the edge, and gets these rows wrong. Too late: over
+    // 'ba' the continuation 'b' gives 'bab', which is (0, 3) here (upstream None), so the partial
+    // starts at 0, not 1 (upstream P(1, 2)). Too early: `(?:a){i<=1}\b` over 'x' is P(0, 1), but
+    // every completion has a match from 1, so P(1, 1) (upstream's answer). No rule over the two
+    // partials settles these (DECISIONS 2026-10-17); expected values are the judge's,
+    // tools/probes/partial-contract-judge.py.
+    [Test]
+    [Arguments(@"(?:ab){1<=i<=2}", "ba", 0, 2)]
+    [Arguments(@"(?:ab){1<=i<=2}", "xa", 0, 2)]
+    [Arguments(@"(?:ab){2<=i<=2}", "xya", 0, 3)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ax", 0, 2)]
+    [Arguments(@"(?:a){i<=1}\b", "x", 1, 1)]
+    // Five more from the triage of the rows main and fix/d100 both got wrong
+    // (.scratch/s1016/partial-44/triage.md, causes A to E), judged at continuations of up to 5.
+    [Arguments(@"(?:(?=a)a){e<=1}", "b", 1, 1)] // too early: 'ba' is (1, 2)
+    [Arguments(@"(?:ab){1<=d<=1,i<=1}", " ", 1, 1)] // too early: a deletion needs no more text
+    [Arguments(@"(?r)(?:b){i<=2}\B", "a ", 0, 0)] // too early (reversed): 'ba ' completes inside
+    [Arguments(@"(?:b){2<=i<=2}", " b", 0, 2)] // too late: ' ba' is (0, 3)
+    [Arguments(@"(?r)(?:b\b){i<=2}", "xx", 0, 2)] // too late (reversed): 'bxx' is (0, 3)
+    public void A_partial_starts_where_the_full_search_of_some_continuation_starts(
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+    }
+
+    // D100 over finditer: the scan's one match is the same partial.
+    [Test]
+    public void A_partial_scan_starts_where_the_full_search_of_some_continuation_starts()
+    {
+        Match[] forward = [.. new FuzzyRegex(@"(?:ab){1<=i<=2}").Matches("ba", partial: true)];
+
+        forward.Select(static m => (m.PartialMatch, m.Index, m.Index + m.Length)).Should().Equal((true, 0, 2));
+    }
+
     private static Match Partial(string operation, string pattern, string text)
     {
         var regex = new FuzzyRegex(pattern);

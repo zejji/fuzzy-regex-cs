@@ -763,8 +763,6 @@ public sealed class ThreadSafetyTests
             // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
             // only since D61.
             "PatternObject.AnchorGuards",
-            // And LiftsAnchorBanWhenPartial, written beside it.
-            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",

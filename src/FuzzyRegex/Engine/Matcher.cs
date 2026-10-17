@@ -22811,6 +22811,11 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the attempt is the answer.</returns>
     private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
     {
+        // SHORTCUT (D100): when both are partial, the attempt's end is the edge, not the end of a
+        // completed match, so this test can pick a start the partial contract does not. The right
+        // answer needs one continuation that completes the attempt and leaves no match inside it,
+        // which no rule over the two partials settles (DECISIONS 2026-10-17). Upgrade path: reason
+        // over the continuations jointly, or refuse the combination.
         if (upstream is null)
         {
             return true;
@@ -22819,13 +22824,15 @@ internal static class Matcher
         return state.Reverse ? upstream.AttemptStart <= state.TextPos : upstream.AttemptStart >= state.TextPos;
     }
 
-    /// <summary>Whether rule H' can change this search's answer (the compile-time gate).</summary>
+    /// <summary>
+    /// Whether rule H' can change this search's answer (the compile-time gate), the same with
+    /// partial matching on or off: for a gated-out pattern the full search keeps the ban on every
+    /// completed text, so a partial, which reports the least start some completion matches from,
+    /// keeps it too (D100; <c>(?:a){i&lt;=1}</c> partial over 'x' is P(1, 1)).
+    /// </summary>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if the anchored attempt must be considered.</returns>
-    private static bool LiftsTheBan(MatchState state) =>
-        state.PartialSide == MatchState.PartialNone
-            ? state.Pattern.LiftsAnchorBan
-            : state.Pattern.LiftsAnchorBanWhenPartial;
+    private static bool LiftsTheBan(MatchState state) => state.Pattern.LiftsAnchorBan;
 
     /// <summary>
     /// The parts of a match <see cref="DoMatch"/> and its callers read, kept while
