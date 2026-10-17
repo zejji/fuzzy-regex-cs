@@ -2019,6 +2019,24 @@ Console.WriteLine(m.FuzzyCounts.Total);   // 0
 
 There is no option to restore the upstream answer. Ledger entry 32.
 
+### BESTMATCH and ENHANCEMATCH never let their budget decide a negative lookaround or a conditional's test
+
+Both flags look for a better match by holding each new attempt to fewer errors than the last.
+That budget is how the search narrows down; it does not change what the pattern matches. So the
+body of a negative lookaround, or of a conditional's test, matches here exactly when it would
+without the flag. Upstream holds those bodies to the budget too, and a body with no errors left to
+spend passes a test the pattern fails.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?e)(?:x(?:b){d<=1}|(?!a{s<=1}))").Match("x");
+Console.WriteLine(m.Index);   // 1 - upstream: 0, which is not a match: a{s<=1} matches the 'x'
+Console.WriteLine(m.FuzzyCounts.Total);   // 0
+```
+
+There is no option to restore the upstream answer. Known defect D102, ledger entry 32.
+
 ### The calls inside a called group run with the call's direction and fuzziness too
 
 A call such as `(?&g)` matches what the group's body would match written out at the call: exactly

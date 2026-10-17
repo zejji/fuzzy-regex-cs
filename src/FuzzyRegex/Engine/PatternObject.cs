@@ -945,6 +945,14 @@ internal sealed class PatternObject
     internal bool KeepDiscardedTotals;
 
     /// <summary>
+    /// Oracle-only: the budget BESTMATCH and ENHANCEMATCH tighten between runs also bounds a
+    /// negative lookaround's body and a conditional's test, as upstream's <c>max_errors</c> does
+    /// (D102, ledger entry 32's addendum of 2026-10-17). Set only by <c>OracleComparer</c>'s
+    /// ablation; never by the library. See <c>MatchState.BoundlessBodies</c>.
+    /// </summary>
+    internal bool BoundsReachDecidingBodies;
+
+    /// <summary>
     /// Oracle-only: a conditional whose negative test fails, because the test's body matched, puts
     /// back the captures, repeats and fuzzy counts saved before the test and then takes the no
     /// branch, as upstream's <c>END_CONDITIONAL</c> does (<c>upstream/src/_regex.c</c>:12423-12432;

@@ -1356,21 +1356,25 @@ public sealed class FuzzyBestMatchTests
     // decide a test. A negative lookaround's body, and a conditional's test, run with the budget
     // lifted, so a body that matches with errors still matches. Before the fix, at 0 in 'x' the
     // lookahead spent one deletion, the budget then had no room for the body's substitution, the
-    // body failed, and `(?!a{s<=1})` passed although `a{s<=1}` matches 'x'. Expected answers are
-    // the flagless engine's own matches ranked by the flag; `regex` 2026.9.10 runs away on most of
-    // the BESTMATCH rows (ledger entry 32) and answers the ENHANCEMATCH rows as below
-    // (.scratch/s1016/d102/NOTES.md).
+    // body failed, and `(?!a{s<=1})` passed although `a{s<=1}` matches 'x'. Each expected answer
+    // is a match of the flagless pattern, ranked by the flag. ENHANCEMATCH refines inside the span
+    // of the first match it finds and may end on a later start, as both engines answer
+    // `(?e)(?:x(?:bb){d<=2}|(?:c){d<=1}$)` over 'x' with (1, 1). `regex` 2026.9.10 runs away on
+    // the BESTMATCH rows here (ledger entry 32) and answers (0, 0), not a match, on the plain
+    // ENHANCEMATCH row; on the three ENHANCEMATCH rows with a lookahead in front it stops at the
+    // first fit, (0, 1) (.scratch/s1016/d102/NOTES.md).
     [Test]
     [Arguments("(?b)(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
     [Arguments("(?b)(?:b){d<=1}x??(?!a{s<=1})", "xx", 1, 2, 0, 0, 1)]
     [Arguments("(?b)(?r)(?<!a{s<=1})\\w??(?<=a{d<=1})", "xx", 0, 1, 0, 0, 1)]
     [Arguments("(?b)(?:(?:yy){d<=2}^|x(?=a{d<=1})\\w??(?<!a{s<=1}))", "xx", 0, 0, 0, 0, 2)]
     [Arguments("(?b)(?=a{d<=1})(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 1, 1, 0, 0, 1)]
-    [Arguments("(?e)(?=a{d<=1})(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 0, 1, 0, 0, 2)]
+    [Arguments("(?e)(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 1, 1, 0, 0, 0)]
+    [Arguments("(?e)(?=a{d<=1})(?:x(?:b){d<=1}|(?!a{s<=1}))", "x", 1, 1, 0, 0, 1)]
     [Arguments("(?b)(?=a{d<=1})(?(?!a{s<=1})\\w??|x)", "x", 1, 1, 0, 0, 1)]
     [Arguments("(?b)(?=a{d<=1})(?(?=a{s<=1})x|\\w??)", "x", 1, 1, 0, 0, 1)]
-    [Arguments("(?e)(?=a{d<=1})(?(?!a{s<=1})\\w??|x)", "x", 0, 1, 1, 0, 1)]
-    [Arguments("(?e)(?=a{d<=1})(?(?=a{s<=1})x|\\w??)", "x", 0, 1, 1, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})(?(?!a{s<=1})\\w??|x)", "x", 1, 1, 0, 0, 1)]
+    [Arguments("(?e)(?=a{d<=1})(?(?=a{s<=1})x|\\w??)", "x", 1, 1, 0, 0, 1)]
     public void The_ranking_budget_does_not_stop_a_test_s_body_from_matching(
         string pattern,
         string subject,
@@ -1387,6 +1391,58 @@ public sealed class FuzzyBestMatchTests
         (m.Index, m.Index + m.Length, m.FuzzyCounts)
             .Should()
             .Be((start, end, new FuzzyCounts(substitutions, insertions, deletions)));
+    }
+
+    // D102's other half. A conditional's test keeps its errors in the match (D54), and with the
+    // budget lifted inside the test nothing held them to it: the next run at the same start took
+    // the same one-substitution path, did no better, and the walk never ended. END_CONDITIONAL now
+    // holds the test's errors to the budget as END_FUZZY holds a section's. (1, 1) is exact: at 1
+    // the test's body cannot match, so the empty no-branch is taken.
+    [Test]
+    [Arguments("(?b)(?(?=(?:ab){s<=1})x)")]
+    [Arguments("(?b)(?(?!(?:ab){s<=1})|x)")]
+    public void A_conditional_s_test_is_held_to_the_budget_when_it_ends(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match("xb");
+
+        (m.Index, m.Index + m.Length, m.FuzzyCounts).Should().Be((1, 1, new FuzzyCounts(0, 0, 0)));
+    }
+
+    // D102 in a partial search's second pass. A test's body that reads the text to come ends
+    // blocked: the continuation goes on in the branch with the body closed, and REOPEN opens the
+    // body again for its other paths. Each must close or reopen the lifted budget with the body, or
+    // the budget stays lifted outside it or is restored inside it (a Debug assertion in
+    // MatchState.CloseABoundlessBody and in Matcher.BasicMatch catches either). The first three
+    // rows reach the blocked end only, the last four REOPEN as well. The answers are the flagless
+    // pattern's, which nothing here should move.
+    [Test]
+    [Arguments("(?b)(?(?=(?:ab){s<=1})x|y)", "x", 0, 1, 1, 0, 0)]
+    [Arguments("(?b)(?(?=a{s<=1}b?)xb|y)", "x", 0, 1, 1, 0, 0)]
+    [Arguments("(?b)(?:c){d<=1}(?(?=a{s<=1}b?)xc|y)", "x", 0, 1, 1, 0, 1)]
+    [Arguments("(?b)(?(?=a{s<=1}\\w?)z|y)", "x", 1, 1, 0, 0, 0)]
+    [Arguments("(?b)(?(?=a{s<=1}b?)z|x)", "x", 1, 1, 0, 0, 0)]
+    [Arguments("(?b)(?:c){d<=1}(?(?=a{s<=1}\\w?)z|x)", "x", 1, 1, 0, 0, 0)]
+    [Arguments("(?b)(?(?=(?:a\\w?){s<=1})z|x)", "xy", 2, 2, 0, 0, 0)]
+    public void A_partial_bestmatch_search_closes_and_reopens_the_budget_with_a_blocked_test(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, partial: true);
+        Match plain = new FuzzyRegex(pattern[4..]).Match(subject, partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((start, end, new FuzzyCounts(substitutions, insertions, deletions)));
+        (plain.Index, plain.Index + plain.Length, plain.FuzzyCounts)
+            .Should()
+            .Be((m.Index, m.Index + m.Length, m.FuzzyCounts));
     }
 
     // D102's witness through each operation, with the flagless pattern as the control: (0, 0) is
@@ -1409,12 +1465,14 @@ public sealed class FuzzyBestMatchTests
 
     // The controls D102's fix must not move: the flagless witness and its ENHANCEMATCH twin, which
     // never tightened the budget before the body ran, and a positive lookahead, whose body's errors
-    // belong to the match, so the budget does bound them. `regex` 2026.9.10 answers all three
-    // rows the same.
+    // belong to the match, so the budget does bound them. `regex` 2026.9.10 answers those three
+    // rows the same. The fourth spends no error before the body, so the budget never reached it;
+    // `regex` answers (1, 1) there, which is not a match (`a{s<=1}` matches the 'x' before 1).
     [Test]
     [Arguments("(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
     [Arguments("(?e)(?=a{d<=1})\\w??(?!a{s<=1})", "x", 0, 1, 0, 0, 1)]
     [Arguments("(?b)(?=a{d<=1})\\w??(?=a{s<=1})", "x", 0, 0, 1, 0, 1)]
+    [Arguments("(?b)(?r)(?<!a{s<=1})\\w??", "x", 0, 1, 0, 0, 0)]
     public void A_test_s_body_is_unchanged_where_the_budget_never_reached_it(
         string pattern,
         string subject,
@@ -1434,7 +1492,8 @@ public sealed class FuzzyBestMatchTests
 
     // D102's oracle row (battery run 6, R1): a reversed, POSIX, overlapped BESTMATCH scan whose
     // negative lookbehind's body matches 'AA\n\n' with one \W substitution, so (8, 12), the first
-    // match the port reported, is not a match.
+    // match the port reported, is not a match. Every match costs one deletion, so the flag ranks
+    // nothing and the answer is the flagless scan's, which `regex` 2026.9.10 gives too.
     [Test]
     public void The_battery_row_with_a_fuzzy_negative_lookbehind_reports_only_matches()
     {
@@ -1448,10 +1507,10 @@ public sealed class FuzzyBestMatchTests
         [
             .. new FuzzyRegex(pattern, options)
                 .Matches("\U0001D518\U0001D518AA\n\n\U0001D518\U0001D518\U0001F600", overlapped: true)
-                .Select(static m => $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts}"),
+                .Select(static m => $"({m.Index},{m.Index + m.Length}) {m.FuzzyCounts.Deletions}"),
         ];
 
-        spans.Should().NotContain(static s => s.StartsWith("(8,12)", StringComparison.Ordinal));
+        spans.Should().Equal("(10,12) 1", "(4,6) 1", "(2,5) 1", "(0,4) 1", "(0,2) 1");
     }
 
     // D78: AFTER AN EMPTY MATCH, A BESTMATCH SCAN EXCLUDES ONLY THE EMPTY MATCH AT THE RESUME
