@@ -6908,3 +6908,48 @@ in this port, which copied the line: the failure arm stepped from 1 after the at
 
 **The fix here.** The advance steps on from `MatchState.AttemptStart`, where the attempt began. A
 `(*SKIP)` has already moved the slice, and the step goes to it as before.
+
+## 88. A section below its minimum never tries an insertion in front of an item that matched - SHARED, FIXED HERE ON `fix/d94` (D94, 2026-10-17)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D94, found by battery run 2 (`.scratch/battery/20261016-2/triage-matrix.md`, R2). Fixed on
+`fix/d94` and pinned by `Gaps/Engine/FuzzyMinimumInsertionBeforeExactItemTests`. Evidence:
+`.scratch/s1016/d94/`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-17 (expected = this port's answer, argued
+below):
+
+```
+fullmatch(r'(?:a){1<=s<=1,i<=1}', 'ab')      -> None    expected (0, 2), 1 substitution, 1 insertion
+fullmatch(r'(?:a){1<=s<=1,1<=i<=1}', 'ab')   -> None    expected (0, 2), the same
+fullmatch(r'(?:ab){1<=s<=1,i<=1}', 'abb')    -> None    expected (0, 3), the same
+fullmatch(r'(?r)(?:a){1<=s<=1,i<=1}', 'ba')  -> None    expected (0, 2), the same
+search(r'(?:(?!x)[ab]){1<=s<=1,i<=1}', 'xaxbxxbb') -> None    expected (1, 3), the same
+fullmatch(r'(?:a){1<=s<=1,i<=1}', 'ba')      -> (0, 2), 1 substitution, 1 insertion  (the control)
+fullmatch(r'(?:ab){1<=s<=1,i<=1}', 'aab')    -> (0, 3), the same                      (the control)
+```
+
+**Why upstream is wrong.** A minimum says the match holds at least that many errors of that kind
+(`upstream/README.rst:538-566`), and an insertion is a text character the pattern does not account
+for, which may stand in front of any item. Over 'ab' the fit is the 'a' inserted and the 'b'
+substituted for the item. Upstream finds that fit when the insertion comes after the substitution
+(the controls) and misses it when it comes before, so the order of its search is the defect, as in
+entry 51. None of the engines the port's correctness survey uses has fuzzy matching, so the
+question is settled from the definition.
+
+**Mechanism.** Errors are tried on an item only when its exact test fails (`fuzzy_match_item`,
+`_regex.c:10185-10258`); an item that matches pushes nothing (`:11924-11927`, `:14742-14745`).
+When a minimum is unmet, a later item may need to take the error, and only an insertion in front
+of an earlier exact item can line it up with the character it must edit.
+
+**Proposed fix upstream:** while an open section, or one around it, is below a minimum, an item
+that matches exactly pushes the `fuzzy_match_item` frame marked so that its retry tries one
+insertion in front of the item and nothing else, when an insertion fits the section and every
+section around it.
+
+**The fix here.** `Matcher.InsertionMayMeetMinimum` decides, and the exact-match sites push an
+insertion-only frame (`_exactInsertionOnly`) beneath entry 42's deletion frame, for one-character
+items, strings, group references and their full-folded forms. So the deletion of the matched item
+is tried first and the insertion next, both before any earlier choice. A pattern with no minimum
+pays one test of `PatternObject.HasFuzzyMinimum`: its engine steps are unchanged on 9,550 runnable
+fuzzy rows without a minimum (rows-c, rows-d and the minimum grid with its lower bounds removed).

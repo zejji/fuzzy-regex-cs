@@ -1858,6 +1858,25 @@ Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
 A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
 neither. There is no option to restore the upstream answer. Ledger entry 51.
 
+### Below a minimum, an exact item can have a character inserted in front of it
+
+The same order problem one step earlier. Upstream tries errors on an item only when it fails to
+match, so when a later item has to take the error a minimum asks for, and only an extra character
+in front of an earlier item would line it up, upstream finds nothing. Here an item that matched is
+also tried with an insertion in front of it while a minimum is unmet, after the deletion of that
+item and before any earlier choice.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The 'a' is inserted, and the 'b' is substituted for the pattern's 'a'.
+Match m = FuzzyRegex.FullMatch("ab", "(?:a){1<=s<=1,i<=1}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Substitutions, m.FuzzyCounts.Insertions));   // (0, 2, 1, 1) - upstream: no match
+```
+
+Upstream already finds the mirror image, 'ba', where the substitution comes first. There is no
+option to restore the upstream answer. Ledger entry 88.
+
 ### A fuzzy run can edit an expanding subject character as one character
 
 The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a
