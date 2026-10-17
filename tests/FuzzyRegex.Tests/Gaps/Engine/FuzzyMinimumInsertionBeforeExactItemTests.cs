@@ -234,4 +234,28 @@ public sealed class FuzzyMinimumInsertionBeforeExactItemTests
             "an insertion is skipped when no later character can take the missing substitution"
         );
     }
+
+    // Bounded in engine steps (D13). The insertions D94 tries reach the same repeat-end states from
+    // every start and every insertion point; the failed-state memo searches each once. Measured in
+    // Debug on 2026-10-17, before D94 / with D94 / with the memo: 148,173 / 511,762 / 9,472 (s),
+    // 769,884 / 1,535,461 / 22,752 (e), 245,238 / 764,823 / 13,003 (i), and for the last row
+    // 36,458 / 530,840 / under 15,000. Each bound is several times the memo's count and below the
+    // count before D94.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:a+){1<=s<=1,i<=1}b", 200, "cccb", 100_000)]
+    [Arguments(@"(?:a+){1<=e<=2}b", 200, "cccb", 100_000)]
+    [Arguments(@"(?:a+){1<=i<=2}b", 200, "cccb", 100_000)]
+    [Arguments(@"(?:a+){1<=s<=1,i<=3}", 100, "", 30_000)]
+    public void A_failed_state_is_searched_once(string pattern, int run, string tail, long bound)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string text = new string('a', run) + tail;
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = regex.Match(text),
+            bound,
+            "each repeat-end state that failed is not searched again"
+        );
+    }
 }

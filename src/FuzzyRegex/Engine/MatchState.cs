@@ -393,6 +393,12 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal int LastSubstitutablePos = int.MinValue;
 
+    /// <summary>NOT UPSTREAM (D94 performance): the repeat-end states known to fail (<c>Matcher.StateKnownToFail</c>).</summary>
+    internal HashSet<RepeatStateKey>? FailedRepeatStates;
+
+    /// <summary>NOT UPSTREAM (D94 performance): the keys of the failed-state marks on the backtrack stack.</summary>
+    internal readonly List<RepeatStateKey> MarkedStates = [];
+
     /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
     internal int SliceStart;
 
@@ -1543,6 +1549,8 @@ internal sealed class MatchState : IDisposable
         Text = text;
         TextLength = text.Length;
         LastSubstitutablePos = int.MinValue; // D94 performance: worked out on first use
+        FailedRepeatStates?.Clear();
+        MarkedStates.Clear();
         CaptureTexts.Reset(text);
         Array.Clear(_tailTextValues); // the ids above start again (D85)
 
@@ -2136,6 +2144,7 @@ internal sealed class MatchState : IDisposable
     {
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
+        MarkedStates.Clear();
         LookaroundSuccesses.Clear();
         Sstack.Reset();
         SetBstackCount(0);

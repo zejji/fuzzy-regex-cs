@@ -901,6 +901,7 @@ public sealed class ThreadSafetyTests
             "PatternObject.KeepsSectionLinks",
             // D94's insertion pruning added one, written by Compile beside KeepsSectionLinks.
             "PatternObject.SubstitutionTests",
+            "PatternObject.RepeatStateMemoCaps",
             // The capture-dependent call guard added one, written in Compile beside MemoGroups.
             "PatternObject.CallReadGroups",
             "PatternObject.CapturesAgainstDirection",

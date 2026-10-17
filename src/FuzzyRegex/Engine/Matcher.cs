@@ -9121,6 +9121,156 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (D94 performance): the patterns the failed-state memo
+    /// (<see cref="StateKnownToFail"/>) serves, and the repeat caps of its key; null to leave it off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The memo says that everything after a greedy repeat's end at position p, with error counts c
+    /// and repeat counts r, failed, so it fails again, later in this attempt or in a later one. That
+    /// holds only where what follows depends on nothing else: one fuzzy section, so c is the whole
+    /// budget; no reference, conditional, call, lookaround, atomic group, verb, \K, \G or reverse
+    /// item, which would read captures, cut the backtracking short, read the attempt's start or an
+    /// earlier position; no BESTMATCH, ENHANCEMATCH or POSIX, which go on past a match. A repeat
+    /// with no maximum is keyed by its count only up to its minimum, as beyond that the count
+    /// changes nothing.
+    /// </para>
+    /// <para>
+    /// A later attempt starts further on, so the rules that depend on the start (no insertion where
+    /// an attempt began; a match may not be empty where the last one ended) only take choices away.
+    /// SHORTCUT: two repeats at most, the room in the key; more would need a variable-length key.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern, its nodes numbered.</param>
+    /// <param name="sections">How many fuzzy sections it has.</param>
+    /// <returns>The caps, or null.</returns>
+    internal static long[]? MemoCapsFor(PatternObject pattern, int sections)
+    {
+        if (
+            sections != 1
+            || pattern.HasGroupCalls
+            || pattern.RepeatCount > 2
+            || (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) != 0
+        )
+        {
+            return null;
+        }
+
+        long[] caps = new long[pattern.RepeatCount];
+        Array.Fill(caps, long.MaxValue);
+        foreach (Node node in pattern.NodeList)
+        {
+            if ((node.Status & NodeStatus.Reverse) != 0)
+            {
+                return null;
+            }
+
+            switch (node.Op)
+            {
+                case Opcode.GreedyRepeat or Opcode.LazyRepeat:
+                    if (node.Values[2] == uint.MaxValue)
+                    {
+                        caps[node.Values[0]] = node.Values[1];
+                    }
+
+                    break;
+                case Opcode.Lookaround
+                or Opcode.FuzzyLookaround
+                or Opcode.Atomic
+                or Opcode.GroupCall
+                or Opcode.CallRef
+                or Opcode.GroupExists
+                or Opcode.Conditional
+                or Opcode.RefGroup
+                or Opcode.RefGroupIgn
+                or Opcode.RefGroupFld
+                or Opcode.RefGroupRev
+                or Opcode.RefGroupIgnRev
+                or Opcode.RefGroupFldRev
+                or Opcode.Skip
+                or Opcode.Prune
+                or Opcode.Keep
+                or Opcode.SearchAnchor
+                or Opcode.GreedyRepeatOne
+                or Opcode.LazyRepeatOne
+                or Opcode.StringFld
+                or Opcode.StringFldRev:
+                    return null;
+                default:
+                    break;
+            }
+        }
+
+        return caps;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): at a greedy repeat's end, whether this state (position,
+    /// counts, repeat counts) is known to fail; if not, marks it, so that backtracking past the
+    /// mark, which means everything after it failed, records it. Patterns as for
+    /// <see cref="MemoCapsFor"/>.
+    /// </summary>
+    /// <remarks>
+    /// The insertions D94 tries below a minimum reach the same states from many places: in
+    /// <c>(?:a+){1&lt;=s&lt;=1,i&lt;=1}b</c> searched over a run of 'a' with a 'c' near the end,
+    /// every start and every insertion point leads to the repeat's end at each later position
+    /// with one insertion, and each was searched to the end again. The memo searches each once.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The repeat's end node.</param>
+    /// <returns><see langword="true"/> if it is known to fail.</returns>
+    private static bool StateKnownToFail(MatchState state, Node node)
+    {
+        if (
+            state.Pattern.RepeatStateMemoCaps is not { } caps
+            || state.PartialSide != MatchState.PartialNone
+            || !state.IsFuzzy
+        )
+        {
+            return false;
+        }
+
+        RepeatStateKey key = RepeatStateKeyOf(state, node, caps);
+        state.FailedRepeatStates ??= [];
+        if (state.FailedRepeatStates.Contains(key))
+        {
+            return true;
+        }
+
+        state.MarkedStates.Add(key);
+        state.Bstack.PushUInt8((byte)Opcode.FailedStateMark);
+        return false;
+    }
+
+    /// <summary>NOT UPSTREAM (D94 performance): the failed-state memo key for this state.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The repeat's end node.</param>
+    /// <param name="caps">The pattern's repeat caps.</param>
+    /// <returns>The key.</returns>
+    private static RepeatStateKey RepeatStateKeyOf(MatchState state, Node node, long[] caps)
+    {
+        long r0 = caps.Length > 0 ? Math.Min(state.Repeats[0].Count, caps[0]) : 0;
+        long r1 = caps.Length > 1 ? Math.Min(state.Repeats[1].Count, caps[1]) : 0;
+        long[] c = state.FuzzyCounts;
+
+        // DeletionRepeatsAnEarlierAlternative reads whether the last change is an insertion just
+        // behind the position, so that is part of the state.
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        bool insertedBehind =
+            changes.Count > 0 && changes[^1].Type == FuzzyValue.Ins && changes[^1].Pos == state.TextPos - 1;
+        return new RepeatStateKey(
+            node.Index,
+            state.TextPos,
+            c[FuzzyValue.Sub],
+            c[FuzzyValue.Ins],
+            c[FuzzyValue.Del],
+            r0,
+            r1,
+            insertedBehind
+        );
+    }
+
+    /// <summary>
     /// NOT UPSTREAM (D94 performance): whether every open section meets its insertion, deletion
     /// and total minimums, counting the errors of the sections inside it, so only a substitution
     /// minimum can be unmet.
@@ -14416,6 +14566,13 @@ internal static class Matcher
                     }
 
                     // Could the body or tail match?
+                    // NOT UPSTREAM (D94 performance): a state already known to fail.
+                    if (StateKnownToFail(state, node))
+                    {
+                        --rpData.Count;
+                        goto backtrack;
+                    }
+
                     bool tryBody =
                         changed
                         && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
@@ -17314,6 +17471,10 @@ internal static class Matcher
                         goto armExit;
                     }
 
+                    break;
+                case Opcode.FailedStateMark: // NOT UPSTREAM (D94 performance): see StateKnownToFail.
+                    state.FailedRepeatStates!.Add(state.MarkedStates[^1]);
+                    state.MarkedStates.RemoveAt(state.MarkedStates.Count - 1);
                     break;
                 case Opcode.RunOutClosedSection: // NOT UPSTREAM'S, D11 chunk 8: the body's section again.
                     status = BacktrackRunOutClosedSection(state);
@@ -22891,3 +23052,24 @@ internal static class Matcher
         return status;
     }
 }
+
+/// <summary>NOT UPSTREAM (D94 performance): a key of the failed-state memo.</summary>
+/// <param name="Node">The repeat end's index.</param>
+/// <param name="Pos">The position.</param>
+/// <param name="Sub">The substitutions so far.</param>
+/// <param name="Ins">The insertions so far.</param>
+/// <param name="Del">The deletions so far.</param>
+/// <param name="R0">The first repeat's count, capped.</param>
+/// <param name="R1">The second repeat's count, capped.</param>
+/// <param name="InsertedBehind">Whether the last change is an insertion just behind the position.</param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct RepeatStateKey(
+    int Node,
+    int Pos,
+    long Sub,
+    long Ins,
+    long Del,
+    long R0,
+    long R1,
+    bool InsertedBehind
+);

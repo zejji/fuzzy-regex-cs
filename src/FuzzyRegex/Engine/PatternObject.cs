@@ -455,6 +455,14 @@ internal sealed class PatternObject
     internal Node[]? SubstitutionTests;
 
     /// <summary>
+    /// NOT UPSTREAM (D94 performance): null when the failed-state memo
+    /// (<c>Matcher.StateKnownToFail</c>) is off for this pattern; otherwise, per repeat, the count
+    /// above which its count no longer matters (its minimum when it has no maximum), or
+    /// <see cref="long.MaxValue"/> to keep it all. Set when a pattern with a fuzzy minimum is compiled.
+    /// </summary>
+    internal long[]? RepeatStateMemoCaps;
+
+    /// <summary>
     /// NOT UPSTREAM (D81): whether one fuzzy section can be open inside another: the pattern has two
     /// or more, or one and a group call, which can enter it again from inside itself. Only then can
     /// a run-out find an enclosing section's limits broken (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
@@ -1326,6 +1334,7 @@ internal sealed class PatternObject
         if (self.HasFuzzyMinimum)
         {
             self.SubstitutionTests = Matcher.CollectSubstitutionTests(self.NodeList);
+            self.RepeatStateMemoCaps = Matcher.MemoCapsFor(self, sections);
         }
 
         // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
