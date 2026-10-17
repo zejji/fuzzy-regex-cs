@@ -745,8 +745,21 @@ internal sealed class MatchState : IDisposable
     /// <c>SstackDepth</c> again for the caller's own call when the caller pushed nothing else
     /// between; <c>Matcher.DeletionsPastReturns</c> walks the frames with it.
     /// </para>
+    /// <para>
+    /// <c>BstackAt</c> is where the call's <c>GROUP_CALL</c> entry lies on <see cref="Bstack"/>, so
+    /// that a run-out inside a call a lookaround's body opened can undo the call as that entry's
+    /// backtrack arm would (D98, <c>Matcher.AbandonTheCallsTheBodyOpened</c>). A call re-opened by
+    /// <c>GROUP_RETURN</c>'s backtrack arm gets it back from that entry.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase)> OpenCalls = [];
+    internal readonly List<(
+        long Key,
+        int Reach,
+        int SstackDepth,
+        long[]? MemoKey,
+        int FrameBase,
+        int BstackAt
+    )> OpenCalls = [];
 
     /// <summary>
     /// NOT UPSTREAM'S (D93): for each entry of <see cref="OpenCalls"/>, in the same order, the fuzzy
@@ -2086,23 +2099,59 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation was already continued
-    /// from the same frame (the dedup). Reads only the entries at or above the frame, from the end.
+    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation as the one the state
+    /// holds now was already continued from the same frame (the dedup). Reads only the entries at or
+    /// above the frame, from the end, and the state in place.
     /// </summary>
-    /// <param name="success">The success.</param>
-    /// <returns><see langword="true"/> if an entry of the same frame leads where it does.</returns>
-    internal bool HasSameContinuation(LookaroundSuccess success)
+    /// <remarks>
+    /// The state is compared in place, so a repeat costs no copy. Until D98's follow-up each
+    /// success was copied into a <see cref="LookaroundSuccess"/> first: `(x)(?=(?1)*y)\Z` searched
+    /// over 'x' * n reaches its blocked end twice per attempt, the second time a repeat, and
+    /// allocated 432 bytes per character.
+    /// </remarks>
+    /// <param name="frame">The lookaround's frame.</param>
+    /// <param name="withChanges">Whether the fuzzy changes are part of the key (<c>(?b)</c>, <c>(?e)</c>).</param>
+    /// <returns><see langword="true"/> if an earlier success of the frame had the same key.</returns>
+    internal bool HasSameContinuation(int frame, bool withChanges)
     {
-        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
+        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= frame; i--)
         {
             DedupEntriesExamined++;
-            if (success.SameContinuation(LookaroundSuccesses[i]))
+            LookaroundSuccess other = LookaroundSuccesses[i];
+            if (
+                other.Frame == frame
+                && SameCapturesAsNow(other.Captures)
+                && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
+                && (withChanges ? CollectionsMarshal.AsSpan(FuzzyChanges) : []).SequenceEqual(other.FuzzyChanges)
+            )
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>Whether each group's current capture is the one a dedup entry recorded.</summary>
+    /// <param name="captures">The entry's captures, (-1, -1) for a group with none.</param>
+    /// <returns><see langword="true"/> if all are the same.</returns>
+    private bool SameCapturesAsNow(GroupSpan[] captures)
+    {
+        if (captures.Length != Groups.Length)
+        {
+            return false;
+        }
+
+        for (int g = 0; g < Groups.Length; g++)
+        {
+            GroupData group = Groups[g];
+            if ((group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1)) != captures[g])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
