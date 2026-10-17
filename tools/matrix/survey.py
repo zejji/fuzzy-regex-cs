@@ -66,8 +66,12 @@ import threading
 import time
 from pathlib import Path
 
-import psutil
-import regex
+try:
+    import psutil
+    import regex
+except ImportError as missing:  # the regex venv has no psutil (battery run 20261016-2's triage)
+    raise SystemExit(f"{missing.name} is missing: run the survey and c7.py with the Python that has psutil and "
+                     "regex, the one tools/battery/run.sh puts first (BATTERY_PYTHON_DIR, default C:/Python314)")
 
 HERE = Path(__file__).resolve().parent
 TOOLS = HERE.parent

@@ -80,6 +80,11 @@ def answer(r: dict) -> str:
 
 
 def main(path: str) -> int:
+    # Capped below screen.py's 2 GB watchdog, so a runaway row answers MemoryError rather than
+    # being killed (tools/memcap.py).
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+    import memcap
+    memcap.cap_this_process(1.5)
     r = json.loads(open(path, encoding="utf-8").read())
     a = answer(r)
     sys.stdout.write("%s\t%s\t%s\t%s\t%s\n" % (r["id"], r.get("operation"), quote(r["pattern"]), quote(r["subject"]), a))

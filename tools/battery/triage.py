@@ -204,6 +204,11 @@ def upstream_many(rows: list[dict], work: Path) -> list:
 
 
 def upstream_worker(src: str, start: int) -> int:
+    # A runaway row raises MemoryError at 2 GB (answered as ("ERR", "MemoryError")) instead of
+    # growing until the machine runs out (tools/memcap.py).
+    sys.path.insert(0, str(HERE.parent))
+    import memcap
+    memcap.cap_this_process(2)
     rows = [json.loads(line) for line in open(src, encoding="utf-8") if line.strip()]
     for row in rows[start:]:
         print(json.dumps(upstream(row)), flush=True)

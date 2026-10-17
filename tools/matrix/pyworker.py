@@ -140,6 +140,11 @@ def c6(row, ref, regex) -> str:
 
 
 def child(task: str, rows_path: str, start: int) -> int:
+    # A runaway row raises MemoryError at 2 GB instead of growing (tools/memcap.py); the
+    # supervisor below records the row the child then dies or answers on.
+    sys.path.insert(0, str(HERE.parent))
+    import memcap
+    memcap.cap_this_process(2)
     import regex
     judge_mod = _load(HERE / "d11-brute-judge.py", "d11_brute_judge") if task == "c4up" else None
     ref = _load(HERE.parent / "probes" / "fuzzy-reference-matcher.py", "fuzzy_reference") if task == "c6" else None
