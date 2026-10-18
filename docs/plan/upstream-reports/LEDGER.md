@@ -5980,6 +5980,35 @@ it do.
 which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
 does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.
 
+### Addendum to 62, 2026-10-18: the reversed form (battery run 9, c1-2) - DRAFT - NOT FILED
+
+Battery run 20261018-9's bed-and-pairs judge found the same skip in a reversed pattern
+(`.scratch/battery/20261018-9/triage-bedpairs.md`, row c1-2; probes in the `triage-bedpairs`
+folder beside it). A reversed pattern matches its yes branch right to left, so the BRANCH the skip
+reaches first is the alternation at the branch's right end. `regex` 2026.9.10, measured
+2026-10-18, `compile(p).search(s)`:
+
+```
+search(r'(?r)(?(?!q)a(?:x|))', 'a')       -> None     here (0, 1)
+search(r'(?r)(?(?<!q)a(?:x|))', 'a')      -> None     here (0, 1)
+search(r'(?r)(?(?!q)a(?:x|)|b)', 'a')     -> None     here (0, 1)
+search(r'(?r)(?(?!q)a(?:xz|x))', 'ax')    -> None     here (0, 2)
+search(r'(?(?!q)a(?:x|))', 'a')           -> (0, 1)   the same   (the forward pattern)
+search(r'(?r)(?(?!q)(?:x|)a)', 'a')       -> (0, 1)   the same   (the alternation is met last)
+search(r'(?r)(?(?!q)a(?:x|y))', 'a')      -> None     the same   (no alternative can match)
+search(r'(?r)(?(?=q)q|a(?:x|))', 'a')     -> (0, 1)   the same   (a positive test)
+```
+
+The forward pattern matches (0, 1) over 'a', and a reversed search changes which match it finds
+first, never whether one exists, so None is wrong. PCRE2 and Perl have no reversed search to
+compare. The three controls behave as the forward entry predicts: the alternation the reversed yes
+branch meets last is out of the skip's reach, an alternation with no empty alternative gives the
+same answer either way, and a positive test never reads `true_node`. The battery's ablation
+reproduces the upstream answer with `RunWithTheUpstreamTrueBranchSkip` alone, so the cause is the
+same `:23206` test, and the proposed fix covers this form too. Pinned by the four reversed rows of
+`Gaps/Engine/BackrefAndConditionalTests.A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch`
+and the two reversed rows of its controls test.
+
 ## 63. A group call's captures stay on the group's capture list after it returns - DIVERGES HERE BY RULING (2026-09-30)
 
 **Status:** not filed, per the owner's rule. Known defect D51, owner ruling (a) of 2026-09-30
@@ -7123,6 +7152,53 @@ limit is the end of the slice; a limit inside the text means the tail was not fo
 **This port.** It answers None to every row. Pinned by
 `Gaps/Engine/LookaroundTests.A_partial_match_after_a_lookbehind_that_fails_on_the_held_text_is_no_match`,
 with a control that the same calls hold once the text before the start spells the body.
+
+### Addendum to 90, 2026-10-18: the mirror form, a lookahead in a reversed pattern (battery run 9, c8) - DRAFT - NOT FILED
+
+Battery run 20261018-9's bed-and-pairs judge found the mirror of this entry
+(`.scratch/battery/20261018-9/triage-bedpairs.md`, rows c8-2, c8-3 and c8-4; probes in the
+`triage-bedpairs` folder beside it). `regex` 2026.9.10, measured 2026-10-18,
+`compile(p).search(s, partial=True)`:
+
+```
+search(r'(?r)a(?=b?ab).', 'ba')         -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?ab).', 'bb')         -> P(0, 1)   here P(0, 0)
+search(r'(?r)(?=b?ab).', 'ba')          -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?abc).', 'bcx')       -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?acb).', 'bxy')       -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b??ab).', 'ba')        -> P(0, 0)   the same
+search(r'(?r)a(?=(?:b|)ab).', 'ba')     -> P(0, 0)   the same
+search(r'(?r)a(?=b?ab).', 'ca')         -> P(0, 0)   the same
+search(r'(?r)a(?=b?ab).', 'ba')         -> None      the same, without partial
+```
+
+**Why upstream is wrong.** A reversed pattern's text can grow only at its start
+(`partial_side` is LEFT, `_regex.c:18450`), and a lookahead reads only text after its position,
+which is all there. At every place in 'ba' the lookahead `b?ab` fails, so any match must lie wholly
+in text put in front, and end at 0 or before. Checked by search: over every text of up to four
+characters from 'abcx' put in front of each subject, no match ends after 0 (`regex` 2026.9.10,
+the slice held at the original end). A partial ending at 1 claims more than any completion gives,
+and upstream contradicts itself: the lazy `b??` and the alternation `(?:b|)`, which match exactly
+what `b?` matches, answer P(0, 0), this port's answer. Under the partial contract of 2026-10-08
+(`tests/FuzzyRegex.Tests/Gaps/Engine/PartialContractTests.cs`), P(0, 0) is the partial at the edge
+that a search may give while the text to come could still hold a match.
+
+**Mechanism.** The mirror of the one above. When the GREEDY_REPEAT_ONE backtrack gives back the 'b'
+it took, its forward arm for a STRING tail (`_regex.c:15999-16031`) looks for the tail with the
+reversed `string_search_rev`, using the repeat's own start as the limit. `simple_string_search_rev`
+treats reaching that limit as running off the start of the text and, because a reversed pattern's
+`partial_side` is LEFT, reports a partial (`:5724-5729`). So the witness needs the repeat to have
+taken a character and the text at its start to spell the end of the tail: 'b' for "ab" and "acb",
+"bc" for "abc". 'ca' (the repeat takes nothing), `b??` (the lazy arm) and `(?:b|)` (no
+one-character repeat) answer P(0, 0), as predicted. A three-character tail over 'ba' gives P(0, 0)
+too, because the arm first clamps the search to the slice and finds no room.
+
+**Proposed fix upstream:** the same as above, in the forward arms: take a partial from the tail
+search only when its limit is the start of the slice.
+
+**This port.** It answers P(0, 0) to every row. Pinned by
+`Gaps/Engine/LookaroundTests.A_reversed_partial_search_before_a_lookahead_that_fails_on_the_held_text_is_empty_at_the_start`,
+the five rows above and the lazy control.
 
 ## 91. Under ASCII, a literal alone in a non-capturing group is full-folded and stops matching itself - DIVERGES HERE (no defect row, 2026-10-17)
 

@@ -240,4 +240,40 @@ public sealed class LookaroundTests
             .Success.Should()
             .BeTrue(pattern);
     }
+
+    /// <summary>
+    /// The mirror of the test above. A reversed pattern's text can grow only at its start, and a
+    /// lookahead reads only the text after its position, which is all there. Where it fails on that
+    /// text, every match must lie wholly in text still to come, so the only partial a search can
+    /// give is the empty one at the start.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 90, addendum of 2026-10-18, found by battery run 20261018-9 (rows c8). Upstream
+    /// 2026.9.10 answers P(0, 1) to every row but the last, measured 2026-10-18, for example
+    /// <c>regex.compile(r'(?r)a(?=b?ab).').search('ba', partial=True)</c>. No text put in front of
+    /// these subjects gives a match that ends after 0. The cause is the forward backtrack of a
+    /// one-character repeat before a string tail (<c>b?</c>, then "ab"), whose reversed tail search
+    /// stops at the repeat's own start and reports reaching it as running out of text. With the
+    /// lazy <c>b??</c>, which takes the other arm, upstream answers P(0, 0) itself; that row is the
+    /// control.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments("(?r)a(?=b?ab).", "ba")]
+    [Arguments("(?r)a(?=b?ab).", "bb")]
+    [Arguments("(?r)(?=b?ab).", "ba")]
+    [Arguments("(?r)a(?=b?abc).", "bcx")]
+    [Arguments("(?r)a(?=b?acb).", "bxy")]
+    [Arguments("(?r)a(?=b??ab).", "ba")]
+    public void A_reversed_partial_search_before_a_lookahead_that_fails_on_the_held_text_is_empty_at_the_start(
+        string pattern,
+        string subject
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 0), pattern);
+    }
 }
