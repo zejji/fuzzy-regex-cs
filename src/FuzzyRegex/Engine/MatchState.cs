@@ -3003,7 +3003,8 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM (D90): every entry below this count on the backtracking stack was pushed before
     /// the last blocked end and is still there, so its failure, when it is popped, takes in what
-    /// follows that blocked construct. -1 when no blocked end has happened in the attempt.
+    /// follows that blocked construct (or a run-out: see the remarks). -1 when neither has happened
+    /// in the attempt.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -3016,6 +3017,14 @@ internal sealed class MatchState : IDisposable
     /// construct started and on what came before it, and a later instance of the construct read it
     /// and cut a path that matches: `a*(?=(?:ab|a)*b?y)aa` over 'aaba' answered P(3, 4), not P(0, 4).
     /// Such a record is not written (<see cref="PoppedEntrySawABlockedEnd"/>).
+    /// </para>
+    /// <para>
+    /// The same holds for the second pass's other outcomes that are not a failure: a run-out in a
+    /// body (<c>Matcher.RunOutInALookaroundBody</c>), a run-out that waits for the body's other
+    /// paths (<c>Matcher.RunOutCanWaitForTheBody</c>; round 2 of the review:
+    /// `a?(?>(?=a?b?y)a)` over 'ab' was P(2, 2), not P(0, 2), because `b?`'s tail guard recorded
+    /// the run-out at 2 as a failure), and the LOOKAROUND arm going on after a negative body or a
+    /// waiting run-out it could not decide. Each sets the mark like a blocked end.
     /// </para>
     /// <para>
     /// The mark is the lowest count the stack has had since the last blocked end, as far as the

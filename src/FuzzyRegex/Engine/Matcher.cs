@@ -6818,6 +6818,9 @@ internal static class Matcher
         state.AttemptTouchedTheTextToCome = true;
         PushTouchMark(state);
         state.NotePartialEvent(PartialEvent.RunOutInBody);
+
+        // NOT UPSTREAM (D90): a run-out is not a failure, so an entry pending now may not record one.
+        state.NoteABlockedEnd();
         return look.Node.LookaroundEnd;
     }
 
@@ -6885,6 +6888,11 @@ internal static class Matcher
         state.AttemptTouchedTheTextToCome = true;
         state.NoteRunOutTaken(answered: false);
         state.NotePartialEvent(PartialEvent.RunOutWaits);
+
+        // NOT UPSTREAM (D90, round 2): the body's other paths are tried next, and the entries pending
+        // now would record a failure for a path that ran out (`a?(?>(?=a?b?y)a)` over 'ab' lost
+        // `b?`'s run-out at 2 to its tail guard).
+        state.NoteABlockedEnd();
         return true;
     }
 
@@ -21062,6 +21070,7 @@ internal static class Matcher
             {
                 PushTouchMark(state);
                 state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                state.NoteABlockedEnd(); // D90: matching goes on after an undecided construct.
                 CountFork(state);
             }
 
@@ -21078,6 +21087,7 @@ internal static class Matcher
             PushTouchMark(state);
             state.NotePartialEvent(PartialEvent.RunOutInBody);
             CountFork(state);
+            state.NoteABlockedEnd(); // D90: matching goes on after an undecided construct.
             node = lookNode.Next2.Node!;
             return _armAdvance;
         }

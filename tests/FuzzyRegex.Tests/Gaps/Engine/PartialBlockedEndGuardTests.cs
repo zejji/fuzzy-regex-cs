@@ -50,6 +50,32 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial: true).Should().Be(expected);
     }
 
+    // Round 2 (blind review): a lookahead inside an atomic group or a possessive repeat lets a run-out
+    // in its body wait for the body's other paths (Matcher.RunOutCanWaitForTheBody), and backtracking
+    // through them wrote a tail guard for a tail that had run out, not failed: `b?`'s at 2 here, so
+    // the attempt from 0 lost the run-out. 'aby' matches (0, 1), so P(0, 2). Main and round 1 answer
+    // the row as in the comment.
+    [Test]
+    [Arguments(@"a?(?>(?=a?b?y)a)", "ab", "search", "(0,2)p")] // (2,2)p
+    [Arguments(@"a?(?>(?=a?b?y)a)", "ab", "match", "(0,2)p")] // None
+    [Arguments(@"a?(?>(?=a?b?y)a)", "ab", "finditer", "(0,2)p")] // (2,2)p
+    [Arguments(@"a?(?>(?=a?b?y)a)", "ab", "overlapped", "(0,2)p")] // (2,2)p
+    [Arguments(@"a*(?>(?=a*b?y)a)a", "aab", "search", "(0,3)p")] // (3,3)p
+    [Arguments(@"a?(?>(?=a?b?y))a", "ab", "search", "(0,2)p")] // (2,2)p
+    [Arguments(@"a?(?>(?>(?=a?b?y))a)", "ab", "match", "(0,2)p")] // None
+    [Arguments(@"a?(?>(?=a?b?y)a)++", "ab", "search", "(0,2)p")] // (2,2)p
+    [Arguments(@"a?(?:(?=a?b?y)a)++", "ab", "match", "(0,2)p")] // None
+    [Arguments(@"(?:a|(?>(?=a*+b?y)a)ab)*a", "aab", "fullmatch", "(0,3)p")] // None
+    public void A_run_out_that_waits_for_the_body_leaves_no_failure_record(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        Run(pattern, subject, operation, partial: true).Should().Be(expected);
+    }
+
     // Controls, green before the fix: the same patterns without partial, and partial calls where
     // the body never runs out or the record is sound.
     [Test]
@@ -62,6 +88,10 @@ public sealed class PartialBlockedEndGuardTests
     [Arguments(@"(?=(a))a\1", "a", "search", true, "(0,1)p g1=(0,1)")]
     [Arguments(@"(?:(?=(?:a|aa)*y)a)*z", "aaaa", "match", true, "(0,4)p")]
     [Arguments(@"(?>(?:a|aa)*y?)(?<!a)", "aaaa", "match", true, "(0,4)p")]
+    [Arguments(@"a?(?>(?!a?b?y)|a)", "ab", "search", true, "(0,1)")]
+    [Arguments(@"a?(?=(?>a?b?y))a", "ab", "search", true, "(0,2)p")]
+    [Arguments(@"a?(?>(?(?=a?b?y)a|c))", "ab", "search", true, "(0,2)p")]
+    [Arguments(@"a?(?>a(?<=^a?b?y))", "ab", "search", true, "(2,2)p")]
     public void Calls_the_fault_cannot_reach_answer_as_before(
         string pattern,
         string subject,
@@ -81,6 +111,7 @@ public sealed class PartialBlockedEndGuardTests
             "match" => regex.MatchAtStart(subject, partial: partial),
             "fullmatch" => regex.FullMatch(subject, partial: partial),
             "finditer" => regex.Matches(subject, partial: partial)[0],
+            "overlapped" => regex.Matches(subject, overlapped: true, partial: partial)[0],
             _ => regex.Match(subject, partial: partial),
         };
 
