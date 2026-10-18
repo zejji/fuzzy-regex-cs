@@ -18,7 +18,11 @@ port's answer) and did **not** fix the `(?<=(?&a))c` row S30 pinned.
 
 **S44 made 2026.9.10 the PIN on 2026-09-13**, so "the newest release" and "the version the oracle
 records against" are now the same thing, and that re-verification is no longer a separate act - the
-oracle itself performs it on every wave. Two consequences for this file:
+oracle itself performs it on every wave. **S81a moved the pin to 2026.9.19 on 2026-10-18**
+(`85e568c`, issue 619: a crash in `expand()` and `str()` of a capture after `detach_string()`, which
+the port cannot have). The oracle still records against PyPI's 2026.9.10, because 2026.9.19 records
+seeds 7, 4242 and 20260927 byte-identically and is not on PyPI; the entries below therefore stand as
+verified against 2026.9.10. Two consequences for this file:
 
 - **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
   here, so there is nothing outstanding on either side. It stays in the file as history.
