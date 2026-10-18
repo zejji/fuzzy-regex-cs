@@ -353,22 +353,4 @@ public sealed class PartialUnknownCaptureTests
 
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, partial, 0, text.Length));
     }
-
-    /// <summary>
-    /// D98's limit, pinned as it stands: where the body's outcome feeds a decision (a negative
-    /// lookahead, a condition's test, a lookahead inside an atomic group) a run-out inside a call
-    /// the body opened still answers the partial at once, a phantom: the written-out forms and the
-    /// judge answer None. D101 in KNOWN-DEFECTS; its red test is in <c>OpenDefectTests</c>.
-    /// </summary>
-    // Upstream answers the same partial.
-    [Test]
-    [Arguments(@"(x)(?!y?(?1))\Z", "xy")]
-    [Arguments(@"(x)(?(?=y?(?1))a|b)", "xy")]
-    [Arguments(@"(x)(?>(?=(?1)))\Z", "x")]
-    public void A_run_out_inside_a_call_a_deciding_body_opened_still_answers_at_once(string pattern, string text)
-    {
-        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
-
-        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, text.Length));
-    }
 }
