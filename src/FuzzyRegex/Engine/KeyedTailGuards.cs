@@ -128,10 +128,7 @@ internal sealed class KeyedTailGuards
         foreach (KeyValuePair<TailKeyValues, GuardList> pair in _lists)
         {
             long[] key = pair.Key.Values;
-            Debug.Assert(
-                _lists.Count == 1 || keyLength == 0 || key.Length == keyLength,
-                "a store's keys share one length"
-            );
+            Debug.Assert(keyLength == 0 || key.Length == keyLength, "a store's keys share one length");
             keyLength = key.Length;
             pair.Value.PushTo(stack);
             stack.PushBlock(MemoryMarshal.AsBytes(key.AsSpan()));
