@@ -198,9 +198,14 @@ public sealed class PartialContractTests
     /// fix, re-opening the calls a body opened (D98's option B), is a 1.1 candidate. Evidence: D98's
     /// grid (124 of 2,640 rows, <c>.scratch/s1016/d98/grid-vs-written.txt</c>) and the fuzzy grid
     /// (421 phantoms and 188 earlier starts of 3,240 rows, no miss,
-    /// <c>.scratch/s1016/refuse-partial/fz/diff.txt</c>).
+    /// <c>.scratch/s1016/refuse-partial/fz/diff.txt</c>). In a fuzzy pattern that has any group
+    /// call, a run-out inside any lookaround answers at once whether or not the body opened a call
+    /// (<c>Matcher.ACallOpenedInTheBodyIsOpenOrUnmodelled</c> holds for every fuzzy pattern): the
+    /// last row's body opens none, no text completes it, and without the call it answers None
+    /// (battery run 9, matrix k43; upstream 2026.9.10 answers P(0, 1) in both forms).
     /// </remarks>
     [Test]
+    [Arguments("match", @"(?!(?:a*a){s<=1})(?P<g1>)(?1)", "a", 0, 1)]
     [Arguments("match", @"(x)(?!y?(?1))\Z", "xy", 0, 2)]
     [Arguments("match", @"(x)(?(?=y?(?1))a|b)", "xy", 0, 2)]
     [Arguments("match", @"(x)(?>(?=(?1)))\Z", "x", 0, 1)]
