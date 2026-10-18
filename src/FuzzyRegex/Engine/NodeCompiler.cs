@@ -1680,6 +1680,7 @@ internal static class NodeCompiler
                     4
                 );
                 RecordRepeat(args.Pattern, index, args.RepeatDepth);
+                args.Pattern.RepeatInfoAt(index).InsideACutBody = args.WithinDiscardingConstruct;
 
                 // NOT UPSTREAM: the repeat's own half of the failure memo's conditions; the
                 // pattern's half is Optimiser.KeepFailureMemosSound. With no maximum and a minimum

@@ -1020,5 +1020,8 @@ public sealed class ThreadSafetyTests
             // reads it. Only OracleComparer.RunWithTheUpstreamRepeatGuards does, on a pattern it
             // compiled for that one call.
             "RepeatInfo.BodyGuardDroppedForD85",
+            // D90: set by NodeCompiler.BuildRepeat inside Compile, read by
+            // MatchState.PoppedEntrySawABlockedEnd; matching never writes it.
+            "RepeatInfo.InsideACutBody",
         };
 }
