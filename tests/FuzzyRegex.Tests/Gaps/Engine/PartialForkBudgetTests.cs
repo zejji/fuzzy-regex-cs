@@ -64,6 +64,27 @@ public sealed class PartialForkBudgetTests
     }
 
     /// <summary>
+    /// Row S4 itself: in the second pass every start's lookahead reads the text to come, so every
+    /// start but the edge fails on 'c' and the leftmost completable start is the edge itself
+    /// ('...c' + 'bz' matches at 1001). The design's memo and per-attempt budget keep this search at
+    /// the first pass's order (section 9).
+    /// </summary>
+    /// <remarks>
+    /// Moved from <c>OpenDefectTests</c> on 2026-10-18: red before D11 (F54, merge 65265cfd,
+    /// 2026-10-04), green from it on (measured 2026-10-18).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, as design section 1 does: upstream 2026.9.10 answers P(0, 1001), from
+    // the first start's run-out.
+    [Test]
+    public void A_search_whose_lookahead_reads_the_text_to_come_from_every_start_reports_the_edge()
+    {
+        Match m = new FuzzyRegex(@"a*(?=.*z)b").Match(new string('a', 1000) + "c", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1001, 1001));
+    }
+
+    /// <summary>
     /// A budget partial reports no capture even with a group call open, as the written-out pattern
     /// does (<c>(x)(?:(a)|a){12}(?!\b)(*FAIL)\2</c> answers the same span with every group unset).
     /// The budget stands for no path, so D62's rule, which reports what every completion of the

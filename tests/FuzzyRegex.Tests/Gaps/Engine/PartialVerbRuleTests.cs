@@ -36,6 +36,12 @@ public sealed class PartialVerbRuleTests
     [Arguments("search", @"a$(*SKIP)(?<=b)|a.")]
     [Arguments("match", @"(?:(?>a$(*PRUNE)(?<=b))|a.)")]
     [Arguments("search", @"(?>a$(*SKIP)(?<=b))|a.")]
+    // V1-V3 themselves, moved from OpenDefectTests on 2026-10-18: since build chunk 9 deleted S57d
+    // their `\b` read is a witness too. V3 was red before D11 (F54, merge 65265cfd, 2026-10-04),
+    // and V1 and V2 passed through S57d and have held through its deletion (measured 2026-10-18).
+    [Arguments("match", @"(?:a\b(*PRUNE)(?<=b)|a.)")]
+    [Arguments("match", @"(?:a\b(*SKIP)(?<=b)|a.)")]
+    [Arguments("search", @"a\b(*SKIP)(?<=b)|a.")]
     public void A_verb_after_a_read_of_the_text_to_come_does_nothing(string operation, string pattern)
     {
         Match m = Run(operation, pattern, "a");
@@ -66,13 +72,18 @@ public sealed class PartialVerbRuleTests
     /// build chunk 9, so there the Debug counts are the witness, and the twin is the one a Release
     /// build checks.
     /// </summary>
-    // Upstream answers None to the twin too.
+    /// <remarks>
+    /// V4's own answer, moved from <c>OpenDefectTests</c> on 2026-10-18: red before D11 (F54, merge
+    /// 65265cfd, 2026-10-04), green from it on (measured 2026-10-18).
+    /// </remarks>
+    // Upstream answers None to V4 and the twin.
     [Test]
     [Category(EngineWork.Category)]
     public void A_verb_before_the_read_prunes()
     {
         using MatchState state = RunPartial(@"(?:a(*PRUNE)\b(?<=b)|a.)", "a");
 
+        new FuzzyRegex(@"(?:a(*PRUNE)\b(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
         new FuzzyRegex(@"(?:a(*PRUNE)$(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(0);
@@ -138,13 +149,19 @@ public sealed class PartialVerbRuleTests
     /// <c>|a\B</c>, which the continuations where the group committed need.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to both.
+    // T1's own answer, moved from OpenDefectTests on 2026-10-18: it passed through S57d before D11
+    // and has held through its deletion by D11 (F54, merge 65265cfd, 2026-10-04; measured
+    // 2026-10-18).
     [Test]
     [Category(EngineWork.Category)]
     public void A_verb_reached_back_through_a_skipped_cut_does_nothing()
     {
-        using MatchState state = RunPartial(@"(?:(?>a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)", "a");
+        const string pattern = @"(?:(?>a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)";
+        using MatchState state = RunPartial(pattern, "a");
+        Match m = new FuzzyRegex(pattern).MatchAtStart("a", partial: true);
         Match twin = new FuzzyRegex(@"(?:(?>a$|)(?<!a)a(*PRUNE)(?<=b)|a\n)").MatchAtStart("a", partial: true);
 
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
         (twin.PartialMatch, twin.Index, twin.Length).Should().Be((true, 0, 1));
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(1);
