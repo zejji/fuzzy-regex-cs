@@ -191,7 +191,7 @@ public enum FuzzyRegexOptions
     /// sits where <c>\w+</c> has to stop.
     /// <para>
     /// <b>The WORD flag's word boundary is Unicode's default one.</b> It agrees with all 1,944
-    /// lines of Unicode 17.0.0's <c>WordBreakTest.txt</c>; upstream disagrees with 268. See
+    /// lines of Unicode 18.0.0's <c>WordBreakTest.txt</c>; upstream disagrees with 268. See
     /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#the-word-flags-word-boundary-is-unicodes-default-one">the comparison page</see>.
     /// </para>
     /// </remarks>

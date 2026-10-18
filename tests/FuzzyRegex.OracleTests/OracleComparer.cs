@@ -1108,8 +1108,8 @@ internal static class OracleComparer
     /// UAX #29's.
     /// </summary>
     /// <remarks>
-    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 revision 47, which passes all of
-    /// Unicode 17.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
+    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 (revision 47, now 49), which passes all of
+    /// Unicode 18.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
     /// <c>PatternObject.UpstreamDefaultBoundary</c> sends <c>Matcher.AtDefaultBoundary</c> to
     /// <c>AtUpstreamDefaultBoundary</c>, upstream's function as it stands, at every site that reads
     /// it. The <c>default-word-boundary-follows-uax29</c> entry keys on this.

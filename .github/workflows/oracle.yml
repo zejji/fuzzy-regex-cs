@@ -96,12 +96,12 @@ jobs:
         run: python tools/transliterate-unicode.py --check
 
       - name: The character-name table must be current
-        # Downloads the Unicode 17.0.0 UCD and re-verifies every name against this runner's own
+        # Downloads the Unicode 18.0.0 UCD and re-verifies every name against this runner's own
         # unicodedata - an implementation independent of those files - before diffing the table.
         run: python tools/build-character-names.py --check
 
       - name: The lowercase table must be current
-        # Downloads the Unicode 17.0.0 UCD and re-verifies the mapping against this runner's own
+        # Downloads the Unicode 18.0.0 UCD and re-verifies the mapping against this runner's own
         # str.lower() - an implementation independent of those files - before diffing the table.
         run: python tools/build-lowercase.py --check
 

@@ -16,7 +16,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// tested where the cluster starts matching and never where it ends. The match then stops after
 /// one codepoint: <c>regex.findall(r'(?r)\X', 'e\u0301a')</c> is <c>['a', '\u0301']</c> and the
 /// 'e' is lost. Upstream fails 465 of the 766 lines of <c>GraphemeBreakTest.txt</c> 17.0.0 in
-/// reverse and none forwards (regex 2026.9.10, measured 2026-09-26). This port inherited the fault
+/// reverse and none forwards (regex 2026.9.10, measured 2026-09-26), and 516 of 18.0.0's 853 in
+/// reverse (regex 2026.9.29, 2026-10-18; forwards it fails the 10 in
+/// <see cref="IndicConjunctGraphemeTests"/>). This port inherited the fault
 /// and fixed it the same day, ledger entry 43.
 /// </para>
 /// <para>

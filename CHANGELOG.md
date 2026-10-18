@@ -97,7 +97,12 @@ module needs to know where this port deliberately behaves differently.
 - **Tracks mrab-regex 2026.9.19** (commit `85e568c`), up from 2026.9.10. Its one change, issue 619,
   stops `expand()` crashing after `detach_string()`; this port has no `detach_string` and holds its
   subject for the life of the match, so there was nothing to port, and a test now pins that.
-  2026.9.29 (Unicode 18.0.0) follows after 1.0.
+- **Tracks mrab-regex 2026.9.29** (commit `0e8cb05`): the Unicode data is 18.0.0, up from
+  17.0.0. New scripts (Jurchen, Seal), blocks, joining groups, case pairs and character names
+  work in patterns, and so does U+1DF95, the first character outside the BMP whose case folding
+  lands inside it (`(?i)ß` finds it). `\X` follows Unicode 18.0.0's simplified Indic conjunct
+  rule, which upstream's `\X` does not yet (see COMPARISON). Upstream's other change in that
+  release, C type names, has nothing to port.
 
 ### Fixed
 

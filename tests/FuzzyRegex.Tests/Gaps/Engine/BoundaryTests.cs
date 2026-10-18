@@ -85,7 +85,7 @@ public sealed class BoundaryTests
         // by simple-lowercasing, so U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE counted as one and
         // U+0131 LATIN SMALL LETTER DOTLESS I did not: finditer(r"(?w)\b", "'İ") starts at 0 and 2,
         // and for "'ı" at 0, 1 and 2 (regex 2026.7.19, 2026-08-31). UAX #29 has no such default
-        // rule, and WordBreakTest.txt 17.0.0 line 1001 breaks "'A" after the apostrophe, so both
+        // rule, and WordBreakTest.txt 18.0.0 line 1001 breaks "'A" after the apostrophe, so both
         // subjects break there now. See DefaultWordBoundaryTests.
         var pattern = new FuzzyRegex(@"(?w)\b");
 

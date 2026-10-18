@@ -1452,8 +1452,8 @@ internal static class Matcher
     /// <remarks>
     /// <para>
     /// DIVERGES FROM UPSTREAM, deliberately (2026-09-26, ledger entry 40): this follows UAX #29
-    /// revision 47, the Unicode 17.0.0 version the tables are, and passes all 1,944 lines of its
-    /// <c>WordBreakTest.txt</c>, where upstream fails 268. Upstream's README promises "a default
+    /// revision 49, the Unicode 18.0.0 version the tables are, and passes all 1,944 lines of its
+    /// <c>WordBreakTest.txt</c>, where upstream fails 268 (revision 47 and 17.0.0 gave the same counts). Upstream's README promises "a default
     /// Unicode word boundary" (<c>upstream/README.rst:1011</c>). Three differences:
     /// </para>
     /// <list type="bullet">
@@ -2655,7 +2655,7 @@ internal static class Matcher
     /// NOT UPSTREAM'S, D11 M1 (build chunk 10): one character for each combination of
     /// Word_Break value, Extended_Pictographic and Unicode <c>\w</c> that a character can have, the
     /// three things the default word rules read about a character beside a position. Unicode
-    /// 17.0.0, the tables' version, has 27 combinations;
+    /// 18.0.0, the tables' version, has 27 combinations;
     /// <c>PartialWindowReadTests.Every_character_class_the_default_word_rules_read_has_a_representative</c>
     /// scans every code point and fails when the tables change the set. The classes that most
     /// often split a test come first (a line break, an extending mark, a letter, a space, a digit),

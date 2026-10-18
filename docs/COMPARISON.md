@@ -930,12 +930,12 @@ Match m = FuzzyRegex.Match("A", "(?ai)\\p{Ll}");
 Console.WriteLine(m.Success);   // True - upstream's regex.search(r'(?ai)\p{Ll}', 'A') is None
 ```
 
-### The Unicode data is version 17.0.0
+### The Unicode data is version 18.0.0
 
-`\N{...}` and other Unicode-table lookups resolve against Unicode 17.0.0 here, where upstream
-resolves through whatever `unicodedata` version the host CPython build ships (16.0.0 at the time
-this was measured). A small number of codepoints named in 17.0.0 but not 16.0.0 resolve here and
-raise upstream.
+`\N{...}` and other Unicode-table lookups resolve against Unicode 18.0.0 here, the version of
+upstream's own tables, where upstream resolves `\N{...}` through whatever `unicodedata` version the
+host CPython build ships (16.0.0 at the time this was measured). The codepoints named in 17.0.0 or
+18.0.0 but not 16.0.0 resolve here and raise upstream.
 
 `tests/FuzzyRegex.Tests/Gaps/Unicode/UnicodeCharacterNameTests.cs`'s `Every_stored_name_resolves_to_its_own_codepoint`
 pins one such name: `"TOLONG SIKI DIGIT ONE"` resolves to U+11DE1, a codepoint Unicode 17.0.0 added.
@@ -1569,7 +1569,7 @@ no option to restore the upstream answer; deleting the constraint from the patte
 
 `(?w)` switches `\b`, `\B`, `\m` and `\M` to Unicode's default word boundaries, the rules of
 [UAX #29](https://www.unicode.org/reports/tr29/). Unicode publishes a conformance file for them,
-`WordBreakTest.txt`, and this port agrees with every one of its 1,944 lines for Unicode 17.0.0, the
+`WordBreakTest.txt`, and this port agrees with every one of its 1,944 lines for Unicode 18.0.0, the
 version of its tables. Upstream disagrees with 268, for three reasons.
 
 Combining marks and format characters, such as U+0308 COMBINING DIAERESIS or U+2060 WORD JOINER,
@@ -1598,7 +1598,7 @@ nothing changes there.
 [UAX #29](https://www.unicode.org/reports/tr29/): 'e' followed by U+0301 COMBINING ACUTE ACCENT is
 one cluster, and so is CR LF. Where a cluster starts and ends is a property of the text, so a
 reversed search, `(?r)`, should find the same clusters in the opposite order. Here it does, on every
-line of Unicode's conformance file for Unicode 17.0.0. Upstream's reversed `\X` stops after one
+line of Unicode's conformance file for Unicode 18.0.0. Upstream's reversed `\X` stops after one
 codepoint, so it splits the accent from its letter and loses the letter, and a lookbehind that
 holds `\X`, which also reads backwards, sees only part of a cluster.
 
@@ -1611,7 +1611,26 @@ Console.WriteLine(string.Join(" ", backwards.Matches("e\u0301a").Select(static m
 Console.WriteLine(new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index);                              // 2 - upstream: no match
 ```
 
-Forward matching is unchanged: upstream's forward `\X` already agrees with the whole file.
+Forwards, upstream's `\X` agrees with the whole file except for the Indic conjunct rule in the next
+section.
+
+### `\X` keeps a conjunct linker with the next consonant, as Unicode 18.0.0's GB9c says
+
+In Devanagari and many other Indic scripts a virama joins two consonants into one written conjunct,
+so the virama and the consonant after it belong to one grapheme cluster. Unicode 18.0.0 simplified
+the rule that says so: a virama, or another character Unicode marks as a conjunct linker, keeps the
+next consonant in its cluster whatever comes before the linker. Unicode 17.0.0 also required a
+consonant before it. Upstream moved its tables to 18.0.0 but kept the older rule, so its `\X`
+follows neither version and disagrees with 10 lines of the 18.0.0 conformance file. This port
+follows 18.0.0 and agrees with every line, in both directions.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'a', DEVANAGARI SIGN VIRAMA, DEVANAGARI LETTER TA: the virama keeps TA in its cluster.
+var cluster = new FuzzyRegex(@"\X");
+Console.WriteLine(string.Join(" ", cluster.Matches("a्त").Select(static m => m.Length)));  // 3 - upstream: 2 1
+```
 
 ### A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start
 

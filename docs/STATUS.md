@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 46 | 46 | 0 | 0 |
-| Docs | 65 | 65 | 0 | 0 |
+| Docs | 66 | 66 | 0 | 0 |
 | EngineWorkTests | 2 | 2 | 0 | 0 |
 | Gaps | 7480 | 7480 | 0 | 0 |
 

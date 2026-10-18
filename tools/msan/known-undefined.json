@@ -1,6 +1,6 @@
 {
   "comment": "Upstream reads of uninitialised memory that a ledger entry accounts for. Read by tools/screen-undefined.py; each entry's reproductions are re-screened by --reverify whenever the upstream submodule moves, and verifiedAtUpstreamCommit records the last commit they reproduced on.",
-  "verifiedAtUpstreamCommit": "85e568c0e0be620b4ebe50c98ea92415f5995ffc",
+  "verifiedAtUpstreamCommit": "0e8cb0596ba6572c66e5d153a1d7c901b381e15e",
   "defects": [
     {
       "origin": "new_position in basic_match",
@@ -26,9 +26,9 @@
       ]
     },
     {
-      "origin": "data_r2368 in basic_match",
+      "origin": "data_r2261 in basic_match",
       "ledger": "ledger 5",
-      "summary": "A second MSan origin on ledger 5's path, not a second defect. The bytes come from the LAZY_REPEAT frame data_r (_regex.c:13567, pushed :13583, popped :15792, read at :15806), and they are read only after ledger 5's uninitialised new_position (:11820) has moved the match to a garbage position: on the reproduction, a build with new_position initialised to state->text_pos gives no MSan report at all, this origin included, and answers the port's single match (screened 2026-10-13). 'data_r2368' is clang's name for the local and may change with the compiler.",
+      "summary": "A second MSan origin on ledger 5's path, not a second defect. The bytes come from the LAZY_REPEAT frame data_r (_regex.c:13567, pushed :13583, popped :15792, read at :15806), and they are read only after ledger 5's uninitialised new_position (:11820) has moved the match to a garbage position: on the reproduction, a build with new_position initialised to state->text_pos gives no MSan report at all, this origin included, and answers the port's single match (screened 2026-10-13, and again 2026-10-18 on upstream 0e8cb05). 'data_r2261' is clang's name for the local and changes with the compiler and the source: it was 'data_r2368' until 2026.9.29's stdbool/stdint renames, which moved no line cited here.",
       "reproductions": [
         {
           "generator": "verbs",
