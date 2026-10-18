@@ -6830,7 +6830,7 @@ internal static class Matcher
         if (
             look.Node.Match
             || look.Node.Op != Opcode.Lookaround
-            || offset != 0
+            || !OnlyTheAttemptsMarkIsBelow(state, offset)
             || pattern.HasBacktrackingVerb
             || pattern.HasGroupCalls
         )
@@ -6840,6 +6840,23 @@ internal static class Matcher
 
         return look.Node.LookaroundEnd;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): whether the pruning stack holds nothing below the mark at
+    /// <paramref name="offset"/> but the attempt's own FAILURE mark, which every attempt pushes
+    /// first; so no atomic group, possessive repeat, lookaround or test is open around that frame.
+    /// Reads at most one mark.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="offset">The frame's mark's offset on the pruning stack.</param>
+    /// <returns><see langword="true"/> if nothing cuts around the frame.</returns>
+    private static bool OnlyTheAttemptsMarkIsBelow(MatchState state, int offset) =>
+        offset == 0
+        || (
+            offset == sizeof(long)
+            && ReadPruningMark(state, (int)state.Pstack.SizeAt(0), out Opcode below, out _)
+            && below == Opcode.Failure
+        );
 
     /// <summary>
     /// NOT UPSTREAM'S, D11 (second pre-merge review, R3): a run-out in a positive lookaround's body
