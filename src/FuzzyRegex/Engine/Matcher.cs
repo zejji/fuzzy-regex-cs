@@ -23092,7 +23092,8 @@ internal static class Matcher
     /// </para>
     /// <para>
     /// The caller runs this once per pass, so under partial matching the full pass decides first
-    /// and a full c beats a later partial u, which is upstream's own preference. A pattern with no
+    /// and a full c beats a later partial u, which is upstream's own preference. In the partial pass
+    /// a live c beats a later partial u too (D100, <see cref="TheAttemptWins"/>). A pattern with no
     /// construct that depends on position, or no section that permits an insertion
     /// (<see cref="PatternObject.LiftsAnchorBan"/>), keeps the plain ban and pays one field test.
     /// </para>
@@ -23126,7 +23127,10 @@ internal static class Matcher
         state.SliceEnd = sliceEnd;
         int attempt = DoMatch2(state, search: false);
 
-        if (attempt is MatchStatus.Success or MatchStatus.Partial && TheAttemptWins(state, upstream))
+        if (
+            attempt is MatchStatus.Success or MatchStatus.Partial
+            && TheAttemptWins(state, upstream, banned == MatchStatus.Partial)
+        )
         {
             return attempt;
         }
@@ -23146,24 +23150,36 @@ internal static class Matcher
 
     /// <summary>
     /// Rule H''s test, with the attempt at the anchor in <paramref name="state"/>: the banned match
-    /// is absent or starts at or after the attempt's end.
+    /// is absent, partial, or starts at or after the attempt's end.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// "Starts" is where the banned match's attempt began. A <c>\K</c> moves only the start it
     /// reports, and must not decide which attempt wins (D96): <c>(?:a){i&lt;=1}\K</c> over 'ba' is
     /// (2, 2) exact, as <c>(?:a){i&lt;=1}</c> is (1, 2) exact.
+    /// </para>
+    /// <para>
+    /// A partial banned match never keeps the ban (D100). Only the partial pass sees one, and there
+    /// the attempt is partial too, so its end is the edge, not the end of any completed match. Some
+    /// continuation completes the attempt, so taking it never reports a later start than the
+    /// port's full search over every continuation: <c>(?:ab){1&lt;=i&lt;=2}</c> over 'ba' is
+    /// P(0, 2), as 'bab' is (0, 3). It may report an earlier one, where every continuation that
+    /// completes the attempt also completes a match inside it: <c>(?:ab){1&lt;=i&lt;=2}</c> over
+    /// 'xxa' is P(0, 3), although the full search over 'xxab' is (1, 4).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state, holding the attempt at the anchor.</param>
     /// <param name="upstream">The banned search's match, or <see langword="null"/> if it found none.</param>
+    /// <param name="upstreamIsPartial">Whether the banned search's match is partial.</param>
     /// <returns><see langword="true"/> if the attempt is the answer.</returns>
-    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream)
+    private static bool TheAttemptWins(MatchState state, AnchorBanSnapshot? upstream, bool upstreamIsPartial)
     {
-        // SHORTCUT (D100): when both are partial, the attempt's end is the edge, not the end of a
-        // completed match, so this test can pick a start the partial contract does not. The right
-        // answer needs one continuation that completes the attempt and leaves no match inside it,
-        // which no rule over the two partials settles (DECISIONS 2026-10-17). Upgrade path: reason
-        // over the continuations jointly, or refuse the combination.
-        if (upstream is null)
+        // SHORTCUT (D100): the exact partial needs one continuation that completes the attempt and
+        // leaves no match inside it, which no rule over the two partials settles (DECISIONS
+        // 2026-10-17), so a partial keeps the earlier start, never the later one. The ceiling: in
+        // the class this gate lets in, a partial may start before every completion's match.
+        // Upgrade path: reason over the continuations jointly.
+        if (upstream is null || upstreamIsPartial)
         {
             return true;
         }
