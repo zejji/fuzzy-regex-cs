@@ -9,9 +9,19 @@ in `docs/plan/slices/done/` and in the generated `docs/STATUS.md`; repeating it 
 it somewhere to rot. An entry is written when a phase closes, which is already a human checkpoint,
 and the release entry is written in phase 8. A **Divergences from mrab-regex** section is owed at
 1.0, sourced from the intentional-divergence allowlist: anyone arriving from the Python `regex`
-module needs to know where this port deliberately behaves differently.
+module needs to know where this port deliberately behaves differently. From 1.0 on, entries are
+per release.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-10-19
+
+The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking
+upstream 2026.9.10: every construct upstream's parser accepts, fuzzy matching with per-kind error
+budgets and weighted costs, and an API shaped after `System.Text.RegularExpressions.Regex`. All
+1,967 ported upstream tests pass with none skipped. The phases below record how it was built; the
+GitHub release notes for v1.0.0 list every deliberate difference from upstream, the upstream bugs
+this port does not share, the performance gate and the known limitations.
 
 ### Added
 
@@ -69,11 +79,33 @@ module needs to know where this port deliberately behaves differently.
   nothing upstream exposes is missing here. Upstream's own test suite runs with **nothing skipped**,
   and the differential oracle is green at three seeds over 126,080 rows a seed.
 
-  Phase 6 is not finished. Three inherited bugs are identified, reproduced and scheduled rather than
-  fixed - a word-start anchor before a fuzzy section, a partial `fullmatch` that denies a prefix
-  whose completion exists, and a repeated capture group whose backtracking cost grows with the
-  repetitions. They are `docs/plan/upstream-reports/LEDGER.md` entries 18 to 21, and the owner's
-  standing rule is that no known bug ships, so none of them will reach 1.0 unfixed.
+  Phase 6 closed with the three inherited bugs it had scheduled all fixed: a word-start anchor
+  before a fuzzy section (`docs/plan/upstream-reports/LEDGER.md` entries 19 and 20), a partial
+  `fullmatch` that denied a prefix whose completion exists (entry 21), and a repeated capture group
+  whose backtracking cost grew with the repetitions (entry 18).
+- Phase 7: **benchmarks and optimisation.** A BenchmarkDotNet suite of workloads, each measured
+  against Python `regex` with pyperf on the same machine, with a measured noise floor. A cache of
+  the fifteen most recently used patterns for the static methods (`FuzzyRegex.CacheSize`).
+  Upstream's search prefilters (the required-string locator and the `search_start` family), ported
+  so that none of them changes an answer. Less allocation per match, a lazy `Matches`, and the
+  matcher's hot method split so the JIT can optimise it again (rarely used arms moved out: every
+  timing harness row 0.74-0.93x of its earlier time). The 1.0 gate on 2026-10-18: of 40 workloads
+  paired with Python, 38 are at or below Python's time and 2 are 1.09x, inside the tolerance of
+  10% of workloads and 1.25x
+  (`bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-10-18-S63-gate.md`).
+- Phase 8: **documentation, packaging and the demo.** `docs/GUIDE.md` for a reader who knows
+  `System.Text.RegularExpressions` and has never used Python `regex`; `docs/COMPARISON.md`, the
+  complete member-by-member mapping; package validation and a rehearsed release
+  (`docs/plan/RELEASE.md`); and a browser demo that runs the engine in a Web Worker.
+- **The correctness sweep before 1.0.** After Phase 6 a complete interaction matrix and then a
+  battery of searches (fresh oracle seeds, a bed of real and generated patterns, and generators for
+  each pair of features such as fuzzy matching with backreferences, or partial matching with
+  lookarounds) found further root causes, most of them inherited from upstream in rare
+  combinations. Each was fixed test first or settled by a recorded decision; `docs/KNOWN-DEFECTS.md`
+  lists them. The stopping rule was two consecutive battery runs with no new root cause, met by
+  runs 7 and 8 on 2026-10-18. The largest change was to partial matching, which now works to a
+  written contract: a partial promises that more text may complete the match, and where some text
+  does, a partial call never answers "no match".
 
 ### Changed
 
@@ -166,9 +198,32 @@ Each is fixed here even though upstream still has it, and each is recorded in
 - **A self-recursive call around a fuzzy section that can match empty exhausted memory.** A progress
   guard is not enough: progress bounds the depth and not the branching.
 - **Branch reset gave two groups in the same branch the same number**, for the shape upstream's own
-  issue reports. Two other orderings still do, and are the one item on this list left open, because
-  fixing them means choosing between two options upstream has left unchosen.
+  issue reports. Two other orderings did too, until the choice between the two options upstream
+  has left unchosen was made: in a branch reset, a group never takes a number another group in the
+  same branch will use.
 - **A reversed partial match reported running out of text at the slice start, or did not, depending
   on which optimisation had run.**
 
-[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/commits/main
+### Divergences from mrab-regex
+
+This port behaves differently from upstream on purpose in 101 places, each one a row of
+[`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md)
+with its reason, its evidence and, where one exists, how to get upstream's behaviour back. The ones
+a caller arriving from Python meets first:
+
+- **Version 1 is the default**, so nested sets and full case folding are on; `(?V0)` or
+  `FuzzyRegexOptions.Version0` switches back.
+- **`Match` searches**; upstream's anchored `match` is `MatchAtStart`. Positions count UTF-16 code
+  units, and "no limit" is `-1` for `Split` and `Replace`.
+- **Replacement templates use upstream's `\1`**, where .NET's `Regex` uses `$1`.
+- **`EnhanceMatch` and `BestMatch` rank by cost** where upstream ranks by error count, which differs
+  only when a pattern weights its error kinds differently.
+- **The Turkic `I` pairings are off by default.**
+- **Partial matching follows a written contract**, described in `docs/GUIDE.md` under "Reading a
+  result".
+
+Most of the remaining rows are upstream defects fixed here and pinned by tests; each has an entry
+in `docs/plan/upstream-reports/LEDGER.md`.
+
+[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.0.0
