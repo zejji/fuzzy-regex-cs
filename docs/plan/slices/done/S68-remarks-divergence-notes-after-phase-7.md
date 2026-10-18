@@ -38,5 +38,47 @@ S58-S63 slice is pending. Runs in the `docs` worktree after rebasing onto `main`
 
 ## Done when
 
-- Every SHIPPED divergence is visible from IntelliSense on the member it affects, with a link to the
+- [x] Every SHIPPED divergence is visible from IntelliSense on the member it affects, with a link to the
   one page that explains it.
+
+## Closing notes (2026-10-18)
+
+**What landed.** 101 SHIPPED rows. 59 are attached to the public members they change, each with a
+`<remarks>` paragraph that restates the COMPARISON.md section in one or two sentences and links it.
+Where a member already carried the note (34 member and row pairs, from S41 to S65), the link was
+added to that paragraph and nothing was duplicated. The other 42 rows are behaviour of a pattern
+construct (group calls, backtracking verbs, `\K`, conditionals, fuzzy-section internals), visible
+only in what a match returns, and their COMPARISON.md sections name no member in their prose; they
+are listed with a reason in `DivergenceRemarksTests._noMember`.
+
+Where a row went:
+
+- Rows about every input-dependent method (cancellation token, per-call timeout, UTF-16 indices,
+  `beginning`/`length`, thread safety, `concurrent`, not-ported members) go on the `FuzzyRegex`
+  type, plus `Match.NextMatch` for the two that name it, rather than on all 35 overloads.
+- Rows whose heading names an option or its inline flag go on that `FuzzyRegexOptions` member:
+  `BestMatch`/`EnhanceMatch` (6 rows), `IgnoreCase` (5), `Ascii` (5), `FullCase` (5, the
+  "full-folded" rows), `RightToLeft` (3), `Word`, `Unicode`, `Version0`, `Version1`.
+- The partial-matching rows go on `Match.PartialMatch`, the member that reports one.
+- Method rows go on every public overload of the method the row names (`Split`, `Replace`,
+  `Matches`, ...), and only on the overloads that have the parameter in question (`count`,
+  `maxSplits`).
+
+The fuzzy members carry COMPARISON.md's worked examples in `<example>`: the five syntax sections on
+the `FuzzyRegex` type, `BestMatch`, `EnhanceMatch`, and the `\L<name>` example on the constructor
+that takes named lists. Links point at `https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#<anchor>`.
+The anchor rule (lower case; letters, digits, `_`, `-` and spaces kept; spaces to hyphens) was
+checked against the ids GitHub rendered for the published file through the contents API: 115 of
+115 published headings agree; the 7 headings newer than the last push follow the same rule.
+
+**Convention test.** `Conventions/DivergenceRemarksTests.cs`, extending S65's
+`ComparisonCoversDivergencesTests` (whose row and heading scans it now shares). It fails when a
+SHIPPED row is neither attached nor listed as having no member, when an entry names no row, when a
+row has no single COMPARISON.md heading, and when any covered doc entry in the generated
+`FuzzyRegex.xml` lacks a `<remarks>` link to that row's anchor. Floors: more than 100 rows (measured
+101) and more than 120 member entries checked (measured 122). A second test holds each `<example>`
+to a C# block of COMPARISON.md, verbatim after trimming indentation (9 blocks).
+
+**Negative control.** Removed the WORD-flag paragraph from `FuzzyRegexOptions.Word`: the test
+failed with `F:Fuzzy.Text.RegularExpressions.FuzzyRegexOptions.Word: no <remarks> link to
+#the-word-flags-word-boundary-is-unicodes-default-one`. Reverted; green.
