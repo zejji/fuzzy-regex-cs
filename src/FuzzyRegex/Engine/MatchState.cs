@@ -2627,6 +2627,7 @@ internal sealed class MatchState : IDisposable
     /// </param>
     internal void ResetGuards(bool keepFailureMemos = false)
     {
+        BlockedEndMark = -1;
         // Reset the guards for the repeats.
         for (int i = 0; i < Repeats.Length; i++)
         {
@@ -2996,6 +2997,79 @@ internal sealed class MatchState : IDisposable
         }
 
         return new GuardSpan(low, high, span.Protect);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): every entry below this count on the backtracking stack was pushed before
+    /// the last blocked end and is still there, so its failure, when it is popped, takes in what
+    /// follows that blocked construct. -1 when no blocked end has happened in the attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A guard inside a lookaround, condition test or atomic group records that the construct cannot
+    /// reach its end from a position, a fact about the position, because the construct's cut drops
+    /// its body's entries before anything after it runs. In a partial call's second pass a blocked
+    /// end keeps them (<c>Matcher.EndALookaroundInTheSecondPass</c>, <c>Matcher.BlockAtomicCut</c>):
+    /// matching goes on after the construct, and when that fails, backtracking comes back into the
+    /// body. A record written then says that the continuation failed, which depends on where the
+    /// construct started and on what came before it, and a later instance of the construct read it
+    /// and cut a path that matches: `a*(?=(?:ab|a)*b?y)aa` over 'aaba' answered P(3, 4), not P(0, 4).
+    /// Such a record is not written (<see cref="PoppedEntrySawABlockedEnd"/>).
+    /// </para>
+    /// <para>
+    /// The mark is the lowest count the stack has had since the last blocked end, as far as the
+    /// guard-writing entries see it: <see cref="NoteGuardWritingEntry"/> lowers it on a push and
+    /// <see cref="PoppedEntrySawABlockedEnd"/> on a pop. An entry below it was pushed before that
+    /// end and not popped since; one at or above it was pushed after. Where a pop of another kind
+    /// lowered the stack unseen, the mark is higher than the true minimum, which can only withhold
+    /// a sound record, never keep a stale one.
+    /// </para>
+    /// <para>
+    /// Only the repeats inside such a construct are affected (<see cref="RepeatInfo.InsideACutBody"/>).
+    /// A repeat outside one keeps every record: its body or tail is the same whatever path entered
+    /// it, as in the first pass, and a construct inside it continues into its own rest. The search
+    /// that found D90 (5.6 million rows, <c>.scratch/s1016/d90/grid</c>) gives the guards-off answer
+    /// on every row with this rule.
+    /// </para>
+    /// </remarks>
+    internal int BlockedEndMark = -1;
+
+    /// <summary>NOT UPSTREAM (D90): a blocked construct's continuation starts here; see <see cref="BlockedEndMark"/>.</summary>
+    internal void NoteABlockedEnd() => BlockedEndMark = Bstack.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): an entry whose pop writes a guard is about to be pushed; see
+    /// <see cref="BlockedEndMark"/>.
+    /// </summary>
+    // AggressiveInlining: one compare on every repeat entry, in BasicMatchCore's hottest arms.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void NoteGuardWritingEntry()
+    {
+        if (BlockedEndMark > Bstack.Count)
+        {
+            BlockedEndMark = Bstack.Count;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): whether the entry just popped for repeat <paramref name="index"/> was
+    /// pushed before a blocked end, so that the guard its pop writes would record the failure of
+    /// what follows the blocked construct; see <see cref="BlockedEndMark"/>.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <returns><see langword="true"/> if the guard must not be written.</returns>
+    internal bool PoppedEntrySawABlockedEnd(int index)
+    {
+        int count = Bstack.Count;
+        if (count >= BlockedEndMark)
+        {
+            return false;
+        }
+
+        BlockedEndMark = count;
+
+        // A called group's repeat can run inside a construct's body wherever the group is written.
+        return Pattern.HasGroupCalls || Pattern.RepeatInfoAt(index).InsideACutBody;
     }
 
     /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>

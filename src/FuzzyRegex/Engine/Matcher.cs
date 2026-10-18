@@ -6250,6 +6250,7 @@ internal static class Matcher
         node = node.Next1.Node!;
         state.NotePartialEvent(blockedEvent);
         CountFork(state);
+        state.NoteABlockedEnd();
         return LookaroundEnd.Continue;
     }
 
@@ -7253,6 +7254,7 @@ internal static class Matcher
         if (count > node.Values[1])
         {
             rpData.Count = count;
+            state.NoteGuardWritingEntry();
             PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
@@ -14605,6 +14607,7 @@ internal static class Matcher
                             "D11 amendment 2, assert 5: a blocked atomic end leaves the saved stack as its frame found it"
                         );
                         BlockAtomicCut(state, (int)atomicBstackCount);
+                        state.NoteABlockedEnd();
                         node = node.Next1.Node!;
                         break;
                     }
@@ -15033,6 +15036,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
@@ -15053,6 +15057,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
@@ -15240,6 +15245,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
@@ -15255,6 +15261,7 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
@@ -15483,6 +15490,7 @@ internal static class Matcher
 
                     // We might need to backtrack into the head, so save the current repeat.
                     // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    state.NoteGuardWritingEntry();
                     bool numbersRuns = pattern.TestedGroups.Length > 0;
                     if (numbersRuns)
                     {
@@ -15622,6 +15630,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
@@ -15637,6 +15646,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
@@ -15755,6 +15765,7 @@ internal static class Matcher
                     if (count > node.Values[1])
                     {
                         // Record the backtracking info.
+                        state.NoteGuardWritingEntry();
                         PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
@@ -15876,6 +15887,7 @@ internal static class Matcher
 
                     // We might need to backtrack into the head, so save the current repeat.
                     // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
+                    state.NoteGuardWritingEntry();
                     bool numbersRuns = pattern.TestedGroups.Length > 0;
                     if (numbersRuns)
                     {
@@ -16008,6 +16020,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
@@ -16023,6 +16036,7 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
+                        state.NoteGuardWritingEntry();
                         state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
@@ -16074,6 +16088,7 @@ internal static class Matcher
                     {
                         // The match is shorter than the maximum, so we might need to backtrack the
                         // repeat to consume more.
+                        state.NoteGuardWritingEntry();
                         PushRepeatOneStateData(state.Bstack, rpData.Count, rpData.Start, node, index);
                         state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
@@ -17038,8 +17053,12 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    // The body may have failed to match at this position.
-                    state.GuardRepeat((int)bodyIndex, (int)bodyTextPos, NodeStatus.Body, true);
+                    // The body may have failed to match at this position. NOT UPSTREAM (D90): unless
+                    // a blocked end let the body's failure take in what follows the construct.
+                    if (!state.PoppedEntrySawABlockedEnd((int)bodyIndex))
+                    {
+                        state.GuardRepeat((int)bodyIndex, (int)bodyTextPos, NodeStatus.Body, true);
+                    }
                     break;
                 }
                 case Opcode.Branch: // 2-way branch.
@@ -17264,8 +17283,12 @@ internal static class Matcher
                     // The repeat failed to match.
                     RepeatData rpData = state.Repeats[dataR.Index];
 
-                    // The body may have failed to match at this position.
-                    state.GuardRepeat(dataR.Index, dataR.TextPos, NodeStatus.Body, true);
+                    // The body may have failed to match at this position (NOT UPSTREAM, D90: see
+                    // MatchState.PoppedEntrySawABlockedEnd).
+                    if (!state.PoppedEntrySawABlockedEnd(dataR.Index))
+                    {
+                        state.GuardRepeat(dataR.Index, dataR.TextPos, NodeStatus.Body, true);
+                    }
 
                     // Restore the previous repeat.
                     rpData.Count = dataR.Count;
@@ -17301,8 +17324,13 @@ internal static class Matcher
                     int pos = StepBy(state, state.TextPos, count, step);
                     int limit = StepBy(state, state.TextPos, node.Values[1], step);
 
-                    // The tail failed to match at this position.
-                    state.GuardRepeat(index, pos, NodeStatus.Tail, true);
+                    // The tail failed to match at this position (NOT UPSTREAM, D90: see
+                    // MatchState.PoppedEntrySawABlockedEnd; the range guard below follows it).
+                    bool sawABlockedEnd = state.PoppedEntrySawABlockedEnd(index);
+                    if (!sawABlockedEnd)
+                    {
+                        state.GuardRepeat(index, pos, NodeStatus.Tail, true);
+                    }
 
                     // A (*SKIP) might have changed the size of the slice.
                     //
@@ -17436,6 +17464,7 @@ internal static class Matcher
                             // repeat again to consume less.
                             rpData.Count = count;
 
+                            state.NoteGuardWritingEntry();
                             PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
 
@@ -17461,7 +17490,11 @@ internal static class Matcher
                     }
 
                     // Don't try this repeated match again.
-                    if (step > 0)
+                    if (sawABlockedEnd)
+                    {
+                        // NOT UPSTREAM (D90): the failure took in what follows a blocked construct.
+                    }
+                    else if (step > 0)
                     {
                         state.GuardRepeatRange(index, limit, pos, NodeStatus.Body, true);
                     }
@@ -17642,6 +17675,7 @@ internal static class Matcher
                             // the repeat again to consume more.
                             rpData.Count = count;
 
+                            state.NoteGuardWritingEntry();
                             PushRepeatOneStateData(state.Bstack, savedCount, start, node, index);
                             state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
 
@@ -17704,6 +17738,7 @@ internal static class Matcher
                     rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the body fails to match.
+                    state.NoteGuardWritingEntry();
                     state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.BodyStart);
@@ -17741,6 +17776,7 @@ internal static class Matcher
                     rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the tail fails to match.
+                    state.NoteGuardWritingEntry();
                     state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.TailStart);
@@ -17761,8 +17797,12 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
-                    // The tail may have failed to match at this position.
-                    state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    // The tail may have failed to match at this position (NOT UPSTREAM, D90: see
+                    // MatchState.PoppedEntrySawABlockedEnd).
+                    if (!state.PoppedEntrySawABlockedEnd((int)tailIndex))
+                    {
+                        state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    }
                     break;
                 }
                 case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.

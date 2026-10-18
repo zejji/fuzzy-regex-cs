@@ -113,6 +113,13 @@ internal sealed class RepeatInfo
     internal bool FailureMemo;
 
     /// <summary>
+    /// NOT UPSTREAM (D90): whether the repeat is inside a lookaround, a condition's test, an atomic
+    /// group or a possessive repeat, whose end a partial call's second pass can block
+    /// (<c>MatchState.BlockedEndMark</c>). Set by <c>NodeCompiler</c>.
+    /// </summary>
+    internal bool InsideACutBody;
+
+    /// <summary>
     /// Where the copy of this repeat's first iteration starts, for a failure-memo repeat whose
     /// minimum was 1: the placeholder node <c>NodeCompiler.BuildRepeat</c> built the copy from, so
     /// a one-way branch that <c>Optimiser.FindFirstIterationAtStart</c> looks through. Otherwise
