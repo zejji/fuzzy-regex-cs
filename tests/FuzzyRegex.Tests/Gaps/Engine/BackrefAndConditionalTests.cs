@@ -328,6 +328,15 @@ public sealed class BackrefAndConditionalTests
     // matches, on every row; PCRE2 10.47 and Perl 5.42.3 both answer the span asserted. The last
     // three are matrix rows 8301, 11941 (group 1 (2, 3)) and 11948 (finditer, one match) of the
     // 2026-09-30 complete matrix.
+    //
+    // The four reversed rows are D55's reversed form (ledger entry 62, addendum of 2026-10-18,
+    // from battery run 20261018-9, row c1-2). A reversed pattern matches its yes branch right to
+    // left, so the alternation it meets first is the one at the branch's right end. PCRE2 and Perl
+    // have no reversed search. The forward (?(?!q)a(?:x|)) matches (0, 1) over 'a' upstream too,
+    // and searching backwards changes only which match is found first, never whether one exists.
+    // DIVERGES FROM UPSTREAM 2026.9.10 on every reversed row, and this test pins OUR answer.
+    // Upstream, measured 2026-10-18: regex.compile(p).search(s) is None on all four, for example
+    // regex.compile(r'(?r)(?(?!q)a(?:x|))').search('a') is None.
     [Test]
     [Arguments("(?(?!a)(?:x|))x", "x", 0, 1)]
     [Arguments("(?(?<!q)(?:xz|x))c", "xc", 0, 2)]
@@ -335,6 +344,10 @@ public sealed class BackrefAndConditionalTests
     [Arguments("(?(?<!x)(?:ab|a)(?<!(?:(?:ab|a)(*FAIL)|ba[ab]))|(?:ab|a))", "  bab", 3, 1)]
     [Arguments("(?P<g1>(?(?!a)(?:.(*SKIP)|a*)|x))(?1)", "aax", 2, 1)]
     [Arguments("(?(?<!x)(?:ab(?R)|(?:b(*F)|b))|a)", "b", 0, 1)]
+    [Arguments("(?r)(?(?!q)a(?:x|))", "a", 0, 1)]
+    [Arguments("(?r)(?(?<!q)a(?:x|))", "a", 0, 1)]
+    [Arguments("(?r)(?(?!q)a(?:x|)|b)", "a", 0, 1)]
+    [Arguments("(?r)(?(?!q)a(?:xz|x))", "ax", 0, 2)]
     public void A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch(
         string pattern,
         string subject,
@@ -366,6 +379,8 @@ public sealed class BackrefAndConditionalTests
     [Test]
     [Arguments("(?(?!a)(?:x|y))x", "x", false)]
     [Arguments("(?(?=x)(?:x|))x", "x", true)]
+    [Arguments("(?r)(?(?!q)a(?:x|y))", "a", false)]
+    [Arguments("(?r)(?(?!q)(?:x|)a)", "a", true)]
     public void The_conditions_the_true_branch_skip_did_not_break_keep_their_answers(
         string pattern,
         string subject,
@@ -374,7 +389,10 @@ public sealed class BackrefAndConditionalTests
     {
         // Controls for D55. The first has no empty alternative, so dropping 'y' could not change
         // the answer; the second is a positive test, which never reads TrueNode. Upstream, PCRE2
-        // 10.47 and Perl 5.42.3 answer None and (0, 1) (measured 2026-09-30).
+        // 10.47 and Perl 5.42.3 answer None and (0, 1) (measured 2026-09-30). The reversed pair
+        // are the controls for the reversed form: the same no-empty-alternative case, and an
+        // alternation the reversed yes branch meets last, where the skip does not look. Upstream
+        // answers None and (0, 1) (measured 2026-10-18).
         Match m = FuzzyRegex.Match(subject, pattern);
 
         m.Success.Should().Be(matches);
