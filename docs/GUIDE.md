@@ -226,6 +226,11 @@ form such as `{2i+1s<4}` - attaches to a group the same way a quantifier does. `
 "Fuzzy syntax in one page" is the complete reference for the syntax; this guide does not repeat
 it.
 
+A minimum needs a maximum. `{1<=d<=3}` asks for one to three deletions, but `{1<=d}` is not a
+budget at all: it is read as the six literal characters `{1<=d}`, as upstream reads it, so
+`(?:qx){1<=d}` matches 'qx{1<=d}' and not 'x'. To ask for at least one deletion with no real cap,
+give a large maximum: `{1<=d<=9999}`.
+
 A **named list** lets a fuzzy pattern check a placeholder against a fixed vocabulary instead of
 matching characters: `\L<colour>{e<=1}` matches a member of a list named `colour`, allowing one
 error, where `colour` is supplied through the `namedLists` constructor or static-method
