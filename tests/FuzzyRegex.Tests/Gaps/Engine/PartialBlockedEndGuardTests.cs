@@ -76,6 +76,27 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial: true).Should().Be(expected);
     }
 
+    // Negative lookarounds whose undecided outcome another construct reads: an atomic group or
+    // possessive repeat around it, or another negative. A record that turned the body's run-out into
+    // a failure made a later instance pass decided, so the enclosing construct committed. These bound
+    // the exemption below (MatchState.BlockedEndMark): a negative lookaround inside nothing that cuts
+    // keeps its records. The search of 1.48 million rows (`.scratch/s1016/d90/grid/gen3.py`) found
+    // main wrong only in these three wrappers. Main answers as in the comment.
+    [Test]
+    [Arguments(@"(?:(?!a(?!(?:(a)|b)*y))a)+", "aaaa", "fullmatch", "(0,4)p g1=")] // None
+    [Arguments(@"a?(?>(?!(?:(a)|b)*y)a|ab)a", "ab", "search", "(0,2)p g1=")] // (2,2)p
+    [Arguments(@"a*(?:(?!(?:(a)|b)*y)a)++a", "aab", "search", "(0,3)p g1=")] // (3,3)p
+    [Arguments(@"(?:(?!a(?!(?:ab|a)*b?y))a)+b", "aaab", "search", "(0,4)p")] // (1,4)p
+    public void A_negative_lookaround_whose_outcome_a_cut_reads_keeps_its_run_out(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        Run(pattern, subject, operation, partial: true).Should().Be(expected);
+    }
+
     // Controls, green before the fix: the same patterns without partial, and partial calls where
     // the body never runs out or the record is sound.
     [Test]
@@ -89,6 +110,8 @@ public sealed class PartialBlockedEndGuardTests
     [Arguments(@"(?:(?=(?:a|aa)*y)a)*z", "aaaa", "match", true, "(0,4)p")]
     [Arguments(@"(?>(?:a|aa)*y?)(?<!a)", "aaaa", "match", true, "(0,4)p")]
     [Arguments(@"a?(?>(?!a?b?y)|a)", "ab", "search", true, "(0,1)")]
+    [Arguments(@"(?:(?!(?:a|b)*(b)?y)a)*[ab]*\1c", "aaaa", "search", true, "(0,4)p g1=")]
+    [Arguments(@"[aby]*?(?!(?:a|b)*(b)?y)aa", "abab", "search", true, "(0,4)p g1=")]
     [Arguments(@"a?(?=(?>a?b?y))a", "ab", "search", true, "(0,2)p")]
     [Arguments(@"a?(?>(?(?=a?b?y)a|c))", "ab", "search", true, "(0,2)p")]
     [Arguments(@"a?(?>a(?<=^a?b?y))", "ab", "search", true, "(2,2)p")]

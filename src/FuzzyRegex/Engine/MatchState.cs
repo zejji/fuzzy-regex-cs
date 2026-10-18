@@ -3024,7 +3024,11 @@ internal sealed class MatchState : IDisposable
     /// paths (<c>Matcher.RunOutCanWaitForTheBody</c>; round 2 of the review:
     /// `a?(?>(?=a?b?y)a)` over 'ab' was P(2, 2), not P(0, 2), because `b?`'s tail guard recorded
     /// the run-out at 2 as a failure), and the LOOKAROUND arm going on after a negative body or a
-    /// waiting run-out it could not decide. Each sets the mark like a blocked end.
+    /// waiting run-out it could not decide. Each sets the mark like a blocked end. The one
+    /// exception is a run-out in a negative lookaround with no atomic group, possessive repeat,
+    /// lookaround or test around it (and no verb or call in the pattern): there a stale record can
+    /// only turn an undecided pass into a decided one, which nothing reads
+    /// (<c>Matcher.RunOutInALookaroundBody</c>; `.scratch/s1016/d90/NOTES.md`, option (b)).
     /// </para>
     /// <para>
     /// The mark is the lowest count the stack has had since the last blocked end, as far as the

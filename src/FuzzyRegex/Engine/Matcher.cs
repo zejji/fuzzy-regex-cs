@@ -6820,7 +6820,24 @@ internal static class Matcher
         state.NotePartialEvent(PartialEvent.RunOutInBody);
 
         // NOT UPSTREAM (D90): a run-out is not a failure, so an entry pending now may not record one.
-        state.NoteABlockedEnd();
+        // Except in a negative lookaround that nothing cuts around (no atomic group, possessive
+        // repeat, lookaround or test below its frame, no verb, no call): its body never goes on
+        // past its end, so a record there says what its body does from a position, and turning the
+        // run-out into a failure can only make a later instance pass decided instead of undecided,
+        // which differs in a touch mark that only an enclosing construct's end would read (see
+        // MatchState.BlockedEndMark). Its records keep the second pass linear where the run-out
+        // would otherwise taint every pending entry (`(?:(?!(?:a|b)*(b)?y)a)*[ab]*\1c`).
+        if (
+            look.Node.Match
+            || look.Node.Op != Opcode.Lookaround
+            || offset != 0
+            || pattern.HasBacktrackingVerb
+            || pattern.HasGroupCalls
+        )
+        {
+            state.NoteABlockedEnd();
+        }
+
         return look.Node.LookaroundEnd;
     }
 
