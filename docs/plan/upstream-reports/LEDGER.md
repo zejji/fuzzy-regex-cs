@@ -7256,7 +7256,7 @@ them from `make_case_flags(info)`.
 **This port.** It folds the grouped literal as it folds the bare one. Pinned by
 `Gaps/Engine/CaseInsensitiveMatchingTests.Under_ascii_a_grouped_literal_folds_as_the_bare_literal_does`.
 
-## 92. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D106, 2026-10-18)
+## 92. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D107, 2026-10-18)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Found by the 2026.9.29 sync, which ran Unicode's
 conformance files over the port and over upstream. Not yet blind-reviewed.
