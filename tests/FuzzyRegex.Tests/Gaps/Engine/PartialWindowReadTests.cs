@@ -106,13 +106,13 @@ public sealed class PartialWindowReadTests
 
     /// <summary>
     /// Reversed, GB9c, GB11 and GB12/GB13 look left through a run that can reach the edge, and the
-    /// text to come can end the run the way that keeps the cluster together: a Consonant before the
-    /// Linker ('क्क' is one cluster), an Extended_Pictographic before the ZWJ, one regional
-    /// indicator more. Upstream's reversed <c>\X</c> takes one codepoint (ledger entry 43).
+    /// text to come can end the run the way that keeps the cluster together: a Linker before the
+    /// InCB Extend mark (virama, U+0308, KA is one cluster under Unicode 18.0.0's GB9c), an
+    /// Extended_Pictographic before the ZWJ, one regional indicator more. Upstream's reversed <c>\X</c> takes one codepoint (ledger entry 43).
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to every row.
     [Test]
-    [Arguments("(?r)(?<!\u094D)\\X", "\u094D\u0915", 0, 2)]
+    [Arguments("(?r)(?<!\u0308)\\X", "\u0308\u0915", 0, 2)]
     [Arguments("(?r)(?<!\u200D)\\X", "\u200D\U0001F600", 0, 3)]
     [Arguments("(?r)(?=(?:\U0001F1E6){2}$)\\X", "\U0001F1E6\U0001F1E6\U0001F1E6", 0, 6)]
     public void A_reversed_grapheme_test_whose_run_reaches_the_text_to_come_is_undetermined(
