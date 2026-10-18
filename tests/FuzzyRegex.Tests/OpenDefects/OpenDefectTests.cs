@@ -186,28 +186,6 @@ public sealed class OpenDefectTests
             .Be((true, true, start, end, group1Set));
     }
 
-    // D101. A run-out inside a group call that a lookaround's body or a condition's test opened,
-    // where the body's outcome feeds a decision (a negative lookahead, a condition's test, a
-    // lookahead inside an atomic group), still answers the partial at once (the SHORTCUT on
-    // Matcher.RunOutInALookaroundBody that D98 narrowed). The written-out forms answer None, as the
-    // brute-force judge does. In the first row `\Z` would need the text to end at 1, where 'xy'
-    // already goes on; in the second the test passes or fails, but 'a' or 'b' is needed at 1, which
-    // holds 'y'; in the third `\Z` needs the end at 1, where the lookahead needs an 'x'. Evidence
-    // .scratch/s1016/d98/grid-vs-written.txt.
-    [Test]
-    [Arguments(@"(x)(?!y?(?1))\Z", "xy")] // port P(0, 2)
-    [Arguments(@"(x)(?(?=y?(?1))a|b)", "xy")] // port P(0, 2)
-    [Arguments(@"(x)(?>(?=(?1)))\Z", "x")] // port P(0, 1)
-    public void A_run_out_inside_a_call_a_deciding_body_opened_is_taken_as_its_written_out_form_takes_it(
-        string pattern,
-        string subject
-    )
-    {
-        Match m = Partial("match", pattern, subject);
-
-        m.Success.Should().BeFalse();
-    }
-
     // D100. A partial reports the least start from which this port's own full search matches some
     // continuation (DECISIONS 2026-09-30), and that search follows rule H'. When the attempt at the
     // anchor and a later partial are both live, H' compares the later partial's start with the

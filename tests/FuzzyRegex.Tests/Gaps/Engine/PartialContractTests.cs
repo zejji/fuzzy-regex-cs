@@ -180,6 +180,129 @@ public sealed class PartialContractTests
         ShouldAnswer("match", pattern, "ab", 0, 2);
     }
 
+    /// <summary>
+    /// A run-out inside a group call, where the body that opened the call feeds a decision (a
+    /// negative lookahead, a condition's test, a lookahead inside an atomic group, or any
+    /// lookaround in a fuzzy pattern), answers the partial at once (was D101; owner decision
+    /// 2026-10-18). The same pattern with the call written out can answer None, so here a call
+    /// does not answer as its group written out (DECISIONS, D40), which still holds for every full
+    /// match.
+    /// </summary>
+    /// <remarks>
+    /// The judge (brute force over every continuation of up to three characters, on the
+    /// written-out form) answers None on the four match rows and P(2, 2) on the search: no text
+    /// completes a match from 0, and 'xyxx' completes one from 2. Reporting a start earlier than
+    /// the first a continuation completes is the skip-fail row's kind (D53). Upstream answers the
+    /// first three rows as here; PCRE2 10.47 gives the same partials for them and for their
+    /// written-out forms too (<c>.scratch/s1016/refuse-partial/NOTES.md</c>, "PCRE2 10.47"). The
+    /// fix, re-opening the calls a body opened (D98's option B), is a 1.1 candidate. Evidence: D98's
+    /// grid (124 of 2,640 rows, <c>.scratch/s1016/d98/grid-vs-written.txt</c>) and the fuzzy grid
+    /// (421 phantoms and 188 earlier starts of 3,240 rows, no miss,
+    /// <c>.scratch/s1016/refuse-partial/fz/diff.txt</c>).
+    /// </remarks>
+    [Test]
+    [Arguments("match", @"(x)(?!y?(?1))\Z", "xy", 0, 2)]
+    [Arguments("match", @"(x)(?(?=y?(?1))a|b)", "xy", 0, 2)]
+    [Arguments("match", @"(x)(?>(?=(?1)))\Z", "x", 0, 1)]
+    [Arguments("match", @"(x)(?:(?=(?1))\Z){e<=1}", "xy", 0, 2)]
+    [Arguments("search", @"(x)(?:(?=(?1))\Z){e<=1}", "xy", 0, 2)]
+    public void A_run_out_inside_a_call_a_deciding_body_opened_answers_a_partial(
+        string operation,
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        ShouldAnswer(operation, pattern, text, start, end);
+    }
+
+    /// <summary>
+    /// The guarantee holds for the rows above: over every text that starts with the row's text and
+    /// goes on by up to three characters, the call form answers every full call as its written-out
+    /// form does, and a partial call never answers None, or a different complete match, where the
+    /// written-out form finds one.
+    /// </summary>
+    [Test]
+    [Arguments(@"(x)(?!y?(?1))\Z", @"(x)(?!y?(?:x))\Z", "xy")]
+    [Arguments(@"(x)(?(?=y?(?1))a|b)", @"(x)(?(?=y?(?:x))a|b)", "xy")]
+    [Arguments(@"(x)(?>(?=(?1)))\Z", @"(x)(?>(?=(?:x)))\Z", "x")]
+    [Arguments(@"(x)(?:(?=(?1))\Z){e<=1}", @"(x)(?:(?=(?:x))\Z){e<=1}", "xy")]
+    public void A_call_a_deciding_body_opened_never_misses_a_match_its_written_out_form_completes(
+        string pattern,
+        string writtenOut,
+        string text
+    )
+    {
+        var call = new FuzzyRegex(pattern);
+        var written = new FuzzyRegex(writtenOut);
+        var texts = new List<string> { text };
+        for (int i = 0; i < texts.Count && texts[i].Length < text.Length + 3; i++)
+        {
+            foreach (char c in "xyabq")
+            {
+                texts.Add(texts[i] + c);
+            }
+        }
+
+        var misses = new List<string>();
+        foreach (string t in texts)
+        {
+            foreach (var (name, run) in _calls)
+            {
+                string byCall = Describe(run(call, t, false));
+                string byWritten = Describe(run(written, t, false));
+                if (!string.Equals(byCall, byWritten, StringComparison.Ordinal))
+                {
+                    misses.Add($"{name} '{t}': {byCall}, written out {byWritten}");
+                }
+
+                Match partialByCall = run(call, t, true);
+                Match partialByWritten = run(written, t, true);
+                bool writtenCompletes = partialByWritten.Success && !partialByWritten.PartialMatch;
+                if (
+                    (partialByWritten.Success && !partialByCall.Success)
+                    || (
+                        writtenCompletes
+                        && !string.Equals(Describe(partialByCall), Describe(partialByWritten), StringComparison.Ordinal)
+                    )
+                )
+                {
+                    misses.Add(
+                        $"{name} partial '{t}': {Describe(partialByCall)}, written out {Describe(partialByWritten)}"
+                    );
+                }
+            }
+        }
+
+        misses.Should().BeEmpty();
+    }
+
+    /// <summary>The search row's completion, where the judge says one exists: 'xyxx' matches at (2, 4).</summary>
+    [Test]
+    public void The_earlier_partial_start_still_finds_the_match_a_continuation_completes()
+    {
+        Describe(new FuzzyRegex(@"(x)(?:(?=(?1))\Z){e<=1}").Match("xyxx", partial: true)).Should().Be("M(2, 4)");
+    }
+
+    private static readonly (string Name, Func<FuzzyRegex, string, bool, Match> Run)[] _calls =
+    [
+        ("match", static (r, t, p) => r.MatchAtStart(t, partial: p)),
+        ("fullmatch", static (r, t, p) => r.FullMatch(t, partial: p)),
+        ("search", static (r, t, p) => r.Match(t, partial: p)),
+    ];
+
+    private static string Describe(Match m)
+    {
+        if (!m.Success)
+        {
+            return "None";
+        }
+
+        string kind = m.PartialMatch ? "P" : "M";
+        return $"{kind}({m.Index}, {m.Index + m.Length})";
+    }
+
     /// <summary>Asserts a partial call's answer: a partial over [start, end), or no match when start is -1.</summary>
     private static void ShouldAnswer(string operation, string pattern, string text, int start, int end)
     {
