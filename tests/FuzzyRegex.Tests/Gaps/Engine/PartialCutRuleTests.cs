@@ -153,12 +153,18 @@ public sealed class PartialCutRuleTests
     /// S57d still escalates the failure to a partial until build chunk 9, so the Debug count of
     /// second-pass successes is the witness.
     /// </summary>
+    /// <remarks>
+    /// The answer itself, moved from <c>OpenDefectTests</c> on 2026-10-18 now that S57d is gone: red
+    /// before D11 (F54, merge 65265cfd, 2026-10-04), green from it on (measured 2026-10-18).
+    /// </remarks>
+    // Upstream answers None too.
     [Test]
     [Category(EngineWork.Category)]
     public void The_design_row_of_a_tainted_frame_is_no_second_pass_success()
     {
         using MatchState state = RunPartial(@"(?>x\b|x|)(?<!x)x", "x");
 
+        new FuzzyRegex(@"(?>x\b|x|)(?<!x)x").MatchAtStart("x", partial: true).Success.Should().BeFalse();
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(0);
         state.PartialEventCount(PartialEvent.CutBlockedAtomic).Should().Be(1);

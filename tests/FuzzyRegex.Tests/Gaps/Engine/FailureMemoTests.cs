@@ -108,6 +108,10 @@ public sealed class FailureMemoTests
     [Test]
     [Category(EngineWork.Category)]
     [Arguments(@"(?:(?(?=.*z)a|a))*b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac", 41)]
+    // X2 at the design's own length, n = 20, moved from OpenDefectTests on 2026-10-18: red before
+    // D11 (F54, merge 65265cfd, 2026-10-04), green from it on (measured 2026-10-18). Upstream
+    // answers P(0, 21).
+    [Arguments(@"(?:(?(?=.*z)a|a))*b", "aaaaaaaaaaaaaaaaaaaac", 21)]
     [Arguments(@"(?:(?(?=.*c)a|a))*?(?=c)", "abbab", 5)]
     public void A_partial_call_keeps_the_guards_a_blocked_condition_test_let_through(
         string pattern,

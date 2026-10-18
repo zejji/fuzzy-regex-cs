@@ -91,6 +91,31 @@ public sealed class PartialEdgeReadTests
     }
 
     /// <summary>
+    /// A word test the continuation decides passes at the edge, but no continuation completes the
+    /// match: a full match would need the text to end where the pattern stops, which a passing
+    /// <c>\B</c> forbids (rows B3, B5), or a later item fails on the held text (row B6).
+    /// </summary>
+    /// <remarks>
+    /// Moved from <c>OpenDefectTests</c> on 2026-10-18. Each row was red before D11 (F54, merge
+    /// 65265cfd, 2026-10-04), where S57d escalated it to a partial, and green from that merge on
+    /// (measured 2026-10-18 at a4d4c697 and 65265cfd). Measured 2026-09-28 by
+    /// <c>tools/probes/d11-partial-boundary.py</c>: upstream None on all three.
+    /// </remarks>
+    // Upstream answers None too.
+    [Test]
+    [Arguments("fullmatch", @"a\B", "a")]
+    [Arguments("fullmatch", @"(?fV1mi)(?:\p{Ll}(*SKIP)[^\d]|\p{Ll})([[:alpha:]])\B$", "aaA")]
+    [Arguments("match", @"a\b(?<=b)", "a")]
+    public void A_word_test_the_continuation_decides_gives_no_partial_when_the_rest_cannot_follow(
+        string operation,
+        string pattern,
+        string text
+    )
+    {
+        Partial(operation, pattern, text).Success.Should().BeFalse();
+    }
+
+    /// <summary>
     /// A decided-false test at the edge sends the path the other way, and the other way can be a
     /// match that needs the continuation (row D4: 'a' + 'a', where <c>\Z</c> fails, the atomic group
     /// takes its empty branch and <c>(?&lt;!a)a</c> matches). Upstream answers None.
@@ -158,6 +183,10 @@ public sealed class PartialEdgeReadTests
     [Arguments(@"(?a)\Z(\W?\M)(^ +?\m)?", "", 0)]
     [Arguments(@"(?u)\Z(?:(?:\Bax|aa\b)|(\M))", "", 0)]
     [Arguments("(?i)\\mİ", "b", 1)]
+    // Row A2, moved from OpenDefectTests on 2026-10-18: the partial starts where the `\m` still can
+    // hold, at the edge. Red before D11 (F54, merge 65265cfd,
+    // 2026-10-04), green from it on (measured 2026-10-18). Upstream answers (2, 2) too.
+    [Arguments("(?fi)\\m\u0130(?(?<!\\w)[^a-f]|\\p{Ll})$", "\uFB01 ", 2)]
     public void A_search_whose_only_completion_starts_in_the_text_to_come_reports_the_edge(
         string pattern,
         string text,
