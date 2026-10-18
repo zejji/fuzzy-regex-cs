@@ -489,6 +489,18 @@ what is committed, and `UnicodeConstants.UnicodeVersion` stays **17.0.0**.
 | 2026.9.2, 2026.9.3 - cibuildwheel free-threading options | `.github/` | **NOT APPLICABLE.** Same reason |
 | 2026.9.9, PRs 615-618 - Python API error propagation | 178 of the range's 188 `_regex.c` lines, across `get_string`, `match_get_ends_by_index`, `match_get_captures_by_index`, `match_detach_string`, `scanner_search_or_match`, `scanner_iternext`, `decode_partial`, `pattern_scanner`, `index_to_integer`, `capture_str`, `pattern_search_or_match`, `CheckStack_push`/`_pop`, `add_repeat_guards`, `NodeStack_push`/`_pop`, `use_nodes`, `discard_unused_nodes`, `optimise_pattern` and `get_all_cases` | **NOT APPLICABLE.** Every hunk is CPython C-API bookkeeping: propagating a failed `PyList_SetItem`, returning `NULL` instead of swallowing an exception, `PyErr_NoMemory()` on a failed `re_alloc`. A managed port raises `OutOfMemoryException` and propagates exceptions by construction. **Checked hunk by hunk that no matching or compiling logic moved**, because four of these functions ARE ported (`add_repeat_guards`, `use_nodes`, `discard_unused_nodes`, `optimise_pattern`): the only non-mechanical change is `add_repeat_guards`'s return type going from `RE_STATUS_T` to `BOOL`, and its single caller discarded the return value before the change (`:23841` at `9398a6d`), so nothing read it |
 
+### 2026.9.10 -> 2026.9.19 (S81a, 2026-10-18)
+
+Submodule at `85e568c0e0be620b4ebe50c98ea92415f5995ffc`, tag `2026.9.19`. The 1.0 pin; 2026.9.29
+(Unicode 18.0.0) is left for 1.1 (owner decision 4(a), `docs/plan/2026-10-16-plan-to-1.0.md`). The
+range is one commit touching `changelog.txt` and two lines of `src/_regex.c`. Upstream did not bump
+its version strings for it: at the tag, `pyproject.toml` and `regex.__version__` both still say
+`2026.9.10`, and 2026.9.19 was never published to PyPI.
+
+| Changelog entry | Upstream change | Disposition |
+|---|---|---|
+| 2026.9.19, issue 619 - "`Match.expand()` segfaults after `detach_string()` when the template references a group" | `_regex.c:19942` (`match_expand`) and `:21476` (`capture_str`) read `self->substring` / `match->substring` instead of `->string`, which `match_detach_string` (`:20283`) leaves `NULL` | **NOT APPLICABLE: this port cannot have the fault.** It has no `detach_string` (the row in the table below), and `Capture._subject`, which `Match.Result` (the `match_expand` port) and `Group.Value` (the `capture_str` port) read, is a `readonly` field set once in the constructor (`src/FuzzyRegex/Match.cs:25`). Measured 2026-10-18 on `regex.match(r'(a)\|(b)', 'a')`: before detaching, `expand(r'[\1][\2]')` and `expandf('[{1}][{2}]')` give `'[a][]'`; after it, 2026.9.10 dies with a segmentation fault on `expand` and raises `SystemError: null argument to internal routine` on `expandf`, and a 2026.9.19 built from the submodule answers `'[a][]'` to both. This port answers `'[a][]'` after the caller drops the subject and a collection runs: `Gaps/UpstreamIssues/DetachedSubjectTests.cs`. For a match that was never detached the two lines change nothing, because a new match's `substring` IS its `string` (`:20769-20770`) |
+
 ## Deliberately not ported
 
 Recorded so the omissions are visible and countable rather than silently missing.

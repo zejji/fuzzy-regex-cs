@@ -1,6 +1,6 @@
 {
   "comment": "Upstream reads of uninitialised memory that a ledger entry accounts for. Read by tools/screen-undefined.py; each entry's reproductions are re-screened by --reverify whenever the upstream submodule moves, and verifiedAtUpstreamCommit records the last commit they reproduced on.",
-  "verifiedAtUpstreamCommit": "7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33",
+  "verifiedAtUpstreamCommit": "85e568c0e0be620b4ebe50c98ea92415f5995ffc",
   "defects": [
     {
       "origin": "new_position in basic_match",

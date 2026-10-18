@@ -7,6 +7,11 @@ delivers: []
 
 # S81 - Re-sync upstream before the release
 
+**2026-10-18, S81a: the 2026.9.19 half is done.** The pin is `85e568c`, tag `2026.9.19`, and
+issue 619 is NOT APPLICABLE with a test that proves it (`docs/PORTMAP.md`, sync log). What is left
+is 2026.9.29 (Unicode 18.0.0), which owner decision 4(a) puts in 1.1. The text below is the brief
+as written on 2026-09-21.
+
 The pin is `7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33`, tag `2026.9.10`, set by S44 on 2026-09-13,
 and S44 recorded that the tag was upstream's head at the time. It no longer is. Measured from the
 GitHub API on 2026-09-21, upstream's `hg` branch carries one commit past the tag:
