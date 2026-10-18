@@ -1359,6 +1359,13 @@ two ways according to where the caller started. Upstream issues 563 and 564 have
 17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to
 restore the upstream answer.
 
+A partial search keeps the match at the starting position whenever more text could complete it,
+even if a later partial is also open, because whether that later one would start inside it depends
+on text that has not arrived. So the partial start is never later than the match the completed
+text gives, and sometimes earlier. With `(?:ab){1<=i<=2}`, the partial over `"ba"` starts at 0
+here and at 1 upstream, and `"bab"` matches from 0 here (upstream: no match). Over `"xxa"` the
+partial starts at 0 here and at 1 upstream, and `"xxab"` matches from 1 in both.
+
 ### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
 
 Under `IgnoreCase` with version 1, a literal holding a pair that one character can fold to (fi, ff,

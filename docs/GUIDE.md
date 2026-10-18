@@ -438,6 +438,28 @@ promise. It holds firmly the other way round: where some longer text does comple
 partial call never answers no match, so a caller that stops reading at the first no match never
 misses one.
 
+For one kind of pattern the partial start is a bound. When a fuzzy section allows insertions and
+the pattern also holds a word boundary, a lookaround or another test that depends on the position,
+or a fuzzy minimum such as `{1<=i<=2}`, a partial search can start earlier than the match that more
+text would give, and never later:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var pair = new FuzzyRegex(@"(?:ab){1<=i<=2}");
+Match early = pair.Match("xxa", partial: true);
+Console.WriteLine($"{early.Index} {early.Length}");
+Match complete = pair.Match("xxab");
+Console.WriteLine($"{complete.Index} {complete.Length}");
+// 0 3
+// 1 3
+```
+
+The attempt from 0 can still complete ('xxab', with both 'x' characters inserted), but every text
+that completes it also holds a match from 1, which the engine then prefers. Seeing that needs the
+text that has not arrived, so the partial keeps the earlier start. A caller that keeps the text from the partial start keeps a
+character or two more than it needs, and never drops the start of a match that is still arriving.
+
 A fuzzy partial's `FuzzyCounts` and `FuzzyChanges` are the errors of the path that was still open,
 and they stay within the limits of every fuzzy section around that point, including sections
 that had not closed yet. More text can only add errors, so a path already over a limit could never
