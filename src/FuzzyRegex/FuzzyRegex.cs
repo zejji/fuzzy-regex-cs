@@ -23,6 +23,7 @@ public delegate string MatchEvaluator(Match match);
 /// likewise be read from any thread. An enumerator is the exception, as it is everywhere in .NET: a
 /// <see cref="MatchCollection"/> may be read from several threads, but one enumerator over it -
 /// the thing a <c>foreach</c> creates - belongs to the thread that made it.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-match-may-be-read-from-any-thread-where-systemtextregularexpressionsmatch-may-not">the comparison page</see>.
 /// </para>
 /// <para>
 /// That is the guarantee the built-in <see cref="System.Text.RegularExpressions.Regex"/> makes -
@@ -40,6 +41,7 @@ public delegate string MatchEvaluator(Match match);
 /// Upstream's <c>concurrent</c> argument has no equivalent here and needs none. It asks upstream's
 /// C to release the GIL during the match, which is a question that exists only because CPython has
 /// a global lock; this port never takes one, so every call is already concurrent.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#no-concurrent-parameter">the comparison page</see>.
 /// </para>
 /// <para>
 /// Three matching operations exist where the built-in <c>Regex</c> has one, because upstream has
@@ -55,13 +57,92 @@ public delegate string MatchEvaluator(Match match);
 /// <c>MatchAtStart</c>.</b> Every static convenience on this class takes
 /// <c>(input, pattern, options)</c>, the built-in <c>Regex</c>'s parameter order, where
 /// upstream's module-level functions take the pattern before the subject.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#match-means-upstreams-search-upstreams-anchored-match-is-matchatstart">the comparison page</see>.
 /// </para>
 /// <para>
 /// Upstream's <c>pos</c> and <c>endpos</c> arguments are expressed the .NET way, as a
 /// <c>beginning</c> and a <c>length</c>: <c>endpos</c> is <c>beginning + length</c>. Positions and
-/// lengths are UTF-16 code units throughout (design spec section 4).
+/// lengths are UTF-16 code units throughout (design spec section 4). The comparison page covers
+/// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#upstreams-posendpos-are-reshaped-to-beginninglength">the reshaped arguments</see>
+/// and <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#indices-are-utf-16-code-units-where-upstream-counts-codepoints">the UTF-16 indices</see>.
+/// </para>
+/// <para>
+/// <b>A <see cref="CancellationToken"/> on every input-dependent method.</b> Every method that
+/// reads the subject takes one as its last parameter, except <see cref="Match.NextMatch"/>;
+/// upstream has none, because a Python caller interrupts a long match with Ctrl-C. See
+/// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-cancellationtoken-on-every-input-dependent-method">the comparison page</see>.
+/// </para>
+/// <para>
+/// <b>A per-call <c>timeout</c> on every input-dependent method.</b> Every one except
+/// <see cref="Match.NextMatch"/> takes a <c>TimeSpan? timeout</c>, where <see langword="null"/>
+/// means the pattern's own <see cref="FuzzyRegex.MatchTimeout"/>, as upstream's <c>timeout=</c>
+/// does. See
+/// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-per-call-timeout-on-every-input-dependent-method">the comparison page</see>.
+/// </para>
+/// <para>
+/// <b>Not ported at all</b>: <c>Pattern.scanner</c>, <c>Match.pos</c>, <c>endpos</c>,
+/// <c>string</c>, <c>re</c>, <c>regs</c> and <c>detach_string</c>, <c>regex.template</c>, the
+/// <c>LOCALE</c> and <c>DEBUG</c> options, <c>cache_pattern</c>, <c>regex.prefixmatch</c> and the
+/// copy protocol have no port equivalent. See
+/// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#not-ported-at-all">the comparison page</see>.
 /// </para>
 /// </remarks>
+/// <example>
+/// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#en-allow-up-to-n-errors-of-any-kind">the comparison page</see>:</para>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// Match m = FuzzyRegex.Match("foxbar", "^(foobar){e&lt;=1}$");
+/// Console.WriteLine(m.Success);   // True
+/// (int subs, int ins, int dels) = m.FuzzyCounts;
+/// Console.WriteLine($"{subs} {ins} {dels}");   // 1 0 0
+/// </code>
+/// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#side-separate-budgets-per-kind-of-error">the comparison page</see>:</para>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// Match m = FuzzyRegex.Match("oobargoobaploowap", "(foobar){i&lt;=2,s&lt;=2,e&lt;=2}");
+/// Console.WriteLine((m.Index, m.Length));   // (5, 6)
+/// </code>
+/// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#cost-forms-nimdn-weights-errors-instead-of-just-counting-them">the comparison page</see>:</para>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// // "3oifaowefbaoraofuiebofasebfaobfaorfeoaro" - one insertion costs nothing here because the
+/// // equation never names 'i'; two deletions or three substitutions are capped, and the total
+/// // weighted cost must come to less than 4.
+/// const string subject = "3oifaowefbaoraofuiebofasebfaobfaorfeoaro";
+/// Match m = FuzzyRegex.Match(subject, "(foobar){i&lt;=1,d&lt;=2,s&lt;=3,2d+1s&lt;4}");
+/// Console.WriteLine((m.Index, m.Length));   // (6, 7)
+/// </code>
+/// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#0e5-two-sided-form-at-least-one-error-and-fewer-than-five">the comparison page</see>:</para>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection){0&lt;e&lt;5}");
+/// Console.WriteLine((fuzzy.Index, fuzzy.Length));   // (0, 16)
+///
+/// Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0&lt;e&lt;5}");
+/// Console.WriteLine((exact.Index, exact.Length, exact.FuzzyCounts.Deletions));   // (0, 16, 1)
+/// </code>
+/// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#enset-constrain-which-characters-an-edit-may-touch">the comparison page</see>:</para>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// Match ok = FuzzyRegex.FullMatch("ae", @"(?:a){e&lt;=1:[a-z]}");
+/// Console.WriteLine(ok.Success);   // True - the inserted 'e' is in [a-z]
+///
+/// Match rejected = FuzzyRegex.FullMatch("a-", @"(?:a){e&lt;=1:[a-z]}");
+/// Console.WriteLine(rejected.Success);   // False - the inserted '-' is not in [a-z]
+/// </code>
+/// <code language="csharp">
+/// using Fuzzy.Text.RegularExpressions;
+///
+/// Match perKind = FuzzyRegex.Match("colur", @"(?:colour){i&lt;=1,d&lt;=1,s&lt;=1:[a-z]}");
+/// Console.WriteLine(perKind.Value);   // colur - one substitution and one deletion, both within [a-z]
+/// Console.WriteLine(FuzzyRegex.Match("col0ur", @"(?:colour){i&lt;=1,d&lt;=2,s&lt;=3,2d+1s&lt;4:[a-z]}").Success);   // False - the substitution would put a digit in
+/// </code>
+/// </example>
 public sealed class FuzzyRegex
 {
     /// <summary>A <see cref="MatchTimeout"/> value meaning "never time out".</summary>
@@ -76,6 +157,7 @@ public sealed class FuzzyRegex
     /// <c>Engine/Node.cs</c>) and the largest repeat count the ported suite and the compile-parity
     /// corpus contain (<c>{65535}</c>, which creates about 131,000 nodes). Upstream has no such
     /// limit; see the "Compile budget" row of <c>docs/DIVERGENCES.md</c>.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#compile-budget">the comparison page</see>.
     /// </remarks>
     public const int DefaultMaxCompiledNodes = 1_000_000;
 
@@ -124,6 +206,34 @@ public sealed class FuzzyRegex
     /// Compiles a pattern with the given options and the named lists its <c>\L&lt;name&gt;</c>
     /// references need.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The "unused keyword argument" message interpolates the name as written</b>: a named list
+    /// called <c>é</c> that the pattern never uses is reported as <c>'é'</c>, where upstream prints
+    /// <c>'\xe9'</c>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#the-unused-keyword-argument-message-interpolates-the-name-as-written">the comparison page</see>.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <para>From <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#lname-fuzzy-matching-against-a-named-list-of-words">the comparison page</see>:</para>
+    /// <code language="csharp">
+    /// using Fuzzy.Text.RegularExpressions;
+    ///
+    /// var namedLists = new Dictionary&lt;string, IReadOnlyCollection&lt;string&gt;&gt; { ["words"] = ["cat", "dog"] };
+    /// MatchCollection matches = FuzzyRegex.Matches(
+    ///     " book dog cot desk ",
+    ///     @"(?e)\b\L&lt;words&gt;{e&lt;=1}\b",
+    ///     FuzzyRegexOptions.None,
+    ///     namedLists
+    /// );
+    /// foreach (Match m in matches)
+    /// {
+    ///     Console.WriteLine(m.Value);
+    /// }
+    /// // dog
+    /// // cot
+    /// </code>
+    /// </example>
     /// <param name="pattern">The pattern to compile.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
     /// <param name="namedLists">
@@ -147,6 +257,7 @@ public sealed class FuzzyRegex
     /// backreference to a still-open group all work, where upstream defaults to version 0.
     /// Pass <see cref="FuzzyRegexOptions.Version0"/>, or write <c>(?V0)</c>, for upstream's
     /// default instead.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#version-1-is-the-default">the comparison page</see>.
     /// </para>
     /// <para>
     /// <b><c>(?V0)</c> really means version 0, where upstream's own algorithm would leave
@@ -155,12 +266,14 @@ public sealed class FuzzyRegex
     /// Upstream's own two-pass parser instead leaks its default version's flags into a leading
     /// <c>(?V0)</c>, so <c>compile('(?V0)a')</c> keeps full case-folding on there - unreachable
     /// upstream, where the default is version 0 already.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#v0-really-means-version-0-where-upstreams-own-algorithm-would-leave-version-1s-fullcase-on">the comparison page</see>.
     /// </para>
     /// <para>
     /// <b>The "unterminated character set" parse error names
     /// <see cref="FuzzyRegexOptions.Version0"/> and the <c>\[</c> escape.</b> It does so only
     /// for a pattern that version 0 itself accepts, such as <c>[[a-z]--[aeiou]]</c>; upstream
     /// raises the bare message with no such detail.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#the-unterminated-character-set-parse-error-names-fuzzyregexoptionsversion0-and-the--escape">the comparison page</see>.
     /// </para>
     /// <para>
     /// <b>A pattern needing more than <paramref name="maxCompiledNodes"/> nodes is refused</b>
@@ -169,6 +282,13 @@ public sealed class FuzzyRegex
     /// the product of their counts: <c>((a{1000}){1000}){1000}</c> needs a thousand million nodes
     /// and exhausts memory upstream, which has no limit. Raise the budget for a pattern that
     /// genuinely needs a bigger graph. See the "Compile budget" row of <c>docs/DIVERGENCES.md</c>.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#compile-budget">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>The "unused keyword argument" message interpolates the name as written</b>: a named list
+    /// called <c>é</c> that the pattern never uses is reported as <c>'é'</c>, where upstream prints
+    /// <c>'\xe9'</c>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#the-unused-keyword-argument-message-interpolates-the-name-as-written">the comparison page</see>.
     /// </para>
     /// </remarks>
     /// <param name="pattern">The pattern to compile.</param>
@@ -395,6 +515,7 @@ public sealed class FuzzyRegex
     /// here: <c>new FuzzyRegex("a").Options</c> is <c>Version1 | FullCase | Unicode</c>, because
     /// the version-implied defaults are folded into the compiled flags rather than kept as a
     /// separate, unreported field.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#version-1-is-the-default">the comparison page</see>.
     /// </para>
     /// </remarks>
     public FuzzyRegexOptions Options => (FuzzyRegexOptions)(_compiled.Flags & ~_unexposedFlags);
@@ -418,6 +539,14 @@ public sealed class FuzzyRegex
     /// <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> and never returns a
     /// wrong answer. Upstream raises <c>MemoryError</c> on these patterns. See the fuzzy recursion
     /// row of <c>docs/DIVERGENCES.md</c>.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-fuzzy-recursive-pattern-whose-calls-fail-is-matched-in-milliseconds-but-some-shapes-stay-exponential-and-matchtimeout-is-their-bound">the comparison page</see>.
+    /// <para>
+    /// <b>A per-call <c>timeout</c> on every input-dependent method.</b> Every one except
+    /// <see cref="Match.NextMatch"/> takes a <c>TimeSpan? timeout</c>, where <see langword="null"/>
+    /// means the pattern's own <see cref="FuzzyRegex.MatchTimeout"/>, as upstream's <c>timeout=</c>
+    /// does. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-per-call-timeout-on-every-input-dependent-method">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public TimeSpan MatchTimeout { get; }
 
@@ -438,6 +567,12 @@ public sealed class FuzzyRegex
     /// <c>(a{100}){100}</c> creates 20,913 nodes and keeps 10,509 - so a graph the budget refuses
     /// may be smaller than the budget once finished. Created is the number worth bounding, because
     /// the memory is spent before the pruning runs.
+    /// </para>
+    /// <para>
+    /// <b>Compile budget.</b> A pattern whose compiling creates more nodes than
+    /// <c>maxCompiledNodes</c> allows is refused at construction, where upstream builds the graph
+    /// until memory runs out. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#compile-budget">the comparison page</see>.
     /// </para>
     /// </remarks>
     public int MaxCompiledNodes { get; }
@@ -1176,6 +1311,18 @@ public sealed class FuzzyRegex
     /// (7, 9) with one insertion, while over <c>"cat and dog"</c> it is (8, 11) with no errors. A
     /// partial match has no final error count to rank by, only a lower bound.
     /// </para>
+    /// <para>
+    /// <b><c>Match</c> means upstream's <c>search</c>; upstream's anchored <c>match</c> is
+    /// <c>MatchAtStart</c>.</b> <c>Match</c> searches anywhere, as <c>Regex.Match</c> does, and
+    /// <c>MatchAtStart</c> matches only at the start position. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#match-means-upstreams-search-upstreams-anchored-match-is-matchatstart">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public Match Match(
         string input,
@@ -1202,6 +1349,12 @@ public sealed class FuzzyRegex
     /// <remarks>
     /// See <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks for
     /// how a reversed partial match behaves at the slice start under <paramref name="partial"/>.
+    /// <para>
+    /// <b><c>Match</c> means upstream's <c>search</c>; upstream's anchored <c>match</c> is
+    /// <c>MatchAtStart</c>.</b> <c>Match</c> searches anywhere, as <c>Regex.Match</c> does, and
+    /// <c>MatchAtStart</c> matches only at the start position. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#match-means-upstreams-search-upstreams-anchored-match-is-matchatstart">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public Match MatchAtStart(
         string input,
@@ -1228,6 +1381,12 @@ public sealed class FuzzyRegex
     /// <remarks>
     /// See <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks for
     /// how a reversed partial match behaves at the slice start under <paramref name="partial"/>.
+    /// <para>
+    /// <b><c>BestMatch</c> and <c>EnhanceMatch</c> keep a fit that ends in trailing insertions</b>,
+    /// so a <c>FullMatch</c> or a pattern ending in <c>$</c> answers what it answers without the
+    /// flag; upstream can lose that match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-keep-a-fit-that-ends-in-trailing-insertions">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public Match FullMatch(
         string input,
@@ -1281,6 +1440,7 @@ public sealed class FuzzyRegex
     /// <c>Match.Groups[1].Value</c> over the result. See
     /// <see cref="Count(string, int, int, bool, TimeSpan?, CancellationToken)"/> for a count with
     /// no per-match allocation.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#there-is-no-findall">the comparison page</see>.
     /// </para>
     /// <para>
     /// <b>Lazy, as the built-in <c>Regex.Matches</c> is</b> (since 2026-10-14). The returned
@@ -1292,6 +1452,12 @@ public sealed class FuzzyRegex
     /// and for the built-in collection. Upstream's <c>finditer</c> times the whole scan instead; a
     /// caller who needs the scan bounded as a whole times it themselves or passes a token. The
     /// answers are exactly <c>EnumerateMatches</c>' answers.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
     /// </para>
     /// </remarks>
     public MatchCollection Matches(
@@ -1353,6 +1519,19 @@ public sealed class FuzzyRegex
     /// <b>The clock restarts at every step</b>, because the time between two steps is the caller's,
     /// so <paramref name="timeout"/> bounds each step rather than the walk. A caller who needs the
     /// whole walk bounded should time it themselves or pass a token.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
+    /// capturing groups when the pattern has any; this method returns the matches, so read
+    /// <c>Groups[1].Value</c> for upstream's shape. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#there-is-no-findall">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
     /// </para>
     /// </remarks>
     public IEnumerable<Match> EnumerateMatches(
@@ -1403,6 +1582,24 @@ public sealed class FuzzyRegex
     /// <see cref="System.Buffers.ArrayPool{T}.Shared"/>, and returns it when the walk ends. Use it
     /// in a <c>foreach</c>, which returns the buffer however the loop ends; see
     /// <see cref="ValueMatchEnumerator"/>.
+    /// </para>
+    /// <para>
+    /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
+    /// capturing groups when the pattern has any; this method returns the matches, so read
+    /// <c>Groups[1].Value</c> for upstream's shape. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#there-is-no-findall">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
     /// </para>
     /// </remarks>
     public ValueMatchEnumerator EnumerateMatches(
@@ -1565,6 +1762,13 @@ public sealed class FuzzyRegex
     /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/>'s <c>maxSplits</c>: here
     /// <c>-1</c> means "no limit" and <c>0</c> means "replace nothing", where upstream's
     /// <c>count=0</c> means "no limit" and a negative count replaces nothing.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>Replacement templates speak upstream's language.</b> <c>\1</c>, <c>\g&lt;name&gt;</c>,
+    /// <c>\n</c>, <c>\x41</c> and <c>\N{...}</c> mean what they mean upstream, and <c>$</c> is
+    /// ordinary text. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replacement-templates-speak-upstreams-language">the comparison page</see>.
     /// </para>
     /// </remarks>
     public string Replace(
@@ -1617,6 +1821,17 @@ public sealed class FuzzyRegex
     /// cannot reach position 1. The C says so as well: <c>pattern_subx</c>'s trailing segment runs
     /// to <c>str_info.length</c> rather than to the slice end
     /// (<c>upstream/src/_regex.c:22092-22097</c>).
+    /// <para>
+    /// <b><c>Replace</c>'s <c>count</c> is inverted the same way.</b> <c>-1</c> means no limit and
+    /// <c>0</c> replaces nothing, where upstream's <c>count=0</c> replaces every match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>Replacement templates speak upstream's language.</b> <c>\1</c>, <c>\g&lt;name&gt;</c>,
+    /// <c>\n</c>, <c>\x41</c> and <c>\N{...}</c> mean what they mean upstream, and <c>$</c> is
+    /// ordinary text. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replacement-templates-speak-upstreams-language">the comparison page</see>.
+    /// </para>
     /// </remarks>
     // The slice comes after `replacements` here and before it in every other overload, because an
     // `out` parameter has to stay where it was: moving it would be a source break for no gain.
@@ -1644,6 +1859,13 @@ public sealed class FuzzyRegex
         );
 
     /// <summary>Replaces matches with text computed per match.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Replace</c>'s <c>count</c> is inverted the same way.</b> <c>-1</c> means no limit and
+    /// <c>0</c> replaces nothing, where upstream's <c>count=0</c> replaces every match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="evaluator">Computes the replacement for each match.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
@@ -1684,6 +1906,13 @@ public sealed class FuzzyRegex
     /// Replaces matches with text computed per match, reporting how many were replaced. Upstream
     /// <c>Pattern.subn</c> with a callable.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Replace</c>'s <c>count</c> is inverted the same way.</b> <c>-1</c> means no limit and
+    /// <c>0</c> replaces nothing, where upstream's <c>count=0</c> replaces every match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="evaluator">Computes the replacement for each match.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
@@ -1751,6 +1980,13 @@ public sealed class FuzzyRegex
     /// <b>Split spells "no limit" as <c>maxSplits = -1</c>.</b> Upstream spells it
     /// <c>maxsplit=0</c>, and reads a negative number as "no splits" - the opposite
     /// convention, applied at the boundary only.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-spells-no-limit-as-maxsplits---1">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b><c>Split</c> returns <c>string?[]</c> and puts <see langword="null"/> where a capturing
+    /// group did not take part</b>, as upstream puts <c>None</c>; the built-in <c>Regex.Split</c>
+    /// leaves the entry out. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-returns-string-and-puts-null-where-a-capturing-group-did-not-take-part">the comparison page</see>.
     /// </para>
     /// </remarks>
     public string?[] Split(
@@ -1796,6 +2032,23 @@ public sealed class FuzzyRegex
     /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/> has none and upstream has
     /// none: <c>pattern_split</c>'s keyword list is <c>string, maxsplit, concurrent, timeout</c>,
     /// so a split is always of the whole subject.
+    /// <para>
+    /// <b><c>Split</c> spells "no limit" as <c>maxSplits = -1</c>.</b> <c>0</c> splits nowhere,
+    /// where upstream's <c>maxsplit=0</c> means no limit and a negative one means no splits. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-spells-no-limit-as-maxsplits---1">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b><c>Split</c> returns <c>string?[]</c> and puts <see langword="null"/> where a capturing
+    /// group did not take part</b>, as upstream puts <c>None</c>; the built-in <c>Regex.Split</c>
+    /// leaves the entry out. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-returns-string-and-puts-null-where-a-capturing-group-did-not-take-part">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public IEnumerable<string?> EnumerateSplits(
         string input,
@@ -1831,6 +2084,7 @@ public sealed class FuzzyRegex
     /// See <see cref="Replace(string, string, int, int, int, TimeSpan?, CancellationToken)"/>'s
     /// remarks: <b>Replace's <c>count</c> is inverted the same way</b> applies here too -
     /// <c>-1</c> is "no limit" and <c>0</c> is "replace nothing".
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
     /// </remarks>
     public string ReplaceFormat(
         string input,
@@ -1858,6 +2112,13 @@ public sealed class FuzzyRegex
     /// Replaces matches by expanding a <c>str.format</c>-style template, reporting how many were
     /// replaced. Upstream <c>Pattern.subfn</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Replace</c>'s <c>count</c> is inverted the same way.</b> <c>-1</c> means no limit and
+    /// <c>0</c> replaces nothing, where upstream's <c>count=0</c> replaces every match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replaces-count-is-inverted-the-same-way">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="format">The format template.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
@@ -1986,6 +2247,20 @@ public sealed class FuzzyRegex
     ) => Cached(pattern, options).IsMatch(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds the first match anywhere in the subject. Upstream <c>regex.search</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Match</c> means upstream's <c>search</c>; upstream's anchored <c>match</c> is
+    /// <c>MatchAtStart</c>.</b> <c>Match</c> searches anywhere, as <c>Regex.Match</c> does, and
+    /// <c>MatchAtStart</c> matches only at the start position. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#match-means-upstreams-search-upstreams-anchored-match-is-matchatstart">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2008,6 +2283,14 @@ public sealed class FuzzyRegex
     /// <summary>
     /// Finds the match starting at the start of the subject. Upstream <c>regex.match</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Match</c> means upstream's <c>search</c>; upstream's anchored <c>match</c> is
+    /// <c>MatchAtStart</c>.</b> <c>Match</c> searches anywhere, as <c>Regex.Match</c> does, and
+    /// <c>MatchAtStart</c> matches only at the start position. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#match-means-upstreams-search-upstreams-anchored-match-is-matchatstart">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to match.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2030,6 +2313,14 @@ public sealed class FuzzyRegex
             .MatchAtStart(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds the match covering the whole subject. Upstream <c>regex.fullmatch</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>BestMatch</c> and <c>EnhanceMatch</c> keep a fit that ends in trailing insertions</b>,
+    /// so a <c>FullMatch</c> or a pattern ending in <c>$</c> answers what it answers without the
+    /// flag; upstream can lose that match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-keep-a-fit-that-ends-in-trailing-insertions">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to match.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2050,6 +2341,20 @@ public sealed class FuzzyRegex
     ) => Cached(pattern, options, namedLists).FullMatch(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds every match in the subject. Upstream <c>regex.finditer</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
+    /// capturing groups when the pattern has any; this method returns the matches, so read
+    /// <c>Groups[1].Value</c> for upstream's shape. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#there-is-no-findall">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2077,6 +2382,26 @@ public sealed class FuzzyRegex
     /// Finds every match in the subject, one at a time. Upstream <c>regex.finditer</c>; the lazy
     /// twin of <see cref="Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}}, TimeSpan?, CancellationToken)"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
+    /// capturing groups when the pattern has any; this method returns the matches, so read
+    /// <c>Groups[1].Value</c> for upstream's shape. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#there-is-no-findall">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2102,6 +2427,20 @@ public sealed class FuzzyRegex
     /// Splits the subject around the matches, producing the pieces one at a time. Upstream
     /// <c>regex.splititer</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A lazy walk times each step, <c>Matches</c> included.</b> The clock restarts for every
+    /// match, because the time between two reads is the caller's; upstream's <c>finditer</c> has
+    /// one budget for the whole walk. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-lazy-walk-times-each-step-matches-included">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b><c>Split</c> returns <c>string?[]</c> and puts <see langword="null"/> where a capturing
+    /// group did not take part</b>, as upstream puts <c>None</c>; the built-in <c>Regex.Split</c>
+    /// leaves the entry out. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-returns-string-and-puts-null-where-a-capturing-group-did-not-take-part">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to split.</param>
     /// <param name="pattern">The pattern to split on.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -2137,6 +2476,14 @@ public sealed class FuzzyRegex
     /// <summary>
     /// Replaces matches with an expanded replacement template. Upstream <c>regex.sub</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Replacement templates speak upstream's language.</b> <c>\1</c>, <c>\g&lt;name&gt;</c>,
+    /// <c>\n</c>, <c>\x41</c> and <c>\N{...}</c> mean what they mean upstream, and <c>$</c> is
+    /// ordinary text. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replacement-templates-speak-upstreams-language">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="replacement">The replacement template.</param>
@@ -2246,6 +2593,14 @@ public sealed class FuzzyRegex
             );
 
     /// <summary>Splits the subject around the matches. Upstream <c>regex.split</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Split</c> returns <c>string?[]</c> and puts <see langword="null"/> where a capturing
+    /// group did not take part</b>, as upstream puts <c>None</c>; the built-in <c>Regex.Split</c>
+    /// leaves the entry out. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#split-returns-string-and-puts-null-where-a-capturing-group-did-not-take-part">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     /// <param name="input">The subject to split.</param>
     /// <param name="pattern">The pattern to split on.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
