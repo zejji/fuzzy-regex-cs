@@ -427,6 +427,7 @@ internal static class RequiredStringScreen
         0xFB15,
         0xFB16,
         0xFB17,
+        0x1DF95,
     ];
 
     /// <summary>

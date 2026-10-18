@@ -133,16 +133,16 @@ internal static partial class UnicodeTables
         v = ScriptExtensionsTable2[(int)((v << 5) | field_1)];
         v = ScriptExtensionsTable3[(int)((v << 5) | field_0)];
 
-        // Below 176 the value is the single script itself; at or above it, an index into a
+        // Below 179 the value is the single script itself; at or above it, an index into a
         // table of zero-terminated runs.
-        if (v < 176)
+        if (v < 179)
         {
             scripts[0] = (byte)v;
 
             return 1;
         }
 
-        int offset = ScriptExtensionsTable4[v - 176];
+        int offset = ScriptExtensionsTable4[v - 179];
         int count = 0;
 
         do

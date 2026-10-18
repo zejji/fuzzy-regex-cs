@@ -5,19 +5,19 @@ Upstream calls Python's ``unicodedata.lookup``. .NET has no character-name API a
 the one place the port genuinely needs a UCD data file: everything else is transliterated from
 tables upstream has already generated (``docs/plan/2026-08-30-phase2-decisions.md``, decision B).
 
-Reads ``UnicodeData.txt`` and ``NameAliases.txt`` for **Unicode 17.0.0**, the version
+Reads ``UnicodeData.txt`` and ``NameAliases.txt`` for **Unicode 18.0.0**, the version
 ``upstream/src/_regex_unicode.h`` declares - not whichever version the host CPython's
 ``unicodedata`` happens to ship. Writes ``src/FuzzyRegex/Unicode/UnicodeCharacterNames.g.cs``.
 
-The four algorithmic ranges are computed, not stored: Hangul syllables (11,172 names), CJK unified
-ideographs (~100,000) and the two Tangut ranges (~7,000) would otherwise be 90% of the table.
-Everything else - 40,470 names plus 481 aliases - is stored.
+The algorithmic ranges are computed, not stored: Hangul syllables (11,172 names), CJK unified
+ideographs (~100,000), the two Tangut ranges (~7,000), Jurchen (914) and Small Seal (11,328)
+would otherwise be most of the table. Everything else is stored.
 
 **Verification happens here, in Python, against the host's own ``unicodedata``**, because that is
 an implementation independent of these data files. For every codepoint the host can name, the
 table (or the algorithm) must map that name back to that codepoint. Names are immutable under
-Unicode's stability policy, so a 16.0.0 name is still a 17.0.0 name; only the additions cannot be
-checked this way, and they are counted instead. The C# test then only has to prove the table
+Unicode's stability policy, so the host's 16.0.0 names are still 18.0.0 names; only the additions
+since the host's version cannot be checked this way, and they are counted instead. The C# test then only has to prove the table
 survived the trip into C#, which is what the fixture digest is for.
 
 Usage:
@@ -41,7 +41,7 @@ CACHE = REPO_ROOT / '.scratch/ucd'
 OUT_PATH = REPO_ROOT / 'src/FuzzyRegex/Unicode/UnicodeCharacterNames.g.cs'
 FIXTURE_PATH = REPO_ROOT / 'tests/FuzzyRegex.Tests/Gaps/Unicode/character-names.json'
 
-UNICODE_VERSION = '17.0.0'
+UNICODE_VERSION = '18.0.0'
 BASE_URL = f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/'
 FILES = ('UnicodeData.txt', 'NameAliases.txt', 'DerivedAge.txt')
 
@@ -83,6 +83,11 @@ def classify_range(label: str) -> str | None:
         return 'CJK UNIFIED IDEOGRAPH-'
     if 'Tangut Ideograph' in label:
         return 'TANGUT IDEOGRAPH-'
+    # New in 18.0; the prefixes are extracted/DerivedName.txt's.
+    if label == '<Jurchen Character, First>':
+        return 'JURCHEN CHARACTER-'
+    if label == '<Seal Character, First>':
+        return 'SMALL SEAL CHARACTER-'
     if 'Surrogate' in label or 'Private Use' in label:
         return None
     raise Fail(f'unknown algorithmic range {label!r}: decide what it is named before shipping')
@@ -145,22 +150,26 @@ def parse_aliases(text: str) -> list[tuple[str, int, str]]:
     return aliases
 
 
-def parse_age(text: str, version: str) -> list[tuple[int, int]]:
-    """The codepoint ranges DerivedAge.txt assigns to one version."""
+def parse_age_after(text: str, host_version: str) -> list[tuple[int, int]]:
+    """The codepoint ranges DerivedAge.txt assigns to a Unicode version later than the host's.
+
+    These are the codepoints the host's ``unicodedata`` cannot answer for.
+    """
+    host = tuple(int(part) for part in host_version.split('.')[:2])
     ranges = []
     for line in text.splitlines():
         line = line.split('#')[0].strip()
         if not line:
             continue
         codes, age = (part.strip() for part in line.split(';'))
-        if age != version:
+        if tuple(int(part) for part in age.split('.')) <= host:
             continue
         if '..' in codes:
             first, last = (int(c, 16) for c in codes.split('..'))
         else:
             first = last = int(codes, 16)
         ranges.append((first, last))
-    return ranges
+    return sorted(ranges)
 
 
 # --------------------------------------------------------------------------------------
@@ -211,14 +220,14 @@ def verify(table: dict[str, int], ranges: list[tuple[str, int, int]]) -> int:
 
 
 def verify_algorithmic(ranges: list[tuple[str, int, int]],
-                       new_in_17: set[int]) -> list[tuple[str, int, int]]:
+                       unknown_to_host: set[int]) -> list[tuple[str, int, int]]:
     """The names we *compute* have to be the names the host resolves.
 
     The loop above only sees codepoints ``unicodedata.name`` will name, and it will not name a
     Tangut ideograph even though ``unicodedata.lookup`` resolves one (measured 2026-08-30,
     CPython 3.14.6). Going the other way - compute the name, ask the host to look it up - covers
-    every algorithmic range instead of most of them. A codepoint new in 17.0 has no 16.0.0 name
-    to check against and is counted separately rather than skipped silently.
+    every algorithmic range instead of most of them. A codepoint newer than the host's version has
+    no name there to check against and is counted separately rather than skipped silently.
     """
     report = []
     for prefix, first, last in ranges:
@@ -230,10 +239,10 @@ def verify_algorithmic(ranges: list[tuple[str, int, int]],
             try:
                 resolved = unicodedata.lookup(name)
             except KeyError:
-                if codepoint in new_in_17:
+                if codepoint in unknown_to_host:
                     unknown += 1
                     continue
-                raise Fail(f'{name!r} (U+{codepoint:04X}) is not new in 17.0 but unicodedata '
+                raise Fail(f'{name!r} (U+{codepoint:04X}) predates the host but unicodedata '
                            f'{unicodedata.unidata_version} does not know it: the range prefix '
                            f'is wrong')
             if len(resolved) != 1 or ord(resolved) != codepoint:
@@ -340,8 +349,8 @@ def render_fixture(entries: list[tuple[str, int]], ranges, checked: int, additio
         'storedNames': digest.hexdigest(),
         'algorithmicRangeCount': len(ranges),
         'namesCheckedAgainstHost': checked,
-        'codepointsAddedIn17': additions,
-        'codepointRangesAddedIn17': [[first, last] for first, last in addition_ranges],
+        'codepointsUnknownToHost': additions,
+        'codepointRangesUnknownToHost': [[first, last] for first, last in addition_ranges],
     }, indent=2) + '\n'
 
 
@@ -370,12 +379,12 @@ def build():
 
     checked = verify(table, ranges)
 
-    age_ranges = parse_age(fetch('DerivedAge.txt'), '17.0')
+    age_ranges = parse_age_after(fetch('DerivedAge.txt'), unicodedata.unidata_version)
     additions = sum(last - first + 1 for first, last in age_ranges)
-    new_in_17 = {cp for first, last in age_ranges for cp in range(first, last + 1)}
+    unknown_to_host = {cp for first, last in age_ranges for cp in range(first, last + 1)}
 
-    for label, verified, unknown in verify_algorithmic(ranges, new_in_17):
-        print(f'  {label}: {verified} verified, {unknown} new in 17.0', file=sys.stderr)
+    for label, verified, unknown in verify_algorithmic(ranges, unknown_to_host):
+        print(f'  {label}: {verified} verified, {unknown} unknown to the host', file=sys.stderr)
 
     entries = sorted(table.items())
     return entries, ranges, checked, additions, age_ranges
@@ -411,7 +420,7 @@ def main() -> int:
     print(f'name characters:     {sum(len(n) for n, _ in entries)}')
     print(f'algorithmic ranges:  {len(ranges)}')
     print(f'checked against unicodedata {unicodedata.unidata_version}: {checked} names')
-    print(f'codepoints new in 17.0: {additions}')
+    print(f'codepoints unknown to unicodedata {unicodedata.unidata_version}: {additions}')
     print(f'wrote {OUT_PATH.relative_to(REPO_ROOT)} '
           f'({OUT_PATH.stat().st_size} bytes) and '
           f'{FIXTURE_PATH.relative_to(REPO_ROOT)}')
