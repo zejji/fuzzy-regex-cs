@@ -17,7 +17,7 @@ per release.
 ## [1.0.0] - 2026-10-19
 
 The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking
-upstream 2026.9.10: every construct upstream's parser accepts, fuzzy matching with per-kind error
+upstream 2026.9.19: every construct upstream's parser accepts, fuzzy matching with per-kind error
 budgets and weighted costs, and an API shaped after `System.Text.RegularExpressions.Regex`. All
 1,967 ported upstream tests pass with none skipped. The phases below record how it was built; the
 GitHub release notes for v1.0.0 list every deliberate difference from upstream, the upstream bugs
@@ -96,7 +96,11 @@ this port does not share, the performance gate and the known limitations.
 - Phase 8: **documentation, packaging and the demo.** `docs/GUIDE.md` for a reader who knows
   `System.Text.RegularExpressions` and has never used Python `regex`; `docs/COMPARISON.md`, the
   complete member-by-member mapping; package validation and a rehearsed release
-  (`docs/plan/RELEASE.md`); and a browser demo that runs the engine in a Web Worker.
+  (`docs/plan/RELEASE.md`); and a browser demo that runs the engine in a Web Worker. The 59
+  deliberate differences from upstream that change a public member now show in IntelliSense, as a
+  `<remarks>` note on that member linked to its section of `docs/COMPARISON.md`; the other 42 are
+  the behaviour of a pattern construct and name no member. A convention test keeps the notes in
+  step with `docs/DIVERGENCES.md`.
 - **The correctness sweep before 1.0.** After Phase 6 a complete interaction matrix and then a
   battery of searches (fresh oracle seeds, a bed of real and generated patterns, and generators for
   each pair of features such as fuzzy matching with backreferences, or partial matching with
@@ -105,7 +109,10 @@ this port does not share, the performance gate and the known limitations.
   lists them. The stopping rule was two consecutive battery runs with no new root cause, met by
   runs 7 and 8 on 2026-10-18. The largest change was to partial matching, which now works to a
   written contract: a partial promises that more text may complete the match, and where some text
-  does, a partial call never answers "no match".
+  does, a partial call never answers "no match". For one class of fuzzy pattern, set out in the
+  release notes, the partial start is a bound: never later than where a completed text's match
+  starts, and sometimes a few characters earlier. Among the last fixes were a repeat guard that could cut a matching path in a partial call's second pass (D90),
+  and a search that skipped start positions after a `\K` and a `(*PRUNE)` or `(*SKIP)` (D92).
 
 ### Changed
 

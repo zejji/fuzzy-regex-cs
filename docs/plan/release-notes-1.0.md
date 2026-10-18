@@ -6,7 +6,7 @@
 
   The divergence links point at line numbers of DIVERGENCES.md in the v1.0.0 tag. If that file
   changes before the tag is made, re-check every link (the row lines were 25-31, 37-51, 57-135
-  when this was drafted on main ff86226e).
+  when this was drafted on main ff86226e, and were re-checked unchanged on main dc8022ed).
 -->
 
 ---
@@ -29,14 +29,16 @@ runs the engine in your browser.
 
 ## What 1.0 supports
 
-- **Everything upstream's parser accepts**, tracking mrab-regex 2026.9.10 (commit `7dd71c1`). All
-  1,967 ported upstream tests pass, with none skipped (`docs/STATUS.md`).
-  <!-- TODO(orchestrator): if S81a (upstream issue 619, the 2026.9.19 fix) lands before the tag,
-  change the version and commit above to 2026.9.19 and say so here. -->
+- **Everything upstream's parser accepts**, tracking mrab-regex 2026.9.19 (commit `85e568c`). All
+  1,967 ported upstream tests pass, with none skipped (`docs/STATUS.md`). The one change in
+  2026.9.19, upstream issue 619, stops `expand()` crashing after `detach_string()`. This port has
+  no `detach_string` and keeps its subject for the life of a match, so there was nothing to port,
+  and a test pins that.
 - **Fuzzy matching**: per-kind budgets (`{i<=1,d<=2,s<=1}`), weighted cost equations
   (`{2i+1d+1s<4}`), the `{...:test}` form that limits which characters an error may fall on, error
   counts and change positions on every match, and the two ranking modes `EnhanceMatch` (`(?e)`) and
-  `BestMatch` (`(?b)`).
+  `BestMatch` (`(?b)`). A minimum needs a maximum: `{1<=d<=3}` asks for one to three deletions,
+  while `{1<=d}` on its own is six literal characters, as upstream reads it.
 - **Every non-fuzzy construct upstream has**: lookahead and variable-length lookbehind, recursion
   and group calls (`(?R)`, `(?&name)`, `(?(DEFINE)...)`), conditionals, branch reset, named lists
   (`\L<name>`), possessive quantifiers, `\K`, the `(*PRUNE)`, `(*SKIP)` and `(*FAIL)` verbs,
@@ -72,17 +74,25 @@ partial. PCRE2, Java's `hitEnd()`, Boost and upstream make the same promise.
 **The promise holds firmly the other way.** Where some longer text does complete a match, a partial
 call never answers "no match". A caller that stops reading at the first "no match" never misses one.
 
-**For one class of pattern the partial start is a bound in one direction.** The class is a pattern
-with a fuzzy section in which one insertion fits, searched without `BestMatch`, that also has a
-position test (`^`, `$`, `\A`, `\Z`, `\G`, `\b`, `\B`, `\m`, `\M`, a grapheme boundary or a
-lookaround), a construct whose result depends on the path taken (a backreference, a conditional, a
-group call, a verb, `\K`, an atomic group or a possessive quantifier), or a fuzzy minimum such as
-`{1<=i<=2}`. For these the partial can start earlier than the match more text would give, and
-never later. For example, `(?:ab){1<=i<=2}` over `xxa` is a partial at 0, while the completed text
-`xxab` matches at 1. On the generated searches this rule moved, the start was early by 1 character
-on 61, by 2 on 4, and by 3 at most; that bound was observed, and is unproven. Under `(?r)` the same
-holds mirrored, at the end of the match. A caller that keeps the text from the partial start keeps
-a few extra characters and still holds the start of every match that is arriving.
+**For one class of pattern the partial start is a bound in one direction.** The class is every
+pattern compiled without `BestMatch` that has a fuzzy section in which one insertion fits (its
+insertion and error limits are above zero and an insertion's cost is within its cost limit),
+together with at least one of these:
+
+- a position test: `^`, `$`, `\A`, `\Z`, `\G`, `\b`, `\B`, `\m`, `\M`, a grapheme boundary or a
+  lookaround;
+- a construct whose result depends on the path taken: a backreference, a conditional, a group
+  call, `(*PRUNE)`, `(*SKIP)`, `(*FAIL)`, `\K`, an atomic group or a possessive quantifier;
+- a fuzzy minimum, such as `{1<=i<=2}`.
+
+For these the partial start is never later than the leftmost start this library's own search
+finds in any completed text, and it may be earlier. For example, `(?:ab){1<=i<=2}` over `xxa` is a
+partial at 0, while the completed text `xxab` matches at 1. On the generated searches this rule
+moved, the start was early by 1 character on 61, by 2 on 4, and by 3 at most; that bound was
+observed, and is unproven. Under `(?r)` the same holds mirrored: the partial's end is never earlier
+than the rightmost end a completed text gives, and may be later. A caller that keeps the text from
+the partial start keeps a few extra characters and still holds the start of every match that is
+arriving. Every other pattern gets the exact start.
 
 **One accepted kind of partial differs between a group call and the same group written out.** When
 a group call is opened inside a body whose outcome feeds a decision (a negative lookaround, a
@@ -90,9 +100,13 @@ conditional's test, a lookahead inside an atomic group or possessive repeat, any
 `(*PRUNE)` or `(*SKIP)`, or any lookaround in a fuzzy pattern) and the text runs out inside that
 call, the engine answers the partial at once. So `(x)(?!y?(?1))\Z` over `xy` is a partial at
 (0, 2), where the written-out `(x)(?!y?x)\Z` gives no match; a search can also report an earlier
-start than the written-out form. Each such answer is either a partial that no text completes or
-one that starts early, and none is a missed match. PCRE2 10.47 and upstream give the same partials.
-The fix that would make the two forms agree is a candidate for 1.1.
+start than the written-out form. In a fuzzy pattern that has any group call, the same holds for a
+run-out in any lookaround's body, whether or not that body opened a call:
+`(?!(?:a*a){s<=1})(?P<g1>)(?1)` over `a` is a partial at (0, 1) that no text completes, and gives
+no match without the call. Each such answer is either a partial that no text completes or one that
+starts early, and none is a missed match. PCRE2 10.47 and upstream give the same partial as this
+library for `(x)(?!y?(?1))\Z`, and for the same call in a conditional's test and in an atomic
+group. The fix that would make the two forms agree is a candidate for 1.1.
 
 Under `BestMatch` and `EnhanceMatch` a partial search reports the leftmost start whose match was
 still open, because those modes rank complete matches by their errors and a partial has no final
@@ -243,7 +257,11 @@ generated rows, and that turned up defects in upstream itself. Each one is recor
 [LEDGER.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/plan/upstream-reports/LEDGER.md)
 with a minimal reproduction, the faulting code where it was traced, and this port's answer. The
 ledger holds 90 entries, numbered 1 to 91 (there is no 41). Entry 10 was fixed by upstream itself in
-2026.9.10. None of the others has been reported upstream yet. Some notable ones:
+2026.9.10. None of the others has been reported upstream yet. Two entries gained a second form on
+2026-10-18, each found by the last battery run and pinned by tests: the reversed form of entry 62
+(a negative condition's yes branch keeps only its first alternative) and the mirror of entry 90,
+where a reversed partial search before a lookahead that fails on the text it holds reports a
+partial that ends too late. Some notable ones:
 
 - A POSIX search of a fuzzy pattern crashes the C engine (entry 9).
 - A self-recursive call around a fuzzy section that can match empty exhausts memory (entry 14), and so does a left-recursive group call (entry 73).
@@ -284,11 +302,6 @@ method and the raw data are in
 
 ## Known limitations
 
-- **D90, a partial match with a lookaround that sets a group.** <!-- TODO(orchestrator): status to
-  be filled in by the orchestrator: fix in progress. --> In a partial call's second pass a repeat
-  guard can cut a path that matches, when a lookaround that sets a group keeps paths with other
-  captures: `a*(?:(?=(?:(a)|b)*)a)+\1ab?` searched over `ab` with `partial: true` gives (2, 2)
-  where (0, 2) is right.
 - **Refused patterns.** These raise `FuzzyRegexParseException` (or `NotSupportedException` for
   `(?L)`) when the pattern is compiled, where upstream compiles them and then fails or runs out of
   memory: exact left recursion, such as `(?(DEFINE)(?<list>(?&list),\w+|\w+))^(?&list)$`; a whole-pattern
@@ -301,7 +314,14 @@ method and the raw data are in
 - **Performance work deferred to 1.1.** D99: a chain of recursive calls that re-enter at the same
   position inside a fuzzy section repeats each level's failed work (`(?:(?P<g>a(?&g)b|c)){d<=6}`
   over 12 `a`s and a `c` takes about 43 times the steps it took before the fix that caused it).
-  D103: the 105 MB per call allocation in ConditionalPerTokenNoMemo, above. Other timing and
+  D103: the 105 MB per call allocation in ConditionalPerTokenNoMemo, above. D104: a partial call
+  can take longer on short texts when the pattern has a lookahead inside a repeat that captures a
+  group, and a `(?(n)...)` condition reads that group. This is the cost of a fix to partial
+  matching (D90), and the partial fork budget bounds it: each attempt may fork 256 times for
+  every character of the text, plus 256. `(?:(?=(?:a|(b))*y)a)+(?(1)c|d)` over ten `a`s and a `b` takes 54,461 steps where it took
+  7,141, while at 50 and 100 `a`s it takes fewer steps than before. Where the budget runs out,
+  the call answers a partial at the attempt's start, which the partial contract allows, and it
+  never loses a match. Other timing and
   allocation rows (D29, D33, D68, D71, D82, D91) and the slowdowns accepted with the D85 and D92
   correctness fixes are in
   [KNOWN-DEFECTS.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/KNOWN-DEFECTS.md).
