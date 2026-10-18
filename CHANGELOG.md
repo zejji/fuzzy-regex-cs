@@ -94,6 +94,11 @@ module needs to know where this port deliberately behaves differently.
   would show it: a POSIX fuzzy match reported the errors it had spent as zero, since the
   save/restore of the best match carried neither the counts nor the change list.
 
+- **Tracks mrab-regex 2026.9.19** (commit `85e568c`), up from 2026.9.10. Its one change, issue 619,
+  stops `expand()` crashing after `detach_string()`; this port has no `detach_string` and holds its
+  subject for the life of the match, so there was nothing to port, and a test now pins that.
+  2026.9.29 (Unicode 18.0.0) follows after 1.0.
+
 ### Fixed
 
 The first two were found by the differential oracle, and neither was visible to the ported test
