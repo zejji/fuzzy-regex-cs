@@ -1032,6 +1032,13 @@ internal sealed class PatternObject
     internal bool TailRunOutAsBeforeD67;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether this pattern was compiled with
+    /// <see cref="Parsing.Info.UpstreamReverseGrapheme"/>, so that a reversed <c>\X</c> also keeps
+    /// upstream's answer at the slice start (D108). See <c>Matcher.ReversedGraphemeCutBySliceStart</c>.
+    /// </summary>
+    internal bool UpstreamReverseGrapheme;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
     /// open fuzzy sections' upper limits, as upstream's does (D81). The oracle sets it on a pattern
     /// it compiled for an ablation, since upstream has none of this port's fixes. See

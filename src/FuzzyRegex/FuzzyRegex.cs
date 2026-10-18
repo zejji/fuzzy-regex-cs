@@ -473,6 +473,7 @@ public sealed class FuzzyRegex
         // with it because the compile budget's refusal is a parse failure and carries the pattern,
         // and CompiledPattern - the compile-parity seam - deliberately does not hold it.
         PatternObject = Engine.PatternObject.Compile(_compiled, pattern, maxCompiledNodes);
+        PatternObject.UpstreamReverseGrapheme = upstreamReverseGrapheme;
 
         TimeoutTicks = ToTicks(matchTimeout);
 

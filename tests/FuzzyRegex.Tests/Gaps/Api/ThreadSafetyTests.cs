@@ -863,6 +863,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.TailRunOutAsBeforeD67",
             // D81 added RunOutAsBeforeD81, likewise set only by OracleComparer's named ablations.
             "PatternObject.RunOutAsBeforeD81",
+            // D108 added UpstreamReverseGrapheme, written once by the FuzzyRegex constructor right
+            // after PatternObject.Compile, and true only for OracleComparer.RunWithTheUpstreamReverseGrapheme.
+            "PatternObject.UpstreamReverseGrapheme",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
