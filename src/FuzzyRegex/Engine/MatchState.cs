@@ -2640,7 +2640,7 @@ internal sealed class MatchState : IDisposable
             }
 
             repeat.TailGuardList.Reset();
-            repeat.KeyedTail?.Reset(newAttempt: true);
+            repeat.KeyedTail?.Reset();
         }
 
         KeyedTailWrites = 0;

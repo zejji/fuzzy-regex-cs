@@ -44,6 +44,29 @@ public sealed class AllocationTests
         allocated.Should().Be(0, "a predicate on a warm pattern has nothing it needs to build");
     }
 
+    /// <summary>
+    /// D103: every entry to a conditional saves each repeat's guard lists (upstream's
+    /// <c>push_repeats</c>), and the search enters this one about 10 n² times. D85's keyed tail
+    /// lists were saved as a new dictionary of copied lists, so a warm call allocated 105,408,000
+    /// bytes at n = 200 (0 before D85). They now go onto the byte stack like a plain list's spans.
+    /// </summary>
+    [Test]
+    public void A_conditional_inside_a_repeat_with_a_keyed_tail_allocates_nothing_when_warm()
+    {
+        string subject = string.Concat(Enumerable.Repeat("aaaa ", 200)) + "!";
+        bool actual = true;
+
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(@"(\w)(?:(?(?=\w)\w+|\s))*\1$");
+            _ = regex.IsMatch(subject);
+            return () => actual = regex.IsMatch(subject);
+        });
+
+        actual.Should().BeFalse();
+        allocated.Should().Be(0, "a warm predicate allocated nothing on this pattern before D85");
+    }
+
     [Test]
     public void The_empty_iteration_record_allocates_only_for_the_states_it_keeps()
     {

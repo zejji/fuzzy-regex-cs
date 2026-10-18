@@ -19898,7 +19898,7 @@ internal static class Matcher
         {
             groupCallRepeat.BodyGuardList.Reset();
             groupCallRepeat.TailGuardList.Reset();
-            groupCallRepeat.KeyedTail?.Reset(newAttempt: false);
+            groupCallRepeat.KeyedTail?.Reset();
         }
 
         // Call a group, skipping its CALL_REF node. Be aware that we might be calling

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
 namespace Fuzzy.Text.RegularExpressions.Engine;
 
 /// <summary>
@@ -18,14 +21,17 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 internal sealed class KeyedTailGuards
 {
     private readonly Dictionary<TailKeyValues, GuardList> _lists = [];
-    private readonly List<Dictionary<TailKeyValues, GuardList>?> _saved = [];
     private long[] _currentKey = [];
+
+    /// <summary>Where <see cref="CheckUnchanged"/> reads a saved key, in Debug only.</summary>
+    private long[] _checkKey = [];
     private GuardList? _current;
     private bool _hasCurrent;
 
     /// <summary>
-    /// Lists and key arrays forgotten by <see cref="Reset"/>, kept for the next attempt so that a
-    /// warm call on a compiled pattern allocates nothing once its keys have been seen.
+    /// Lists and key arrays forgotten by <see cref="Reset"/> or replaced by a restore
+    /// (<see cref="PopFrom"/>), kept for reuse so that a warm call on a compiled pattern allocates
+    /// nothing once its keys have been seen.
     /// </summary>
     private readonly Stack<(long[] Key, GuardList List)> _spare = [];
 
@@ -88,20 +94,119 @@ internal sealed class KeyedTailGuards
     }
 
     /// <summary>Forgets every list, as <c>reset_guard_list</c> does for a plain one.</summary>
-    /// <param name="newAttempt">
-    /// Whether a new attempt begins, so no save made before can be restored; a group call's
-    /// reset keeps the saves, since its return restores the one made just before it.
-    /// </param>
-    internal void Reset(bool newAttempt)
+    internal void Reset()
     {
         _changes++;
         _hasCurrent = false;
         _current = null;
-        if (newAttempt)
+        ReturnListsToSpare();
+    }
+
+    /// <summary>Forgets everything, for a state reused by another call (<c>MatchState.Init</c>).</summary>
+    internal void Clear()
+    {
+        Reset();
+        _changes = 0;
+    }
+
+    /// <summary>
+    /// Upstream saves a repeat's guard lists in full at a lookaround, a condition, an atomic group
+    /// and a call (<c>push_repeat_data</c>, <c>_regex.c:2552</c>); this is the same for the keyed
+    /// lists, in the same form: each list's spans and count (<see cref="GuardList.PushTo"/>) and
+    /// its key, then the key length, the bytes all that took, how many lists and the change count.
+    /// </summary>
+    /// <remarks>
+    /// D103: this used to save a new dictionary of copied lists, about 440 bytes of heap a save,
+    /// and a conditional inside a loop saves on every entry. The byte stack allocates nothing once
+    /// it has grown. The cost per save is O(keys + spans), the order upstream pays for a plain list.
+    /// </remarks>
+    /// <param name="stack">The backtrack stack.</param>
+    internal void PushTo(ByteStack stack)
+    {
+        int start = stack.Count;
+        int keyLength = 0;
+        foreach (KeyValuePair<TailKeyValues, GuardList> pair in _lists)
         {
-            _saved.Clear();
+            long[] key = pair.Key.Values;
+            Debug.Assert(
+                _lists.Count == 1 || keyLength == 0 || key.Length == keyLength,
+                "a store's keys share one length"
+            );
+            keyLength = key.Length;
+            pair.Value.PushTo(stack);
+            stack.PushBlock(MemoryMarshal.AsBytes(key.AsSpan()));
         }
 
+        int bytes = stack.Count - start;
+        stack.PushSize(keyLength);
+        stack.PushSize(bytes);
+        stack.PushSize(_lists.Count);
+        stack.PushSize(_changes);
+    }
+
+    /// <summary>Undoes <see cref="PushTo"/>: the lists as they were at the save.</summary>
+    /// <remarks>
+    /// When nothing changed since the save the lists are already right and the saved bytes are
+    /// dropped. Otherwise the current lists go back to the spare pool and the saved ones are rebuilt
+    /// from it, so a warm call allocates nothing. A save that was never restored (its entry dropped
+    /// by an atomic success) leaves nothing behind but stack bytes, which the drop took.
+    /// </remarks>
+    /// <param name="stack">The backtrack stack.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopFrom(ByteStack stack)
+    {
+        if (
+            !stack.PopSize(out long changes)
+            || !stack.PopSize(out long lists)
+            || !stack.PopSize(out long bytes)
+            || !stack.PopSize(out long keyLength)
+        )
+        {
+            return false;
+        }
+
+        if (changes == _changes)
+        {
+            CheckUnchanged(stack, lists, keyLength);
+            return stack.DropBlock((int)bytes);
+        }
+
+        _changes++;
+        _hasCurrent = false;
+        _current = null;
+        ReturnListsToSpare();
+
+        int end = stack.Count - (int)bytes;
+        for (long i = 0; i < lists; i++)
+        {
+            long[] key;
+            GuardList list;
+            if (_spare.Count > 0 && _spare.Peek().Key.Length == keyLength)
+            {
+                (key, list) = _spare.Pop();
+            }
+            else
+            {
+                key = new long[keyLength];
+                list = new GuardList();
+            }
+
+            if (!stack.PopBlock(MemoryMarshal.AsBytes(key.AsSpan())) || !list.RestoreFrom(stack))
+            {
+                return false;
+            }
+
+            bool added = _lists.TryAdd(new TailKeyValues(key), list);
+            Debug.Assert(added, "a save holds each key once");
+        }
+
+        Debug.Assert(stack.Count == end, "the restore read back exactly the bytes the save pushed");
+        return true;
+    }
+
+    /// <summary>Moves every list to the spare pool, keeping its key array with it.</summary>
+    private void ReturnListsToSpare()
+    {
         if (_lists.Count > 0)
         {
             foreach (KeyValuePair<TailKeyValues, GuardList> pair in _lists)
@@ -113,75 +218,42 @@ internal sealed class KeyedTailGuards
         }
     }
 
-    /// <summary>Forgets everything, for a state reused by another call (<c>MatchState.Init</c>).</summary>
-    internal void Clear()
-    {
-        Reset(newAttempt: true);
-        _changes = 0;
-    }
-
     /// <summary>
-    /// Upstream saves a repeat's guard lists in full at a lookaround, a condition, an atomic group
-    /// and a call (<c>push_repeat_data</c>, <c>_regex.c:2552</c>); this is the same for the keyed
-    /// lists. Pushes the save's number and the change count; the copy itself is kept here.
+    /// Debug only: asserts that a save whose change count still matches holds exactly the lists
+    /// there are now, which is what lets <see cref="PopFrom"/> drop it unread. It rests on every
+    /// edit of a keyed list going through <see cref="ForWrite"/> or <see cref="Reset"/>, both of
+    /// which count a change (<c>MatchState.KeyedTailGuardList</c> hands out a list to write only
+    /// from <see cref="ForWrite"/>).
     /// </summary>
-    /// <param name="stack">The backtrack stack.</param>
-    internal void PushTo(ByteStack stack)
+    /// <param name="stack">The backtrack stack, with the save's lists on top.</param>
+    /// <param name="lists">How many lists the save holds.</param>
+    /// <param name="keyLength">Their key length.</param>
+    [Conditional("DEBUG")]
+    private void CheckUnchanged(ByteStack stack, long lists, long keyLength)
     {
-        Dictionary<TailKeyValues, GuardList>? copy = null;
-        if (_lists.Count > 0)
+        Debug.Assert(lists == _lists.Count, "an unchanged store has as many lists as its save");
+        if (lists == 0)
         {
-            // SHORTCUT: a full copy per save, as upstream copies its plain lists. Ceiling: a
-            // lookaround inside a loop with many keys pays O(entries) per save; an undo journal
-            // (the design note's option b) is the upgrade if a row shows it.
-            copy = new Dictionary<TailKeyValues, GuardList>(_lists.Count);
-            foreach (KeyValuePair<TailKeyValues, GuardList> pair in _lists)
-            {
-                copy[pair.Key] = pair.Value.Copy();
-            }
+            return;
         }
 
-        _saved.Add(copy);
-        stack.PushSize(_saved.Count - 1);
-        stack.PushSize(_changes);
-    }
-
-    /// <summary>Undoes <see cref="PushTo"/>: the lists as they were at the save.</summary>
-    /// <param name="stack">The backtrack stack.</param>
-    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    internal bool PopFrom(ByteStack stack)
-    {
-        if (!stack.PopSize(out long changes) || !stack.PopSize(out long slot))
+        if (_checkKey.Length != keyLength)
         {
-            return false;
+            _checkKey = new long[keyLength];
         }
 
-        // A save that was never restored (its entry dropped by an atomic success) leaves later
-        // slots behind; the pop of an earlier save drops them too.
-        Dictionary<TailKeyValues, GuardList>? copy = (int)slot < _saved.Count ? _saved[(int)slot] : null;
-        if ((int)slot < _saved.Count)
+        int top = stack.Count;
+        for (long i = 0; i < lists; i++)
         {
-            _saved.RemoveRange((int)slot, _saved.Count - (int)slot);
+            bool read = stack.ReadBlockBelow(top, MemoryMarshal.AsBytes(_checkKey.AsSpan()));
+            top -= (int)keyLength * sizeof(long);
+            Debug.Assert(
+                read
+                    && _lists.TryGetValue(new TailKeyValues(_checkKey), out GuardList? list)
+                    && list.MatchesSaved(stack, ref top),
+                "an unchanged store's lists equal its save"
+            );
         }
-
-        if (changes == _changes)
-        {
-            return true;
-        }
-
-        _changes++;
-        _hasCurrent = false;
-        _current = null;
-        _lists.Clear();
-        if (copy is not null)
-        {
-            foreach (KeyValuePair<TailKeyValues, GuardList> pair in copy)
-            {
-                _lists[pair.Key] = pair.Value;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>Caches <paramref name="list"/> as the answer for <paramref name="key"/>.</summary>
