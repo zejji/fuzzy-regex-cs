@@ -12,6 +12,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// pattern never uses - is also reported through it, with no <see cref="Pattern"/> or
 /// <see cref="Offset"/>, because upstream's <c>ValueError</c> carries neither (S07; see the
 /// reasoning at the throw sites in <c>Parsing/PatternCompiler.cs</c>).
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#exception-mapping">the comparison page</see>.
 /// </para>
 /// <para>
 /// Upstream's other errors map onto .NET types of their own: <c>IndexError</c> from
@@ -68,6 +69,7 @@ public class FuzzyRegexParseException : Exception
     /// <b>Indices are UTF-16 code units</b>, where upstream counts codepoints, so this differs
     /// from upstream's <c>error.pos</c> for a pattern holding a non-BMP character before the
     /// failure point.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#indices-are-utf-16-code-units-where-upstream-counts-codepoints">the comparison page</see>.
     /// </remarks>
     public int Offset { get; } = -1;
 }
