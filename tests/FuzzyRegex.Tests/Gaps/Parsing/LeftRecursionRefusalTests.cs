@@ -312,10 +312,13 @@ public sealed class LeftRecursionRefusalTests
     /// <summary>
     /// The check is linear in the pattern. A chain of 1,000 nested groups, each calling the one
     /// inside it, needs a group's answer before its parent's; reading every body again on each
-    /// round of the fixpoint took 20.3 s (blind review, 2026-10-08). The bound is generous: the
-    /// whole compile takes a few milliseconds.
+    /// round of the fixpoint took 20.3 s (blind review, 2026-10-08), and 10-16 s in a Release build
+    /// with that loop put back (2026-10-18). The whole compile takes about 110 ms alone in Release,
+    /// but up to 2.3 s alongside the rest of the suite, so the test runs on its own and the bound
+    /// sits between the two: well clear of a loaded machine, under a third of the regression.
     /// </summary>
     [Test]
+    [NotInParallel]
     public void A_thousand_nested_groups_that_call_each_other_compile_quickly()
     {
         // (?<g1>(?<g2>...(?<g1000>)(?&g1000))...(?&g2))x
@@ -348,7 +351,7 @@ public sealed class LeftRecursionRefusalTests
         compile.Start();
         compile.Join();
 
-        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
     }
 
     /// <summary>

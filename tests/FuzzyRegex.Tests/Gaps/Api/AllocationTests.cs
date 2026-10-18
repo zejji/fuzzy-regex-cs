@@ -366,6 +366,7 @@ public sealed class AllocationTests
         // The call allocates 1 KB the first time it runs after its setup, as a warm call does when
         // it re-rents a pool buffer another thread took, and the first attempt also collects inside
         // the call, so a pause lands in it. Repeating only the call would count 0 in the repeat.
+        // A gen0 collection, so only the pause, not a gen2 count, can force the repeat.
         int attempt = 0;
 
         long allocated = AllocatedBy(() =>
@@ -384,7 +385,7 @@ public sealed class AllocationTests
                 if (collect)
                 {
 #pragma warning disable S1215 // A pause inside the first attempt is the test.
-                    GC.Collect();
+                    GC.Collect(0);
 #pragma warning restore S1215
                 }
             };
@@ -394,11 +395,92 @@ public sealed class AllocationTests
         attempt.Should().BeGreaterThan(1, "the collection inside the first attempt forces a repeat");
     }
 
+    [Test]
+    public void A_gen2_collection_between_the_warm_up_and_the_measured_call_forces_a_repeat()
+    {
+        // The flake of 2026-10-18, on demand. A gen2 collection under high memory pressure empties
+        // ArrayPool.Shared's per-thread slots, so a warm template Replace rented a fresh 8,192-piece
+        // array and counted 131 KB more than its answer. Here the first attempt's warm-up fills a
+        // cache, a gen2 collection follows, and the cache is dropped as the pool's trim drops it.
+        int attempt = 0;
+        byte[]? cache = null;
+
+        long allocated = AllocatedBy(() =>
+        {
+            attempt++;
+            cache ??= new byte[1024];
+            if (attempt == 1)
+            {
+#pragma warning disable S1215 // A gen2 collection after the warm-up is the test.
+                GC.Collect();
+#pragma warning restore S1215
+                cache = null;
+            }
+
+            return () => cache ??= new byte[1024];
+        });
+
+        allocated.Should().Be(0, "the repeat measures the warm call");
+        attempt.Should().BeGreaterThan(1, "the gen2 collection after the warm-up forces a repeat");
+    }
+
+    [Test]
+    public void A_pool_trim_still_pending_from_an_earlier_collection_lands_before_the_warm_up()
+    {
+        // The pool trims in a gen2 callback, which runs on the finalizer thread after the
+        // collection, so a collection just before the measurement can trim in the middle of it.
+        // Here a finalizer stands in for that callback: it is queued before the measurement and
+        // drops the cache a moment later, by when the warm-up has filled it.
+        TrimStandIn trim = new();
+        QueueTrimStandIn(trim);
+#pragma warning disable S1215 // Queueing a finalizer before the measurement is the test.
+        GC.Collect();
+#pragma warning restore S1215
+
+        long allocated = AllocatedBy(() =>
+        {
+            trim.Cache ??= new byte[1024];
+            trim.Ran.Wait(TimeSpan.FromSeconds(10));
+            return () => trim.Cache ??= new byte[1024];
+        });
+
+        trim.Ran.IsSet.Should().BeTrue("the stand-in trim ran");
+        allocated.Should().Be(0, "the trim landed before the warm-up, which refilled the cache");
+    }
+
+    /// <summary>Makes a finalizable object that drops <paramref name="trim"/>'s cache when it is finalized.</summary>
+    /// <param name="trim">The cache the finalizer drops.</param>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void QueueTrimStandIn(TrimStandIn trim) => _ = new TrimOnFinalize(trim);
+
+    /// <summary>A cache, and a signal that the stand-in trim has dropped it.</summary>
+    private sealed class TrimStandIn
+    {
+        internal byte[]? Cache { get; set; }
+
+        internal ManualResetEventSlim Ran { get; } = new();
+    }
+
+    /// <summary>Drops a cache from its finalizer, after a pause, as a late gen2 callback would.</summary>
+    /// <param name="trim">The cache to drop.</param>
+    private sealed class TrimOnFinalize(TrimStandIn trim)
+    {
+#pragma warning disable MA0055 // The finalizer stands in for the pool's gen2 callback, itself a finalizer.
+        ~TrimOnFinalize()
+#pragma warning restore MA0055
+        {
+            Thread.Sleep(200);
+            trim.Cache = null;
+            trim.Ran.Set();
+        }
+    }
+
     /// <summary>
     /// The bytes the call that <paramref name="arrange"/> returns allocates on this thread, from a
     /// run of it that no garbage collection paused.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <see cref="GC.GetAllocatedBytesForCurrentThread"/> counts a thread's allocation context as
     /// allocated when the thread takes it, and a collection that retires the context takes the unused
     /// part back off (<c>fix_allocation_context</c>, dotnet/runtime v10.0.12
@@ -410,6 +492,20 @@ public sealed class AllocationTests
     /// (:46874-46876), so a run that saw no pause is exact. A run that saw one is repeated, and the
     /// repeat rebuilds the whole scenario, so an allocation it causes, once or every time, shows in
     /// the repeat too. After ten attempts the last one's figure stands, pause or not.
+    /// </para>
+    /// <para>
+    /// The warm-up inside <paramref name="arrange"/> can also be undone before the call.
+    /// <see cref="System.Buffers.ArrayPool{T}.Shared"/> trims itself from a gen2 callback, and
+    /// under high memory pressure (90% of the high-load threshold) that trim empties every
+    /// thread's slots at once (dotnet/runtime v10.0.12
+    /// <c>src/libraries/System.Private.CoreLib/src/System/Buffers/SharedArrayPool.cs</c> :183-231,
+    /// registered at :288; <c>Utilities.cs</c> :40-47), so a call that rents a large array
+    /// allocates it afresh. A loaded full-suite run saw exactly that on 2026-10-18: a template
+    /// Replace counted one fresh 8,192-piece array, 131 KB. So an attempt is also repeated when the
+    /// gen2 collection count moves between the start of its warm-up and the end of its call,
+    /// and each attempt first waits for pending finalizers, which is where the gen2 callbacks run,
+    /// so a trim left over from an earlier collection lands before the warm-up, not after it.
+    /// </para>
     /// </remarks>
     /// <param name="arrange">
     /// Builds the scenario from scratch (the pattern, its warm-up calls, anything that disturbs it)
@@ -421,12 +517,14 @@ public sealed class AllocationTests
         long allocated = 0;
         for (int attempt = 0; attempt < 10; attempt++)
         {
+            GC.WaitForPendingFinalizers();
+            int gen2Collections = GC.CollectionCount(2);
             Action call = arrange();
             TimeSpan paused = GC.GetTotalPauseDuration();
             long before = GC.GetAllocatedBytesForCurrentThread();
             call();
             allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            if (GC.GetTotalPauseDuration() == paused)
+            if (GC.GetTotalPauseDuration() == paused && GC.CollectionCount(2) == gen2Collections)
             {
                 break;
             }
