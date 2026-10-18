@@ -1700,6 +1700,7 @@ internal sealed class MatchState : IDisposable
         }
 
         KeyedTailWrites = 0;
+        BlockedEndMark = -1;
         Array.Clear(_tailKeyScratch);
         Array.Clear(_tailTextSpans);
 
