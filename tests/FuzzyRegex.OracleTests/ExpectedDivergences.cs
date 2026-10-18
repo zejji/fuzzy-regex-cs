@@ -4309,7 +4309,9 @@ internal static class ExpectedDivergences
                 + "`DropNegativeTestCaptures`. `start_match` zeroes them.\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithTheDiscardedTotals`, which sets "
-                + "`PatternObject.KeepDiscardedTotals` with entries 42 and 44 off, reproduces "
+                + "`PatternObject.KeepDiscardedTotals` and D102's `BoundsReachDecidingBodies` (a stale "
+                + "total sends the walk on with no budget, and a negative body held to it passes) with "
+                + "entries 42 and 44 off, reproduces "
                 + "upstream's recorded answer exactly, AND this port's live answer is the one being "
                 + "judged. The control is `A_row_the_discarded_total_fix_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "Gaps.Engine.FuzzyBestMatchTests",

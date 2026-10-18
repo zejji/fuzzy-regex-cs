@@ -4187,6 +4187,37 @@ positive twin, and `(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx
 (`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, all
 red with `PatternObject.KeepDiscardedTotals` set).
 
+### Addendum to 32, 2026-10-17: the budget decides a negative test (D102)
+
+Battery run 6 (oracle row R1) found a second fault on the same walk, in this port as well as
+upstream. `do_best_fuzzy_match` and `do_enhanced_fuzzy_match` hold each run to fewer errors than
+the last through `max_errors` (`_regex.c:17675`, `:17978`), and the body of a negative lookaround
+or a conditional's test is held to it too. There a body that fails makes the construct succeed,
+so a body with no budget left turns the test the wrong way. Measured with `regex` 2026.9.10 on
+2026-10-17, one row per process under `tools/memcap.py` at 1 GB:
+
+```
+search('(?e)(?:x(?:b){d<=1}|(?!a{s<=1}))', 'x')     -> span=(0, 0) fuzzy_counts=(0, 0, 0)
+search('(?:x(?:b){d<=1}|(?!a{s<=1}))', 'x')         -> span=(0, 1) fuzzy_counts=(0, 0, 1)
+search('(?b)(?r)(?<!a{s<=1})\w??', 'x')            -> span=(1, 1) fuzzy_counts=(0, 0, 0)
+search('(?r)(?<!a{s<=1})\w??', 'x')                -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?b)(?=a{d<=1})\w??(?!a{s<=1})', 'x')      -> MemoryError
+```
+
+Neither flagged answer is a match: at 0 in the first row, and before 1 in the third, `a{s<=1}`
+matches 'x' with one substitution, so the negative lookaround fails there. The third row's first
+run should find the exact (0, 1); that the walk goes on past it is most likely this entry's stale
+total (the body's substitution), after which the body has no budget left. That reading is not
+traced in upstream's C; the port, which restores the total, answers (0, 1). The forward
+BESTMATCH rows run away in memory, as this entry's other rows do.
+
+**This port** had the same fault on the forward rows: `(?b)(?=a{d<=1})\w??(?!a{s<=1})` over 'x'
+was (0, 0) where the flagless answer is (0, 1). Known defect D102 (F94) lifts the budget inside
+those bodies, and a conditional's test then takes a match of its body that fits the budget
+(DECISIONS 2026-10-17). The port answers (1, 1) with no error on the first row, (0, 1) on the third, and
+(0, 1) with one deletion on the fifth. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs`
+(`The_ranking_budget_does_not_stop_a_test_s_body_from_matching` and the controls beside it).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found

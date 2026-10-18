@@ -1422,6 +1422,13 @@ internal static class OracleComparer
     /// counts go back and the total does not, and <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> rank by
     /// the total. <c>PatternObject.KeepDiscardedTotals</c> restores that. The
     /// <c>fuzzy-total-drops-a-discarded-section</c> entry keys on this.
+    /// <para>
+    /// D102's fix is switched off with it (<c>PatternObject.BoundsReachDecidingBodies</c>). Where a
+    /// stale total makes a perfect match look imperfect, upstream's walk goes on with no budget, and
+    /// a negative lookaround's body held to that budget fails and lets the lookaround pass: the
+    /// first example row, <c>(?b)(a)(?:(?!.(?:(?1)){e&lt;=1})|.)+?b</c> over 'abbx', answers
+    /// upstream's (0, 2) only with both switched off.
+    /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
@@ -1433,7 +1440,11 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.KeepDiscardedTotals = true,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.KeepDiscardedTotals = true;
+                compiled.PatternObject.BoundsReachDecidingBodies = true;
+            },
             withoutTheFuzzySearchFixes: true,
             keepMinimumOrderFix: true
         );

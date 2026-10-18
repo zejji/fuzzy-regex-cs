@@ -926,6 +926,84 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal long MaxCost;
 
+    /// <summary>
+    /// NOT UPSTREAM (D102): how many bodies that decide a test are open, a negative lookaround's or
+    /// a conditional's test. While any is, <see cref="MaxErrors"/> and <see cref="MaxCost"/> are
+    /// lifted, and the bounds the run was given wait in <see cref="HeldMaxErrors"/> and
+    /// <see cref="HeldMaxCost"/>.
+    /// </summary>
+    /// <remarks>
+    /// The two bounds are how BESTMATCH and ENHANCEMATCH hold a run to better than the last; they
+    /// say nothing about what the pattern matches. A body whose failure makes its construct succeed
+    /// would otherwise fail for want of budget and turn the test the wrong way:
+    /// <c>(?b)(?=a{d&lt;=1})\w??(?!a{s&lt;=1})</c> over 'x' answered (0, 0), although
+    /// <c>a{s&lt;=1}</c> matches 'x'. A positive lookaround keeps the bounds: its body's errors
+    /// belong to the match, and failing it only rejects a path that costs too much. Counted rather
+    /// than saved in each frame, so a pattern pays nothing for it unless it is fuzzy.
+    /// </remarks>
+    internal int BoundlessBodies;
+
+    /// <summary>
+    /// NOT UPSTREAM (D102): the pruning marks of the conditional tests whose body matched over the
+    /// budget and now goes on under it for a match that fits (<c>Matcher.HoldTheTestToTheBudget</c>),
+    /// innermost last. Such a test's body no longer counts in <see cref="BoundlessBodies"/>.
+    /// </summary>
+    internal readonly List<long> TestsHeldToTheBudget = [];
+
+    /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
+    internal long HeldMaxErrors;
+
+    /// <summary>NOT UPSTREAM (D102): <see cref="MaxCost"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
+    internal long HeldMaxCost;
+
+    /// <summary>NOT UPSTREAM (D102): a body that decides a test opens; lift the bounds for it.</summary>
+    internal void OpenABoundlessBody()
+    {
+        if (Pattern.BoundsReachDecidingBodies)
+        {
+            return;
+        }
+
+        if (BoundlessBodies++ == 0)
+        {
+            HeldMaxErrors = MaxErrors;
+            HeldMaxCost = MaxCost;
+            MaxErrors = long.MaxValue;
+            MaxCost = long.MaxValue;
+        }
+    }
+
+    /// <summary>NOT UPSTREAM (D102): a body that decides a test closes; the outermost puts the bounds back.</summary>
+    internal void CloseABoundlessBody()
+    {
+        if (Pattern.BoundsReachDecidingBodies)
+        {
+            return;
+        }
+
+        Debug.Assert(BoundlessBodies > 0, "D102: a boundless body closes that was never opened");
+        if (--BoundlessBodies == 0)
+        {
+            MaxErrors = HeldMaxErrors;
+            MaxCost = HeldMaxCost;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D102): a run has ended, so any body still open is abandoned with it (a partial
+    /// answered from inside one); the run's own bounds go back.
+    /// </summary>
+    internal void CloseEveryBoundlessBody()
+    {
+        TestsHeldToTheBudget.Clear();
+        if (BoundlessBodies != 0)
+        {
+            BoundlessBodies = 0;
+            MaxErrors = HeldMaxErrors;
+            MaxCost = HeldMaxCost;
+        }
+    }
+
     /// <summary>Upstream <c>total_errors</c>.</summary>
     internal long TotalErrors;
 
@@ -1654,6 +1732,10 @@ internal sealed class MatchState : IDisposable
         BestTotalCost = 0;
         MaxErrors = 0;
         MaxCost = 0;
+        BoundlessBodies = 0;
+        TestsHeldToTheBudget.Clear();
+        HeldMaxErrors = 0;
+        HeldMaxCost = 0;
         TotalErrors = 0;
         TotalCost = 0;
         FewestErrors = 0;

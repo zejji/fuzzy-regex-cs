@@ -6235,6 +6235,18 @@ internal static class Matcher
         state.TextPos = look.TextPos;
         state.SliceStart = look.SliceStart;
         state.SliceEnd = look.SliceEnd;
+        if (op == Opcode.Conditional && state.IsFuzzy)
+        {
+            // D102: the test's body closes until REOPEN opens it again, and the errors it keeps
+            // are held to the bounds that come back, as AdvanceEndConditional holds them.
+            state.CloseABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+            if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
+            {
+                return LookaroundEnd.Backtrack;
+            }
+        }
+
         node = node.Next1.Node!;
         state.NotePartialEvent(blockedEvent);
         CountFork(state);
@@ -13750,6 +13762,14 @@ internal static class Matcher
         state.ForkBudgetAnswered = false;
 #endif
         int status = BasicMatchCore(state, search);
+
+        // D102: a run that ends inside a body that decides a test (a partial answered there) gives
+        // the driver back the bounds it set, which the driver tightens next.
+        Debug.Assert(
+            status is not (MatchStatus.Success or MatchStatus.Failure) || state.BoundlessBodies == 0,
+            "D102: a run ended with a body that decides a test still open"
+        );
+        state.CloseEveryBoundlessBody();
 #if DEBUG
         // The premise of skipping the restore below: a partial returned with the budget spent is
         // the budget's own, never one an arm answered in the step that spent it.
@@ -19363,6 +19383,13 @@ internal static class Matcher
         state.SliceStart = state.TextStart;
         state.SliceEnd = state.TextEnd;
 
+        // NOT UPSTREAM (D102): the test picks a branch, so the ranking bounds must not decide it.
+        if (state.IsFuzzy)
+        {
+            state.OpenABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        }
+
         node = node.Next1.Node!;
         return _armContinue;
     }
@@ -19402,6 +19429,16 @@ internal static class Matcher
             {
                 return _armBacktrack;
             }
+        }
+
+        // NOT UPSTREAM (D102): the test's body ran with the budget lifted, so this match gives
+        // the flagless verdict. Its errors stay in the match (D54 for a negative test), so they
+        // must fit the budget; if they do not, the body goes on under the budget for a match
+        // that does, as a positive lookaround's body would, and the conditional fails only if
+        // none is left (BacktrackConditional).
+        if (state.IsFuzzy && HoldTheTestToTheBudget(state))
+        {
+            return _armBacktrack;
         }
 
         // The condition matched. It is atomic, like a lookaround, so everything it pushed
@@ -19444,6 +19481,7 @@ internal static class Matcher
         state.SliceEnd = endCondData.SliceEnd;
         state.SliceStart = endCondData.SliceStart;
         Node endCondNode = endCondData.Node;
+        Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
 
         /* sstack: -
          *
@@ -19590,6 +19628,12 @@ internal static class Matcher
         state.SliceEnd = endLookData.SliceEnd;
         state.SliceStart = endLookData.SliceStart;
         Node endLookNode = endLookData.Node;
+        if (state.IsFuzzy && !endLookNode.Match)
+        {
+            // D102: the body matched, so the lookaround fails and its errors go with it.
+            state.CloseABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        }
 
         /* sstack: -
          *
@@ -19928,6 +19972,14 @@ internal static class Matcher
         // against 'ab' searched from position 1 has to see the 'a'.
         state.SliceStart = state.TextStart;
         state.SliceEnd = state.TextEnd;
+
+        // NOT UPSTREAM (D102): a negative lookaround's body failing makes it pass, so the
+        // ranking bounds must not make the body fail. See MatchState.BoundlessBodies.
+        if (state.IsFuzzy && !node.Match)
+        {
+            state.OpenABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        }
 
         node = node.Next1.Node!;
         return _armContinue;
@@ -20502,6 +20554,16 @@ internal static class Matcher
             state.DropLookaroundSuccessesFrom(state.Bstack.Count);
         }
 
+        // D102: a test whose body matched over the budget, with no match left that fits.
+        bool heldTestRanOut =
+            state.TestsHeldToTheBudget.Count != 0
+            && state.Pstack.TopSize(out long condMark)
+            && state.TestsHeldToTheBudget[^1] == condMark;
+        if (heldTestRanOut)
+        {
+            state.TestsHeldToTheBudget.RemoveAt(state.TestsHeldToTheBudget.Count - 1);
+        }
+
         // The condition failed to match. As with LOOKAROUND, the condition's own bstack
         // entries have already been popped by the backtracking that got here, so the
         // pstack entry is simply dropped.
@@ -20522,6 +20584,12 @@ internal static class Matcher
         state.SliceEnd = condData.SliceEnd;
         state.SliceStart = condData.SliceStart;
         Node condNode = condData.Node;
+        if (state.IsFuzzy && !heldTestRanOut)
+        {
+            // D102: the test's body has failed; the bounds come back for the branch.
+            state.CloseABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        }
 
         /* sstack: -
          *
@@ -20546,6 +20614,13 @@ internal static class Matcher
         )
         {
             return MatchStatus.Illegal;
+        }
+
+        // D102: the test's verdict stands (its body matched), but no match of the body fits the
+        // budget, so the conditional fails.
+        if (heldTestRanOut)
+        {
+            return _armContinue;
         }
 
         // D11 (D38): the test held for every continuation, and its yes-branch has failed
@@ -20902,6 +20977,12 @@ internal static class Matcher
         state.SliceEnd = lookData.SliceEnd;
         state.SliceStart = lookData.SliceStart;
         Node lookNode = lookData.Node;
+        if (state.IsFuzzy && !lookNode.Match)
+        {
+            // D102: the body has failed, so the negative lookaround passes under the bounds.
+            state.CloseABoundlessBody();
+            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        }
 
         /* sstack: -
          *
@@ -21074,11 +21155,126 @@ internal static class Matcher
             }
             state.SliceStart = state.TextStart;
             state.SliceEnd = state.TextEnd;
+            if (reopenedOp == (byte)Opcode.Conditional && state.IsFuzzy)
+            {
+                // D102: the test's body is open again, so its bounds are lifted again, as the
+                // blocked end that moved it closed them (EndALookaroundInTheSecondPass).
+                state.OpenABoundlessBody();
+            }
+
             state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
         }
 
         state.Pstack.PushSize(reopenedFrameEnd);
+        Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
         return _armContinue;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D102): at a conditional test's end, closes its lifted body and says whether
+    /// the errors the test keeps are over the budget, in which case the test is marked as held to
+    /// the budget (<see cref="MatchState.TestsHeldToTheBudget"/>) and its body goes on under it.
+    /// </summary>
+    /// <remarks>
+    /// The verdict is already the flagless one: the body matched with the budget lifted. Only the
+    /// price is in question. The body's paths before this match all failed with the budget lifted,
+    /// so they fail under it too, and the paths still on the stack are the rest of the body's
+    /// matches, in the order a positive lookaround's body under the budget would try them. Both
+    /// the whole-match totals and the open section's own counts are held, as END_FUZZY and each
+    /// error's permission hold them. Upstream's negative-test arm
+    /// (<c>PatternObject.DropNegativeTestCaptures</c>, oracle-only) keeps no errors, so it is not
+    /// held.
+    /// </remarks>
+    /// <param name="state">The match state, at END_CONDITIONAL with the test's frame on top.</param>
+    /// <returns><see langword="true"/> if the body must go on under the budget.</returns>
+    private static bool HoldTheTestToTheBudget(MatchState state)
+    {
+        if (!state.Pstack.TopSize(out long mark))
+        {
+            return false;
+        }
+
+        List<long> held = state.TestsHeldToTheBudget;
+        bool alreadyHeld = held.Count != 0 && held[^1] == mark;
+        if (!alreadyHeld)
+        {
+            state.CloseABoundlessBody();
+        }
+
+        bool over =
+            state.TotalErrors > state.MaxErrors
+            || state.TotalCost > state.MaxCost
+            || (
+                state.FuzzyNode is { } section
+                && (
+                    TotalErrors(state.FuzzyCounts) > state.MaxErrors
+                    || TotalCost(state.FuzzyCounts, section) > state.MaxCost
+                )
+            );
+        if (over && state.Pattern.DropNegativeTestCaptures && !TestNodeAt(state, mark).Match)
+        {
+            over = false;
+        }
+
+        if (over && !alreadyHeld)
+        {
+            held.Add(mark);
+        }
+        else if (!over && alreadyHeld)
+        {
+            held.RemoveAt(held.Count - 1);
+        }
+
+        // Not held, the frame is still open here and closes at once in the caller.
+        Debug.Assert(!over || BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+        return over;
+    }
+
+    /// <summary>NOT UPSTREAM (D102): the CONDITIONAL node whose frame has pruning mark <paramref name="mark"/>.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The frame's pruning mark.</param>
+    /// <returns>The node.</returns>
+    private static Node TestNodeAt(MatchState state, long mark)
+    {
+        _ = state.Bstack.ReadSizeBelow((int)mark - 1, out long sstackCount);
+        int top = state.Sstack.Count;
+        state.Sstack.Count = (int)sstackCount;
+        _ = PopLookaroundStateData(state.Pattern, state.Sstack, out LookaroundStateData look);
+        state.Sstack.Count = top;
+        return look.Node;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D102), DEBUG only: whether <see cref="MatchState.BoundlessBodies"/> counts
+    /// exactly the open frames that lift the ranking bounds, a conditional's test or a negative
+    /// lookaround, read off the pruning marks. The counter saves a push per frame, and this is
+    /// what proves it stays in step with the frames at the arms that open, move and close them.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the count is right, or the pattern is not fuzzy.</returns>
+    private static bool BoundlessBodiesBalance(MatchState state)
+    {
+        if (!state.IsFuzzy || state.Pattern.BoundsReachDecidingBodies)
+        {
+            return true;
+        }
+
+        int open = 0;
+        for (int offset = 0; offset < state.Pstack.Count; offset += sizeof(long))
+        {
+            if (
+                ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out LookaroundStateData look)
+                && (
+                    (op == Opcode.Conditional && !state.TestsHeldToTheBudget.Contains(state.Pstack.SizeAt(offset)))
+                    || (op == Opcode.Lookaround && !look.Node.Match)
+                )
+            )
+            {
+                open++;
+            }
+        }
+
+        return open == state.BoundlessBodies;
     }
 
     /// <summary>
