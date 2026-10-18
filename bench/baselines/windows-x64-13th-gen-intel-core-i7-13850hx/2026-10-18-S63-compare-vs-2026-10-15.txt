@@ -1,0 +1,98 @@
+
+Baseline: C:\Users\gerard.howell\source\repos\fuzzy-regex-cs\.claude\worktrees\s63\bench\baselines\windows-x64-13th-gen-intel-core-i7-13850hx\net10.0.json (taken 10/15/2026 00:45:01)
+Machine:  13th Gen Intel Core i7-13850HX, Windows 11 (10.0.22631.6199/23H2/2023Update/SunValley3)
+Job:      baseline medium, this run medium
+Cores:    baseline performance, this run performance
+Floor:    time 1.10x, allocation 1.0001x or 1024 B - inside these a row reads 'same'.
+
+Benchmark                                                   baseline ns       now ns     time    alloc
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 1)            126.4        139.8  1.11x    same
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 2)            140.0        162.1  1.16x    same
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 4)            178.1        207.0  1.16x    same
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 8)            247.6        282.0  1.14x    same
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 16)           394.9        452.6  1.15x    same
+GroupCountStateBenchmarks.StateByGroupCount(Groups: 32)           692.2        815.5  1.18x    same
+ManyInputsBenchmarks.FuzzyPhraseOneIsMatch                 43,226,941.7 44,015,350.0   same    same
+ManyInputsBenchmarks.FuzzyPhraseOneMatch                   43,700,000.0 45,188,266.7   same    same
+ManyInputsBenchmarks.FuzzyPhraseOneEnhanced                46,959,659.1 48,395,295.5   same    same
+ManyInputsBenchmarks.FuzzyPhraseThreeAlternation           136,270,675.0 139,459,187.5   same    same
+ManyInputsBenchmarks.FuzzyPhraseThreeNamedList             135,486,312.5 136,490,725.0   same    same
+ManyInputsBenchmarks.FuzzyPhraseThreeSeparatePasses        121,845,720.0 124,530,912.5   same    same
+ManyInputsBenchmarks.ValidateEmails                        28,347,181.2 29,145,418.8   same    same
+ManyInputsBenchmarks.ParseLogLines                         39,023,615.4 42,678,754.2   same    same
+ManyInputsBenchmarks.RedactDigits                          29,125,931.2 31,180,848.4   same    same
+ManyInputsBenchmarks.CaseFoldAccented                      24,422,015.6 25,582,896.9   same    same
+ManyInputsBenchmarks.CaseBlindAlternation                  30,458,046.9 30,053,587.5   same     new
+ManyInputsBenchmarks.WholeWordRecords                      36,999,957.1 35,716,428.6   same    same
+PatternCacheBenchmarks.StaticIsMatch                              232.3        235.2   same    same
+PatternCacheBenchmarks.UncachedIsMatch                         10,371.9     10,646.5   same    same
+PatternCacheBenchmarks.InstanceIsMatch                            190.3        203.7   same    same
+PatternCacheBenchmarks.StaticFuzzyIsMatch                         238.9        251.7   same    same
+PatternCacheBenchmarks.UncachedFuzzyIsMatch                     4,338.9      4,460.1   same    same
+PatternCacheBenchmarks.InstanceFuzzyIsMatch                       209.8        232.9  1.11x    same
+PatternCacheBenchmarks.StaticMatch                                279.0        287.4   same    same
+PatternCacheBenchmarks.UncachedMatch                           10,526.1     10,669.4   same    same
+PatternCacheBenchmarks.StaticIsMatchAlwaysMissing              11,075.3     11,408.1   same    same
+PatternCacheBenchmarks.StaticMatchWithNamedLists               10,967.9     11,062.4   same    same
+ReferenceBenchmarks.LiteralPort                                52,322.2     51,889.3   same    same
+ReferenceBenchmarks.LiteralBcl                                 50,982.2     50,741.9   same    same
+ReferenceBenchmarks.LiteralBclCompiled                         41,431.9     44,241.9   same    same
+ReferenceBenchmarks.ClassScanPort                          20,834,846.9 22,181,807.8   same    same
+ReferenceBenchmarks.ClassScanBcl                           13,523,656.2 13,678,493.0   same    same
+ReferenceBenchmarks.ClassScanBclCompiled                    6,300,739.8  6,292,013.3   same    same
+ReferenceBenchmarks.ReplacePort                            19,728,625.0 20,608,825.0   same    same
+ReferenceBenchmarks.ReplaceBcl                             10,676,296.1 10,694,704.7   same    same
+ReferenceBenchmarks.ReplaceBclCompiled                      7,103,034.4  7,208,778.9   same    same
+ReferenceBenchmarks.BacktrackingPort                               61.3         74.9  1.22x    same
+ReferenceBenchmarks.BacktrackingBcl                             5,225.2      5,182.4   same    same
+ReferenceBenchmarks.BacktrackingBclCompiled                     1,106.9      1,118.1   same    same
+SpanOverloadBenchmarks.StringShort                                 66.3         74.8  1.13x    same
+SpanOverloadBenchmarks.SpanShort                                   74.4         81.3   same    same
+SpanOverloadBenchmarks.StringKilobyte                              67.9         75.9  1.12x    same
+SpanOverloadBenchmarks.SpanKilobyte                                82.0         92.1  1.12x    same
+SpanOverloadBenchmarks.StringMegabyte                              67.0         75.8  1.13x    same
+SpanOverloadBenchmarks.SpanMegabyte                            44,666.2     44,749.9   same    same
+SpanOverloadBenchmarks.CountStringMegabyte                    825,758.1    861,497.1   same    same
+SpanOverloadBenchmarks.CountSpanMegabyte                      922,188.0    948,685.6   same    same
+SpanOverloadBenchmarks.MemoryMegabyte                              67.2         76.2  1.13x    same
+SpanOverloadBenchmarks.CountMemoryMegabyte                    820,984.9    850,431.6   same    same
+SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 64)        125.5        143.2  1.14x    same
+SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 1024)        125.9        142.8  1.13x    same
+SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 16384)        124.8        142.1  1.14x    same
+SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 262144)        125.0        142.4  1.14x    same
+WorkloadBenchmarks.LiteralMatch                                50,125.3     50,658.1   same    same
+WorkloadBenchmarks.ClassScan                               20,827,156.2 21,958,964.1   same    same
+WorkloadBenchmarks.CaseFoldedScan                           1,809,262.7  1,813,816.6   same    same
+WorkloadBenchmarks.WholeWordList                            4,077,398.4  3,931,980.3   same    same
+WorkloadBenchmarks.ReverseFailedScan                          258,817.6    257,289.5   same    same
+WorkloadBenchmarks.PartialMatch                                99,596.4     99,524.4   same    same
+WorkloadBenchmarks.MatchesToEnd                            34,470,633.3 36,378,863.5   same    same
+WorkloadBenchmarks.MatchesToEndDense                        1,904,142.2  2,034,859.4   same    same
+WorkloadBenchmarks.EnumerateMatchesToEndDense               1,694,307.5  1,771,357.7   same    same
+WorkloadBenchmarks.EnumerateMatchesSpanToEndDense           1,398,885.2  1,487,504.3   same    same
+WorkloadBenchmarks.MatchesFirstTwo                                344.3        417.5  1.21x    same
+WorkloadBenchmarks.EnumerateMatchesFirstTwo                       207.1        221.1   same    same
+WorkloadBenchmarks.ReplaceTemplate                         20,087,143.8 20,566,378.1   same    same
+WorkloadBenchmarks.SplitLong                               15,753,459.4 17,455,393.8  1.11x    same
+WorkloadBenchmarks.FuzzyShort                                     228.7        241.6   same    same
+WorkloadBenchmarks.FuzzyLong                                   85,823.7     82,519.7   same    same
+WorkloadBenchmarks.FuzzyNoMatchLong                            87,919.4     81,894.6   same    same
+WorkloadBenchmarks.FuzzyBudgetThree                               982.9        991.3   same    same
+WorkloadBenchmarks.EnhanceMatch                                 2,186.3      2,279.0   same    same
+WorkloadBenchmarks.BestMatch                                    2,698.5      2,761.8   same    same
+WorkloadBenchmarks.PathologicalSameBranches                     1,891.1      2,101.3  1.11x    same
+WorkloadBenchmarks.PathologicalPrefixBranches                   2,656.5      2,825.5   same    same
+WorkloadBenchmarks.PathologicalNestedRepeat                   123,186.6    127,569.5   same    same
+WorkloadBenchmarks.PathologicalWordsToEnd                     140,203.9    152,344.8   same    same
+WorkloadBenchmarks.TestedGroupRepeat                        2,355,249.8  2,438,190.0   same     new
+WorkloadBenchmarks.EmptyIterationRecord                     2,775,902.7  3,638,237.1  1.31x    same
+WorkloadBenchmarks.ConditionalBesideBranch                      2,007.9      2,197.7   same    same
+WorkloadBenchmarks.ConditionalPerToken                        162,806.3    184,637.3  1.13x    same
+WorkloadBenchmarks.ConditionalPerTokenNoMemo               103,300,620.0 113,942,690.0  1.10x     new
+WorkloadBenchmarks.CompileLargePattern                        243,433.0    247,942.8   same    same
+
+Benchmarks: RED
+  regressed: ManyInputsBenchmarks.CaseBlindAlternation now allocates where the baseline did not - 0 -> 52 bytes
+  regressed: WorkloadBenchmarks.TestedGroupRepeat now allocates where the baseline did not - 0 -> 7 bytes
+  regressed: WorkloadBenchmarks.EmptyIterationRecord slower (1.31x)
+  regressed: WorkloadBenchmarks.ConditionalPerTokenNoMemo now allocates where the baseline did not - 0 -> 105408000 bytes

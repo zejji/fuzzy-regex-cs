@@ -6,435 +6,435 @@
     "logicalCores": 28,
     "os": "Windows 11 (10.0.22631.6199/23H2/2023Update/SunValley3)",
     "architecture": "X64",
-    "runtime": ".NET 10.0.12 (10.0.12, 10.0.1226.42308)",
-    "sdk": "10.0.401",
+    "runtime": ".NET 10.0.13 (10.0.13, 10.0.1326.50504)",
+    "sdk": "10.0.402",
     "benchmarkDotNet": "0.15.8"
   },
-  "takenUtc": "2026-10-15T00:45:01Z",
+  "takenUtc": "2026-10-18T05:07:28Z",
   "job": "medium",
   "cores": "performance",
   "multimodal": [],
   "contended": [],
   "benchmarks": {
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 1)": {
-      "medianNs": 126.41,
-      "minNs": 124.16,
+      "medianNs": 139.78,
+      "minNs": 137.12,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 2)": {
-      "medianNs": 140.0,
-      "minNs": 138.08,
+      "medianNs": 162.09,
+      "minNs": 157.94,
       "allocatedBytes": 64
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 4)": {
-      "medianNs": 178.06,
-      "minNs": 175.94,
+      "medianNs": 206.97,
+      "minNs": 201.84,
       "allocatedBytes": 104
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 8)": {
-      "medianNs": 247.6,
-      "minNs": 243.01,
+      "medianNs": 281.96,
+      "minNs": 273.45,
       "allocatedBytes": 184
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 16)": {
-      "medianNs": 394.86,
-      "minNs": 388.5,
+      "medianNs": 452.59,
+      "minNs": 444.79,
       "allocatedBytes": 344
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.GroupCountStateBenchmarks.StateByGroupCount(Groups: 32)": {
-      "medianNs": 692.18,
-      "minNs": 673.79,
+      "medianNs": 815.49,
+      "minNs": 792.94,
       "allocatedBytes": 664
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseOneIsMatch": {
-      "medianNs": 43226941.67,
-      "minNs": 42816091.67,
+      "medianNs": 44015350.0,
+      "minNs": 43544800.0,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseOneMatch": {
-      "medianNs": 43700000.0,
-      "minNs": 43348266.67,
+      "medianNs": 45188266.67,
+      "minNs": 44594658.33,
       "allocatedBytes": 12077736
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseOneEnhanced": {
-      "medianNs": 46959659.09,
-      "minNs": 46235854.55,
+      "medianNs": 48395295.45,
+      "minNs": 47761463.64,
       "allocatedBytes": 15358920
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseThreeAlternation": {
-      "medianNs": 136270675.0,
-      "minNs": 134727850.0,
+      "medianNs": 139459187.5,
+      "minNs": 135593925.0,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseThreeNamedList": {
-      "medianNs": 135486312.5,
-      "minNs": 134032600.0,
+      "medianNs": 136490725.0,
+      "minNs": 134241875.0,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.FuzzyPhraseThreeSeparatePasses": {
-      "medianNs": 121845720.0,
-      "minNs": 120405760.0,
+      "medianNs": 124530912.5,
+      "minNs": 123158725.0,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.ValidateEmails": {
-      "medianNs": 28347181.25,
-      "minNs": 27887550.0,
+      "medianNs": 29145418.75,
+      "minNs": 28929843.75,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.ParseLogLines": {
-      "medianNs": 39023615.38,
-      "minNs": 38678069.23,
+      "medianNs": 42678754.17,
+      "minNs": 40793830.77,
       "allocatedBytes": 28800000
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.RedactDigits": {
-      "medianNs": 29125931.25,
-      "minNs": 28631784.38,
+      "medianNs": 31180848.44,
+      "minNs": 30801218.75,
       "allocatedBytes": 10102488
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.CaseFoldAccented": {
-      "medianNs": 24422015.62,
-      "minNs": 24189737.5,
+      "medianNs": 25582896.88,
+      "minNs": 24861946.88,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.CaseBlindAlternation": {
-      "medianNs": 30458046.88,
-      "minNs": 30124528.12,
-      "allocatedBytes": 0
+      "medianNs": 30053587.5,
+      "minNs": 29603931.25,
+      "allocatedBytes": 52
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ManyInputsBenchmarks.WholeWordRecords": {
-      "medianNs": 36999957.14,
-      "minNs": 34849473.33,
+      "medianNs": 35716428.57,
+      "minNs": 35306433.33,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.StaticIsMatch": {
-      "medianNs": 232.28,
-      "minNs": 228.38,
+      "medianNs": 235.22,
+      "minNs": 230.29,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.UncachedIsMatch": {
-      "medianNs": 10371.85,
-      "minNs": 10212.56,
-      "allocatedBytes": 34640
+      "medianNs": 10646.54,
+      "minNs": 10503.75,
+      "allocatedBytes": 35104
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.InstanceIsMatch": {
-      "medianNs": 190.26,
-      "minNs": 187.59,
+      "medianNs": 203.68,
+      "minNs": 201.15,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.StaticFuzzyIsMatch": {
-      "medianNs": 238.9,
-      "minNs": 235.68,
+      "medianNs": 251.71,
+      "minNs": 247.64,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.UncachedFuzzyIsMatch": {
-      "medianNs": 4338.93,
-      "minNs": 4279.73,
-      "allocatedBytes": 15272
+      "medianNs": 4460.09,
+      "minNs": 4365.08,
+      "allocatedBytes": 15688
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.InstanceFuzzyIsMatch": {
-      "medianNs": 209.79,
-      "minNs": 207.16,
+      "medianNs": 232.87,
+      "minNs": 227.46,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.StaticMatch": {
-      "medianNs": 279.03,
-      "minNs": 276.03,
+      "medianNs": 287.45,
+      "minNs": 283.42,
       "allocatedBytes": 64
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.UncachedMatch": {
-      "medianNs": 10526.09,
-      "minNs": 10423.62,
-      "allocatedBytes": 35472
+      "medianNs": 10669.37,
+      "minNs": 10450.8,
+      "allocatedBytes": 35936
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.StaticIsMatchAlwaysMissing": {
-      "medianNs": 11075.29,
-      "minNs": 10958.73,
-      "allocatedBytes": 34704
+      "medianNs": 11408.1,
+      "minNs": 11255.26,
+      "allocatedBytes": 35168
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.PatternCacheBenchmarks.StaticMatchWithNamedLists": {
-      "medianNs": 10967.93,
-      "minNs": 10826.02,
-      "allocatedBytes": 37912
+      "medianNs": 11062.43,
+      "minNs": 10802.0,
+      "allocatedBytes": 38360
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.LiteralPort": {
-      "medianNs": 52322.2,
-      "minNs": 50859.75,
+      "medianNs": 51889.35,
+      "minNs": 50980.41,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.LiteralBcl": {
-      "medianNs": 50982.24,
-      "minNs": 49409.95,
+      "medianNs": 50741.94,
+      "minNs": 50293.21,
       "allocatedBytes": 208
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.LiteralBclCompiled": {
-      "medianNs": 41431.95,
-      "minNs": 40517.2,
+      "medianNs": 44241.87,
+      "minNs": 40483.04,
       "allocatedBytes": 208
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ClassScanPort": {
-      "medianNs": 20834846.88,
-      "minNs": 20629256.25,
+      "medianNs": 22181807.81,
+      "minNs": 21697334.38,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ClassScanBcl": {
-      "medianNs": 13523656.25,
-      "minNs": 13351250.0,
+      "medianNs": 13678492.97,
+      "minNs": 13401820.31,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ClassScanBclCompiled": {
-      "medianNs": 6300739.84,
-      "minNs": 6219671.88,
+      "medianNs": 6292013.28,
+      "minNs": 6240916.41,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ReplacePort": {
-      "medianNs": 19728625.0,
-      "minNs": 19525537.5,
+      "medianNs": 20608825.0,
+      "minNs": 20427925.0,
       "allocatedBytes": 2097760
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ReplaceBcl": {
-      "medianNs": 10676296.09,
-      "minNs": 10443370.31,
+      "medianNs": 10694704.69,
+      "minNs": 10515881.25,
       "allocatedBytes": 2097326
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.ReplaceBclCompiled": {
-      "medianNs": 7103034.38,
-      "minNs": 7049656.25,
-      "allocatedBytes": 2097338
+      "medianNs": 7208778.91,
+      "minNs": 7068142.19,
+      "allocatedBytes": 2097361
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.BacktrackingPort": {
-      "medianNs": 61.27,
-      "minNs": 60.62,
+      "medianNs": 74.9,
+      "minNs": 73.61,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.BacktrackingBcl": {
-      "medianNs": 5225.22,
-      "minNs": 5126.27,
+      "medianNs": 5182.41,
+      "minNs": 5124.02,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.ReferenceBenchmarks.BacktrackingBclCompiled": {
-      "medianNs": 1106.87,
-      "minNs": 1092.27,
+      "medianNs": 1118.1,
+      "minNs": 1100.84,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.StringShort": {
-      "medianNs": 66.3,
-      "minNs": 65.38,
+      "medianNs": 74.83,
+      "minNs": 73.73,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.SpanShort": {
-      "medianNs": 74.42,
-      "minNs": 73.28,
+      "medianNs": 81.35,
+      "minNs": 80.32,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.StringKilobyte": {
-      "medianNs": 67.89,
-      "minNs": 65.25,
+      "medianNs": 75.86,
+      "minNs": 74.18,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.SpanKilobyte": {
-      "medianNs": 82.05,
-      "minNs": 81.25,
+      "medianNs": 92.07,
+      "minNs": 90.73,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.StringMegabyte": {
-      "medianNs": 67.02,
-      "minNs": 65.94,
+      "medianNs": 75.78,
+      "minNs": 74.7,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.SpanMegabyte": {
-      "medianNs": 44666.16,
-      "minNs": 43931.35,
+      "medianNs": 44749.86,
+      "minNs": 44267.08,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.CountStringMegabyte": {
-      "medianNs": 825758.11,
-      "minNs": 798864.16,
+      "medianNs": 861497.12,
+      "minNs": 849159.86,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.CountSpanMegabyte": {
-      "medianNs": 922188.04,
-      "minNs": 899556.05,
+      "medianNs": 948685.55,
+      "minNs": 923131.64,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.MemoryMegabyte": {
-      "medianNs": 67.19,
-      "minNs": 66.09,
+      "medianNs": 76.22,
+      "minNs": 75.3,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SpanOverloadBenchmarks.CountMemoryMegabyte": {
-      "medianNs": 820984.86,
-      "minNs": 801261.82,
+      "medianNs": 850431.64,
+      "minNs": 837739.55,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 64)": {
-      "medianNs": 125.49,
-      "minNs": 123.43,
+      "medianNs": 143.17,
+      "minNs": 134.59,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 1024)": {
-      "medianNs": 125.9,
-      "minNs": 124.13,
+      "medianNs": 142.77,
+      "minNs": 139.89,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 16384)": {
-      "medianNs": 124.81,
-      "minNs": 123.59,
+      "medianNs": 142.14,
+      "minNs": 139.58,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.SubjectLengthStateBenchmarks.StateBySubjectLength(SubjectLength: 262144)": {
-      "medianNs": 125.0,
-      "minNs": 123.55,
+      "medianNs": 142.39,
+      "minNs": 139.69,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.LiteralMatch": {
-      "medianNs": 50125.29,
-      "minNs": 49470.31,
+      "medianNs": 50658.08,
+      "minNs": 49457.84,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ClassScan": {
-      "medianNs": 20827156.25,
-      "minNs": 20558756.25,
+      "medianNs": 21958964.06,
+      "minNs": 21497809.38,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.CaseFoldedScan": {
-      "medianNs": 1809262.7,
-      "minNs": 1784264.84,
+      "medianNs": 1813816.6,
+      "minNs": 1800611.72,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.WholeWordList": {
-      "medianNs": 4077398.44,
-      "minNs": 3999606.25,
+      "medianNs": 3931980.27,
+      "minNs": 3831834.38,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ReverseFailedScan": {
-      "medianNs": 258817.65,
-      "minNs": 255163.96,
+      "medianNs": 257289.5,
+      "minNs": 248697.71,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.PartialMatch": {
-      "medianNs": 99596.36,
-      "minNs": 96757.08,
+      "medianNs": 99524.41,
+      "minNs": 96406.91,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.MatchesToEnd": {
-      "medianNs": 34470633.33,
-      "minNs": 33066593.33,
-      "allocatedBytes": 27478628
+      "medianNs": 36378863.46,
+      "minNs": 35149135.71,
+      "allocatedBytes": 27478387
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.MatchesToEndDense": {
-      "medianNs": 1904142.19,
-      "minNs": 1877757.81,
-      "allocatedBytes": 2696592
+      "medianNs": 2034859.38,
+      "minNs": 1961103.12,
+      "allocatedBytes": 2696608
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.EnumerateMatchesToEndDense": {
-      "medianNs": 1694307.52,
-      "minNs": 1675775.0,
-      "allocatedBytes": 2515000
+      "medianNs": 1771357.71,
+      "minNs": 1738521.68,
+      "allocatedBytes": 2515016
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.EnumerateMatchesSpanToEndDense": {
-      "medianNs": 1398885.16,
-      "minNs": 1389314.84,
+      "medianNs": 1487504.3,
+      "minNs": 1469716.02,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.MatchesFirstTwo": {
-      "medianNs": 344.29,
-      "minNs": 338.33,
-      "allocatedBytes": 2536
+      "medianNs": 417.5,
+      "minNs": 408.37,
+      "allocatedBytes": 2824
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.EnumerateMatchesFirstTwo": {
-      "medianNs": 207.11,
-      "minNs": 203.13,
-      "allocatedBytes": 456
+      "medianNs": 221.05,
+      "minNs": 216.51,
+      "allocatedBytes": 472
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ReplaceTemplate": {
-      "medianNs": 20087143.75,
-      "minNs": 19764084.38,
+      "medianNs": 20566378.12,
+      "minNs": 20278237.5,
       "allocatedBytes": 2097760
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.SplitLong": {
-      "medianNs": 15753459.38,
-      "minNs": 15655687.5,
-      "allocatedBytes": 1716475
+      "medianNs": 17455393.75,
+      "minNs": 16884581.25,
+      "allocatedBytes": 1716491
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.FuzzyShort": {
-      "medianNs": 228.71,
-      "minNs": 224.81,
+      "medianNs": 241.62,
+      "minNs": 237.98,
       "allocatedBytes": 32
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.FuzzyLong": {
-      "medianNs": 85823.71,
-      "minNs": 76268.25,
+      "medianNs": 82519.68,
+      "minNs": 77596.68,
       "allocatedBytes": 32
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.FuzzyNoMatchLong": {
-      "medianNs": 87919.45,
-      "minNs": 77249.62,
+      "medianNs": 81894.57,
+      "minNs": 76633.9,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.FuzzyBudgetThree": {
-      "medianNs": 982.94,
-      "minNs": 962.3,
+      "medianNs": 991.29,
+      "minNs": 969.17,
       "allocatedBytes": 48
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.EnhanceMatch": {
-      "medianNs": 2186.34,
-      "minNs": 2152.65,
+      "medianNs": 2279.04,
+      "minNs": 2227.5,
       "allocatedBytes": 120
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.BestMatch": {
-      "medianNs": 2698.49,
-      "minNs": 2666.36,
-      "allocatedBytes": 512
+      "medianNs": 2761.82,
+      "minNs": 2726.23,
+      "allocatedBytes": 544
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.PathologicalSameBranches": {
-      "medianNs": 1891.08,
-      "minNs": 1866.31,
+      "medianNs": 2101.26,
+      "minNs": 2051.64,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.PathologicalPrefixBranches": {
-      "medianNs": 2656.49,
-      "minNs": 2619.35,
+      "medianNs": 2825.53,
+      "minNs": 2755.35,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.PathologicalNestedRepeat": {
-      "medianNs": 123186.61,
-      "minNs": 119458.25,
+      "medianNs": 127569.54,
+      "minNs": 126031.27,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.PathologicalWordsToEnd": {
-      "medianNs": 140203.92,
-      "minNs": 136310.64,
+      "medianNs": 152344.84,
+      "minNs": 148724.51,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.TestedGroupRepeat": {
-      "medianNs": 2355249.8,
-      "minNs": 2320489.84,
-      "allocatedBytes": 0
+      "medianNs": 2438190.04,
+      "minNs": 2365960.94,
+      "allocatedBytes": 7
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.EmptyIterationRecord": {
-      "medianNs": 2775902.73,
-      "minNs": 2750893.75,
+      "medianNs": 3638237.11,
+      "minNs": 3603318.75,
       "allocatedBytes": 16000
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ConditionalBesideBranch": {
-      "medianNs": 2007.91,
-      "minNs": 1976.07,
+      "medianNs": 2197.72,
+      "minNs": 2082.04,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ConditionalPerToken": {
-      "medianNs": 162806.34,
-      "minNs": 158816.85,
+      "medianNs": 184637.27,
+      "minNs": 182683.33,
       "allocatedBytes": 0
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.ConditionalPerTokenNoMemo": {
-      "medianNs": 103300620.0,
-      "minNs": 101908760.0,
-      "allocatedBytes": 0
+      "medianNs": 113942690.0,
+      "minNs": 111673520.0,
+      "allocatedBytes": 105408000
     },
     "Fuzzy.Text.RegularExpressions.Benchmarks.WorkloadBenchmarks.CompileLargePattern": {
-      "medianNs": 243433.0,
-      "minNs": 240022.02,
-      "allocatedBytes": 1016032
+      "medianNs": 247942.77,
+      "minNs": 245025.1,
+      "allocatedBytes": 1016504
     }
   }
 }
