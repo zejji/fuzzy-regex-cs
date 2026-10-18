@@ -443,6 +443,35 @@ promise. It holds firmly the other way round: where some longer text does comple
 partial call never answers no match, so a caller that stops reading at the first no match never
 misses one.
 
+For one kind of pattern the partial start is a bound. The pattern has a fuzzy section where one
+insertion fits within its limits, is not searched with `BestMatch`, and also holds at least one of:
+a test of the position (`^`, `$`, `\A`, `\Z`, `\G`, `\b`, `\B`, `\m`, `\M`, a grapheme boundary or a
+lookaround); a construct whose result depends on the path taken (a backreference, a conditional, a
+group call, `(*PRUNE)`, `(*SKIP)`, `(*FAIL)`, `\K`, an atomic group or a possessive quantifier); or a
+fuzzy minimum such as `{1<=i<=2}`. For such a pattern a partial search can start earlier than the
+match that more text would give, and never later. Under `(?r)` the same holds mirrored: the partial
+can end later than the completed match, and never earlier.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var pair = new FuzzyRegex(@"(?:ab){1<=i<=2}");
+Match early = pair.Match("xxa", partial: true);
+Console.WriteLine($"{early.Index} {early.Length}");
+Match complete = pair.Match("xxab");
+Console.WriteLine($"{complete.Index} {complete.Length}");
+// 0 3
+// 1 3
+```
+
+The attempt from 0 can still complete ('xxab', with both 'x' characters inserted), but every text
+that completes it also holds a match from 1, which the engine then prefers. Seeing that needs the
+text that has not arrived, so the partial keeps the earlier start, here 1 character early. Among
+generated partial searches that this behaviour moved, the start was 1 character early on 61, 2 on
+4, and 3 at most; that bound was observed, and is unproven. A caller that keeps the text from the
+partial start keeps those few extra characters and still holds the start of every match that is
+still arriving.
+
 A fuzzy partial's `FuzzyCounts` and `FuzzyChanges` are the errors of the path that was still open,
 and they stay within the limits of every fuzzy section around that point, including sections
 that had not closed yet. More text can only add errors, so a path already over a limit could never
