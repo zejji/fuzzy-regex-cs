@@ -3343,6 +3343,11 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchGraphemeBoundary(MatchState state, Node node, int textPos)
     {
+        if (ReversedGraphemeCutBySliceStart(state, textPos))
+        {
+            return MatchStatus.Success;
+        }
+
         if (state.PartialSide != MatchState.PartialNone)
         {
             return GraphemeBoundaryInAPartialCall(state, node, textPos);
@@ -3350,6 +3355,51 @@ internal static class Matcher
 
         return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D108: whether a reversed <c>\X</c> ends at <paramref name="textPos"/> because
+    /// the caller's slice starts there, the mirror image of a forward <c>\X</c> cut by the slice end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Forwards the slice end is <see cref="MatchState.TextEnd"/>, so a cluster cut by it ends
+    /// there (GB2). Backwards <see cref="MatchState.TextStart"/> stays 0 (ledger entry 24), so the
+    /// boundary test at the far end of a reversed <c>\X</c> read the character before the slice,
+    /// found no break, and the <c>\X</c> could not go past the slice start to reach one: the cut
+    /// cluster was lost. A reversed match may not consume below the slice start, so the matchable
+    /// text has run out there (the rule <see cref="RanOutOnTheLeft"/> applies to a partial), and
+    /// the cluster ends.
+    /// </para>
+    /// <para>
+    /// Only the <c>\X</c> ending is cut. <c>\b</c>, <c>\B</c> and lookbehind still see the
+    /// character before the slice. The caller's start is <see cref="MatchState.InitialSliceStart"/>.
+    /// <see cref="MatchState.SliceStart"/> alone is not enough: ENHANCEMATCH and BESTMATCH move it
+    /// to a found match's start before they re-run, and a cut there split a cluster the caller's
+    /// slice holds whole (<c>(?re)(?:̈z|\Xy){e&lt;=1}</c> over 'äy' became (1, 3) with
+    /// no error), where a forward re-run keeps reading up to <see cref="MatchState.TextEnd"/>.
+    /// Requiring the live start as well leaves out a lookaround, which opens the slice to the whole
+    /// text, so a <c>\X</c> inside one still reads the cluster before the caller's start. Outside a
+    /// lookaround only nodes of the pattern's own direction run, so <see cref="MatchState.Reverse"/>
+    /// is the node's direction.
+    /// </para>
+    /// <para>
+    /// A partial call's second pass is left as it was: there the text before the slice start is
+    /// the text to come (ledger entry 24), so a cluster reaching it may go on and the <c>\X</c>
+    /// runs out, as a forward one at the slice end is undetermined (<see cref="GraphemeBoundaryAtEdge"/>).
+    /// The first pass, which is an ordinary match, cuts. The oracle's model of upstream's reversed
+    /// <c>\X</c> (<see cref="PatternObject.UpstreamReverseGrapheme"/>) keeps upstream's answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position of the boundary test.</param>
+    /// <returns><see langword="true"/> if the test stands at the caller's slice start, past the start of the text.</returns>
+    private static bool ReversedGraphemeCutBySliceStart(MatchState state, int textPos) =>
+        state.Reverse
+        && textPos == state.InitialSliceStart
+        && textPos == state.SliceStart
+        && textPos > state.TextStart
+        && state.PartialSide == MatchState.PartialNone
+        && !state.Pattern.UpstreamReverseGrapheme;
 
     /// <summary>
     /// NOT UPSTREAM'S, D11: whether a zero-width character test that has reached the edge lets the
