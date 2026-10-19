@@ -7347,3 +7347,38 @@ keeps it, since the window costs a read to the text end per attempt. On adversar
 pattern with an atomic group anywhere scans quadratically (known defect D114). A `(*PRUNE)` or
 `(*SKIP)` would need the same, but D109 refuses a ranked fuzzy pattern that holds one. Pinned by
 `Gaps/Engine/RankedRefinementWindowTests`.
+
+## 94. A negative lookahead around a lookahead that holds for every continuation reports a partial span the pattern cannot make - DIVERGES HERE (F105, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D113's second shape, found by the
+D113 cost research's blind reviewer. Evidence: `.scratch/s1019/d113-cost/review/` (235 rows of 40
+patterns) and `.scratch/s1019/d113/probe3/rows.tsv`.
+
+**Reproduction**, `regex` 2026.9.10 and 2026.9.29 on Python 3.14, measured 2026-10-19,
+`partial=True`:
+
+```
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'a')       -> P(0, 1)   here None
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'aa')      -> P(0, 2)   here None
+search(r'(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a', 'aa')  -> P(0, 2)   here P(1, 2)
+search(r'(?!(?=(?:(?=a*$)a|aa)(?:ab|a)*a?))a', 'aaa')    -> P(0, 3)   here P(2, 3)
+match(r'(?!(?=(?:a(?=[ab]*c)|aa)(?:ab|a)*a?))', 'aab')   -> P(0, 3)   here None
+```
+
+**Why upstream is wrong.** A partial match is one that "could be possible if the string had not
+been truncated" (`upstream/README.rst:270`), and no text makes a zero-width pattern span a
+character or a one-character pattern span two. Judged by brute force (upstream without partial,
+every continuation of up to four letters from {a, b, c}): no continuation of 'a' or 'aab'
+completes the first and last patterns, because the alternative `a` or `aa` succeeds at 0 whatever
+follows, so the negative lookahead always fails there; the earliest start any continuation
+completes is 1 for 'aa' (the continuation 'c' fails both alternatives at 1) and 2 for 'aaa'.
+
+**Mechanism upstream:** not traced. Upstream reaches the same spans as this port did before
+D113, whose cause was the port's own: the second pass's dedup at a blocked lookahead end let a
+repeat in the body record the continuation's failure, and that record cut the body's other
+alternative where it reached the same repeat with its end decided, so the inner lookahead stayed
+undecided. Upstream has no such dedup, so its route to the same answer is different.
+
+**This port.** The dedup marks the blocked end (`MatchState.NoteABlockedEnd`), so the record is
+not made. Pinned by
+`Gaps/Engine/PartialBlockedEndGuardTests.A_negative_lookahead_reports_no_partial_its_inner_lookahead_decides_for_every_continuation`.

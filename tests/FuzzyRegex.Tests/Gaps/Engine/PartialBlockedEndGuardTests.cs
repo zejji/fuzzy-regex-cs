@@ -126,6 +126,33 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial: true).Should().Be(expected);
     }
 
+    // D113, the second shape (found by the cost research, `.scratch/s1019/d113-cost/review`): a
+    // lookaround touching the text end in the first alternative of a lookahead's body leaves that
+    // path's end blocked, and main's dedup let the repeat record the continuation's failure there.
+    // The second alternative reaches the same repeat at the same position with its end decided, and
+    // the record cut it, so the inner lookahead stayed undecided and the negative one around it
+    // reported a partial over the whole text. Those spans are impossible: two of the patterns are
+    // zero-width and the other two read one character. The right answers, for the first two rows:
+    // over 'a', the second alternative `a` succeeds for every continuation, so `(?!...)` always
+    // fails; over 'aa', `aa` succeeds at 0 whatever follows, and at 1 the continuation 'c' fails
+    // both alternatives, so `(?!...)a` completes as (1,2). The last two rows move the touch to an
+    // end anchor and to after a character. Upstream regex 2026.9.10 and 2026.9.29 answer as main
+    // does (comments; ledger entry 94).
+    [Test]
+    [Arguments(@"(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))", "a", "match", "None")] // (0,1)p
+    [Arguments(@"(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a", "aa", "search", "(1,2)p")] // (0,2)p
+    [Arguments(@"(?!(?=(?:(?=a*$)a|aa)(?:ab|a)*a?))a", "aaa", "search", "(2,3)p")] // (0,3)p
+    [Arguments(@"(?!(?=(?:a(?=[ab]*c)|aa)(?:ab|a)*a?))", "aab", "match", "None")] // (0,3)p
+    public void A_negative_lookahead_reports_no_partial_its_inner_lookahead_decides_for_every_continuation(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        Run(pattern, subject, operation, partial: true).Should().Be(expected);
+    }
+
     // Controls, green before the fix: the same patterns without partial, and partial calls where
     // the body never runs out or the record is sound.
     [Test]

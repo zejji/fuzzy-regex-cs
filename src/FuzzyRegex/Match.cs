@@ -481,6 +481,11 @@ public sealed class Match : Group
     /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-reversed-partial-search-lets--hold-before-a-final-newline-in-the-text-to-come">the comparison page</see>.
     /// </para>
     /// <para>
+    /// <b>A negative lookahead around a lookahead that holds for every continuation reports no
+    /// partial</b>, where upstream can report a span the pattern cannot make. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-negative-lookahead-around-a-lookahead-that-holds-for-every-continuation-reports-no-partial">the comparison page</see>.
+    /// </para>
+    /// <para>
     /// <b>A partial search's first-set check does not answer before the anchors it skips</b>, so
     /// <c>\A</c>, <c>\G</c> and <c>$</c> decide at the edge of the text. See
     /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-searchs-first-set-check-does-not-answer-before-the-anchors-it-skips">the comparison page</see>.

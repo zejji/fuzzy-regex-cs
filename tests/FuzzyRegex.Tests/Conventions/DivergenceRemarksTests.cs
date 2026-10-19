@@ -208,6 +208,7 @@ public sealed class DivergenceRemarksTests
         ("A partial search tries a start inside the text to come for a pattern with no first set", [_partial]),
         ("`\\b` over the empty text is a partial", [_partial]),
         ("A partial match reports a group that closes before a repeat's tail runs out of text", [_partial]),
+        ("A negative lookahead around a lookahead that holds for every continuation reports no partial", [_partial]),
         (
             "A reversed partial search lets `$` hold before a final newline in the text to come",
             [_partial, Option("RightToLeft")]
