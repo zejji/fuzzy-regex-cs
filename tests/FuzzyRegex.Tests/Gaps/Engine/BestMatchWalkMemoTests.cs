@@ -6,11 +6,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// D115: BESTMATCH holds each run after a match to fewer errors than that match and searches to the
 /// end of the slice for it. When no better match exists that search fails only at the end of the
 /// text, and a finditer paid it once per match, so the scan was quadratic. The port now remembers a
-/// failed search for the rest of the scan (<c>MatchState.BestWalkNoMatchFrom</c>).
+/// failed search for the rest of the scan (<c>MatchState.BestWalkFailures</c>).
 /// </summary>
 /// <remarks>
 /// Steps measured 2026-10-19 over 16,000 characters of prose (Debug, <c>WorkCounter</c>): main
-/// fc878eec 8,944,794 and 6,370,408; with the memo 205,109 and 199,724. The flagless scans take
+/// fc878eec 8,944,794 and 6,370,408; with the memo 206,141 and 200,496. The flagless scans take
 /// 127,030 and 129,706. Answers are the same with and without the memo.
 /// </remarks>
 public sealed class BestMatchWalkMemoTests
@@ -57,7 +57,9 @@ public sealed class BestMatchWalkMemoTests
     // insertion decides a negative lookaround, an atomic group or a conditional, the ban widens
     // the whole pattern. Each row is main fc878eec's answer, which the first memo changed.
     // The second row is reversed and its lookahead runs against the scan; the third holds a
-    // fuzzy lookbehind, which reads back across a later search's anchor.
+    // fuzzy lookbehind, which reads back across a later search's anchor; so does the fourth's
+    // negative lookbehind (found by the D115 alternatives research), which a later search from 2
+    // passes where a search from 0 refuses it.
     [Test]
     [Arguments(@"(?b)(?:(?!(?:ab){i<=1})x|(?:[xy]q){s<=1})", "yb.xab", "0,2,1,0,0|3,1,0,0,0")]
     [Arguments(
@@ -70,6 +72,7 @@ public sealed class BestMatchWalkMemoTests
         "y aby",
         "1,0,0,0,0|2,0,0,0,0|2,1,0,1,0|3,0,0,1,0|3,1,0,1,1|5,0,0,0,0"
     )]
+    [Arguments(@"(?b)(?:(?<!(?:abb){i<=1})x|(?:[aQ]Z|bbZ){s<=1})", "aQbbx", "0,2,1,0,0|4,1,0,0,0")]
     public void A_later_search_for_a_better_match_is_not_judged_by_an_earlier_one_whose_anchor_differs(
         string pattern,
         string text,
