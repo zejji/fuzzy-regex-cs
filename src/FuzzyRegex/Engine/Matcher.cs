@@ -7422,6 +7422,33 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (D104): the construct a pruning mark belongs to and, for a lookaround or a
+    /// condition's test, where it started and the slice it set (<c>MatchState.CutBodyKeyOf</c>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The backtracking-stack size the mark holds.</param>
+    /// <param name="op">Receives the construct's opcode.</param>
+    /// <param name="textPos">Receives where a lookaround or test started; 0 for anything else.</param>
+    /// <param name="sliceStart">Receives the slice start it set; 0 for anything else.</param>
+    /// <param name="sliceEnd">Receives the slice end it set; 0 for anything else.</param>
+    /// <returns><see langword="false"/> if the stacks do not hold what the mark promises.</returns>
+    internal static bool ReadConstructStart(
+        MatchState state,
+        int mark,
+        out Opcode op,
+        out int textPos,
+        out int sliceStart,
+        out int sliceEnd
+    )
+    {
+        bool read = ReadPruningMark(state, mark, out op, out LookaroundStateData look);
+        textPos = look.TextPos;
+        sliceStart = look.SliceStart;
+        sliceEnd = look.SliceEnd;
+        return read;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, ledger entry 47: backtracking has reached a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> inside an unfinished atomic group or positive lookaround, so abandon everything
     /// back to the innermost enclosing negative lookaround, conditional test or attempt.
@@ -17101,6 +17128,16 @@ internal static class Matcher
                     {
                         state.GuardRepeat((int)bodyIndex, (int)bodyTextPos, NodeStatus.Body, true);
                     }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(
+                            (int)bodyIndex,
+                            (int)bodyTextPos,
+                            (int)bodyTextPos,
+                            NodeStatus.Body
+                        );
+                    }
                     break;
                 }
                 case Opcode.Branch: // 2-way branch.
@@ -17331,6 +17368,11 @@ internal static class Matcher
                     {
                         state.GuardRepeat(dataR.Index, dataR.TextPos, NodeStatus.Body, true);
                     }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(dataR.Index, dataR.TextPos, dataR.TextPos, NodeStatus.Body);
+                    }
 
                     // Restore the previous repeat.
                     rpData.Count = dataR.Count;
@@ -17372,6 +17414,11 @@ internal static class Matcher
                     if (!sawABlockedEnd)
                     {
                         state.GuardRepeat(index, pos, NodeStatus.Tail, true);
+                    }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(index, pos, pos, NodeStatus.Tail);
                     }
 
                     // A (*SKIP) might have changed the size of the slice.
@@ -17534,7 +17581,14 @@ internal static class Matcher
                     // Don't try this repeated match again.
                     if (sawABlockedEnd)
                     {
-                        // NOT UPSTREAM (D90): the failure took in what follows a blocked construct.
+                        // NOT UPSTREAM (D90): the failure took in what follows a blocked construct,
+                        // so it is kept under the instance instead (D104).
+                        state.GuardRepeatAfterBlockedEnd(
+                            index,
+                            Math.Min(limit, pos),
+                            Math.Max(limit, pos),
+                            NodeStatus.Body
+                        );
                     }
                     else if (step > 0)
                     {
@@ -17844,6 +17898,16 @@ internal static class Matcher
                     if (!state.PoppedEntrySawABlockedEnd((int)tailIndex))
                     {
                         state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(
+                            (int)tailIndex,
+                            (int)tailTextPos,
+                            (int)tailTextPos,
+                            NodeStatus.Tail
+                        );
                     }
                     break;
                 }

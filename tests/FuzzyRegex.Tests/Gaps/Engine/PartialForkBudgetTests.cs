@@ -124,10 +124,11 @@ public sealed class PartialForkBudgetTests
     /// </summary>
     [Test]
     [Arguments(@"a(?>\b|)(*FAIL)", "atomic group's blocked cut (BlockAtomicCut)", 1)]
-    // 4 since D90: the tail guard that the first continuation's failure wrote cut two later paths
-    // to the blocked end; a guard written after a blocked end is no longer kept, since in general
-    // it records the continuation, not the position (MatchState.BlockedEndMark).
-    [Arguments(@"a(?:\b|)++(*FAIL)", "possessive repeat's blocked cuts (BlockAtomicCut)", 4)]
+    // 2: the tail guard that the first continuation's failure wrote cuts two later paths to the
+    // blocked end. D90 made it 4 by dropping that guard, since in general it records the
+    // continuation, not the position (MatchState.BlockedEndMark); D104 keeps it under the instance
+    // it was written in (MatchState.CutBodyKeyOf), and the two later paths share its key.
+    [Arguments(@"a(?:\b|)++(*FAIL)", "possessive repeat's blocked cuts (BlockAtomicCut)", 2)]
     [Arguments(@"a\b(*PRUNE)(*FAIL)", "skipped verb (SkipABlockedVerb)", 1)]
     [Arguments(@"a(?=\b)(*FAIL)", "positive lookaround's blocked end (EndALookaroundInTheSecondPass)", 1)]
     [Arguments(@"a(?<=a\b)(*FAIL)", "lookbehind's blocked end (EndALookaroundInTheSecondPass)", 1)]

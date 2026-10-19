@@ -126,6 +126,90 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial).Should().Be(expected);
     }
 
+    // D104: the records the rule above withholds are kept under the instance they were written in
+    // (MatchState.CutBodyKeyOf: where the lookahead started, the enclosing loop's count, start and
+    // progress, the groups the rest reads), so a second arrival in the same state is still cut.
+    // Without them the second pass explored what the guards-off build explores until the fork
+    // budget stopped it and answered its partial at the attempt start, (0, 10), on every row here
+    // (red on perf/d103 608481da). The expected answers are the guards-off build's with no budget
+    // (.scratch/s1016/d90/steps, 30 of the 40 rows where main before D90 agreed with it, and the
+    // register's witness at n = 10; the other 10 are still open, in OpenDefectTests). Upstream
+    // 2026.9.10 answers (0, 10) on all 40 grid rows: its lookahead never carries on past a blocked
+    // end, so it has no such second pass.
+    [Test]
+    [Arguments(@"(?:(?=(?:a|(b))*a?)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"(?:(?=(?:a|(b))*a?)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"(?:(?=(?:a|(b))*a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*a?)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*a?)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*y)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*y)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:(a)|b)*y)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:ab|a)*(b?)y)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:ab|a)*(b?)y)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:ab|a)*(b?)y)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*a?)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*a?)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*y)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*y)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"a*(?:(?=(?:a|(b))*y)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"b?(?:(?=(?:a|(b))*a?)a)*(?(1)c|d)", "aaaaaaaaab", 9, 10)]
+    [Arguments(@"b?(?:(?=(?:a|(b))*a?)a)+(?(1)c|d)", "aaaaaaaaab", 9, 10)]
+    [Arguments(@"b?(?:(?=(?:a|(b))*a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 9, 10)]
+    [Arguments(@"y?(?:(?=(?:a|(b))*a?)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"y?(?:(?=(?:a|(b))*a?)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"y?(?:(?=(?:a|(b))*a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments("(?:(?=(?:a|(b))*y)a)+(?(1)c|d)", "aaaaaaaaaab", 11, 11)]
+    public void A_record_kept_under_its_instance_keeps_the_exact_partial(
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, partial: true);
+
+        m.Success.Should().BeTrue();
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length)
+            .Should()
+            .Be((start, end), "the fork budget's partial at the attempt start is the D104 phantom");
+    }
+
+    // D104, blind review of the design (2026-10-18): `b?` captures an empty span, which the
+    // capture-change counter and D17's empty-iteration states read, so a key holding only whether
+    // the group is set would merge arrivals whose futures differ. The key holds what D85's does,
+    // the exact span where a new capture could equal it. The expected answers are the guards-off
+    // build's (.scratch/s1018/d104g/w-sw.txt); D90's rule and main before D90 give the same. Upstream
+    // 2026.9.10 answers (0, 10) and (0, 2) partial, or raises MemoryError, for want of the
+    // blocked-end second pass.
+    [Test]
+    [Arguments(@"(?:(?=(?:a|(b?))*y)a?)+(?(1)c|d)", "aaaaaaaaab", "search", "(10,10)p g1=")]
+    [Arguments(@"(?:(?=(?:a|(b?))*y)a?)+(?(1)c|d)", "aaaaaaaaab", "match", "None")]
+    [Arguments(@"(?:(?=(?:a|(b?))*y)a?)+(?(1)c|d)", "ab", "search", "(2,2)p g1=")]
+    [Arguments(@"(?:(?=(?:a|(b?))*y)a?)+(?(1)c|d)", "aaba", "search", "(3,4)p g1=")]
+    [Arguments(@"a*(?:(?=(?:a|(b?))*a?)a?)*(?(1)c|d)", "aaaaaaaaab", "search", "(10,10)p g1=")]
+    [Arguments(@"a*(?:(?=(?:a|(b?))*a?)a?)*(?(1)c|d)", "aaba", "fullmatch", "None")]
+    [Arguments(@"(?:(?=(?:(a?)|b)*y)a?){2,}(?(1)c|d)", "ab", "search", "(2,2)p g1=")]
+    [Arguments(@"(?:(?=(?:(a?)|b)*y)a?){2,}(?(1)c|d)", "aaba", "search", "(3,4)p g1=")]
+    public void A_record_kept_under_its_instance_tells_empty_captures_apart(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        Run(pattern, subject, operation, partial: true).Should().Be(expected);
+    }
+
     private static string Run(string pattern, string subject, string operation, bool partial)
     {
         var regex = new FuzzyRegex(pattern);

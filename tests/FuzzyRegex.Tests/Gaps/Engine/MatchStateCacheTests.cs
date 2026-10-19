@@ -393,6 +393,9 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 stack.Push(7);
                 break;
+            case KeyedTailGuards store:
+                store.ForWrite([7], mayAdd: true)!.Guard(7, protect: true);
+                break;
             case FuzzyLiteralFilter.ScanMemory memory:
                 Array.Fill(memory.From, 7);
                 Array.Fill(memory.Found, 7);
@@ -547,6 +550,18 @@ public sealed class MatchStateCacheTests
                 break;
             case GuardList guards:
                 RenderItems(path, ((GuardSpan[])Private(guards, "_spans")).Take(guards.Count), lines);
+                break;
+            case KeyedTailGuards store:
+                lines.Add($"{path}.Changes={Private(store, "_changes")}");
+                foreach (
+                    (TailKeyValues key, GuardList list) in (
+                        (Dictionary<TailKeyValues, GuardList>)Private(store, "_lists")
+                    ).OrderBy(static entry => string.Join(" ", entry.Key.Values), StringComparer.Ordinal)
+                )
+                {
+                    Render($"{path}[{string.Join(" ", key.Values)}]", list, lines);
+                }
+
                 break;
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);

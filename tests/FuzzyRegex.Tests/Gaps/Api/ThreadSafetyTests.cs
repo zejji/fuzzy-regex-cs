@@ -1023,5 +1023,10 @@ public sealed class ThreadSafetyTests
             // D90: set by NodeCompiler.BuildRepeat inside Compile, read by
             // MatchState.PoppedEntrySawABlockedEnd; matching never writes it.
             "RepeatInfo.InsideACutBody",
+            // D104: written once by TailGuardLiveness.FindTailKeys inside Compile (Optimiser), read
+            // by MatchState.Create and MatchState.CutBodyKeyOf; matching never writes them.
+            "RepeatInfo.CutBodyKey",
+            "RepeatInfo.EnclosingLoops",
+            "RepeatInfo.EnclosingLoopCaps",
         };
 }

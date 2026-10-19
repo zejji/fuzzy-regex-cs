@@ -136,6 +136,26 @@ internal sealed class RepeatInfo
     internal TailGuardKeySpec? TailKey;
 
     /// <summary>
+    /// NOT UPSTREAM (D104): what this repeat's records written after a blocked end are keyed on
+    /// besides the instance, for a repeat <see cref="InsideACutBody"/>; see
+    /// <c>MatchState.CutBodyKeyOf</c>. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal TailGuardKeySpec? CutBodyKey;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the loops enclosing this repeat, for a repeat
+    /// <see cref="InsideACutBody"/>: their count, start and progress are in the key of its records
+    /// written after a blocked end. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal int[] EnclosingLoops = [];
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): for each of <see cref="EnclosingLoops"/>, the count past which the key
+    /// stops telling counts apart: the minimum of a loop with no maximum, else no cap.
+    /// </summary>
+    internal long[] EnclosingLoopCaps = [];
+
+    /// <summary>
     /// NOT UPSTREAM (D85): the body holds a repeat whose tail guard is keyed, so this repeat's body
     /// guard is off. A body guard records that the body never got to its end from a position; a
     /// keyed tail guard inside can stop the body under one value of a group the rest of the match
