@@ -158,6 +158,7 @@ public sealed class DivergenceRemarksTests
                 "P:" + _ns + "FuzzyRegex.MaxCompiledNodes",
             ]
         ),
+        ("Nesting limit", [_mainConstructor]),
         (
             "A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit",
             [Option("FullCase")]

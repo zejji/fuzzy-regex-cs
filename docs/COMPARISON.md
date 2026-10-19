@@ -1332,6 +1332,21 @@ the memory has already been spent by then, so a graph that is refused may be sma
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
 
+### Nesting limit
+
+Compiling a pattern recurses once for each level of nesting, and in .NET a stack overflow cannot be
+caught: it ends the process. So this port refuses a pattern with more than 500 levels of groups
+and sets, throwing `FuzzyRegexParseException` with the message "too deeply nested: more than 500
+levels of groups and sets" and the offset of the bracket that opens the 501st level. Every
+construct compiles at 500 levels on a 1 MB stack. A thread with a smaller stack can run out
+sooner, and then gets `FuzzyRegexParseException` with the message "too deeply nested to compile on
+this thread: its stack ran out", an offset of -1, and the `InsufficientExecutionStackException`
+as its inner exception.
+
+Upstream has no limit of its own. Python's recursion limit stops it first, with `RecursionError`
+rather than `regex.error`, at 140 to 330 levels depending on the construct (regex 2026.9.10 on
+Python 3.14), so no pattern upstream compiles is refused here.
+
 ### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
 Upstream refuses to let a fuzzy match begin with an inserted character at the exact position the

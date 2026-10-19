@@ -548,12 +548,20 @@ instead) would be disproportionate to what it was worth compiling. It defaults t
 `maxCompiledNodes` constructor parameter; there is no "unlimited" value. A pattern that exceeds it
 throws `FuzzyRegexParseException` at compile time, naming the limit in its message.
 
+**Nesting** is limited to 500 levels of groups and sets: `new string('(', 501) + "a" + new
+string(')', 501)` throws `FuzzyRegexParseException` with the offset of the bracket that opens the
+501st level. Compiling recurses once per level, and a stack overflow would end the process rather
+than throw, so the compiler also checks the stack it has left; on a thread with a small stack a
+shallower pattern can be refused with "too deeply nested to compile on this thread". Every
+construct compiles at 500 levels on a 1 MB stack. Python's `regex` stops at 140 to 330 levels.
+
 **`FuzzyRegex.CacheSize`** is the number of compiled patterns the static convenience methods keep
 ready between calls (fifteen by default); see Section 2 for when to bypass it with an instance
 instead.
 
 **Exceptions.** `FuzzyRegexParseException` is thrown for anything wrong with the pattern itself -
-a syntax error, an unknown flag combination, a pattern over `MaxCompiledNodes` - and carries
+a syntax error, an unknown flag combination, a pattern over `MaxCompiledNodes` or nested too
+deeply - and carries
 `Pattern` (the input pattern) and `Offset` (where in it parsing failed) alongside `Message`. Bad
 input elsewhere raises `ArgumentNullException` for a null pattern or subject,
 `ArgumentOutOfRangeException` for a group number the pattern does not define,

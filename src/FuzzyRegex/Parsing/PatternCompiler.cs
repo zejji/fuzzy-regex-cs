@@ -94,6 +94,7 @@ internal static class PatternCompiler
         bool upstreamCallCopies = false
     )
     {
+        FuzzyRegexParseException unterminated;
         try
         {
             return CompileUnderVersion(
@@ -109,41 +110,47 @@ internal static class PatternCompiler
                 upstreamCallCopies
             );
         }
-        catch (FuzzyRegexParseException unterminated)
-            when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
+        catch (FuzzyRegexParseException failed)
+            when (string.Equals(failed.Message, _unterminatedSet, StringComparison.Ordinal)
                 && defaultVersion == RegexFlags.Version1
                 && (flags & RegexFlags.AllVersions) == 0
             )
         {
-            // NOT UPSTREAM'S MESSAGE (S50b; docs/DIVERGENCES.md). Under version 1 an unescaped `[`
-            // inside a set opens a NESTED set, so `[[]` and `[a[b]` - accepted by `re`, by
-            // `System.Text.RegularExpressions` and under `Version0` - stop compiling, and upstream's
-            // bare "unterminated character set" tells a caller arriving from `Regex` nothing about
-            // why their working pattern broke. Upstream can afford the bare text because its own
-            // DEFAULT_VERSION is VERSION0, where the nested reading does not exist.
-            //
-            // The condition is the WHOLE pattern compiling under version 0, decided by compiling it,
-            // because nothing cheaper is true. Two blind reviews killed two heuristics that looked
-            // equivalent and were not: a parse-wide "we read a nested set" flag advised Version0 on
-            // `[[a-z]--[aeiou]]x[`, whose nested part is a legal set operation and whose trailing `[`
-            // is the whole problem, and scoping that flag to one top-level set still advised it on
-            // `[[a]--[b`, where the nested set is inside the set that fails. Version 0 rejects both.
-            //
-            // It costs a second parse of a pattern that has already failed, and it cannot recurse:
-            // the retry names Version0 explicitly, so this arm's `defaultVersion == Version1` guard
-            // is false inside it. Skipped entirely when the caller or the pattern already chose a
-            // version, since then version 1 is not what the caller got by default.
-            if (!CompilesUnderVersion0(pattern, flags, namedLists))
-            {
-                throw;
-            }
-
-            throw new FuzzyRegexParseException(
-                _unterminatedNestedSet,
-                unterminated.Pattern ?? pattern,
-                unterminated.Offset
-            );
+            // The retry below runs after the catch, not inside it (D110): .NET runs a catch block
+            // before it pops the frames of the parse that threw, so a retry in here would start
+            // on top of that parse's stack and, for a deep pattern, run out of stack where a
+            // fresh compile would not.
+            unterminated = failed;
         }
+
+        // NOT UPSTREAM'S MESSAGE (S50b; docs/DIVERGENCES.md). Under version 1 an unescaped `[`
+        // inside a set opens a NESTED set, so `[[]` and `[a[b]` - accepted by `re`, by
+        // `System.Text.RegularExpressions` and under `Version0` - stop compiling, and upstream's
+        // bare "unterminated character set" tells a caller arriving from `Regex` nothing about
+        // why their working pattern broke. Upstream can afford the bare text because its own
+        // DEFAULT_VERSION is VERSION0, where the nested reading does not exist.
+        //
+        // The condition is the WHOLE pattern compiling under version 0, decided by compiling it,
+        // because nothing cheaper is true. Two blind reviews killed two heuristics that looked
+        // equivalent and were not: a parse-wide "we read a nested set" flag advised Version0 on
+        // `[[a-z]--[aeiou]]x[`, whose nested part is a legal set operation and whose trailing `[`
+        // is the whole problem, and scoping that flag to one top-level set still advised it on
+        // `[[a]--[b`, where the nested set is inside the set that fails. Version 0 rejects both.
+        //
+        // It costs a second parse of a pattern that has already failed, and it cannot recurse:
+        // the retry names Version0 explicitly, so this arm's `defaultVersion == Version1` guard
+        // is false inside it. Skipped entirely when the caller or the pattern already chose a
+        // version, since then version 1 is not what the caller got by default.
+        if (!CompilesUnderVersion0(pattern, flags, namedLists))
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(unterminated);
+        }
+
+        throw new FuzzyRegexParseException(
+            _unterminatedNestedSet,
+            unterminated.Pattern ?? pattern,
+            unterminated.Offset
+        );
     }
 
     /// <summary>Upstream's message for a set that runs off the end of the pattern.</summary>

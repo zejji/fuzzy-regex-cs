@@ -959,11 +959,67 @@ internal static class ParseFunctions
     /// <returns>The digits, which may be empty.</returns>
     internal static string ParseCount(Source source) => source.GetWhile(RegexFlags.IsDigit);
 
+    /// <summary>
+    /// NOT UPSTREAM (D110): the deepest the parser lets groups and sets nest, counting each
+    /// parenthesis and each bracket that opens a set. Every pass over the parsed pattern recurses
+    /// once per level, and a .NET stack overflow ends the process, so the depth needs a bound the
+    /// parser can give a position for. Upstream has none of its own; Python's recursion limit stops
+    /// it at 140 to 330 levels with a <c>RecursionError</c>, so every pattern it compiles is under
+    /// this one. 500 levels compile with room to spare on a 1 MB stack (1,100 to 1,450 did before
+    /// the guard), so on an ordinary thread the limit, not the stack, decides.
+    /// </summary>
+    internal const int MaxNestingDepth = 500;
+
+    /// <summary>
+    /// NOT UPSTREAM (D110): enters one level of nesting, refusing the level past
+    /// <see cref="MaxNestingDepth"/> at the bracket that opened it, which the caller has just read.
+    /// The caller leaves the level with <c>info.NestingDepth--</c> in a <c>finally</c>.
+    /// </summary>
+    /// <param name="source">The scanner, just past the opening bracket.</param>
+    /// <param name="info">The parse state.</param>
+    /// <remarks>
+    /// The stack check here also covers the passes that run later over the parsed tree (the
+    /// <see cref="RegexBase"/> virtuals in <c>Nodes.cs</c>), which have no check of their own. They
+    /// recurse once per level too and spend less stack per level than the parser: on threads of
+    /// 160 KB to 1 MB, every nesting shape in <c>.scratch/s1019/d110/probe/grid.sh</c> either
+    /// compiled or was stopped here, never overflowing later (2026-10-19, Release).
+    /// SHORTCUT: that margin is measured, not enforced; if a tree pass ever grows past the parser's
+    /// cost per level, a small-stack thread could overflow in it. The upgrade is a stack check in
+    /// each container node's recursive overrides, as the engine's <c>BuildSequence</c> has.
+    /// </remarks>
+    private static void EnterNesting(Source source, Info info)
+    {
+        if (info.NestingDepth == MaxNestingDepth)
+        {
+            throw new FuzzyRegexParseException(
+                $"too deeply nested: more than {MaxNestingDepth} levels of groups and sets",
+                source.String,
+                source.Pos - 1
+            );
+        }
+
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        info.NestingDepth++;
+    }
+
     /// <summary>Upstream <c>parse_paren</c> (lines 850-940).</summary>
-    /// <param name="source">The scanner.</param>
+    /// <param name="source">The scanner, just past the parenthesis.</param>
     /// <param name="info">The parse state.</param>
     /// <returns>The subpattern, or <see langword="null"/> when the parenthesis held only inline flags.</returns>
     internal static RegexBase? ParseParen(Source source, Info info)
+    {
+        EnterNesting(source, info);
+        try
+        {
+            return ParseParenCore(source, info);
+        }
+        finally
+        {
+            info.NestingDepth--;
+        }
+    }
+
+    private static RegexBase? ParseParenCore(Source source, Info info)
     {
         int savedPos = source.Pos;
         int ch = source.Get(overrideIgnore: true);
@@ -2347,6 +2403,19 @@ internal static class ParseFunctions
     /// <returns>The set node.</returns>
     internal static RegexBase ParseSet(Source source, Info info)
     {
+        EnterNesting(source, info);
+        try
+        {
+            return ParseSetCore(source, info);
+        }
+        finally
+        {
+            info.NestingDepth--;
+        }
+    }
+
+    private static RegexBase ParseSetCore(Source source, Info info)
+    {
         int version = Version(info);
 
         bool savedIgnore = source.IgnoreSpace;
@@ -2560,15 +2629,23 @@ internal static class ParseFunctions
             // It's the start of a nested set.
 
             // Negative set?
-            bool negate = source.MatchText("^");
-            RegexBase item = ParseSetUnion(source, info);
-
-            if (!source.MatchText("]"))
+            EnterNesting(source, info);
+            try
             {
-                throw new FuzzyRegexParseException("missing ]", source.String, source.Pos);
-            }
+                bool negate = source.MatchText("^");
+                RegexBase item = ParseSetUnion(source, info);
 
-            return negate ? item.WithFlags(positive: !item.Positive) : item;
+                if (!source.MatchText("]"))
+                {
+                    throw new FuzzyRegexParseException("missing ]", source.String, source.Pos);
+                }
+
+                return negate ? item.WithFlags(positive: !item.Positive) : item;
+            }
+            finally
+            {
+                info.NestingDepth--;
+            }
         }
 
         int ch = source.Get();

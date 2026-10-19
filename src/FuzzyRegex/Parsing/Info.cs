@@ -58,6 +58,12 @@ internal sealed class Info
     internal int FlagScopeDepth { get; set; }
 
     /// <summary>
+    /// How many groups and sets enclose the current point. Not upstream state: the parser bounds it
+    /// at <see cref="ParseFunctions.MaxNestingDepth"/> (D110).
+    /// </summary>
+    internal int NestingDepth { get; set; }
+
+    /// <summary>
     /// The encoding flags in force outside every group. Not upstream state (S91): an encoding named
     /// there reaches the whole pattern, because outside a group encodings accumulate and a clash is
     /// rejected, so a node parsed under exactly these encodings needs no encoding of its own.

@@ -687,49 +687,65 @@ internal static class Optimiser
         Node? node
     )
     {
-        while (node is not null)
+        // NOT UPSTREAM'S SHAPE (D110): upstream recurses into Next1 at a branch, a conditional and
+        // a repeat and loops on Next2. A conditional's Next1 runs on to the rest of the pattern, so
+        // the recursion was as deep as the number of conditionals in a row, and 12,000 of them
+        // overflowed a 1 MB stack and ended the process (upstream's C overflows at about 62,000).
+        // The Next2 edges wait on a heap stack instead, popped in the order the returns would have
+        // taken them, so the nodes are visited in upstream's order.
+        Stack<Node?> pending = new();
+        pending.Push(node);
+        while (pending.TryPop(out node))
         {
-            if ((node.Status & NodeStatus.VisitedRep) != 0)
-            {
-                return;
-            }
+            WalkFrom(node);
+        }
 
-            node.Status |= NodeStatus.VisitedRep;
-
-            switch (node.Op)
+        void WalkFrom(Node? node)
+        {
+            while (node is not null)
             {
-                case Opcode.Branch:
-                case Opcode.GroupExists:
-                    RecordSubpatternRepeatsAndFuzzySections(parentNode, offset, repeatCount, node.Next1.Node);
-                    node = node.Next2.Node;
-                    break;
-                case Opcode.EndFuzzy:
-                    node = node.Next1.Node;
-                    break;
-                case Opcode.EndGreedyRepeat:
-                case Opcode.EndLazyRepeat:
+                if ((node.Status & NodeStatus.VisitedRep) != 0)
+                {
                     return;
-                case Opcode.Fuzzy:
-                    // Record the fuzzy index.
-                    AddIndex(parentNode, offset, repeatCount + (int)node.Values[0]);
-                    node = node.Next1.Node;
-                    break;
-                case Opcode.GreedyRepeat:
-                case Opcode.LazyRepeat:
-                    // Record the repeat index.
-                    AddIndex(parentNode, offset, (int)node.Values[0]);
-                    RecordSubpatternRepeatsAndFuzzySections(parentNode, offset, repeatCount, node.Next1.Node);
-                    node = node.Next2.Node;
-                    break;
-                case Opcode.GreedyRepeatOne:
-                case Opcode.LazyRepeatOne:
-                    // Record the repeat index.
-                    AddIndex(parentNode, offset, (int)node.Values[0]);
-                    node = node.Next1.Node;
-                    break;
-                default:
-                    node = node.Next1.Node;
-                    break;
+                }
+
+                node.Status |= NodeStatus.VisitedRep;
+
+                switch (node.Op)
+                {
+                    case Opcode.Branch:
+                    case Opcode.GroupExists:
+                        pending.Push(node.Next2.Node);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.EndFuzzy:
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.EndGreedyRepeat:
+                    case Opcode.EndLazyRepeat:
+                        return;
+                    case Opcode.Fuzzy:
+                        // Record the fuzzy index.
+                        AddIndex(parentNode, offset, repeatCount + (int)node.Values[0]);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.GreedyRepeat:
+                    case Opcode.LazyRepeat:
+                        // Record the repeat index.
+                        AddIndex(parentNode, offset, (int)node.Values[0]);
+                        pending.Push(node.Next2.Node);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.GreedyRepeatOne:
+                    case Opcode.LazyRepeatOne:
+                        // Record the repeat index.
+                        AddIndex(parentNode, offset, (int)node.Values[0]);
+                        node = node.Next1.Node;
+                        break;
+                    default:
+                        node = node.Next1.Node;
+                        break;
+                }
             }
         }
     }
