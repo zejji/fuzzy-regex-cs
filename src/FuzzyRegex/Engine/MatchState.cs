@@ -991,6 +991,31 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal int BoundlessBodies;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: where a BESTMATCH walk's search last failed, or -1. A search from
+    /// there to the end of the slice, held to <see cref="BestWalkNoMatchErrors"/> and
+    /// <see cref="BestWalkNoMatchCost"/>, found nothing, so no search that starts at or past it in
+    /// the same slice and is held to no more can find anything either. Without it each match of a
+    /// finditer re-reads the rest of the text looking for a better match that is not there, which is
+    /// quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; cleared by <see cref="Init"/>.
+    /// </summary>
+    internal int BestWalkNoMatchFrom = -1;
+
+    /// <summary>NOT UPSTREAM'S, D115: the error bound of the search <see cref="BestWalkNoMatchFrom"/> records.</summary>
+    internal long BestWalkNoMatchErrors;
+
+    /// <summary>NOT UPSTREAM'S, D115: the cost bound of the search <see cref="BestWalkNoMatchFrom"/> records.</summary>
+    internal long BestWalkNoMatchCost;
+
+    /// <summary>NOT UPSTREAM'S, D115: whether that search banned an empty match at its start.</summary>
+    internal bool BestWalkNoMatchMustAdvance;
+
+    /// <summary>NOT UPSTREAM'S, D115: the start of the slice that search ran in.</summary>
+    internal int BestWalkNoMatchSliceStart;
+
+    /// <summary>NOT UPSTREAM'S, D115: the end of the slice that search ran in.</summary>
+    internal int BestWalkNoMatchSliceEnd;
+
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
 
@@ -1810,6 +1835,12 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
+        BestWalkNoMatchFrom = -1;
+        BestWalkNoMatchErrors = 0;
+        BestWalkNoMatchCost = 0;
+        BestWalkNoMatchMustAdvance = false;
+        BestWalkNoMatchSliceStart = 0;
+        BestWalkNoMatchSliceEnd = 0;
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;

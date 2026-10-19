@@ -22836,6 +22836,90 @@ internal static class Matcher
         bestChangesList.Add([.. state.FuzzyChanges]);
 
     /// <summary>
+    /// NOT UPSTREAM'S, D115: whether a BESTMATCH walk's search from <paramref name="start"/>, under
+    /// the live bounds, must fail because an earlier search of this scan failed from a position at
+    /// or before it, in the same slice, under bounds at least as wide.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk holds each run after a match to fewer errors than that match and searches to the
+    /// end of the slice. When nothing better exists, as when every match costs one error, that
+    /// search fails only at the end of the text, and a finditer pays it once per match: quadratic
+    /// (KNOWN-DEFECTS D115; upstream mrab-regex does the same, 0.85 s for 774 matches of
+    /// <c>(?b)(?:thx\s[a-z]+\s){e&lt;=1}</c> over 64 KB of prose against 9 ms without the flag).
+    /// </para>
+    /// <para>
+    /// Why the fact carries over. A failed search tried every start from its own to the slice's
+    /// end, so every start the later search tries was tried. At each such start the later run can
+    /// do no more than the earlier one: its bounds are no wider, and the bounds only prune paths
+    /// (a body that commits to what it read runs with them lifted, D109, and is judged against
+    /// them only at its end); the only other input that differs is its own start, which bans an
+    /// empty match there under <see cref="MatchState.MustAdvance"/> and an insertion before the
+    /// first character, both narrowing it. What does not carry over is withheld: a <c>\G</c>,
+    /// which reads the start; a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109
+    /// refuses them in a fuzzy pattern anyway); a partial search, which can succeed at the slice's
+    /// end; and a different slice, since a lookbehind reads its start.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, holding the live bounds and the recorded fact.</param>
+    /// <param name="start">Where the search would start.</param>
+    /// <returns><see langword="true"/> if the search must fail.</returns>
+    private static bool BestWalkKnownToFail(MatchState state, int start)
+    {
+        int from = state.BestWalkNoMatchFrom;
+        if (from < 0 || !BestWalkCanRemember(state))
+        {
+            return false;
+        }
+
+        bool covered;
+        if (start == from)
+        {
+            covered = !state.BestWalkNoMatchMustAdvance || state.MustAdvance;
+        }
+        else
+        {
+            covered = state.Reverse ? start < from : start > from;
+        }
+
+        return covered
+            && state.SliceStart == state.BestWalkNoMatchSliceStart
+            && state.SliceEnd == state.BestWalkNoMatchSliceEnd
+            && state.MaxErrors <= state.BestWalkNoMatchErrors
+            && state.MaxCost <= state.BestWalkNoMatchCost;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D115: records a failed walk search. See <see cref="BestWalkKnownToFail"/>.</summary>
+    /// <param name="state">The match state, holding the live bounds the search ran under.</param>
+    /// <param name="start">Where the failed search started.</param>
+    private static void NoteBestWalkFailure(MatchState state, int start)
+    {
+        if (!BestWalkCanRemember(state))
+        {
+            return;
+        }
+
+        // SHORTCUT: one fact, the latest. A forward scan only moves on, and a search that missed it
+        // was held to more than it allowed, so the latest covers what the earlier one did on every
+        // row whose bounds are one number; a weighted cost walk can trade one fact for another and
+        // re-read. Upgrade path: keep one fact per error bound.
+        state.BestWalkNoMatchFrom = start;
+        state.BestWalkNoMatchErrors = state.MaxErrors;
+        state.BestWalkNoMatchCost = state.MaxCost;
+        state.BestWalkNoMatchMustAdvance = state.MustAdvance;
+        state.BestWalkNoMatchSliceStart = state.SliceStart;
+        state.BestWalkNoMatchSliceEnd = state.SliceEnd;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D115: whether a failed walk search may be remembered at all.</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> unless the search's answer can depend on more than its start and bounds.</returns>
+    private static bool BestWalkCanRemember(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+        && !state.Pattern.ReadsTheSearchAnchor
+        && !state.Pattern.HasBacktrackingVerb;
+
+    /// <summary>
     /// Upstream <c>do_best_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17584): search the whole
     /// slice for the match with the fewest errors rather than taking the first that fits, then
     /// re-examine the equal-best candidates for the earliest, lowest-cost fit.
@@ -23052,7 +23136,19 @@ internal static class Matcher
 
                 if (status == MatchStatus.Success)
                 {
-                    status = BasicMatch(state, search);
+                    // NOT UPSTREAM'S, D115: a search an earlier one already showed fails is skipped.
+                    if (search && BestWalkKnownToFail(state, startPos))
+                    {
+                        status = MatchStatus.Failure;
+                    }
+                    else
+                    {
+                        status = BasicMatch(state, search);
+                        if (search && status == MatchStatus.Failure)
+                        {
+                            NoteBestWalkFailure(state, startPos);
+                        }
+                    }
                 }
 
                 // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a
