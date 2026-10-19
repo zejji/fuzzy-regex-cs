@@ -2095,8 +2095,9 @@ found, upstream cuts the text off at that match's edges, so an atomic group or a
 stops at the cut instead of taking what follows. `(?e)(?:xaq|a(?>a*)){e<=1}` over 'xaaa' is (1, 3)
 exact upstream, but in the whole text the atomic `a*` at 1 takes 'aaa' and the match there is
 (1, 4). Here the better fit must still lie inside the first match, but the pattern reads the whole
-text, so the answer is (0, 3) with one substitution, as without the flag. Such a pattern can
-search more slowly on long text built to defeat it (known defect D114).
+text, so the answer is (0, 3) with one substitution, as without the flag. Only the atomic group
+reads past the first match, so a pattern whose atomic group itself runs to the end of the text can
+search more slowly on long text built to defeat it.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;

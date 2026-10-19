@@ -6763,6 +6763,10 @@ internal static class Matcher
     /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
     private static Node? RunOutInALookaroundBody(MatchState state, Node? item, out bool fails)
     {
+        Debug.Assert(
+            !state.RefinesInANarrowedSlice,
+            "D114: a run-out is a partial call's, which refines in the caller's slice"
+        );
         fails = false;
         PatternObject pattern = state.Pattern;
         if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
@@ -7068,6 +7072,7 @@ internal static class Matcher
     /// changed, if the stacks are not as the marks promise.</returns>
     private static Node? AbandonTheCallsTheBodyOpened(MatchState state, Node look, long lookMark)
     {
+        Debug.Assert(!state.RefinesInANarrowedSlice, "D114: a pattern with calls refines in the caller's slice");
         if (!state.Bstack.ReadSizeBelow((int)lookMark - 1, out long savedSstack))
         {
             return null;
@@ -7521,6 +7526,7 @@ internal static class Matcher
     /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
     private static bool UnwindToTheVerbTarget(MatchState state, out bool toAttempt)
     {
+        Debug.Assert(!state.RefinesInANarrowedSlice, "D114: D109 refuses a ranked pattern with a verb");
         toAttempt = false;
         LookaroundStateData outermostLook = default;
         bool crossedALookaround = false;
@@ -14778,6 +14784,13 @@ internal static class Matcher
                         BlockAtomicCut(state, (int)atomicBstackCount);
                         state.NoteABlockedEnd();
 
+                        // D114: a blocked end needs a partial call's marks or a verb, and neither
+                        // runs a refinement in a narrowed slice (NarrowsTheRefinementOutsideBodies).
+                        Debug.Assert(
+                            !state.RefinesInANarrowedSlice,
+                            "D114: no blocked atomic end in a narrowed refinement"
+                        );
+
                         // D109: the body closes until REOPEN opens it again, and its errors are
                         // held to the budget that comes back, as at an end that cuts.
                         if (state.IsFuzzy)
@@ -14829,6 +14842,20 @@ internal static class Matcher
                         state.CloseABoundlessBody();
                         Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
                         if (CommittedOverTheBudget(state))
+                        {
+                            goto backtrack;
+                        }
+
+                        // NOT UPSTREAM'S, D114: outside every body a refinement's slice ends at its
+                        // window again (MatchState.RefinesInANarrowedSlice), and a group that read
+                        // past the window ends every match from here past it, because nothing outside
+                        // a body moves back. The window would refuse them all at SUCCESS; the slice
+                        // must never hold a position past its own end, so the group fails now.
+                        if (
+                            state.RefinesInANarrowedSlice
+                            && state.BoundlessBodies == 0
+                            && EndsOutsideTheRefinement(state)
+                        )
                         {
                             goto backtrack;
                         }
@@ -16832,6 +16859,21 @@ internal static class Matcher
                     {
                         goto backtrack;
                     }
+
+                    // D114: a match ends outside every body, so a narrowed refinement's far end is
+                    // its window's again, and an atomic group that read past it has failed already.
+                    Debug.Assert(
+                        !state.RefinesInANarrowedSlice
+                            || (
+                                state.BoundlessBodies == 0
+                                && (
+                                    state.Reverse
+                                        ? state.SliceStart == state.RefineStart
+                                        : state.SliceEnd == state.RefineEnd
+                                )
+                            ),
+                        "D114: a narrowed refinement succeeds with its far end at the window"
+                    );
 
                     // NOT UPSTREAM'S, D11 M3 (design section 4.3). The two passes run the same code
                     // from the same start, so a second-pass path differs from the first only after
@@ -22406,6 +22448,88 @@ internal static class Matcher
         state.Reverse ? start < state.RefineStart : start > state.RefineEnd;
 
     /// <summary>
+    /// D111, D114: holds the next BESTMATCH or ENHANCEMATCH run of a pattern with an atomic group
+    /// (<see cref="PatternObject.RefinesInAWindow"/>) to the span <paramref name="start"/> to
+    /// <paramref name="end"/>: a window its matches must fall inside (<see cref="MatchState.RefineStart"/>),
+    /// and, where <see cref="NarrowsTheRefinementOutsideBodies"/> holds, a slice whose far end is the
+    /// window's outside the bodies that lift the ranking bounds (<see cref="MatchState.RefinesInANarrowedSlice"/>).
+    /// </summary>
+    /// <param name="state">The match state, between runs, outside every body.</param>
+    /// <param name="start">The span's start.</param>
+    /// <param name="end">The span's end.</param>
+    /// <param name="callerSliceStart">The slice the caller asked for: its start.</param>
+    /// <param name="callerSliceEnd">Its end.</param>
+    private static void HoldTheRefinementToAWindow(
+        MatchState state,
+        int start,
+        int end,
+        int callerSliceStart,
+        int callerSliceEnd
+    )
+    {
+        state.RefineStart = start;
+        state.RefineEnd = end;
+
+        if (!NarrowsTheRefinementOutsideBodies(state))
+        {
+            return;
+        }
+
+        // The assumptions the narrowing rests on (MatchState.RefinesInANarrowedSlice): a run
+        // between refinements has no body open, only a fuzzy run refines, so the counter that
+        // tracks the bodies is kept, and D109 refuses a ranked pattern with a verb, whose unwinding
+        // (UnwindToTheVerbTarget) and moved slice (MoveTheSliceForASkip) the argument does not cover.
+        Debug.Assert(state.BoundlessBodies == 0, "D114: a refinement starts outside every body");
+        Debug.Assert(state.IsFuzzy, "D114: only a fuzzy run refines, and only a fuzzy run counts its bodies");
+        Debug.Assert(!state.Pattern.HasBacktrackingVerb, "D114: D109 refuses a ranked pattern with a verb");
+
+        state.RefinesInANarrowedSlice = true;
+        if (state.Reverse)
+        {
+            state.RefineCallerFarEnd = callerSliceStart;
+            state.SliceStart = start;
+        }
+        else
+        {
+            state.RefineCallerFarEnd = callerSliceEnd;
+            state.SliceEnd = end;
+        }
+    }
+
+    /// <summary>
+    /// D114: whether a refinement held to a window may also narrow its slice's far end outside the
+    /// bodies that lift the ranking bounds (<see cref="MatchState.RefinesInANarrowedSlice"/>) and give
+    /// the same answers. Not in a partial call, whose run-outs read the slice's edge and end the run
+    /// rather than fail; not with group calls, because a called body runs inside a body at one call
+    /// and outside at another, so a guard or memo keyed on node and position could see two slices;
+    /// and not under the oracle's ablation that stops the counter (<see cref="PatternObject.BoundsReachDecidingBodies"/>).
+    /// Those keep D111's window over the caller's slice, which is right and slower.
+    /// </summary>
+    /// <remarks>
+    /// SHORTCUT: the partial and call clauses are where the equivalence argument stops, not where a
+    /// witness was found: dropping either changed no answer on 64,000 rows (2026-10-19,
+    /// <c>.scratch/s1019/d114/excl.sh</c>). A ranked partial call or a ranked pattern with group calls
+    /// and an atomic group still pays D111's cost on adversarial text. Upgrade path: extend the
+    /// argument (run-outs at the narrowed edge; guards and memos keyed per call context), then drop
+    /// the clause with a differential against this one.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the far end may be narrowed.</returns>
+    private static bool NarrowsTheRefinementOutsideBodies(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+        && !state.Pattern.HasGroupCalls
+        && !state.Pattern.BoundsReachDecidingBodies;
+
+    /// <summary>D111, D114: ends a refinement's window, and its narrowed far end with it. The slice is the driver's to restore.</summary>
+    /// <param name="state">The match state.</param>
+    private static void EndTheRefinementWindow(MatchState state)
+    {
+        state.RefineStart = int.MinValue;
+        state.RefineEnd = int.MaxValue;
+        state.RefinesInANarrowedSlice = false;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D78: whether a BESTMATCH or ENHANCEMATCH run from <paramref name="start"/> must
     /// advance. After an empty match the scan excludes only the empty match at its resume position
     /// <paramref name="first"/>; upstream re-sets <c>must_advance</c> for every run, and each run's
@@ -22630,20 +22754,16 @@ internal static class Matcher
             // span the pattern does not match in the text. See MatchState.RefineStart. A pattern
             // that commits to nothing it read keeps upstream's narrowing (PatternObject.RefinesInAWindow).
             //
-            // SHORTCUT: the gate is per pattern, so one atomic group anywhere puts every branch in a
-            // window, and each attempt inside the span then reads to the end of the text: quadratic
-            // on adversarial text. (?e)(?:abcd|b[^z]*|(?>q)){e<=1} over 'abce' x 4000 scans in 6.4 s
-            // where the narrowed slice took 28 ms (KNOWN-DEFECTS D114). Accepted for 1.0 (owner,
-            // 2026-10-19): only a ranked pattern holding an atomic group pays it, the class where
-            // the narrowed slice can answer a span the pattern does not match. Upgrade path, the
-            // precise fix: keep the narrowed slice and let only atomic and possessive bodies see
-            // past it.
+            //
+            // D114: and where it can, the slice's far end is narrowed to the span outside the
+            // bodies that lift the ranking bounds, so only an atomic group reads past the span
+            // (MatchState.RefinesInANarrowedSlice); with the window alone, every attempt inside the
+            // span read to the end of the text.
             int spanStart = state.Reverse ? state.TextPos : state.AttemptStart;
             int spanEnd = state.Reverse ? state.AttemptStart : state.TextPos;
             if (state.Pattern.RefinesInAWindow)
             {
-                state.RefineStart = spanStart;
-                state.RefineEnd = spanEnd;
+                HoldTheRefinementToAWindow(state, spanStart, spanEnd, sliceStart, sliceEnd);
             }
             else
             {
@@ -22654,8 +22774,7 @@ internal static class Matcher
             state.TextPos = state.AttemptStart;
         }
 
-        state.RefineStart = int.MinValue;
-        state.RefineEnd = int.MaxValue;
+        EndTheRefinementWindow(state);
 
         if (status is < 0 and not MatchStatus.Partial)
         {
@@ -23248,11 +23367,10 @@ internal static class Matcher
             // NOT UPSTREAM'S, D111: a window the re-run's match must fall inside, not a narrowed
             // slice, for the reason DoEnhancedFuzzyMatch gives at its own window, and only where
             // the pattern can commit to what it read (PatternObject.RefinesInAWindow). The same
-            // SHORTCUT applies (KNOWN-DEFECTS D114).
+            // D114 narrowing applies (MatchState.RefinesInANarrowedSlice).
             if (state.Pattern.RefinesInAWindow)
             {
-                state.RefineStart = widenedStart;
-                state.RefineEnd = widenedEnd;
+                HoldTheRefinementToAWindow(state, widenedStart, widenedEnd, sliceStart, sliceEnd);
             }
             else
             {
@@ -23290,8 +23408,7 @@ internal static class Matcher
             state.InitMatch();
             status = BasicMatch(state, search);
 
-            state.RefineStart = int.MinValue;
-            state.RefineEnd = int.MaxValue;
+            EndTheRefinementWindow(state);
 
             if (status < 0)
             {
@@ -23701,8 +23818,7 @@ internal static class Matcher
         state.SliceEnd = state.InitialSliceEnd;
 
         // D111: and no refinement window left over from a match a timeout ended mid-refinement.
-        state.RefineStart = int.MinValue;
-        state.RefineEnd = int.MaxValue;
+        EndTheRefinementWindow(state);
 
         // Is there enough to search?
         if (state.Reverse)

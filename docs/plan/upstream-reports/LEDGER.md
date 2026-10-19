@@ -7343,8 +7343,9 @@ search does.
 
 **This port.** That fix, applied only to patterns that hold an atomic group
 (`PatternObject.RefinesInAWindow`); every other pattern matches the same in the narrowed slice and
-keeps it, since the window costs a read to the text end per attempt. On adversarial text a ranked
-pattern with an atomic group anywhere scans quadratically (known defect D114). A `(*PRUNE)` or
+keeps it, since the window costs a read to the text end per attempt. D114 (F106) narrows the slice
+again outside the atomic, lookaround and test bodies, so only an atomic body reads past the span; a
+ranked pattern whose atomic body itself runs to the text end still scans quadratically (inherent). A `(*PRUNE)` or
 `(*SKIP)` would need the same, but D109 refuses a ranked fuzzy pattern that holds one. Pinned by
 `Gaps/Engine/RankedRefinementWindowTests`.
 
