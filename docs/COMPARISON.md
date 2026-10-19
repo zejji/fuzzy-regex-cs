@@ -2072,6 +2072,14 @@ up to a hundred times slower and could pass over a better match. So BESTMATCH or
 a fuzzy pattern that holds either verb is refused when the pattern is compiled, with an error
 that names the flag and the verb.
 
+The same fault had a second route. When ENHANCEMATCH looks for a better fit inside the match it
+found, upstream cuts the text off at that match's edges, so an atomic group or a possessive repeat
+stops at the cut instead of taking what follows. `(?e)(?:xaq|a(?>a*)){e<=1}` over 'xaaa' is (1, 3)
+exact upstream, but in the whole text the atomic `a*` at 1 takes 'aaa' and the match there is
+(1, 4). Here the better fit must still lie inside the first match, but the pattern reads the whole
+text, so the answer is (0, 3) with one substitution, as without the flag. Such a pattern can
+search more slowly on long text built to defeat it (known defect D114).
+
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
@@ -2080,7 +2088,8 @@ Console.WriteLine(m.Index);   // 0 - upstream: 1, which is not a match: at 1 the
 Console.WriteLine(m.FuzzyCounts.Total);   // 1
 ```
 
-There is no option to restore the upstream answer. Known defect D109, ledger entry 32.
+There is no option to restore the upstream answer. Known defects D109 and D111, ledger entries 32
+and 93.
 
 ### The calls inside a called group run with the call's direction and fuzziness too
 

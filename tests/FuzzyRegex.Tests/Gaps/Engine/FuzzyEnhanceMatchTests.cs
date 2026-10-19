@@ -80,13 +80,13 @@ public sealed class FuzzyEnhanceMatchTests
 
         // Complete-matrix row 7619, the same trace (pass 2 total 2 at max 1): a possessive repeat of
         // an i/d section over ' x aaaa' was one deletion at 0 here and two upstream. D109 moved it to
-        // one deletion at 1. NOT RIGHT YET, D111: neither (0, 0) nor (1, 1) is a match of the
-        // flagless pattern, whose possessive repeat commits to (0, 2) at 0 and (1, 7) at 1; the
-        // refinement narrows the slice to the first match, (0, 1), and the slice end cuts the
-        // repeat short. This pins the answer until D111 is fixed.
+        // one deletion at 1, which is not a match of the flagless pattern: the refinement narrowed
+        // the slice to the first match, (0, 1), and the slice end cut the possessive repeat short.
+        // D111 keeps the caller's slice, so nothing inside (0, 1) beats the first match, and the
+        // answer is the flagless one, (0, 1) with an insertion and two deletions.
         Match possessive = new FuzzyRegex(@"(?e)(?:(?:a+){i<=1,d<=1}){1,2}+").Match(" x aaaa");
-        (possessive.Index, possessive.Length).Should().Be((1, 0));
-        possessive.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        (possessive.Index, possessive.Length).Should().Be((0, 1));
+        possessive.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 2));
     }
 
     [Test]

@@ -13213,7 +13213,7 @@ internal static class Matcher
                 int limit;
                 if (search || !useOffset)
                 {
-                    limit = state.SliceEnd;
+                    limit = state.SearchSliceEnd;
                 }
                 else
                 {
@@ -13444,7 +13444,7 @@ internal static class Matcher
                 return pos;
             }
 
-            if (reverse ? pos <= state.SliceStart : pos >= state.SliceEnd)
+            if (reverse ? pos <= state.SearchSliceStart : pos >= state.SearchSliceEnd)
             {
                 return -1;
             }
@@ -13454,7 +13454,7 @@ internal static class Matcher
             // In codepoints upstream's '--text_pos' cannot pass 'slice_start' (:7911-7913). In
             // UTF-16 it can: a 'beginning' that splits a surrogate pair lets 'PrevPos' walk the
             // whole pair and land one below 'SliceStart', where the matcher itself refuses to start.
-            if (reverse && pos < state.SliceStart)
+            if (reverse && pos < state.SearchSliceStart)
             {
                 return -1;
             }
@@ -13574,7 +13574,7 @@ internal static class Matcher
 
         // Upstream's opening bound test (:8400-8416). Its partial halves are narrowing 1's; what is
         // left is the reverse arm, because the forward arm upstream has no failure case at all.
-        if (state.Reverse && startPos < state.SliceStart)
+        if (state.Reverse && startPos < state.SearchSliceStart)
         {
             return MatchStatus.Failure;
         }
@@ -13662,9 +13662,9 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgn:
                 case Opcode.SetUnion:
                 case Opcode.SetUnionIgn:
-                    startPos = MatchMany(state, test, startPos, state.SliceEnd, false, false);
+                    startPos = MatchMany(state, test, startPos, state.SearchSliceEnd, false, false);
 
-                    if (startPos >= state.SliceEnd)
+                    if (startPos >= state.SearchSliceEnd)
                     {
                         return MatchStatus.Failure;
                     }
@@ -13687,9 +13687,9 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev:
                 case Opcode.SetUnionRev:
                 case Opcode.SetUnionIgnRev:
-                    startPos = MatchMany(state, test, startPos, state.SliceStart, false, true);
+                    startPos = MatchMany(state, test, startPos, state.SearchSliceStart, false, true);
 
-                    if (startPos <= state.SliceStart)
+                    if (startPos <= state.SearchSliceStart)
                     {
                         return MatchStatus.Failure;
                     }
@@ -13756,7 +13756,14 @@ internal static class Matcher
                     // node's step is its whole length, and stepping one character instead turned 82
                     // tests red the moment that clause was switched off. See the negative controls
                     // in 'docs/plan/slices/notes/S60b-sittings.md'.
-                    startPos = SimpleStringSearch(state, test, startPos, state.SliceEnd, out _, out bool cancelled);
+                    startPos = SimpleStringSearch(
+                        state,
+                        test,
+                        startPos,
+                        state.SearchSliceEnd,
+                        out _,
+                        out bool cancelled
+                    );
 
                     if (cancelled)
                     {
@@ -13829,7 +13836,7 @@ internal static class Matcher
             // This position is refused after all, so try the next one.
             startPos = Step(state, startPos, state.Reverse ? -1 : 1);
 
-            if (state.Reverse ? startPos < state.SliceStart : startPos > state.SliceEnd)
+            if (state.Reverse ? startPos < state.SearchSliceStart : startPos > state.SearchSliceEnd)
             {
                 return MatchStatus.Failure;
             }
@@ -13999,7 +14006,7 @@ internal static class Matcher
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static (int Start, int End) NextLeadingUnit(MatchState state, int foundPos, SearchValues<char> leadingUnits)
     {
-        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        ReadOnlySpan<char> text = state.Text.Span[..state.SearchSliceEnd];
         if (foundPos < text.Length && leadingUnits.Contains(text[foundPos]))
         {
             int run = text[(foundPos + 1)..].IndexOfAnyExcept(leadingUnits);
@@ -14306,7 +14313,14 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos, state.FilterMemory!))
+                if (
+                    !fuzzyFilter.MayMatchBefore(
+                        state.Text.Span,
+                        state.SearchSliceStart,
+                        state.TextPos,
+                        state.FilterMemory!
+                    )
+                )
                 {
                     return MatchStatus.Failure;
                 }
@@ -14317,7 +14331,13 @@ internal static class Matcher
             {
                 // C3: the filter's bit-parallel scan can read the rest of a long subject in one call,
                 // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk).
-                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!, state);
+                int next = fuzzyFilter.NextStart(
+                    state.Text.Span,
+                    foundPos,
+                    state.SearchSliceEnd,
+                    state.FilterMemory!,
+                    state
+                );
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
@@ -14342,9 +14362,9 @@ internal static class Matcher
         // NOT UPSTREAM'S (S60b item 14). Every match starts with one of the literals and ends
         // inside the slice, so the next attempt starts at the earliest one that fits. One sweep
         // with no poll, for the reasons StringSearch gives.
-        if (leadingStrings is not null && foundPos <= state.SliceEnd)
+        if (leadingStrings is not null && foundPos <= state.SearchSliceEnd)
         {
-            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            int at = state.Text.Span[foundPos..state.SearchSliceEnd].IndexOfAny(leadingStrings);
             if (at < 0)
             {
                 return MatchStatus.Failure;
@@ -14352,7 +14372,7 @@ internal static class Matcher
 
             foundPos += at;
         }
-        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
+        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SearchSliceEnd)
         {
             // Every match takes at least one character, which starts on one of the units. Below
             // leadingUnitsEnd the attempt is known to stand on one, so text that is all hits pays
@@ -14384,6 +14404,13 @@ internal static class Matcher
                 state.TextPos = newPosition.TextPos;
                 state.AttemptStart = state.MatchPos;
 
+                // D111: the prefilter's scans stop at a refinement's window (SearchSliceEnd), so
+                // this holds; it is the window's guarantee, not the scans'.
+                if (StartsOutsideTheRefinement(state, state.MatchPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
                 if (node.Op == Opcode.Success)
                 {
                     // The same test 'next_match_2' makes below, including the MatchAll clause that
@@ -14391,8 +14418,11 @@ internal static class Matcher
                     if (state.TextPos != state.SearchAnchor || !state.MustAdvance)
                     {
                         bool matched =
-                            !state.MatchAll
-                            || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd);
+                            !EndsOutsideTheRefinement(state)
+                            && (
+                                !state.MatchAll
+                                || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd)
+                            );
 
                         if (matched)
                         {
@@ -14444,6 +14474,12 @@ internal static class Matcher
                 }
             }
 
+            // D111: a refinement starts no attempt outside its window.
+            if (StartsOutsideTheRefinement(state, state.TextPos))
+            {
+                return MatchStatus.Failure;
+            }
+
             state.MatchPos = state.TextPos;
             state.AttemptStart = state.TextPos;
             state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
@@ -14463,8 +14499,11 @@ internal static class Matcher
                 if (state.TextPos != state.SearchAnchor || !state.MustAdvance)
                 {
                     bool succeeded =
-                        !state.MatchAll
-                        || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd);
+                        !EndsOutsideTheRefinement(state)
+                        && (
+                            !state.MatchAll
+                            || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd)
+                        );
 
                     if (succeeded)
                     {
@@ -16776,6 +16815,15 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // NOT UPSTREAM'S, D111: a BESTMATCH or ENHANCEMATCH refinement keeps the matches
+                    // that end inside its window, read against the caller's slice (see
+                    // MatchState.RefineStart). Before the partial test, because a partial ends at the
+                    // end of the text, which is outside a window that ends short of it.
+                    if (EndsOutsideTheRefinement(state))
+                    {
+                        goto backtrack;
+                    }
+
                     // NOT UPSTREAM'S, D11 M3 (design section 4.3). The two passes run the same code
                     // from the same start, so a second-pass path differs from the first only after
                     // it read the text to come: an undetermined test, a decided one that differs
@@ -17327,7 +17375,7 @@ internal static class Matcher
                         ? state.StartNotBehindTheAttempt()
                         : state.AttemptStart;
 
-                    if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
+                    if (state.Reverse ? state.TextPos <= state.SearchSliceStart : state.TextPos >= state.SearchSliceEnd)
                     {
                         return MatchStatus.Failure;
                     }
@@ -22333,6 +22381,22 @@ internal static class Matcher
         cost != bestCost ? cost < bestCost : errors < bestErrors;
 
     /// <summary>
+    /// D111: whether a match ending at the current position falls outside a BESTMATCH or
+    /// ENHANCEMATCH refinement's window (<see cref="MatchState.RefineStart"/>). Never true outside one.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the match must backtrack.</returns>
+    private static bool EndsOutsideTheRefinement(MatchState state) =>
+        state.Reverse ? state.TextPos < state.RefineStart : state.TextPos > state.RefineEnd;
+
+    /// <summary>D111: whether an attempt starting at <paramref name="start"/> falls outside a refinement's window.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="start">Where the attempt starts.</param>
+    /// <returns><see langword="true"/> if the search must stop.</returns>
+    private static bool StartsOutsideTheRefinement(MatchState state, int start) =>
+        state.Reverse ? start < state.RefineStart : start > state.RefineEnd;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D78: whether a BESTMATCH or ENHANCEMATCH run from <paramref name="start"/> must
     /// advance. After an empty match the scan excludes only the empty match at its resume position
     /// <paramref name="first"/>; upstream re-sets <c>must_advance</c> for every run, and each run's
@@ -22550,19 +22614,39 @@ internal static class Matcher
 
             // D86: the span from where the attempt began, not from the start a \K reported, which
             // would leave the part of the pattern before the \K nothing to match.
-            if (state.Reverse)
+            //
+            // NOT UPSTREAM'S, D111: the span is a window the next run's matches must fall inside,
+            // not a narrowed slice (upstream ':17988-17996'). A narrowed slice end cuts what an
+            // atomic group, a possessive repeat, \R or \X reads, and the refined answer could be a
+            // span the pattern does not match in the text. See MatchState.RefineStart. A pattern
+            // that commits to nothing it read keeps upstream's narrowing (PatternObject.RefinesInAWindow).
+            //
+            // SHORTCUT: the gate is per pattern, so one atomic group anywhere puts every branch in a
+            // window, and each attempt inside the span then reads to the end of the text: quadratic
+            // on adversarial text. (?e)(?:abcd|b[^z]*|(?>q)){e<=1} over 'abce' x 4000 scans in 6.4 s
+            // where the narrowed slice took 28 ms (KNOWN-DEFECTS D114). Accepted for 1.0 (owner,
+            // 2026-10-19): only a ranked pattern holding an atomic group pays it, the class where
+            // the narrowed slice can answer a span the pattern does not match. Upgrade path, the
+            // precise fix: keep the narrowed slice and let only atomic and possessive bodies see
+            // past it.
+            int spanStart = state.Reverse ? state.TextPos : state.AttemptStart;
+            int spanEnd = state.Reverse ? state.AttemptStart : state.TextPos;
+            if (state.Pattern.RefinesInAWindow)
             {
-                state.SliceStart = state.TextPos;
-                state.SliceEnd = state.AttemptStart;
+                state.RefineStart = spanStart;
+                state.RefineEnd = spanEnd;
             }
             else
             {
-                state.SliceStart = state.AttemptStart;
-                state.SliceEnd = state.TextPos;
+                state.SliceStart = spanStart;
+                state.SliceEnd = spanEnd;
             }
 
             state.TextPos = state.AttemptStart;
         }
+
+        state.RefineStart = int.MinValue;
+        state.RefineEnd = int.MaxValue;
 
         if (status is < 0 and not MatchStatus.Partial)
         {
@@ -23152,8 +23236,20 @@ internal static class Matcher
             int widenedStart = StepBy(state, state.Reverse ? entry.TextPos : entry.AttemptStart, fewestErrors, -1);
             int widenedEnd = StepBy(state, state.Reverse ? entry.AttemptStart : entry.TextPos, fewestErrors, 1);
 
-            state.SliceStart = widenedStart;
-            state.SliceEnd = widenedEnd;
+            // NOT UPSTREAM'S, D111: a window the re-run's match must fall inside, not a narrowed
+            // slice, for the reason DoEnhancedFuzzyMatch gives at its own window, and only where
+            // the pattern can commit to what it read (PatternObject.RefinesInAWindow). The same
+            // SHORTCUT applies (KNOWN-DEFECTS D114).
+            if (state.Pattern.RefinesInAWindow)
+            {
+                state.RefineStart = widenedStart;
+                state.RefineEnd = widenedEnd;
+            }
+            else
+            {
+                state.SliceStart = widenedStart;
+                state.SliceEnd = widenedEnd;
+            }
 
             // We've narrowed the slice. The required string position might now be outside it.
             //
@@ -23184,6 +23280,9 @@ internal static class Matcher
             state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.AttemptStart, firstStartPos);
             state.InitMatch();
             status = BasicMatch(state, search);
+
+            state.RefineStart = int.MinValue;
+            state.RefineEnd = int.MaxValue;
 
             if (status < 0)
             {
@@ -23591,6 +23690,10 @@ internal static class Matcher
         // pins.
         state.SliceStart = state.InitialSliceStart;
         state.SliceEnd = state.InitialSliceEnd;
+
+        // D111: and no refinement window left over from a match a timeout ended mid-refinement.
+        state.RefineStart = int.MinValue;
+        state.RefineEnd = int.MaxValue;
 
         // Is there enough to search?
         if (state.Reverse)
