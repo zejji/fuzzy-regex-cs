@@ -1841,6 +1841,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSet(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // codes: opcode, flags, ..., end.
         Opcode op = args.Op;
         uint flags = args.At(1);
@@ -2079,6 +2080,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSequence(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // Guarantee that there's something to attach to.
         args.Start = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
         args.End = args.Start;

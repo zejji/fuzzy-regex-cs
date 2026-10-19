@@ -7250,3 +7250,33 @@ them from `make_case_flags(info)`.
 
 **This port.** It folds the grouped literal as it folds the bare one. Pinned by
 `Gaps/Engine/CaseInsensitiveMatchingTests.Under_ascii_a_grouped_literal_folds_as_the_bare_literal_does`.
+
+## 92. A long run of conditionals overflows the C stack while compiling and ends the process - FIXED HERE (F102, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found by the D110 work. Evidence:
+`.scratch/s1019/d110/probe/` (`up.py`, shape `seqcond`).
+
+**Reproduction**, `regex` 2026.9.10 on Python 3.14, Windows x64, measured 2026-10-19, each in a
+child process:
+
+```
+regex.compile('(a)?' + '(?(1)a|b)' * 61440)   -> compiles
+regex.compile('(a)?' + '(?(1)a|b)' * 62464)   -> process ends, exit code 0xC00000FD (stack overflow)
+```
+
+**Why upstream is wrong.** A pattern that is merely long, with no nesting at all, should compile
+or raise a catchable error; ending the interpreter means any program that compiles a pattern it
+did not write can be crashed. Deep nesting is caught by Python's recursion limit as a
+`RecursionError`; this is not, because the recursion is in C.
+
+**Mechanism.** `record_subpattern_repeats_and_fuzzy_sections` (`_regex.c`, around line 23517)
+recurses into `next_1` at a branch, a conditional and a repeat and loops on `next_2`. A
+conditional's `next_1` runs on to the rest of the pattern, so the recursion is as deep as the
+number of conditionals in a row.
+
+**Proposed fix upstream:** keep the pending `next_2` edges on a heap stack, as this port does; the
+walk then visits the same nodes in the same order.
+
+**This port.** `Optimiser.RecordSubpatternRepeatsAndFuzzySections` keeps its pending edges on a
+`Stack<Node?>`, so 20,000 conditionals compile on a 256 KB thread. Pinned by
+`Gaps/Parsing/NestingDepthTests.A_long_run_of_conditionals_compiles_on_a_small_stack`.
