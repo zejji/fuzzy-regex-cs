@@ -89,6 +89,26 @@ public sealed class RankedRefinementWindowTests
         );
     }
 
+    /// <summary>
+    /// D114: an atomic group that closes past the span fails at once, because nothing after it can
+    /// move back inside the span. Without that, the optional tail after the group was tried in every
+    /// combination before each match was refused at its end: 7,925 steps here, against 3,355 (Debug,
+    /// WorkCounter, measured 2026-10-19). The answers are the same either way.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void An_atomic_group_that_closes_past_the_span_fails_at_once()
+    {
+        FuzzyRegex regex = new("(?e)(?:xaq|a(?>a*)(?:q?r?s?t?){1,4}){e<=2}");
+        string subject = "x" + new string('a', 30);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Matches(subject).Count.Should().Be(12),
+            4_500,
+            "the tail after a group that read past the span is not tried"
+        );
+    }
+
     [Test]
     public void An_enhancematch_scan_after_a_refinement_searches_the_whole_text_again()
     {

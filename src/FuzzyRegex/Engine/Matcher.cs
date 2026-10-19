@@ -22505,6 +22505,14 @@ internal static class Matcher
     /// and not under the oracle's ablation that stops the counter (<see cref="PatternObject.BoundsReachDecidingBodies"/>).
     /// Those keep D111's window over the caller's slice, which is right and slower.
     /// </summary>
+    /// <remarks>
+    /// SHORTCUT: the partial and call clauses are where the equivalence argument stops, not where a
+    /// witness was found: dropping either changed no answer on 64,000 rows (2026-10-19,
+    /// <c>.scratch/s1019/d114/excl.sh</c>). A ranked partial call or a ranked pattern with group calls
+    /// and an atomic group still pays D111's cost on adversarial text. Upgrade path: extend the
+    /// argument (run-outs at the narrowed edge; guards and memos keyed per call context), then drop
+    /// the clause with a differential against this one.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if the far end may be narrowed.</returns>
     private static bool NarrowsTheRefinementOutsideBodies(MatchState state) =>
