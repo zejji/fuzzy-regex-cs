@@ -394,7 +394,7 @@ internal sealed class PatternObject
     /// <summary>
     /// NOT UPSTREAM'S, D115: whether the pattern holds a <c>\G</c>, whose answer depends on where a
     /// search began, so a failed search from one position says nothing about a search from a later
-    /// one. See <c>MatchState.BestWalkNoMatchFrom</c>.
+    /// one. See <c>Matcher.BestWalkKnownToFail</c>.
     /// </summary>
     internal bool ReadsTheSearchAnchor;
 

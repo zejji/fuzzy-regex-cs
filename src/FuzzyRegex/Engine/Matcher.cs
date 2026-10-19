@@ -22967,7 +22967,10 @@ internal static class Matcher
     /// <remarks>
     /// Called only after a whole search, so no fact for these bounds already covered
     /// <paramref name="start"/>: the one being replaced starts later, or at the same place with the
-    /// empty-match ban, and the new one covers every search the old one did.
+    /// empty-match ban, and the new one covers every search the old one did. The facts are not keyed
+    /// by slice, because every walk of a scan runs in the caller's slice (DoMatch puts it back for
+    /// each match); a fact from another slice could only be replaced, never misread, since
+    /// <see cref="BestWalkKnownToFail"/> compares the slice.
     /// </remarks>
     /// <param name="state">The match state, holding the live bounds the search ran under.</param>
     /// <param name="start">Where the failed search started.</param>
