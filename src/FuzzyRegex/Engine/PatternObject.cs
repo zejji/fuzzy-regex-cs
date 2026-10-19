@@ -381,6 +381,17 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D111: whether the pattern holds something that commits to what it has read:
+    /// an atomic group, which a possessive repeat, <c>\R</c> and <c>\X</c> compile to. Only such a
+    /// pattern can match differently when text past a span is cut off, so only it needs a BESTMATCH
+    /// or ENHANCEMATCH refinement to keep the caller's slice (<see cref="MatchState.RefineStart"/>);
+    /// every other pattern keeps upstream's narrowed slice, which matches the same and reads no
+    /// further than the span. A <c>(*PRUNE)</c> or <c>(*SKIP)</c> commits too, but D109 refuses a
+    /// ranked pattern that holds one and can make errors, and only a match with errors is refined.
+    /// </summary>
+    internal bool RefinesInAWindow;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
     /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
     /// </summary>
@@ -1293,6 +1304,12 @@ internal sealed class PatternObject
             if (self.NodeList[i].Op == Opcode.Skip)
             {
                 self.HasSkipVerb = true;
+            }
+
+            // NOT UPSTREAM'S, D111: see RefinesInAWindow.
+            if (self.NodeList[i].Op == Opcode.Atomic)
+            {
+                self.RefinesInAWindow = true;
             }
 
             // NOT UPSTREAM'S, D11: see HasBacktrackingVerb and ReadsCapturesWhileMatching.

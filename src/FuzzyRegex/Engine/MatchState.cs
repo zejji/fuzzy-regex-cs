@@ -422,6 +422,33 @@ internal sealed class MatchState : IDisposable
     internal int InitialSliceEnd;
 
     /// <summary>
+    /// NOT UPSTREAM (D111): the span a BESTMATCH or ENHANCEMATCH refinement holds its matches to.
+    /// <see cref="int.MinValue"/> and <see cref="int.MaxValue"/> (no limit) outside a refinement.
+    /// </summary>
+    /// <remarks>
+    /// Upstream narrows the SLICE to the span instead, and the narrowed slice end cuts what an atomic
+    /// group, a possessive repeat, <c>\R</c> or <c>\X</c> reads, so a refinement could report a span
+    /// the pattern does not match in the text: <c>(?e)(?:xaq|a(?&gt;a*)){e&lt;=1}</c> over 'xaaa' was
+    /// (1, 3) exact, where the atomic <c>a*</c> takes 'aaa'. The slice now stays the caller's, so
+    /// every construct reads the text as the plain search does, and this window is a filter: an
+    /// attempt starts inside it (<see cref="SearchSliceStart"/>, <see cref="SearchSliceEnd"/>) and a
+    /// match that ends outside it backtracks (<c>Matcher.EndsOutsideTheRefinement</c>).
+    /// </remarks>
+    internal int RefineStart = int.MinValue;
+
+    /// <inheritdoc cref="RefineStart" />
+    internal int RefineEnd = int.MaxValue;
+
+    /// <summary>
+    /// D111: the lowest position a search may start an attempt at (or, reversed, scan down to):
+    /// the slice start, raised to a refinement's window.
+    /// </summary>
+    internal int SearchSliceStart => Math.Max(SliceStart, RefineStart);
+
+    /// <summary>D111: the slice end, lowered to a refinement's window. See <see cref="SearchSliceStart"/>.</summary>
+    internal int SearchSliceEnd => Math.Min(SliceEnd, RefineEnd);
+
+    /// <summary>
     /// Upstream <c>text_start</c>. Always 0: upstream documents the bounds as an open start and a
     /// closed end, so <c>pos</c> moves <see cref="SliceStart"/> but not this, which is why
     /// <c>^</c> does not match at <c>pos</c>.
@@ -1789,6 +1816,8 @@ internal sealed class MatchState : IDisposable
         SliceEnd = end;
         InitialSliceStart = start;
         InitialSliceEnd = end;
+        RefineStart = int.MinValue;
+        RefineEnd = int.MaxValue;
 
         Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 
