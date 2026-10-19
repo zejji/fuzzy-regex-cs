@@ -15771,6 +15771,7 @@ internal static class Matcher
                     // 'state->text_pos + (Py_ssize_t)count * node->step', stepped back a character
                     // at a time as the count comes down rather than recomputed by multiplication.
                     bool match = false;
+                    long cutBodyHits = state.CutBodyHits;
                     while (true)
                     {
                         if (count < node.Values[1])
@@ -15826,8 +15827,17 @@ internal static class Matcher
                             goto runOut;
                         }
 
-                        // The repeat has failed to match at this position.
-                        state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        // The repeat has failed to match at this position. NOT UPSTREAM (D104):
+                        // a tail guard kept under the instance said so, then so is this.
+                        if (state.CutBodyHits == cutBodyHits)
+                        {
+                            state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        }
+                        else
+                        {
+                            state.GuardRepeatAfterBlockedEnd(index, state.TextPos, state.TextPos, NodeStatus.Body);
+                        }
+
                         goto backtrack;
                     }
 
@@ -17411,6 +17421,7 @@ internal static class Matcher
                     // The tail failed to match at this position (NOT UPSTREAM, D90: see
                     // MatchState.PoppedEntrySawABlockedEnd; the range guard below follows it).
                     bool sawABlockedEnd = state.PoppedEntrySawABlockedEnd(index);
+                    long cutBodyHits = state.CutBodyHits;
                     if (!sawABlockedEnd)
                     {
                         state.GuardRepeat(index, pos, NodeStatus.Tail, true);
@@ -17579,10 +17590,11 @@ internal static class Matcher
                     }
 
                     // Don't try this repeated match again.
-                    if (sawABlockedEnd)
+                    if (sawABlockedEnd || state.CutBodyHits != cutBodyHits)
                     {
                         // NOT UPSTREAM (D90): the failure took in what follows a blocked construct,
-                        // so it is kept under the instance instead (D104).
+                        // so it is kept under the instance instead (D104), as it is when a tail
+                        // guard kept under the instance cut a position on the way down.
                         state.GuardRepeatAfterBlockedEnd(
                             index,
                             Math.Min(limit, pos),

@@ -284,6 +284,7 @@ internal static class TailGuardLiveness
             info.CutBodyKey = specAt(repeat) ?? new TailGuardKeySpec([], [], [], repeat.Values[3] != 0, false);
             info.EnclosingLoops = loops.TryGetValue(index, out List<int>? list) ? [.. list] : [];
             info.EnclosingLoopCaps = [.. info.EnclosingLoops.Select(loop => caps[loop])];
+            info.CountFreeBody = ~repeat.Values[2] == 0 && repeat.Values[1] <= 1;
         }
     }
 

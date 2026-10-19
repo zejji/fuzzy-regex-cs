@@ -156,6 +156,15 @@ internal sealed class RepeatInfo
     internal long[] EnclosingLoopCaps = [];
 
     /// <summary>
+    /// NOT UPSTREAM (D104): the repeat has no maximum and a minimum of at most 1, so its own count
+    /// cannot change what its body leads to, and a body record written after a blocked end may
+    /// leave the count out of its key. A plain body record relies on the success mark instead
+    /// (<c>GuardRepeat(..., protect: false)</c> at the iteration's end), which a record kept under
+    /// its instance never gets. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal bool CountFreeBody;
+
+    /// <summary>
     /// NOT UPSTREAM (D85): the body holds a repeat whose tail guard is keyed, so this repeat's body
     /// guard is off. A body guard records that the body never got to its end from a position; a
     /// keyed tail guard inside can stop the body under one value of a group the rest of the match

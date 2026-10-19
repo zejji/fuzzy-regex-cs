@@ -1702,6 +1702,7 @@ internal sealed class MatchState : IDisposable
 
         KeyedTailWrites = 0;
         CutBodyWrites = 0;
+        CutBodyHits = 0;
         _cutBodyGuards.Clear();
         BlockedEndMark = -1;
         Array.Clear(_tailKeyScratch);
@@ -2648,6 +2649,7 @@ internal sealed class MatchState : IDisposable
 
         KeyedTailWrites = 0;
         CutBodyWrites = 0;
+        CutBodyHits = 0;
         _cutBodyGuards.Reset();
 
         // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
@@ -3191,7 +3193,7 @@ internal sealed class MatchState : IDisposable
             && !Pattern.HasBacktrackingVerb
             && (
                 (guardType & NodeStatus.Body) != 0
-                    ? !info.BodyHoldsKeyedTail
+                    ? !info.BodyHoldsKeyedTail && info.CountFreeBody
                     : info.TailKey is not { HasUnknownInside: true }
             );
     }
@@ -3339,8 +3341,21 @@ internal sealed class MatchState : IDisposable
             span = ClipTailSpan(spec, textPos, span);
         }
 
+        // The path this cuts would have reached the construct's blocked end, so a record that its
+        // cut lets an entry pushed before now write is about the instance too: it is kept under the
+        // instance (PoppedEntrySawABlockedEnd), and a write that follows from this hit without a
+        // pop checks CutBodyHits (blind review, 2026-10-19: `a?(?=(?:a|)*b?y)a` over 'ab', match,
+        // was None for P(0, 2) when GREEDY_REPEAT_ONE wrote its plain body guard from such hits).
+        NoteABlockedEnd();
+        CutBodyHits++;
         return true;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): how many guard checks <see cref="_cutBodyGuards"/> has answered in this
+    /// attempt, so that a record written because of them goes under the instance too.
+    /// </summary>
+    internal long CutBodyHits;
 
     /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>
     /// <param name="index">The repeat index.</param>

@@ -24,10 +24,11 @@ public sealed class OpenDefectTests
     /// the attempt start, (0, 10). The expected answers are the guards-off build's with no budget,
     /// which main before D90 also gave. Records kept under their instance
     /// (<c>MatchState.CutBodyKeyOf</c>) bring back 30 of the 40 grid rows and the register's
-    /// witness (<c>PartialBlockedEndGuardTests</c>); these 10 still exhaust the budget. Here
-    /// <c>(b?)</c> captures an empty span at every position the inner repeat can stop at, and the
-    /// key holds that exact span where a later capture could equal it (the capture-change counter
-    /// reads it), so each lookahead hands its continuation one state per position.
+    /// witness (<c>PartialBlockedEndGuardTests</c>); these 10 still exhaust the budget. A likely
+    /// cause, not yet tested: <c>(b?)</c> captures an empty span at every position the inner repeat
+    /// can stop at, and the key holds that exact span where a later capture could equal it (the
+    /// capture-change counter reads it), so each lookahead hands its continuation one state per
+    /// position.
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="subject">The subject.</param>

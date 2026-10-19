@@ -210,6 +210,28 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial: true).Should().Be(expected);
     }
 
+    // D104, blind review of the code (2026-10-19): a guard check answered by a record kept under
+    // its instance cut a path that would have reached the blocked end, and GREEDY_REPEAT_ONE then
+    // wrote "the repeat fails here" into its plain body list, which the next instance read. Such a
+    // write now goes under the instance too, and so does any record whose subtree took such a cut
+    // (MatchState.CutBodyHits). Expected: the guards-off build's spans; the first commit of the
+    // change (9abbb4a9) answered as in the comment.
+    [Test]
+    [Arguments(@"a?(?=(?:a|)*b?y)a", "ab", "match", "(0,2)p")] // None
+    [Arguments(@"a*(?=(a?)*b?y)aa", "aab", "search", "(0,3)p")] // (3,3)p
+    [Arguments(@"a*(?:(?=(a?){1,2}(b)?y)a?)+aa", "aaaab", "match", "(0,5)p")] // None
+    public void A_write_that_follows_from_a_record_kept_under_its_instance_is_kept_there_too(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        string answer = Run(pattern, subject, operation, partial: true);
+
+        answer.Split(' ')[0].Should().Be(expected);
+    }
+
     private static string Run(string pattern, string subject, string operation, bool partial)
     {
         var regex = new FuzzyRegex(pattern);

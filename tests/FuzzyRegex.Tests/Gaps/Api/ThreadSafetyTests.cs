@@ -1028,5 +1028,6 @@ public sealed class ThreadSafetyTests
             "RepeatInfo.CutBodyKey",
             "RepeatInfo.EnclosingLoops",
             "RepeatInfo.EnclosingLoopCaps",
+            "RepeatInfo.CountFreeBody",
         };
 }
