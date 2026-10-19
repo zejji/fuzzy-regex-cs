@@ -5,14 +5,9 @@
   DECISIONS.md. Paste everything below the second rule into the release form.
 
   The divergence links point at line numbers of DIVERGENCES.md in the v1.0.0 tag. If that file
-  changes before the tag is made, re-check every link (the row lines were 25-31, 37-51, 57-136
-  on main cd6cb70d, after D110's nesting-limit row went in at line 73). fix/d109 adds a row at
-  line 114, so when it merges every link from d114 up moves down one line and the row count
-  below becomes 103 (in CHANGELOG.md too).
-
-  Lines marked "pending merge of fix/d109 / fix/d111" describe work not yet on main. The owner
-  decided on 2026-10-19 that 1.0 waits for both, and for one more clean battery run. If either
-  is dropped, delete its lines.
+  changes before the tag is made, re-check every link (the row lines are 25-31, 37-51, 57-138
+  on main 0b77977d, after D109's row went in at line 114 and D113's at line 138). Each link's
+  label is the line number it points at.
 -->
 
 ---
@@ -125,7 +120,7 @@ section has runnable examples of each case.
 Each line below is one row of
 [DIVERGENCES.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md), which
 gives the reason, the evidence, the decision and, where one exists, how to get upstream's behaviour
-back. All 102 rows are in the released code. Most of the behaviour rows are upstream defects that
+back. All 104 rows are in the released code. Most of the behaviour rows are upstream defects that
 this port fixed and pinned with tests; the rest are choices made for .NET callers.
 
 ### Defaults
@@ -201,25 +196,24 @@ this port fixed and pinned with tests; the rest are choices made for .NET caller
 - Under these modes `\G` holds only where the search began. [details][d100]
 - They count only the errors a match contains, leaving out sections an atomic group, lookaround, verb or conditional's test threw away. [details][d112]
 - Their budget never decides a negative lookaround or a conditional's test. [details][d113]
-<!-- pending merge of fix/d109 / fix/d111 -->
-- They answer only matches the pattern can make without the flag. Upstream's budget can make an atomic group, possessive repeat, lookaround or conditional's test commit to a later match than it would without the flag, so `(?b)(?:(?>ab|a)c){s<=1}` over `aacbc` is (1, 3) upstream, a span the pattern does not match there; here it is (0, 3) with one substitution. [details][d109-comparison]
-- They refuse a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`, with a `FuzzyRegexParseException` when it is compiled. The budget would decide where the verb acts, and holding it only at the end of the match made some searches a hundred times slower and could lose a better match. Drop the flag, drop the verb, or make the section around the verb exact (`{e<=0}`). [details][d109-comparison]
-- An `EnhanceMatch` refinement looks for a better match inside the first one's span without cutting the text there, so an atomic group or possessive repeat still sees the whole text: `(?e)(?:xaq|a(?>a*)){e<=1}` over `xaaa` is (1, 3) upstream, which the pattern does not match, and (0, 3) with one substitution here.
-<!-- end pending -->
-- They keep a fit that ends in trailing insertions. [details][d130]
+- They answer only matches the pattern can make without the flag. Upstream's budget can make an atomic group, possessive repeat, lookaround or conditional's test commit to a later match than it would without the flag, so `(?b)(?:(?>ab|a)c){s<=1}` over `aacbc` is (1, 3) upstream, a span the pattern does not match there; here it is (0, 3) with one substitution. [details][d114]
+- They refuse a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`, with a `FuzzyRegexParseException` when it is compiled. The budget would decide where the verb acts, and holding it only at the end of the match cost 7 to 110 times the work and could lose a better match. Drop the flag, drop the verb, or make the section around the verb exact (`{e<=0}`). [details][d114]
+- An `EnhanceMatch` refinement looks for a better match inside the first one's span without cutting the text there, so an atomic group or possessive repeat still sees the whole text: `(?e)(?:xaq|a(?>a*)){e<=1}` over `xaaa` is (1, 3) upstream, which the pattern does not match, and (0, 3) with one substitution here. [details][d114]
+- They keep a fit that ends in trailing insertions. [details][d131]
 
 ### Partial matching
 
 - A word or grapheme boundary decided at the end of the text gives a partial match, as in PCRE2 (upstream issue 589). [details][d60]
 - A partial is refused where the match failed on text the engine already held, so no text could complete it. [details][d61]
 - A reversed partial match reports running out of text at the slice start consistently. [details][d71]
-- Running out of text inside a lookaround's body no longer ends the call with a partial by itself. [details][d124]
-- A partial is reported where upstream refuses a completion that exists, such as `.*?(?<=c)` over `aa`. [details][d125]
-- A partial search tries a start inside the text still to come, for a pattern with no first set. [details][d126]
-- `\b` over the empty text is a partial, and `\Z` at the edge is false in a partial call's second pass. [details][d127]
-- A partial reports a group that closed before a repeat's tail ran out of text. [details][d128]
-- A reversed partial search lets `$` hold before a final newline in the text to come. [details][d129]
-- A partial search's first-set check does not answer before the anchors it skips. [details][d131]
+- Running out of text inside a lookaround's body no longer ends the call with a partial by itself. [details][d125]
+- A partial is reported where upstream refuses a completion that exists, such as `.*?(?<=c)` over `aa`. [details][d126]
+- A partial search tries a start inside the text still to come, for a pattern with no first set. [details][d127]
+- `\b` over the empty text is a partial, and `\Z` at the edge is false in a partial call's second pass. [details][d128]
+- A partial reports a group that closed before a repeat's tail ran out of text. [details][d129]
+- A reversed partial search lets `$` hold before a final newline in the text to come. [details][d130]
+- A partial search's first-set check does not answer before the anchors it skips. [details][d132]
+- A negative lookahead around a lookahead that holds whatever text follows reports no partial, where upstream reports a span the pattern cannot make. [details][d138]
 
 ### Verbs and `\K`
 
@@ -228,9 +222,9 @@ this port fixed and pinned with tests; the rest are choices made for .NET caller
 - A verb reached by backtracking inside an unfinished atomic group or positive lookaround ends the attempt. [details][d97]
 - A verb after a lazy leading repeat does not hide the starts inside the repeat's run. [details][d98]
 - A verb inside a lookbehind acts in right-to-left order, as the lookbehind's body runs. [details][d101]
-- A `\K` inside a lookaround cannot make a scan or a search repeat itself for ever. [details][d133]
-- A `\K` inside a lookaround, condition, atomic group or possessive repeat is undone when matching backtracks past it. [details][d134]
-- A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions. [details][d135]
+- A `\K` inside a lookaround cannot make a scan or a search repeat itself for ever. [details][d134]
+- A `\K` inside a lookaround, condition, atomic group or possessive repeat is undone when matching backtracks past it. [details][d135]
+- A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions. [details][d136]
 
 ### Group calls, recursion, conditionals and backreferences
 
@@ -241,18 +235,18 @@ this port fixed and pinned with tests; the rest are choices made for .NET caller
 - A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away. [details][d108]
 - A group call keeps none of the captures its body made, as in Perl and PCRE2. [details][d109]
 - A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller. [details][d110]
-- The calls inside a called group run with the call's direction and fuzziness. [details][d114]
-- A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused. [details][d115]
-- A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does. [details][d116]
-- A call in a conditional's lookbehind test runs its group backwards. [details][d117]
-- A backwards copy of the whole pattern does not jump to the required string's forward end. [details][d118]
-- A called copy adds nothing to the pattern's minimum width. [details][d119]
-- A called group's copy runs as the group written out at the call. [details][d120]
-- An alternation at the start of a negative condition's yes branch keeps all its alternatives. [details][d121]
-- A conditional's lookaround test is matched exactly inside a fuzzy section. [details][d122]
-- A conditional whose negative test fails keeps the captures the test made. [details][d123]
-- A `DEFINE` group with a no-branch is refused at construction, as PCRE2 and Perl refuse it. [details][d132]
-- A search that reads a group after a guarded repeat finds the leftmost match. [details][d136]
+- The calls inside a called group run with the call's direction and fuzziness. [details][d115]
+- A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused. [details][d116]
+- A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does. [details][d117]
+- A call in a conditional's lookbehind test runs its group backwards. [details][d118]
+- A backwards copy of the whole pattern does not jump to the required string's forward end. [details][d119]
+- A called copy adds nothing to the pattern's minimum width. [details][d120]
+- A called group's copy runs as the group written out at the call. [details][d121]
+- An alternation at the start of a negative condition's yes branch keeps all its alternatives. [details][d122]
+- A conditional's lookaround test is matched exactly inside a fuzzy section. [details][d123]
+- A conditional whose negative test fails keeps the captures the test made. [details][d124]
+- A `DEFINE` group with a no-branch is refused at construction, as PCRE2 and Perl refuse it. [details][d133]
+- A search that reads a group after a guarded repeat finds the leftmost match. [details][d137]
 
 ### Search and limits
 
@@ -268,7 +262,7 @@ Building the port meant reading upstream's C closely and comparing the two engin
 generated rows, and that turned up defects in upstream itself. Each one is recorded in
 [LEDGER.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/plan/upstream-reports/LEDGER.md)
 with a minimal reproduction, the faulting code where it was traced, and this port's answer. The
-ledger holds 91 entries, numbered 1 to 92 (there is no 41). Entry 10 was fixed by upstream itself in
+ledger holds 93 entries, numbered 1 to 94 (there is no 41). Entry 10 was fixed by upstream itself in
 2026.9.10. None of the others has been reported upstream yet. Two entries gained a second form on
 2026-10-18, each found by a battery run and pinned by tests: the reversed form of entry 62
 (a negative condition's yes branch keeps only its first alternative) and the mirror of entry 90,
@@ -286,9 +280,7 @@ partial that ends too late. Some notable ones:
 - The `(?w)` word boundary fails 268 lines of Unicode's own conformance test (entry 40), and a reversed `\X` takes one codepoint where it should take a grapheme cluster (entry 43).
 - A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever (entry 85).
 - A run of about 62,000 conditionals, with no nesting at all, overflows the C stack while compiling and ends the Python process (entry 92).
-<!-- pending merge of fix/d109 -->
 - Under `BestMatch` and `EnhanceMatch` the error budget decides what an atomic group, lookaround or verb commits to, so a search can return a span the pattern does not match (entry 32's addendum of 2026-10-19).
-<!-- end pending -->
 
 ## Performance
 
@@ -316,6 +308,15 @@ allocating about 105 MB per call after a correctness fix (known defect D103). Th
 method and the raw data are in
 [the gate record](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-10-18-S63-gate.md).
 
+One scan outside the gate's workloads is faster here than upstream. After each match, a
+`BestMatch` scan searches from that match's start to the end of the text for a match with fewer
+errors. When there is none, upstream's search runs to the end of the text after every match, so the
+scan's time grows with the square of the text's length: `(?b)(?:thx\s[a-z]+\s){e<=1}` takes
+1.19 s over 64 KB of text, against 0.011 s without the flag. This port remembers a search that
+failed and does not run it again, so the scan stays linear: over 100 KB of prose,
+`(?b)(?:the\s(?>[a-z]+)\s){e<=1}` takes 1.3 million steps of the engine, against 0.8 million
+without the flag.
+
 ## Known limitations
 
 - **Refused patterns.** These raise `FuzzyRegexParseException` (or `NotSupportedException` for
@@ -324,10 +325,8 @@ method and the raw data are in
   call that re-opens a fuzzy section where the same call is already open; a `DEFINE` group with a
   no-branch; a pattern whose compiled graph would exceed `maxCompiledNodes`; case-insensitive
   matching under `(?L)`.
-  <!-- pending merge of fix/d109 / fix/d111 -->
   Also refused: `BestMatch` or `EnhanceMatch` on a fuzzy pattern that holds `(*PRUNE)` or
   `(*SKIP)`, which upstream answers, sometimes with a span the pattern does not match.
-  <!-- end pending -->
 - **Nesting limit.** A pattern nested more than 500 levels deep in groups and sets is refused
   with `FuzzyRegexParseException`, where upstream raises `RecursionError`. Compiling on a thread
   with a small stack can run out below that depth; that is reported as a `FuzzyRegexParseException`
@@ -349,10 +348,9 @@ method and the raw data are in
   allocation rows (D29, D33, D68, D71, D82, D91, D105) and the slowdowns accepted with the D85 and D92
   correctness fixes are in
   [KNOWN-DEFECTS.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/KNOWN-DEFECTS.md).
-  <!-- pending merge of fix/d111 -->
-  The D111 fix can make an `EnhanceMatch` scan take time that grows with the square of the text's
-  length on adversarial input; on ordinary text its cost is unchanged.
-  <!-- end pending -->
+  D116: the `BestMatch` scan described under Performance keeps upstream's cost, which grows with
+  the square of the text's length, when the pattern holds a lookbehind (a lookahead in a reversed
+  pattern), and in the rarer cases KNOWN-DEFECTS lists.
 - **Upstream 2026.9.29** (Unicode 18.0.0) is planned for 1.1; 1.0 uses Unicode 17.0.0.
 
 ## Reporting a bug
@@ -465,5 +463,5 @@ several of the differences above are cases where it is.
 [d134]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L134
 [d135]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L135
 [d136]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L136
-<!-- pending merge of fix/d109: point this at the DIVERGENCES row once it has a line number -->
-[d109-comparison]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/COMPARISON.md#bestmatch-and-enhancematch-answer-a-match-the-pattern-can-make
+[d137]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L137
+[d138]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L138

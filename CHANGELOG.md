@@ -119,15 +119,18 @@ this port does not share, the performance gate and the known limitations.
   and a search that skipped start positions after a `\K` and a `(*PRUNE)` or `(*SKIP)` (D92).
   A reversed `\X` now stops at a slice start that cuts a grapheme cluster, as a forward one stops
   at the slice end (D108).
-  <!-- pending merge of fix/d109 / fix/d111 -->
   `BestMatch` and `EnhanceMatch` now answer only matches the pattern can make without the flag:
   upstream's error budget could make an atomic group, possessive repeat, lookaround or
   conditional's test commit to a different match (D109, inherited). They refuse a fuzzy pattern
   that holds `(*PRUNE)` or `(*SKIP)`, because the budget would decide where the verb acts and
-  holding it only at the end of the match was up to a hundred times slower; drop the flag, drop
+  holding it only at the end of the match cost 7 to 110 times the work; drop the flag, drop
   the verb or make that section exact. An `EnhanceMatch` refinement no longer cuts the text short,
-  so atomic groups and possessive repeats inside it see the whole text (D111, inherited).
-  <!-- end pending -->
+  so atomic groups and possessive repeats inside it see the whole text (D111, inherited). It reads past the
+  match only inside an atomic group, so a scan over adversarial text stays linear (D114). A partial search with a lookahead nested first in a lookahead no longer reports a
+  partial that starts later than a real match, or a span the pattern cannot make (D113). A
+  `BestMatch` scan where no match is better than the one found no longer repeats a failed search
+  after every match, so it runs in linear time where upstream's grows with the square of the text
+  (D115; a pattern with a lookbehind keeps upstream's cost, D116).
 - **Deep nesting cannot crash the process.** A pattern nested more than 500 levels deep in groups
   and sets is refused with `FuzzyRegexParseException`, and running out of stack while compiling is
   reported as the same exception rather than a stack overflow, which .NET cannot catch and which
@@ -232,7 +235,7 @@ Each is fixed here even though upstream still has it, and each is recorded in
 
 ### Divergences from mrab-regex
 
-This port behaves differently from upstream on purpose in 102 places, each one a row of
+This port behaves differently from upstream on purpose in 104 places, each one a row of
 [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md)
 with its reason, its evidence and, where one exists, how to get upstream's behaviour back. The ones
 a caller arriving from Python meets first:
