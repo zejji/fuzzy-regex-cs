@@ -16,16 +16,17 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// <para>
 /// Upstream has no limit of its own: Python's recursion limit stops it with a catchable
 /// <c>RecursionError</c>, at 140 to 330 levels depending on the construct (regex 2026.9.10 on
-/// Python 3.14, 2026-10-19, <c>.scratch/s1019/d110/probe/up.py</c>), so every pattern upstream
+/// Python 3.14, 2026-10-19, <c>.scratch/s1019/d110/probe/up.py</c>), so at that default limit every pattern upstream
 /// compiles is under the limit here. The <c>docs/DIVERGENCES.md</c> row "Nesting limit" records
 /// the different exception.
 /// </para>
 /// <para>
-/// <b>These tests cannot crash the test host.</b> Before the fix, the depths here that compile on
-/// the host's 1 MB thread were measured to compile (1,100 to 1,450 levels; the limit is 500), and
-/// the 100,000-level and small-stack cases overflowed in a child process
-/// (<c>.scratch/s1019/d110/probe</c>, exit code -1073741571, "Stack overflow."); those two are
-/// the cases a missing guard would turn into a crash, and they were run there first.
+/// <b>These tests cannot crash the test host.</b> The tests the limit must decide compile on a
+/// 4 MB thread of their own, which held 1,100 to 1,450 levels before the fix on a quarter of
+/// that. The cases a missing guard would turn into a crash (100,000 levels, the 256 KB thread, the
+/// runs of conditionals and of exact constraints) overflowed in a child process before the fix
+/// (<c>.scratch/s1019/d110/probe</c>, exit code 127, "Stack overflow.") and were proved there
+/// to stop with an exception after it, before they were run here.
 /// </para>
 /// </remarks>
 public sealed class NestingDepthTests
@@ -61,7 +62,7 @@ public sealed class NestingDepthTests
     {
         string pattern = Nest(lead, open, close, _limit);
 
-        var regex = new FuzzyRegex(pattern);
+        FuzzyRegex regex = CompileOnLargeStack(pattern);
 
         regex.Match("aa").Success.Should().BeTrue();
     }
@@ -92,9 +93,9 @@ public sealed class NestingDepthTests
     {
         string pattern = Nest(lead, open, close, _limit + 1);
 
-        Action compile = () => _ = new FuzzyRegex(pattern);
+        Exception? thrown = OnThreadWithStack(() => _ = new FuzzyRegex(pattern), _largeStack);
 
-        FuzzyRegexParseException refused = compile.Should().Throw<FuzzyRegexParseException>().Which;
+        FuzzyRegexParseException refused = thrown.Should().BeOfType<FuzzyRegexParseException>().Which;
         refused.Message.Should().Be($"too deeply nested: more than {_limit} levels of groups and sets");
         refused.Pattern.Should().Be(pattern);
         refused.Offset.Should().Be(lead.Length + (open.Length * _limit));
@@ -105,11 +106,11 @@ public sealed class NestingDepthTests
     {
         string pattern = "(?V1)" + new string('(', _limit - 1) + "[[a]]" + new string(')', _limit - 1);
 
-        Action compile = () => _ = new FuzzyRegex(pattern);
+        Exception? thrown = OnThreadWithStack(() => _ = new FuzzyRegex(pattern), _largeStack);
 
-        compile
+        thrown
             .Should()
-            .Throw<FuzzyRegexParseException>()
+            .BeOfType<FuzzyRegexParseException>()
             .Which.Offset.Should()
             .Be("(?V1)".Length + _limit, "the inner set is the 501st level");
     }
@@ -117,11 +118,11 @@ public sealed class NestingDepthTests
     [Test]
     public void Siblings_do_not_add_up()
     {
-        // Depth is nesting, not the number of groups: 2,000 groups side by side, each 400 deep.
+        // Depth is nesting, not the number of groups: 2,400 groups side by side, each 400 deep.
         string one = Nest("", "(?:", ")", 400);
         string pattern = string.Concat(Enumerable.Repeat(one, 5)) + "|" + one;
 
-        var regex = new FuzzyRegex(pattern);
+        FuzzyRegex regex = CompileOnLargeStack(pattern);
 
         regex.Match("aaaaa").Value.Should().Be("aaaaa");
     }
@@ -132,9 +133,28 @@ public sealed class NestingDepthTests
         // Before D110's fix this ended the process at 1,440 levels on a 1 MB stack.
         string pattern = new string('(', 100_000) + "a" + new string(')', 100_000);
 
-        Action compile = () => _ = new FuzzyRegex(pattern);
+        Exception? thrown = OnThreadWithStack(() => _ = new FuzzyRegex(pattern), _largeStack);
 
-        compile.Should().Throw<FuzzyRegexParseException>().Which.Offset.Should().Be(_limit);
+        thrown.Should().BeOfType<FuzzyRegexParseException>().Which.Offset.Should().Be(_limit);
+    }
+
+    [Test]
+    [Arguments("a", 1)]
+    [Arguments("(a)", 1)]
+    [Arguments("(?:ab)", 2)]
+    public void A_hundred_thousand_exact_constraints_in_a_row_compile(string element, int length)
+    {
+        // Each constraint that allows no errors used to wrap the element in another exact fuzzy
+        // section, so the parsed tree was as deep as the run was long and 100,000 of them overflowed
+        // the stack with no bracket in sight (found by the D110 diff review; child process, exit
+        // code 127). Upstream drops such a constraint and answers (0, 1) for 'a' (2026-10-19).
+        string pattern = element + string.Concat(Enumerable.Repeat("{e<=0}", 100_000));
+        Match? match = null;
+
+        Exception? thrown = OnThreadWithStack(() => match = new FuzzyRegex(pattern).Match("xab"));
+
+        thrown.Should().BeNull();
+        (match!.Index, match.Length).Should().Be((1, length));
     }
 
     [Test]
@@ -213,6 +233,19 @@ public sealed class NestingDepthTests
 
         thrown.Should().BeNull();
         (match!.Index, match.Length).Should().Be((0, 2 * depth));
+    }
+
+    /// <summary>
+    /// A stack large enough for 500 levels in any build. The limit, not the stack, has to decide
+    /// these tests, and a test runner's own threads can be as small as 512 KB on some platforms.
+    /// </summary>
+    private const int _largeStack = 4096;
+
+    private static FuzzyRegex CompileOnLargeStack(string pattern)
+    {
+        FuzzyRegex? regex = null;
+        OnThreadWithStack(() => regex = new FuzzyRegex(pattern), _largeStack).Should().BeNull();
+        return regex!;
     }
 
     private static Exception? OnThreadWithStack(Action action, int kilobytes = 256)

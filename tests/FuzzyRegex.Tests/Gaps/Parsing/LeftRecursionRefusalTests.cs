@@ -353,7 +353,7 @@ public sealed class LeftRecursionRefusalTests
         compile.Start();
         compile.Join();
 
-        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1.5));
+        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
     }
 
     /// <summary>

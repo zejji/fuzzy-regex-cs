@@ -552,8 +552,8 @@ throws `FuzzyRegexParseException` at compile time, naming the limit in its messa
 string(')', 501)` throws `FuzzyRegexParseException` with the offset of the bracket that opens the
 501st level. Compiling recurses once per level, and a stack overflow would end the process rather
 than throw, so the compiler also checks the stack it has left; on a thread with a small stack a
-shallower pattern can be refused with "too deeply nested to compile on this thread". Every
-construct compiles at 500 levels on a 1 MB stack. Python's `regex` stops at 140 to 330 levels.
+shallower pattern can be refused with "too deeply nested to compile on this thread". In a Release
+build every construct tested compiles at 500 levels on a 1 MB stack; a Debug build needs more. Python's `regex` stops at 140 to 330 levels.
 
 **`FuzzyRegex.CacheSize`** is the number of compiled patterns the static convenience methods keep
 ready between calls (fifteen by default); see Section 2 for when to bypass it with an instance
