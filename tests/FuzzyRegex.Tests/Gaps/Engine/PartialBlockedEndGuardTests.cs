@@ -97,6 +97,35 @@ public sealed class PartialBlockedEndGuardTests
         Run(pattern, subject, operation, partial: true).Should().Be(expected);
     }
 
+    // D113: the dedup at a blocked lookahead end (Matcher.EndALookaroundInTheSecondPass) backtracks
+    // in place of a continuation it has already run, so the failure it stands for is the
+    // continuation's, and the repeats in the body must not record it. Without NoteABlockedEnd there,
+    // `a?`'s tail guard at 2 written under the lookahead at 1 (where `b` then fails) refused the
+    // lookahead at 2, and start 0 was lost. The search over 2.1 million rows
+    // (`.scratch/s1019/d113/grid`) found main late on 951 rows of 12 patterns, all of this shape: a
+    // positive lookahead nested first in a positive lookahead whose body ends in a repeat and an
+    // optional item. Each expected answer is the earliest start that some continuation completes
+    // (upstream without partial over every continuation of one to four characters); upstream with
+    // partial answers the same, except as noted. Main answers as in the comment.
+    [Test]
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aab", "search", "(0,3)p")] // (1,3)p
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aab", "match", "(0,3)p")] // None
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aab", "finditer", "(0,3)p")] // (1,3)p
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aaaaab", "search", "(3,6)p")] // (4,6)p; upstream (0,6)p
+    [Arguments(@"a*?(?=(?=[ab]*c)(?:ab|a)*a?)b", "ab", "search", "(0,2)p")] // (1,2)p
+    [Arguments(@"(?:a|aa)(?=(?=a*b*c)(?:a|aa)*a?)(?:b|ab)", "aaab", "search", "(0,4)p")] // (1,4)p
+    [Arguments(@"(?:(?:a|aa)(?=(?=[ab]*c)(?:a|aa)+a?)a(?!a)|b)", "aaab", "match", "(0,4)p")] // None
+    [Arguments(@"(?:a?a?(?=(?=[ab]*c)(?:a|aa){0,3}(?<=a)))+(?<!a)", "aaab", "match", "(0,4)p")] // None
+    public void A_repeat_inside_a_lookahead_keeps_no_record_of_a_continuation_the_dedup_skipped(
+        string pattern,
+        string subject,
+        string operation,
+        string expected
+    )
+    {
+        Run(pattern, subject, operation, partial: true).Should().Be(expected);
+    }
+
     // Controls, green before the fix: the same patterns without partial, and partial calls where
     // the body never runs out or the record is sound.
     [Test]
@@ -115,6 +144,10 @@ public sealed class PartialBlockedEndGuardTests
     [Arguments(@"a?(?=(?>a?b?y))a", "ab", "search", true, "(0,2)p")]
     [Arguments(@"a?(?>(?(?=a?b?y)a|c))", "ab", "search", true, "(0,2)p")]
     [Arguments(@"a?(?>a(?<=^a?b?y))", "ab", "search", true, "(2,2)p")]
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aabc", "search", true, "(0,3)")]
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b", "aaaaab", "match", true, "None")]
+    [Arguments(@"(?:a|aa)(?=(?:a|aa)*a?)b", "aab", "search", true, "(0,3)")]
+    [Arguments(@"(?:a|aa)(?=(?=[ab]*c)b)b", "aab", "search", true, "(0,3)p")]
     public void Calls_the_fault_cannot_reach_answer_as_before(
         string pattern,
         string subject,
