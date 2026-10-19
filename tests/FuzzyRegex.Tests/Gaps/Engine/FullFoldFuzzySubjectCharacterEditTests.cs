@@ -196,6 +196,10 @@ public sealed class FullFoldFuzzySubjectCharacterEditTests
     [Arguments(@"(?rfi)(?:\1){s<=1}x(ss)", "ǰsxss", "fullmatch", 0, 5, 1, 0, 0)]
     [Arguments(@"(?rfi)(?:\1){s<=1}-(ssx)", "sßx-ssx", "fullmatch", 0, 7, 1, 0, 0)]
     [Arguments(@"(?rfi)(?:\1){i<=1}-(ssx)", "sßsx-ssx", "fullmatch", 0, 8, 0, 1, 0)]
+    // A ligature whose folding begins with the group letter: ﬆ folds to st. Minimised from the
+    // scheduled oracle's seed 20261019 row 49578. Upstream: None; its literal twin
+    // (?fi)(s)x(?:s){s<=1} gives (0, 3) with one substitution.
+    [Arguments(@"(?fi)(s)x(?:\1){s<=1}", "sxﬆ", "fullmatch", 0, 3, 1, 0, 0)]
     public void An_expanding_subject_character_in_a_fuzzy_backreference_can_be_edited_as_one_character(
         string pattern,
         string text,

@@ -774,6 +774,41 @@ public sealed class FuzzyBestMatchTests
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     //
+    // Ledger entry 12 through a ligature: under full folding 'fi' is also ﬁ, and only the ligature
+    // pairs (fi, fl, st) show it. Minimised from the scheduled oracle's seed 20261019 row 45883,
+    // `(?b)(?fi)(?r)(?:field kelvin fine){e<=7}` over 'dFIeLdwkelvIN fINEba', where upstream
+    // answers six errors and the port four. Upstream, regex 2026.9.10, measured 2026-10-19:
+    //
+    //   regex.fullmatch(r'(?b)(?fi)(?r)(?:fi){e<=7}', ' fba')  ->  (0, 4) counts=(2, 2, 0)
+    //   regex.fullmatch(r'(?b)(?fi)(?:fi){e<=7}', ' fba')      ->  (0, 4) counts=(1, 2, 0)
+    //   regex.fullmatch(r'(?b)(?i)(?r)(?:fi){e<=7}', ' fba')   ->  (0, 4) counts=(1, 2, 0)
+    //
+    // Three errors is the least: two insertions for the length, and no 'i' to match. The control
+    // puts upstream's doubled term back and gets its four.
+    [Test]
+    public void Bestmatch_reversed_under_full_folding_keeps_the_three_error_fit()
+    {
+        const string Pattern = "(?b)(?fi)(?r)(?:fi){e<=7}";
+
+        Match m = new FuzzyRegex(Pattern).FullMatch(" fba");
+
+        (m.Index, m.Index + m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 2, 0), "upstream answers (2, 2, 0)");
+
+        FuzzyRegex doubled = new(Pattern);
+        doubled.PatternObject.DoubleCountTrailingInsertions = true;
+
+        doubled.FullMatch(" fba").FuzzyCounts.Should().Be(new FuzzyCounts(2, 2, 0), "upstream's doubled guard");
+
+        // Without (?b) the first fit found is kept, and both engines find the four-error one first.
+        new FuzzyRegex("(?fi)(?r)(?:fi){e<=7}")
+            .FullMatch(" fba")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(2, 2, 0));
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
     // Reported on 2026-09-28 as a possible new bug in BESTMATCH's retries under fullmatch, and it is
     // ledger entry 12 in the shape of that entry's own reproduction: a one-character body with two
     // trailing insertions. Upstream, measured by tools/probes/bestmatch-fullmatch-trailing-insertions.py:
