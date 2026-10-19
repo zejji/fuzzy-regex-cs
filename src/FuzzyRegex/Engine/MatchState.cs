@@ -992,29 +992,46 @@ internal sealed class MatchState : IDisposable
     internal int BoundlessBodies;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D115: where a BESTMATCH walk's search last failed, or -1. A search from
-    /// there to the end of the slice, held to <see cref="BestWalkNoMatchErrors"/> and
-    /// <see cref="BestWalkNoMatchCost"/>, found nothing, so no search that starts at or past it in
-    /// the same slice and is held to no more can find anything either. Without it each match of a
-    /// finditer re-reads the rest of the text looking for a better match that is not there, which is
-    /// quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; cleared by <see cref="Init"/>.
+    /// NOT UPSTREAM'S, D115: the BESTMATCH walk searches of this scan that failed, at most
+    /// <see cref="BestWalkFailureSlots"/>, one per pair of bounds, oldest first. Without them each
+    /// match of a finditer re-reads the rest of the text looking for a better match that is not
+    /// there, which is quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; <see cref="Init"/>
+    /// empties it. <c>Matcher.BestWalkKnownToFail</c> says what a fact proves.
     /// </summary>
-    internal int BestWalkNoMatchFrom = -1;
+    internal readonly List<BestWalkFailure> BestWalkFailures = [];
 
-    /// <summary>NOT UPSTREAM'S, D115: the error bound of the search <see cref="BestWalkNoMatchFrom"/> records.</summary>
-    internal long BestWalkNoMatchErrors;
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: how many facts <see cref="BestWalkFailures"/> keeps. A walk tries one
+    /// pair of bounds per better match it finds, so a scan meets few pairs; past this many the
+    /// oldest is overwritten, which costs a search, never an answer.
+    /// </summary>
+    internal const int BestWalkFailureSlots = 8;
 
-    /// <summary>NOT UPSTREAM'S, D115: the cost bound of the search <see cref="BestWalkNoMatchFrom"/> records.</summary>
-    internal long BestWalkNoMatchCost;
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: a search that makes its first attempt only, at the position it starts
+    /// from, with no prefilter. Set by <c>Matcher.DoBestFuzzyMatch</c> around one call of
+    /// <c>Matcher.BasicMatch</c>; <c>Matcher.BestWalkKnownToFail</c> says why.
+    /// </summary>
+    internal bool OneAttempt;
 
-    /// <summary>NOT UPSTREAM'S, D115: whether that search banned an empty match at its start.</summary>
-    internal bool BestWalkNoMatchMustAdvance;
-
-    /// <summary>NOT UPSTREAM'S, D115: the start of the slice that search ran in.</summary>
-    internal int BestWalkNoMatchSliceStart;
-
-    /// <summary>NOT UPSTREAM'S, D115: the end of the slice that search ran in.</summary>
-    internal int BestWalkNoMatchSliceEnd;
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: one failed BESTMATCH walk search: where it started, the bounds it was
+    /// held to, whether it banned an empty match at its start, and the slice it ran in.
+    /// </summary>
+    /// <param name="From">Where the search started.</param>
+    /// <param name="Errors">Its <see cref="MaxErrors"/>.</param>
+    /// <param name="Cost">Its <see cref="MaxCost"/>.</param>
+    /// <param name="MustAdvance">Its <see cref="MustAdvance"/>.</param>
+    /// <param name="SliceStart">Its <see cref="SliceStart"/>.</param>
+    /// <param name="SliceEnd">Its <see cref="SliceEnd"/>.</param>
+    internal readonly record struct BestWalkFailure(
+        int From,
+        long Errors,
+        long Cost,
+        bool MustAdvance,
+        int SliceStart,
+        int SliceEnd
+    );
 
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
@@ -1835,12 +1852,8 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
-        BestWalkNoMatchFrom = -1;
-        BestWalkNoMatchErrors = 0;
-        BestWalkNoMatchCost = 0;
-        BestWalkNoMatchMustAdvance = false;
-        BestWalkNoMatchSliceStart = 0;
-        BestWalkNoMatchSliceEnd = 0;
+        BestWalkFailures.Clear();
+        OneAttempt = false;
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;

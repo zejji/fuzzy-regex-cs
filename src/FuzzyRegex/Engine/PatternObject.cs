@@ -399,6 +399,15 @@ internal sealed class PatternObject
     internal bool ReadsTheSearchAnchor;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a lookaround, or a conditional's lookaround
+    /// test, that reads against the scan's direction: a lookbehind in a forward pattern, a
+    /// lookahead in a reversed one. Its body can reach back from an attempt to where a search
+    /// began, so a failed search from one position says nothing about a search from a later one.
+    /// See <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool LooksAgainstTheScan;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
     /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
     /// </summary>

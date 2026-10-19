@@ -50,4 +50,39 @@ public sealed class BestMatchWalkMemoTests
             "a failed search for a better match is not repeated for every match"
         );
     }
+
+    // D115 review round 1 refuted the first memo: inside a search, the position it starts from is
+    // the search anchor, where a fuzzy item may not open with an insertion. A later search starts
+    // somewhere else, so its anchor bans an insertion the remembered search allowed, and where that
+    // insertion decides a negative lookaround, an atomic group or a conditional, the ban widens
+    // the whole pattern. Each row is main fc878eec's answer, which the first memo changed.
+    // The second row is reversed and its lookahead runs against the scan; the third holds a
+    // fuzzy lookbehind, which reads back across a later search's anchor.
+    [Test]
+    [Arguments(@"(?b)(?:(?!(?:ab){i<=1})x|(?:[xy]q){s<=1})", "yb.xab", "0,2,1,0,0|3,1,0,0,0")]
+    [Arguments(
+        @"(?br)(?:(?>x(?!x??a)(?:\B){1,2})){i<=1,d<=1}",
+        "baay. x",
+        "5,1,0,1,1|5,0,0,0,1|4,1,0,1,1|3,0,0,0,1|2,1,0,1,1|0,1,0,1,1"
+    )]
+    [Arguments(
+        @"(?b)(?:xaab|(?<!x)(?<=(?:[xy]+\s?){i<=1,d<=1})){i<=1,d<=1}",
+        "y aby",
+        "1,0,0,0,0|2,0,0,0,0|2,1,0,1,0|3,0,0,1,0|3,1,0,1,1|5,0,0,0,0"
+    )]
+    public void A_later_search_for_a_better_match_is_not_judged_by_an_earlier_one_whose_anchor_differs(
+        string pattern,
+        string text,
+        string expected
+    ) =>
+        string.Join(
+                '|',
+                new FuzzyRegex(pattern)
+                    .Matches(text)
+                    .Select(static m =>
+                        $"{m.Index},{m.Length},{m.FuzzyCounts.Substitutions},{m.FuzzyCounts.Insertions},{m.FuzzyCounts.Deletions}"
+                    )
+            )
+            .Should()
+            .Be(expected);
 }

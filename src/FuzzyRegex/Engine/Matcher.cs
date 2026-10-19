@@ -14160,7 +14160,11 @@ internal static class Matcher
         // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
         // Withheld from a partial match, which can end part way through a literal, and from a
         // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        //
+        // D115: none for a one-attempt search (MatchState.OneAttempt), which tries its start alone,
+        // and none of the prefilters below either.
+        bool leadingJump =
+            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb && !state.OneAttempt;
         SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
         SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
         int leadingUnitsEnd = 0;
@@ -14180,14 +14184,16 @@ internal static class Matcher
             && leadingStrings is null
             && leadingUnits is null;
 
-        bool doSearchStart = state.DoSearchStart && searchStartAllowed;
+        bool doSearchStart = state.DoSearchStart && searchStartAllowed && !state.OneAttempt;
 
         // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
         // withheld from a partial match, which can be a prefix of the literal holding no whole
         // piece. What it learns lives on the state, across every attempt of every call of the scan
         // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
-            search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
+            search && state.PartialSide == MatchState.PartialNone && !state.OneAttempt
+                ? pattern.FuzzyLiteralFilter
+                : null;
 
         Node node;
         int status;
@@ -14308,7 +14314,13 @@ internal static class Matcher
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
-        if (state.Pattern.ReqString is null || state.InsideW || state.TextPos < state.ReqPos || state.ScreenSettles())
+        if (
+            state.Pattern.ReqString is null
+            || state.InsideW
+            || state.OneAttempt
+            || state.TextPos < state.ReqPos
+            || state.ScreenSettles()
+        )
         {
             foundPos = state.TextPos;
         }
@@ -14445,12 +14457,18 @@ internal static class Matcher
                         }
                     }
 
+                    // D115: a one-attempt search tries no other start.
+                    if (state.OneAttempt)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
                     state.TextPos = Step(state, state.MatchPos, patternStep);
                     goto next_match_1;
                 }
 
                 // 'do_search_start' may have been cleared (:11847-11848).
-                doSearchStart = state.DoSearchStart && searchStartAllowed;
+                doSearchStart = state.DoSearchStart && searchStartAllowed && !state.OneAttempt;
 
                 // NOT UPSTREAM (C5, S2d): SearchStart chose this attempt's start (MatchPos). If R's
                 // body already failed there, so does the attempt; the FAILURE entry pushed at
@@ -14524,6 +14542,12 @@ internal static class Matcher
                     {
                         return MatchStatus.Success;
                     }
+                }
+
+                // D115: a one-attempt search tries no other start.
+                if (state.OneAttempt)
+                {
+                    return MatchStatus.Failure;
                 }
 
                 state.TextPos = Step(state, state.MatchPos, patternStep);
@@ -17408,8 +17432,8 @@ internal static class Matcher
                         return MatchStatus.Success;
                     }
 
-                    // Do we have to advance?
-                    if (!search)
+                    // Do we have to advance? D115: not after a one-attempt search's attempt.
+                    if (!search || state.OneAttempt)
                     {
                         return MatchStatus.Failure;
                     }
@@ -22835,61 +22859,116 @@ internal static class Matcher
     private static void AddBestFuzzyChanges(MatchState state, List<List<FuzzyChange>> bestChangesList) =>
         bestChangesList.Add([.. state.FuzzyChanges]);
 
+    /// <summary>What <see cref="BestWalkKnownToFail"/> found: nothing known, so run the search.</summary>
+    private const int _walkSearchUnknown = 0;
+
+    /// <summary>What <see cref="BestWalkKnownToFail"/> found: the search fails, so skip it.</summary>
+    private const int _walkSearchFails = 1;
+
     /// <summary>
-    /// NOT UPSTREAM'S, D115: whether a BESTMATCH walk's search from <paramref name="start"/>, under
-    /// the live bounds, must fail because an earlier search of this scan failed from a position at
-    /// or before it, in the same slice, under bounds at least as wide.
+    /// What <see cref="BestWalkKnownToFail"/> found: every attempt but the first fails, so run that
+    /// one alone (<see cref="MatchState.OneAttempt"/>).
+    /// </summary>
+    private const int _walkSearchFirstAttemptOnly = 2;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: what an earlier failed BESTMATCH walk search of this scan proves about
+    /// a search from <paramref name="start"/> under the live bounds.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The walk holds each run after a match to fewer errors than that match and searches to the
     /// end of the slice. When nothing better exists, as when every match costs one error, that
     /// search fails only at the end of the text, and a finditer pays it once per match: quadratic
-    /// (KNOWN-DEFECTS D115; upstream mrab-regex does the same, 0.85 s for 774 matches of
-    /// <c>(?b)(?:thx\s[a-z]+\s){e&lt;=1}</c> over 64 KB of prose against 9 ms without the flag).
+    /// (KNOWN-DEFECTS D115; upstream mrab-regex does the same, 1.19 s for
+    /// <c>(?b)(?:thx\s[a-z]+\s){e&lt;=1}</c> over 64 KB of prose against 11 ms without the flag).
     /// </para>
     /// <para>
-    /// Why the fact carries over. A failed search tried every start from its own to the slice's
-    /// end, so every start the later search tries was tried. At each such start the later run can
-    /// do no more than the earlier one: its bounds are no wider, and the bounds only prune paths
-    /// (a body that commits to what it read runs with them lifted, D109, and is judged against
-    /// them only at its end); the only other input that differs is its own start, which bans an
-    /// empty match there under <see cref="MatchState.MustAdvance"/> and an insertion before the
-    /// first character, both narrowing it. What does not carry over is withheld: a <c>\G</c>,
-    /// which reads the start; a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109
-    /// refuses them in a fuzzy pattern anyway); a partial search, which can succeed at the slice's
-    /// end; and a different slice, since a lookbehind reads its start.
+    /// A search is a run of attempts, one per start position from its own start to the slice's
+    /// end, and an attempt reads three things a fact can differ in: the bounds, the slice, and the
+    /// search anchor, which is the position the search started from. Take a fact for a search from
+    /// F that failed, and a later search from S, past F in the scan's direction, in the same slice
+    /// and held to no wider bounds.
+    /// </para>
+    /// <para>
+    /// The anchor is not neutral. A fuzzy item standing on it may not open with an insertion
+    /// (the <c>PermitInsertion</c> lines and <see cref="AnchorIsPinned"/>), and an empty match on it
+    /// is refused after an empty match (<see cref="MatchState.MustAdvance"/>). A ban narrows the item
+    /// it lands on, and a narrower body can widen the pattern when it decides a negative
+    /// lookaround, an atomic group or a conditional: <c>(?b)(?:(?!(?:ab){i&lt;=1})x|(?:[xy]q){s&lt;=1})</c>
+    /// over 'yb.xab' finds (3, 4) exactly from 3, where the attempt at 3 of a search from 0 cannot
+    /// (D115 review, round 1). So the attempt at S is run, as the search would run it.
+    /// </para>
+    /// <para>
+    /// Every attempt after it starts past S and past F, and none reaches back to either while the
+    /// pattern reads only in the scan's direction: each attempt's text position moves away from its
+    /// start except inside a lookaround that runs the other way, and a pattern with one is not
+    /// remembered (<see cref="PatternObject.LooksAgainstTheScan"/>). So no ban touches those
+    /// attempts in either search, and they run the same, but for the bounds. The bounds only prune:
+    /// a body that commits to what it read runs with them lifted (D102, D109) and is judged against
+    /// them only at its end. Each of those attempts failed in the fact's search, under bounds at
+    /// least as wide, so each fails again. When S is F the two searches are the same search, but
+    /// for the empty-match ban, which only refuses a success, so a fact that ran without it covers
+    /// one with it.
+    /// </para>
+    /// <para>
+    /// What does not carry over is not remembered: a <c>\G</c>, which reads the anchor; a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109 refuses them in a fuzzy
+    /// pattern anyway); a partial search, which can succeed at the slice's end; and a different
+    /// slice, since a lookaround reads up to its edges.
     /// </para>
     /// </remarks>
-    /// <param name="state">The match state, holding the live bounds and the recorded fact.</param>
+    /// <param name="state">The match state, holding the live bounds and the recorded facts.</param>
     /// <param name="start">Where the search would start.</param>
-    /// <returns><see langword="true"/> if the search must fail.</returns>
-    private static bool BestWalkKnownToFail(MatchState state, int start)
+    /// <returns>
+    /// <see cref="_walkSearchFails"/>, <see cref="_walkSearchFirstAttemptOnly"/> or
+    /// <see cref="_walkSearchUnknown"/>.
+    /// </returns>
+    private static int BestWalkKnownToFail(MatchState state, int start)
     {
-        int from = state.BestWalkNoMatchFrom;
-        if (from < 0 || !BestWalkCanRemember(state))
+        if (state.BestWalkFailures.Count == 0 || !BestWalkCanRemember(state))
         {
-            return false;
+            return _walkSearchUnknown;
         }
 
-        bool covered;
-        if (start == from)
+        int found = _walkSearchUnknown;
+        foreach (MatchState.BestWalkFailure fact in state.BestWalkFailures)
         {
-            covered = !state.BestWalkNoMatchMustAdvance || state.MustAdvance;
-        }
-        else
-        {
-            covered = state.Reverse ? start < from : start > from;
+            if (
+                fact.SliceStart != state.SliceStart
+                || fact.SliceEnd != state.SliceEnd
+                || state.MaxErrors > fact.Errors
+                || state.MaxCost > fact.Cost
+            )
+            {
+                continue;
+            }
+
+            if (start == fact.From)
+            {
+                if (!fact.MustAdvance || state.MustAdvance)
+                {
+                    return _walkSearchFails;
+                }
+            }
+            else if (state.Reverse ? start < fact.From : start > fact.From)
+            {
+                found = _walkSearchFirstAttemptOnly;
+            }
         }
 
-        return covered
-            && state.SliceStart == state.BestWalkNoMatchSliceStart
-            && state.SliceEnd == state.BestWalkNoMatchSliceEnd
-            && state.MaxErrors <= state.BestWalkNoMatchErrors
-            && state.MaxCost <= state.BestWalkNoMatchCost;
+        return found;
     }
 
-    /// <summary>NOT UPSTREAM'S, D115: records a failed walk search. See <see cref="BestWalkKnownToFail"/>.</summary>
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: records a failed walk search, over the fact kept for the same bounds
+    /// if there is one. See <see cref="BestWalkKnownToFail"/>.
+    /// </summary>
+    /// <remarks>
+    /// Called only after a whole search, so no fact for these bounds already covered
+    /// <paramref name="start"/>: the one being replaced starts later, or at the same place with the
+    /// empty-match ban, and the new one covers every search the old one did.
+    /// </remarks>
     /// <param name="state">The match state, holding the live bounds the search ran under.</param>
     /// <param name="start">Where the failed search started.</param>
     private static void NoteBestWalkFailure(MatchState state, int start)
@@ -22899,25 +22978,52 @@ internal static class Matcher
             return;
         }
 
-        // SHORTCUT: one fact, the latest. A forward scan only moves on, and a search that missed it
-        // was held to more than it allowed, so the latest covers what the earlier one did on every
-        // row whose bounds are one number; a weighted cost walk can trade one fact for another and
-        // re-read. Upgrade path: keep one fact per error bound.
-        state.BestWalkNoMatchFrom = start;
-        state.BestWalkNoMatchErrors = state.MaxErrors;
-        state.BestWalkNoMatchCost = state.MaxCost;
-        state.BestWalkNoMatchMustAdvance = state.MustAdvance;
-        state.BestWalkNoMatchSliceStart = state.SliceStart;
-        state.BestWalkNoMatchSliceEnd = state.SliceEnd;
+        List<MatchState.BestWalkFailure> facts = state.BestWalkFailures;
+        var fact = new MatchState.BestWalkFailure(
+            start,
+            state.MaxErrors,
+            state.MaxCost,
+            state.MustAdvance,
+            state.SliceStart,
+            state.SliceEnd
+        );
+
+        for (int i = 0; i < facts.Count; i++)
+        {
+            if (facts[i].Errors == fact.Errors && facts[i].Cost == fact.Cost)
+            {
+                facts[i] = fact;
+                return;
+            }
+        }
+
+        // Full: the oldest fact goes.
+        if (facts.Count == MatchState.BestWalkFailureSlots)
+        {
+            facts.RemoveAt(0);
+        }
+
+        facts.Add(fact);
     }
 
     /// <summary>NOT UPSTREAM'S, D115: whether a failed walk search may be remembered at all.</summary>
     /// <param name="state">The match state.</param>
-    /// <returns><see langword="true"/> unless the search's answer can depend on more than its start and bounds.</returns>
-    private static bool BestWalkCanRemember(MatchState state) =>
-        state.PartialSide == MatchState.PartialNone
-        && !state.Pattern.ReadsTheSearchAnchor
-        && !state.Pattern.HasBacktrackingVerb;
+    /// <returns>
+    /// <see langword="true"/> unless the search's answer can depend on more than its start, its
+    /// slice and its bounds. See <see cref="BestWalkKnownToFail"/>.
+    /// </returns>
+    private static bool BestWalkCanRemember(MatchState state)
+    {
+        Debug.Assert(
+            state.RefineStart == int.MinValue && state.RefineEnd == int.MaxValue,
+            "D115: the walk runs outside a refinement's window"
+        );
+
+        return state.PartialSide == MatchState.PartialNone
+            && !state.Pattern.ReadsTheSearchAnchor
+            && !state.Pattern.HasBacktrackingVerb
+            && !state.Pattern.LooksAgainstTheScan;
+    }
 
     /// <summary>
     /// Upstream <c>do_best_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17584): search the whole
@@ -23136,10 +23242,24 @@ internal static class Matcher
 
                 if (status == MatchStatus.Success)
                 {
-                    // NOT UPSTREAM'S, D115: a search an earlier one already showed fails is skipped.
-                    if (search && BestWalkKnownToFail(state, startPos))
+                    // NOT UPSTREAM'S, D115: what an earlier failed search already showed is not
+                    // searched again. See BestWalkKnownToFail.
+                    int known = search ? BestWalkKnownToFail(state, startPos) : _walkSearchUnknown;
+                    if (known == _walkSearchFails)
                     {
                         status = MatchStatus.Failure;
+                    }
+                    else if (known == _walkSearchFirstAttemptOnly)
+                    {
+                        state.OneAttempt = true;
+                        try
+                        {
+                            status = BasicMatch(state, search);
+                        }
+                        finally
+                        {
+                            state.OneAttempt = false;
+                        }
                     }
                     else
                     {
