@@ -182,6 +182,13 @@ internal sealed class Info
     internal bool HasGroupCall { get; set; }
 
     /// <summary>
+    /// NOT UPSTREAM (D109): the first <c>(*PRUNE)</c> or <c>(*SKIP)</c> the parser met, its name and
+    /// position, or null. <see cref="PatternCompiler"/> refuses one in a fuzzy pattern under
+    /// BESTMATCH or ENHANCEMATCH.
+    /// </summary>
+    internal (string Name, int Position)? FirstBacktrackingVerb { get; set; }
+
+    /// <summary>
     /// Negative alias to real group number, for a named group nested inside itself. Upstream
     /// <c>info.private_groups</c>.
     /// </summary>

@@ -4222,6 +4222,36 @@ those bodies, and a conditional's test then takes a match of its body that fits 
 (0, 1) with one deletion on the fifth. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs`
 (`The_ranking_budget_does_not_stop_a_test_s_body_from_matching` and the controls beside it).
 
+### Addendum to 32, 2026-10-19: the budget decides what a construct commits to (D109)
+
+Battery run 11 found the same fault reached through commitment rather than a test, in this port as
+well as upstream. A body that commits to its first match (an atomic group, a possessive repeat,
+`\R`, `\X`, a lookaround, a conditional's test) is held to `max_errors` too, so where the flagless
+engine's first match needs more errors than the budget, the body commits to a later match; and a
+path the budget cuts short before a `(*PRUNE)` or `(*SKIP)` never fires the verb. Measured with
+`regex` 2026.9.10 on 2026-10-19:
+
+```
+search('(?b)(?:(?>ab|a)c){s<=1}', 'aacbc')          -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search('(?:(?>ab|a)c){s<=1}', 'aacbc')              -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+search('(?b)(?:a?+){e<=2}b', 'bbbxcc')              -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?b)(?:(?:a){s<=1}(*PRUNE)c|b)', 'ccab')    -> span=(3, 4) fuzzy_counts=(0, 0, 0)
+search('(?b)(?=(a{s<=1}|xy))\1', 'xy')              -> span=(0, 2) fuzzy_counts=(0, 0, 0)
+```
+
+None of the flagged spans is a match of the pattern without the flag: at 1 in the first row the
+flagless group takes 'ac' with a substitution and `c` then fails, and the group is atomic. A random
+probe of 36,000 rows (`.scratch/s1019/d109/probe/`) found the same in every committing construct,
+under both flags and both directions; upstream gave the port's answer on 186 of the 222 rows.
+
+**This port** had the same fault. Known defect D109 (F103) lifts the budget inside those bodies and
+fails the construct when the match it commits to is over the budget. A fuzzy pattern with a verb is
+refused under either flag: holding the budget only at the end of the match cost up to 110 times the
+steps and could lose a better match (DECISIONS 2026-10-19). Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.cs` (`The_ranking_budget_does_not_change_what_a_construct_commits_to`,
+`A_ranked_answer_is_a_match_of_the_flagless_pattern` and
+`A_ranked_fuzzy_pattern_with_a_backtracking_verb_is_refused`).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found

@@ -231,6 +231,12 @@ public enum FuzzyRegexOptions
     /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-never-let-their-budget-decide-a-negative-lookaround-or-a-conditionals-test">the comparison page</see>.
     /// </para>
     /// <para>
+    /// <b>BESTMATCH and ENHANCEMATCH answer a match the pattern can make.</b> An atomic group, a
+    /// possessive repeat, a lookaround and a conditional's test act as they would without the flag,
+    /// and a fuzzy pattern that holds <c>(*PRUNE)</c> or <c>(*SKIP)</c> is refused. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-answer-a-match-the-pattern-can-make">the comparison page</see>.
+    /// </para>
+    /// <para>
     /// <b><c>BestMatch</c> and <c>EnhanceMatch</c> keep a fit that ends in trailing insertions</b>,
     /// so a <c>FullMatch</c> or a pattern ending in <c>$</c> answers what it answers without the
     /// flag; upstream can lose that match. See
@@ -276,6 +282,12 @@ public enum FuzzyRegexOptions
     /// <b>BESTMATCH and ENHANCEMATCH never let their budget decide a negative lookaround or a
     /// conditional's test.</b> Those bodies match exactly as they would without the flag. See
     /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-never-let-their-budget-decide-a-negative-lookaround-or-a-conditionals-test">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>BESTMATCH and ENHANCEMATCH answer a match the pattern can make.</b> An atomic group, a
+    /// possessive repeat, a lookaround and a conditional's test act as they would without the flag,
+    /// and a fuzzy pattern that holds <c>(*PRUNE)</c> or <c>(*SKIP)</c> is refused. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#bestmatch-and-enhancematch-answer-a-match-the-pattern-can-make">the comparison page</see>.
     /// </para>
     /// <para>
     /// <b><c>BestMatch</c> and <c>EnhanceMatch</c> keep a fit that ends in trailing insertions</b>,

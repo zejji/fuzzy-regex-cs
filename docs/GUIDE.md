@@ -288,6 +288,13 @@ over 'axyd abXcd' returns 'axyd', two substitutions costing 2, rather than 'abXc
 costing 3. Upstream mrab-regex returns 'abXcd' here; `docs/COMPARISON.md`'s "`(?e)` and `(?b)`
 rank candidates by fuzzy COST" gives the conditions and the reasoning.
 
+Neither flag accepts a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`: compiling one throws
+`FuzzyRegexParseException` ("BESTMATCH cannot rank a fuzzy pattern that holds (*SKIP)"). The
+flags search by holding each new attempt to fewer errors than the last, and that limit would
+decide where the verb acts, so the answer could be a span the pattern does not match. Drop the
+flag, or the verb, or make the section exact (`{e<=0}`). `docs/COMPARISON.md`'s "BESTMATCH and
+ENHANCEMATCH answer a match the pattern can make" gives the reasoning.
+
 The two flags cost very different amounts. `(?e)` costs little, because its extra searches look
 only inside the first match. `(?b)` keeps scanning the rest of the text after it finds a match,
 in case a better one follows, so a match near the start costs about as much as a search of the

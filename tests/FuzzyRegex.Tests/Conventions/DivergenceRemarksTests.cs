@@ -199,6 +199,10 @@ public sealed class DivergenceRemarksTests
             "BESTMATCH and ENHANCEMATCH never let their budget decide a negative lookaround or a conditional's test",
             [Option("BestMatch"), Option("EnhanceMatch")]
         ),
+        (
+            "BESTMATCH and ENHANCEMATCH answer a match the pattern can make",
+            [Option("BestMatch"), Option("EnhanceMatch")]
+        ),
         ("A run-out of text inside a lookaround's body no longer ends a partial call with a partial", [_partial]),
         ("A partial call reports a partial where upstream refuses a completion that exists", [_partial]),
         ("A partial search tries a start inside the text to come for a pattern with no first set", [_partial]),
