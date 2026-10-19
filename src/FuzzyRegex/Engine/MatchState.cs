@@ -927,28 +927,22 @@ internal sealed class MatchState : IDisposable
     internal long MaxCost;
 
     /// <summary>
-    /// NOT UPSTREAM (D102): how many bodies that decide a test are open, a negative lookaround's or
-    /// a conditional's test. While any is, <see cref="MaxErrors"/> and <see cref="MaxCost"/> are
-    /// lifted, and the bounds the run was given wait in <see cref="HeldMaxErrors"/> and
-    /// <see cref="HeldMaxCost"/>.
+    /// NOT UPSTREAM (D102, D109): how many bodies are open that run with the ranking bounds lifted:
+    /// a lookaround's, a conditional's test and an atomic group's (with a possessive repeat's, and
+    /// <c>\R</c>'s and <c>\X</c>'s, which compile to one). While any is, <see cref="MaxErrors"/>
+    /// and <see cref="MaxCost"/> are lifted, and the bounds the run was given wait in
+    /// <see cref="HeldMaxErrors"/> and <see cref="HeldMaxCost"/>.
     /// </summary>
     /// <remarks>
     /// The two bounds are how BESTMATCH and ENHANCEMATCH hold a run to better than the last; they
     /// say nothing about what the pattern matches. A body whose failure makes its construct succeed
-    /// would otherwise fail for want of budget and turn the test the wrong way:
+    /// would otherwise fail for want of budget and turn the test the wrong way (D102):
     /// <c>(?b)(?=a{d&lt;=1})\w??(?!a{s&lt;=1})</c> over 'x' answered (0, 0), although
-    /// <c>a{s&lt;=1}</c> matches 'x'. A positive lookaround keeps the bounds: its body's errors
-    /// belong to the match, and failing it only rejects a path that costs too much. Counted rather
-    /// than saved in each frame, so a pattern pays nothing for it unless it is fuzzy.
+    /// <c>a{s&lt;=1}</c> matches 'x'. And a body that commits to its first match would commit to a
+    /// different one (D109, <c>Matcher.OverTheBudget</c>). Counted rather than saved in each frame,
+    /// so a pattern pays nothing for it unless it is fuzzy.
     /// </remarks>
     internal int BoundlessBodies;
-
-    /// <summary>
-    /// NOT UPSTREAM (D102): the pruning marks of the conditional tests whose body matched over the
-    /// budget and now goes on under it for a match that fits (<c>Matcher.HoldTheTestToTheBudget</c>),
-    /// innermost last. Such a test's body no longer counts in <see cref="BoundlessBodies"/>.
-    /// </summary>
-    internal readonly List<long> TestsHeldToTheBudget = [];
 
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
@@ -995,7 +989,6 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal void CloseEveryBoundlessBody()
     {
-        TestsHeldToTheBudget.Clear();
         if (BoundlessBodies != 0)
         {
             BoundlessBodies = 0;
@@ -1734,7 +1727,6 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
-        TestsHeldToTheBudget.Clear();
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;

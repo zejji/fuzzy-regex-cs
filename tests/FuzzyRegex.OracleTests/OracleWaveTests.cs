@@ -1844,7 +1844,6 @@ public sealed class OracleWaveTests
 
     [Test]
     [Arguments("partial-retry-reversed-slice")]
-    [Arguments("bestmatch-walk-truncated-by-a-skip")]
     [Arguments("bounded-lazy-repeat-partial")]
     [Arguments("turkic-default-folding-without-spans")]
     [Arguments("end-of-line-reads-a-skip-moved-slice")]

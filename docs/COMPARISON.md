@@ -2060,6 +2060,28 @@ Console.WriteLine(m.FuzzyCounts.Total);   // 0
 
 There is no option to restore the upstream answer. Known defect D102, ledger entry 32.
 
+### BESTMATCH and ENHANCEMATCH answer a match the pattern can make
+
+An atomic group, a possessive repeat, a lookaround and a conditional's test take the first match
+of their body and never come back for another. Upstream's budget can make that first match fail,
+so the construct takes a later one, and the answer is a span the pattern without the flag does
+not match. Here the construct takes the same match it takes without the flag, and fails if that
+match costs more errors than the search allows. A `(*PRUNE)` or `(*SKIP)` has the same fault
+upstream, and no cheap repair: holding the search's limit only at the end of the match made it
+up to a hundred times slower and could pass over a better match. So BESTMATCH or ENHANCEMATCH on
+a fuzzy pattern that holds either verb is refused when the pattern is compiled, with an error
+that names the flag and the verb.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?b)(?:(?>ab|a)c){s<=1}").Match("aacbc");
+Console.WriteLine(m.Index);   // 0 - upstream: 1, which is not a match: at 1 the group takes 'ac'
+Console.WriteLine(m.FuzzyCounts.Total);   // 1
+```
+
+There is no option to restore the upstream answer. Known defect D109, ledger entry 32.
+
 ### The calls inside a called group run with the call's direction and fuzziness too
 
 A call such as `(?&g)` matches what the group's body would match written out at the call: exactly

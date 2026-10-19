@@ -410,6 +410,27 @@ internal static class PatternCompiler
             LeftRecursion.Check(info, parsed, pattern);
         }
 
+        // NOT UPSTREAM (D109, DECISIONS 2026-10-19): BESTMATCH and ENHANCEMATCH search by holding each
+        // run to fewer errors than the last, and a (*PRUNE) or (*SKIP) acts when backtracking reaches
+        // it, so that budget would decide where the verb acts: either the run answers a span the
+        // pattern does not match (upstream), or the search must give up its budget and can lose the
+        // better match. A fuzzy pattern that ranks its matches and holds such a verb is refused.
+        if (
+            (info.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0
+            && info.FirstBacktrackingVerb is { } verb
+            && parsed.AllowsFuzzyErrors()
+        )
+        {
+            string flag = (info.Flags & RegexFlags.BestMatch) != 0 ? "BESTMATCH" : "ENHANCEMATCH";
+            throw new FuzzyRegexParseException(
+                $"{flag} cannot rank a fuzzy pattern that holds (*{verb.Name}): (*PRUNE) and (*SKIP) depend on "
+                    + $"the order the search tries paths, which {flag} changes; use the pattern without the flag or "
+                    + "without the verb",
+                pattern,
+                verb.Position
+            );
+        }
+
         // NOT UPSTREAM (ledger entry 44's addendum): where the marked NEXT words landed.
         // None in most patterns, so the list is made only for the first.
         List<int>? optionalPassEnds = null;

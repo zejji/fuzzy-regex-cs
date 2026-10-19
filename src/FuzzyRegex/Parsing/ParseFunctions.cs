@@ -1141,6 +1141,11 @@ internal static class ParseFunctions
 
                 source.Expect(")");
 
+                if (word is "PRUNE" or "SKIP")
+                {
+                    info.FirstBacktrackingVerb ??= (word, savedPos2 - 2);
+                }
+
                 return verb();
             }
 
