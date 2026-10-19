@@ -1631,7 +1631,12 @@ public sealed class FuzzyBestMatchTests
         Action compile = () => _ = new FuzzyRegex(pattern);
 
         FuzzyRegexParseException error = compile.Should().Throw<FuzzyRegexParseException>().Which;
-        error.Message.Should().Contain($"{flag} cannot rank a fuzzy pattern that holds (*{verb})");
+        error
+            .Message.Should()
+            .Contain(
+                $"{flag} cannot rank a fuzzy pattern that holds (*{verb}): (*PRUNE) and (*SKIP) depend on the order "
+                    + $"the search tries paths, which {flag} changes; use the pattern without the flag or without the verb"
+            );
         error.Offset.Should().Be(position);
     }
 
@@ -1645,7 +1650,10 @@ public sealed class FuzzyBestMatchTests
             .Should()
             .Throw<FuzzyRegexParseException>()
             .Which.Message.Should()
-            .Contain("ENHANCEMATCH cannot rank a fuzzy pattern that holds (*SKIP)");
+            .Contain(
+                "ENHANCEMATCH cannot rank a fuzzy pattern that holds (*SKIP): (*PRUNE) and (*SKIP) depend on the order "
+                    + "the search tries paths, which ENHANCEMATCH changes; use the pattern without the flag or without the verb"
+            );
 
         new FuzzyRegex(@"(?:(?:a){s<=1}(*PRUNE)c|b)").Match("ccab").Index.Should().Be(0);
         new FuzzyRegex(@"(?b)(?:a(*PRUNE)c|b)").Match("ccab").Index.Should().Be(3);

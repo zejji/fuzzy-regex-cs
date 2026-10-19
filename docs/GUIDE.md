@@ -289,8 +289,10 @@ costing 3. Upstream mrab-regex returns 'abXcd' here; `docs/COMPARISON.md`'s "`(?
 rank candidates by fuzzy COST" gives the conditions and the reasoning.
 
 Neither flag accepts a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`: compiling one throws
-`FuzzyRegexParseException` ("BESTMATCH cannot rank a fuzzy pattern that holds (*SKIP)"). The
-flags search by holding each new attempt to fewer errors than the last, and that limit would
+`FuzzyRegexParseException`, and the message gives the reason: "BESTMATCH cannot rank a fuzzy
+pattern that holds (*SKIP): (*PRUNE) and (*SKIP) depend on the order the search tries paths,
+which BESTMATCH changes; use the pattern without the flag or without the verb". In more detail,
+the flags search by holding each new attempt to fewer errors than the last, and that limit would
 decide where the verb acts, so the answer could be a span the pattern does not match. Drop the
 flag, or the verb, or make the section exact (`{e<=0}`). `docs/COMPARISON.md`'s "BESTMATCH and
 ENHANCEMATCH answer a match the pattern can make" gives the reasoning.

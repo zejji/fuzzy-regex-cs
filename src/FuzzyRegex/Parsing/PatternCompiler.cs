@@ -423,7 +423,9 @@ internal static class PatternCompiler
         {
             string flag = (info.Flags & RegexFlags.BestMatch) != 0 ? "BESTMATCH" : "ENHANCEMATCH";
             throw new FuzzyRegexParseException(
-                $"{flag} cannot rank a fuzzy pattern that holds (*{verb.Name})",
+                $"{flag} cannot rank a fuzzy pattern that holds (*{verb.Name}): (*PRUNE) and (*SKIP) depend on "
+                    + $"the order the search tries paths, which {flag} changes; use the pattern without the flag or "
+                    + "without the verb",
                 pattern,
                 verb.Position
             );
