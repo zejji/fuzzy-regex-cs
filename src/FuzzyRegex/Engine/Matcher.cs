@@ -6112,6 +6112,7 @@ internal static class Matcher
 
         int frame = (int)mark - 1;
         bool blocked = state.WMarks[^1].Position > frame || HasWMarkAt(state, frame, WMarkKind.VerbTaint);
+        D104Proto.Tally(-3, blocked ? 1u : 2u, 0);
         PartialEvent blockedEvent =
             op == Opcode.Conditional ? PartialEvent.CutBlockedCondition : PartialEvent.CutBlockedLookaround;
 
@@ -6173,10 +6174,39 @@ internal static class Matcher
             return LookaroundEnd.Backtrack;
         }
 
+        // PROTOTYPE (D104-fast): the continuation memo. A continuation that failed under the same
+        // key fails again: a blocked end goes back into the body, an unblocked one cuts and fails
+        // as the dedup does.
+        int contId = -1;
+        if (op == Opcode.Lookaround && state.ContinuationKeyOf(look.Node, look.TextPos) is long[] contKey)
+        {
+            if (state.ContinuationFailed(contKey, look.TextPos))
+            {
+                // The cut path would have reached this blocked end and its continuation, so an entry
+                // pushed before now is about the instance too (blind review 2026-10-19, as the
+                // store-hit path in MatchState.IsGuardedAfterBlockedEnd).
+                state.NoteABlockedEnd();
+                if (blocked)
+                {
+                    TaintTheFrame(state, frame);
+                }
+                else
+                {
+                    CutBstack(state, (int)mark);
+                }
+
+                return LookaroundEnd.Backtrack;
+            }
+
+            contId = state.ContinuationKeys.Count;
+            state.ContinuationKeys.Add([.. contKey]);
+        }
+
         if (!blocked)
         {
             // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
             RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
+            state.PendingContinuationId = contId;
             return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
         }
 
@@ -6219,6 +6249,13 @@ internal static class Matcher
         state.Bstack.PushUInt8((byte)Opcode.Reopen);
 
         /* bstack: sstack_bytes length section_frame call_base pstack_mark REOPEN */
+
+        if (contId >= 0)
+        {
+            state.Bstack.PushSize(look.TextPos);
+            state.Bstack.PushSize(contId);
+            state.Bstack.PushUInt8((byte)Opcode.ContinuationMark);
+        }
 
         Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
         CloseFramesAbove(state);
@@ -8455,7 +8492,11 @@ internal static class Matcher
     private static void CountFork(MatchState state)
     {
         Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass forks");
-        if (++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1) && !state.ForkBudgetSpent)
+        if (
+            ++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1)
+            && !state.ForkBudgetSpent
+            && !D104Proto.NoBudget
+        )
         {
             state.ForkBudgetSpent = true;
 
@@ -17335,7 +17376,8 @@ internal static class Matcher
                     // Re-aligning: if upstream changes what a body guard means, or what reset_guards
                     // resets, re-check the argument there; nothing else moves.
                     state.ResetGuards(
-                        pattern.KeepsFailureMemosAcrossAttempts && state.PartialSide == MatchState.PartialNone
+                        pattern.KeepsFailureMemosAcrossAttempts && state.PartialSide == MatchState.PartialNone,
+                        nextAttempt: true
                     );
 
                     // Reset the stacks. Backtracking has popped every entry of the attempt, and each
@@ -17939,6 +17981,16 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.ContinuationMark: // PROTOTYPE (D104-fast): a lookaround's continuation failed.
+                {
+                    if (!state.Bstack.PopSize(out long contMarkId) || !state.Bstack.PopSize(out long contMarkPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.RecordContinuationFailure((int)contMarkId, (int)contMarkPos);
+                    break;
+                }
                 case Opcode.FailedStateMark: // NOT UPSTREAM (D94 performance): see StateKnownToFail.
                     state.FailedRepeatStates!.Add(state.MarkedStates[^1]);
                     state.MarkedStates.RemoveAt(state.MarkedStates.Count - 1);
@@ -19809,6 +19861,14 @@ internal static class Matcher
             if (lookEnd == LookaroundEnd.CutTainted)
             {
                 state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
+            }
+
+            if (state.PendingContinuationId >= 0)
+            {
+                state.Bstack.PushSize(endLookData.TextPos);
+                state.Bstack.PushSize(state.PendingContinuationId);
+                state.Bstack.PushUInt8((byte)Opcode.ContinuationMark);
+                state.PendingContinuationId = -1;
             }
 
             /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */

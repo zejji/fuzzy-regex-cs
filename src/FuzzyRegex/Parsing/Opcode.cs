@@ -397,4 +397,11 @@ internal enum Opcode : uint
     /// (<c>Matcher.StateKnownToFail</c>). It never appears on a node or in a code list.
     /// </summary>
     FailedStateMark = 106,
+
+    /// <summary>
+    /// PROTOTYPE (D104-fast): the backtracking entry pushed where a positive lookaround's
+    /// continuation begins in a partial call's second pass, holding the id of its key in
+    /// <c>MatchState.ContinuationKeys</c>. Backtracking onto it means the continuation failed.
+    /// </summary>
+    ContinuationMark = 107,
 }
