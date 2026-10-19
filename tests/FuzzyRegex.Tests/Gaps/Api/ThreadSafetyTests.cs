@@ -881,6 +881,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasBacktrackingVerb",
             // D111: written by Compile in the node-numbering loop, beside HasSkipVerb.
             "PatternObject.RefinesInAWindow",
+            // D115: written by Compile in the node-numbering loop, beside RefinesInAWindow.
+            "PatternObject.ReadsTheSearchAnchor",
+            // D115: written by the compiler where it builds a lookaround or a conditional's test.
+            "PatternObject.LooksAgainstTheScan",
             // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
             "PatternObject.AnAttemptCanMoveTheNextStart",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through

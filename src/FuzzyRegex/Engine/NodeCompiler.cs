@@ -1011,6 +1011,12 @@ internal static class NodeCompiler
         // Create a node for the lookaround.
         Node testNode = CreateNode(args.Pattern, Opcode.Conditional, flags, 0, 0);
 
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
+
         args.Code += 3;
 
         AddNode(args.End!, testNode);
@@ -1399,6 +1405,12 @@ internal static class NodeCompiler
 
         // Create a node for the lookaround.
         Node lookaroundNode = CreateNode(args.Pattern, Opcode.Lookaround, flags, 0, 0);
+
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
 
         args.Code += 3;
 

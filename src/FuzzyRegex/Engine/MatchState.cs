@@ -991,6 +991,48 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal int BoundlessBodies;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: the BESTMATCH walk searches of this scan that failed, at most
+    /// <see cref="BestWalkFailureSlots"/>, one per pair of bounds, oldest first. Without them each
+    /// match of a finditer re-reads the rest of the text looking for a better match that is not
+    /// there, which is quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; <see cref="Init"/>
+    /// empties it. <c>Matcher.BestWalkKnownToFail</c> says what a fact proves.
+    /// </summary>
+    internal readonly List<BestWalkFailure> BestWalkFailures = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: how many facts <see cref="BestWalkFailures"/> keeps. A walk tries one
+    /// pair of bounds per better match it finds, so a scan meets few pairs; past this many the
+    /// oldest is overwritten, which costs a search, never an answer.
+    /// </summary>
+    internal const int BestWalkFailureSlots = 8;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: a search that makes its first attempt only, at the position it starts
+    /// from, with no prefilter. Set by <c>Matcher.DoBestFuzzyMatch</c> around one call of
+    /// <c>Matcher.BasicMatch</c>; <c>Matcher.BestWalkKnownToFail</c> says why.
+    /// </summary>
+    internal bool OneAttempt;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: one failed BESTMATCH walk search: where it started, the bounds it was
+    /// held to, whether it banned an empty match at its start, and the slice it ran in.
+    /// </summary>
+    /// <param name="From">Where the search started.</param>
+    /// <param name="Errors">Its <see cref="MaxErrors"/>.</param>
+    /// <param name="Cost">Its <see cref="MaxCost"/>.</param>
+    /// <param name="MustAdvance">Its <see cref="MustAdvance"/>.</param>
+    /// <param name="SliceStart">Its <see cref="SliceStart"/>.</param>
+    /// <param name="SliceEnd">Its <see cref="SliceEnd"/>.</param>
+    internal readonly record struct BestWalkFailure(
+        int From,
+        long Errors,
+        long Cost,
+        bool MustAdvance,
+        int SliceStart,
+        int SliceEnd
+    );
+
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
 
@@ -1810,6 +1852,8 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
+        BestWalkFailures.Clear();
+        OneAttempt = false;
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;
