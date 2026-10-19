@@ -1456,8 +1456,8 @@ internal static class OracleComparer
     /// </summary>
     /// <remarks>
     /// <c>PatternObject.BoundsReachDecidingBodies</c> keeps the budget in force inside lookarounds,
-    /// conditional tests and atomic groups, and stops a pattern with a verb lifting it for the whole
-    /// run. The <c>ranked-budget-steered-a-commitment</c> entry keys on this.
+    /// conditional tests and atomic groups. The <c>ranked-budget-steered-a-commitment-by-ablation</c>
+    /// entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers without the fixes, on the row's own deadline.</returns>

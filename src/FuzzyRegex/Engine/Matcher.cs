@@ -6292,7 +6292,7 @@ internal static class Matcher
             // AdvanceEndConditional and AdvanceEndLookaround hold them.
             state.CloseABoundlessBody();
             Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
-            if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
+            if (CommittedOverTheBudget(state))
             {
                 return LookaroundEnd.Backtrack;
             }

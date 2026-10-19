@@ -3670,8 +3670,8 @@ internal static class ExpectedDivergences
                 + "it. `regex.search(r'(?b)(?:(?>ab|a)c){s<=1}', 'aacbc')` is (1, 3) exact, where the "
                 + "flagless group at 1 takes 'ac' with a substitution and the match fails there.\n"
                 + "THE FIX (`Matcher.OverTheBudget`): those bodies run with the budget lifted, and a "
-                + "construct whose committed match is over the budget fails; with a verb in the "
-                + "pattern the budget is lifted for the whole run and held at SUCCESS (`BasicMatch`).\n"
+                + "construct whose committed match is over the budget fails. A fuzzy pattern with a "
+                + "verb is refused (`ranked-fuzzy-verb-is-refused-at-compile-time`).\n"
                 + "KEYED ON ROWS, judged one by one, where a second upstream defect (the carried slice "
                 + "of ledger entry 5, or leaked change positions) moves upstream's answer as well, so "
                 + "no single ablation reproduces it. The rows D109 alone explains are "
@@ -8366,7 +8366,7 @@ internal static class ExpectedDivergences
         // entry explains.
         new(
             Id: "ranked-budget-steered-a-commitment-by-ablation",
-            Reason: "D109 ALONE: the rows of `ranked-budget-steered-a-commitment` (see there) whose whole "
+            Reason: "D109 OR D102 ALONE (one switch turns both off): the rows of `ranked-budget-steered-a-commitment` (see there) whose whole "
                 + "divergence is that fix. KEYED ON AN ABLATION. A row belongs here when it asks for "
                 + "BESTMATCH or ENHANCEMATCH and `OracleComparer.RunWithTheBudgetInEveryBody`, which "
                 + "sets `PatternObject.BoundsReachDecidingBodies` (D102 and D109 off) with entries 42 "
