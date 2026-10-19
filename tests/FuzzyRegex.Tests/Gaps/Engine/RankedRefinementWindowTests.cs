@@ -69,6 +69,26 @@ public sealed class RankedRefinementWindowTests
         inside.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
 
+    /// <summary>
+    /// D114: only an atomic group reads past a refinement's span. With the window alone (D111) the
+    /// unrelated branch <c>b[^z]*</c> read to the end of the text from every start inside the span,
+    /// so the scan was quadratic: 18,034,067 steps over 'abce' x 1000 on main 542f9d68, against
+    /// 52,067 here (Debug, WorkCounter).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_refinement_reads_past_its_span_only_inside_an_atomic_group()
+    {
+        string subject = string.Concat(Enumerable.Repeat("abce", 1000));
+        FuzzyRegex regex = new(@"(?e)(?:abcd|b[^z]*|(?>q)){e<=1}");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Matches(subject).Count.Should().Be(1001),
+            200_000,
+            "a branch outside the atomic group reads no further than the span it refines"
+        );
+    }
+
     [Test]
     public void An_enhancematch_scan_after_a_refinement_searches_the_whole_text_again()
     {

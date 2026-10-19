@@ -440,6 +440,26 @@ internal sealed class MatchState : IDisposable
     internal int RefineEnd = int.MaxValue;
 
     /// <summary>
+    /// NOT UPSTREAM (D114): whether a refinement held to a window also narrows the slice's far end
+    /// (forwards <see cref="SliceEnd"/>, reversed <see cref="SliceStart"/>) to the window outside
+    /// every body that lifts the ranking bounds (<see cref="BoundlessBodies"/>). Inside one, the far
+    /// end is the caller's (<see cref="RefineCallerFarEnd"/>).
+    /// </summary>
+    /// <remarks>
+    /// The window alone (D111) lets every part of the pattern read past the span, so on adversarial
+    /// text each attempt inside the span read to the end of the text (KNOWN-DEFECTS D114). Only a body
+    /// that commits to what it read, an atomic group, can answer differently when the text past the
+    /// span is cut off; a lookaround or a condition's test already reads the whole text. Outside the
+    /// bodies, a path that reads past the span ends past it, because forward matching moves only
+    /// right there, so the window would refuse it anyway; the narrowed end only refuses it sooner.
+    /// <c>Matcher.NarrowsTheRefinementOutsideBodies</c> says where that argument holds.
+    /// </remarks>
+    internal bool RefinesInANarrowedSlice;
+
+    /// <summary>D114: the caller's far slice end, which a body that lifts the ranking bounds reads to. See <see cref="RefinesInANarrowedSlice"/>.</summary>
+    internal int RefineCallerFarEnd;
+
+    /// <summary>
     /// D111: the lowest position a search may start an attempt at (or, reversed, scan down to):
     /// the slice start, raised to a refinement's window.
     /// </summary>
@@ -991,6 +1011,20 @@ internal sealed class MatchState : IDisposable
             HeldMaxCost = MaxCost;
             MaxErrors = long.MaxValue;
             MaxCost = long.MaxValue;
+
+            // D114: the body reads the text as far as the caller's slice, as the plain search does.
+            // A lookaround or a test has set the whole text already, which the min and max keep.
+            if (RefinesInANarrowedSlice)
+            {
+                if (Reverse)
+                {
+                    SliceStart = Math.Min(SliceStart, RefineCallerFarEnd);
+                }
+                else
+                {
+                    SliceEnd = Math.Max(SliceEnd, RefineCallerFarEnd);
+                }
+            }
         }
     }
 
@@ -1007,6 +1041,27 @@ internal sealed class MatchState : IDisposable
         {
             MaxErrors = HeldMaxErrors;
             MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
+        }
+    }
+
+    /// <summary>
+    /// D114: outside every body, a refinement in a narrowed slice reads no further than its window
+    /// (<see cref="RefinesInANarrowedSlice"/>). A lookaround or a test that closes has put back the
+    /// slice it saved, which is this one already.
+    /// </summary>
+    private void NarrowTheRefinementsFarEnd()
+    {
+        if (RefinesInANarrowedSlice)
+        {
+            if (Reverse)
+            {
+                SliceStart = RefineStart;
+            }
+            else
+            {
+                SliceEnd = RefineEnd;
+            }
         }
     }
 
@@ -1021,6 +1076,7 @@ internal sealed class MatchState : IDisposable
             BoundlessBodies = 0;
             MaxErrors = HeldMaxErrors;
             MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
         }
     }
 
@@ -1818,6 +1874,8 @@ internal sealed class MatchState : IDisposable
         InitialSliceEnd = end;
         RefineStart = int.MinValue;
         RefineEnd = int.MaxValue;
+        RefinesInANarrowedSlice = false;
+        RefineCallerFarEnd = 0;
 
         Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 
