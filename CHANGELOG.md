@@ -14,7 +14,10 @@ per release.
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-10-19
+## [1.0.0]
+
+<!-- Add the date on the day of the tag. The release slipped past 2026-10-19 to take the D109 and
+     D111 fixes and one more clean battery run. -->
 
 The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking
 upstream 2026.9.19: every construct upstream's parser accepts, fuzzy matching with per-kind error
@@ -106,13 +109,29 @@ this port does not share, the performance gate and the known limitations.
   each pair of features such as fuzzy matching with backreferences, or partial matching with
   lookarounds) found further root causes, most of them inherited from upstream in rare
   combinations. Each was fixed test first or settled by a recorded decision; `docs/KNOWN-DEFECTS.md`
-  lists them. The stopping rule was two consecutive battery runs with no new root cause, met by
-  runs 7 and 8 on 2026-10-18. The largest change was to partial matching, which now works to a
+  lists them. The stopping rule was two consecutive battery runs with no new root cause. Runs 9
+  and 10 met it on 2026-10-18; run 11 then found D109, and 1.0 waited for its fix and a clean run
+  after it. <!-- pending: the clean run after the D109 and D111 merges --> The largest change was to partial matching, which now works to a
   written contract: a partial promises that more text may complete the match, and where some text
   does, a partial call never answers "no match". For one class of fuzzy pattern, set out in the
   release notes, the partial start is a bound: never later than where a completed text's match
   starts, and sometimes a few characters earlier. Among the last fixes were a repeat guard that could cut a matching path in a partial call's second pass (D90),
   and a search that skipped start positions after a `\K` and a `(*PRUNE)` or `(*SKIP)` (D92).
+  A reversed `\X` now stops at a slice start that cuts a grapheme cluster, as a forward one stops
+  at the slice end (D108).
+  <!-- pending merge of fix/d109 / fix/d111 -->
+  `BestMatch` and `EnhanceMatch` now answer only matches the pattern can make without the flag:
+  upstream's error budget could make an atomic group, possessive repeat, lookaround or
+  conditional's test commit to a different match (D109, inherited). They refuse a fuzzy pattern
+  that holds `(*PRUNE)` or `(*SKIP)`, because the budget would decide where the verb acts and
+  holding it only at the end of the match was up to a hundred times slower; drop the flag, drop
+  the verb or make that section exact. An `EnhanceMatch` refinement no longer cuts the text short,
+  so atomic groups and possessive repeats inside it see the whole text (D111, inherited).
+  <!-- end pending -->
+- **Deep nesting cannot crash the process.** A pattern nested more than 500 levels deep in groups
+  and sets is refused with `FuzzyRegexParseException`, and running out of stack while compiling is
+  reported as the same exception rather than a stack overflow, which .NET cannot catch and which
+  ends the process (D110). Upstream raises Python's `RecursionError` instead.
 
 ### Changed
 
@@ -213,7 +232,7 @@ Each is fixed here even though upstream still has it, and each is recorded in
 
 ### Divergences from mrab-regex
 
-This port behaves differently from upstream on purpose in 101 places, each one a row of
+This port behaves differently from upstream on purpose in 102 places, each one a row of
 [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md)
 with its reason, its evidence and, where one exists, how to get upstream's behaviour back. The ones
 a caller arriving from Python meets first:

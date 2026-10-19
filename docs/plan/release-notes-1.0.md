@@ -5,8 +5,14 @@
   DECISIONS.md. Paste everything below the second rule into the release form.
 
   The divergence links point at line numbers of DIVERGENCES.md in the v1.0.0 tag. If that file
-  changes before the tag is made, re-check every link (the row lines were 25-31, 37-51, 57-135
-  when this was drafted on main ff86226e, and were re-checked unchanged on main dc8022ed).
+  changes before the tag is made, re-check every link (the row lines were 25-31, 37-51, 57-136
+  on main cd6cb70d, after D110's nesting-limit row went in at line 73). fix/d109 adds a row at
+  line 114, so when it merges every link from d114 up moves down one line and the row count
+  below becomes 103 (in CHANGELOG.md too).
+
+  Lines marked "pending merge of fix/d109 / fix/d111" describe work not yet on main. The owner
+  decided on 2026-10-19 that 1.0 waits for both, and for one more clean battery run. If either
+  is dropped, delete its lines.
 -->
 
 ---
@@ -119,7 +125,7 @@ section has runnable examples of each case.
 Each line below is one row of
 [DIVERGENCES.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md), which
 gives the reason, the evidence, the decision and, where one exists, how to get upstream's behaviour
-back. All 101 rows are in the released code. Most of the behaviour rows are upstream defects that
+back. All 102 rows are in the released code. Most of the behaviour rows are upstream defects that
 this port fixed and pinned with tests; the rest are choices made for .NET callers.
 
 ### Defaults
@@ -157,69 +163,74 @@ this port fixed and pinned with tests; the rest are choices made for .NET caller
 - A digit's decimal value comes from the port's own Unicode tables, so the two never disagree. [details][d63]
 - `\N{...}` named sequences raise "undefined character name" where upstream raises `TypeError`. [details][d64]
 - `(?L)` works only where no casing is requested; case-insensitive matching under it is refused at construction. [details][d65]
-- Under ASCII, a case-insensitive cased property such as `(?ai)\p{Lu}` means the 52 ASCII letters. [details][d81]
-- A scope that names no encoding keeps the one around it: `(?a:(?s:\w))` stays ASCII. [details][d82]
-- A POSIX class such as `[[:alpha:]]` takes the encoding of its scope. [details][d83]
-- Under `IgnoreCase` a cased property answers the same bare and inside a set. [details][d84]
-- A case-insensitive set matches each member first, then combines them. [details][d85]
-- An encoding named by positional flags inside a group, as in `(?a:(?u)\w)`, replaces the one in force. [details][d86]
-- A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern, for every construct. [details][d87]
-- A literal under a scoped `(?i:...)` is found in text that holds only its full case folding, such as `ss` in `ß`. [details][d88]
-- A lazy repeat finds a full-folded literal that starts at the repeat's last position. [details][d89]
-- The `(?w)` word boundary is Unicode's default one and passes all 1,944 lines of `WordBreakTest.txt`. [details][d91]
-- `\X` matches the same grapheme cluster backwards as forwards, over all 766 lines of `GraphemeBreakTest.txt`. [details][d92]
+- Under ASCII, a case-insensitive cased property such as `(?ai)\p{Lu}` means the 52 ASCII letters. [details][d82]
+- A scope that names no encoding keeps the one around it: `(?a:(?s:\w))` stays ASCII. [details][d83]
+- A POSIX class such as `[[:alpha:]]` takes the encoding of its scope. [details][d84]
+- Under `IgnoreCase` a cased property answers the same bare and inside a set. [details][d85]
+- A case-insensitive set matches each member first, then combines them. [details][d86]
+- An encoding named by positional flags inside a group, as in `(?a:(?u)\w)`, replaces the one in force. [details][d87]
+- A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern, for every construct. [details][d88]
+- A literal under a scoped `(?i:...)` is found in text that holds only its full case folding, such as `ss` in `ß`. [details][d89]
+- A lazy repeat finds a full-folded literal that starts at the repeat's last position. [details][d90]
+- The `(?w)` word boundary is Unicode's default one and passes all 1,944 lines of `WordBreakTest.txt`. [details][d92]
+- `\X` matches the same grapheme cluster backwards as forwards, over all 766 lines of `GraphemeBreakTest.txt`, and a reversed `\X` stops at a slice start that cuts a cluster, as a forward one stops at the slice end. [details][d93]
 
 ### Fuzzy matching
 
-- A search may open a fuzzy match with an insertion at the position it started from, when no later match would start inside it. [details][d73]
-- A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit. [details][d74]
-- A full-folded backreference that ends half-way through a folding charges the rest as one edit. [details][d75]
-- A retried fuzzy edit in a full-folded backreference steps past what it used up. [details][d76]
-- A fuzzy full-folded match can stop part-way into a folding, at one deletion per folded character given back. [details][d77]
-- A fuzzy section that is undone takes its error total with it. [details][d78]
-- A fuzzy repeat takes an empty, deleting iteration only when something needs it. [details][d79]
-- A constraint that allows no errors, such as `{e<=0}`, limits the errors made inside it however it is written. [details][d90]
-- A fuzzy item that matched exactly can still be deleted, and that choice is tried before any earlier one. [details][d93]
-- A `\G` inside a fuzzy section gets an answer where upstream raises "invalid RE code". [details][d101]
-- A fuzzy run can edit `ß` or a ligature as one character. [details][d102]
-- A lookaround that fails inside a fuzzy section can be passed by inserting a character in front of it. [details][d103]
-- A section's minimum error count can be met by a character inserted after its last item. [details][d104]
-- Below a section's minimum, an item that matched exactly is also tried with a character inserted in front of it. [details][d105]
-- A fuzzy run can edit a subject character that expands under case folding, such as `ǰ`, as one character. [details][d106]
-- A verb that cuts through a fuzzy section closes it, so its limits stop where it ends. [details][d110]
+- A search may open a fuzzy match with an insertion at the position it started from, when no later match would start inside it. [details][d74]
+- A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit. [details][d75]
+- A full-folded backreference that ends half-way through a folding charges the rest as one edit. [details][d76]
+- A retried fuzzy edit in a full-folded backreference steps past what it used up. [details][d77]
+- A fuzzy full-folded match can stop part-way into a folding, at one deletion per folded character given back. [details][d78]
+- A fuzzy section that is undone takes its error total with it. [details][d79]
+- A fuzzy repeat takes an empty, deleting iteration only when something needs it. [details][d80]
+- A constraint that allows no errors, such as `{e<=0}`, limits the errors made inside it however it is written. [details][d91]
+- A fuzzy item that matched exactly can still be deleted, and that choice is tried before any earlier one. [details][d94]
+- A `\G` inside a fuzzy section gets an answer where upstream raises "invalid RE code". [details][d102]
+- A fuzzy run can edit `ß` or a ligature as one character. [details][d103]
+- A lookaround that fails inside a fuzzy section can be passed by inserting a character in front of it. [details][d104]
+- A section's minimum error count can be met by a character inserted after its last item. [details][d105]
+- Below a section's minimum, an item that matched exactly is also tried with a character inserted in front of it. [details][d106]
+- A fuzzy run can edit a subject character that expands under case folding, such as `ǰ`, as one character. [details][d107]
+- A verb that cuts through a fuzzy section closes it, so its limits stop where it ends. [details][d111]
 
 ### BestMatch and EnhanceMatch
 
 - `(?e)` and `(?b)` rank by fuzzy cost where upstream ranks by error count (upstream issue 470). The two agree unless the pattern weights its error kinds differently. [details][d57]
-- A `BestMatch` or `EnhanceMatch` scan does not skip positions after an empty match. [details][d98]
-- Under these modes `\G` holds only where the search began. [details][d99]
-- They count only the errors a match contains, leaving out sections an atomic group, lookaround, verb or conditional's test threw away. [details][d111]
-- Their budget never decides a negative lookaround or a conditional's test. [details][d112]
-- They keep a fit that ends in trailing insertions. [details][d129]
+- A `BestMatch` or `EnhanceMatch` scan does not skip positions after an empty match. [details][d99]
+- Under these modes `\G` holds only where the search began. [details][d100]
+- They count only the errors a match contains, leaving out sections an atomic group, lookaround, verb or conditional's test threw away. [details][d112]
+- Their budget never decides a negative lookaround or a conditional's test. [details][d113]
+<!-- pending merge of fix/d109 / fix/d111 -->
+- They answer only matches the pattern can make without the flag. Upstream's budget can make an atomic group, possessive repeat, lookaround or conditional's test commit to a later match than it would without the flag, so `(?b)(?:(?>ab|a)c){s<=1}` over `aacbc` is (1, 3) upstream, a span the pattern does not match there; here it is (0, 3) with one substitution. [details][d109-comparison]
+- They refuse a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`, with a `FuzzyRegexParseException` when it is compiled. The budget would decide where the verb acts, and holding it only at the end of the match made some searches a hundred times slower and could lose a better match. Drop the flag, drop the verb, or make the section around the verb exact (`{e<=0}`). [details][d109-comparison]
+- An `EnhanceMatch` refinement looks for a better match inside the first one's span without cutting the text there, so an atomic group or possessive repeat still sees the whole text: `(?e)(?:xaq|a(?>a*)){e<=1}` over `xaaa` is (1, 3) upstream, which the pattern does not match, and (0, 3) with one substitution here.
+<!-- end pending -->
+- They keep a fit that ends in trailing insertions. [details][d130]
 
 ### Partial matching
 
 - A word or grapheme boundary decided at the end of the text gives a partial match, as in PCRE2 (upstream issue 589). [details][d60]
 - A partial is refused where the match failed on text the engine already held, so no text could complete it. [details][d61]
 - A reversed partial match reports running out of text at the slice start consistently. [details][d71]
-- Running out of text inside a lookaround's body no longer ends the call with a partial by itself. [details][d123]
-- A partial is reported where upstream refuses a completion that exists, such as `.*?(?<=c)` over `aa`. [details][d124]
-- A partial search tries a start inside the text still to come, for a pattern with no first set. [details][d125]
-- `\b` over the empty text is a partial, and `\Z` at the edge is false in a partial call's second pass. [details][d126]
-- A partial reports a group that closed before a repeat's tail ran out of text. [details][d127]
-- A reversed partial search lets `$` hold before a final newline in the text to come. [details][d128]
-- A partial search's first-set check does not answer before the anchors it skips. [details][d130]
+- Running out of text inside a lookaround's body no longer ends the call with a partial by itself. [details][d124]
+- A partial is reported where upstream refuses a completion that exists, such as `.*?(?<=c)` over `aa`. [details][d125]
+- A partial search tries a start inside the text still to come, for a pattern with no first set. [details][d126]
+- `\b` over the empty text is a partial, and `\Z` at the edge is false in a partial call's second pass. [details][d127]
+- A partial reports a group that closed before a repeat's tail ran out of text. [details][d128]
+- A reversed partial search lets `$` hold before a final newline in the text to come. [details][d129]
+- A partial search's first-set check does not answer before the anchors it skips. [details][d131]
 
 ### Verbs and `\K`
 
-- A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start. [details][d94]
-- A verb, branch, group call or fuzzy section that starts every alternative stays in each one, as in PCRE2 and Perl. [details][d95]
-- A verb reached by backtracking inside an unfinished atomic group or positive lookaround ends the attempt. [details][d96]
-- A verb after a lazy leading repeat does not hide the starts inside the repeat's run. [details][d97]
-- A verb inside a lookbehind acts in right-to-left order, as the lookbehind's body runs. [details][d100]
-- A `\K` inside a lookaround cannot make a scan or a search repeat itself for ever. [details][d132]
-- A `\K` inside a lookaround, condition, atomic group or possessive repeat is undone when matching backtracks past it. [details][d133]
-- A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions. [details][d134]
+- A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start. [details][d95]
+- A verb, branch, group call or fuzzy section that starts every alternative stays in each one, as in PCRE2 and Perl. [details][d96]
+- A verb reached by backtracking inside an unfinished atomic group or positive lookaround ends the attempt. [details][d97]
+- A verb after a lazy leading repeat does not hide the starts inside the repeat's run. [details][d98]
+- A verb inside a lookbehind acts in right-to-left order, as the lookbehind's body runs. [details][d101]
+- A `\K` inside a lookaround cannot make a scan or a search repeat itself for ever. [details][d133]
+- A `\K` inside a lookaround, condition, atomic group or possessive repeat is undone when matching backtracks past it. [details][d134]
+- A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions. [details][d135]
 
 ### Group calls, recursion, conditionals and backreferences
 
@@ -227,28 +238,29 @@ this port fixed and pinned with tests; the rest are choices made for .NET caller
 - A group call that would re-enter the same group at the same position fails that path only. [details][d68]
 - A fuzzy recursive pattern whose calls fail matches in milliseconds; some shapes stay exponential, bounded by `MatchTimeout`. [details][d69]
 - In a branch reset, a group never takes a number another group in the same branch will use (upstream issue 425). [details][d70]
-- A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away. [details][d107]
-- A group call keeps none of the captures its body made, as in Perl and PCRE2. [details][d108]
-- A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller. [details][d109]
-- The calls inside a called group run with the call's direction and fuzziness. [details][d113]
-- A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused. [details][d114]
-- A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does. [details][d115]
-- A call in a conditional's lookbehind test runs its group backwards. [details][d116]
-- A backwards copy of the whole pattern does not jump to the required string's forward end. [details][d117]
-- A called copy adds nothing to the pattern's minimum width. [details][d118]
-- A called group's copy runs as the group written out at the call. [details][d119]
-- An alternation at the start of a negative condition's yes branch keeps all its alternatives. [details][d120]
-- A conditional's lookaround test is matched exactly inside a fuzzy section. [details][d121]
-- A conditional whose negative test fails keeps the captures the test made. [details][d122]
-- A `DEFINE` group with a no-branch is refused at construction, as PCRE2 and Perl refuse it. [details][d131]
-- A search that reads a group after a guarded repeat finds the leftmost match. [details][d135]
+- A group call inside a lookaround leaves no capture behind when the lookaround's body is thrown away. [details][d108]
+- A group call keeps none of the captures its body made, as in Perl and PCRE2. [details][d109]
+- A call to the whole pattern inside a pattern that is one fuzzy section returns to its caller. [details][d110]
+- The calls inside a called group run with the call's direction and fuzziness. [details][d114]
+- A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused. [details][d115]
+- A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does. [details][d116]
+- A call in a conditional's lookbehind test runs its group backwards. [details][d117]
+- A backwards copy of the whole pattern does not jump to the required string's forward end. [details][d118]
+- A called copy adds nothing to the pattern's minimum width. [details][d119]
+- A called group's copy runs as the group written out at the call. [details][d120]
+- An alternation at the start of a negative condition's yes branch keeps all its alternatives. [details][d121]
+- A conditional's lookaround test is matched exactly inside a fuzzy section. [details][d122]
+- A conditional whose negative test fails keeps the captures the test made. [details][d123]
+- A `DEFINE` group with a no-branch is refused at construction, as PCRE2 and Perl refuse it. [details][d132]
+- A search that reads a group after a guarded repeat finds the leftmost match. [details][d136]
 
 ### Search and limits
 
 - Search prefilters never change the answer the full match would give, so on several families `search`, `finditer` and partial matching agree with upstream's own anchored `match` where upstream's `search` does not. [details][d59]
 - CPython's 4,300-digit cap on integers is absent, so a very long group number compiles. [details][d66]
 - A pattern whose compiled graph would exceed `maxCompiledNodes` (a million by default) is refused at construction. [details][d72]
-- Inherited upstream bugs are fixed here, each with a ledger entry; this row lists the earlier ones. [details][d80]
+- A pattern nested more than 500 levels deep in groups and sets is refused at construction with `FuzzyRegexParseException`, and a thread whose stack runs out while compiling a shallower one gets the same exception. A .NET stack overflow cannot be caught and ends the process, so before this a service compiling a caller's pattern could be brought down by `new string('(', 1500)`. Upstream raises Python's `RecursionError` at 140 to 330 levels. [details][d73]
+- Inherited upstream bugs are fixed here, each with a ledger entry; this row lists the earlier ones. [details][d81]
 
 ## Upstream bugs this port does not share
 
@@ -256,9 +268,9 @@ Building the port meant reading upstream's C closely and comparing the two engin
 generated rows, and that turned up defects in upstream itself. Each one is recorded in
 [LEDGER.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/plan/upstream-reports/LEDGER.md)
 with a minimal reproduction, the faulting code where it was traced, and this port's answer. The
-ledger holds 90 entries, numbered 1 to 91 (there is no 41). Entry 10 was fixed by upstream itself in
+ledger holds 91 entries, numbered 1 to 92 (there is no 41). Entry 10 was fixed by upstream itself in
 2026.9.10. None of the others has been reported upstream yet. Two entries gained a second form on
-2026-10-18, each found by the last battery run and pinned by tests: the reversed form of entry 62
+2026-10-18, each found by a battery run and pinned by tests: the reversed form of entry 62
 (a negative condition's yes branch keeps only its first alternative) and the mirror of entry 90,
 where a reversed partial search before a lookahead that fails on the text it holds reports a
 partial that ends too late. Some notable ones:
@@ -273,6 +285,10 @@ partial that ends too late. Some notable ones:
 - A repeated capture group costs hundreds of bytes per repetition (entry 18, upstream issue 554).
 - The `(?w)` word boundary fails 268 lines of Unicode's own conformance test (entry 40), and a reversed `\X` takes one codepoint where it should take a grapheme cluster (entry 43).
 - A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever (entry 85).
+- A run of about 62,000 conditionals, with no nesting at all, overflows the C stack while compiling and ends the Python process (entry 92).
+<!-- pending merge of fix/d109 -->
+- Under `BestMatch` and `EnhanceMatch` the error budget decides what an atomic group, lookaround or verb commits to, so a search can return a span the pattern does not match (entry 32's addendum of 2026-10-19).
+<!-- end pending -->
 
 ## Performance
 
@@ -308,6 +324,14 @@ method and the raw data are in
   call that re-opens a fuzzy section where the same call is already open; a `DEFINE` group with a
   no-branch; a pattern whose compiled graph would exceed `maxCompiledNodes`; case-insensitive
   matching under `(?L)`.
+  <!-- pending merge of fix/d109 / fix/d111 -->
+  Also refused: `BestMatch` or `EnhanceMatch` on a fuzzy pattern that holds `(*PRUNE)` or
+  `(*SKIP)`, which upstream answers, sometimes with a span the pattern does not match.
+  <!-- end pending -->
+- **Nesting limit.** A pattern nested more than 500 levels deep in groups and sets is refused
+  with `FuzzyRegexParseException`, where upstream raises `RecursionError`. Compiling on a thread
+  with a small stack can run out below that depth; that is reported as a `FuzzyRegexParseException`
+  too, never as a crash.
 - **Some recursive fuzzy patterns take exponential time.** The failure memo covers calls that fail
   without returning; shapes whose calls return and whose callers then fail can still grow
   exponentially. Set a `matchTimeout` when patterns come from users.
@@ -322,9 +346,13 @@ method and the raw data are in
   7,141, while at 50 and 100 `a`s it takes fewer steps than before. Where the budget runs out,
   the call answers a partial at the attempt's start, which the partial contract allows, and it
   never loses a match. Other timing and
-  allocation rows (D29, D33, D68, D71, D82, D91) and the slowdowns accepted with the D85 and D92
+  allocation rows (D29, D33, D68, D71, D82, D91, D105) and the slowdowns accepted with the D85 and D92
   correctness fixes are in
   [KNOWN-DEFECTS.md](https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/KNOWN-DEFECTS.md).
+  <!-- pending merge of fix/d111 -->
+  The D111 fix can make an `EnhanceMatch` scan take time that grows with the square of the text's
+  length on adversarial input; on ordinary text its cost is unchanged.
+  <!-- end pending -->
 - **Upstream 2026.9.29** (Unicode 18.0.0) is planned for 1.1; 1.0 uses Unicode 17.0.0.
 
 ## Reporting a bug
@@ -436,3 +464,6 @@ several of the differences above are cases where it is.
 [d133]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L133
 [d134]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L134
 [d135]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L135
+[d136]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/DIVERGENCES.md?plain=1#L136
+<!-- pending merge of fix/d109: point this at the DIVERGENCES row once it has a line number -->
+[d109-comparison]: https://github.com/zejji/fuzzy-regex-cs/blob/v1.0.0/docs/COMPARISON.md#bestmatch-and-enhancematch-answer-a-match-the-pattern-can-make
