@@ -1295,6 +1295,24 @@ The same rule gives some partial matches that no text completes, such as `(?wr)a
 partial contract allows it: a partial promises only that more text may complete the match (see
 `Match.PartialMatch`). There is no option to restore the upstream answer. Ledger entry 75.
 
+### A negative lookahead around a lookahead that holds for every continuation reports no partial
+
+When a lookahead's body has a lookaround that touches the end of the text in one alternative,
+upstream can leave the lookahead undecided even where another alternative makes it succeed for
+every continuation. A negative lookahead around it then reports a partial whose span the pattern
+cannot make at any length of text. Here the lookahead is decided, so the negative one fails.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))").MatchAtStart("a", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch));                       // (False, False) - upstream answers a partial (0, 1) for this zero-width pattern
+Match n = new FuzzyRegex(@"(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a").Match("aa", partial: true);
+Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));   // (True, True, 1, 1) - upstream answers a partial (0, 2) for this one-character pattern
+```
+
+There is no option to restore the upstream answer. Ledger entry 94.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted

@@ -6205,7 +6205,16 @@ internal static class Matcher
         if (state.HasSameContinuation(frame, withChanges))
         {
             state.NotePartialEvent(PartialEvent.Dedup);
-            if (!blocked)
+            if (blocked)
+            {
+                // D113: this backtrack stands for the continuation failing again, so the body's
+                // entries popped next must not record it, as after any blocked end (D90). Without
+                // this, `a?`'s tail guard in `(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b` over 'aab',
+                // written under the lookahead at 1, refused the lookahead at 2. Unblocked, the cut
+                // below drops the body's entries, so none is popped to record anything.
+                state.NoteABlockedEnd();
+            }
+            else
             {
                 // Cut and fail: the frame's entry is next, and its arm fails the construct. A test
                 // that held for every continuation must not be read as one that failed, which would

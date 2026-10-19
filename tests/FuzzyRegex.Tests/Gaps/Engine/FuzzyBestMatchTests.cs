@@ -1577,6 +1577,9 @@ public sealed class FuzzyBestMatchTests
     // 2026.9.10 gave the span in the comment.
     [Test]
     [Arguments("(?b)(?:(?>ab|a)c){s<=1}", "aacbc", 0, 3, 1, 0, 0)] // was (1, 3) exact
+    // The greedy atomic `b+` at 5 spends its error taking the 'c', so the flagless pattern matches
+    // nothing at 4 (its search from 4 is (5, 7) with a deletion); upstream answers (4, 7) exact.
+    [Arguments("(?b)(?:a(?>b+)c){e<=1}", "xbc abc", 0, 3, 1, 0, 0)]
     [Arguments("(?b)(?>(?:c){d<=1}|b)", "ab", 0, 0, 0, 0, 1)] // was (1, 2)
     [Arguments("(?br)(?:(?>b|c)){d<=1}", "xbcaxx", 1, 2, 0, 0, 0)] // was (2, 3)
     [Arguments("(?b)(?:a?+){e<=2}b", "bbbxcc", 0, 2, 1, 0, 0)] // was (0, 1)
