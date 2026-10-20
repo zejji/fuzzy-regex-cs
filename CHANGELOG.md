@@ -14,10 +14,7 @@ per release.
 
 ## [Unreleased]
 
-## [1.0.0]
-
-<!-- Add the date on the day of the tag. The release slipped past 2026-10-19 to take the D109 and
-     D111 fixes and one more clean battery run. -->
+## [1.0.0] - 2026-10-20
 
 The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking
 upstream 2026.9.19: every construct upstream's parser accepts, fuzzy matching with per-kind error
