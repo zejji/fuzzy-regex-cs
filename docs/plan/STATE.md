@@ -1,5 +1,5 @@
 # Current state
-**Branch `sync/2026.9.29` (worktree `.claude/worktrees/sync-2929`) holds the 2026.9.29 sync**, Unicode 18.0.0, ready to merge after the 1.0 release: tables, names and lowercase rebuilt, D119 and D120 fixed, ledger entry 95 drafted, ratchet and oracle (seed 7) green against PyPI's 2026.9.29. PORTMAP's sync log has the per-entry dispositions. Merging it moves `.venvs/regex-2026.9.29` into use as the oracle.
+**Branch `sync/2026.9.29` (worktree `.claude/worktrees/sync-2026-9-29`) holds the 2026.9.29 sync**, Unicode 18.0.0, ready to merge, with main merged in on 2026-10-20: tables, names and lowercase rebuilt, D119 and D120 fixed, ledger entry 95 drafted, ratchet and oracle (seed 7: diverge 0 of 7,880 rows, all 939 known examples re-asked unchanged) green against PyPI's 2026.9.29. PORTMAP's sync log has the per-entry dispositions. Merging it moves `.venvs/regex-2026.9.29` into use as the oracle.
 
 **S91 is done** (e78f8d2, 5522bc3; `docs/plan/slices/done/S91-scoped-encoding-everywhere.md`). A
 scoped `(?a:...)` or `(?u:...)` now answers exactly as the same encoding set for the whole pattern:
