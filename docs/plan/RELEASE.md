@@ -41,9 +41,9 @@ Packs `src/FuzzyRegex` in Release with `ContinuousIntegrationBuild=true` (so the
 embeds a contributor's local path - see the SourceLink note below) and runs
 `meziantou.validate-nuget-package` against the result. `EnablePackageValidation` (shape checks:
 matching TFM assets, consistent dependencies) already runs as part of the `dotnet pack` step
-itself, from the property in `src/FuzzyRegex/FuzzyRegex.csproj`; it has no
-`PackageValidationBaselineVersion` yet because there is no earlier published version to diff
-against - set it to `1.0.0` once a 1.1.0 or later release is being prepared.
+itself, from the property in `src/FuzzyRegex/FuzzyRegex.csproj`. Since 1.0.0 was published,
+`PackageValidationBaselineVersion` is `1.0.0`, so the same step also diffs the public API against
+the published package and fails on a breaking change. Bump it after each release.
 
 This is also `ci.yml`'s `pack` job, run on every push. Three findings only resolve once the packed
 commit is actually pushed to GitHub (SourceLink maps PDB paths to
