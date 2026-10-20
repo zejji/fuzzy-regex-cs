@@ -8,10 +8,17 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # release.yml runs these same jobs as its gates on a version tag.
+  workflow_call:
 
 permissions:
   contents: read
 
+# When release.yml calls this file, github.ref is the caller's (refs/tags/v1.0.0), so the group
+# is ci-refs/tags/v1.0.0. That differs from release.yml's own group (release-refs/tags/...), which
+# matters: GitHub's reusable-workflows reference says that with cancel-in-progress a shared group
+# in caller and called workflow cancels the run already in progress. Pushes to main and pull
+# requests use other refs, so they never cancel a release's gates.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

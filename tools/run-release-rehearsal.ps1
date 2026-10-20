@@ -24,11 +24,18 @@
 .PARAMETER Rid
     The runtime identifier to publish the consumer for. Defaults to this machine's.
 
+.PARAMETER VersionSuffix
+    Passed to `dotnet pack -p:VersionSuffix=`. Defaults to rc.0. Keep a suffix: the consumer's
+    feed list also includes nuget.org, and "when a package exists on multiple sources, it may not
+    be deterministic which source the package will be downloaded from" (NuGet's Package Source
+    Mapping page, learn.microsoft.com/en-us/nuget/consume-packages/package-source-mapping, read
+    2026-10-20). An unsuffixed version already on nuget.org could replace the one just packed.
+
 .EXAMPLE
     pwsh -File tools/run-release-rehearsal.ps1
 #>
 [CmdletBinding()]
-param([string]$Rid)
+param([string]$Rid, [ValidateNotNullOrEmpty()][string]$VersionSuffix = 'rc.0')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -37,7 +44,6 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $feedDir = Join-Path $repoRoot '.scratch/pack'
 $consumerDir = Join-Path $repoRoot '.scratch/release-rehearsal-consumer'
 $nugetCacheDir = Join-Path $repoRoot '.scratch/release-rehearsal-nuget-cache'
-$version = '1.0.0-rc.0'
 
 if (-not $Rid) {
     $Rid = if ($IsWindows) { 'win-x64' } elseif ($IsMacOS) { 'osx-x64' } else { 'linux-x64' }
@@ -47,8 +53,15 @@ Write-Host '--- Step 1: pack ---'
 if (Test-Path $feedDir) { Remove-Item -Recurse -Force $feedDir }
 New-Item -ItemType Directory -Force $feedDir | Out-Null
 dotnet pack (Join-Path $repoRoot 'src/FuzzyRegex/FuzzyRegex.csproj') --configuration Release -o $feedDir `
-    -p:ContinuousIntegrationBuild=true -p:VersionSuffix=rc.0
+    -p:ContinuousIntegrationBuild=true "-p:VersionSuffix=$VersionSuffix"
 if ($LASTEXITCODE -ne 0) { throw 'dotnet pack failed.' }
+
+# The version comes from the package just packed (VersionPrefix plus the suffix), so this script
+# never needs editing when Directory.Build.props is bumped.
+$nupkg = @(Get-ChildItem -Path $feedDir -Filter 'FuzzyRegex.*.nupkg')
+if ($nupkg.Count -ne 1) { throw "Expected one FuzzyRegex .nupkg in $feedDir, found $($nupkg.Count)." }
+$version = $nupkg[0].Name -replace '^FuzzyRegex\.(.+)\.nupkg$', '$1'
+Write-Host "Packed FuzzyRegex $version."
 
 Write-Host ''
 Write-Host '--- Step 2: install from the local feed into a fresh consumer ---'

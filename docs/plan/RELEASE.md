@@ -115,17 +115,20 @@ binary: Consumer.exe  6.77 MB, win-x64, installed from a local feed, trimmed
 
 ## Step 3 (S69 only): tag, release, publish
 
-Not rehearsed here - S66 stops before anything leaves the local machine.
+Not rehearsed here - S66 stops before anything leaves the local machine. The step-by-step guide,
+including the one-time setup and what to do when a step fails, is
+[`docs/RELEASING.md`](../RELEASING.md).
 
 - **Tag format**: `v1.0.0` (the conventional `v`-prefixed semver tag GitHub's release UI expects).
 - **GitHub release notes**: generated from `docs/DIVERGENCES.md`'s `SHIPPED` rows (every deliberate
   difference from upstream that actually shipped) plus `docs/plan/upstream-reports/LEDGER.md`
   (bugs found and their resolution). Do not write release notes from memory - re-read both files at
   release time, the way `DIVERGENCES.md`'s own header requires.
-- **nuget.org push**: `dotnet nuget push <path>.nupkg --api-key <key> --source
-  https://api.nuget.org/v3/index.json`. The API key lives with the owner and is never committed,
-  logged, or pasted into a session transcript; S69 asks for it interactively at the point of use
-  and nowhere else.
+- **nuget.org push**: automated. Pushing the tag runs `.github/workflows/release.yml`, which waits
+  for the owner's approval and then pushes through nuget.org Trusted Publishing: the workflow
+  exchanges a GitHub sign-in token for an API key valid for one hour, so no key is stored or
+  pasted anywhere. The only manual push is the one-off fallback in `docs/RELEASING.md` for a 403
+  on the first push of the new package id.
 - **Post-publish checks** (S69's own verification list): the nuget.org package page renders the
   README; the symbol package resolves (`snupkg`, already produced by every pack in this file);
   the demo link in `README.md` (`https://zejji.github.io/fuzzy-regex-cs/`, filled in by S71 over the
