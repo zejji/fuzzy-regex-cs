@@ -28,11 +28,12 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <!--
-      Shape validation (matching TFM assets, consistent dependencies) on every pack. No
-      PackageValidationBaselineVersion yet - there is no earlier published version to diff
-      against. Set it to "1.0.0" once the first post-1.0 release is being prepared, per S66's
-      docs/plan/RELEASE.md.
+      Package validation on every pack: shape checks (matching TFM assets, consistent
+      dependencies) plus a diff of the public API against the published baseline below, so an
+      accidental breaking change fails the pack. Bump the baseline after each release, per
+      docs/RELEASING.md.
     -->
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
