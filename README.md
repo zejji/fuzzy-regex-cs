@@ -7,10 +7,12 @@ with per-error-type budgets - insertions, deletions and substitutions inside pat
 `Fuzzy.Text.RegularExpressions`, and the main type is `FuzzyRegex`, shaped after
 `System.Text.RegularExpressions.Regex`.
 
-**Status: pre-1.0.** Feature-complete against the pinned upstream release - the whole ported
-upstream test suite passes (`docs/STATUS.md`) - and the public API is frozen. What is left before
-1.0 - performance work, packaging, mutation-test coverage, the rest of this documentation and a
-browser demo - is tracked in [`docs/plan/ROADMAP.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/ROADMAP.md).
+**Status: 1.0.0, released on [nuget.org](https://www.nuget.org/packages/FuzzyRegex)** ([release
+notes](https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.0.0)). Feature-complete against the
+pinned upstream release - the whole ported upstream test suite passes (`docs/STATUS.md`) - and the
+public API follows semantic versioning from 1.0.0. Where this port deliberately answers differently
+from upstream is listed in [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md),
+and open defects in [`docs/KNOWN-DEFECTS.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/KNOWN-DEFECTS.md).
 
 **Try it in your browser: [the FuzzyRegex demo](https://zejji.github.io/fuzzy-regex-cs/).** This is
 v1 of the page: pattern, flags and subject, the matches highlighted, every group and capture in a
