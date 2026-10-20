@@ -1,3 +1,5 @@
+using AwesomeAssertions;
+
 namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 
 /// <summary>
@@ -12,6 +14,19 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 /// beside each assertion. Where upstream is wrong the expected value is argued from principle, and
 /// the argument is written above the test.
 /// </remarks>
-// Empty as of 2026-10-18: the last rows (queue item 9 and D11's) were fixed and now live in the suite.
 [Explicit]
-public sealed class OpenDefectTests;
+public sealed class OpenDefectTests
+{
+    // D121. Start 0 matches: `[ab]*?` takes the 'b', the lookahead at 1 sets g to '' before a 'c',
+    // the conditional repeat takes 'cccba', and `(?=(?P=g))` matches the empty g at the end. The
+    // port reports the match from start 1; regex 2026.9.10 answers (0, 6), and so does the port
+    // with every repeat guard off.
+    [Test]
+    public void A_search_finds_the_leftmost_start_through_a_conditional_repeat_after_a_lookahead()
+    {
+        Match m = new FuzzyRegex(@"[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?!c)[ab]|c)*$(?=(?P=g))").Match("bcccba");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 6));
+        m.Groups["g"].Value.Should().BeEmpty();
+    }
+}
