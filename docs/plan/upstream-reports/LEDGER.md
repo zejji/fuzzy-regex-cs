@@ -7392,7 +7392,9 @@ not made. Pinned by
 ## 95. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D120, 2026-10-18)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Found by the 2026.9.29 sync, which ran Unicode's
-conformance files over the port and over upstream. Not yet blind-reviewed.
+conformance files over the port and over upstream. Blind-reviewed 2026-10-20: a fresh reviewer
+fetched UAX #29 revision 49 and the 18.0.0 test file, ran every line through regex 2026.9.29 and
+measured the same 10 failing lines.
 
 **Reproduction**, `regex` 2026.9.29 from PyPI (sdist byte-identical to tag `2026.9.29`,
 `0e8cb05`), measured 2026-10-18:
@@ -7422,4 +7424,7 @@ rule is 17.0.0's and the data 18.0.0's, and `\X` answers as neither version woul
 
 **This port.** `AtGraphemeBoundary` and the reversed partial check apply revision 49's rule; the
 port passes all 853 lines forwards and backwards. Pinned by
-`Gaps/Engine/IndicConjunctGraphemeTests`.
+`Gaps/Engine/IndicConjunctGraphemeTests`. The oracle entry `grapheme-conjunct-follows-unicode-18`
+claims a row only when `PatternObject.UpstreamGraphemeConjunct`, which puts revision 47's rule
+back, reproduces upstream's answer; its example rows are lines 859, 660 and 860, recorded from
+`tools/probes/sync-2026-9-29-gb9c-rows.jsonl`.

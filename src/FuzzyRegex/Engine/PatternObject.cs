@@ -1066,6 +1066,14 @@ internal sealed class PatternObject
     internal bool UpstreamReverseGrapheme;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether <c>\X</c>'s GB9c is UAX #29 revision
+    /// 47's, as upstream 2026.9.29 still applies it, rather than revision 49's (Unicode 18.0.0). The
+    /// oracle sets it on a pattern it compiled for one call, to show that the D120 fix is the whole of
+    /// a divergence. See <c>Matcher.AtGraphemeBoundary</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </summary>
+    internal bool UpstreamGraphemeConjunct;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
     /// open fuzzy sections' upper limits, as upstream's does (D81). The oracle sets it on a pattern
     /// it compiled for an ablation, since upstream has none of this port's fixes. See

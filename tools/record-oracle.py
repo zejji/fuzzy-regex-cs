@@ -2382,6 +2382,9 @@ BOUNDARY_CLUSTERS = (
     "\U0001f469‍\U0001f466",  # An emoji ZWJ sequence: GB11 and WB3c.
     "à",  # A base letter and a combining mark: GB9, and Extend for WB4.
     "क्ष",  # Devanagari consonant, virama, consonant: GB9c.
+    # A virama after a letter that is not a consonant, then a consonant: one cluster under Unicode
+    # 18.0.0's GB9c, two under upstream's older rule (ledger entry 95, GraphemeBreakTest line 859).
+    "a्त",
     "can't",  # WB6/WB7 across an apostrophe, which is what `(?w)` is for.
     "3.2",  # WB11/WB12 across a decimal point.
 )
