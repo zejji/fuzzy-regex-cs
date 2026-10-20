@@ -265,8 +265,12 @@ of one. Installed on this machine, 2026-09-14:
   Windows' `msys-pcre2-8-0.dll` as `tools/probes/pcre2-partial-and-skip.py` does.
 - **Perl 5.42** (Git for Windows): `perl script.pl`; the driver allowlist permits it.
 - **.NET 10** `System.Text.RegularExpressions`: a scratch console project or the test project.
-- **regex 2026.9.10**: `.venvs/regex-2026.9.10` for probes; the oracle interpreter is on the same
-  version.
+- **regex 2026.9.29**, the pinned upstream: `.venvs/regex-2026.9.29` in the main checkout (`.venvs/`
+  is gitignored, so a worktree has none). `tools/run-oracle.ps1` calls whatever `python` is first
+  on PATH, and neither `C:\Python315` (no `regex`) nor `C:\Python314` (2026.9.10) is the pinned
+  version, so put the venv's `Scripts` first and check `python -c "import regex;
+  print(regex.__version__)"` before a run. `.venvs/regex-2026.9.10` stays for re-reading probes
+  written against the 1.0 pin.
 
 Quote the version and the flags in the slice notes, as S45 did.
 

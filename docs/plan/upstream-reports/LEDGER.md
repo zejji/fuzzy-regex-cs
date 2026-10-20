@@ -26,8 +26,8 @@ verified against 2026.9.10. **The 2026.9.29 sync moved the pin to `0e8cb05` on 2
 (Unicode 18.0.0, on branch `sync/2026.9.29` until it merges). That release is on PyPI and
 its sdist is byte-identical to the tag, so the oracle records against it; re-asking it every
 known-divergence example (`record-oracle.py --recheck`: 932 examples on 2026-10-18, 939 after
-main was merged in on 2026-10-20) gave every stored answer back, so no entry below changed status, and the sync added entry 95. Two consequences of the 2026.9.19
-move for this file:
+main was merged in on 2026-10-20) gave every stored answer back, so no entry below changed
+status, and the sync added entry 95. Two consequences of the 2026.9.19 move for this file:
 
 - **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
   here, so there is nothing outstanding on either side. It stays in the file as history.
