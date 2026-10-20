@@ -43,6 +43,8 @@ BeforeAll {
                 }
             )
         }
+        # A negative -Bytes is a run whose MemoryDiagnoser did not attach: the report has no Memory node.
+        if ($Bytes -lt 0) { $report.Benchmarks[0].Remove('Memory') }
         $report | ConvertTo-Json -Depth 8 |
             Set-Content -LiteralPath (Join-Path $Path 'results/Probe-report-full-compressed.json') -Encoding utf8
     }
@@ -157,15 +159,29 @@ Describe 'compare-benchmarks.ps1 noise floor' {
 
     It 'never lets the floor excuse a lost allocation reading, however wide the floor' {
         New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
-        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 0
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes -1
 
-        # A baselined allocation that has become zero is a diagnoser that did not attach far more
-        # often than an engine that stopped allocating. That is a change of kind, and a floor is a
-        # statement about degree.
+        # A run whose MemoryDiagnoser did not attach has no Memory node at all (the script reads that
+        # as -1), which is a change of kind, and a floor is a statement about degree.
         $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
             -BaselinePath $Baseline -Threshold 1.25 -NoiseFloor 5 -AllocationNoiseFloor 5 -Job medium 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 1
         $report | Should -Match 'lost'
+    }
+
+    It 'reads a measured 0 B as an improvement, not a lost diagnoser' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 52
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 0
+
+        # BenchmarkDotNet writes a real zero as a Memory node with BytesAllocatedPerOperation 0
+        # (bench/baselines/.../2026-10-18-S63-bdn/...ManyInputsBenchmarks-report-full-compressed.json
+        # has 7 such rows); a diagnoser that did not run writes no Memory node. CaseBlindAlternation
+        # went 52 -> 0 B this way.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Threshold 1.25 -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $report | Should -Not -Match 'lost'
+        $report | Should -Match 'GREEN'
     }
 
     It 'fails a run for any allocation rise beyond the floor and the slack, not only one past -Threshold' {
