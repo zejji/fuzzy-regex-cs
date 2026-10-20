@@ -111,7 +111,8 @@ this port does not share, the performance gate and the known limitations.
   combinations. Each was fixed test first or settled by a recorded decision; `docs/KNOWN-DEFECTS.md`
   lists them. The stopping rule was two consecutive battery runs with no new root cause. Runs 9
   and 10 met it on 2026-10-18; run 11 then found D109, and 1.0 waited for its fix and a clean run
-  after it. <!-- pending: the clean run after the D109 and D111 merges --> The largest change was to partial matching, which now works to a
+  after it. Run 12, on the release engine, found no new defect: its one new finding was
+  settled by a recorded decision as by design (F108). The largest change was to partial matching, which now works to a
   written contract: a partial promises that more text may complete the match, and where some text
   does, a partial call never answers "no match". For one class of fuzzy pattern, set out in the
   release notes, the partial start is a bound: never later than where a completed text's match
