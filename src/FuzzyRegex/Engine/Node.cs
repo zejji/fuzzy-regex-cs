@@ -85,6 +85,14 @@ internal sealed class Node
     internal Body? BodyInfo;
 
     /// <summary>
+    /// NOT UPSTREAM (D104): for a positive lookaround, the first repeat of its body whose records
+    /// after a blocked end are keyed (<see cref="RepeatInfo.CutBodyKey"/>), whose key a record of
+    /// the lookaround's continuation borrows (<c>MatchState.ContinuationKeyOf</c>); -1 for none, and
+    /// for every other node. Set by <c>PatternObject.SetLookaroundBodies</c>.
+    /// </summary>
+    internal int ContinuationKeyRepeat = -1;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: for a node inside a lookaround body or condition test, the
     /// capture groups whose start or end the innermost such body can still reach from it: the groups
     /// a run-out at this node leaves unknown (<c>Matcher.MarkTheBodysCapturesUnknown</c>). A group

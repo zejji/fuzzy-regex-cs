@@ -399,9 +399,10 @@ internal enum Opcode : uint
     FailedStateMark = 106,
 
     /// <summary>
-    /// PROTOTYPE (D104-fast): the backtracking entry pushed where a positive lookaround's
-    /// continuation begins in a partial call's second pass, holding the id of its key in
-    /// <c>MatchState.ContinuationKeys</c>. Backtracking onto it means the continuation failed.
+    /// NOT UPSTREAM (D104): the backtracking entry pushed where a positive lookaround's
+    /// continuation begins in a partial call's second pass, holding its key and start
+    /// (<c>MatchState.ContinuationKeyOf</c>). Backtracking onto it means the continuation failed.
+    /// It never appears on a node or in a code list.
     /// </summary>
     ContinuationMark = 107,
 }

@@ -697,6 +697,13 @@ internal sealed class PatternObject
     internal bool KeepInSubmatch;
 
     /// <summary>
+    /// NOT UPSTREAM (D104): some positive lookaround of the pattern has a
+    /// <see cref="Node.ContinuationKeyRepeat"/>, so a partial call's second pass may record its
+    /// continuations (<c>MatchState.ContinuationKeyOf</c>). Set by <see cref="SetLookaroundBodies"/>.
+    /// </summary>
+    internal bool KeysContinuations;
+
+    /// <summary>
     /// Whether a search keeps the failure memos (<see cref="RepeatInfo.FailureMemo"/>) from one
     /// start position to the next. <b>This port's own field</b>, written by
     /// <c>Optimiser.KeepFailureMemosSound</c>: set when some repeat has a failure memo and the
@@ -1830,6 +1837,29 @@ internal sealed class PatternObject
             int[] sorted = [.. nodes];
             Array.Sort(sorted);
             test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
+
+            // NOT UPSTREAM (D104): see Node.ContinuationKeyRepeat. The repeats' keys are set by
+            // then (TailGuardLiveness.FindTailKeys, in the optimiser).
+            if (test.Op == Opcode.Lookaround && test.Match)
+            {
+                foreach (int i in sorted)
+                {
+                    Node n = pattern.NodeList[i];
+                    if (
+                        n.Op
+                            is Opcode.GreedyRepeat
+                                or Opcode.LazyRepeat
+                                or Opcode.GreedyRepeatOne
+                                or Opcode.LazyRepeatOne
+                        && pattern.RepeatInfoAt((int)n.Values[0]).CutBodyKey is { HasUnknownInside: false }
+                    )
+                    {
+                        test.ContinuationKeyRepeat = (int)n.Values[0];
+                        pattern.KeysContinuations = true;
+                        break;
+                    }
+                }
+            }
         }
 
         // A call is stepped over (D97): its return restores every capture, so it adds no group.

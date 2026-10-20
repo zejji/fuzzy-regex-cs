@@ -6162,7 +6162,6 @@ internal static class Matcher
 
         int frame = (int)mark - 1;
         bool blocked = state.WMarks[^1].Position > frame || HasWMarkAt(state, frame, WMarkKind.VerbTaint);
-        D104Proto.Tally(-3, blocked ? 1u : 2u, 0);
         PartialEvent blockedEvent =
             op == Opcode.Conditional ? PartialEvent.CutBlockedCondition : PartialEvent.CutBlockedLookaround;
 
@@ -6233,39 +6232,36 @@ internal static class Matcher
             return LookaroundEnd.Backtrack;
         }
 
-        // PROTOTYPE (D104-fast): the continuation memo. A continuation that failed under the same
-        // key fails again: a blocked end goes back into the body, an unblocked one cuts and fails
-        // as the dedup does.
-        int contId = -1;
-        if (op == Opcode.Lookaround && state.ContinuationKeyOf(look.Node, look.TextPos) is long[] contKey)
+        // NOT UPSTREAM (D104): the continuation memo (MatchState.ContinuationKeyOf). A
+        // continuation that failed under the same key fails again: a blocked end goes back into
+        // the body, an unblocked one cuts and fails as the dedup does.
+        bool keyed =
+            op == Opcode.Lookaround
+            && state.Bstack.ReadSizeBelow((int)mark - 1, out long parkedAt)
+            && state.ContinuationKeyOf(look.Node, look.TextPos, parkedAt - _lookaroundStateDataSize);
+        if (keyed && state.ContinuationFailed(look.TextPos))
         {
-            if (state.ContinuationFailed(contKey, look.TextPos))
+            // The cut path would have reached this blocked end and its continuation, so an entry
+            // pushed before now is about the instance too (blind review 2026-10-19, as the
+            // store-hit path in MatchState.IsGuardedAfterBlockedEnd).
+            state.NoteABlockedEnd();
+            if (blocked)
             {
-                // The cut path would have reached this blocked end and its continuation, so an entry
-                // pushed before now is about the instance too (blind review 2026-10-19, as the
-                // store-hit path in MatchState.IsGuardedAfterBlockedEnd).
-                state.NoteABlockedEnd();
-                if (blocked)
-                {
-                    TaintTheFrame(state, frame);
-                }
-                else
-                {
-                    CutBstack(state, (int)mark);
-                }
-
-                return LookaroundEnd.Backtrack;
+                TaintTheFrame(state, frame);
+            }
+            else
+            {
+                CutBstack(state, (int)mark);
             }
 
-            contId = state.ContinuationKeys.Count;
-            state.ContinuationKeys.Add([.. contKey]);
+            return LookaroundEnd.Backtrack;
         }
 
         if (!blocked)
         {
             // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
             RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
-            state.PendingContinuationId = contId;
+            state.ContinuationPending = keyed;
             return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
         }
 
@@ -6309,11 +6305,9 @@ internal static class Matcher
 
         /* bstack: sstack_bytes length section_frame call_base pstack_mark REOPEN */
 
-        if (contId >= 0)
+        if (keyed)
         {
-            state.Bstack.PushSize(look.TextPos);
-            state.Bstack.PushSize(contId);
-            state.Bstack.PushUInt8((byte)Opcode.ContinuationMark);
+            state.PushContinuationMark(look.TextPos);
         }
 
         Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
@@ -7565,6 +7559,37 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// <see cref="ReadConstructStart(MatchState, int, out Opcode, out int, out int, out int)"/>,
+    /// also saying whether the construct is a negative lookaround or a condition with a negative
+    /// test. <b>Not upstream</b> (D104).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <param name="op">Its opcode.</param>
+    /// <param name="textPos">Where it started.</param>
+    /// <param name="sliceStart">The slice start it parked.</param>
+    /// <param name="sliceEnd">The slice end it parked.</param>
+    /// <param name="negative">Whether its body's success fails it.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the mark promises.</returns>
+    internal static bool ReadConstructStart(
+        MatchState state,
+        int mark,
+        out Opcode op,
+        out int textPos,
+        out int sliceStart,
+        out int sliceEnd,
+        out bool negative
+    )
+    {
+        bool read = ReadPruningMark(state, mark, out op, out LookaroundStateData look);
+        textPos = look.TextPos;
+        sliceStart = look.SliceStart;
+        sliceEnd = look.SliceEnd;
+        negative = op is Opcode.Lookaround or Opcode.Conditional && look.Node is { Match: false };
+        return read;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, ledger entry 47: backtracking has reached a <c>(*PRUNE)</c> or
     /// <c>(*SKIP)</c> inside an unfinished atomic group or positive lookaround, so abandon everything
     /// back to the innermost enclosing negative lookaround, conditional test or attempt.
@@ -8578,11 +8603,7 @@ internal static class Matcher
     private static void CountFork(MatchState state)
     {
         Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass forks");
-        if (
-            ++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1)
-            && !state.ForkBudgetSpent
-            && !D104Proto.NoBudget
-        )
+        if (++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1) && !state.ForkBudgetSpent)
         {
             state.ForkBudgetSpent = true;
 
@@ -18216,16 +18237,13 @@ internal static class Matcher
                     }
 
                     break;
-                case Opcode.ContinuationMark: // PROTOTYPE (D104-fast): a lookaround's continuation failed.
-                {
-                    if (!state.Bstack.PopSize(out long contMarkId) || !state.Bstack.PopSize(out long contMarkPos))
+                case Opcode.ContinuationMark: // NOT UPSTREAM (D104): see MatchState.ContinuationKeyOf.
+                    if (!state.PopContinuationMark())
                     {
                         return MatchStatus.Illegal;
                     }
 
-                    state.RecordContinuationFailure((int)contMarkId, (int)contMarkPos);
                     break;
-                }
                 case Opcode.FailedStateMark: // NOT UPSTREAM (D94 performance): see StateKnownToFail.
                     state.FailedRepeatStates!.Add(state.MarkedStates[^1]);
                     state.MarkedStates.RemoveAt(state.MarkedStates.Count - 1);
@@ -20108,12 +20126,11 @@ internal static class Matcher
                 state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
             }
 
-            if (state.PendingContinuationId >= 0)
+            // D104: the continuation starts here, above the entry that undoes the lookaround.
+            if (state.ContinuationPending)
             {
-                state.Bstack.PushSize(endLookData.TextPos);
-                state.Bstack.PushSize(state.PendingContinuationId);
-                state.Bstack.PushUInt8((byte)Opcode.ContinuationMark);
-                state.PendingContinuationId = -1;
+                state.PushContinuationMark(endLookData.TextPos);
+                state.ContinuationPending = false;
             }
 
             /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */

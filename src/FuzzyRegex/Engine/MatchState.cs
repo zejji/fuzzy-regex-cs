@@ -1634,7 +1634,9 @@ internal sealed class MatchState : IDisposable
         }
 
         _tailKeyScratch = new long[MaxTailKeyLength(pattern)];
-        _cutBodyKey = new long[CutBodyKeyLength(pattern)];
+        _cutBodyBaseLength = CutBodyKeyLength(pattern);
+        _cutBodyKey = new long[_cutBodyBaseLength + (pattern.KeysContinuations ? 2 * pattern.TrueGroupCount : 0)];
+        _continuationKey = new long[pattern.KeysContinuations ? _cutBodyKey.Length : 0];
         _tailTextSpans = new long[_tailKeyScratch.Length == 0 ? 0 : pattern.TrueGroupCount];
         _tailTextValues = new long[_tailKeyScratch.Length == 0 ? 0 : pattern.TrueGroupCount];
 
@@ -1822,6 +1824,7 @@ internal sealed class MatchState : IDisposable
         CutBodyWrites = 0;
         CutBodyHits = 0;
         _cutBodyGuards.Clear();
+        ContinuationPending = false;
         BlockedEndMark = -1;
         Array.Clear(_tailKeyScratch);
         Array.Clear(_tailTextSpans);
@@ -2753,7 +2756,10 @@ internal sealed class MatchState : IDisposable
     /// Whether to leave the body guard lists of failure-memo repeats as they are. <b>Not
     /// upstream</b>; see <see cref="PatternObject.KeepsFailureMemosAcrossAttempts"/>.
     /// </param>
-    /// <param name="nextAttempt">PROTOTYPE (D104-fast): the reset between start positions of one pass.</param>
+    /// <param name="nextAttempt">
+    /// Whether this is the reset between two starts of one pass, which keeps the records written
+    /// after blocked ends. <b>Not upstream</b> (D104).
+    /// </param>
     internal void ResetGuards(bool keepFailureMemos = false, bool nextAttempt = false)
     {
         BlockedEndMark = -1;
@@ -2772,8 +2778,16 @@ internal sealed class MatchState : IDisposable
         }
 
         KeyedTailWrites = 0;
-        ContinuationKeys.Clear();
-        if (!(nextAttempt && D104Proto.Keep && !Pattern.KeepInSubmatch))
+        ContinuationPending = false;
+
+        // D104: the records after blocked ends stay for the whole pass. Each says that a subtree
+        // failed from a state its key holds in full, and a later start reaches that state with
+        // nothing else changed: the touch flag is in the key, the fork budget and the must-advance
+        // rule write no record, and the start itself is read by nothing a record covers. Kept, each
+        // state is proved once per pass rather than once per start, which made option G cubic on
+        // the register's witness. A \K can move the next start (and starts it touched), so a
+        // pattern with one empties the store as before.
+        if (!nextAttempt || Pattern.KeepInSubmatch)
         {
             CutBodyWrites = 0;
             CutBodyHits = 0;
@@ -3269,6 +3283,13 @@ internal sealed class MatchState : IDisposable
     /// <summary>NOT UPSTREAM (D104): where <see cref="CutBodyKeyOf"/> builds a key; empty when no repeat needs one.</summary>
     private readonly long[] _cutBodyKey;
 
+    /// <summary>
+    /// NOT UPSTREAM (D104): the length of a repeat's part of <see cref="_cutBodyKey"/>; past it, a
+    /// continuation key adds every group's span (<see cref="ContinuationKeyOf"/>), and a repeat's
+    /// key leaves zeros, so every key in the store has one length.
+    /// </summary>
+    private readonly int _cutBodyBaseLength;
+
     /// <summary>NOT UPSTREAM (D104): writes to <see cref="_cutBodyGuards"/> in this attempt, capped by <see cref="KeyedTailWriteCap"/>.</summary>
     internal long CutBodyWrites;
 
@@ -3314,8 +3335,7 @@ internal sealed class MatchState : IDisposable
     private bool RecordsAfterBlockedEnd(int index, uint guardType)
     {
         RepeatInfo info = Pattern.RepeatInfoAt(index);
-        return !D104Proto.NoG
-            && info.CutBodyKey is { HasUnknownInside: false }
+        return info.CutBodyKey is { HasUnknownInside: false }
             && (info.Status & guardType) != 0
             && !IsFuzzy
             && !Pattern.HasGroupCalls
@@ -3344,7 +3364,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>The key, in <see cref="_cutBodyKey"/>; <see langword="null"/> with too many constructs open.</returns>
-    /// <param name="dropFrames">PROTOTYPE (D104-fast): open frames on top to leave out.</param>
+    /// <param name="dropFrames">How many open frames on top to leave out: 1 for a continuation key, whose lookaround's own frame is still open.</param>
     private long[]? CutBodyKeyOf(int index, uint guardType, int textPos, int dropFrames = 0)
     {
         int frames = (Pstack.Count / sizeof(long)) - dropFrames;
@@ -3363,6 +3383,12 @@ internal sealed class MatchState : IDisposable
         int k = 4;
         for (int f = 0; f < frames; f++, k += 4)
         {
+            // A negative construct's blocked success backtracks into its body (the frame is
+            // tainted, Matcher.EndALookaroundInTheSecondPass), so below one, a continuation that
+            // "failed" may have succeeded for some text to come; whether it did depends on the
+            // w-marks above the frame, which the key does not hold. D90's rule applies there: no
+            // record (D113's second shape, `(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))` over 'a', match,
+            // was P(0, 1) for None once such a record cut the decided alternative).
             if (
                 !Matcher.ReadConstructStart(
                     this,
@@ -3370,8 +3396,9 @@ internal sealed class MatchState : IDisposable
                     out Opcode op,
                     out int start,
                     out int sliceStart,
-                    out int sliceEnd
-                )
+                    out int sliceEnd,
+                    out bool negative
+                ) || negative
             )
             {
                 return null;
@@ -3395,7 +3422,7 @@ internal sealed class MatchState : IDisposable
         TailGuardKeySpec spec = info.CutBodyKey!;
         if (spec.KeyLength > 0)
         {
-            Array.Copy(TailGuardKeyOf(spec, textPos), 0, key, key.Length - spec.KeyLength, spec.KeyLength);
+            Array.Copy(TailGuardKeyOf(spec, textPos), 0, key, _cutBodyBaseLength - spec.KeyLength, spec.KeyLength);
         }
 
         return key;
@@ -3414,7 +3441,6 @@ internal sealed class MatchState : IDisposable
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     internal void GuardRepeatAfterBlockedEnd(int index, int loPos, int hiPos, uint guardType)
     {
-        D104Proto.Tally(index, guardType, 2);
         if (
             CutBodyWrites >= KeyedTailWriteCap
             || !RecordsAfterBlockedEnd(index, guardType)
@@ -3425,8 +3451,6 @@ internal sealed class MatchState : IDisposable
         }
 
         CutBodyWrites++;
-        D104Proto.Write();
-        D104Proto.Tally(index, guardType, 3);
         if (_cutBodyGuards.ForWrite(key, mayAdd: _cutBodyGuards.Count < CutBodyKeyCap) is not GuardList list)
         {
             return;
@@ -3481,31 +3505,61 @@ internal sealed class MatchState : IDisposable
         // was None for P(0, 2) when GREEDY_REPEAT_ONE wrote its plain body guard from such hits).
         NoteABlockedEnd();
         CutBodyHits++;
-        D104Proto.Hit(_cutBodyGuards.Count);
-        D104Proto.Tally(index, guardType, 4);
         return true;
     }
 
-    /// <summary>PROTOTYPE (D104-fast): the id of a continuation an unblocked end begins, for the END_LOOKAROUND arm to mark.</summary>
-    internal int PendingContinuationId = -1;
-
-    /// <summary>PROTOTYPE (D104-fast): keys of continuations begun in this attempt, by id.</summary>
-    internal List<long[]> ContinuationKeys { get; } = [];
-
-    /// <summary>PROTOTYPE (D104-fast): lookaround node index to the repeat whose key spec it borrows (-1: none).</summary>
-    private Dictionary<int, int>? _contRepeat;
+    /// <summary>
+    /// NOT UPSTREAM (D104): an unblocked positive lookaround's continuation key waits in
+    /// <see cref="_continuationKey"/> for the END_LOOKAROUND arm to push its mark
+    /// (<see cref="PushContinuationMark"/>); see <see cref="ContinuationKeyOf"/>.
+    /// </summary>
+    internal bool ContinuationPending;
 
     /// <summary>
-    /// PROTOTYPE (D104-fast): the key of the continuation after positive lookaround
-    /// <paramref name="look"/> started at <paramref name="textPos"/>, or null where the memo is off.
-    /// The key borrows a repeat R inside the body: R's cut-body spec holds the groups live from R on,
-    /// through the construct's end, so every group the continuation reads; R's enclosing loops hold
-    /// the lookaround's. Only a lookaround with no construct open around it (frames 0 after its own).
+    /// NOT UPSTREAM (D104): the key <see cref="ContinuationKeyOf"/> built, kept apart from
+    /// <see cref="_cutBodyKey"/> because guard checks may build other keys before it is pushed;
+    /// empty when no lookaround of the pattern is keyed.
     /// </summary>
-    internal long[]? ContinuationKeyOf(Node look, int textPos)
+    private readonly long[] _continuationKey;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): builds the key of the continuation after positive lookaround
+    /// <paramref name="look"/>, started at <paramref name="textPos"/>, in
+    /// <see cref="_continuationKey"/>; see <see cref="_cutBodyGuards"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The continuation memo. In a partial call's second pass, each way a lookahead's body can end
+    /// at the end of the text (a run-out on one branch, a real success on another) runs the whole
+    /// continuation again, and the continuation holds every later lookahead, so where a capture of
+    /// the body is read later the search was exponential up to the fork budget, whose partial is
+    /// a phantom (D104: `(?:(?=(?:ab|a)*(b?)a?)a)+(?(1)c|d)` over 'a' * 9 + 'b' answered P(0, 10)
+    /// for P(10, 10)). Records inside the body cannot help there: a real success makes the
+    /// lookahead atomic and discards them. So the continuation itself is recorded: when
+    /// backtracking pops its <see cref="Opcode.ContinuationMark"/>, nothing after the lookaround
+    /// matched or ran out from the state the key holds, and a later arrival at the same lookaround
+    /// with the same key fails at once. A cut drops the mark, so a cut writes nothing.
+    /// </para>
+    /// <para>
+    /// The key holds everything the continuation reads: the position it resumes at; every group's
+    /// current span, exactly; and, built by <see cref="CutBodyKeyOf"/> for the first keyed repeat
+    /// of the body (<see cref="Node.ContinuationKeyRepeat"/>), whose enclosing loops include the
+    /// lookaround's, the touch flag and those loops' count, start and progress bit. The memo is off
+    /// where anything else could differ: under fuzzy matching, group calls, backtracking verbs and
+    /// <c>\K</c>; with a construct open around the lookaround; and with anything saved below its
+    /// parked state (<paramref name="savedBelow"/>), such as the parked start of a group open
+    /// around it, from which the continuation would capture.
+    /// </para>
+    /// </remarks>
+    /// <param name="look">The LOOKAROUND node.</param>
+    /// <param name="textPos">Where it started.</param>
+    /// <param name="savedBelow">How many bytes the save stack held below its parked state.</param>
+    /// <returns><see langword="false"/> where the memo is off.</returns>
+    internal bool ContinuationKeyOf(Node look, int textPos, long savedBelow)
     {
         if (
-            !D104Proto.Cont
+            look.ContinuationKeyRepeat < 0
+            || savedBelow != 0
             || IsFuzzy
             || PartialSide == PartialNone
             || Pattern.HasGroupCalls
@@ -3514,104 +3568,81 @@ internal sealed class MatchState : IDisposable
             || Pstack.Count != 2 * sizeof(long)
             || !Matcher.ReadConstructStart(this, (int)Pstack.SizeAt(0), out Opcode baseOp, out _, out _, out _)
             || baseOp != Opcode.Failure
+            || CutBodyKeyOf(look.ContinuationKeyRepeat, _continuationGuardType, textPos, dropFrames: 1)
+                is not long[] key
         )
         {
-            return null;
+            return false;
         }
 
-        _contRepeat ??= [];
-        if (!_contRepeat.TryGetValue(look.Index, out int r))
-        {
-            r = -1;
-            foreach (int i in look.BodyInfo?.Nodes ?? [])
-            {
-                Node n = Pattern.NodeList[i];
-                if (
-                    n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat or Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne
-                    && Pattern.RepeatInfoAt((int)n.Values[0]).CutBodyKey is { HasUnknownInside: false }
-                )
-                {
-                    r = (int)n.Values[0];
-                    break;
-                }
-            }
-
-            _contRepeat[look.Index] = r;
-        }
-
-        if (r < 0 || CutBodyKeyOf(r, 4, textPos, dropFrames: 1) is not long[] key)
-        {
-            return null;
-        }
-
-        // The spec borrowed from R holds the groups live at R, and a group the body writes after R
-        // and the continuation reads is not live at R, so every group's current capture is added
-        // too, exactly (a refinement of any liveness, so sound; it can only cost hits).
-        long[] full = new long[key.Length + (2 * Groups.Length)];
-        key.AsSpan().CopyTo(full);
-        full[0] = ~(long)look.Index;
-        for (int g = 0; g < Groups.Length; g++)
+        // The borrowed key's groups are the ones live at the repeat; a group the body writes after
+        // it and the continuation reads is not, so every group's span is added, exactly. A finer
+        // key than needed only costs hits.
+        key[0] = ~(long)look.Index;
+        int k = _cutBodyBaseLength;
+        for (int g = 0; g < Groups.Length; g++, k += 2)
         {
             GroupData group = Groups[g];
-            if (group.Current < 0)
-            {
-                full[key.Length + (2 * g)] = -1;
-                continue;
-            }
-
-            GroupSpan span = group.Captures[group.Current];
-            full[key.Length + (2 * g)] = span.Start;
-            full[key.Length + (2 * g) + 1] = span.End;
+            GroupSpan span = group.Current < 0 ? new GroupSpan(-1, -1) : group.Captures[group.Current];
+            key[k] = span.Start;
+            key[k + 1] = span.End;
         }
 
-        return full;
+        key.AsSpan().CopyTo(_continuationKey);
+        return true;
     }
 
-    /// <summary>PROTOTYPE (D104-fast): whether the continuation under <paramref name="key"/> failed before.</summary>
-    internal bool ContinuationFailed(long[] key, int textPos)
+    /// <summary>
+    /// NOT UPSTREAM (D104): the guard type a continuation key carries, so that it can equal no
+    /// repeat's key (<see cref="NodeStatus.Body"/> and <see cref="NodeStatus.Tail"/> are the others).
+    /// </summary>
+    private const uint _continuationGuardType = 4;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): whether the continuation keyed by <see cref="ContinuationKeyOf"/>
+    /// failed before from <paramref name="textPos"/>.
+    /// </summary>
+    /// <param name="textPos">Where the lookaround started.</param>
+    /// <returns><see langword="true"/> if it did.</returns>
+    internal bool ContinuationFailed(int textPos) =>
+        _cutBodyGuards.Count != 0 && _cutBodyGuards.Find(_continuationKey) is GuardList list && list.IsGuarded(textPos);
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): pushes the mark whose pop records that the continuation keyed by
+    /// <see cref="ContinuationKeyOf"/> failed from <paramref name="textPos"/>.
+    /// </summary>
+    /// <remarks>The key rides the byte stack with the mark, so a continuation allocates nothing.</remarks>
+    /// <param name="textPos">Where the lookaround started.</param>
+    internal void PushContinuationMark(int textPos)
     {
-        bool failed =
-            _cutBodyGuards.Count != 0 && _cutBodyGuards.Find(key) is GuardList list && list.IsGuarded(textPos);
-        D104Proto.Tally(-1, 4, failed ? 4 : 1);
-        return failed;
+        Bstack.PushBlock(MemoryMarshal.AsBytes(_continuationKey.AsSpan()));
+        Bstack.PushSize(textPos);
+        Bstack.PushUInt8((byte)Opcode.ContinuationMark);
     }
 
-    /// <summary>PROTOTYPE (D104-fast): records that the continuation under key <paramref name="id"/> failed.</summary>
-    internal void RecordContinuationFailure(int id, int textPos)
+    /// <summary>
+    /// NOT UPSTREAM (D104): the <see cref="Opcode.ContinuationMark"/> arm: the continuation
+    /// failed, so it is recorded under its key. A write past the key cap is skipped, which only
+    /// loses pruning.
+    /// </summary>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopContinuationMark()
     {
-        long[] key = ContinuationKeys[id];
-        if (_cutBodyGuards.ForWrite(key, mayAdd: _cutBodyGuards.Count < CutBodyKeyCap) is GuardList list)
+        if (!Bstack.PopSize(out long textPos) || !Bstack.PopBlock(MemoryMarshal.AsBytes(_continuationKey.AsSpan())))
         {
-            list.Guard(textPos, true);
-            D104Proto.Tally(-1, 4, 3);
-        }
-    }
-
-    /// <summary>PROTOTYPE (D104-fast): counts an arrival at a recording repeat and its distinct (key, position).</summary>
-    private void CountArrival(int index, int textPos, uint guardType)
-    {
-        if (PartialSide == PartialNone)
-        {
-            return;
+            return false;
         }
 
-        D104Proto.Tally(index, guardType, 0);
-        if (D104Proto.Infos.Count < 64 && !D104Proto.Infos.ContainsKey(index))
+        if (
+            CutBodyWrites < KeyedTailWriteCap
+            && _cutBodyGuards.ForWrite(_continuationKey, mayAdd: _cutBodyGuards.Count < CutBodyKeyCap) is GuardList list
+        )
         {
-            RepeatInfo ri = Pattern.RepeatInfoAt(index);
-            D104Proto.Infos[index] =
-                $"status={ri.Status} cut={ri.InsideACutBody} countFree={ri.CountFreeBody} bodyKT={ri.BodyHoldsKeyedTail} memo={ri.FailureMemo} cutKey={(ri.CutBodyKey is null ? "null" : $"len{ri.CutBodyKey.KeyLength},unk{ri.CutBodyKey.HasUnknownInside},pos{ri.CutBodyKey.DependsOnPosition}")} tailKey={(ri.TailKey is null ? "null" : $"len{ri.TailKey.KeyLength},unk{ri.TailKey.HasUnknownInside}")} loops={string.Join(' ', ri.EnclosingLoops)}";
-        }
-        if (!RecordsAfterBlockedEnd(index, guardType))
-        {
-            return;
+            CutBodyWrites++;
+            list.Guard((int)textPos, true);
         }
 
-        D104Proto.Tally(index, guardType, 1);
-
-        D104Proto.Arrive(
-            CutBodyKeyOf(index, guardType, textPos) is long[] key ? string.Join(',', key) + "@" + textPos : null
-        );
+        return true;
     }
 
     /// <summary>
@@ -3705,16 +3736,6 @@ internal sealed class MatchState : IDisposable
         }
 
         WorkCounter.GuardChecked();
-        if (D104Proto.States)
-        {
-            CountArrival(index, textPos, guardType);
-        }
-
-        if (D104Proto.NoGuards)
-        {
-            return false;
-        }
-
         bool guarded =
             (ActiveGuardList(index, guardType, textPos, write: false)?.IsGuarded(textPos) ?? false)
             || IsGuardedAfterBlockedEnd(index, textPos, guardType, out _);
@@ -3742,16 +3763,6 @@ internal sealed class MatchState : IDisposable
         }
 
         WorkCounter.GuardChecked();
-        if (D104Proto.States)
-        {
-            CountArrival(index, textPos, guardType);
-        }
-
-        if (D104Proto.NoGuards)
-        {
-            return false;
-        }
-
         bool guarded =
             ActiveGuardList(index, guardType, textPos, write: false) is GuardList list
             && list.TryGetSpan(textPos, out span)
