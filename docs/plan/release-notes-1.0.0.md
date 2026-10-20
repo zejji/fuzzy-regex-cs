@@ -2,7 +2,8 @@
   Draft of the GitHub release text for v1.0.0, for the owner's review. Generated from
   docs/DIVERGENCES.md (every SHIPPED row) and docs/plan/upstream-reports/LEDGER.md, as
   docs/plan/RELEASE.md step 3 requires, plus the S63 gate record, docs/KNOWN-DEFECTS.md and
-  DECISIONS.md. Paste everything below the second rule into the release form.
+  DECISIONS.md. The release workflow (.github/workflows/release.yml) publishes everything after
+  the first line that is exactly `---` as the GitHub release text, so this comment stays out.
 
   The divergence links point at line numbers of DIVERGENCES.md in the v1.0.0 tag. If that file
   changes before the tag is made, re-check every link (the row lines are 25-31, 37-51, 57-138
