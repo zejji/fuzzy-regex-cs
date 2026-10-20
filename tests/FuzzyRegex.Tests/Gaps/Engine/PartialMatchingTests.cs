@@ -1102,6 +1102,40 @@ public sealed class PartialMatchingTests
         }
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer. Ledger entry 5: the verb moves
+    // the slice bound and the partial pass starts from it.
+    [Test]
+    public void A_skip_after_a_folded_list_member_does_not_move_where_the_partial_search_starts()
+    {
+        // Minimised from the scheduled oracle's seed 20261020 row 7797, `(?fi)(?:\L<words>)(*SKIP)b|c`
+        // over 'a' + U+1F600 with ten words. Measured 2026-10-20 on regex 2026.9.10, words=['U+1F600']:
+        //
+        //   search('(?fi)(?:\L<words>)(*SKIP)b|c', 'a😀', partial=True)   (2, 2)   upstream
+        //   ... spelt (*PRUNE), which moves no bound                              (1, 2)   upstream, this port
+        //   ... with 'b' appended, the completion                                 (1, 3)
+        //
+        // A match from 1 exists ('a', then the emoji, then 'b'), so a partial at 2 is later than a
+        // completion's start. Without (?fi) both verbs give (1, 2) on upstream too.
+        Dictionary<string, IReadOnlyCollection<string>> lists = new(StringComparer.Ordinal) { ["words"] = ["😀"] };
+        const string Subject = "a😀";
+
+        foreach (string verb in new[] { "(*SKIP)", "(*PRUNE)" })
+        {
+            Match m = new FuzzyRegex(@"(?fi)(?:\L<words>)" + verb + "b|c", FuzzyRegexOptions.Version0, lists).Match(
+                Subject,
+                partial: true
+            );
+
+            m.PartialMatch.Should().BeTrue(verb);
+            (m.Index, m.Length).Should().Be((1, 2), verb);
+        }
+
+        new FuzzyRegex(@"(?fi)(?:\L<words>)(*SKIP)b|c", FuzzyRegexOptions.Version0, lists)
+            .Match(Subject + "b")
+            .Index.Should()
+            .Be(1);
+    }
+
     [Test]
     [Arguments("(?e)")]
     [Arguments("(?b)")]
