@@ -1451,6 +1451,31 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with the BESTMATCH and ENHANCEMATCH budget bounding every
+    /// body, as upstream's does (the D102 and D109 fixes switched off).
+    /// </summary>
+    /// <remarks>
+    /// <c>PatternObject.BoundsReachDecidingBodies</c> keeps the budget in force inside lookarounds,
+    /// conditional tests and atomic groups. The <c>ranked-budget-steered-a-commitment-by-ablation</c>
+    /// entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fixes, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheBudgetInEveryBody(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.BoundsReachDecidingBodies = true,
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with each negative condition's yes branch skipped past
     /// every branch at its start, as upstream's optimiser skips it (the D55 fix switched off).
     /// </summary>

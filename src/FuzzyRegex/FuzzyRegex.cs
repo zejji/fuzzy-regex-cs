@@ -285,6 +285,13 @@ public sealed class FuzzyRegex
     /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#compile-budget">the comparison page</see>.
     /// </para>
     /// <para>
+    /// <b>A pattern nested more than 500 levels deep is refused</b> with
+    /// <see cref="FuzzyRegexParseException"/>, counting groups and sets, and so is a shallower one
+    /// that runs the compiling thread out of stack. Upstream stops at 140 to 330 levels with
+    /// Python's <c>RecursionError</c>. See the "Nesting limit" row of <c>docs/DIVERGENCES.md</c>.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#nesting-limit">the comparison page</see>.
+    /// </para>
+    /// <para>
     /// <b>The "unused keyword argument" message interpolates the name as written</b>: a named list
     /// called <c>é</c> that the pattern never uses is reported as <c>'é'</c>, where upstream prints
     /// <c>'\xe9'</c>. See
@@ -453,26 +460,37 @@ public sealed class FuzzyRegex
         Pattern = pattern;
         MatchTimeout = matchTimeout;
         MaxCompiledNodes = maxCompiledNodes;
-        _compiled = Parsing.PatternCompiler.Compile(
-            pattern,
-            (int)options,
-            ToCompilerNamedLists(namedLists),
-            defaultVersion,
-            upstreamReverseGrapheme,
-            upstreamFoldedRuns,
-            upstreamWholePatternCall,
-            upstreamCallFeatures,
-            upstreamFuzzyConditionTest,
-            upstreamCallCopies
-        );
+        try
+        {
+            _compiled = Parsing.PatternCompiler.Compile(
+                pattern,
+                (int)options,
+                ToCompilerNamedLists(namedLists),
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies
+            );
 
-        // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
-        // the last thing that can reject a pattern - it refuses code the parser was happy to emit
-        // (upstream/src/_regex.c:25863). Building here rather than at first match keeps that
-        // rejection where the caller expects it, and where upstream puts it. The pattern text goes
-        // with it because the compile budget's refusal is a parse failure and carries the pattern,
-        // and CompiledPattern - the compile-parity seam - deliberately does not hold it.
-        PatternObject = Engine.PatternObject.Compile(_compiled, pattern, maxCompiledNodes);
+            // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler
+            // is the last thing that can reject a pattern - it refuses code the parser was happy to
+            // emit (upstream/src/_regex.c:25863). Building here rather than at first match keeps
+            // that rejection where the caller expects it, and where upstream puts it. The pattern
+            // text goes with it because the compile budget's refusal is a parse failure and
+            // carries the pattern, and CompiledPattern - the compile-parity seam - deliberately
+            // does not hold it.
+            PatternObject = Engine.PatternObject.Compile(_compiled, pattern, maxCompiledNodes);
+        }
+        catch (InsufficientExecutionStackException outOfStack)
+        {
+            // D110: the passes that recurse over the pattern check the stack they have left, and a
+            // stack overflow cannot be caught, so running out is reported as a pattern too deep.
+            throw new FuzzyRegexParseException(pattern, outOfStack);
+        }
+        PatternObject.UpstreamReverseGrapheme = upstreamReverseGrapheme;
 
         TimeoutTicks = ToTicks(matchTimeout);
 

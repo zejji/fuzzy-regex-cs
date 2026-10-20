@@ -14,8 +14,10 @@ yours to change. Edit only `README.md`, `docs/COMPARISON.md`, `CHANGELOG.md`, an
 
 1. `docs/DIVERGENCES.md`: every deliberate difference from Python's `regex` module, with a Status
    column. Document only rows whose Status is SHIPPED. A PLANNED row is not yet true of the code.
-2. `src/FuzzyRegex/PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`: the exact public surface.
-   A member not listed there does not exist; do not invent one.
+2. `src/FuzzyRegex/PublicAPI.Shipped.txt` (the released 1.0.0 surface) and
+   `PublicAPI.Unshipped.txt` (changes since): together, the exact public surface. A member not
+   listed in either does not exist, and one marked `*REMOVED*` in Unshipped is gone; do not invent
+   one.
 3. The XML doc comments in `src/FuzzyRegex/*.cs` for a member's meaning.
 4. `upstream/` holds the Python source being ported, for the Python side of any comparison.
 

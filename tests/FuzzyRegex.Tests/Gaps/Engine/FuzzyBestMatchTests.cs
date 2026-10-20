@@ -616,53 +616,9 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
-    public void Bestmatch_keeps_a_partial_that_upstreams_own_search_loses_beside_a_skip()
-    {
-        // UPSTREAM BUG, found by S43's composed `interactions` wave - five rows of a 6000-row
-        // three-seed default wave are this family. The judgement needs no second engine, and on
-        // THIS shape it takes the strongest form available: upstream contradicts itself on the same
-        // compiled pattern, flag still on.
-        //
-        //   regex.compile(r'(?b)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)').search('ab.', partial=True)
-        //     -> None
-        //   ...the same object....................................match('ab.', 2, partial=True)
-        //     -> (2, 3) partial
-        //
-        // A search that finds nothing where its own anchored match finds something is wrong however
-        // the ranking rule is defined: BESTMATCH chooses among the matches that exist, it does not
-        // remove them. THAT FORM DOES NOT HOLD ON ALL FIVE WAVE ROWS - on three of them upstream
-        // finds nothing from any door with the flag on, so only the weaker argument below applies
-        // to those; see the probe's docstring, which keeps the two apart. Said the weaker way,
-        // deleting `(?b)` gives upstream a match it refused with `(?b)` present - and THAT is the
-        // answer this port gives:
-        //
-        //   regex.compile(r'(?:ab){e<=1}(?:\S(*SKIP)\w|\W)').search('ab.', partial=True)
-        //     -> (0, 3) partial, counts (0, 0, 0)
-        //
-        // Four conditions, each necessary on this shape. The BESTMATCH flag, where `(?e)` in its
-        // place keeps the match. The fuzzy section. The backtracking verb. And the partial. The
-        // faulting function is `do_best_fuzzy_match` at upstream/src/_regex.c line 17584, though the
-        // exact line inside it is not pinned, and Phase 6's upstream report owns finishing that.
-        // Re-runnable as `python tools/probes/upstream-bestmatch-loses-a-partial.py`.
-        Match best = new FuzzyRegex(@"(?b)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)").Match("ab.", partial: true);
-
-        best.Success.Should().BeTrue("upstream's own anchored match finds this and its search does not");
-        (best.Index, best.Length).Should().Be((0, 3));
-        best.PartialMatch.Should().BeTrue();
-        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        // The same pattern without `(?b)`, which upstream and this port agree on, and which is what
-        // makes the answer above upstream's own rather than this port's invention.
-        Match plain = new FuzzyRegex(@"(?:ab){e<=1}(?:\S(*SKIP)\w|\W)").Match("ab.", partial: true);
-
-        (plain.Index, plain.Length).Should().Be((0, 3));
-        plain.PartialMatch.Should().BeTrue();
-    }
-
-    [Test]
     public void Bestmatch_without_the_verb_keeps_its_match_on_both_engines()
     {
-        // The negative control for the test above, and the reason the entry names `(*SKIP)` as a
+        // The verb-free twin of a row D109 now refuses, and the reason the entry named `(*SKIP)` as a
         // condition rather than describing `(?b)` with partial matching in general. Upstream keeps
         // this one:
         //   regex.compile(r'(?b)(?:ab){e<=1}(?:\S\w|\W)').search('ab.', partial=True)
@@ -676,217 +632,15 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
-    public void Bestmatch_looks_past_the_candidate_whose_own_skip_moved_the_slice()
-    {
-        // INHERITED BUG, FIXED HERE - ledger entry 5's sixth door, and the first one that is neither
-        // a scan nor a two-pass partial. `(*SKIP)` assigns `slice_start` mid-attempt
-        // (upstream/src/_regex.c:14555) and nothing puts it back, and `do_best_fuzzy_match`'s walk
-        // guard at `:17625` - which holds `start_pos` between `state->slice_start` and
-        // `state->slice_end` - reads the moved bound on its next turn. `start_pos` is the match this
-        // candidate found, so a verb that consumed anything leaves `slice_start` ABOVE it and the
-        // walk ends on its first successful candidate.
-        //
-        // Measured 2026-09-14 on regex 2026.9.10, `python
-        // tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py`; this port answered the same
-        // until this slice:
-        //
-        //   (?b)(?:a(*SKIP)b){e<=1}   'axab'  search    (0, 2) one substitution   <- upstream, and
-        //                                                                            this port before
-        //   ...the same compiled pattern............... match(2)  (2, 4) NO errors
-        //   (*PRUNE) in its place...................... search    (2, 4) NO errors
-        //   the verb deleted........................... search    (2, 4) NO errors
-        //
-        // WHAT JUDGES IT IS THE VERB'S OWN DEFINITION, not a preference between two rankings.
-        // `(*SKIP)` sets a skip point: a later attempt must not start BELOW it (pcre2pattern,
-        // "Verbs that act after backtracking"). Here the skip point is 1 and the candidate the walk
-        // never reaches starts at 2, which the verb permits outright. And `(?b)` promises the match
-        // with the fewest errors among those that exist, so a zero-error match its own anchored door
-        // finds settles it without a second engine - which is as well, because PCRE2 has no fuzzy
-        // matching at all (tools/probes/pcre2-has-no-fuzzy-matching.py).
-        //
-        // `(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so the last
-        // two lines are what make the moved bound the cause rather than the pattern's meaning.
-        Match best = new FuzzyRegex("(?b)(?:a(*SKIP)b){e<=1}").Match("axab");
-
-        best.Success.Should().BeTrue();
-        (best.Index, best.Index + best.Length).Should().Be((2, 4));
-        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        // The same pattern's own anchored door, which is the self-refutation stated as a test: it
-        // found this answer before the fix as well, which is why the search could be called wrong
-        // without appealing to upstream at all.
-        Match anchored = new FuzzyRegex("(?b)(?:a(*SKIP)b){e<=1}").MatchAtStart("axab", beginning: 2);
-
-        (anchored.Index, anchored.Index + anchored.Length).Should().Be((2, 4));
-        anchored.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
-    [Test]
-    [Arguments(@"x(*SKIP)(?:ba+){e<=1}", FuzzyRegexOptions.BestMatch, "xbaabbbx", false, 0, 4)]
-    [Arguments(
-        @"a(*SKIP)a+(?<=b?)(?:a+){i<=1,d<=1}",
-        FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Word,
-        "aaaax",
-        false,
-        0,
-        4
-    )]
-    [Arguments(@"\w(*SKIP)(?:[ab]a+){s<=1}", FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Word, "aaax", true, 0, 3)]
-    public void Bestmatch_finds_the_exact_fit_at_the_start_a_skip_already_passed(
-        string pattern,
-        FuzzyRegexOptions options,
-        string subject,
-        bool search,
-        int start,
-        int end
-    )
-    {
-        // PORT RIGHT, KNOWN DEFECT D56: the fix above on three complete-matrix rows (5849, 8589 and
-        // 8595, 2026-09-30) where the candidate the walk loses starts at the SAME position as the
-        // one it found, with the flag set by the option bit rather than inline. The first candidate
-        // runs the verb and leaves `slice_start` past its own start, so the walk guard
-        // (upstream/src/_regex.c:17625) ends the walk and upstream keeps the first, costlier fit.
-        //
-        // Measured 2026-10-01 on regex 2026.9.10, `x(*SKIP)(?:ba+){e<=1}` matched over 'xbaabbbx':
-        //
-        //   (?b)                    (0, 5) one substitution at 4   <- upstream
-        //   (?b), (*PRUNE)          (0, 4) no errors               <- this port
-        //   (?b), verb deleted      (0, 4) no errors
-        //   no (?b), either verb    (0, 5) one substitution        <- both engines
-        //
-        // Without `(?b)` the two verbs agree, so the pruning is not what moves the answer; with it,
-        // only `(*SKIP)` (which moves the bound) loses the exact fit. The other two rows measure the
-        // same way. Classified as `bestmatch-walk-truncated-by-a-skip`.
-        var regex = new FuzzyRegex(pattern, options);
-        Match best = search ? regex.Match(subject) : regex.MatchAtStart(subject);
-
-        best.Success.Should().BeTrue();
-        (best.Index, best.Index + best.Length).Should().Be((start, end));
-        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        // The near variant: the same verb with no bound to move gives the same exact fit.
-        var pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options);
-        Match prunedBest = search ? pruned.Match(subject) : pruned.MatchAtStart(subject);
-        (prunedBest.Index, prunedBest.Index + prunedBest.Length).Should().Be((start, end));
-        prunedBest.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
-    [Test]
     public void Without_bestmatch_a_skip_before_a_fuzzy_repeat_keeps_the_first_fit()
     {
-        // The control for the test above: with no `(?b)` there is no walk, and this port answers
+        // With no `(?b)` there is no walk (D109 refuses the flag with a verb), and this port answers
         // the plain first match upstream answers, (0, 5) with a substitution at 4 (measured
         // 2026-10-01 on regex 2026.9.10). So the exact fit above is BESTMATCH's doing.
         Match plain = new FuzzyRegex(@"x(*SKIP)(?:ba+){e<=1}").MatchAtStart("xbaabbbx");
 
         (plain.Index, plain.Index + plain.Length).Should().Be((0, 5));
         plain.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-    }
-
-    [Test]
-    public void Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives()
-    {
-        // THE NEGATIVE CONTROL for the fix above. The restore is once PER CANDIDATE and it restores
-        // the SLICE ONLY, so a `(*SKIP)` inside a candidate's attempt must still do what the verb is
-        // for - cut the backtracking. This row is one where the pruning decides the answer and the
-        // moved bound does not, so a fix that had reached too far would move it and the fix as
-        // written must not.
-        //
-        // Upstream, regex 2026.9.10, measured 2026-09-14 - and the row is upstream's OWN answer, so
-        // it is not a divergence and no `ExpectedDivergences` entry classifies it:
-        //
-        //   (?b)(?:\w(*SKIP)a|a){e<=1}   over 'axab'   (1, 3) no errors
-        //   (*PRUNE) in its place .....................  (1, 3) no errors
-        //   the verb deleted ..........................  (0, 1) no errors
-        //
-        // Both verbs agree, so the bound the `(*SKIP)` moves changes nothing here; deleting the verb
-        // changes the answer, so the PRUNING is what decides it. The attempt at 0 takes `\w` = 'a',
-        // the verb commits, the 'a' it then needs is 'x', and the `|a` alternative it would have
-        // backtracked into is cut - so 0 can only answer by substituting, and the walk finds the
-        // perfect match at 1. Position 0 is NOT barren, and the doors say so on both engines:
-        //
-        //   match at 0  (0, 2) one substitution      match at 2  (2, 4) one substitution
-        //   match at 1  (1, 3) NO errors             match at 3  (3, 4) one deletion
-        //
-        // With the verb deleted, 0 answers (0, 1) with no errors and wins on being earliest, which
-        // is the whole of the difference this test pins.
-        //
-        // It also exercises the walk more than once, which the test above does not: the fix is in
-        // `DoBestFuzzyMatch` and `DoMatch2` reaches that only for a fuzzy pattern with `BESTMATCH`
-        // set (Matcher.cs, the `RegexFlags.BestMatch` arm), so a control without `(?b)` would be
-        // routed to `DoSimpleFuzzyMatch` and would pin nothing about this fix.
-        Match pruned = new FuzzyRegex(@"(?b)(?:\w(*SKIP)a|a){e<=1}").Match("axab");
-
-        (pruned.Index, pruned.Index + pruned.Length).Should().Be((1, 3));
-        pruned.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        // The verb deleted, which is what says the pruning and not the ranking is doing the work.
-        Match gone = new FuzzyRegex(@"(?b)(?:\wa|a){e<=1}").Match("axab");
-
-        (gone.Index, gone.Index + gone.Length).Should().Be((0, 1));
-        gone.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
-    /// <summary>
-    /// The minimisation of seed 7 row 76160, the eighth row of
-    /// <c>bestmatch-walk-truncated-by-a-skip</c>: a <c>(*SKIP)</c> in the branch that matched costs
-    /// upstream the PERFECT alternative beside it, and this port keeps it.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The drawn row is a 100-character pattern whose <c>(*PRUNE)</c> door never opens - 3,092
-    /// seconds on 2026-09-21 and then <c>MemoryError</c> - so S57b ran the gate's own comparer over
-    /// every one-edit shortening of it, keeping any that still diverged, until nothing smaller did.
-    /// What is left is nineteen characters, and every control on it answers in milliseconds.
-    /// </para>
-    /// <para>
-    /// Measured 2026-09-21 on regex 2026.9.10 by
-    /// <c>python tools/probes/s57b-bestmatch-walk-row76160.py</c>:
-    /// </para>
-    /// <code>
-    /// as drawn             split ['', 'ß', '', None, '']   search (0, 1) ONE substitution   &lt;- upstream
-    /// (*SKIP) -> (*PRUNE)  split ['', None, 'ß', None, '']  search (0, 0) NO errors          &lt;- ours
-    /// the verb deleted     the same as (*PRUNE)
-    /// no (?b), all three   split ['', 'ß', '', '', '']      search (0, 1) ONE substitution
-    /// </code>
-    /// The last line is what classifies it. With <c>(?b)</c> gone the three spellings agree, so the
-    /// verb's pruning decides nothing; with <c>(?b)</c> present they part company, and the
-    /// candidate upstream loses costs no errors at all where the one it keeps costs one.
-    /// </remarks>
-    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
-    [Test]
-    public void Bestmatch_keeps_the_perfect_alternative_a_skip_moved_the_slice_past()
-    {
-        const string pattern = "(?b:(}){e}(*SKIP)|)";
-        const string subject = "ß";
-        const FuzzyRegexOptions drawn =
-            FuzzyRegexOptions.Posix | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase;
-
-        FuzzyRegex skip = new(pattern, drawn);
-
-        skip.Split(subject).Should().Equal("", null, subject, null, "");
-
-        Match m = skip.Match(subject);
-
-        (m.Index, m.Length).Should().Be((0, 0));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-
-        // The control: `(*PRUNE)` prunes the same backtracking and moves no bound, and upstream
-        // itself answers this port's split with it.
-        new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), drawn)
-            .Split(subject)
-            .Should()
-            .Equal("", null, subject, null, "");
-
-        // And the drawn row, which this port answers the verb-free way where upstream spends a
-        // substitution: upstream's own verb-deleted spelling gives these four parts.
-        FuzzyRegex drawnRow = new(
-            @"(?b)(?:(?:[^\p{L}]{0,1}(?:ß){e<=1}){e<=2,s<=1}(*SKIP).|[a-f])"
-                + @"(?:(?P<g1>[a\d]*?)([\w\s])[^a-f]){s<=1,i<=1,d<=1}\b",
-            drawn
-        );
-
-        drawnRow.Split("\rﬀıİAﬀß").Should().Equal("\rﬀıİ", "", "ﬀ", "");
     }
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
@@ -1016,6 +770,41 @@ public sealed class FuzzyBestMatchTests
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 11));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 7, 0), "upstream answers no match at all");
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
+    // Ledger entry 12 through a ligature: under full folding 'fi' is also ﬁ, and only the ligature
+    // pairs (fi, fl, st) show it. Minimised from the scheduled oracle's seed 20261019 row 45883,
+    // `(?b)(?fi)(?r)(?:field kelvin fine){e<=7}` over 'dFIeLdwkelvIN fINEba', where upstream
+    // answers six errors and the port four. Upstream, regex 2026.9.10, measured 2026-10-19:
+    //
+    //   regex.fullmatch(r'(?b)(?fi)(?r)(?:fi){e<=7}', ' fba')  ->  (0, 4) counts=(2, 2, 0)
+    //   regex.fullmatch(r'(?b)(?fi)(?:fi){e<=7}', ' fba')      ->  (0, 4) counts=(1, 2, 0)
+    //   regex.fullmatch(r'(?b)(?i)(?r)(?:fi){e<=7}', ' fba')   ->  (0, 4) counts=(1, 2, 0)
+    //
+    // Three errors is the least: two insertions for the length, and no 'i' to match. The control
+    // puts upstream's doubled term back and gets its four.
+    [Test]
+    public void Bestmatch_reversed_under_full_folding_keeps_the_three_error_fit()
+    {
+        const string Pattern = "(?b)(?fi)(?r)(?:fi){e<=7}";
+
+        Match m = new FuzzyRegex(Pattern).FullMatch(" fba");
+
+        (m.Index, m.Index + m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 2, 0), "upstream answers (2, 2, 0)");
+
+        FuzzyRegex doubled = new(Pattern);
+        doubled.PatternObject.DoubleCountTrailingInsertions = true;
+
+        doubled.FullMatch(" fba").FuzzyCounts.Should().Be(new FuzzyCounts(2, 2, 0), "upstream's doubled guard");
+
+        // Without (?b) the first fit found is kept, and both engines find the four-error one first.
+        new FuzzyRegex("(?fi)(?r)(?:fi){e<=7}")
+            .FullMatch(" fba")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(2, 2, 0));
     }
 
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
@@ -1223,26 +1012,6 @@ public sealed class FuzzyBestMatchTests
         state.TotalErrors.Should().Be(state.FuzzyCounts.Sum());
     }
 
-    // Oracle row 3752, generator `interactions`, seed 20260923. This test is for termination: the
-    // port did not finish. Upstream answers ['', '\r\n𝔘𝔘𝔘\rAa'] only because its `(*SKIP)` leaves
-    // a stale slice that ends the scan after one match (ledger 5); with `(*PRUNE)` in its place, or
-    // the verb deleted, upstream hangs as well. The expected parts are upstream's own scan taken
-    // one search at a time: (0, 1), then search(s, 1) gives (3, 4) with no errors, then nothing.
-    // Measured on regex 2026.9.10, 2026-09-23, tools/probes/upstream-skip-carried-slice-doors.py.
-    [Test]
-    public void Bestmatch_split_over_a_rejected_fuzzy_section_finishes()
-    {
-        var pattern = new FuzzyRegex(
-            "(?b)\\b\\K(?:(?:\U0001d7eea(?:[[:alpha:]]+?){s<=1:\\W}){s<=1,i<=1,d<=1}(*SKIP)\\S|\\S)",
-            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.FullCase,
-            TimeSpan.FromSeconds(2)
-        );
-
-        string?[] parts = pattern.Split("\U0001d7ee\r\n\U0001d518\U0001d518\U0001d518\rAa");
-
-        parts.Should().Equal("", "\r\n", "\U0001d518\U0001d518\rAa");
-    }
-
     // S42-2G, tools/controls.json: the whole-match cost bound on END_FUZZY's trailing-insertion
     // retry ('Matcher.cs', the third test beside the 'ponytail:' note). Found by a blind review's
     // 686-candidate sweep of the '(?1)$' self-recursive-call family (2026-09-28); this is the
@@ -1262,72 +1031,6 @@ public sealed class FuzzyBestMatchTests
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((1, 3));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-    }
-
-    // Known defect D45, the rest of ledger entry 32. A lookaround or atomic group whose body is
-    // thrown away throws away its fuzzy section too: the counts went back, but the running total the
-    // section's END_FUZZY wrote stayed, and BESTMATCH and ENHANCEMATCH rank by that total. Over 'c',
-    // `(?!(?:q){e<=1})` fails with one error spent and the empty branch's (0, 0) was ranked by that
-    // stale total; over 'abcxx' a (*SKIP) throws the atomic group's body away and the exact 'b' at 1
-    // lost to a one-error (0, 4). With PatternObject.KeepDiscardedTotals set, the two rows answer
-    // (0, 0) and (0, 4) (measured 2026-10-03). A CONDITION's test is thrown away when its branch
-    // fails and the match backtracks out of the whole conditional: `(?(?!(?:q){e<=1})|y)` and its
-    // positive twin `(?(?=(?:q){e<=1})y|)` over 'c' spend one error in the test, the branch fails,
-    // and the exact 'c' alternative must not be ranked by that error. Upstream 2026.9.10 answers
-    // (0, 0) on both, the live answer is (0, 1) (checked with python, 2026-10-03). These two rows
-    // are the only witnesses of END_CONDITIONAL's backtrack arm restoring the totals. A failed
-    // negative test whose conditional goes on to match keeps its block (D54, see
-    // Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made).
-    [Test]
-    [Arguments("(?b)(?:(?!(?:q){e<=1})|c)", "c", 0, 1)]
-    [Arguments("(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)", "abcxx", 1, 2)]
-    [Arguments("(?b)(?:(?(?!(?:q){e<=1})|y)|c)", "c", 0, 1)]
-    [Arguments("(?b)(?:(?(?=(?:q){e<=1})y|)|c)", "c", 0, 1)]
-    public void Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away(
-        string pattern,
-        string subject,
-        int start,
-        int end
-    )
-    {
-        Match m = new FuzzyRegex(pattern).Match(subject);
-
-        m.Success.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((start, end));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
-    // D54 (ledger entry 65), decided 2026-10-03: a failed negative condition's no branch keeps the
-    // test's whole block, its errors included, so these rows answer as their positive twin
-    // `(?b)(?:(?(?=(?:a){e<=1})d|c)c|(?:bc){e<=1})` does: (0, 1) with one deletion, as upstream 2026.9.10
-    // answers all three. They pinned D45's (1, 3) with no error until then, but that match is not
-    // exact either: `(?:(?(?!(?:a))c|d)c|(?:bc))` has no match over 'cdcx'.
-    [Test]
-    [Arguments("(?b)(?:(?(?!(?:a){e<=1})c|d)c|(?:bc){e<=1})")]
-    [Arguments("(?b)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
-    [Arguments("(?be)(?:(?(?!(?:a(*PRUNE)){e<=1})c|d)c|(?:bc){e<=1})")]
-    public void Bestmatch_counts_the_errors_a_failed_negative_condition_s_test_made(string pattern)
-    {
-        Match m = new FuzzyRegex(pattern).Match("cdcx");
-        Match twin = new FuzzyRegex("(?b)(?:(?(?=(?:a){e<=1})d|c)c|(?:bc){e<=1})").Match("cdcx");
-
-        (m.Index, m.Index + m.Length).Should().Be((0, 1));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
-        (twin.Index, twin.Index + twin.Length, twin.FuzzyCounts).Should().Be((0, 1, new FuzzyCounts(0, 0, 1)));
-    }
-
-    // D45 through an atomic group: a (*SKIP) inside it throws the group's body away wholesale, and
-    // the section's one error stayed in the total, so the exact 'b' at 1 lost to a one-error match at
-    // (0, 4). Upstream answers (1, 2) here, as it does the control without the verb.
-    [Test]
-    [Arguments("(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)")]
-    [Arguments("(?b)(?:(?>(?:ab){e<=1}|c)(?:cd){e<=1}|b)")]
-    public void Bestmatch_does_not_count_the_errors_of_an_atomic_group_a_verb_threw_away(string pattern)
-    {
-        Match m = new FuzzyRegex(pattern).Match("abcxx");
-
-        (m.Index, m.Index + m.Length).Should().Be((1, 2));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
 
     // D45's other side: a first match with no errors is perfect, and BESTMATCH and ENHANCEMATCH
@@ -1445,45 +1148,50 @@ public sealed class FuzzyBestMatchTests
             .Be((m.Index, m.Index + m.Length, m.FuzzyCounts));
     }
 
-    // D102, round 2. The test's verdict is the flagless one, but when its body matched, the errors
-    // it keeps must fit the budget, and the body may take any of its matches that does. The first
-    // fix took the body's first match, found it over the budget and failed the whole conditional,
-    // so `(?b)(?(?=a{s<=1}|x)x|y)` over 'x' answered (0, 1) with a substitution where the body's
-    // exact 'x' gives the same verdict for nothing. The body now goes on under the budget, as a
-    // positive lookaround's would, and the conditional fails only if no match of the body fits.
-    // `regex` 2026.9.10 answers each row as below, and so did main before D102.
+    // D109 reverses D102's round 2. A conditional's test, like a lookaround, commits to its body's
+    // first match, and that match's errors stay in the match (D54). Round 2 let the body go on
+    // under the budget for a later match that fitted, so `(?b)(?(?=a{s<=1}|x)x|y)` over 'x'
+    // answered (0, 1) exact, but the flagless test at 0 takes `a{s<=1}` with a substitution and
+    // never tries 'x', so no flagless path reaches (0, 1) without an error. With a capture in the
+    // body the later match was a span the flagless pattern does not match at all (D109's
+    // `(?b)(?(?=(a{s<=1}|xy))\1|z)` over 'xy', (0, 2)). Each row now answers what the flagless
+    // pattern does, with its substitution, except the last: at 0 the flagless test takes 'b' for
+    // `a` with a substitution, and the better match is the exact empty one at 1, where the test
+    // fails and the empty no-branch is taken. `regex` 2026.9.10, and main before D109, answer
+    // (0, 1) exact on every row.
     [Test]
-    [Arguments("(?b)(?(?=a{s<=1}|x)x|y)", "x", 0, 1)]
-    [Arguments("(?e)(?(?=a{s<=1}|x)x|y)", "x", 0, 1)]
-    [Arguments("(?b)(?(?=(?:ab|xb){s<=1})x|y)", "xb", 0, 1)]
-    [Arguments("(?b)(?(?!a{s<=1}|x)y|x)", "x", 0, 1)]
-    [Arguments("(?e)(?(?!a{s<=1}|x)y|x)", "x", 0, 1)]
-    [Arguments("(?b)(?(?=(?:a|b){s<=1}c)\\w)", "bc", 0, 1)]
-    public void A_conditional_s_test_takes_a_match_of_its_body_that_fits_the_budget(
+    [Arguments("(?b)(?(?=a{s<=1}|x)x|y)", "x", 0, 1, 1)]
+    [Arguments("(?e)(?(?=a{s<=1}|x)x|y)", "x", 0, 1, 1)]
+    [Arguments("(?b)(?(?=(?:ab|xb){s<=1})x|y)", "xb", 0, 1, 1)]
+    [Arguments("(?b)(?(?!a{s<=1}|x)y|x)", "x", 0, 1, 1)]
+    [Arguments("(?e)(?(?!a{s<=1}|x)y|x)", "x", 0, 1, 1)]
+    [Arguments("(?b)(?(?=(?:a|b){s<=1}c)\\w)", "bc", 1, 1, 0)]
+    public void A_conditional_s_test_keeps_the_errors_of_the_match_it_commits_to(
         string pattern,
         string subject,
         int start,
-        int end
+        int end,
+        int substitutions
     )
     {
         Match m = new FuzzyRegex(pattern).Match(subject);
 
-        (m.Index, m.Index + m.Length, m.FuzzyCounts).Should().Be((start, end, new FuzzyCounts(0, 0, 0)));
+        (m.Index, m.Index + m.Length, m.FuzzyCounts).Should().Be((start, end, new FuzzyCounts(substitutions, 0, 0)));
     }
 
-    // Round 2's rows through fullmatch and a scan.
+    // The same rows through fullmatch and a scan.
     [Test]
-    public void A_conditional_s_test_takes_a_match_of_its_body_that_fits_the_budget_in_every_operation()
+    public void A_conditional_s_test_keeps_the_errors_of_the_match_it_commits_to_in_every_operation()
     {
         Match full = new FuzzyRegex("(?b)(?(?=a{s<=1}|x)x|y)").FullMatch("x");
-        (full.Index, full.Index + full.Length, full.FuzzyCounts).Should().Be((0, 1, new FuzzyCounts(0, 0, 0)));
+        (full.Index, full.Index + full.Length, full.FuzzyCounts).Should().Be((0, 1, new FuzzyCounts(1, 0, 0)));
 
         Match negative = new FuzzyRegex("(?b)(?(?!a{s<=1}|x)y|x)").FullMatch("x");
         (negative.Index, negative.Index + negative.Length, negative.FuzzyCounts)
             .Should()
-            .Be((0, 1, new FuzzyCounts(0, 0, 0)));
+            .Be((0, 1, new FuzzyCounts(1, 0, 0)));
 
-        Scan("(?b)(?(?=a{s<=1}|x)x|y)", "xx").Should().Equal("(0,1) 0,0,0 d:", "(1,2) 0,0,0 d:");
+        Scan("(?b)(?(?=a{s<=1}|x)x|y)", "xx").Should().Equal("(0,1) 1,0,0 d:", "(1,2) 1,0,0 d:");
     }
 
     // D102's witness through each operation, with the flagless pattern as the control: (0, 0) is
@@ -1808,50 +1516,6 @@ public sealed class FuzzyBestMatchTests
         Scan(@"(?b)\m(?:Y){i}\M", "XY YX").Should().Equal("(0,2) 0,1,0 d:", "(3,5) 0,1,0 d:");
     }
 
-    // D86 (inherited, open): the second pass re-runs each best candidate anchored at its reported
-    // start, which a \K has moved off the place the attempt began, so a candidate with errors is
-    // lost or replaced by whatever matches from the \K position. BESTMATCH only ranks the matches
-    // plain fuzzy matching makes, so each answer here is the flag-free one: (2,2) s:0 and (1,3)
-    // s:1. Upstream 2026.9.10 answers None, None and (1,3) d:3 (the second alternative, the only
-    // one that matches anchored at 1), measured 2026-10-15; this port answers the same until D86
-    // is fixed. Found by scheduled-oracle row 138026906/24826.
-    [Test]
-    [Arguments(@"(?b)(?:By){e<=1}\K", "Cy", 2, 2)]
-    [Arguments(@"(?b)a\K(?:By){e<=1}", "aCy", 1, 3)]
-    [Arguments(@"(?b)a\K(?:By){e<=1}|(?:Cyy){e<=1}", "aCy", 1, 3)]
-    // The adversaries, each answered flag-free as listed, and None by upstream: \K under (?r),
-    // inside a lookahead, inside a backtracked repeat, before a (*SKIP), and with POSIX.
-    [Arguments(@"(?br)\K(?:By){e<=1}", "Cy", 0, 0)]
-    [Arguments(@"(?br)(?:By){e<=1}\Ka", "Cya", 0, 2)]
-    [Arguments(@"(?b)(?=a\K)(?:aBy){e<=1}", "aCy", 1, 3)]
-    [Arguments(@"(?b)(?:a\K){1,2}?c(?:By){e<=1}", "aacCy", 2, 5)]
-    [Arguments(@"(?b)a\K(*SKIP)(?:By){e<=1}", "aCy", 1, 3)]
-    [Arguments(@"(?bp)a\K(?:By){e<=1}", "aCy", 1, 3)]
-    public void Bestmatch_keeps_a_candidate_whose_reported_start_a_K_moved(
-        string pattern,
-        string subject,
-        int start,
-        int end
-    )
-    {
-        Match m = new FuzzyRegex(pattern).Match(subject);
-
-        m.Success.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((start, end));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-    }
-
-    [Test]
-    public void Bestmatch_with_a_K_still_prefers_an_exact_match_further_on()
-    {
-        // The walk restarts where the attempt began, so it still reaches the exact 'aBy' at 4 that
-        // a (*SKIP) leaves the second attempt to find. Upstream 2026.9.10 agrees: (5,7) s:0.
-        Match m = new FuzzyRegex(@"(?b)a(*SKIP)\K(?:By){e<=1}").Match("aCy aBy");
-
-        (m.Index, m.Index + m.Length).Should().Be((5, 7));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
-    }
-
     [Test]
     public void Bestmatch_breaks_a_tie_by_where_the_attempt_began_not_the_start_a_K_reported()
     {
@@ -1862,23 +1526,6 @@ public sealed class FuzzyBestMatchTests
 
         (m.Index, m.Index + m.Length).Should().Be((2, 4));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-    }
-
-    [Test]
-    public void Bestmatch_keeps_the_K_moved_match_a_reversed_skip_row_lost()
-    {
-        // Sweep row 7 of reversed-skip-invents-a-match (ExpectedDivergences), a reversed match: one
-        // attempt, from the end. Flag-free, this port and upstream agree on (4,8) with three
-        // substitutions (codepoints (2,5)). Before D86 was fixed this port answered None, as
-        // upstream does with the verb spelled (*PRUNE) or deleted; upstream as drawn answers
-        // codepoints (0,3), a match the attempt cannot make (regex 2026.9.10, 2026-10-15).
-        Match m = new FuzzyRegex(
-            @"(?m)(?b)(?r)(?:(?:𝟮([[:alpha:]])){1<=e<=2}(*SKIP)[^a]|\s)\K(?:(\w)([^\p{L}])[\p{L}\p{N}]*){e<=2,s<=1}"
-        ).MatchAtStart("𝟮𝟮\u200D\u200D😀 😀");
-
-        (m.Index, m.Index + m.Length).Should().Be((4, 8));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(3, 0, 0));
-        (m.Groups[3].Index, m.Groups[3].Length).Should().Be((9, 2));
     }
 
     [Test]
@@ -1916,6 +1563,140 @@ public sealed class FuzzyBestMatchTests
         m.PartialMatch.Should().BeFalse();
         (m.Index, m.Index + m.Length).Should().Be((1, 3));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    // D109: D102's fault reached through commitment. An atomic group, a possessive repeat (and \R,
+    // which is one), a lookaround and a conditional's test commit to the first match of their body,
+    // and a (*PRUNE) or (*SKIP) acts when backtracking reaches it. The budget BESTMATCH holds a run
+    // to made the body fail where the flagless engine's first match needs more errors than the
+    // budget, so the construct committed to a later match, or a path never reached the verb, and
+    // the run returned a span the flagless pattern does not match. In the first row, at 1 the
+    // flagless `(?>ab|a)` takes 'ac' with a substitution and the match fails there; with the
+    // budget it took 'a' and answered (1, 3) exact. Each expected answer here is the flagless
+    // pattern's match with the fewest errors, worked by hand; before the fix the port and `regex`
+    // 2026.9.10 gave the span in the comment.
+    [Test]
+    [Arguments("(?b)(?:(?>ab|a)c){s<=1}", "aacbc", 0, 3, 1, 0, 0)] // was (1, 3) exact
+    // The greedy atomic `b+` at 5 spends its error taking the 'c', so the flagless pattern matches
+    // nothing at 4 (its search from 4 is (5, 7) with a deletion); upstream answers (4, 7) exact.
+    [Arguments("(?b)(?:a(?>b+)c){e<=1}", "xbc abc", 0, 3, 1, 0, 0)]
+    [Arguments("(?b)(?>(?:c){d<=1}|b)", "ab", 0, 0, 0, 0, 1)] // was (1, 2)
+    [Arguments("(?br)(?:(?>b|c)){d<=1}", "xbcaxx", 1, 2, 0, 0, 0)] // was (2, 3)
+    [Arguments("(?b)(?:a?+){e<=2}b", "bbbxcc", 0, 2, 1, 0, 0)] // was (0, 1)
+    [Arguments("(?b)(?:(?:a|ab)*+c){s<=1}", "abc", 0, 3, 1, 0, 0)] // was (2, 3)
+    [Arguments("(?b)(?:\\Rb){e<=2}", "ccabc", 1, 4, 2, 0, 0)] // was (2, 4) 1 substitution
+    [Arguments("(?b)(?=(a{s<=1}|xy))\\1", "xy", 0, 1, 1, 0, 0)] // was (0, 2) exact
+    [Arguments("(?b)(?(?=(a{s<=1}|xy))\\1|z)", "xy", 0, 1, 1, 0, 0)] // was (0, 2) exact
+    public void The_ranking_budget_does_not_change_what_a_construct_commits_to(
+        string pattern,
+        string subject,
+        int start,
+        int end,
+        int substitutions,
+        int insertions,
+        int deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((start, end, new FuzzyCounts(substitutions, insertions, deletions)));
+    }
+
+    // D109 over the shapes the scope probe found (.scratch/s1019/d109/probe), BESTMATCH and
+    // ENHANCEMATCH, forwards and reversed: whatever the flag answers must be a match of the flagless
+    // pattern. Asked twice, as either question alone has a blind spot: the flagless pattern matches
+    // the span as a slice (which hides the text around it from a lookaround), or a flagless search
+    // of the whole text held to the span by a lookbehind and a lookahead finds it.
+    [Test]
+    [Arguments("(?e)(?:(?>ab|a)){e<=2}c", "xccac")]
+    [Arguments("(?e)(?>(?:ab){s<=1}|c)b", "ccxxcbb")]
+    [Arguments("(?er)(?:b(?>ca|c)){1s+2d+2i<=2}", "bcxxx")]
+    [Arguments("(?br)(?:ca++){s<=1}", "cxxcac")]
+    [Arguments("(?e)(?:a?+){e<=2}b", "bbbxcc")]
+    [Arguments("(?er)(?:ca++){s<=1}", "cxxcac")]
+    [Arguments("(?e)(?:\\Rb){e<=2}", "ccabc")]
+    [Arguments("(?br)(?:c\\R){1s+2d+2i<=2}", "bcbaba")]
+    [Arguments("(?er)(?:c\\R){1s+2d+2i<=2}", "bcbaba")]
+    [Arguments("(?b)(?:(?=((?:a){d<=1}|b))\\1){d<=1}", "xb")]
+    [Arguments("(?b)(?:(?=((?:c){e<=1}|aca))\\1){e<=1}", "acaxbc")]
+    public void A_ranked_answer_is_a_match_of_the_flagless_pattern(string pattern, string subject)
+    {
+        bool reversed = pattern[3] == 'r';
+        string body = pattern[(reversed ? 5 : 4)..];
+        string flagless = (reversed ? "(?r)" : "") + body;
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match(subject);
+
+        m.Success.Should().BeTrue();
+        int start = m.Index;
+        int end = m.Index + m.Length;
+        bool asASlice = new FuzzyRegex(flagless).FullMatch(subject, start, end - start).Success;
+        string held =
+            (reversed ? "(?r)" : "") + $"(?<=\\A(?s:.{{{start}}}))(?:{body})(?=(?s:.{{{subject.Length - end}}})\\Z)";
+        bool heldToTheSpan = new FuzzyRegex(held).Match(subject).Success;
+
+        (asASlice || heldToTheSpan).Should().BeTrue($"{pattern} answered ({start}, {end}) over '{subject}'");
+    }
+
+    // D109's verb half, refused (DECISIONS 2026-10-19). A (*PRUNE) or (*SKIP) acts when backtracking
+    // reaches it, so the budget the two flags search with decided where it acted: upstream answers
+    // `(?b)(?:(?:a){s<=1}(*PRUNE)c|b)` over 'ccab' with (3, 4), which the pattern does not match.
+    // Lifting the budget for the whole run fixed the answers but cost up to 110 times the steps on
+    // prose and could lose an exact match a (*SKIP) then fired past, so a fuzzy pattern that ranks
+    // its matches and holds such a verb is refused when it is compiled. The rows are the D109
+    // witnesses and the patterns of the tests the refusal retired (the walk a (*SKIP) truncated,
+    // the slice it carried, and an ArgumentOutOfRangeException a (*SKIP) row threw).
+    [Test]
+    [Arguments("(?b)(?:(?:a){s<=1}(*PRUNE)c|b)", "BESTMATCH", "PRUNE", 18)]
+    [Arguments("(?b)(?:(?:a){s<=1}(*SKIP)c|b)", "BESTMATCH", "SKIP", 18)]
+    [Arguments("(?e)(?:(?:b){e<=2}(*SKIP)a|a)", "ENHANCEMATCH", "SKIP", 18)]
+    [Arguments("(?br)(?:(?:a(*PRUNE)c|b)){s<=1}", "BESTMATCH", "PRUNE", 12)]
+    [Arguments("(?b:(}){e}(*SKIP)|)", "BESTMATCH", "SKIP", 10)]
+    [Arguments("(?b)(?:a(*SKIP)b){e<=1}", "BESTMATCH", "SKIP", 8)]
+    [Arguments("(?b)(?:(?:ba){1s+2d+2i<=2}(*SKIP)b|ac)", "BESTMATCH", "SKIP", 26)]
+    [Arguments("(?b)(?e)(?:[^a](*SKIP)[[:digit:]]|\\w)(?:a){e<=1}", "BESTMATCH", "SKIP", 15)]
+    [Arguments("(?b)a(*SKIP)\\K(?:By){e<=1}", "BESTMATCH", "SKIP", 5)]
+    [Arguments("(?b)(?:ab){e<=1}(*PRUNE)(*SKIP)", "BESTMATCH", "PRUNE", 16)]
+    public void A_ranked_fuzzy_pattern_with_a_backtracking_verb_is_refused(
+        string pattern,
+        string flag,
+        string verb,
+        int position
+    )
+    {
+        Action compile = () => _ = new FuzzyRegex(pattern);
+
+        FuzzyRegexParseException error = compile.Should().Throw<FuzzyRegexParseException>().Which;
+        error
+            .Message.Should()
+            .Contain(
+                $"{flag} cannot rank a fuzzy pattern that holds (*{verb}): (*PRUNE) and (*SKIP) depend on the order "
+                    + $"the search tries paths, which {flag} changes; use the pattern without the flag or without the verb"
+            );
+        error.Offset.Should().Be(position);
+    }
+
+    // The refusal's edges: the flag by option, and the patterns it does not reach - no flag, no
+    // fuzzy section, a section that allows no error, and (*FAIL), which only fails.
+    [Test]
+    public void The_verb_refusal_covers_the_option_and_nothing_else()
+    {
+        Action byOption = static () => _ = new FuzzyRegex(@"(?:ab){e<=1}(*SKIP)c", FuzzyRegexOptions.EnhanceMatch);
+        byOption
+            .Should()
+            .Throw<FuzzyRegexParseException>()
+            .Which.Message.Should()
+            .Contain(
+                "ENHANCEMATCH cannot rank a fuzzy pattern that holds (*SKIP): (*PRUNE) and (*SKIP) depend on the order "
+                    + "the search tries paths, which ENHANCEMATCH changes; use the pattern without the flag or without the verb"
+            );
+
+        new FuzzyRegex(@"(?:(?:a){s<=1}(*PRUNE)c|b)").Match("ccab").Index.Should().Be(0);
+        new FuzzyRegex(@"(?b)(?:a(*PRUNE)c|b)").Match("ccab").Index.Should().Be(3);
+        new FuzzyRegex(@"(?b)(?:a{e<=0}(*SKIP)c|b)").Match("ccab").Index.Should().Be(3);
+        new FuzzyRegex(@"(?b)(?:(?:a){s<=1}(*F)|b)").Match("ccab").Index.Should().Be(3);
     }
 
     /// <summary>

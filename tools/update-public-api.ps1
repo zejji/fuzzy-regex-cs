@@ -1,7 +1,9 @@
 <#
 .SYNOPSIS
     Adds every public symbol the PublicApiAnalyzers report as undeclared (RS0016) to
-    src/FuzzyRegex/PublicAPI.Unshipped.txt, then rebuilds to prove the file is complete.
+    src/FuzzyRegex/PublicAPI.Unshipped.txt, then rebuilds to prove the file is complete. The 1.0.0
+    surface is in PublicAPI.Shipped.txt, which this script reads but never writes: the analyzer
+    raises RS0016 only for a symbol neither file declares, so a shipped symbol is never re-added.
 
 .DESCRIPTION
     The RS0016 message quotes the exact line the analyzer expects ("Symbol '<line>' is not part
@@ -30,7 +32,11 @@ $dropUnshipped = @($removed | Where-Object { $_ -notin $shipped })
 $breaking = @($removed | Where-Object { $_ -in $shipped })
 if ($breaking) { Write-Host "RS0017 on SHIPPED symbols (breaking), decide by hand:" -ForegroundColor Red; $breaking | ForEach-Object { "  $_" } }
 if ($dropUnshipped) { Write-Host "dropped $($dropUnshipped.Count) unshipped symbol(s) that no longer exist:"; $dropUnshipped | ForEach-Object { "  $_" } }
-if (-not $added -and -not $dropUnshipped) { Write-Host "public API: nothing to change ($(($existing | Where-Object { $_ -and $_ -notmatch '^#' }).Count) symbols declared)"; exit ([int][bool]$breaking) }
+if (-not $added -and -not $dropUnshipped) {
+    $declared = { param($lines) @($lines | Where-Object { $_ -and $_ -notmatch '^(#|\*REMOVED\*)' }).Count }
+    Write-Host "public API: nothing to change ($(& $declared $shipped) shipped, $(& $declared $existing) unshipped symbols declared)"
+    exit ([int][bool]$breaking)
+}
 
 $body = @($existing | Where-Object { $_ -and $_ -notmatch '^#' -and $_ -notin $dropUnshipped }) + @($added) | Sort-Object -Unique
 $lines = @($existing | Where-Object { $_ -match '^#' }) + $body

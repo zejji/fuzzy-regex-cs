@@ -158,6 +158,7 @@ public sealed class DivergenceRemarksTests
                 "P:" + _ns + "FuzzyRegex.MaxCompiledNodes",
             ]
         ),
+        ("Nesting limit", [_mainConstructor]),
         (
             "A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit",
             [Option("FullCase")]
@@ -198,11 +199,16 @@ public sealed class DivergenceRemarksTests
             "BESTMATCH and ENHANCEMATCH never let their budget decide a negative lookaround or a conditional's test",
             [Option("BestMatch"), Option("EnhanceMatch")]
         ),
+        (
+            "BESTMATCH and ENHANCEMATCH answer a match the pattern can make",
+            [Option("BestMatch"), Option("EnhanceMatch")]
+        ),
         ("A run-out of text inside a lookaround's body no longer ends a partial call with a partial", [_partial]),
         ("A partial call reports a partial where upstream refuses a completion that exists", [_partial]),
         ("A partial search tries a start inside the text to come for a pattern with no first set", [_partial]),
         ("`\\b` over the empty text is a partial", [_partial]),
         ("A partial match reports a group that closes before a repeat's tail runs out of text", [_partial]),
+        ("A negative lookahead around a lookahead that holds for every continuation reports no partial", [_partial]),
         (
             "A reversed partial search lets `$` hold before a final newline in the text to come",
             [_partial, Option("RightToLeft")]

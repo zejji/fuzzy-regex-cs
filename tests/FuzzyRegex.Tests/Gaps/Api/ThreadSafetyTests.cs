@@ -863,6 +863,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.TailRunOutAsBeforeD67",
             // D81 added RunOutAsBeforeD81, likewise set only by OracleComparer's named ablations.
             "PatternObject.RunOutAsBeforeD81",
+            // D108 added UpstreamReverseGrapheme, written once by the FuzzyRegex constructor right
+            // after PatternObject.Compile, and true only for OracleComparer.RunWithTheUpstreamReverseGrapheme.
+            "PatternObject.UpstreamReverseGrapheme",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
@@ -876,6 +879,12 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasBacktrackingVerb",
+            // D111: written by Compile in the node-numbering loop, beside HasSkipVerb.
+            "PatternObject.RefinesInAWindow",
+            // D115: written by Compile in the node-numbering loop, beside RefinesInAWindow.
+            "PatternObject.ReadsTheSearchAnchor",
+            // D115: written by the compiler where it builds a lookaround or a conditional's test.
+            "PatternObject.LooksAgainstTheScan",
             // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
             "PatternObject.AnAttemptCanMoveTheNextStart",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through

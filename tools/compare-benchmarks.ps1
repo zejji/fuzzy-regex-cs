@@ -423,10 +423,14 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     # -1 on either side means that side was never measured: not an improvement and not a
     # regression, so it is reported as such rather than folded into a ratio.
     $allocUnmeasured = ($wasBytes -lt 0 -or $nowBytes -lt 0)
-    # A baselined allocation that has become zero is far more likely to be a diagnoser that did not
-    # attach than an engine that stopped allocating altogether, and reading it as a 100%
-    # improvement is how a whole run of lost readings passes GREEN. Flagged so somebody looks.
-    $allocLost = (-not $allocUnmeasured) -and $wasBytes -gt 0 -and $nowBytes -eq 0
+    # A baselined allocation that is no longer in the report at all (no Memory node, read as -1
+    # above) is a diagnoser that did not attach, and reading it as n/a is how a whole run of lost
+    # readings passes GREEN. Flagged so somebody looks. A real measured 0 is NOT this: BenchmarkDotNet
+    # writes a Memory node with BytesAllocatedPerOperation 0 for an engine that stopped allocating
+    # (bench/baselines/.../2026-10-18-S63-bdn/*ManyInputsBenchmarks-report-full-compressed.json),
+    # and that is an improvement, the same as 100000 -> 20000. Fixed 2026-10-20: this used to flag
+    # every N -> 0 (CaseBlindAlternation 52 -> 0, TestedGroupRepeat 7 -> 0).
+    $allocLost = $wasBytes -ge 0 -and $nowBytes -lt 0
     $allocAppeared = (-not $allocUnmeasured) -and $wasBytes -eq 0 -and $nowBytes -gt 0
     $allocRatio = if (-not $allocUnmeasured -and $wasBytes -gt 0) { $nowBytes / $wasBytes } else { 1 }
     # A separate floor from the time one: allocation is very nearly deterministic, so sharing a
@@ -442,8 +446,8 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt 1 -and -not $allocWithinFloor)
 
     $allocCell =
-    if ($allocUnmeasured) { '    n/a' }
-    elseif ($allocLost) { '   lost' }
+    if ($allocLost) { '   lost' }
+    elseif ($allocUnmeasured) { '    n/a' }
     elseif ($allocAppeared) { '    new' }
     elseif ($allocWithinFloor) { '   same' }
     else { "{0,6:N$(Get-RatioDigits $allocRatio)}x" -f $allocRatio }

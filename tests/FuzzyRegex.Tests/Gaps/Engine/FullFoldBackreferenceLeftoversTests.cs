@@ -196,6 +196,27 @@ public sealed class FullFoldBackreferenceLeftoversTests
         reverse.FuzzyChanges.Insertions.Should().Equal(3);
     }
 
+    [Test]
+    public void A_retried_insertion_inside_a_nested_fuzzy_section_steps_past_the_inserted_character()
+    {
+        // Minimised from the scheduled oracle's seed 20261019 row 49930: the substitution b-for-t is
+        // tried first and fails at the t; the retry inserts the b. Upstream, measured 2026-10-19:
+        // V1 fullmatch('(?fi)(st)(?:(?:\1){s<=1,i<=1}){i<=1}', 'stsbt'): None
+        // V1 fullmatch('(?fi)(st)(?:(?:st){s<=1,i<=1}){i<=1}', 'stsbt'): span=(0, 5) counts=(0, 1, 0)
+        //   changes=([], [3], [])
+        const string Pattern = @"(?fi)(st)(?:(?:\1){s<=1,i<=1}){i<=1}";
+
+        Match m = new FuzzyRegex(Pattern).FullMatch("stsbt");
+        (m.Index, m.Length).Should().Be((0, 5));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        m.FuzzyChanges.Insertions.Should().Equal(3);
+
+        // Upstream's re-entry restored, and nothing else changed, gives upstream's None.
+        var reentered = new FuzzyRegex(Pattern);
+        reentered.PatternObject.SkipRetriedFoldSteps = true;
+        reentered.FullMatch("stsbt").Success.Should().BeFalse();
+    }
+
     // Known defect D25. Because the retried insertion now steps past the character it inserts,
     // it has to obey the rule every first attempt obeys: a search does not open a match with an
     // insertion at its first position, since starting one character later is better. Upstream's

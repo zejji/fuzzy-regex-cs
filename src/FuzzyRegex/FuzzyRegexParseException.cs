@@ -58,6 +58,18 @@ public class FuzzyRegexParseException : Exception
         Offset = offset;
     }
 
+    /// <summary>
+    /// D110: the pattern ran the compiling thread out of stack. There is no offset, because the
+    /// pass that ran out may be one that walks the parsed pattern rather than its text.
+    /// </summary>
+    /// <param name="pattern">The pattern that could not be compiled.</param>
+    /// <param name="innerException">The stack check that stopped the compile.</param>
+    internal FuzzyRegexParseException(string pattern, InsufficientExecutionStackException innerException)
+        : base("too deeply nested to compile on this thread: its stack ran out", innerException)
+    {
+        Pattern = pattern;
+    }
+
     /// <summary>The pattern that failed to parse, or <see langword="null"/> if not supplied.</summary>
     public string? Pattern { get; }
 
