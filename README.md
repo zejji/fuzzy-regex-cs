@@ -32,7 +32,7 @@ dotnet add package FuzzyRegex
 ## Quick start
 
 Every example below compiles against the public API in
-[`src/FuzzyRegex/PublicAPI.Unshipped.txt`](https://github.com/zejji/fuzzy-regex-cs/blob/main/src/FuzzyRegex/PublicAPI.Unshipped.txt). Add
+[`src/FuzzyRegex/PublicAPI.Shipped.txt`](https://github.com/zejji/fuzzy-regex-cs/blob/main/src/FuzzyRegex/PublicAPI.Shipped.txt). Add
 `using Fuzzy.Text.RegularExpressions;` before running any of them.
 
 ### Exact match with named groups

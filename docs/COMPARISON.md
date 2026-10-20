@@ -105,8 +105,8 @@ itself has none:
 ## Fuzzy syntax in one page
 
 Fuzzy matching is written inside `{...}` straight after the construct it applies to - usually a
-group. Every example below compiles against `src/FuzzyRegex/PublicAPI.Unshipped.txt` as it stands
-today.
+group. Every example below compiles against the public API listed in
+`src/FuzzyRegex/PublicAPI.Shipped.txt`.
 
 ### `{e<=n}`: allow up to `n` errors of any kind
 

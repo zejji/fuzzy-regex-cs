@@ -4,12 +4,13 @@ using Fuzzy.Text.RegularExpressions.Parsing;
 namespace Fuzzy.Text.RegularExpressions.Tests.Conventions;
 
 /// <summary>
-/// S80. <c>src/FuzzyRegex/PublicAPI.Unshipped.txt</c> is the tracked list of every public member
-/// the library ships (nothing has reached 1.0 yet, so <c>PublicAPI.Shipped.txt</c> is a single
-/// line and carries none of them); <c>RegexFlags.InlineFlags</c> is every letter <c>(?x)</c> syntax
-/// accepts. Neither list is read by a person, so this is the gate that keeps the user
-/// documentation - <c>README.md</c> and <c>docs/GUIDE.md</c> - describing the whole surface rather
-/// than whatever happened to be described when it was last read by eye (found by the owner,
+/// S80. <c>src/FuzzyRegex/PublicAPI.Shipped.txt</c> (the 1.0.0 surface) and
+/// <c>PublicAPI.Unshipped.txt</c> (changes since, including <c>*REMOVED*</c> lines) are together the
+/// tracked list of every public member the library ships, so the gate reads both;
+/// <c>RegexFlags.InlineFlags</c> is every letter <c>(?x)</c> syntax accepts. Neither list is read by
+/// a person, so this is the gate that keeps the user documentation - <c>README.md</c> and
+/// <c>docs/GUIDE.md</c> - describing the whole surface rather than whatever happened to be
+/// described when it was last read by eye (found by the owner,
 /// 2026-09-21: four flags and four public members named in neither file). It matches names, not
 /// signatures, so an overload or an accessor pair costs the prose nothing extra.
 /// </summary>
@@ -44,15 +45,15 @@ public sealed class UserDocumentationCompletenessTests
     public void Every_public_member_and_inline_flag_letter_is_named_in_the_user_documentation()
     {
         string repoRoot = TestTree.RepositoryRoot().FullName;
-        string publicApiPath = Path.Combine(repoRoot, "src", "FuzzyRegex", "PublicAPI.Unshipped.txt");
-        List<string> apiLines = [.. File.ReadAllLines(publicApiPath).Where(line => line.Length > 0 && line[0] != '#')];
+        List<string> apiLines = LiveApiLines(Path.Combine(repoRoot, "src", "FuzzyRegex"));
         apiLines
             .Should()
             .HaveCountGreaterThan(
                 140,
-                "the PublicAPI.Unshipped.txt read must actually find its member lines (measured 146, "
-                    + "2026-09-21) - a broken path, or reading PublicAPI.Shipped.txt by mistake, finds "
-                    + "fewer, or nothing, and this gate would pass while documenting nothing"
+                "the PublicAPI.Shipped.txt + PublicAPI.Unshipped.txt read must actually find the member "
+                    + "lines (measured 159, 2026-10-20, all of them in Shipped) - reading only Unshipped, "
+                    + "as this gate did before the release, or a broken path, finds fewer, or nothing, "
+                    + "and this gate would pass while documenting nothing"
             );
 
         List<string> memberNames =
@@ -91,7 +92,38 @@ public sealed class UserDocumentationCompletenessTests
     }
 
     /// <summary>
-    /// The simple member (or type) name a <c>PublicAPI.Unshipped.txt</c> line declares: the last
+    /// Every member line the two <c>PublicAPI.*.txt</c> files declare as live: both files' lines
+    /// minus <c>#nullable enable</c>, blanks and comments, and minus any shipped member that
+    /// <c>PublicAPI.Unshipped.txt</c> marks as gone with a <c>*REMOVED*</c> line (the analyzer's own
+    /// spelling for a removal or signature change after release).
+    /// </summary>
+    /// <param name="projectDirectory">The directory holding both files.</param>
+    /// <returns>The declared lines of every public member that still exists.</returns>
+    private static List<string> LiveApiLines(string projectDirectory)
+    {
+        const string RemovedPrefix = "*REMOVED*";
+        List<string> lines =
+        [
+            .. new[] { "PublicAPI.Shipped.txt", "PublicAPI.Unshipped.txt" }
+                .SelectMany(file => File.ReadAllLines(Path.Combine(projectDirectory, file)))
+                .Where(line => line.Length > 0 && line[0] != '#'),
+        ];
+        HashSet<string> removed =
+        [
+            .. lines
+                .Where(line => line.StartsWith(RemovedPrefix, StringComparison.Ordinal))
+                .Select(line => line[RemovedPrefix.Length..]),
+        ];
+        return
+        [
+            .. lines.Where(line =>
+                !line.StartsWith(RemovedPrefix, StringComparison.Ordinal) && !removed.Contains(line)
+            ),
+        ];
+    }
+
+    /// <summary>
+    /// The simple member (or type) name a <c>PublicAPI.*.txt</c> line declares: the last
     /// dotted segment once modifiers (<c>~</c>, <c>override</c>, <c>static</c>, <c>const</c>,
     /// <c>readonly</c>, <c>virtual</c>), the return type after <c>-&gt;</c>, an enum's <c>= value</c>,
     /// a method's parameter list, and a property's <c>.get</c>/<c>.set</c>/<c>.init</c> accessor
@@ -99,7 +131,7 @@ public sealed class UserDocumentationCompletenessTests
     /// overload to <c>operator ==</c> / <c>operator !=</c>, both handled by
     /// <see cref="_excludedMemberNames"/> rather than read from prose.
     /// </summary>
-    /// <param name="line">One non-comment line of <c>PublicAPI.Unshipped.txt</c>.</param>
+    /// <param name="line">One live member line of either <c>PublicAPI.*.txt</c> file.</param>
     /// <returns>The name to look for in the documentation set.</returns>
     private static string MemberName(string line)
     {
