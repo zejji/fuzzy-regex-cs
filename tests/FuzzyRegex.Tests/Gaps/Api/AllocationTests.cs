@@ -17,8 +17,15 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// pattern has already run once on the same kind of subject: the first call builds the state the
 /// pattern then keeps, as upstream does with its <c>groups_storage</c>, <c>repeats_storage</c> and
 /// <c>stack_storage</c> (<c>upstream/src/_regex.c</c> :577-579).
+/// <para>
+/// The class runs alone (D112). The rest of the suite, running alongside, collected often enough
+/// that every one of a measurement's ten attempts saw a collection, twice in 30 full runs; alone,
+/// a collection lands in an attempt only when this thread's own allocations cause it. Some tests
+/// here also collect on purpose, which would disturb each other's measurements.
+/// </para>
 /// </remarks>
 [SkipUnderStryker]
+[NotInParallel]
 public sealed class AllocationTests
 {
     [Test]
@@ -448,6 +455,27 @@ public sealed class AllocationTests
         allocated.Should().Be(0, "the trim landed before the warm-up, which refilled the cache");
     }
 
+    [Test]
+    public void A_call_that_a_collection_disturbs_on_every_attempt_is_reported_rather_than_measured()
+    {
+        // D112. Under the full parallel suite a run of collections can disturb all ten attempts,
+        // and the helper used to hand back the last one's figure anyway. That figure can carry up
+        // to 8 KB of a retired allocation context (see AllocatedBy), so a warm span walk counted
+        // 7,592 B and the empty-iteration test's shorter subject counted 4,408 B too many. Here a
+        // collection inside the call disturbs every attempt on purpose.
+        Action measure = static () =>
+            AllocatedBy(static () =>
+                static () =>
+                {
+#pragma warning disable S1215 // A collection inside every attempt is the test.
+                    GC.Collect(0);
+#pragma warning restore S1215
+                }
+            );
+
+        measure.Should().Throw<InvalidOperationException>("no attempt measured the call alone");
+    }
+
     /// <summary>Makes a finalizable object that drops <paramref name="trim"/>'s cache when it is finalized.</summary>
     /// <param name="trim">The cache the finalizer drops.</param>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -491,7 +519,10 @@ public sealed class AllocationTests
     /// collector adds a pause to <see cref="GC.GetTotalPauseDuration"/> before it lets the threads go
     /// (:46874-46876), so a run that saw no pause is exact. A run that saw one is repeated, and the
     /// repeat rebuilds the whole scenario, so an allocation it causes, once or every time, shows in
-    /// the repeat too. After ten attempts the last one's figure stands, pause or not.
+    /// the repeat too. If all ten attempts are disturbed, the helper throws rather than return a
+    /// figure it knows may be wrong (D112): under the full parallel suite that happened twice in
+    /// 30 runs, and the last attempt's figure then carried 4,408-7,592 B that the call never
+    /// allocated. The tests that use it run alone (<c>[NotInParallel]</c>) for the same reason.
     /// </para>
     /// <para>
     /// The warm-up inside <paramref name="arrange"/> can also be undone before the call.
@@ -526,10 +557,12 @@ public sealed class AllocationTests
             allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             if (GC.GetTotalPauseDuration() == paused && GC.CollectionCount(2) == gen2Collections)
             {
-                break;
+                return allocated;
             }
         }
 
-        return allocated;
+        throw new InvalidOperationException(
+            $"A collection disturbed all ten attempts, so none measured the call alone; the last counted {allocated:N0} B. A call that allocates enough to collect every time does this too."
+        );
     }
 }

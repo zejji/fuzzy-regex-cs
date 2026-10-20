@@ -12,7 +12,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// The allocation tests use <see cref="AllocationTests.AllocatedBy"/>, which counts this thread's
 /// allocations and repeats a run a collection paused. Where a call also pays a fixed cost (a
 /// compiled template, an enumerator), the test measures two subject sizes and bounds the
-/// difference, so only the part that grows with the matches is judged.
+/// difference, so only the part that grows with the matches is judged. The class runs alone, as
+/// <see cref="AllocationTests"/> does and for its reason (D112).
 /// </para>
 /// <para>
 /// Every expected answer is upstream's, recorded with regex 2026.9.10 on CPython 3.14.7 on
@@ -20,6 +21,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// </para>
 /// </remarks>
 [SkipUnderStryker]
+[NotInParallel]
 public sealed class PerMatchCostTests
 {
     // --- Replace: the join list -------------------------------------------------------------
