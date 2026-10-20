@@ -1011,6 +1011,12 @@ internal static class NodeCompiler
         // Create a node for the lookaround.
         Node testNode = CreateNode(args.Pattern, Opcode.Conditional, flags, 0, 0);
 
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
+
         args.Code += 3;
 
         AddNode(args.End!, testNode);
@@ -1399,6 +1405,12 @@ internal static class NodeCompiler
 
         // Create a node for the lookaround.
         Node lookaroundNode = CreateNode(args.Pattern, Opcode.Lookaround, flags, 0, 0);
+
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
 
         args.Code += 3;
 
@@ -1841,6 +1853,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSet(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // codes: opcode, flags, ..., end.
         Opcode op = args.Op;
         uint flags = args.At(1);
@@ -2079,6 +2092,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSequence(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // Guarantee that there's something to attach to.
         args.Start = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
         args.End = args.Start;

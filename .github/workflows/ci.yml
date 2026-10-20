@@ -8,10 +8,17 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # release.yml runs these same jobs as its gates on a version tag.
+  workflow_call:
 
 permissions:
   contents: read
 
+# When release.yml calls this file, github.ref is the caller's (refs/tags/v1.0.0), so the group
+# is ci-refs/tags/v1.0.0. That differs from release.yml's own group (release-refs/tags/...), which
+# matters: GitHub's reusable-workflows reference says that with cancel-in-progress a shared group
+# in caller and called workflow cancels the run already in progress. Pushes to main and pull
+# requests use other refs, so they never cancel a release's gates.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +36,7 @@ jobs:
     name: Author identity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Every commit is authored and committed by the public identity
@@ -44,13 +51,13 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # upstream/ is the reference the port is measured against, and check-ratchet.ps1
           # stamps its commit into the status board.
           submodules: true
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -119,7 +126,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os }}
           path: TestResults/
@@ -148,11 +155,11 @@ jobs:
             rid: linux-x64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -176,11 +183,11 @@ jobs:
     name: Pack and validate the NuGet package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -200,10 +207,10 @@ jobs:
     name: ReSharper inspections (IDE0320 and other IDE-only errors must fail here)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Restore and build

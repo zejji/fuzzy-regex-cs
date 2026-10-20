@@ -8,7 +8,7 @@
       RS0026 (multiple overloads with optional parameters) is disapplied on the merits, 2026-09-16:
       the string/span overload pairs mirror Python's keyword arguments (pos, endpos, timeout) and are
       disambiguated by the first parameter's type; the rule guards against overloads ADDED later,
-      and after the S53b freeze any addition is a PublicAPI.Unshipped.txt change reviewed on its own.
+      and since the S53b freeze any addition is a PublicAPI.Unshipped.txt change reviewed on its own.
       Revisit if an overload with a different optional-parameter set is ever proposed.
     -->
     <NoWarn>RS0026</NoWarn>
@@ -28,11 +28,12 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <!--
-      Shape validation (matching TFM assets, consistent dependencies) on every pack. No
-      PackageValidationBaselineVersion yet - there is no earlier published version to diff
-      against. Set it to "1.0.0" once the first post-1.0 release is being prepared, per S66's
-      docs/plan/RELEASE.md.
+      Package validation on every pack: shape checks (matching TFM assets, consistent
+      dependencies) plus a diff of the public API against the published baseline below, so an
+      accidental breaking change fails the pack. Bump the baseline after each release, per
+      docs/RELEASING.md.
     -->
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
@@ -49,8 +50,10 @@
   <!--
     The public API is frozen after S53b (owner decision 2026-09-16): Phase 7 optimisation, Phase 8
     docs and Phase 9 demo run in parallel worktrees, so any change to the public surface must be
-    deliberate and visible. RS0016/RS0017 fail the build until PublicAPI.Unshipped.txt names the
-    change; the docs stream reads that file's diff to learn what to document.
+    deliberate and visible. The 1.0.0 surface is in PublicAPI.Shipped.txt. RS0016/RS0017 fail the
+    build until PublicAPI.Unshipped.txt names any change: a new member as a plain line, a shipped
+    member that is removed or changed as a *REMOVED* line. The docs stream reads that file's diff to
+    learn what to document.
   -->
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers">

@@ -3338,6 +3338,11 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchGraphemeBoundary(MatchState state, Node node, int textPos)
     {
+        if (ReversedGraphemeCutBySliceStart(state, textPos))
+        {
+            return MatchStatus.Success;
+        }
+
         if (state.PartialSide != MatchState.PartialNone)
         {
             return GraphemeBoundaryInAPartialCall(state, node, textPos);
@@ -3345,6 +3350,51 @@ internal static class Matcher
 
         return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D108: whether a reversed <c>\X</c> ends at <paramref name="textPos"/> because
+    /// the caller's slice starts there, the mirror image of a forward <c>\X</c> cut by the slice end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Forwards the slice end is <see cref="MatchState.TextEnd"/>, so a cluster cut by it ends
+    /// there (GB2). Backwards <see cref="MatchState.TextStart"/> stays 0 (ledger entry 24), so the
+    /// boundary test at the far end of a reversed <c>\X</c> read the character before the slice,
+    /// found no break, and the <c>\X</c> could not go past the slice start to reach one: the cut
+    /// cluster was lost. A reversed match may not consume below the slice start, so the matchable
+    /// text has run out there (the rule <see cref="RanOutOnTheLeft"/> applies to a partial), and
+    /// the cluster ends.
+    /// </para>
+    /// <para>
+    /// Only the <c>\X</c> ending is cut. <c>\b</c>, <c>\B</c> and lookbehind still see the
+    /// character before the slice. The caller's start is <see cref="MatchState.InitialSliceStart"/>.
+    /// <see cref="MatchState.SliceStart"/> alone is not enough: ENHANCEMATCH and BESTMATCH move it
+    /// to a found match's start before they re-run, and a cut there split a cluster the caller's
+    /// slice holds whole (<c>(?re)(?:̈z|\Xy){e&lt;=1}</c> over 'äy' became (1, 3) with
+    /// no error), where a forward re-run keeps reading up to <see cref="MatchState.TextEnd"/>.
+    /// Requiring the live start as well leaves out a lookaround, which opens the slice to the whole
+    /// text, so a <c>\X</c> inside one still reads the cluster before the caller's start. Outside a
+    /// lookaround only nodes of the pattern's own direction run, so <see cref="MatchState.Reverse"/>
+    /// is the node's direction.
+    /// </para>
+    /// <para>
+    /// A partial call's second pass is left as it was: there the text before the slice start is
+    /// the text to come (ledger entry 24), so a cluster reaching it may go on and the <c>\X</c>
+    /// runs out, as a forward one at the slice end is undetermined (<see cref="GraphemeBoundaryAtEdge"/>).
+    /// The first pass, which is an ordinary match, cuts. The oracle's model of upstream's reversed
+    /// <c>\X</c> (<see cref="PatternObject.UpstreamReverseGrapheme"/>) keeps upstream's answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position of the boundary test.</param>
+    /// <returns><see langword="true"/> if the test stands at the caller's slice start, past the start of the text.</returns>
+    private static bool ReversedGraphemeCutBySliceStart(MatchState state, int textPos) =>
+        state.Reverse
+        && textPos == state.InitialSliceStart
+        && textPos == state.SliceStart
+        && textPos > state.TextStart
+        && state.PartialSide == MatchState.PartialNone
+        && !state.Pattern.UpstreamReverseGrapheme;
 
     /// <summary>
     /// NOT UPSTREAM'S, D11: whether a zero-width character test that has reached the edge lets the
@@ -6141,7 +6191,16 @@ internal static class Matcher
         if (state.HasSameContinuation(frame, withChanges))
         {
             state.NotePartialEvent(PartialEvent.Dedup);
-            if (!blocked)
+            if (blocked)
+            {
+                // D113: this backtrack stands for the continuation failing again, so the body's
+                // entries popped next must not record it, as after any blocked end (D90). Without
+                // this, `a?`'s tail guard in `(?:a|aa)(?=(?=[ab]*c)(?:a|aa)*a?)b` over 'aab',
+                // written under the lookahead at 1, refused the lookahead at 2. Unblocked, the cut
+                // below drops the body's entries, so none is popped to record anything.
+                state.NoteABlockedEnd();
+            }
+            else
             {
                 // Cut and fail: the frame's entry is next, and its arm fails the construct. A test
                 // that held for every continuation must not be read as one that failed, which would
@@ -6221,13 +6280,14 @@ internal static class Matcher
         state.TextPos = look.TextPos;
         state.SliceStart = look.SliceStart;
         state.SliceEnd = look.SliceEnd;
-        if (op == Opcode.Conditional && state.IsFuzzy)
+        if (state.IsFuzzy)
         {
-            // D102: the test's body closes until REOPEN opens it again, and the errors it keeps
-            // are held to the bounds that come back, as AdvanceEndConditional holds them.
+            // D102: the test's body (D109: or a positive lookaround's) closes until REOPEN opens
+            // it again, and the errors it keeps are held to the bounds that come back, as
+            // AdvanceEndConditional and AdvanceEndLookaround hold them.
             state.CloseABoundlessBody();
             Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
-            if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
+            if (CommittedOverTheBudget(state))
             {
                 return LookaroundEnd.Backtrack;
             }
@@ -6689,6 +6749,10 @@ internal static class Matcher
     /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
     private static Node? RunOutInALookaroundBody(MatchState state, Node? item, out bool fails)
     {
+        Debug.Assert(
+            !state.RefinesInANarrowedSlice,
+            "D114: a run-out is a partial call's, which refines in the caller's slice"
+        );
         fails = false;
         PatternObject pattern = state.Pattern;
         if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
@@ -6770,6 +6834,13 @@ internal static class Matcher
         {
             _ = state.Pstack.PopSize(out long atomicMark);
             BlockAtomicCut(state, (int)atomicMark);
+
+            // D109: the group's body closes with its frame, and REOPEN lifts it again.
+            if (state.IsFuzzy)
+            {
+                state.CloseABoundlessBody();
+            }
+
             if (atomicScopes && !HasWMarkAt(state, (int)atomicMark - 1, WMarkKind.VerbTaint))
             {
                 state.AddWMark((int)atomicMark - 1, WMarkKind.VerbTaint);
@@ -6987,6 +7058,7 @@ internal static class Matcher
     /// changed, if the stacks are not as the marks promise.</returns>
     private static Node? AbandonTheCallsTheBodyOpened(MatchState state, Node look, long lookMark)
     {
+        Debug.Assert(!state.RefinesInANarrowedSlice, "D114: a pattern with calls refines in the caller's slice");
         if (!state.Bstack.ReadSizeBelow((int)lookMark - 1, out long savedSstack))
         {
             return null;
@@ -7026,6 +7098,13 @@ internal static class Matcher
         while (state.Pstack.TopSize(out long mark) && mark > bstackAt)
         {
             _ = state.Pstack.DropSize();
+
+            // D109: every frame above a call's entry is a body's (atomic, lookaround or test),
+            // which lifted the budget and is abandoned with its frame.
+            if (state.IsFuzzy)
+            {
+                state.CloseABoundlessBody();
+            }
         }
 
         CutBstack(state, bstackAt);
@@ -7433,6 +7512,7 @@ internal static class Matcher
     /// <returns><see langword="false"/> if the stacks are not as the marks promise.</returns>
     private static bool UnwindToTheVerbTarget(MatchState state, out bool toAttempt)
     {
+        Debug.Assert(!state.RefinesInANarrowedSlice, "D114: D109 refuses a ranked pattern with a verb");
         toAttempt = false;
         LookaroundStateData outermostLook = default;
         bool crossedALookaround = false;
@@ -7467,6 +7547,12 @@ internal static class Matcher
             }
 
             _ = state.Pstack.DropSize();
+
+            // D109: a crossed frame's body lifted the budget, and is abandoned with its frame.
+            if (state.IsFuzzy)
+            {
+                state.CloseABoundlessBody();
+            }
         }
     }
 
@@ -13128,7 +13214,7 @@ internal static class Matcher
                 int limit;
                 if (search || !useOffset)
                 {
-                    limit = state.SliceEnd;
+                    limit = state.SearchSliceEnd;
                 }
                 else
                 {
@@ -13359,7 +13445,7 @@ internal static class Matcher
                 return pos;
             }
 
-            if (reverse ? pos <= state.SliceStart : pos >= state.SliceEnd)
+            if (reverse ? pos <= state.SearchSliceStart : pos >= state.SearchSliceEnd)
             {
                 return -1;
             }
@@ -13369,7 +13455,7 @@ internal static class Matcher
             // In codepoints upstream's '--text_pos' cannot pass 'slice_start' (:7911-7913). In
             // UTF-16 it can: a 'beginning' that splits a surrogate pair lets 'PrevPos' walk the
             // whole pair and land one below 'SliceStart', where the matcher itself refuses to start.
-            if (reverse && pos < state.SliceStart)
+            if (reverse && pos < state.SearchSliceStart)
             {
                 return -1;
             }
@@ -13489,7 +13575,7 @@ internal static class Matcher
 
         // Upstream's opening bound test (:8400-8416). Its partial halves are narrowing 1's; what is
         // left is the reverse arm, because the forward arm upstream has no failure case at all.
-        if (state.Reverse && startPos < state.SliceStart)
+        if (state.Reverse && startPos < state.SearchSliceStart)
         {
             return MatchStatus.Failure;
         }
@@ -13577,9 +13663,9 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgn:
                 case Opcode.SetUnion:
                 case Opcode.SetUnionIgn:
-                    startPos = MatchMany(state, test, startPos, state.SliceEnd, false, false);
+                    startPos = MatchMany(state, test, startPos, state.SearchSliceEnd, false, false);
 
-                    if (startPos >= state.SliceEnd)
+                    if (startPos >= state.SearchSliceEnd)
                     {
                         return MatchStatus.Failure;
                     }
@@ -13602,9 +13688,9 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev:
                 case Opcode.SetUnionRev:
                 case Opcode.SetUnionIgnRev:
-                    startPos = MatchMany(state, test, startPos, state.SliceStart, false, true);
+                    startPos = MatchMany(state, test, startPos, state.SearchSliceStart, false, true);
 
-                    if (startPos <= state.SliceStart)
+                    if (startPos <= state.SearchSliceStart)
                     {
                         return MatchStatus.Failure;
                     }
@@ -13671,7 +13757,14 @@ internal static class Matcher
                     // node's step is its whole length, and stepping one character instead turned 82
                     // tests red the moment that clause was switched off. See the negative controls
                     // in 'docs/plan/slices/notes/S60b-sittings.md'.
-                    startPos = SimpleStringSearch(state, test, startPos, state.SliceEnd, out _, out bool cancelled);
+                    startPos = SimpleStringSearch(
+                        state,
+                        test,
+                        startPos,
+                        state.SearchSliceEnd,
+                        out _,
+                        out bool cancelled
+                    );
 
                     if (cancelled)
                     {
@@ -13744,7 +13837,7 @@ internal static class Matcher
             // This position is refused after all, so try the next one.
             startPos = Step(state, startPos, state.Reverse ? -1 : 1);
 
-            if (state.Reverse ? startPos < state.SliceStart : startPos > state.SliceEnd)
+            if (state.Reverse ? startPos < state.SearchSliceStart : startPos > state.SearchSliceEnd)
             {
                 return MatchStatus.Failure;
             }
@@ -13914,7 +14007,7 @@ internal static class Matcher
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static (int Start, int End) NextLeadingUnit(MatchState state, int foundPos, SearchValues<char> leadingUnits)
     {
-        ReadOnlySpan<char> text = state.Text.Span[..state.SliceEnd];
+        ReadOnlySpan<char> text = state.Text.Span[..state.SearchSliceEnd];
         if (foundPos < text.Length && leadingUnits.Contains(text[foundPos]))
         {
             int run = text[(foundPos + 1)..].IndexOfAnyExcept(leadingUnits);
@@ -14053,7 +14146,11 @@ internal static class Matcher
         // start with, or (2026-10-11) the code units its case-insensitive literals can start on.
         // Withheld from a partial match, which can end part way through a literal, and from a
         // pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
-        bool leadingJump = search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb;
+        //
+        // D115: none for a one-attempt search (MatchState.OneAttempt), which tries its start alone,
+        // and none of the prefilters below either.
+        bool leadingJump =
+            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb && !state.OneAttempt;
         SearchValues<string>? leadingStrings = leadingJump ? pattern.LeadingStrings : null;
         SearchValues<char>? leadingUnits = leadingJump ? pattern.LeadingUnits : null;
         int leadingUnitsEnd = 0;
@@ -14073,14 +14170,16 @@ internal static class Matcher
             && leadingStrings is null
             && leadingUnits is null;
 
-        bool doSearchStart = state.DoSearchStart && searchStartAllowed;
+        bool doSearchStart = state.DoSearchStart && searchStartAllowed && !state.OneAttempt;
 
         // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
         // withheld from a partial match, which can be a prefix of the literal holding no whole
         // piece. What it learns lives on the state, across every attempt of every call of the scan
         // (D14). See FuzzyLiteralFilter.
         FuzzyLiteralFilter? fuzzyFilter =
-            search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
+            search && state.PartialSide == MatchState.PartialNone && !state.OneAttempt
+                ? pattern.FuzzyLiteralFilter
+                : null;
 
         Node node;
         int status;
@@ -14201,7 +14300,13 @@ internal static class Matcher
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
-        if (state.Pattern.ReqString is null || state.InsideW || state.TextPos < state.ReqPos || state.ScreenSettles())
+        if (
+            state.Pattern.ReqString is null
+            || state.InsideW
+            || state.OneAttempt
+            || state.TextPos < state.ReqPos
+            || state.ScreenSettles()
+        )
         {
             foundPos = state.TextPos;
         }
@@ -14221,7 +14326,14 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (!fuzzyFilter.MayMatchBefore(state.Text.Span, state.SliceStart, state.TextPos, state.FilterMemory!))
+                if (
+                    !fuzzyFilter.MayMatchBefore(
+                        state.Text.Span,
+                        state.SearchSliceStart,
+                        state.TextPos,
+                        state.FilterMemory!
+                    )
+                )
                 {
                     return MatchStatus.Failure;
                 }
@@ -14232,7 +14344,13 @@ internal static class Matcher
             {
                 // C3: the filter's bit-parallel scan can read the rest of a long subject in one call,
                 // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk).
-                int next = fuzzyFilter.NextStart(state.Text.Span, foundPos, state.SliceEnd, state.FilterMemory!, state);
+                int next = fuzzyFilter.NextStart(
+                    state.Text.Span,
+                    foundPos,
+                    state.SearchSliceEnd,
+                    state.FilterMemory!,
+                    state
+                );
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
@@ -14257,9 +14375,9 @@ internal static class Matcher
         // NOT UPSTREAM'S (S60b item 14). Every match starts with one of the literals and ends
         // inside the slice, so the next attempt starts at the earliest one that fits. One sweep
         // with no poll, for the reasons StringSearch gives.
-        if (leadingStrings is not null && foundPos <= state.SliceEnd)
+        if (leadingStrings is not null && foundPos <= state.SearchSliceEnd)
         {
-            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            int at = state.Text.Span[foundPos..state.SearchSliceEnd].IndexOfAny(leadingStrings);
             if (at < 0)
             {
                 return MatchStatus.Failure;
@@ -14267,7 +14385,7 @@ internal static class Matcher
 
             foundPos += at;
         }
-        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SliceEnd)
+        else if (leadingUnits is not null && foundPos >= leadingUnitsEnd && foundPos <= state.SearchSliceEnd)
         {
             // Every match takes at least one character, which starts on one of the units. Below
             // leadingUnitsEnd the attempt is known to stand on one, so text that is all hits pays
@@ -14299,6 +14417,13 @@ internal static class Matcher
                 state.TextPos = newPosition.TextPos;
                 state.AttemptStart = state.MatchPos;
 
+                // D111: the prefilter's scans stop at a refinement's window (SearchSliceEnd), so
+                // this holds; it is the window's guarantee, not the scans'.
+                if (StartsOutsideTheRefinement(state, state.MatchPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
                 if (node.Op == Opcode.Success)
                 {
                     // The same test 'next_match_2' makes below, including the MatchAll clause that
@@ -14306,8 +14431,11 @@ internal static class Matcher
                     if (state.TextPos != state.SearchAnchor || !state.MustAdvance)
                     {
                         bool matched =
-                            !state.MatchAll
-                            || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd);
+                            !EndsOutsideTheRefinement(state)
+                            && (
+                                !state.MatchAll
+                                || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd)
+                            );
 
                         if (matched)
                         {
@@ -14315,12 +14443,18 @@ internal static class Matcher
                         }
                     }
 
+                    // D115: a one-attempt search tries no other start.
+                    if (state.OneAttempt)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
                     state.TextPos = Step(state, state.MatchPos, patternStep);
                     goto next_match_1;
                 }
 
                 // 'do_search_start' may have been cleared (:11847-11848).
-                doSearchStart = state.DoSearchStart && searchStartAllowed;
+                doSearchStart = state.DoSearchStart && searchStartAllowed && !state.OneAttempt;
 
                 // NOT UPSTREAM (C5, S2d): SearchStart chose this attempt's start (MatchPos). If R's
                 // body already failed there, so does the attempt; the FAILURE entry pushed at
@@ -14359,6 +14493,12 @@ internal static class Matcher
                 }
             }
 
+            // D111: a refinement starts no attempt outside its window.
+            if (StartsOutsideTheRefinement(state, state.TextPos))
+            {
+                return MatchStatus.Failure;
+            }
+
             state.MatchPos = state.TextPos;
             state.AttemptStart = state.TextPos;
             state.SkippedAttemptVerb = MatchState.NoSkippedVerb;
@@ -14378,13 +14518,22 @@ internal static class Matcher
                 if (state.TextPos != state.SearchAnchor || !state.MustAdvance)
                 {
                     bool succeeded =
-                        !state.MatchAll
-                        || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd);
+                        !EndsOutsideTheRefinement(state)
+                        && (
+                            !state.MatchAll
+                            || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd)
+                        );
 
                     if (succeeded)
                     {
                         return MatchStatus.Success;
                     }
+                }
+
+                // D115: a one-attempt search tries no other start.
+                if (state.OneAttempt)
+                {
+                    return MatchStatus.Failure;
                 }
 
                 state.TextPos = Step(state, state.MatchPos, patternStep);
@@ -14597,6 +14746,14 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
+                    // NOT UPSTREAM (D109): the group commits to its body's first match, so the
+                    // ranking budget must not decide which match that is. See OverTheBudget.
+                    if (state.IsFuzzy)
+                    {
+                        state.OpenABoundlessBody();
+                        Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+                    }
+
                     node = node.Next1.Node!;
                     break;
                 case Opcode.EndAtomic: // End of an atomic group.
@@ -14636,6 +14793,26 @@ internal static class Matcher
                         );
                         BlockAtomicCut(state, (int)atomicBstackCount);
                         state.NoteABlockedEnd();
+
+                        // D114: a blocked end needs a partial call's marks or a verb, and neither
+                        // runs a refinement in a narrowed slice (NarrowsTheRefinementOutsideBodies).
+                        Debug.Assert(
+                            !state.RefinesInANarrowedSlice,
+                            "D114: no blocked atomic end in a narrowed refinement"
+                        );
+
+                        // D109: the body closes until REOPEN opens it again, and its errors are
+                        // held to the budget that comes back, as at an end that cuts.
+                        if (state.IsFuzzy)
+                        {
+                            state.CloseABoundlessBody();
+                            Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+                            if (CommittedOverTheBudget(state))
+                            {
+                                goto backtrack;
+                            }
+                        }
+
                         node = node.Next1.Node!;
                         break;
                     }
@@ -14666,6 +14843,33 @@ internal static class Matcher
                      *
                      * pstack: -
                      */
+
+                    // NOT UPSTREAM (D109): the group has committed to the match the flagless
+                    // engine commits to. If its errors do not fit the budget, every path from
+                    // here keeps them and is over it too, so the group fails as a whole.
+                    if (state.IsFuzzy)
+                    {
+                        state.CloseABoundlessBody();
+                        Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+                        if (CommittedOverTheBudget(state))
+                        {
+                            goto backtrack;
+                        }
+
+                        // NOT UPSTREAM'S, D114: outside every body a refinement's slice ends at its
+                        // window again (MatchState.RefinesInANarrowedSlice), and a group that read
+                        // past the window ends every match from here past it, because nothing outside
+                        // a body moves back. The window would refuse them all at SUCCESS; the slice
+                        // must never hold a position past its own end, so the group fails now.
+                        if (
+                            state.RefinesInANarrowedSlice
+                            && state.BoundlessBodies == 0
+                            && EndsOutsideTheRefinement(state)
+                        )
+                        {
+                            goto backtrack;
+                        }
+                    }
 
                     node = node.Next1.Node!;
                     break;
@@ -16657,6 +16861,30 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // NOT UPSTREAM'S, D111: a BESTMATCH or ENHANCEMATCH refinement keeps the matches
+                    // that end inside its window, read against the caller's slice (see
+                    // MatchState.RefineStart). Before the partial test, because a partial ends at the
+                    // end of the text, which is outside a window that ends short of it.
+                    if (EndsOutsideTheRefinement(state))
+                    {
+                        goto backtrack;
+                    }
+
+                    // D114: a match ends outside every body, so a narrowed refinement's far end is
+                    // its window's again, and an atomic group that read past it has failed already.
+                    Debug.Assert(
+                        !state.RefinesInANarrowedSlice
+                            || (
+                                state.BoundlessBodies == 0
+                                && (
+                                    state.Reverse
+                                        ? state.SliceStart == state.RefineStart
+                                        : state.SliceEnd == state.RefineEnd
+                                )
+                            ),
+                        "D114: a narrowed refinement succeeds with its far end at the window"
+                    );
+
                     // NOT UPSTREAM'S, D11 M3 (design section 4.3). The two passes run the same code
                     // from the same start, so a second-pass path differs from the first only after
                     // it read the text to come: an undetermined test, a decided one that differs
@@ -16948,6 +17176,13 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
+                    // D109: the body has no match left, so its lifted budget goes back.
+                    if (state.IsFuzzy)
+                    {
+                        state.CloseABoundlessBody();
+                        Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
+                    }
+
                     state.Sstack.Count = (int)atomicSstackCount;
                     CloseFramesAbove(state);
 
@@ -17183,8 +17418,8 @@ internal static class Matcher
                         return MatchStatus.Success;
                     }
 
-                    // Do we have to advance?
-                    if (!search)
+                    // Do we have to advance? D115: not after a one-attempt search's attempt.
+                    if (!search || state.OneAttempt)
                     {
                         return MatchStatus.Failure;
                     }
@@ -17201,7 +17436,7 @@ internal static class Matcher
                         ? state.StartNotBehindTheAttempt()
                         : state.AttemptStart;
 
-                    if (state.Reverse ? state.TextPos <= state.SliceStart : state.TextPos >= state.SliceEnd)
+                    if (state.Reverse ? state.TextPos <= state.SearchSliceStart : state.TextPos >= state.SearchSliceEnd)
                     {
                         return MatchStatus.Failure;
                     }
@@ -19500,13 +19735,16 @@ internal static class Matcher
         }
 
         // NOT UPSTREAM (D102): the test's body ran with the budget lifted, so this match gives
-        // the flagless verdict. Its errors stay in the match (D54 for a negative test), so they
-        // must fit the budget; if they do not, the body goes on under the budget for a match
-        // that does, as a positive lookaround's body would, and the conditional fails only if
-        // none is left (BacktrackConditional).
-        if (state.IsFuzzy && HoldTheTestToTheBudget(state))
+        // the flagless verdict, and (D109) it is the match the flagless test commits to. Its
+        // errors stay in the match (D54 for a negative test), so they must fit the budget; if
+        // they do not, the conditional fails once its entry is on the stack (OverTheBudget).
+        // Upstream's negative-test arm (PatternObject.DropNegativeTestCaptures, oracle-only)
+        // keeps no errors, so it is not held: that arm does not read the flag.
+        bool testOverTheBudget = false;
+        if (state.IsFuzzy)
         {
-            return _armBacktrack;
+            state.CloseABoundlessBody();
+            testOverTheBudget = CommittedOverTheBudget(state);
         }
 
         // The condition matched. It is atomic, like a lookaround, so everything it pushed
@@ -19570,6 +19808,11 @@ internal static class Matcher
             }
 
             /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
+
+            if (testOverTheBudget)
+            {
+                return _armBacktrack;
+            }
 
             // A positive test holds: go to the 'true' branch. NOT UPSTREAM (D54, ledger
             // entry 65): a negative test fails, and the 'false' branch keeps the whole
@@ -19696,9 +19939,11 @@ internal static class Matcher
         state.SliceEnd = endLookData.SliceEnd;
         state.SliceStart = endLookData.SliceStart;
         Node endLookNode = endLookData.Node;
-        if (state.IsFuzzy && !endLookNode.Match)
+        if (state.IsFuzzy)
         {
-            // D102: the body matched, so the lookaround fails and its errors go with it.
+            // D102: for a negative lookaround the body matched, so the lookaround fails and its
+            // errors go with it. D109: a positive one has committed to this match, and its errors
+            // are held to the budget below, once its entry is on the stack to undo it.
             state.CloseABoundlessBody();
             Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
         }
@@ -19722,6 +19967,12 @@ internal static class Matcher
             }
 
             /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
+
+            // D109: see OverTheBudget.
+            if (state.IsFuzzy && CommittedOverTheBudget(state))
+            {
+                return _armBacktrack;
+            }
 
             // Go to the 'true' branch.
             node = node.Next1.Node!;
@@ -20042,8 +20293,10 @@ internal static class Matcher
         state.SliceEnd = state.TextEnd;
 
         // NOT UPSTREAM (D102): a negative lookaround's body failing makes it pass, so the
-        // ranking bounds must not make the body fail. See MatchState.BoundlessBodies.
-        if (state.IsFuzzy && !node.Match)
+        // ranking bounds must not make the body fail. See MatchState.BoundlessBodies. D109: a
+        // positive one commits to its body's first match, which the bounds must not choose
+        // either; its errors are held to them at its end (OverTheBudget).
+        if (state.IsFuzzy)
         {
             state.OpenABoundlessBody();
             Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
@@ -20622,16 +20875,6 @@ internal static class Matcher
             state.DropLookaroundSuccessesFrom(state.Bstack.Count);
         }
 
-        // D102: a test whose body matched over the budget, with no match left that fits.
-        bool heldTestRanOut =
-            state.TestsHeldToTheBudget.Count != 0
-            && state.Pstack.TopSize(out long condMark)
-            && state.TestsHeldToTheBudget[^1] == condMark;
-        if (heldTestRanOut)
-        {
-            state.TestsHeldToTheBudget.RemoveAt(state.TestsHeldToTheBudget.Count - 1);
-        }
-
         // The condition failed to match. As with LOOKAROUND, the condition's own bstack
         // entries have already been popped by the backtracking that got here, so the
         // pstack entry is simply dropped.
@@ -20652,7 +20895,7 @@ internal static class Matcher
         state.SliceEnd = condData.SliceEnd;
         state.SliceStart = condData.SliceStart;
         Node condNode = condData.Node;
-        if (state.IsFuzzy && !heldTestRanOut)
+        if (state.IsFuzzy)
         {
             // D102: the test's body has failed; the bounds come back for the branch.
             state.CloseABoundlessBody();
@@ -20682,13 +20925,6 @@ internal static class Matcher
         )
         {
             return MatchStatus.Illegal;
-        }
-
-        // D102: the test's verdict stands (its body matched), but no match of the body fits the
-        // budget, so the conditional fails.
-        if (heldTestRanOut)
-        {
-            return _armContinue;
         }
 
         // D11 (D38): the test held for every continuation, and its yes-branch has failed
@@ -21045,9 +21281,10 @@ internal static class Matcher
         state.SliceEnd = lookData.SliceEnd;
         state.SliceStart = lookData.SliceStart;
         Node lookNode = lookData.Node;
-        if (state.IsFuzzy && !lookNode.Match)
+        if (state.IsFuzzy)
         {
-            // D102: the body has failed, so the negative lookaround passes under the bounds.
+            // D102: the body has failed, so a negative lookaround passes under the bounds, and
+            // (D109) a positive one fails with them back.
             state.CloseABoundlessBody();
             Debug.Assert(BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
         }
@@ -21225,14 +21462,15 @@ internal static class Matcher
             }
             state.SliceStart = state.TextStart;
             state.SliceEnd = state.TextEnd;
-            if (reopenedOp == (byte)Opcode.Conditional && state.IsFuzzy)
-            {
-                // D102: the test's body is open again, so its bounds are lifted again, as the
-                // blocked end that moved it closed them (EndALookaroundInTheSecondPass).
-                state.OpenABoundlessBody();
-            }
 
             state.NotePartialEvent(PartialEvent.ReopenRestoredSstack);
+        }
+
+        // D102, D109: the body is open again, so its bounds are lifted again, as the blocked end
+        // that moved it closed them (EndALookaroundInTheSecondPass, ATOMIC_END's blocked cut).
+        if (state.IsFuzzy)
+        {
+            state.OpenABoundlessBody();
         }
 
         state.Pstack.PushSize(reopenedFrameEnd);
@@ -21241,83 +21479,47 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// NOT UPSTREAM (D102): at a conditional test's end, closes its lifted body and says whether
-    /// the errors the test keeps are over the budget, in which case the test is marked as held to
-    /// the budget (<see cref="MatchState.TestsHeldToTheBudget"/>) and its body goes on under it.
+    /// NOT UPSTREAM (D102, D109): whether the errors so far are over the budget BESTMATCH or
+    /// ENHANCEMATCH holds the run to, checked when a body that ran with the budget lifted ends.
     /// </summary>
     /// <remarks>
-    /// The verdict is already the flagless one: the body matched with the budget lifted. Only the
-    /// price is in question. The body's paths before this match all failed with the budget lifted,
-    /// so they fail under it too, and the paths still on the stack are the rest of the body's
-    /// matches, in the order a positive lookaround's body under the budget would try them. Both
-    /// the whole-match totals and the open section's own counts are held, as END_FUZZY and each
-    /// error's permission hold them. Upstream's negative-test arm
-    /// (<c>PatternObject.DropNegativeTestCaptures</c>, oracle-only) keeps no errors, so it is not
-    /// held.
+    /// D109: an atomic group (and a possessive repeat, <c>\R</c> and <c>\X</c>, which compile to
+    /// one), a lookaround and a conditional's test commit to their body's first match. Under the
+    /// budget a body could fail where the flagless engine's first match needs more errors than the
+    /// budget allows, and commit to a later match instead, so the run answered a span the flagless
+    /// pattern does not match: <c>(?b)(?:(?>ab|a)c){s&lt;=1}</c> over 'aacbc' answered (1, 3)
+    /// exact, where at 1 the flagless group takes 'ac' with a substitution and the match fails.
+    /// So those bodies run with the budget lifted, and when one has matched its errors must fit
+    /// the budget, or the construct fails without trying the body's other matches: every path
+    /// from it keeps those errors, and errors only grow along a path. Both the whole-match totals
+    /// and the open section's own counts are held, as END_FUZZY and each error's permission hold
+    /// them.
     /// </remarks>
-    /// <param name="state">The match state, at END_CONDITIONAL with the test's frame on top.</param>
-    /// <returns><see langword="true"/> if the body must go on under the budget.</returns>
-    private static bool HoldTheTestToTheBudget(MatchState state)
-    {
-        if (!state.Pstack.TopSize(out long mark))
-        {
-            return false;
-        }
+    /// <param name="state">The match state, with the run's own bounds in place.</param>
+    /// <returns><see langword="true"/> if the errors so far are over the budget.</returns>
+    private static bool OverTheBudget(MatchState state) => OverBounds(state, state.MaxErrors, state.MaxCost);
 
-        List<long> held = state.TestsHeldToTheBudget;
-        bool alreadyHeld = held.Count != 0 && held[^1] == mark;
-        if (!alreadyHeld)
-        {
-            state.CloseABoundlessBody();
-        }
-
-        bool over =
-            state.TotalErrors > state.MaxErrors
-            || state.TotalCost > state.MaxCost
-            || (
-                state.FuzzyNode is { } section
-                && (
-                    TotalErrors(state.FuzzyCounts) > state.MaxErrors
-                    || TotalCost(state.FuzzyCounts, section) > state.MaxCost
-                )
-            );
-        if (over && state.Pattern.DropNegativeTestCaptures && !TestNodeAt(state, mark).Match)
-        {
-            over = false;
-        }
-
-        if (over && !alreadyHeld)
-        {
-            held.Add(mark);
-        }
-        else if (!over && alreadyHeld)
-        {
-            held.RemoveAt(held.Count - 1);
-        }
-
-        // Not held, the frame is still open here and closes at once in the caller.
-        Debug.Assert(!over || BoundlessBodiesBalance(state), "D102: the count is the open lifting frames");
-        return over;
-    }
-
-    /// <summary>NOT UPSTREAM (D102): the CONDITIONAL node whose frame has pruning mark <paramref name="mark"/>.</summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="mark">The frame's pruning mark.</param>
-    /// <returns>The node.</returns>
-    private static Node TestNodeAt(MatchState state, long mark)
-    {
-        _ = state.Bstack.ReadSizeBelow((int)mark - 1, out long sstackCount);
-        int top = state.Sstack.Count;
-        state.Sstack.Count = (int)sstackCount;
-        _ = PopLookaroundStateData(state.Pattern, state.Sstack, out LookaroundStateData look);
-        state.Sstack.Count = top;
-        return look.Node;
-    }
+    private static bool OverBounds(MatchState state, long maxErrors, long maxCost) =>
+        state.TotalErrors > maxErrors
+        || state.TotalCost > maxCost
+        || (
+            state.FuzzyNode is { } section
+            && (TotalErrors(state.FuzzyCounts) > maxErrors || TotalCost(state.FuzzyCounts, section) > maxCost)
+        );
 
     /// <summary>
-    /// NOT UPSTREAM (D102), DEBUG only: whether <see cref="MatchState.BoundlessBodies"/> counts
-    /// exactly the open frames that lift the ranking bounds, a conditional's test or a negative
-    /// lookaround, read off the pruning marks. The counter saves a push per frame, and this is
+    /// NOT UPSTREAM (D109): <see cref="OverTheBudget"/> at the end of a committing body, unless the
+    /// oracle's ablation left the budget in force there (then the body could not exceed it).
+    /// </summary>
+    /// <param name="state">The match state, with the run's own bounds back in place.</param>
+    /// <returns><see langword="true"/> if the construct must fail.</returns>
+    private static bool CommittedOverTheBudget(MatchState state) =>
+        !state.Pattern.BoundsReachDecidingBodies && OverTheBudget(state);
+
+    /// <summary>
+    /// NOT UPSTREAM (D102, D109), DEBUG only: whether <see cref="MatchState.BoundlessBodies"/>
+    /// counts exactly the open frames that lift the ranking bounds, a conditional's test, a
+    /// lookaround or an atomic group, read off the pruning marks. The counter saves a push per frame, and this is
     /// what proves it stays in step with the frames at the arms that open, move and close them.
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -21333,11 +21535,8 @@ internal static class Matcher
         for (int offset = 0; offset < state.Pstack.Count; offset += sizeof(long))
         {
             if (
-                ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out LookaroundStateData look)
-                && (
-                    (op == Opcode.Conditional && !state.TestsHeldToTheBudget.Contains(state.Pstack.SizeAt(offset)))
-                    || (op == Opcode.Lookaround && !look.Node.Match)
-                )
+                ReadPruningMark(state, (int)state.Pstack.SizeAt(offset), out Opcode op, out _)
+                && op is Opcode.Conditional or Opcode.Lookaround or Opcode.Atomic
             )
             {
                 open++;
@@ -22243,6 +22442,104 @@ internal static class Matcher
         cost != bestCost ? cost < bestCost : errors < bestErrors;
 
     /// <summary>
+    /// D111: whether a match ending at the current position falls outside a BESTMATCH or
+    /// ENHANCEMATCH refinement's window (<see cref="MatchState.RefineStart"/>). Never true outside one.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the match must backtrack.</returns>
+    private static bool EndsOutsideTheRefinement(MatchState state) =>
+        state.Reverse ? state.TextPos < state.RefineStart : state.TextPos > state.RefineEnd;
+
+    /// <summary>D111: whether an attempt starting at <paramref name="start"/> falls outside a refinement's window.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="start">Where the attempt starts.</param>
+    /// <returns><see langword="true"/> if the search must stop.</returns>
+    private static bool StartsOutsideTheRefinement(MatchState state, int start) =>
+        state.Reverse ? start < state.RefineStart : start > state.RefineEnd;
+
+    /// <summary>
+    /// D111, D114: holds the next BESTMATCH or ENHANCEMATCH run of a pattern with an atomic group
+    /// (<see cref="PatternObject.RefinesInAWindow"/>) to the span <paramref name="start"/> to
+    /// <paramref name="end"/>: a window its matches must fall inside (<see cref="MatchState.RefineStart"/>),
+    /// and, where <see cref="NarrowsTheRefinementOutsideBodies"/> holds, a slice whose far end is the
+    /// window's outside the bodies that lift the ranking bounds (<see cref="MatchState.RefinesInANarrowedSlice"/>).
+    /// </summary>
+    /// <param name="state">The match state, between runs, outside every body.</param>
+    /// <param name="start">The span's start.</param>
+    /// <param name="end">The span's end.</param>
+    /// <param name="callerSliceStart">The slice the caller asked for: its start.</param>
+    /// <param name="callerSliceEnd">Its end.</param>
+    private static void HoldTheRefinementToAWindow(
+        MatchState state,
+        int start,
+        int end,
+        int callerSliceStart,
+        int callerSliceEnd
+    )
+    {
+        state.RefineStart = start;
+        state.RefineEnd = end;
+
+        if (!NarrowsTheRefinementOutsideBodies(state))
+        {
+            return;
+        }
+
+        // The assumptions the narrowing rests on (MatchState.RefinesInANarrowedSlice): a run
+        // between refinements has no body open, only a fuzzy run refines, so the counter that
+        // tracks the bodies is kept, and D109 refuses a ranked pattern with a verb, whose unwinding
+        // (UnwindToTheVerbTarget) and moved slice (MoveTheSliceForASkip) the argument does not cover.
+        Debug.Assert(state.BoundlessBodies == 0, "D114: a refinement starts outside every body");
+        Debug.Assert(state.IsFuzzy, "D114: only a fuzzy run refines, and only a fuzzy run counts its bodies");
+        Debug.Assert(!state.Pattern.HasBacktrackingVerb, "D114: D109 refuses a ranked pattern with a verb");
+
+        state.RefinesInANarrowedSlice = true;
+        if (state.Reverse)
+        {
+            state.RefineCallerFarEnd = callerSliceStart;
+            state.SliceStart = start;
+        }
+        else
+        {
+            state.RefineCallerFarEnd = callerSliceEnd;
+            state.SliceEnd = end;
+        }
+    }
+
+    /// <summary>
+    /// D114: whether a refinement held to a window may also narrow its slice's far end outside the
+    /// bodies that lift the ranking bounds (<see cref="MatchState.RefinesInANarrowedSlice"/>) and give
+    /// the same answers. Not in a partial call, whose run-outs read the slice's edge and end the run
+    /// rather than fail; not with group calls, because a called body runs inside a body at one call
+    /// and outside at another, so a guard or memo keyed on node and position could see two slices;
+    /// and not under the oracle's ablation that stops the counter (<see cref="PatternObject.BoundsReachDecidingBodies"/>).
+    /// Those keep D111's window over the caller's slice, which is right and slower.
+    /// </summary>
+    /// <remarks>
+    /// SHORTCUT: the partial and call clauses are where the equivalence argument stops, not where a
+    /// witness was found: dropping either changed no answer on 64,000 rows (2026-10-19,
+    /// <c>.scratch/s1019/d114/excl.sh</c>). A ranked partial call or a ranked pattern with group calls
+    /// and an atomic group still pays D111's cost on adversarial text. Upgrade path: extend the
+    /// argument (run-outs at the narrowed edge; guards and memos keyed per call context), then drop
+    /// the clause with a differential against this one.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the far end may be narrowed.</returns>
+    private static bool NarrowsTheRefinementOutsideBodies(MatchState state) =>
+        state.PartialSide == MatchState.PartialNone
+        && !state.Pattern.HasGroupCalls
+        && !state.Pattern.BoundsReachDecidingBodies;
+
+    /// <summary>D111, D114: ends a refinement's window, and its narrowed far end with it. The slice is the driver's to restore.</summary>
+    /// <param name="state">The match state.</param>
+    private static void EndTheRefinementWindow(MatchState state)
+    {
+        state.RefineStart = int.MinValue;
+        state.RefineEnd = int.MaxValue;
+        state.RefinesInANarrowedSlice = false;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D78: whether a BESTMATCH or ENHANCEMATCH run from <paramref name="start"/> must
     /// advance. After an empty match the scan excludes only the empty match at its resume position
     /// <paramref name="first"/>; upstream re-sets <c>must_advance</c> for every run, and each run's
@@ -22460,19 +22757,34 @@ internal static class Matcher
 
             // D86: the span from where the attempt began, not from the start a \K reported, which
             // would leave the part of the pattern before the \K nothing to match.
-            if (state.Reverse)
+            //
+            // NOT UPSTREAM'S, D111: the span is a window the next run's matches must fall inside,
+            // not a narrowed slice (upstream ':17988-17996'). A narrowed slice end cuts what an
+            // atomic group, a possessive repeat, \R or \X reads, and the refined answer could be a
+            // span the pattern does not match in the text. See MatchState.RefineStart. A pattern
+            // that commits to nothing it read keeps upstream's narrowing (PatternObject.RefinesInAWindow).
+            //
+            //
+            // D114: and where it can, the slice's far end is narrowed to the span outside the
+            // bodies that lift the ranking bounds, so only an atomic group reads past the span
+            // (MatchState.RefinesInANarrowedSlice); with the window alone, every attempt inside the
+            // span read to the end of the text.
+            int spanStart = state.Reverse ? state.TextPos : state.AttemptStart;
+            int spanEnd = state.Reverse ? state.AttemptStart : state.TextPos;
+            if (state.Pattern.RefinesInAWindow)
             {
-                state.SliceStart = state.TextPos;
-                state.SliceEnd = state.AttemptStart;
+                HoldTheRefinementToAWindow(state, spanStart, spanEnd, sliceStart, sliceEnd);
             }
             else
             {
-                state.SliceStart = state.AttemptStart;
-                state.SliceEnd = state.TextPos;
+                state.SliceStart = spanStart;
+                state.SliceEnd = spanEnd;
             }
 
             state.TextPos = state.AttemptStart;
         }
+
+        EndTheRefinementWindow(state);
 
         if (status is < 0 and not MatchStatus.Partial)
         {
@@ -22532,6 +22844,175 @@ internal static class Matcher
     /// <param name="bestChangesList">The list of lists to add to.</param>
     private static void AddBestFuzzyChanges(MatchState state, List<List<FuzzyChange>> bestChangesList) =>
         bestChangesList.Add([.. state.FuzzyChanges]);
+
+    /// <summary>What <see cref="BestWalkKnownToFail"/> found: nothing known, so run the search.</summary>
+    private const int _walkSearchUnknown = 0;
+
+    /// <summary>What <see cref="BestWalkKnownToFail"/> found: the search fails, so skip it.</summary>
+    private const int _walkSearchFails = 1;
+
+    /// <summary>
+    /// What <see cref="BestWalkKnownToFail"/> found: every attempt but the first fails, so run that
+    /// one alone (<see cref="MatchState.OneAttempt"/>).
+    /// </summary>
+    private const int _walkSearchFirstAttemptOnly = 2;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: what an earlier failed BESTMATCH walk search of this scan proves about
+    /// a search from <paramref name="start"/> under the live bounds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk holds each run after a match to fewer errors than that match and searches to the
+    /// end of the slice. When nothing better exists, as when every match costs one error, that
+    /// search fails only at the end of the text, and a finditer pays it once per match: quadratic
+    /// (KNOWN-DEFECTS D115; upstream mrab-regex does the same, 1.19 s for
+    /// <c>(?b)(?:thx\s[a-z]+\s){e&lt;=1}</c> over 64 KB of prose against 11 ms without the flag).
+    /// </para>
+    /// <para>
+    /// A search is a run of attempts, one per start position from its own start to the slice's
+    /// end, and an attempt reads three things a fact can differ in: the bounds, the slice, and the
+    /// search anchor, which is the position the search started from. Take a fact for a search from
+    /// F that failed, and a later search from S, past F in the scan's direction, in the same slice
+    /// and held to no wider bounds.
+    /// </para>
+    /// <para>
+    /// The anchor is not neutral. A fuzzy item standing on it may not open with an insertion
+    /// (the <c>PermitInsertion</c> lines and <see cref="AnchorIsPinned"/>), and an empty match on it
+    /// is refused after an empty match (<see cref="MatchState.MustAdvance"/>). A ban narrows the item
+    /// it lands on, and a narrower body can widen the pattern when it decides a negative
+    /// lookaround, an atomic group or a conditional: <c>(?b)(?:(?!(?:ab){i&lt;=1})x|(?:[xy]q){s&lt;=1})</c>
+    /// over 'yb.xab' finds (3, 4) exactly from 3, where the attempt at 3 of a search from 0 cannot
+    /// (D115 review, round 1). So the attempt at S is run, as the search would run it.
+    /// </para>
+    /// <para>
+    /// Every attempt after it starts past S and past F, and none reaches back to either while the
+    /// pattern reads only in the scan's direction: each attempt's text position moves away from its
+    /// start except inside a lookaround that runs the other way, and a pattern with one is not
+    /// remembered (<see cref="PatternObject.LooksAgainstTheScan"/>). So no ban touches those
+    /// attempts in either search, and they run the same, but for the bounds. The bounds only prune:
+    /// a body that commits to what it read runs with them lifted (D102, D109) and is judged against
+    /// them only at its end. Each of those attempts failed in the fact's search, under bounds at
+    /// least as wide, so each fails again. When S is F the two searches are the same search, but
+    /// for the empty-match ban, which only refuses a success, so a fact that ran without it covers
+    /// one with it.
+    /// </para>
+    /// <para>
+    /// What does not carry over is not remembered: a <c>\G</c>, which reads the anchor; a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109 refuses them in a fuzzy
+    /// pattern anyway); a partial search, which can succeed at the slice's end; and a different
+    /// slice, since a lookaround reads up to its edges.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, holding the live bounds and the recorded facts.</param>
+    /// <param name="start">Where the search would start.</param>
+    /// <returns>
+    /// <see cref="_walkSearchFails"/>, <see cref="_walkSearchFirstAttemptOnly"/> or
+    /// <see cref="_walkSearchUnknown"/>.
+    /// </returns>
+    private static int BestWalkKnownToFail(MatchState state, int start)
+    {
+        if (state.BestWalkFailures.Count == 0 || !BestWalkCanRemember(state))
+        {
+            return _walkSearchUnknown;
+        }
+
+        int found = _walkSearchUnknown;
+        foreach (MatchState.BestWalkFailure fact in state.BestWalkFailures)
+        {
+            if (
+                fact.SliceStart != state.SliceStart
+                || fact.SliceEnd != state.SliceEnd
+                || state.MaxErrors > fact.Errors
+                || state.MaxCost > fact.Cost
+            )
+            {
+                continue;
+            }
+
+            if (start == fact.From)
+            {
+                if (!fact.MustAdvance || state.MustAdvance)
+                {
+                    return _walkSearchFails;
+                }
+            }
+            else if (state.Reverse ? start < fact.From : start > fact.From)
+            {
+                found = _walkSearchFirstAttemptOnly;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: records a failed walk search, over the fact kept for the same bounds
+    /// if there is one. See <see cref="BestWalkKnownToFail"/>.
+    /// </summary>
+    /// <remarks>
+    /// Called only after a whole search, so no fact for these bounds already covered
+    /// <paramref name="start"/>: the one being replaced starts later, or at the same place with the
+    /// empty-match ban, and the new one covers every search the old one did. The facts are not keyed
+    /// by slice, because every walk of a scan runs in the caller's slice (DoMatch puts it back for
+    /// each match); a fact from another slice could only be replaced, never misread, since
+    /// <see cref="BestWalkKnownToFail"/> compares the slice.
+    /// </remarks>
+    /// <param name="state">The match state, holding the live bounds the search ran under.</param>
+    /// <param name="start">Where the failed search started.</param>
+    private static void NoteBestWalkFailure(MatchState state, int start)
+    {
+        if (!BestWalkCanRemember(state))
+        {
+            return;
+        }
+
+        List<MatchState.BestWalkFailure> facts = state.BestWalkFailures;
+        var fact = new MatchState.BestWalkFailure(
+            start,
+            state.MaxErrors,
+            state.MaxCost,
+            state.MustAdvance,
+            state.SliceStart,
+            state.SliceEnd
+        );
+
+        for (int i = 0; i < facts.Count; i++)
+        {
+            if (facts[i].Errors == fact.Errors && facts[i].Cost == fact.Cost)
+            {
+                facts[i] = fact;
+                return;
+            }
+        }
+
+        // Full: the oldest fact goes.
+        if (facts.Count == MatchState.BestWalkFailureSlots)
+        {
+            facts.RemoveAt(0);
+        }
+
+        facts.Add(fact);
+    }
+
+    /// <summary>NOT UPSTREAM'S, D115: whether a failed walk search may be remembered at all.</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>
+    /// <see langword="true"/> unless the search's answer can depend on more than its start, its
+    /// slice and its bounds. See <see cref="BestWalkKnownToFail"/>.
+    /// </returns>
+    private static bool BestWalkCanRemember(MatchState state)
+    {
+        Debug.Assert(
+            state.RefineStart == int.MinValue && state.RefineEnd == int.MaxValue,
+            "D115: the walk runs outside a refinement's window"
+        );
+
+        return state.PartialSide == MatchState.PartialNone
+            && !state.Pattern.ReadsTheSearchAnchor
+            && !state.Pattern.HasBacktrackingVerb
+            && !state.Pattern.LooksAgainstTheScan;
+    }
 
     /// <summary>
     /// Upstream <c>do_best_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17584): search the whole
@@ -22750,7 +23231,33 @@ internal static class Matcher
 
                 if (status == MatchStatus.Success)
                 {
-                    status = BasicMatch(state, search);
+                    // NOT UPSTREAM'S, D115: what an earlier failed search already showed is not
+                    // searched again. See BestWalkKnownToFail.
+                    int known = search ? BestWalkKnownToFail(state, startPos) : _walkSearchUnknown;
+                    if (known == _walkSearchFails)
+                    {
+                        status = MatchStatus.Failure;
+                    }
+                    else if (known == _walkSearchFirstAttemptOnly)
+                    {
+                        state.OneAttempt = true;
+                        try
+                        {
+                            status = BasicMatch(state, search);
+                        }
+                        finally
+                        {
+                            state.OneAttempt = false;
+                        }
+                    }
+                    else
+                    {
+                        status = BasicMatch(state, search);
+                        if (search && status == MatchStatus.Failure)
+                        {
+                            NoteBestWalkFailure(state, startPos);
+                        }
+                    }
                 }
 
                 // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a
@@ -23062,8 +23569,19 @@ internal static class Matcher
             int widenedStart = StepBy(state, state.Reverse ? entry.TextPos : entry.AttemptStart, fewestErrors, -1);
             int widenedEnd = StepBy(state, state.Reverse ? entry.AttemptStart : entry.TextPos, fewestErrors, 1);
 
-            state.SliceStart = widenedStart;
-            state.SliceEnd = widenedEnd;
+            // NOT UPSTREAM'S, D111: a window the re-run's match must fall inside, not a narrowed
+            // slice, for the reason DoEnhancedFuzzyMatch gives at its own window, and only where
+            // the pattern can commit to what it read (PatternObject.RefinesInAWindow). The same
+            // D114 narrowing applies (MatchState.RefinesInANarrowedSlice).
+            if (state.Pattern.RefinesInAWindow)
+            {
+                HoldTheRefinementToAWindow(state, widenedStart, widenedEnd, sliceStart, sliceEnd);
+            }
+            else
+            {
+                state.SliceStart = widenedStart;
+                state.SliceEnd = widenedEnd;
+            }
 
             // We've narrowed the slice. The required string position might now be outside it.
             //
@@ -23094,6 +23612,8 @@ internal static class Matcher
             state.MustAdvance = MustAdvanceAt(state, mustAdvance, entry.AttemptStart, firstStartPos);
             state.InitMatch();
             status = BasicMatch(state, search);
+
+            EndTheRefinementWindow(state);
 
             if (status < 0)
             {
@@ -23501,6 +24021,9 @@ internal static class Matcher
         // pins.
         state.SliceStart = state.InitialSliceStart;
         state.SliceEnd = state.InitialSliceEnd;
+
+        // D111: and no refinement window left over from a match a timeout ended mid-refinement.
+        EndTheRefinementWindow(state);
 
         // Is there enough to search?
         if (state.Reverse)

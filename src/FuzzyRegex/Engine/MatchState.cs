@@ -422,6 +422,53 @@ internal sealed class MatchState : IDisposable
     internal int InitialSliceEnd;
 
     /// <summary>
+    /// NOT UPSTREAM (D111): the span a BESTMATCH or ENHANCEMATCH refinement holds its matches to.
+    /// <see cref="int.MinValue"/> and <see cref="int.MaxValue"/> (no limit) outside a refinement.
+    /// </summary>
+    /// <remarks>
+    /// Upstream narrows the SLICE to the span instead, and the narrowed slice end cuts what an atomic
+    /// group, a possessive repeat, <c>\R</c> or <c>\X</c> reads, so a refinement could report a span
+    /// the pattern does not match in the text: <c>(?e)(?:xaq|a(?&gt;a*)){e&lt;=1}</c> over 'xaaa' was
+    /// (1, 3) exact, where the atomic <c>a*</c> takes 'aaa'. The slice now stays the caller's, so
+    /// every construct reads the text as the plain search does, and this window is a filter: an
+    /// attempt starts inside it (<see cref="SearchSliceStart"/>, <see cref="SearchSliceEnd"/>) and a
+    /// match that ends outside it backtracks (<c>Matcher.EndsOutsideTheRefinement</c>).
+    /// </remarks>
+    internal int RefineStart = int.MinValue;
+
+    /// <inheritdoc cref="RefineStart" />
+    internal int RefineEnd = int.MaxValue;
+
+    /// <summary>
+    /// NOT UPSTREAM (D114): whether a refinement held to a window also narrows the slice's far end
+    /// (forwards <see cref="SliceEnd"/>, reversed <see cref="SliceStart"/>) to the window outside
+    /// every body that lifts the ranking bounds (<see cref="BoundlessBodies"/>). Inside one, the far
+    /// end is the caller's (<see cref="RefineCallerFarEnd"/>).
+    /// </summary>
+    /// <remarks>
+    /// The window alone (D111) lets every part of the pattern read past the span, so on adversarial
+    /// text each attempt inside the span read to the end of the text (KNOWN-DEFECTS D114). Only a body
+    /// that commits to what it read, an atomic group, can answer differently when the text past the
+    /// span is cut off; a lookaround or a condition's test already reads the whole text. Outside the
+    /// bodies, a path that reads past the span ends past it, because forward matching moves only
+    /// right there, so the window would refuse it anyway; the narrowed end only refuses it sooner.
+    /// <c>Matcher.NarrowsTheRefinementOutsideBodies</c> says where that argument holds.
+    /// </remarks>
+    internal bool RefinesInANarrowedSlice;
+
+    /// <summary>D114: the caller's far slice end, which a body that lifts the ranking bounds reads to. See <see cref="RefinesInANarrowedSlice"/>.</summary>
+    internal int RefineCallerFarEnd;
+
+    /// <summary>
+    /// D111: the lowest position a search may start an attempt at (or, reversed, scan down to):
+    /// the slice start, raised to a refinement's window.
+    /// </summary>
+    internal int SearchSliceStart => Math.Max(SliceStart, RefineStart);
+
+    /// <summary>D111: the slice end, lowered to a refinement's window. See <see cref="SearchSliceStart"/>.</summary>
+    internal int SearchSliceEnd => Math.Min(SliceEnd, RefineEnd);
+
+    /// <summary>
     /// Upstream <c>text_start</c>. Always 0: upstream documents the bounds as an open start and a
     /// closed end, so <c>pos</c> moves <see cref="SliceStart"/> but not this, which is why
     /// <c>^</c> does not match at <c>pos</c>.
@@ -927,28 +974,64 @@ internal sealed class MatchState : IDisposable
     internal long MaxCost;
 
     /// <summary>
-    /// NOT UPSTREAM (D102): how many bodies that decide a test are open, a negative lookaround's or
-    /// a conditional's test. While any is, <see cref="MaxErrors"/> and <see cref="MaxCost"/> are
-    /// lifted, and the bounds the run was given wait in <see cref="HeldMaxErrors"/> and
-    /// <see cref="HeldMaxCost"/>.
+    /// NOT UPSTREAM (D102, D109): how many bodies are open that run with the ranking bounds lifted:
+    /// a lookaround's, a conditional's test and an atomic group's (with a possessive repeat's, and
+    /// <c>\R</c>'s and <c>\X</c>'s, which compile to one). While any is, <see cref="MaxErrors"/>
+    /// and <see cref="MaxCost"/> are lifted, and the bounds the run was given wait in
+    /// <see cref="HeldMaxErrors"/> and <see cref="HeldMaxCost"/>.
     /// </summary>
     /// <remarks>
     /// The two bounds are how BESTMATCH and ENHANCEMATCH hold a run to better than the last; they
     /// say nothing about what the pattern matches. A body whose failure makes its construct succeed
-    /// would otherwise fail for want of budget and turn the test the wrong way:
+    /// would otherwise fail for want of budget and turn the test the wrong way (D102):
     /// <c>(?b)(?=a{d&lt;=1})\w??(?!a{s&lt;=1})</c> over 'x' answered (0, 0), although
-    /// <c>a{s&lt;=1}</c> matches 'x'. A positive lookaround keeps the bounds: its body's errors
-    /// belong to the match, and failing it only rejects a path that costs too much. Counted rather
-    /// than saved in each frame, so a pattern pays nothing for it unless it is fuzzy.
+    /// <c>a{s&lt;=1}</c> matches 'x'. And a body that commits to its first match would commit to a
+    /// different one (D109, <c>Matcher.OverTheBudget</c>). Counted rather than saved in each frame,
+    /// so a pattern pays nothing for it unless it is fuzzy.
     /// </remarks>
     internal int BoundlessBodies;
 
     /// <summary>
-    /// NOT UPSTREAM (D102): the pruning marks of the conditional tests whose body matched over the
-    /// budget and now goes on under it for a match that fits (<c>Matcher.HoldTheTestToTheBudget</c>),
-    /// innermost last. Such a test's body no longer counts in <see cref="BoundlessBodies"/>.
+    /// NOT UPSTREAM'S, D115: the BESTMATCH walk searches of this scan that failed, at most
+    /// <see cref="BestWalkFailureSlots"/>, one per pair of bounds, oldest first. Without them each
+    /// match of a finditer re-reads the rest of the text looking for a better match that is not
+    /// there, which is quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; <see cref="Init"/>
+    /// empties it. <c>Matcher.BestWalkKnownToFail</c> says what a fact proves.
     /// </summary>
-    internal readonly List<long> TestsHeldToTheBudget = [];
+    internal readonly List<BestWalkFailure> BestWalkFailures = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: how many facts <see cref="BestWalkFailures"/> keeps. A walk tries one
+    /// pair of bounds per better match it finds, so a scan meets few pairs; past this many the
+    /// oldest is overwritten, which costs a search, never an answer.
+    /// </summary>
+    internal const int BestWalkFailureSlots = 8;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: a search that makes its first attempt only, at the position it starts
+    /// from, with no prefilter. Set by <c>Matcher.DoBestFuzzyMatch</c> around one call of
+    /// <c>Matcher.BasicMatch</c>; <c>Matcher.BestWalkKnownToFail</c> says why.
+    /// </summary>
+    internal bool OneAttempt;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: one failed BESTMATCH walk search: where it started, the bounds it was
+    /// held to, whether it banned an empty match at its start, and the slice it ran in.
+    /// </summary>
+    /// <param name="From">Where the search started.</param>
+    /// <param name="Errors">Its <see cref="MaxErrors"/>.</param>
+    /// <param name="Cost">Its <see cref="MaxCost"/>.</param>
+    /// <param name="MustAdvance">Its <see cref="MustAdvance"/>.</param>
+    /// <param name="SliceStart">Its <see cref="SliceStart"/>.</param>
+    /// <param name="SliceEnd">Its <see cref="SliceEnd"/>.</param>
+    internal readonly record struct BestWalkFailure(
+        int From,
+        long Errors,
+        long Cost,
+        bool MustAdvance,
+        int SliceStart,
+        int SliceEnd
+    );
 
     /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
     internal long HeldMaxErrors;
@@ -970,6 +1053,20 @@ internal sealed class MatchState : IDisposable
             HeldMaxCost = MaxCost;
             MaxErrors = long.MaxValue;
             MaxCost = long.MaxValue;
+
+            // D114: the body reads the text as far as the caller's slice, as the plain search does.
+            // A lookaround or a test has set the whole text already, which the min and max keep.
+            if (RefinesInANarrowedSlice)
+            {
+                if (Reverse)
+                {
+                    SliceStart = Math.Min(SliceStart, RefineCallerFarEnd);
+                }
+                else
+                {
+                    SliceEnd = Math.Max(SliceEnd, RefineCallerFarEnd);
+                }
+            }
         }
     }
 
@@ -986,6 +1083,27 @@ internal sealed class MatchState : IDisposable
         {
             MaxErrors = HeldMaxErrors;
             MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
+        }
+    }
+
+    /// <summary>
+    /// D114: outside every body, a refinement in a narrowed slice reads no further than its window
+    /// (<see cref="RefinesInANarrowedSlice"/>). A lookaround or a test that closes has put back the
+    /// slice it saved, which is this one already.
+    /// </summary>
+    private void NarrowTheRefinementsFarEnd()
+    {
+        if (RefinesInANarrowedSlice)
+        {
+            if (Reverse)
+            {
+                SliceStart = RefineStart;
+            }
+            else
+            {
+                SliceEnd = RefineEnd;
+            }
         }
     }
 
@@ -995,12 +1113,12 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal void CloseEveryBoundlessBody()
     {
-        TestsHeldToTheBudget.Clear();
         if (BoundlessBodies != 0)
         {
             BoundlessBodies = 0;
             MaxErrors = HeldMaxErrors;
             MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
         }
     }
 
@@ -1734,7 +1852,8 @@ internal sealed class MatchState : IDisposable
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
-        TestsHeldToTheBudget.Clear();
+        BestWalkFailures.Clear();
+        OneAttempt = false;
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
         TotalErrors = 0;
@@ -1797,6 +1916,10 @@ internal sealed class MatchState : IDisposable
         SliceEnd = end;
         InitialSliceStart = start;
         InitialSliceEnd = end;
+        RefineStart = int.MinValue;
+        RefineEnd = int.MaxValue;
+        RefinesInANarrowedSlice = false;
+        RefineCallerFarEnd = 0;
 
         Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 

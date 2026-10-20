@@ -1002,57 +1002,6 @@ public sealed class BacktrackingVerbTests
     }
 
     /// <summary>
-    /// Seed 7 row 25854 of S52's wave: a FORWARD, non-overlapped scan that upstream ends four
-    /// matches early because the <c>(*SKIP)</c> left <c>slice_start</c> above them.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The carried-slice defect the <c>overlapped-skip-*</c> entries judge, on a row none of them
-    /// can key on: the recorder writes <c>anchoredScan</c> for overlapped rows only, because a
-    /// non-overlapped walk needs <c>must_advance</c> and no Python call carries it.
-    /// </para>
-    /// <para>
-    /// The walk is sound on THIS row and the reason is narrow: <c>must_advance</c> is set only after
-    /// a zero-width match (<c>state-&gt;must_advance = state-&gt;text_pos == state-&gt;match_pos</c>,
-    /// <c>upstream/src/_regex.c:20932</c>) and no match here is zero-width, so
-    /// <c>search(subject, m.end())</c> is the scanner's own step. Measured 2026-09-15: upstream's
-    /// scan finds one match, its stepwise scan finds the three this port finds, the
-    /// <c>(*PRUNE)</c> line finds the same three, and deleting the verb finds five - so both verbs
-    /// really do prune two. Classified by
-    /// <c>ExpectedDivergences.skip-carried-slice-on-a-scan-with-no-walk</c>.
-    /// </para>
-    /// </remarks>
-    [Test]
-    public void A_forward_scan_of_a_skip_keeps_the_matches_upstreams_own_stepwise_door_still_finds()
-    {
-        // Flags 0x2, IGNORECASE, plus Version0 for the recorder's default.
-        const string subject = "b\r\nabA\n_";
-        FuzzyRegexOptions options = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0;
-
-        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}(*SKIP)\D|\w)(\p{Lu}{2,3}){0,0}", options)
-            .Matches(subject)
-            .Select(static m => (m.Index, m.Length))
-            .Should()
-            .Equal((0, 1), (3, 1), (4, 1));
-
-        // Control one: the verb spelled (*PRUNE). Upstream answers these same three.
-        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}(*PRUNE)\D|\w)(\p{Lu}{2,3}){0,0}", options)
-            .Matches(subject)
-            .Select(static m => (m.Index, m.Length))
-            .Should()
-            .Equal((0, 1), (3, 1), (4, 1));
-
-        // Control two: the verb deleted, which upstream and this port both answer with FIVE. That
-        // is what says both verbs prune two real matches, so this port is not simply ignoring the
-        // verb - the divergence is about the two upstream prunes beyond them.
-        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}\D|\w)(\p{Lu}{2,3}){0,0}", options)
-            .Matches(subject)
-            .Select(static m => (m.Index, m.Length))
-            .Should()
-            .Equal((0, 1), (3, 1), (4, 1), (5, 1), (7, 1));
-    }
-
-    /// <summary>
     /// Seed 7 row 38151 of S52's wave: a reversed overlapped scan whose second match upstream loses,
     /// on a pattern whose lookahead is why the recorder records no walk for it.
     /// </summary>
@@ -1096,52 +1045,6 @@ public sealed class BacktrackingVerbTests
             .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 8), (0, 5));
-    }
-
-    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
-    [Test]
-    public void A_skip_does_not_re_kind_the_errors_of_the_attempt_it_sits_in()
-    {
-        // Sweep row 21 of tools/probes/sweep-divergence-rows.jsonl, judged by S52's nineteenth
-        // sitting as `skip-moved-slice-changes-the-edit`. Both engines report ONE match over the
-        // same span; upstream charges a DELETION at codepoint 3 and reports group 1 zero-width,
-        // this port charges a SUBSTITUTION there and reports group 1 one character long.
-        //
-        // PROVENANCE, measured 2026-09-16 on regex 2026.9.10 by .scratch/prov.py, and reproducible
-        // with `python tools/probes/sweep-ablation-matrix.py --emit <file> --rows 21` then
-        // `pwsh -File tools/run-oracle.ps1 -Rows <file>`:
-        //
-        //   as drawn    (1, 6) g1=(3, 3) g2=(5, 6) counts=(0, 0, 1) changes=([], [], [3])
-        //   (*PRUNE)    (1, 6) g1=(3, 4) g2=(5, 6) counts=(1, 0, 0) changes=([3], [], [])
-        //
-        // The second line is this port's answer, and it is what judges the row: `(*PRUNE)` prunes
-        // the same backtracking and moves no slice bound, and the difference here is inside the
-        // edit script of ONE attempt - a verb that only forbids later attempts cannot re-kind the
-        // errors of the attempt it sits in. The subject is all BMP, so these codepoints are also
-        // the UTF-16 indices below.
-        const string pattern =
-            @"(?b)(?e)(?:[^a](*SKIP)[[:digit:]]|[\p{L}\p{N}])(?:\ ([abz]+)[\w\s]){e<=1:\w}"
-            + @"(?:[^\d]*([\p{L}\p{N}]+)){e<=2,s<=1}";
-        const string subject = "ﬁa ssS";
-
-        Match[] found = [.. new FuzzyRegex(pattern).Matches(subject)];
-
-        found.Should().ContainSingle();
-        (found[0].Index, found[0].Length).Should().Be((1, 5));
-        (found[0].Groups[1].Index, found[0].Groups[1].Length).Should().Be((3, 1));
-        (found[0].Groups[2].Index, found[0].Groups[2].Length).Should().Be((5, 1));
-        found[0].FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        found[0].FuzzyChanges.Substitutions.Should().Equal(3);
-        found[0].FuzzyChanges.Deletions.Should().BeEmpty();
-
-        // The control itself: with the verb spelled `(*PRUNE)` this port does not move, which is
-        // what says the answer belongs to the pattern rather than to the bound the verb writes.
-        Match pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal)).Matches(
-            subject
-        )[0];
-
-        (pruned.Index, pruned.Length).Should().Be((1, 5));
-        pruned.FuzzyChanges.Substitutions.Should().Equal(3);
     }
 
     /// <summary>

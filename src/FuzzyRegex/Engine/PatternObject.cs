@@ -381,6 +381,33 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D111: whether the pattern holds something that commits to what it has read:
+    /// an atomic group, which a possessive repeat, <c>\R</c> and <c>\X</c> compile to. Only such a
+    /// pattern can match differently when text past a span is cut off, so only it needs a BESTMATCH
+    /// or ENHANCEMATCH refinement to keep the caller's slice (<see cref="MatchState.RefineStart"/>);
+    /// every other pattern keeps upstream's narrowed slice, which matches the same and reads no
+    /// further than the span. A <c>(*PRUNE)</c> or <c>(*SKIP)</c> commits too, but D109 refuses a
+    /// ranked pattern that holds one and can make errors, and only a match with errors is refined.
+    /// </summary>
+    internal bool RefinesInAWindow;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a <c>\G</c>, whose answer depends on where a
+    /// search began, so a failed search from one position says nothing about a search from a later
+    /// one. See <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool ReadsTheSearchAnchor;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a lookaround, or a conditional's lookaround
+    /// test, that reads against the scan's direction: a lookbehind in a forward pattern, a
+    /// lookahead in a reversed one. Its body can reach back from an attempt to where a search
+    /// began, so a failed search from one position says nothing about a search from a later one.
+    /// See <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool LooksAgainstTheScan;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
     /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
     /// </summary>
@@ -952,9 +979,9 @@ internal sealed class PatternObject
     internal bool KeepDiscardedTotals;
 
     /// <summary>
-    /// Oracle-only: the budget BESTMATCH and ENHANCEMATCH tighten between runs also bounds a
-    /// negative lookaround's body and a conditional's test, as upstream's <c>max_errors</c> does
-    /// (D102, ledger entry 32's addendum of 2026-10-17). Set only by <c>OracleComparer</c>'s
+    /// Oracle-only: the budget BESTMATCH and ENHANCEMATCH tighten between runs also bounds every
+    /// lookaround's body, a conditional's test and an atomic group's body, as upstream's
+    /// <c>max_errors</c> does (D102 and D109, ledger entry 32's addenda of 2026-10-17 and -19). Set only by <c>OracleComparer</c>'s
     /// ablation; never by the library. See <c>MatchState.BoundlessBodies</c>.
     /// </summary>
     internal bool BoundsReachDecidingBodies;
@@ -1030,6 +1057,13 @@ internal sealed class PatternObject
     /// of a divergence. See <c>Matcher.TailMayMatch</c>.
     /// </summary>
     internal bool TailRunOutAsBeforeD67;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether this pattern was compiled with
+    /// <see cref="Parsing.Info.UpstreamReverseGrapheme"/>, so that a reversed <c>\X</c> also keeps
+    /// upstream's answer at the slice start (D108). See <c>Matcher.ReversedGraphemeCutBySliceStart</c>.
+    /// </summary>
+    internal bool UpstreamReverseGrapheme;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
@@ -1286,6 +1320,18 @@ internal sealed class PatternObject
             if (self.NodeList[i].Op == Opcode.Skip)
             {
                 self.HasSkipVerb = true;
+            }
+
+            // NOT UPSTREAM'S, D111: see RefinesInAWindow.
+            if (self.NodeList[i].Op == Opcode.Atomic)
+            {
+                self.RefinesInAWindow = true;
+            }
+
+            // NOT UPSTREAM'S, D115: see ReadsTheSearchAnchor.
+            if (self.NodeList[i].Op == Opcode.SearchAnchor)
+            {
+                self.ReadsTheSearchAnchor = true;
             }
 
             // NOT UPSTREAM'S, D11: see HasBacktrackingVerb and ReadsCapturesWhileMatching.

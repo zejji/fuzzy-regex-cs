@@ -26,7 +26,7 @@ verified against 2026.9.10. **The 2026.9.29 sync moved the pin to `0e8cb05` on 2
 (Unicode 18.0.0, on branch `sync/2026.9.29` until it merges after 1.0). That release is on PyPI and
 its sdist is byte-identical to the tag, so the oracle records against it; re-asking it every
 known-divergence example (`record-oracle.py --recheck`, 932 examples) gave every stored answer back,
-so no entry below changed status, and the sync added entry 92. Two consequences of the 2026.9.19
+so no entry below changed status, and the sync added entry 95. Two consequences of the 2026.9.19
 move for this file:
 
 - **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
@@ -4227,6 +4227,36 @@ those bodies, and a conditional's test then takes a match of its body that fits 
 (0, 1) with one deletion on the fifth. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs`
 (`The_ranking_budget_does_not_stop_a_test_s_body_from_matching` and the controls beside it).
 
+### Addendum to 32, 2026-10-19: the budget decides what a construct commits to (D109)
+
+Battery run 11 found the same fault reached through commitment rather than a test, in this port as
+well as upstream. A body that commits to its first match (an atomic group, a possessive repeat,
+`\R`, `\X`, a lookaround, a conditional's test) is held to `max_errors` too, so where the flagless
+engine's first match needs more errors than the budget, the body commits to a later match; and a
+path the budget cuts short before a `(*PRUNE)` or `(*SKIP)` never fires the verb. Measured with
+`regex` 2026.9.10 on 2026-10-19:
+
+```
+search('(?b)(?:(?>ab|a)c){s<=1}', 'aacbc')          -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search('(?:(?>ab|a)c){s<=1}', 'aacbc')              -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+search('(?b)(?:a?+){e<=2}b', 'bbbxcc')              -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?b)(?:(?:a){s<=1}(*PRUNE)c|b)', 'ccab')    -> span=(3, 4) fuzzy_counts=(0, 0, 0)
+search('(?b)(?=(a{s<=1}|xy))\1', 'xy')              -> span=(0, 2) fuzzy_counts=(0, 0, 0)
+```
+
+None of the flagged spans is a match of the pattern without the flag: at 1 in the first row the
+flagless group takes 'ac' with a substitution and `c` then fails, and the group is atomic. A random
+probe of 36,000 rows (`.scratch/s1019/d109/probe/`) found the same in every committing construct,
+under both flags and both directions; upstream gave the port's answer on 186 of the 222 rows.
+
+**This port** had the same fault. Known defect D109 (F103) lifts the budget inside those bodies and
+fails the construct when the match it commits to is over the budget. A fuzzy pattern with a verb is
+refused under either flag: holding the budget only at the end of the match cost up to 110 times the
+steps and could lose a better match (DECISIONS 2026-10-19). Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.cs` (`The_ranking_budget_does_not_change_what_a_construct_commits_to`,
+`A_ranked_answer_is_a_match_of_the_flagless_pattern` and
+`A_ranked_fuzzy_pattern_with_a_backtracking_verb_is_refused`).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -7256,7 +7286,110 @@ them from `make_case_flags(info)`.
 **This port.** It folds the grouped literal as it folds the bare one. Pinned by
 `Gaps/Engine/CaseInsensitiveMatchingTests.Under_ascii_a_grouped_literal_folds_as_the_bare_literal_does`.
 
-## 92. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D107, 2026-10-18)
+## 92. A long run of conditionals overflows the C stack while compiling and ends the process - FIXED HERE (F102, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found by the D110 work. Evidence:
+`.scratch/s1019/d110/probe/` (`up.py`, shape `seqcond`).
+
+**Reproduction**, `regex` 2026.9.10 on Python 3.14, Windows x64, measured 2026-10-19, each in a
+child process:
+
+```
+regex.compile('(a)?' + '(?(1)a|b)' * 61440)   -> compiles
+regex.compile('(a)?' + '(?(1)a|b)' * 62464)   -> process ends, exit code 0xC00000FD (stack overflow)
+```
+
+**Why upstream is wrong.** A pattern that is merely long, with no nesting at all, should compile
+or raise a catchable error; ending the interpreter means any program that compiles a pattern it
+did not write can be crashed. Deep nesting is caught by Python's recursion limit as a
+`RecursionError`; this is not, because the recursion is in C.
+
+**Mechanism.** `record_subpattern_repeats_and_fuzzy_sections` (`_regex.c`, around line 23517)
+recurses into `next_1` at a branch, a conditional and a repeat and loops on `next_2`. A
+conditional's `next_1` runs on to the rest of the pattern, so the recursion is as deep as the
+number of conditionals in a row.
+
+**Proposed fix upstream:** keep the pending `next_2` edges on a heap stack, as this port does; the
+walk then visits the same nodes in the same order.
+
+**This port.** `Optimiser.RecordSubpatternRepeatsAndFuzzySections` keeps its pending edges on a
+`Stack<Node?>`, so 20,000 conditionals compile on a 256 KB thread. Pinned by
+`Gaps/Parsing/NestingDepthTests.A_long_run_of_conditionals_compiles_on_a_small_stack`.
+
+## 93. ENHANCEMATCH's refinement cuts what an atomic group reads, and answers a span the pattern does not match - DIVERGES HERE (F104, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D111, found by the D109 builder's
+blind reviewer. Evidence: `.scratch/s1019/d111/` (DESIGN.md, `upstream/rows.py`).
+
+**Reproduction**, `regex` 2026.9.10 and 2026.9.29 on Python 3.14, measured 2026-10-19:
+
+```
+search(r'(?e)(?:xaq|a(?>a*)){e<=1}', 'xaaa')       -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search(r'(?:xaq|a(?>a*)){e<=1}', 'xaaa')           -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+search(r'(?e)(?:xaq|aa*+){e<=1}', 'xaaa')          -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search(r'(?er)(?:aax|(?:ab|a)*+b){e<=2}', 'aababax') -> span=(4, 5) fuzzy_counts=(0, 0, 0)
+search(r'(?r)(?:aax|(?:ab|a)*+b){e<=2}', 'aababax')  -> span=(4, 7) fuzzy_counts=(1, 0, 0)
+```
+
+**Why upstream is wrong.** (1, 3) is not a match of the pattern in 'xaaa': at 1 the atomic `a*`
+takes 'aaa' and never gives any back, so a match from 1 ends at 4. ENHANCEMATCH "will cause it to
+attempt to improve the fit ... of the match that it has found" (`upstream/README.rst:590-592`); it
+should not find a match the pattern cannot make.
+
+**Mechanism.** `do_enhanced_fuzzy_match` refines by narrowing the slice to the span of the match it
+found (`_regex.c:17985-17990`) and re-running with fewer errors allowed. An atomic group, a
+possessive repeat, `\R` and `\X` then stop at the slice end where in the text they would read on, so
+the re-run finds a span that only exists in the cut text. `do_best_fuzzy_match`'s fallback narrows
+the slice the same way (`:17812-17821`).
+
+**Proposed fix upstream:** keep the caller's slice during a refinement and reject, at the success
+test, any match that starts or ends outside the span, so every construct reads the text as the plain
+search does.
+
+**This port.** That fix, applied only to patterns that hold an atomic group
+(`PatternObject.RefinesInAWindow`); every other pattern matches the same in the narrowed slice and
+keeps it, since the window costs a read to the text end per attempt. D114 (F106) narrows the slice
+again outside the atomic, lookaround and test bodies, so only an atomic body reads past the span; a
+ranked pattern whose atomic body itself runs to the text end still scans quadratically (inherent). A `(*PRUNE)` or
+`(*SKIP)` would need the same, but D109 refuses a ranked fuzzy pattern that holds one. Pinned by
+`Gaps/Engine/RankedRefinementWindowTests`.
+
+## 94. A negative lookahead around a lookahead that holds for every continuation reports a partial span the pattern cannot make - DIVERGES HERE (F105, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D113's second shape, found by the
+D113 cost research's blind reviewer. Evidence: `.scratch/s1019/d113-cost/review/` (235 rows of 40
+patterns) and `.scratch/s1019/d113/probe3/rows.tsv`.
+
+**Reproduction**, `regex` 2026.9.10 and 2026.9.29 on Python 3.14, measured 2026-10-19,
+`partial=True`:
+
+```
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'a')       -> P(0, 1)   here None
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'aa')      -> P(0, 2)   here None
+search(r'(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a', 'aa')  -> P(0, 2)   here P(1, 2)
+search(r'(?!(?=(?:(?=a*$)a|aa)(?:ab|a)*a?))a', 'aaa')    -> P(0, 3)   here P(2, 3)
+match(r'(?!(?=(?:a(?=[ab]*c)|aa)(?:ab|a)*a?))', 'aab')   -> P(0, 3)   here None
+```
+
+**Why upstream is wrong.** A partial match is one that "could be possible if the string had not
+been truncated" (`upstream/README.rst:270`), and no text makes a zero-width pattern span a
+character or a one-character pattern span two. Judged by brute force (upstream without partial,
+every continuation of up to four letters from {a, b, c}): no continuation of 'a' or 'aab'
+completes the first and last patterns, because the alternative `a` or `aa` succeeds at 0 whatever
+follows, so the negative lookahead always fails there; the earliest start any continuation
+completes is 1 for 'aa' (the continuation 'c' fails both alternatives at 1) and 2 for 'aaa'.
+
+**Mechanism upstream:** not traced. Upstream reaches the same spans as this port did before
+D113, whose cause was the port's own: the second pass's dedup at a blocked lookahead end let a
+repeat in the body record the continuation's failure, and that record cut the body's other
+alternative where it reached the same repeat with its end decided, so the inner lookahead stayed
+undecided. Upstream has no such dedup, so its route to the same answer is different.
+
+**This port.** The dedup marks the blocked end (`MatchState.NoteABlockedEnd`), so the record is
+not made. Pinned by
+`Gaps/Engine/PartialBlockedEndGuardTests.A_negative_lookahead_reports_no_partial_its_inner_lookahead_decides_for_every_continuation`.
+
+## 95. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D120, 2026-10-18)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Found by the 2026.9.29 sync, which ran Unicode's
 conformance files over the port and over upstream. Not yet blind-reviewed.

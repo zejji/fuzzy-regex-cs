@@ -502,9 +502,11 @@ foreach ($seed in $runs) {
         Write-Host "No report at $reportPath - the consumer did not get as far as the wave." -ForegroundColor Yellow
     }
 
-    # Three verdicts, kept apart until here: a consumer re-run after the screen must not overwrite a
-    # failed recheck or a failed screen (found by the 2026-09-25 blind review).
-    if ($consumerExit -ne 0 -or $recheckFailed -or $screenFailed) {
+    # Two verdicts, kept apart until here: a consumer re-run after the screen must not overwrite a
+    # failed screen (found by the 2026-09-25 blind review). A failed recheck is not one of them: it
+    # ran once, says nothing about any seed's wave, and so fails the run once at the end - it used
+    # to mark every seed red, which hid the seeds that really were (CI run 39224762300).
+    if ($consumerExit -ne 0 -or $screenFailed) {
         $failed += $seed
     }
 
@@ -549,7 +551,7 @@ foreach ($seed in $runs) {
     }
     # Per-run since OracleWave.cs's ExpectedExamplesPath fix above; scratch the same way as
     # $candidatesPath, since nothing archives a copy of it under the seed's own name.
-    if (($failed -notcontains $seed) -and (Test-Path -LiteralPath $examples)) {
+    if (($failed -notcontains $seed) -and -not $recheckFailed -and (Test-Path -LiteralPath $examples)) {
         Remove-Item -LiteralPath $examples -Force
     }
 }
@@ -564,12 +566,18 @@ finally {
 }
 
 Write-Host ''
-if ($failed.Count -eq 0) {
+if ($failed.Count -eq 0 -and -not $recheckFailed) {
     $where = if ($runs.Count -eq 1 -and $runs[0] -lt 0) { 'the wave' } else { "all $($runs.Count) seeds" }
     Write-Host "Oracle: GREEN - no row diverged from upstream, at $where." -ForegroundColor Green
     exit 0
 }
 
+if ($recheckFailed) {
+    Write-Host 'Oracle: RED - upstream no longer gives a stored example answer (the recheck, once per run); see its message above.' -ForegroundColor Red
+}
+if ($failed.Count -eq 0) {
+    exit 1
+}
 Write-Host "Oracle: RED at $($failed.Count) of $($runs.Count) seeds: $($failed -join ', ')" -ForegroundColor Red
 Write-Host '  Each red seed kept its own wave and report at TestResults/oracle/wave-<seed>.jsonl' -ForegroundColor Yellow
 Write-Host '  and report-<seed>.txt, so a later seed cannot overwrite the evidence.' -ForegroundColor Yellow

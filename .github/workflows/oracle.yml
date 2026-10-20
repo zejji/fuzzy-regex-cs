@@ -39,15 +39,15 @@ jobs:
     if: github.event.schedule != '0 3 * * 4'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # 3.14, because upstream calls the host's `unicodedata` (Unicode 16.0 on 3.14, 15.0 on
           # 3.12) and every committed Unicode table and fixture was generated and verified against
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload divergences
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oracle-divergences
           path: TestResults/
@@ -161,15 +161,15 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # 3.14, for the reason the job above gives.
           python-version: '3.14'
@@ -214,7 +214,7 @@ jobs:
 
       - name: Upload the sweep log and every red seed's wave
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oracle-sweep
           path: TestResults/oracle/

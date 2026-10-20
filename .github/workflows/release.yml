@@ -1,0 +1,137 @@
+name: Release
+
+# Publishes FuzzyRegex to nuget.org and creates the GitHub release when a version tag (v1.0.0) is
+# pushed. The publish job waits for the owner's approval in the `nuget` environment. How to
+# release, and the one-time setup this needs: docs/RELEASING.md.
+#
+# Actions are pinned by full commit SHA (tag in the trailing comment), resolved 2026-10-20 with
+# `gh api repos/<action>/git/ref/tags/<tag>`. Node 24 majors checked 2026-10-20 (runs.using in action.yml).
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+  # The release notes for tag vX.Y.Z. The text after the first line that is exactly `---` becomes
+  # the GitHub release body (everything above it is a note for the reviewer). {0} is the version.
+  RELEASE_NOTES_PATH_FORMAT: docs/plan/release-notes-{0}.md
+
+jobs:
+  # The whole merge gate from ci.yml, run again on the tagged commit. The called workflow's
+  # concurrency group is ci-refs/tags/<tag>, distinct from this file's (see ci.yml).
+  gates:
+    name: CI gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  pack:
+    name: Pack the release package
+    needs: [gates]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: The tag names the version in Directory.Build.props
+        shell: pwsh
+        run: ./tools/check-release-tag.ps1 -Tag $env:GITHUB_REF_NAME
+      - name: The tagged commit is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: The release notes file exists
+        shell: pwsh
+        run: |
+          $notes = $env:RELEASE_NOTES_PATH_FORMAT -f $env:GITHUB_REF_NAME.Substring(1)
+          if (-not (Test-Path -LiteralPath $notes)) { throw "No release notes at $notes." }
+      - run: dotnet restore
+      - run: dotnet tool restore
+      - name: Install from a local feed and publish a consumer as Native AOT
+        # Packs this commit as <version>-rc.0, installs it into a fresh console app and publishes
+        # that as Native AOT (tools/run-release-rehearsal.ps1). A suffix is kept so the install
+        # cannot be served from nuget.org instead of the local feed.
+        shell: pwsh
+        run: ./tools/run-release-rehearsal.ps1 -Rid linux-x64
+      - name: Pack and validate
+        # Runs after the rehearsal because both write .scratch/pack and this one must be last.
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./tools/pack-and-validate.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: .scratch/pack/*
+          if-no-files-found: error
+
+  publish:
+    name: Push to nuget.org
+    needs: [pack]
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: NuGet login (OIDC to a one-hour API key)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push the package and its symbols
+        # Pushing to nuget.org's V3 source also pushes the .snupkg found beside each .nupkg, with
+        # the same key (NuGet.Client PushRunner/PackageUpdateResource; docs/RELEASING.md). Only the
+        # .nupkg is named here, by the tag's exact version, so no other package in the artifact can be
+        # pushed. --skip-duplicate lets a re-run continue past a version already up.
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: >
+          dotnet nuget push "packages/FuzzyRegex.${GITHUB_REF_NAME#v}.nupkg"
+          --api-key "$NUGET_API_KEY"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+  github-release:
+    name: Create the GitHub release
+    needs: [publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Create the release from the notes file
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $notes = $env:RELEASE_NOTES_PATH_FORMAT -f $version
+          $lines = Get-Content -LiteralPath $notes
+          $rule = [array]::IndexOf($lines, '---')
+          if ($rule -lt 0) { throw "$notes has no line that is exactly '---'." }
+          $body = Join-Path $env:RUNNER_TEMP 'notes.md'
+          $lines | Select-Object -Skip ($rule + 1) | Set-Content -LiteralPath $body
+          if (-not (Get-Content -LiteralPath $body -Raw).Trim()) { throw "$notes has nothing after its '---' line." }
+          gh release create $env:GITHUB_REF_NAME --verify-tag --title "FuzzyRegex $version" --notes-file $body
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }

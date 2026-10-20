@@ -105,8 +105,8 @@ itself has none:
 ## Fuzzy syntax in one page
 
 Fuzzy matching is written inside `{...}` straight after the construct it applies to - usually a
-group. Every example below compiles against `src/FuzzyRegex/PublicAPI.Unshipped.txt` as it stands
-today.
+group. Every example below compiles against the public API listed in
+`src/FuzzyRegex/PublicAPI.Shipped.txt`.
 
 ### `{e<=n}`: allow up to `n` errors of any kind
 
@@ -726,7 +726,8 @@ too. Internal-error escapes (`RuntimeError`, `AttributeError`, `TypeError`, `Key
 `V0|V1`) become `NotSupportedException` or `ArgumentOutOfRangeException`; the 1 GB backtracking
 bound and runaway recursion raise `InvalidOperationException`, never `OutOfMemoryException`; a
 matching timeout raises `System.Text.RegularExpressions.RegexMatchTimeoutException`; `\p{Infinity}`
-raises `OverflowException` carrying Python's own message.
+raises `OverflowException` carrying Python's own message. The `RecursionError` upstream raises for
+a deeply nested pattern becomes `FuzzyRegexParseException` (see "Nesting limit").
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -1294,6 +1295,24 @@ The same rule gives some partial matches that no text completes, such as `(?wr)a
 partial contract allows it: a partial promises only that more text may complete the match (see
 `Match.PartialMatch`). There is no option to restore the upstream answer. Ledger entry 75.
 
+### A negative lookahead around a lookahead that holds for every continuation reports no partial
+
+When a lookahead's body has a lookaround that touches the end of the text in one alternative,
+upstream can leave the lookahead undecided even where another alternative makes it succeed for
+every continuation. A negative lookahead around it then reports a partial whose span the pattern
+cannot make at any length of text. Here the lookahead is decided, so the negative one fails.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))").MatchAtStart("a", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch));                       // (False, False) - upstream answers a partial (0, 1) for this zero-width pattern
+Match n = new FuzzyRegex(@"(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a").Match("aa", partial: true);
+Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));   // (True, True, 1, 1) - upstream answers a partial (0, 2) for this one-character pattern
+```
+
+There is no option to restore the upstream answer. Ledger entry 94.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted
@@ -1331,6 +1350,21 @@ the finished pattern keeps: the optimiser prunes about half of a counted repeat'
 the memory has already been spent by then, so a graph that is refused may be smaller than the budget
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
+
+### Nesting limit
+
+Compiling a pattern recurses once for each level of nesting, and in .NET a stack overflow cannot be
+caught: it ends the process. So this port refuses a pattern with more than 500 levels of groups
+and sets, throwing `FuzzyRegexParseException` with the message "too deeply nested: more than 500
+levels of groups and sets" and the offset of the bracket that opens the 501st level. In a Release
+build every construct tested compiles at 500 levels on a 1 MB stack. A thread with a smaller stack can run out
+sooner, and then gets `FuzzyRegexParseException` with the message "too deeply nested to compile on
+this thread: its stack ran out", an offset of -1, and the `InsufficientExecutionStackException`
+as its inner exception.
+
+Upstream has no limit of its own. Python's recursion limit stops it first, with `RecursionError`
+rather than `regex.error`, at 140 to 330 levels depending on the construct (regex 2026.9.10 on
+Python 3.14), so at Python's default recursion limit no pattern upstream compiles is refused here.
 
 ### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
@@ -2062,6 +2096,38 @@ Console.WriteLine(m.FuzzyCounts.Total);   // 0
 ```
 
 There is no option to restore the upstream answer. Known defect D102, ledger entry 32.
+
+### BESTMATCH and ENHANCEMATCH answer a match the pattern can make
+
+An atomic group, a possessive repeat, a lookaround and a conditional's test take the first match
+of their body and never come back for another. Upstream's budget can make that first match fail,
+so the construct takes a later one, and the answer is a span the pattern without the flag does
+not match. Here the construct takes the same match it takes without the flag, and fails if that
+match costs more errors than the search allows. A `(*PRUNE)` or `(*SKIP)` has the same fault
+upstream, and no cheap repair: holding the search's limit only at the end of the match made it
+up to a hundred times slower and could pass over a better match. So BESTMATCH or ENHANCEMATCH on
+a fuzzy pattern that holds either verb is refused when the pattern is compiled, with an error
+that names the flag and the verb.
+
+The same fault had a second route. When ENHANCEMATCH looks for a better fit inside the match it
+found, upstream cuts the text off at that match's edges, so an atomic group or a possessive repeat
+stops at the cut instead of taking what follows. `(?e)(?:xaq|a(?>a*)){e<=1}` over 'xaaa' is (1, 3)
+exact upstream, but in the whole text the atomic `a*` at 1 takes 'aaa' and the match there is
+(1, 4). Here the better fit must still lie inside the first match, but the pattern reads the whole
+text, so the answer is (0, 3) with one substitution, as without the flag. Only the atomic group
+reads past the first match, so a pattern whose atomic group itself runs to the end of the text can
+search more slowly on long text built to defeat it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?b)(?:(?>ab|a)c){s<=1}").Match("aacbc");
+Console.WriteLine(m.Index);   // 0 - upstream: 1, which is not a match: at 1 the group takes 'ac'
+Console.WriteLine(m.FuzzyCounts.Total);   // 1
+```
+
+There is no option to restore the upstream answer. Known defects D109 and D111, ledger entries 32
+and 93.
 
 ### The calls inside a called group run with the call's direction and fuzziness too
 
