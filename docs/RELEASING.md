@@ -40,6 +40,11 @@ owner's account.
   `release-notes-1.0.0.md`) and have been reviewed. The GitHub release body is everything after the
   first line that is exactly `---`. The path is set once, in `RELEASE_NOTES_PATH_FORMAT` at the top
   of `release.yml`.
+- For the first release after 2026-10-20 only: the Actions bump of that date moved
+  `download-artifact` to v8, which only `release.yml` uses, so no run has exercised it yet. If the
+  `publish` job fails to find the packages, compare its first step (`actions/download-artifact`) with v8's release notes
+  (hash mismatches now fail; non-zip files are no longer unzipped). Delete this item once a
+  release has passed.
 
 ## The release
 
