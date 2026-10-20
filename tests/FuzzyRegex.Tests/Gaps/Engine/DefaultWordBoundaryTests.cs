@@ -3,14 +3,14 @@ using AwesomeAssertions;
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
 /// <summary>
-/// The default Unicode word boundary of the WORD flag, <c>(?w)</c>, against the Unicode 17.0.0
+/// The default Unicode word boundary of the WORD flag, <c>(?w)</c>, against the Unicode 18.0.0
 /// conformance file <c>WordBreakTest.txt</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Upstream's README says the flag "changes the definition of a 'word boundary' to that of a
 /// default Unicode word boundary" (<c>upstream/README.rst:1011</c>), and its tables are Unicode
-/// 17.0.0 (<c>RE_UNICODE_VERSION</c>), so the conformance file of that version is the reference.
+/// 18.0.0 (<c>RE_UNICODE_VERSION</c>), so the conformance file of that version is the reference.
 /// Upstream fails 268 of its 1,944 lines (regex 2026.9.10, measured 2026-09-26), and this port
 /// did too until the same day. Three defects account for all of them:
 /// </para>

@@ -97,16 +97,16 @@ public sealed class UnicodeCharacterNameTests
     }
 
     /// <summary>
-    /// Every codepoint Unicode 17.0 added has a name here, which is the check the host CPython
+    /// Every codepoint Unicode 17.0 and 18.0 added has a name here, which is the check the host CPython
     /// cannot make: its <c>unicodedata</c> is 16.0.0.
     /// </summary>
     [Test]
-    public void Every_codepoint_added_in_unicode_17_can_be_named()
+    public void Every_codepoint_added_since_the_hosts_unicode_can_be_named()
     {
         HashSet<int> stored = [.. UnicodeCharacterNames.Codepoints];
         int nameable = 0;
 
-        foreach ((int first, int last) in CharacterNameFixture.RangesAddedIn17)
+        foreach ((int first, int last) in CharacterNameFixture.RangesUnknownToHost)
         {
             for (int codepoint = first; codepoint <= last; codepoint++)
             {
@@ -121,7 +121,7 @@ public sealed class UnicodeCharacterNameTests
             }
         }
 
-        nameable.Should().Be(CharacterNameFixture.CodepointsAddedIn17);
+        nameable.Should().Be(CharacterNameFixture.CodepointsUnknownToHost);
     }
 
     /// <summary>
@@ -214,10 +214,10 @@ internal static class CharacterNameFixture
 
     public static int AlgorithmicRangeCount => Root.GetProperty("algorithmicRangeCount").GetInt32();
 
-    public static int CodepointsAddedIn17 => Root.GetProperty("codepointsAddedIn17").GetInt32();
+    public static int CodepointsUnknownToHost => Root.GetProperty("codepointsUnknownToHost").GetInt32();
 
-    public static IEnumerable<(int First, int Last)> RangesAddedIn17 =>
-        Root.GetProperty("codepointRangesAddedIn17")
+    public static IEnumerable<(int First, int Last)> RangesUnknownToHost =>
+        Root.GetProperty("codepointRangesUnknownToHost")
             .EnumerateArray()
             .Select(static range => (range[0].GetInt32(), range[1].GetInt32()));
 

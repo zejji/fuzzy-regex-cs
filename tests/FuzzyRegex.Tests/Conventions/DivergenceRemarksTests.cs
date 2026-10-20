@@ -227,7 +227,11 @@ public sealed class DivergenceRemarksTests
     /// </summary>
     private static readonly (string Heading, string Reason)[] _noMember =
     [
-        ("The Unicode data is version 17.0.0", "Unicode table data; no member selects it"),
+        ("The Unicode data is version 18.0.0", "Unicode table data; no member selects it"),
+        (
+            "`\\X` keeps a conjunct linker with the next consonant, as Unicode 18.0.0's GB9c says",
+            "pattern syntax: `\\X`"
+        ),
         (
             "A digit's decimal value is derived from upstream's own tables",
             "internal table, by COMPARISON's own account"

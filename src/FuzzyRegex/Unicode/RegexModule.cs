@@ -26,11 +26,11 @@ internal static class RegexModule
 {
     private static readonly Lazy<int[]> _expandOnFolding = new(static () =>
     {
-        ushort[] table = UnicodeTables.ExpandOnFolding;
+        uint[] table = UnicodeTables.ExpandOnFolding;
         int[] result = new int[table.Length];
         for (int i = 0; i < table.Length; i++)
         {
-            result[i] = table[i];
+            result[i] = (int)table[i];
         }
 
         return result;

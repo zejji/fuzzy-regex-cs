@@ -22,7 +22,12 @@ oracle itself performs it on every wave. **S81a moved the pin to 2026.9.19 on 20
 (`85e568c`, issue 619: a crash in `expand()` and `str()` of a capture after `detach_string()`, which
 the port cannot have). The oracle still records against PyPI's 2026.9.10, because 2026.9.19 records
 seeds 7, 4242 and 20260927 byte-identically and is not on PyPI; the entries below therefore stand as
-verified against 2026.9.10. Two consequences for this file:
+verified against 2026.9.10. **The 2026.9.29 sync moved the pin to `0e8cb05` on 2026-10-18**
+(Unicode 18.0.0, on branch `sync/2026.9.29` until it merges). That release is on PyPI and
+its sdist is byte-identical to the tag, so the oracle records against it; re-asking it every
+known-divergence example (`record-oracle.py --recheck`: 932 examples on 2026-10-18, 939 after
+main was merged in on 2026-10-20) gave every stored answer back, so no entry below changed
+status, and the sync added entry 95. Two consequences of the 2026.9.19 move for this file:
 
 - **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
   here, so there is nothing outstanding on either side. It stays in the file as history.
@@ -965,7 +970,7 @@ own clean walk. Pinned by
 
 **A second MSan origin on the same path (2026-10-13).** Scheduled-oracle row 20261012/38391
 (`verbs`, forward overlapped scan of `\b((?:[^a](*SKIP))+?)(?:[^a-f](*SKIP)){1,3}?(?:[^\d](*SKIP)){2,3}`)
-crashed upstream on Linux, and MSan named `data_r2368 in basic_match` beside `new_position`: one
+crashed upstream on Linux, and MSan named `data_r2368 in basic_match` (clang names it `data_r2261` from 2026.9.29) beside `new_position`: one
 read at `:15806` of bytes from the LAZY_REPEAT frame `data_r` (declared `:13567`, pushed `:13583`,
 popped `:15792`), next to eight reads traced to `new_position`. With `new_position` initialised to
 `state->text_pos` (a patched copy of the C source, built in the same MSan image), the row gives no
@@ -7383,3 +7388,43 @@ undecided. Upstream has no such dedup, so its route to the same answer is differ
 **This port.** The dedup marks the blocked end (`MatchState.NoteABlockedEnd`), so the record is
 not made. Pinned by
 `Gaps/Engine/PartialBlockedEndGuardTests.A_negative_lookahead_reports_no_partial_its_inner_lookahead_decides_for_every_continuation`.
+
+## 95. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D120, 2026-10-18)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found by the 2026.9.29 sync, which ran Unicode's
+conformance files over the port and over upstream. Blind-reviewed 2026-10-20: a fresh reviewer
+fetched UAX #29 revision 49 and the 18.0.0 test file, ran every line through regex 2026.9.29 and
+measured the same 10 failing lines.
+
+**Reproduction**, `regex` 2026.9.29 from PyPI (sdist byte-identical to tag `2026.9.29`,
+`0e8cb05`), measured 2026-10-18:
+
+```
+findall(r'\X', 'a\u094d\u0924')   -> ['a\u094d', '\u0924']   18.0.0 file line 859: one cluster
+findall(r'\X', '\u094d\u0915')    -> ['\u094d', '\u0915']    line 179: one cluster
+findall(r'\X', '\u1cf5\u0915')    -> ['\u1cf5', '\u0915']    line 659: one cluster
+findall(r'\X', '\u0915\u094d\u0924') -> ['\u0915\u094d\u0924'] the same in both versions
+```
+
+Over all of `GraphemeBreakTest.txt` 18.0.0, forwards, upstream fails 10 of 853 lines: 179, 180,
+659, 660, 859, 860, 871, 875, 876 and 879, every one a GB9c line. 2026.9.10 with the 17.0.0
+tables passed every line of the 17.0.0 file forwards.
+
+**Why upstream is wrong.** UAX #29 revision 49, the one issued with Unicode 18.0.0, changed GB9c
+from `\p{InCB=Consonant} [\p{InCB=Extend}\p{InCB=Linker}]* \p{InCB=Linker}
+[\p{InCB=Extend}\p{InCB=Linker}]* × \p{InCB=Consonant}` to `\p{InCB=Linker} \p{InCB=Extend}* ×
+\p{InCB=Consonant}` (its Modifications section, citing UTC decision 187-C47). 2026.9.29 regenerated
+the tables, including Indic_Conjunct_Break, from 18.0.0 but left `unicode_at_grapheme_boundary`
+(`src/_regex.c:1786`, GB9c at `:1866-1897`) as it was apart from the stdbool/stdint renames. So the
+rule is 17.0.0's and the data 18.0.0's, and `\X` answers as neither version would.
+`upstream/README.rst` says the grapheme matcher conforms to the Unicode specification.
+
+**Proposed fix upstream:** in the GB9c block, walk left over `RE_INCB_EXTEND` only; a
+`RE_INCB_LINKER` there means no break, anything else ends the rule.
+
+**This port.** `AtGraphemeBoundary` and the reversed partial check apply revision 49's rule; the
+port passes all 853 lines forwards and backwards. Pinned by
+`Gaps/Engine/IndicConjunctGraphemeTests`. The oracle entry `grapheme-conjunct-follows-unicode-18`
+claims a row only when `PatternObject.UpstreamGraphemeConjunct`, which puts revision 47's rule
+back, reproduces upstream's answer; its example rows are lines 859, 660 and 860, recorded from
+`tools/probes/sync-2026-9-29-gb9c-rows.jsonl`.

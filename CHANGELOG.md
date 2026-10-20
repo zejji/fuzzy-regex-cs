@@ -14,6 +14,15 @@ per release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Tracks mrab-regex 2026.9.29** (commit `0e8cb05`): the Unicode data is 18.0.0, up from
+  17.0.0. New scripts (Jurchen, Seal), blocks, joining groups, case pairs and character names
+  work in patterns, and so does U+1DF95, the first character outside the BMP whose case folding
+  lands inside it (`(?i)ß` finds it). `\X` follows Unicode 18.0.0's simplified Indic conjunct
+  rule, which upstream's `\X` does not yet (see COMPARISON). Upstream's other change in that
+  release, C type names, has nothing to port.
+
 ## [1.0.0] - 2026-10-20
 
 The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking

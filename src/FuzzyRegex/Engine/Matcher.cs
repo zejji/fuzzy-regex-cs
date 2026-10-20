@@ -1452,8 +1452,8 @@ internal static class Matcher
     /// <remarks>
     /// <para>
     /// DIVERGES FROM UPSTREAM, deliberately (2026-09-26, ledger entry 40): this follows UAX #29
-    /// revision 47, the Unicode 17.0.0 version the tables are, and passes all 1,944 lines of its
-    /// <c>WordBreakTest.txt</c>, where upstream fails 268. Upstream's README promises "a default
+    /// revision 49, the Unicode 18.0.0 version the tables are, and passes all 1,944 lines of its
+    /// <c>WordBreakTest.txt</c>, where upstream fails 268 (revision 47 and 17.0.0 gave the same counts). Upstream's README promises "a default
     /// Unicode word boundary" (<c>upstream/README.rst:1011</c>). Three differences:
     /// </para>
     /// <list type="bullet">
@@ -2147,6 +2147,47 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S CURRENT RULE, used only under <see cref="PatternObject.UpstreamGraphemeConjunct"/>:
+    /// upstream's GB9c as 2026.9.29 still applies it, UAX #29 revision 47's
+    /// <c>Consonant [Extend Linker]* Linker [Extend Linker]* × Consonant</c>
+    /// (<c>upstream/src/_regex.c</c> lines 1866-1897), so the oracle can show that D120 is the whole
+    /// of a divergence. The library never reaches it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="leftPos">The character left of the position, which is inside the text.</param>
+    /// <returns><see langword="true"/> if the rule joins the consonant on the right to the left.</returns>
+    private static bool UpstreamConjunctJoins(MatchState state, int leftPos)
+    {
+        bool hasLinker = false;
+        int pos = leftPos;
+
+        while (true)
+        {
+            uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
+
+            if (prop == UnicodeTables.IncbLinker)
+            {
+                hasLinker = true;
+            }
+            else if (prop == UnicodeTables.IncbConsonant)
+            {
+                return hasLinker;
+            }
+            else if (prop != UnicodeTables.IncbExtend)
+            {
+                return false;
+            }
+
+            pos = state.PrevPos(pos);
+
+            if (pos < state.TextStart)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Upstream <c>unicode_at_grapheme_boundary</c> (<c>upstream/src/_regex.c</c> lines 1786-1933):
     /// the UAX #29 extended grapheme cluster rules, GB1 to GB999.
     /// </summary>
@@ -2183,33 +2224,39 @@ internal static class Matcher
         // The GB9c rule only applies to extended grapheme clusters: Do not break within certain
         // combinations with Indic_Conjunct_Break (InCB)=Linker.
         // GB9c
-        if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        // DIVERGES FROM UPSTREAM, deliberately (2026-10-18): UAX #29 revision 49, Unicode 18.0.0's,
+        // made the rule \p{InCB=Linker} \p{InCB=Extend}* × \p{InCB=Consonant}. Upstream moved to the
+        // 18.0.0 tables and kept revision 47's Consonant [Extend Linker]* Linker [Extend Linker]*
+        // × Consonant, which fails 10 lines of GraphemeBreakTest.txt 18.0.0
+        // (IndicConjunctGraphemeTests).
+        if (
+            state.Pattern.UpstreamGraphemeConjunct
+            && UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant
+        )
         {
-            bool hasLinker = false;
+            if (UpstreamConjunctJoins(state, leftPos))
+            {
+                return false;
+            }
+        }
+        else if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        {
             int pos = leftPos;
 
-            // Upstream's do-while reads the character at 'pos' and only then tests the bound, so a
-            // walk that steps off the start of the text stops without reading.
+            // Like upstream's do-while, the character at 'pos' is read before the bound is tested:
+            // 'leftPos' is inside the text, and a walk that steps off its start stops without reading.
             while (true)
             {
                 uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
 
                 if (prop == UnicodeTables.IncbLinker)
                 {
-                    hasLinker = true;
+                    return false;
                 }
-                else if (prop == UnicodeTables.IncbConsonant)
-                {
-                    if (hasLinker)
-                    {
-                        return false;
-                    }
 
-                    goto end_GB9c;
-                }
-                else if (prop != UnicodeTables.IncbExtend)
+                if (prop != UnicodeTables.IncbExtend)
                 {
-                    goto end_GB9c;
+                    break;
                 }
 
                 pos = state.PrevPos(pos);
@@ -2221,7 +2268,6 @@ internal static class Matcher
             }
         }
 
-        end_GB9c:
         // Do not break within emoji modifier sequences or emoji zwj sequences.
         // GB11
         if (leftProp == UnicodeTables.GbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
@@ -2660,7 +2706,7 @@ internal static class Matcher
     /// NOT UPSTREAM'S, D11 M1 (build chunk 10): one character for each combination of
     /// Word_Break value, Extended_Pictographic and Unicode <c>\w</c> that a character can have, the
     /// three things the default word rules read about a character beside a position. Unicode
-    /// 17.0.0, the tables' version, has 27 combinations;
+    /// 18.0.0, the tables' version, has 27 combinations;
     /// <c>PartialWindowReadTests.Every_character_class_the_default_word_rules_read_has_a_representative</c>
     /// scans every code point and fails when the tables change the set. The classes that most
     /// often split a test come first (a line break, an extending mark, a letter, a space, a digit),
@@ -3533,11 +3579,11 @@ internal static class Matcher
     /// </summary>
     /// <remarks>
     /// GB3 to GB9b read only the two characters beside the position, which the held text holds.
-    /// GB9c, GB11 and GB12/GB13 look further left, through a run of Extend and Linker characters to
-    /// a Consonant, of Extend characters to an Extended_Pictographic, or of regional indicators to
+    /// GB9c, GB11 and GB12/GB13 look further left, through a run of InCB Extend characters to a
+    /// Linker, of Extend characters to an Extended_Pictographic, or of regional indicators to
     /// count them; a run that reaches the edge goes on in the text to come, which can end it in the
-    /// way that keeps the cluster together (a Consonant, with a Linker if the run had none; an
-    /// Extended_Pictographic; one regional indicator more). Each such rule therefore holds for some
+    /// way that keeps the cluster together (a Linker; an Extended_Pictographic; one regional
+    /// indicator more). Each such rule therefore holds for some
     /// continuation, and the boundary is undetermined unless a rule the held text does decide
     /// holds first or later on the same path, since every rule that holds answers "no break" and
     /// only GB999 answers a break. Forward, every rule looks left into the held text and right only
@@ -3564,8 +3610,13 @@ internal static class Matcher
 
         bool open = false;
 
-        // GB9c
-        if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        // GB9c, revision 49's (AtGraphemeBoundary); revision 47's, upstream's, under the oracle's
+        // ablation (UpstreamConjunctJoins), where a run reaching the edge is open whether or not it
+        // has met a linker, because the text to come can hold both.
+        if (
+            state.Pattern.UpstreamGraphemeConjunct
+            && UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant
+        )
         {
             bool hasLinker = false;
             int pos = leftPos;
@@ -3592,6 +3643,31 @@ internal static class Matcher
                     break;
                 }
                 else if (prop != UnicodeTables.IncbExtend)
+                {
+                    break;
+                }
+
+                pos = state.PrevPos(pos);
+            }
+        }
+        else if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        {
+            int pos = leftPos;
+            while (true)
+            {
+                if (pos < state.TextStart)
+                {
+                    open = true;
+                    break;
+                }
+
+                uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
+                if (prop == UnicodeTables.IncbLinker)
+                {
+                    return false;
+                }
+
+                if (prop != UnicodeTables.IncbExtend)
                 {
                     break;
                 }

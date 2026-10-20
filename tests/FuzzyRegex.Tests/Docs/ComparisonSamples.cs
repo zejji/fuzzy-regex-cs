@@ -369,9 +369,9 @@ public sealed class ComparisonSamples
         m.Success.Should().BeTrue();
     }
 
-    /// <summary>"The Unicode data is version 17.0.0".</summary>
+    /// <summary>"The Unicode data is version 18.0.0".</summary>
     [Test]
-    public void Unicode_data_is_version_17_0_0()
+    public void Unicode_data_is_version_18_0_0()
     {
         Match m = FuzzyRegex.Match("\U00011DE1", @"\N{TOLONG SIKI DIGIT ONE}");
 
@@ -532,6 +532,15 @@ public sealed class ComparisonSamples
 
         backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
         new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
+    }
+
+    /// <summary>"`\X` keeps a conjunct linker with the next consonant, as Unicode 18.0.0's GB9c says".</summary>
+    [Test]
+    public void Grapheme_keeps_a_conjunct_linker_with_the_next_consonant()
+    {
+        var cluster = new FuzzyRegex(@"\X");
+
+        cluster.Matches("a्त").Select(static m => m.Length).Should().Equal(3);
     }
 
     /// <summary>

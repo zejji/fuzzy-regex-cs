@@ -8,7 +8,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 internal static partial class UnicodeTables
 {
     /// <summary>Upstream <c>RE_UNICODE_VERSION</c>.</summary>
-    internal const string UnicodeVersion = "17.0.0";
+    internal const string UnicodeVersion = "18.0.0";
     /// <summary>Upstream <c>RE_ASCII_MAX</c>.</summary>
     internal const int AsciiMax = 0x7F;
     /// <summary>Upstream <c>RE_LOCALE_MAX</c>.</summary>
@@ -283,10 +283,10 @@ internal static partial class UnicodeTables
     internal const int LbreakGlue = 20;
     /// <summary>Upstream <c>RE_LBREAK_AMBIGUOUS</c>.</summary>
     internal const int LbreakAmbiguous = 21;
-    /// <summary>Upstream <c>RE_LBREAK_BREAKBEFORE</c>.</summary>
-    internal const int LbreakBreakbefore = 22;
     /// <summary>Upstream <c>RE_LBREAK_UNAMBIGUOUSHYPHEN</c>.</summary>
-    internal const int LbreakUnambiguoushyphen = 23;
+    internal const int LbreakUnambiguoushyphen = 22;
+    /// <summary>Upstream <c>RE_LBREAK_BREAKBEFORE</c>.</summary>
+    internal const int LbreakBreakbefore = 23;
     /// <summary>Upstream <c>RE_LBREAK_HEBREWLETTER</c>.</summary>
     internal const int LbreakHebrewletter = 24;
     /// <summary>Upstream <c>RE_LBREAK_COMPLEXCONTEXT</c>.</summary>
