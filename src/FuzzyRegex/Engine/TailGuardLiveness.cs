@@ -104,19 +104,27 @@ internal static class TailGuardLiveness
 
     /// <summary>
     /// Fills in <see cref="RepeatInfo.TailKey"/> for every repeat whose tail is guarded, and
-    /// <see cref="RepeatInfo.CutBodyKey"/> and <see cref="RepeatInfo.EnclosingLoops"/> for every
-    /// repeat inside a cut body (D104).
+    /// <see cref="PatternObject.CutBodies"/> for every repeat inside a cut body (D104).
     /// </summary>
     /// <param name="pattern">The pattern, after <c>Optimiser.CollectTestedGroups</c>.</param>
     internal static void FindTailKeys(PatternObject pattern)
     {
         int[] tested = pattern.TestedGroups;
         bool cutBodies = pattern.RepeatInfoList.Exists(static info => info.InsideACutBody);
-        if (tested.Length == 0 && !cutBodies)
+        if (tested.Length != 0 || cutBodies)
         {
-            return;
+            // In a method of its own: the locals its lambdas capture live in an object made on
+            // entry, which a pattern with nothing to key should not pay for (D104's allocation gate).
+            FindKeys(pattern, tested, cutBodies);
         }
+    }
 
+    /// <summary><see cref="FindTailKeys"/> for a pattern with a tested group or a cut body.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="tested">Its tested groups.</param>
+    /// <param name="cutBodies">Whether a repeat is inside a cut body.</param>
+    private static void FindKeys(PatternObject pattern, int[] tested, bool cutBodies)
+    {
         List<Node> nodes = pattern.NodeList;
         var indexOf = new Dictionary<object, int>(nodes.Count, ReferenceEqualityComparer.Instance);
         for (int i = 0; i < nodes.Count; i++)
@@ -280,11 +288,14 @@ internal static class TailGuardLiveness
         )
         {
             int index = (int)repeat.Values[0];
-            RepeatInfo info = pattern.RepeatInfoAt(index);
-            info.CutBodyKey = specAt(repeat) ?? new TailGuardKeySpec([], [], [], repeat.Values[3] != 0, false);
-            info.EnclosingLoops = loops.TryGetValue(index, out List<int>? list) ? [.. list] : [];
-            info.EnclosingLoopCaps = [.. info.EnclosingLoops.Select(loop => caps[loop])];
-            info.CountFreeBody = ~repeat.Values[2] == 0 && repeat.Values[1] <= 1;
+            int[] enclosing = loops.TryGetValue(index, out List<int>? list) ? [.. list] : [];
+            pattern.CutBodies ??= new CutBodyFacts(pattern.RepeatCount);
+            pattern.CutBodies.Repeats[index] = new CutBodyRepeat(
+                specAt(repeat) ?? new TailGuardKeySpec([], [], [], repeat.Values[3] != 0, false),
+                enclosing,
+                [.. enclosing.Select(loop => caps[loop])],
+                ~repeat.Values[2] == 0 && repeat.Values[1] <= 1
+            );
         }
     }
 

@@ -17,14 +17,16 @@ public sealed class PartialForkBudgetTests
 {
     /// <summary>
     /// Row X1: every lookahead has two successes with different captures and a backreference
-    /// turns the guards off, so the second pass forks at every 'a' and is exponential. The budget
-    /// stops it and answers P(0, |t|), the phantom upstream 2026.9.10 answers too (the judge says
-    /// None: no 'z' can come before the 'c').
+    /// turns the guards off, so the second pass forked at every 'a' and was exponential until the
+    /// budget stopped it and answered P(0, |t|), the phantom upstream 2026.9.10 answers too. Since
+    /// D104 a failed continuation is recorded (<c>PartialContinuationMemoTests</c>), so the pass
+    /// ends under the budget with the judge's answer, None: only <c>b</c> can follow the
+    /// <c>a</c>s, and the text has a 'c' where it would go.
     /// </summary>
-    // DIVERGES FROM UPSTREAM on nothing: upstream answers P(0, 41) as well.
+    // DIVERGES FROM UPSTREAM, port-right (D104): upstream 2026.9.10 answers the phantom P(0, 41).
     [Test]
     [Category(EngineWork.Category)]
-    public void An_attempt_that_forks_past_the_budget_answers_the_partial_at_its_start()
+    public void An_attempt_whose_failed_continuations_are_recorded_answers_none_under_the_budget()
     {
         var regex = new FuzzyRegex(@"(?:(?=(.*)z|())a)*b\1\2", FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = new string('a', 40) + "c";
@@ -34,11 +36,10 @@ public sealed class PartialForkBudgetTests
             {
                 Match m = regex.MatchAtStart(subject, partial: true);
 
-                (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 41));
-                m.Groups[1].Success.Should().BeFalse();
+                m.Success.Should().BeFalse();
             },
             2_000_000,
-            "the budget stops the attempt after 256 (|t| + 1) forks"
+            "the continuation memo ends the pass before the budget's 256 (|t| + 1) forks"
         );
     }
 

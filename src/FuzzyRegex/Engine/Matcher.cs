@@ -6261,7 +6261,11 @@ internal static class Matcher
         {
             // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
             RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
-            state.ContinuationPending = keyed;
+            if (keyed)
+            {
+                state.HoldContinuation();
+            }
+
             return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
         }
 
@@ -20127,11 +20131,7 @@ internal static class Matcher
             }
 
             // D104: the continuation starts here, above the entry that undoes the lookaround.
-            if (state.ContinuationPending)
-            {
-                state.PushContinuationMark(endLookData.TextPos);
-                state.ContinuationPending = false;
-            }
+            state.PushPendingContinuationMark(endLookData.TextPos);
 
             /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
 

@@ -299,12 +299,14 @@ public sealed class MatchStateCacheTests
             // and readonly, so no call can set it. MatchState.PartialEventCounts is null exactly in
             // a Release build (D11). MatchState.EmptyIterationScratch is the same, null exactly when
             // the pattern tests no group; otherwise it is an array, which the long[] rule below
-            // scribbles, and a reused state must clear it.
+            // scribbles, and a reused state must clear it. Its D104 records (_cutBody) are the
+            // same, made in the constructor exactly when a repeat or lookaround can write them.
             if (
                 (
                     string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.PartialEventCounts), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
+                    || string.Equals(field.Name, "_cutBody", StringComparison.Ordinal)
                 ) && field.GetValue(state) is null
             )
             {
@@ -395,6 +397,14 @@ public sealed class MatchStateCacheTests
                 break;
             case KeyedTailGuards store:
                 store.ForWrite([7], mayAdd: true)!.Guard(7, protect: true);
+                break;
+            case CutBodyRecords records:
+                records.Writes = 7;
+                records.Hits = 7;
+                records.Pending = true;
+                records.Store.ForWrite([7], mayAdd: true)!.Guard(7, protect: true);
+                Array.Fill(records.Key, 7);
+                Array.Fill(records.ContinuationKey, 7);
                 break;
             case FuzzyLiteralFilter.ScanMemory memory:
                 Array.Fill(memory.From, 7);
@@ -565,6 +575,14 @@ public sealed class MatchStateCacheTests
                     Render($"{path}[{string.Join(" ", key.Values)}]", list, lines);
                 }
 
+                break;
+            case CutBodyRecords records:
+                lines.Add($"{path}=({records.Writes},{records.Hits},{records.Pending},{records.BaseLength})");
+                Render($"{path}.Store", records.Store, lines);
+                // Scratch: CutBodyKeyOf clears Key before it builds a key, and ContinuationKeyOf
+                // overwrites all of ContinuationKey, so only their lengths can carry over.
+                lines.Add($"{path}.Key.Length={records.Key.Length}");
+                lines.Add($"{path}.ContinuationKey.Length={records.ContinuationKey.Length}");
                 break;
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);

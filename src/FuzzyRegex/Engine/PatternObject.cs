@@ -136,35 +136,6 @@ internal sealed class RepeatInfo
     internal TailGuardKeySpec? TailKey;
 
     /// <summary>
-    /// NOT UPSTREAM (D104): what this repeat's records written after a blocked end are keyed on
-    /// besides the instance, for a repeat <see cref="InsideACutBody"/>; see
-    /// <c>MatchState.CutBodyKeyOf</c>. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
-    /// </summary>
-    internal TailGuardKeySpec? CutBodyKey;
-
-    /// <summary>
-    /// NOT UPSTREAM (D104): the loops enclosing this repeat, for a repeat
-    /// <see cref="InsideACutBody"/>: their count, start and progress are in the key of its records
-    /// written after a blocked end. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
-    /// </summary>
-    internal int[] EnclosingLoops = [];
-
-    /// <summary>
-    /// NOT UPSTREAM (D104): for each of <see cref="EnclosingLoops"/>, the count past which the key
-    /// stops telling counts apart: the minimum of a loop with no maximum, else no cap.
-    /// </summary>
-    internal long[] EnclosingLoopCaps = [];
-
-    /// <summary>
-    /// NOT UPSTREAM (D104): the repeat has no maximum and a minimum of at most 1, so its own count
-    /// cannot change what its body leads to, and a body record written after a blocked end may
-    /// leave the count out of its key. A plain body record relies on the success mark instead
-    /// (<c>GuardRepeat(..., protect: false)</c> at the iteration's end), which a record kept under
-    /// its instance never gets. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
-    /// </summary>
-    internal bool CountFreeBody;
-
-    /// <summary>
     /// NOT UPSTREAM (D85): the body holds a repeat whose tail guard is keyed, so this repeat's body
     /// guard is off. A body guard records that the body never got to its end from a position; a
     /// keyed tail guard inside can stop the body under one value of a group the rest of the match
@@ -697,11 +668,16 @@ internal sealed class PatternObject
     internal bool KeepInSubmatch;
 
     /// <summary>
-    /// NOT UPSTREAM (D104): some positive lookaround of the pattern has a
-    /// <see cref="Node.ContinuationKeyRepeat"/>, so a partial call's second pass may record its
-    /// continuations (<c>MatchState.ContinuationKeyOf</c>). Set by <see cref="SetLookaroundBodies"/>.
+    /// NOT UPSTREAM (D104): what the records written after a blocked end are keyed on;
+    /// <see langword="null"/> when no repeat is inside a cut body, so that a pattern that cannot
+    /// record allocates nothing for them. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
     /// </summary>
-    internal bool KeysContinuations;
+    internal CutBodyFacts? CutBodies;
+
+    /// <summary>NOT UPSTREAM (D104): repeat <paramref name="index"/>'s <see cref="CutBodyRepeat"/>, if it has one.</summary>
+    /// <param name="index">The repeat index.</param>
+    /// <returns>The facts, or <see langword="null"/>.</returns>
+    internal CutBodyRepeat? CutBodyAt(int index) => CutBodies?.Repeats[index];
 
     /// <summary>
     /// Whether a search keeps the failure memos (<see cref="RepeatInfo.FailureMemo"/>) from one
@@ -1838,8 +1814,8 @@ internal sealed class PatternObject
             Array.Sort(sorted);
             test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
 
-            // NOT UPSTREAM (D104): see Node.ContinuationKeyRepeat. The repeats' keys are set by
-            // then (TailGuardLiveness.FindTailKeys, in the optimiser).
+            // NOT UPSTREAM (D104): see CutBodyFacts.ContinuationKeyRepeats. The repeats' keys are set by then
+            // (TailGuardLiveness.FindTailKeys, in the optimiser).
             if (test.Op == Opcode.Lookaround && test.Match)
             {
                 foreach (int i in sorted)
@@ -1851,11 +1827,17 @@ internal sealed class PatternObject
                                 or Opcode.LazyRepeat
                                 or Opcode.GreedyRepeatOne
                                 or Opcode.LazyRepeatOne
-                        && pattern.RepeatInfoAt((int)n.Values[0]).CutBodyKey is { HasUnknownInside: false }
+                        && pattern.CutBodyAt((int)n.Values[0]) is { Key.HasUnknownInside: false }
                     )
                     {
-                        test.ContinuationKeyRepeat = (int)n.Values[0];
-                        pattern.KeysContinuations = true;
+                        CutBodyFacts facts = pattern.CutBodies!;
+                        if (facts.ContinuationKeyRepeats is null)
+                        {
+                            facts.ContinuationKeyRepeats = new int[pattern.NodeList.Count];
+                            Array.Fill(facts.ContinuationKeyRepeats, -1);
+                        }
+
+                        facts.ContinuationKeyRepeats[test.Index] = (int)n.Values[0];
                         break;
                     }
                 }
@@ -2190,4 +2172,58 @@ internal sealed class PatternObject
     /// <returns>The same characters, or an empty list when there are none.</returns>
     private static IReadOnlyList<int> GetRequiredChars(IReadOnlyList<int> reqChars) =>
         reqChars.Count < 1 ? [] : reqChars;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D104): a pattern's facts for the records written after a blocked end
+/// (<c>MatchState.CutBodyKeyOf</c>) and for its continuation memo (<c>MatchState.ContinuationKeyOf</c>).
+/// Written while the pattern is compiled, read-only while it matches.
+/// </summary>
+/// <param name="repeats">How many repeats the pattern has.</param>
+internal sealed class CutBodyFacts(int repeats)
+{
+    /// <summary>By repeat index, the facts of each repeat inside a cut body; <see langword="null"/> for the others.</summary>
+    internal CutBodyRepeat?[] Repeats { get; } = new CutBodyRepeat?[repeats];
+
+    /// <summary>
+    /// By node index, for a positive lookaround, the first repeat of its body whose records are
+    /// keyed, whose key a record of the lookaround's continuation borrows; -1 for none and for every
+    /// other node. <see langword="null"/> when no lookaround has one. Set by
+    /// <c>PatternObject.SetLookaroundBodies</c>.
+    /// </summary>
+    internal int[]? ContinuationKeyRepeats;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D104): what a repeat inside a cut body keys its records written after a blocked end
+/// on besides the instance (<c>MatchState.CutBodyKeyOf</c>). Set by
+/// <see cref="TailGuardLiveness.FindTailKeys"/>.
+/// </summary>
+/// <param name="key">The groups live where the repeat is entered, as D85 keys a tail.</param>
+/// <param name="enclosingLoops">The loops enclosing the repeat, whose count, start and progress are in the key.</param>
+/// <param name="enclosingLoopCaps">For each enclosing loop, the count past which the key stops telling counts apart: the minimum of a loop with no maximum, else no cap.</param>
+/// <param name="countFreeBody">
+/// The repeat has no maximum and a minimum of at most 1, so its own count cannot change what its
+/// body leads to, and a body record may leave the count out of its key. A plain body record relies
+/// on the success mark instead (<c>GuardRepeat(..., protect: false)</c> at the iteration's end),
+/// which a record kept under its instance never gets.
+/// </param>
+internal sealed class CutBodyRepeat(
+    TailGuardKeySpec key,
+    int[] enclosingLoops,
+    long[] enclosingLoopCaps,
+    bool countFreeBody
+)
+{
+    /// <summary>The groups live where the repeat is entered.</summary>
+    internal TailGuardKeySpec Key { get; } = key;
+
+    /// <summary>The loops enclosing the repeat.</summary>
+    internal int[] EnclosingLoops { get; } = enclosingLoops;
+
+    /// <summary>For each enclosing loop, the count past which the key stops telling counts apart.</summary>
+    internal long[] EnclosingLoopCaps { get; } = enclosingLoopCaps;
+
+    /// <summary>Whether a body record may leave the repeat's own count out of its key.</summary>
+    internal bool CountFreeBody { get; } = countFreeBody;
 }
