@@ -118,9 +118,11 @@ jobs:
       # the root of a local server and at a preview path on a fork. Nothing third-party to pin, and
       # no second place for the path to drift out of step with.
 
+      # v4 and later leave dot files out of the artifact by default; .nojekyll must go with it.
       - uses: actions/upload-pages-artifact@v5
         with:
           path: ${{ runner.temp }}/demo-publish/wwwroot
+          include-hidden-files: true
 
   deploy:
     name: Deploy to Pages
