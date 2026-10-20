@@ -792,6 +792,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
             // OracleComparer.RunWithTheUpstreamDefaultBoundary.
             "PatternObject.UpstreamDefaultBoundary",
+            // Ledger entry 95 (D120) added UpstreamGraphemeConjunct, likewise set only by
+            // OracleComparer.RunWithTheUpstreamGraphemeConjunct.
+            "PatternObject.UpstreamGraphemeConjunct",
             // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
             // likewise set only by the OracleComparer ablations.
             "PatternObject.SkipExactDeletionRetry",

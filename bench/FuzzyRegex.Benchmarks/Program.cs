@@ -46,6 +46,14 @@ internal static class Program
             return;
         }
 
+        // `unicode-answers` prints UnicodeTableBenchmarks' answers, to compare two trees (a Unicode
+        // table regeneration) before timing them.
+        if (args is ["unicode-answers"])
+        {
+            AnswerText.Print(new UnicodeTableBenchmarks(), UnicodeTableBenchmarks.AnswerDetails);
+            return;
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
     }
 }

@@ -6,7 +6,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </summary>
 /// <remarks>
 /// <para>
-/// .NET has no character-name API, so the table is generated from the Unicode 17.0.0 UCD by
+/// .NET has no character-name API, so the table is generated from the Unicode 18.0.0 UCD by
 /// <c>tools/build-character-names.py</c> - the one place this port needs a UCD file rather than
 /// something upstream already generated.
 /// </para>

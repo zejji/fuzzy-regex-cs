@@ -8,7 +8,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// <para>
 /// Upstream <c>re_get_script_extensions</c>, <c>re_get_all_cases</c>,
 /// <c>re_get_simple_case_folding</c> and <c>re_get_full_case_folding</c>
-/// (<c>upstream/src/_regex_unicode.c</c> lines 26045, 30627, 30948 and 31452). Each walks the same
+/// (<c>upstream/src/_regex_unicode.c</c> lines 26352, 30991, 31321 and 31837). Each walks the same
 /// three levels as the other hundred, then reads a struct array or a run-terminated list instead of
 /// returning a bit.
 /// </para>
@@ -21,7 +21,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </remarks>
 internal static partial class UnicodeTables
 {
-    /// <summary>Upstream <c>re_get_all_cases</c> (line 30627).</summary>
+    /// <summary>Upstream <c>re_get_all_cases</c> (line 30991).</summary>
     /// <param name="codepoint">The codepoint.</param>
     /// <param name="cases">
     /// Receives the codepoint and its other simple cases. Must hold <see cref="MaxCases"/>.
@@ -64,7 +64,7 @@ internal static partial class UnicodeTables
         return 4;
     }
 
-    /// <summary>Upstream <c>re_get_simple_case_folding</c> (line 30948).</summary>
+    /// <summary>Upstream <c>re_get_simple_case_folding</c> (line 31321).</summary>
     /// <param name="codepoint">The codepoint.</param>
     /// <returns>The simple case folding of the codepoint.</returns>
     internal static uint GetSimpleCaseFolding(uint codepoint)
@@ -80,7 +80,7 @@ internal static partial class UnicodeTables
         return codepoint ^ SimpleFoldingTable4[v];
     }
 
-    /// <summary>Upstream <c>re_get_full_case_folding</c> (line 31452).</summary>
+    /// <summary>Upstream <c>re_get_full_case_folding</c> (line 31837).</summary>
     /// <param name="codepoint">The codepoint.</param>
     /// <param name="folded">
     /// Receives the full case folding. Must hold <see cref="MaxFolded"/>.
@@ -117,7 +117,7 @@ internal static partial class UnicodeTables
         return 3;
     }
 
-    /// <summary>Upstream <c>re_get_script_extensions</c> (line 26045).</summary>
+    /// <summary>Upstream <c>re_get_script_extensions</c> (line 26352).</summary>
     /// <param name="codepoint">The codepoint.</param>
     /// <param name="scripts">
     /// Receives the script identifiers. Must hold <see cref="MaxScx"/>.
@@ -133,16 +133,16 @@ internal static partial class UnicodeTables
         v = ScriptExtensionsTable2[(int)((v << 5) | field_1)];
         v = ScriptExtensionsTable3[(int)((v << 5) | field_0)];
 
-        // Below 176 the value is the single script itself; at or above it, an index into a
+        // Below 179 the value is the single script itself; at or above it, an index into a
         // table of zero-terminated runs.
-        if (v < 176)
+        if (v < 179)
         {
             scripts[0] = (byte)v;
 
             return 1;
         }
 
-        int offset = ScriptExtensionsTable4[v - 176];
+        int offset = ScriptExtensionsTable4[v - 179];
         int count = 0;
 
         do

@@ -1,0 +1,3 @@
+{"pattern":"\\X","flags":0,"subject":"a\u094d\u0924","operation":"finditer"}
+{"pattern":"\\X","flags":0,"subject":"\u1cf5\u0308\u0915","operation":"finditer"}
+{"pattern":"\\X{2}","flags":0,"subject":"?\u094d\u0924","operation":"fullmatch"}

@@ -56,8 +56,8 @@ internal static class UnicodeFixture
     /// <summary>How many codepoints the <c>str</c> predicate digest covers.</summary>
     public static int PythonStrCodepointCount => _loaded.Value.PythonStrCodepointCount;
 
-    /// <summary>How many codepoints it skips because they are new in Unicode 17.0.</summary>
-    public static int PythonStrSkippedNewIn17 => _loaded.Value.PythonStrSkippedNewIn17;
+    /// <summary>How many codepoints it skips because the host's Unicode version predates them.</summary>
+    public static int PythonStrSkippedUnknownToHost => _loaded.Value.PythonStrSkippedUnknownToHost;
 
     /// <summary>The digest of CPython's <c>isalpha</c>, <c>isdigit</c> and <c>isidentifier</c>.</summary>
     public static string PythonStr => _loaded.Value.PythonStr;
@@ -125,7 +125,7 @@ internal static class UnicodeFixture
             [.. root.GetProperty("hasPropertyValueCodepoints").EnumerateArray().Select(static c => c.GetInt32())],
             root.GetProperty("hasPropertyValue").GetString()!,
             root.GetProperty("pythonStrCodepointCount").GetInt32(),
-            root.GetProperty("pythonStrSkippedNewIn17").GetInt32(),
+            root.GetProperty("pythonStrSkippedUnknownToHost").GetInt32(),
             root.GetProperty("pythonStr").GetString()!
         );
     }
@@ -149,6 +149,6 @@ internal sealed record FixtureFile(
     IReadOnlyList<int> HasPropertyValueCodepoints,
     string HasPropertyValue,
     int PythonStrCodepointCount,
-    int PythonStrSkippedNewIn17,
+    int PythonStrSkippedUnknownToHost,
     string PythonStr
 );

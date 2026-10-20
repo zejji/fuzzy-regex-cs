@@ -720,8 +720,9 @@ public sealed class PartialEdgeReadTests
     /// of the text to come, so the next try runs out there, as the main loop's arm and a greedy
     /// repeat already do (D11 fix round 3's grid). The backtracking arm kept an entry only while the
     /// count was below the text held, upstream's bound, so it never ran out. 'aac' matches the first
-    /// row at (0, 3) and the bounded second; 'क्क' is one cluster (GB9c), so it fullmatches the
-    /// third, whose `\X` must take a consonant to come; 'caa' matches the reversed row.
+    /// row at (0, 3) and the bounded second; virama, U+0308, KA is one cluster (GB9c, Unicode
+    /// 18.0.0), so it fullmatches the third, whose `\X` must take the virama to come; 'caa' matches
+    /// the reversed row.
     /// </summary>
     /// <remarks>
     /// Each answer is the port's own non-partial call over the continuations of up to three
@@ -732,7 +733,7 @@ public sealed class PartialEdgeReadTests
     [Test]
     [Arguments("match", @".*?(?<=c)", "aa")]
     [Arguments("match", @".{0,3}?(?<=c)", "aa")]
-    [Arguments("fullmatch", @"(?r)\X", "्क")]
+    [Arguments("fullmatch", @"(?r)\X", "̈क")]
     [Arguments("match", @"(?r)(?=c).*?", "aa")]
     public void A_lazy_repeat_that_reaches_the_edge_by_backtracking_runs_out(
         string operation,

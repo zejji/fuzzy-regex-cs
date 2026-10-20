@@ -244,7 +244,7 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
-    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
+    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
     /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
@@ -1108,8 +1108,8 @@ internal static class OracleComparer
     /// UAX #29's.
     /// </summary>
     /// <remarks>
-    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 revision 47, which passes all of
-    /// Unicode 17.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
+    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 (revision 47, now 49), which passes all of
+    /// Unicode 18.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
     /// <c>PatternObject.UpstreamDefaultBoundary</c> sends <c>Matcher.AtDefaultBoundary</c> to
     /// <c>AtUpstreamDefaultBoundary</c>, upstream's function as it stands, at every site that reads
     /// it. The <c>default-word-boundary-follows-uax29</c> entry keys on this.
@@ -1126,6 +1126,32 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's Indic conjunct rule, UAX #29 revision 47's
+    /// GB9c, in place of revision 49's.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 95 (D120): Unicode 18.0.0 made GB9c <c>Linker Extend* × Consonant</c>, and
+    /// upstream 2026.9.29 moved to the 18.0.0 tables but kept <c>Consonant [Extend Linker]* Linker
+    /// [Extend Linker]* × Consonant</c>. Setting <c>PatternObject.UpstreamGraphemeConjunct</c> makes
+    /// both GB9c sites in <c>Matcher</c> apply the old rule. The
+    /// <c>grapheme-conjunct-follows-unicode-18</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's rule, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamGraphemeConjunct(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled => compiled.PatternObject.UpstreamGraphemeConjunct = true
         );
     }
 

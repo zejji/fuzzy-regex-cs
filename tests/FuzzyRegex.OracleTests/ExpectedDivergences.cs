@@ -3443,6 +3443,22 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>grapheme-conjunct-follows-unicode-18</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/sync-2026-9-29-gb9c-rows.jsonl</c> against
+    /// regex 2026.9.29 on 2026-10-20: lines 859 and 660 of <c>GraphemeBreakTest.txt</c> 18.0.0 as
+    /// <c>finditer</c>, and line 860 as a fullmatch of two clusters.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation. Seed 7's wave drew two rows that
+    /// reach the changed rule, and both answer the same under either rule.
+    /// </remarks>
+    private const string _graphemeConjunctRows = """
+        {"generator": "rows", "pattern": "\\X", "flags": 0, "namedLists": {}, "subject": "a्त", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}]}}
+        {"generator": "rows", "pattern": "\\X", "flags": 0, "namedLists": {}, "subject": "ᳵ̈क", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}]}}
+        {"generator": "rows", "pattern": "\\X{2}", "flags": 0, "namedLists": {}, "subject": "?्त", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
     /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -7894,6 +7910,30 @@ internal static class ExpectedDivergences
             Example: _reverseGraphemeRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamReverseGrapheme(row))
+        ),
+        new(
+            Id: "grapheme-conjunct-follows-unicode-18",
+            Reason: "\\X KEEPS A CONJUNCT LINKER WITH THE NEXT CONSONANT HERE WHATEVER COMES BEFORE THE "
+                + "LINKER, AND ONLY AFTER A CONSONANT UPSTREAM. Ledger entry 95 (D120); fixed "
+                + "2026-10-18 by the 2026.9.29 sync and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`. UAX #29 revision 49, Unicode 18.0.0's, made GB9c "
+                + "`Linker Extend* x Consonant`; upstream 2026.9.29 moved its tables to 18.0.0 and kept "
+                + "revision 47's `Consonant [Extend Linker]* Linker [Extend Linker]* x Consonant` "
+                + "(`unicode_at_grapheme_boundary`, `_regex.c:1866-1897`), so it fails 10 of the 853 "
+                + "lines of GraphemeBreakTest.txt 18.0.0, every one a GB9c line, and this port fails "
+                + "none.\n"
+                + "THE ROWS are the file's own lines 859 ('a' virama TA), 660 (VEDIC SIGN JIHVAMULIYA, "
+                + "U+0308, KA) and 860 ('?' virama TA), each one cluster by the file and two upstream.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamGraphemeConjunct`, which sets "
+                + "`PatternObject.UpstreamGraphemeConjunct` so both GB9c sites apply revision 47's "
+                + "rule, reproduces upstream's recorded answer exactly, AND this port's live answer is "
+                + "the one being judged. A row this port gets wrong for any other reason still diverges "
+                + "with upstream's rule and is reported.",
+            PinnedBy: "IndicConjunctGraphemeTests",
+            Example: _graphemeConjunctRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamGraphemeConjunct(row))
         ),
         new(
             Id: "skip-acts-when-backtracked-onto",
