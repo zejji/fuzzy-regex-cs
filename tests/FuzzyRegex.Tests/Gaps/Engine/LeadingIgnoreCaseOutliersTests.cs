@@ -312,8 +312,8 @@ public sealed class LeadingIgnoreCaseOutliersTests
                     regex.Match(text, call * 250, slice).Success.Should().BeFalse();
                 }
             },
-            calls * 256L,
-            "each call searches 50 units, and the outlier search needs only a literal's length past them"
+            calls * (slice + 7L),
+            "each call searches 50 units, and the outlier search needs only a literal's length (7) past them; 53 measured"
         );
     }
 
