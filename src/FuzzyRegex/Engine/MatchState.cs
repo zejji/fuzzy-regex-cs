@@ -2785,11 +2785,14 @@ internal sealed class MatchState : IDisposable
 
         // D104: the records after blocked ends stay for the whole pass. Each says that a subtree
         // failed from a state its key holds in full, and a later start reaches that state with
-        // nothing else changed: the touch flag is in the key, the fork budget and the must-advance
-        // rule write no record, and the start itself is read by nothing a record covers. Kept, each
-        // state is proved once per pass rather than once per start, which made option G cubic on
-        // the register's witness. A \K can move the next start (and starts it touched), so a
-        // pattern with one empties the store as before.
+        // nothing else changed: the touch flag is in the key, the fork budget writes no record,
+        // and the start itself is read by nothing a record covers. The must-advance rule refuses a
+        // success and so does write records, but only from the first start: the memo runs on the
+        // main thread with no construct open (ContinuationKeyOf), where a match ending at the
+        // search anchor started there, and no later start can end there. Kept, each state is
+        // proved once per pass rather than once per start, which made option G cubic on the
+        // register's witness. A \K can move the next start (and starts it touched), so a pattern
+        // with one empties the store as before.
         if (!nextAttempt || Pattern.KeepInSubmatch)
         {
             _cutBody?.Reset();
@@ -3284,9 +3287,14 @@ internal sealed class MatchState : IDisposable
     private readonly CutBodyRecords? _cutBody;
 
     /// <summary>
-    /// NOT UPSTREAM (D104): how many keys <see cref="_cutBody"/> may hold in one attempt; a
-    /// write under a new key past it is skipped, which only loses pruning.
+    /// NOT UPSTREAM (D104): how many keys <see cref="_cutBody"/> may hold; a write under a new key
+    /// past it is skipped, which only loses pruning.
     /// </summary>
+    /// <remarks>
+    /// The store lasts the whole pass, not one attempt (<see cref="ResetGuards"/>), so this cap and
+    /// <see cref="KeyedTailWriteCap"/>, which bounds <see cref="CutBodyRecords.Writes"/>, are spent
+    /// once per pass across every start.
+    /// </remarks>
     internal const int CutBodyKeyCap = 1 << 16;
 
     /// <summary>
@@ -3581,7 +3589,10 @@ internal sealed class MatchState : IDisposable
 
         // The borrowed key's groups are the ones live at the repeat; a group the body writes after
         // it and the continuation reads is not, so every group's span is added, exactly. A finer
-        // key than needed only costs hits.
+        // key than needed only costs hits. The borrowed key is finer in a second way: it reads the
+        // save-stack slots of the groups the repeat is inside, which by the lookaround's end are
+        // closed, so the slots hold what the body left there rather than group starts, and two
+        // arrivals whose bodies took different paths get different keys (lost hits, D123).
         key[0] = ~(long)look.Index;
         int k = _cutBody!.BaseLength;
         for (int g = 0; g < Groups.Length; g++, k += 2)
@@ -3643,13 +3654,13 @@ internal sealed class MatchState : IDisposable
             return false;
         }
 
+        // Counted before the write, as GuardRepeatAfterBlockedEnd and the keyed tail store count.
         if (
-            records.Writes < KeyedTailWriteCap
+            records.Writes++ < KeyedTailWriteCap
             && records.Store.ForWrite(records.ContinuationKey, mayAdd: records.Store.Count < CutBodyKeyCap)
                 is GuardList list
         )
         {
-            records.Writes++;
             list.Guard((int)textPos, true);
         }
 

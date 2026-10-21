@@ -34,7 +34,8 @@ public sealed class OpenDefectTests
     // repeat takes, and no text after 'a' * 9 + 'b' puts one there: the 'b' is fixed. The anchored
     // calls have no completion, and the search's leftmost completable start is the edge. The port
     // forks until the budget stops it and answers the partial at the start; upstream 2026.9.29
-    // answers (0, 10) as well, so the expected answers are argued, not measured.
+    // answers (0, 10) as well. The expected answers are argued, and the port with every repeat
+    // guard and the fork budget off gives the search's (10, 10) (blind review, 2026-10-20).
     [Test]
     public void A_group_open_around_a_recorded_lookahead_still_answers_the_budget_partial()
     {

@@ -6327,6 +6327,9 @@ internal static class Matcher
             }
             else
             {
+                // A RunOutPending mark is left, unlike the success below, so the arm could take the
+                // run-out and run the failed continuation again: at worst wasted work, since the
+                // touch flag is already set. No row of about 135,000 reached it (2026-10-21).
                 CutBstack(state, (int)mark);
             }
 
