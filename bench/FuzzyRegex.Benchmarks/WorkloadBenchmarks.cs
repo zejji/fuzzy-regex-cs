@@ -61,6 +61,18 @@ public class WorkloadBenchmarks
         WholeWordLists()
     );
 
+    /// <summary>
+    /// <see cref="_wholeWordsIgnoreCase"/> with <c>kestrel</c> and <c>thistle</c> for <c>copper</c>
+    /// and <c>violet</c> (C6): <c>k</c> also matches U+212A KELVIN SIGN and <c>s</c> U+017F LATIN
+    /// SMALL LETTER LONG S, which .NET's ignore-case rule does not know, as most real word lists
+    /// hold one of them. The Python pair uses the same list.
+    /// </summary>
+    private static readonly FuzzyRegex _wholeWordsIgnoreCaseKs = new(
+        @"(?i)\b\L<words>\b",
+        FuzzyRegexOptions.None,
+        WholeWordLists("amber", "kestrel", "thistle")
+    );
+
     /// <summary>The pattern whose strict prefix ends <see cref="Corpus.LongPartial"/>.</summary>
     private static readonly FuzzyRegex _partial = new(@"a needle in a haystack\.");
 
@@ -182,6 +194,11 @@ public class WorkloadBenchmarks
     /// <returns>How many there were.</returns>
     [Benchmark]
     public int WholeWordListIgnoreCase() => _wholeWordsIgnoreCase.Count(Corpus.Long);
+
+    /// <summary>The same with a list holding <c>k</c> and <c>s</c>, over the same megabyte.</summary>
+    /// <returns>How many there were.</returns>
+    [Benchmark]
+    public int WholeWordListIgnoreCaseKs() => _wholeWordsIgnoreCaseKs.Count(Corpus.Long);
 
     /// <summary>Walks a megabyte backwards for a literal that is not there.</summary>
     /// <returns>Whether it matched, which it does not.</returns>
@@ -366,6 +383,8 @@ public class WorkloadBenchmarks
         [nameof(CaseFoldedScan)] = static () => AnswerText.Spans(_caseFolded.Matches(Corpus.Long)),
         [nameof(WholeWordList)] = static () => AnswerText.Spans(_wholeWords.Matches(Corpus.Long)),
         [nameof(WholeWordListIgnoreCase)] = static () => AnswerText.Spans(_wholeWordsIgnoreCase.Matches(Corpus.Long)),
+        [nameof(WholeWordListIgnoreCaseKs)] = static () =>
+            AnswerText.Spans(_wholeWordsIgnoreCaseKs.Matches(Corpus.Long)),
         [nameof(PartialMatch)] = static () => AnswerText.Span(_partial.Match(Corpus.LongPartial, partial: true)),
         [nameof(MatchesToEnd)] = static () => AnswerText.Spans(_words.Matches(Corpus.Long)),
         [nameof(MatchesToEndDense)] = static () => AnswerText.Spans(_words.Matches(Corpus.Dense)),
@@ -387,20 +406,20 @@ public class WorkloadBenchmarks
     /// <summary>The ten words of <see cref="_wholeWords"/> and <see cref="_wholeWordsIgnoreCase"/>.</summary>
     /// <returns>The named list.</returns>
     private static Dictionary<string, IReadOnlyCollection<string>> WholeWordLists() =>
+        WholeWordLists("amber", "copper", "violet");
+
+    /// <summary>The ten-word list with its first three words given.</summary>
+    /// <param name="first">The first word.</param>
+    /// <param name="second">The second word.</param>
+    /// <param name="third">The third word.</param>
+    /// <returns>The named list.</returns>
+    private static Dictionary<string, IReadOnlyCollection<string>> WholeWordLists(
+        string first,
+        string second,
+        string third
+    ) =>
         new()
         {
-            ["words"] =
-            [
-                "amber",
-                "copper",
-                "violet",
-                "harbour",
-                "meadow",
-                "lantern",
-                "granite",
-                "jump",
-                "fox",
-                "needle",
-            ],
+            ["words"] = [first, second, third, "harbour", "meadow", "lantern", "granite", "jump", "fox", "needle"],
         };
 }
