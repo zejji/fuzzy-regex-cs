@@ -14253,6 +14253,9 @@ internal static class Matcher
         return true;
     }
 
+    /// <summary>What <see cref="NextLeadingStringPastOutliers"/> answers when the timeout or the token stops it.</summary>
+    private const int _outlierSearchCancelled = -2;
+
     /// <summary>
     /// NOT UPSTREAM'S (C6 option B3): the next start <c>PatternObject.LeadingStrings</c> admits when
     /// that ignore-case search would miss a match holding one of <c>PatternObject.LeadingOutliers</c>,
@@ -14266,13 +14269,17 @@ internal static class Matcher
     /// <c>LeadingFallbackUnits</c>, which every match starts on, takes over. No match is missed and
     /// each stretch of text is searched at most twice. The outlier found is kept in
     /// <paramref name="state"/>, so a search that stops often does not look for the same one again.
-    /// Text with no outlier costs one extra sweep for them in all; text dense with them costs what
-    /// the units screen costs. Out of line, as <see cref="NextLeadingUnit"/> is.
+    /// Text with no outlier costs one extra sweep for them in all, which stops a literal's length
+    /// past the slice; text dense with them costs what the units screen costs. Out of line, as
+    /// <see cref="NextLeadingUnit"/> is.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="pattern">The pattern, whose leading strings have outliers.</param>
     /// <param name="foundPos">Where the next attempt would start, at most the slice end.</param>
-    /// <returns>How far past <paramref name="foundPos"/> the next start is, or -1 if there is none.</returns>
+    /// <returns>
+    /// How far past <paramref name="foundPos"/> the next start is, -1 if there is none, or
+    /// <see cref="_outlierSearchCancelled"/> when the timeout or the token stopped the search.
+    /// </returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int NextLeadingStringPastOutliers(MatchState state, PatternObject pattern, int foundPos)
     {
@@ -14280,14 +14287,38 @@ internal static class Matcher
         int reach = pattern.LeadingStringsMaxLength - 1;
         int pos = foundPos;
 
+        // An outlier at or past this has its window past the slice end, so the search for one stops
+        // here: a caller walking a long text in short slices pays for each slice, not for the rest
+        // of the text on every call.
+        int scanEnd = Math.Min(state.Text.Length, text.Length + reach + 1);
+
         while (pos <= text.Length)
         {
+            // Polled as SimpleStringSearch is: text dense with outliers that no unit stands near, as
+            // long s throughout for (?i)tsx|kab, takes one turn per character.
+            state.Iterations = (ushort)(state.Iterations + 0x100);
+            if (state.Iterations == 0 && SafeCheckCancel(state))
+            {
+                return _outlierSearchCancelled;
+            }
+
             if (pos < state.LeadingOutlierFrom || pos > state.LeadingOutlierAt)
             {
-                // The whole text, not the slice, so the answer kept holds for any slice.
-                int found = state.Text.Span[pos..].IndexOfAny(pattern.LeadingOutliers!);
+                // With none before scanEnd, scanEnd stands in for the next outlier. None lies before
+                // it, which is all the answer kept promises, and in this slice its window starts past
+                // the end. Should a later search reach further, as a refinement window lifted, the
+                // units search that window instead, which is sound at any position.
+                int found = state.Text.Span[pos..scanEnd].IndexOfAny(pattern.LeadingOutliers!);
+                WorkCounter.ScannedSubject(found < 0 ? scanEnd - pos : found + 1);
                 state.LeadingOutlierFrom = pos;
-                state.LeadingOutlierAt = found < 0 ? int.MaxValue : pos + found;
+                if (found >= 0)
+                {
+                    state.LeadingOutlierAt = pos + found;
+                }
+                else
+                {
+                    state.LeadingOutlierAt = scanEnd == state.Text.Length ? int.MaxValue : scanEnd;
+                }
             }
 
             int outlier = state.LeadingOutlierAt;
@@ -14700,12 +14731,18 @@ internal static class Matcher
 
         // NOT UPSTREAM'S (S60b item 14). Every match starts with one of the literals and ends
         // inside the slice, so the next attempt starts at the earliest one that fits. One sweep
-        // with no poll, for the reasons StringSearch gives.
+        // with no poll, for the reasons StringSearch gives; the search past outliers is a loop and
+        // polls.
         if (leadingStrings is not null && foundPos <= state.SearchSliceEnd)
         {
             int at = pattern.LeadingOutliers is null
                 ? state.Text.Span[foundPos..state.SearchSliceEnd].IndexOfAny(leadingStrings)
                 : NextLeadingStringPastOutliers(state, pattern, foundPos);
+            if (at == _outlierSearchCancelled)
+            {
+                return MatchStatus.Cancelled;
+            }
+
             if (at < 0)
             {
                 return MatchStatus.Failure;

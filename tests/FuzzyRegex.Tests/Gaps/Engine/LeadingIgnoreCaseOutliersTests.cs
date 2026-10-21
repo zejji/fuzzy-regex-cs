@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using AwesomeAssertions.Execution;
 using Fuzzy.Text.RegularExpressions.Engine;
@@ -184,6 +185,153 @@ public sealed class LeadingIgnoreCaseOutliersTests
                 Spans(screened, subject).Should().Be("4-10 28-32");
             }
         }
+    }
+
+    /// <summary>
+    /// The Turkish dotted capital I and dotless small i stay apart from <c>i</c> and <c>I</c> on
+    /// both ignore-case string screens, with outliers and without: this port gives them the default
+    /// case data, not upstream's (<c>docs/DIVERGENCES.md</c>, the Turkic row). Upstream finds
+    /// <c>İt</c> here; the screen must not hide a match the engine would make, and the engine
+    /// makes none.
+    /// </summary>
+    /// <param name="pattern">An alternation the ignore-case strings screen.</param>
+    /// <param name="hasOutliers">Whether it gets outliers.</param>
+    [Test]
+    [Arguments("(?i)(?:it|xy)", false)]
+    [Arguments("(?i)(?:it|ks)", true)]
+    public void The_turkic_i_stays_unmatched_on_the_ignore_case_screen(string pattern, bool hasOutliers)
+    {
+        var screened = new FuzzyRegex(pattern);
+
+        using (new AssertionScope())
+        {
+            screened.PatternObject.LeadingStrings.Should().NotBeNull();
+            (screened.PatternObject.LeadingOutliers is not null).Should().Be(hasOutliers);
+            Spans(screened, "İt").Should().BeEmpty();
+            Spans(screened, "ıt").Should().BeEmpty();
+            Spans(screened, "It iT").Should().Be("0-2 3-5");
+        }
+    }
+
+    /// <summary>
+    /// Every subject of up to six characters over <c>a</c>, <c>b</c>, <c>k</c>, the Kelvin sign,
+    /// <c>s</c> and long s, searched whole, overlapped and over a slice that drops its first and last
+    /// character: the screened pattern answers as the same alternation with an extra class arm,
+    /// which no leading screen takes. The 2026-10-16 blind review ran this set against upstream as
+    /// well (223,853 rows, no difference); here the control is the unscreened path.
+    /// </summary>
+    /// <param name="pattern">A pattern whose alternation has outliers.</param>
+    [Test]
+    [Arguments("(?i)(?:kab|sa|bk)")]
+    [Arguments(@"(?i)\b(?:ks|sab)\b")]
+    [Arguments("(?i)(?:kas|ab)(?=b)")]
+    [Arguments("(?i)(?<=a)(?:sk|kba)")]
+    [Arguments(@"(?i)(?:askb|kk|sa)\w")]
+    [Arguments("(?V0i)(?:ssa|kab)")]
+    [Arguments("(?i)(?:kbs|bas)s?")]
+    [Arguments("(?i)(?:kabsk|sk)")]
+    public void Every_short_subject_over_outliers_gets_the_unscreened_answer(string pattern)
+    {
+        var screened = new FuzzyRegex(pattern);
+        var control = new FuzzyRegex(pattern.Replace("(?:", "(?:[0-9]x|", StringComparison.Ordinal));
+        const string alphabet = "abkKsſ";
+        List<string> wrong = [];
+        int rows = 0;
+
+        for (int length = 0; length <= 6; length++)
+        {
+            char[] chars = new char[length];
+            int count = 1;
+            for (int i = 0; i < length; i++)
+            {
+                count *= alphabet.Length;
+            }
+
+            for (int index = 0; index < count; index++)
+            {
+                int rest = index;
+                for (int i = 0; i < length; i++)
+                {
+                    chars[i] = alphabet[rest % alphabet.Length];
+                    rest /= alphabet.Length;
+                }
+
+                string subject = new(chars);
+                int sliceLength = Math.Max(0, length - 2);
+                rows++;
+                if (
+                    !string.Equals(Spans(screened, subject), Spans(control, subject), StringComparison.Ordinal)
+                    || !string.Equals(
+                        Spans(screened, subject, overlapped: true),
+                        Spans(control, subject, overlapped: true),
+                        StringComparison.Ordinal
+                    )
+                    || !string.Equals(
+                        Spans(screened, subject, Math.Min(1, length), sliceLength),
+                        Spans(control, subject, Math.Min(1, length), sliceLength),
+                        StringComparison.Ordinal
+                    )
+                )
+                {
+                    wrong.Add(subject);
+                }
+            }
+        }
+
+        using (new AssertionScope())
+        {
+            screened.PatternObject.LeadingOutliers.Should().NotBeNull();
+            control.PatternObject.LeadingStrings.Should().BeNull();
+            rows.Should().Be(55_987);
+            wrong.Should().BeEmpty();
+        }
+    }
+
+    /// <summary>
+    /// A caller that walks a long text in short slices, as <c>Match(text, i, 50)</c> in a loop,
+    /// pays for each slice and not for the rest of the text each time: the search for the next
+    /// outlier stops a literal's length past the slice. Before the fix it ran to the end of the
+    /// text on every call (the 2026-10-16 blind review measured 399 ms against 6 ms for a list with
+    /// no outliers, 4,000 calls over 4,000,000 units).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_search_over_a_short_slice_looks_for_outliers_only_near_it()
+    {
+        var regex = new FuzzyRegex("(?i)kestrel|thistle");
+        string text = new('a', 1_000_000);
+        const int calls = 4000;
+        const int slice = 50;
+
+        regex.PatternObject.LeadingOutliers.Should().NotBeNull();
+        EngineWork.ShouldScanAtMostUnits(
+            () =>
+            {
+                for (int call = 0; call < calls; call++)
+                {
+                    regex.Match(text, call * 250, slice).Success.Should().BeFalse();
+                }
+            },
+            calls * 256L,
+            "each call searches 50 units, and the outlier search needs only a literal's length past them"
+        );
+    }
+
+    /// <summary>
+    /// Text dense with outliers that no unit stands near, as long s throughout for
+    /// <c>(?i)tsx|kab</c>, takes one turn of the search per character, so the search polls the
+    /// timeout as <c>SimpleStringSearch</c> does. The seam spends the budget on the second clock
+    /// check: the first is the attempt's own, which the search runs after.
+    /// </summary>
+    [Test]
+    public void The_search_past_outliers_honours_the_timeout()
+    {
+        var regex = new FuzzyRegex("(?i)tsx|kab") { ExpiresOnCheck = 2 };
+        string text = new('ſ', 100_000);
+
+        regex.PatternObject.LeadingOutliers.Should().NotBeNull();
+        Action call = () => regex.Match(text, timeout: EngineWork.HangGuard);
+        call.Should().Throw<RegexMatchTimeoutException>();
     }
 
     private static string Spans(
