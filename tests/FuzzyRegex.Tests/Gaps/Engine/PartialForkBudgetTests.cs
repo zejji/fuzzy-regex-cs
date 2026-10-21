@@ -17,14 +17,16 @@ public sealed class PartialForkBudgetTests
 {
     /// <summary>
     /// Row X1: every lookahead has two successes with different captures and a backreference
-    /// turns the guards off, so the second pass forks at every 'a' and is exponential. The budget
-    /// stops it and answers P(0, |t|), the phantom upstream 2026.9.10 answers too (the judge says
-    /// None: no 'z' can come before the 'c').
+    /// turns the guards off, so the second pass forked at every 'a' and was exponential until the
+    /// budget stopped it and answered P(0, |t|), the phantom upstream 2026.9.10 answers too. Since
+    /// D104 a failed continuation is recorded (<c>PartialContinuationMemoTests</c>), so the pass
+    /// ends under the budget with the judge's answer, None: only <c>b</c> can follow the
+    /// <c>a</c>s, and the text has a 'c' where it would go.
     /// </summary>
-    // DIVERGES FROM UPSTREAM on nothing: upstream answers P(0, 41) as well.
+    // DIVERGES FROM UPSTREAM, port-right (D104): upstream 2026.9.10 answers the phantom P(0, 41).
     [Test]
     [Category(EngineWork.Category)]
-    public void An_attempt_that_forks_past_the_budget_answers_the_partial_at_its_start()
+    public void An_attempt_whose_failed_continuations_are_recorded_answers_none_under_the_budget()
     {
         var regex = new FuzzyRegex(@"(?:(?=(.*)z|())a)*b\1\2", FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = new string('a', 40) + "c";
@@ -34,11 +36,10 @@ public sealed class PartialForkBudgetTests
             {
                 Match m = regex.MatchAtStart(subject, partial: true);
 
-                (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 41));
-                m.Groups[1].Success.Should().BeFalse();
+                m.Success.Should().BeFalse();
             },
             2_000_000,
-            "the budget stops the attempt after 256 (|t| + 1) forks"
+            "the continuation memo ends the pass before the budget's 256 (|t| + 1) forks"
         );
     }
 
@@ -61,6 +62,27 @@ public sealed class PartialForkBudgetTests
         Match m = regex.Match(subject, partial: true);
 
         (m.PartialMatch, m.Index, m.Length).Should().Be((true, 601, 0));
+    }
+
+    /// <summary>
+    /// Row S4 itself: in the second pass every start's lookahead reads the text to come, so every
+    /// start but the edge fails on 'c' and the leftmost completable start is the edge itself
+    /// ('...c' + 'bz' matches at 1001). The design's memo and per-attempt budget keep this search at
+    /// the first pass's order (section 9).
+    /// </summary>
+    /// <remarks>
+    /// Moved from <c>OpenDefectTests</c> on 2026-10-18: red before D11 (F54, merge 65265cfd,
+    /// 2026-10-04), green from it on (measured 2026-10-18).
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, as design section 1 does: upstream 2026.9.10 answers P(0, 1001), from
+    // the first start's run-out.
+    [Test]
+    public void A_search_whose_lookahead_reads_the_text_to_come_from_every_start_reports_the_edge()
+    {
+        Match m = new FuzzyRegex(@"a*(?=.*z)b").Match(new string('a', 1000) + "c", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1001, 1001));
     }
 
     /// <summary>
@@ -103,6 +125,10 @@ public sealed class PartialForkBudgetTests
     /// </summary>
     [Test]
     [Arguments(@"a(?>\b|)(*FAIL)", "atomic group's blocked cut (BlockAtomicCut)", 1)]
+    // 2: the tail guard that the first continuation's failure wrote cuts two later paths to the
+    // blocked end. D90 made it 4 by dropping that guard, since in general it records the
+    // continuation, not the position (MatchState.BlockedEndMark); D104 keeps it under the instance
+    // it was written in (MatchState.CutBodyKeyOf), and the two later paths share its key.
     [Arguments(@"a(?:\b|)++(*FAIL)", "possessive repeat's blocked cuts (BlockAtomicCut)", 2)]
     [Arguments(@"a\b(*PRUNE)(*FAIL)", "skipped verb (SkipABlockedVerb)", 1)]
     [Arguments(@"a(?=\b)(*FAIL)", "positive lookaround's blocked end (EndALookaroundInTheSecondPass)", 1)]

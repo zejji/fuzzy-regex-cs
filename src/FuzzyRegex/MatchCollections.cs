@@ -59,6 +59,7 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// it is a filter over this one. <b>The cost is a source break</b>: a type with two
 /// <see cref="IEnumerable{T}"/> faces makes <c>Groups.Select(...)</c> ambiguous, exactly as it
 /// is on the built-in collection.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#matchgroups-is-an-ireadonlydictionarystring-group-as-well-as-a-list">the comparison page</see>.
 /// </para>
 /// <para>
 /// Two places where the built-in's dictionary contract and this port's older behaviour differ, and

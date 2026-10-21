@@ -1011,6 +1011,12 @@ internal static class NodeCompiler
         // Create a node for the lookaround.
         Node testNode = CreateNode(args.Pattern, Opcode.Conditional, flags, 0, 0);
 
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
+
         args.Code += 3;
 
         AddNode(args.End!, testNode);
@@ -1400,6 +1406,12 @@ internal static class NodeCompiler
         // Create a node for the lookaround.
         Node lookaroundNode = CreateNode(args.Pattern, Opcode.Lookaround, flags, 0, 0);
 
+        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
+        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        {
+            args.Pattern.LooksAgainstTheScan = true;
+        }
+
         args.Code += 3;
 
         // Compile the sequence and check that we've reached the end of the subpattern.
@@ -1680,6 +1692,7 @@ internal static class NodeCompiler
                     4
                 );
                 RecordRepeat(args.Pattern, index, args.RepeatDepth);
+                args.Pattern.RepeatInfoAt(index).InsideACutBody = args.WithinDiscardingConstruct;
 
                 // NOT UPSTREAM: the repeat's own half of the failure memo's conditions; the
                 // pattern's half is Optimiser.KeepFailureMemosSound. With no maximum and a minimum
@@ -1840,6 +1853,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSet(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // codes: opcode, flags, ..., end.
         Opcode op = args.Op;
         uint flags = args.At(1);
@@ -2078,6 +2092,7 @@ internal static class NodeCompiler
     /// <returns>A status code.</returns>
     private static int BuildSequence(ref CompileArgs args)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
         // Guarantee that there's something to attach to.
         args.Start = CreateNode(args.Pattern, Opcode.Branch, 0, 0, 0);
         args.End = args.Start;

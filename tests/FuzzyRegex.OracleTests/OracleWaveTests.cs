@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using AwesomeAssertions;
 
@@ -107,6 +108,53 @@ public sealed class OracleWaveTests
             .Contain("version=V1");
     }
 
+    /// <summary>
+    /// A failed assert in this port is a FAULT row, and the rows around it are still compared. Before
+    /// <see cref="FailedAssertListener"/>, the row came out as an ordinary DIVERGE answering
+    /// <c>TUnitException</c>, from TUnit's own listener (measured 2026-10-16 with a planted assert
+    /// in a Debug consumer), and the run survived only because TUnit happens to install one: a
+    /// process without a throwing listener ends at a failed assert (<c>Environment.FailFast</c>, exit
+    /// code 35). <c>Trace.Fail</c> rather than <c>Debug.Assert</c> so the test fires in Release too;
+    /// both reach the same <c>Trace.Listeners</c>.
+    /// </summary>
+    [Test]
+    public void A_failed_assert_in_this_port_is_a_FAULT_row_and_the_wave_still_reports()
+    {
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(_recordedRows);
+        OracleRow asserting = rows[1];
+
+        OracleRunSummary run = OracleComparer.RunWave(
+            rows,
+            row => ReferenceEquals(row, asserting) ? AnswerOfAFailedAssert() : OracleComparer.Run(row)
+        );
+
+        run.Tally.GetValueOrDefault(OracleVerdict.Fault).Should().Be(1);
+        run.Tally.GetValueOrDefault(OracleVerdict.Agree)
+            .Should()
+            .Be(2, "the rows around the assert are still compared");
+        run.Divergences.Should().BeEmpty("a failed assert is a fault, not a question of which engine is right");
+        run.Faults.Should()
+            .ContainSingle()
+            .Which.Should()
+            .StartWith($"FAULT row {asserting.Number} ")
+            .And.Contain(nameof(FailedAssertException))
+            .And.Contain("the probe's invariant");
+
+        static IOracleOutcome? AnswerOfAFailedAssert()
+        {
+            // What OracleComparer.Run does with an exception out of the match call.
+            try
+            {
+                Trace.Fail("the probe's invariant");
+                return null;
+            }
+            catch (Exception e)
+            {
+                return ErrorOutcome.From(e, whileMatching: true);
+            }
+        }
+    }
+
     [Test]
     [Category(OracleWave.NeedsARecordedWave)]
     public void The_wave_agrees_with_upstream()
@@ -143,9 +191,10 @@ public sealed class OracleWaveTests
         run.Faults.Count.Should()
             .Be(
                 0,
-                "{0}. Upstream gave no usable answer on these rows, and no known defect accounts for "
-                    + "them - run tools/screen-undefined.py, then triage any new origin into "
-                    + "docs/plan/upstream-reports/LEDGER.md. Full report at {1}. First:{2}{3}",
+                "{0}. On these rows this port failed an assert (a FailedAssertException: fix the "
+                    + "engine), or upstream gave no usable answer and no known defect accounts for it (run "
+                    + "tools/screen-undefined.py, then triage any new origin into "
+                    + "docs/plan/upstream-reports/LEDGER.md). Full report at {1}. First:{2}{3}",
                 summary,
                 OracleWave.ReportPath,
                 Environment.NewLine,
@@ -1715,8 +1764,86 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_section_reentry_refusal_does_not_explain_is_not_accounted_for()
+    {
+        // The controls for `call-reentry-opening-a-section-is-refused` (D93). This port's live answer
+        // to each example row is the family; upstream's own answer is not; and an empty match at 0
+        // stands in for an unrelated defect on the same pattern. On the first row an empty match at 0
+        // is this port's answer, so the control uses a no-match there instead.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "call-reentry-opening-a-section-is-refused", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(entry.Example);
+        rows.Should().HaveCount(3);
+        foreach (OracleRow row in rows)
+        {
+            IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+            OracleComparer
+                .Compare(row, live)
+                .Should()
+                .Be(OracleVerdict.Diverge, "{0} over {1}", row.Pattern, row.Subject);
+            (ExpectedDivergences.For(row, live)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} over {1} is the family", row.Pattern, row.Subject);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry.Applies(row, new NoMatchOutcome()).Should().BeFalse("no match over {0} is a defect", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_keyed_tail_guard_does_not_explain_is_not_accounted_for()
+    {
+        // The controls for `keyed-tail-guard` (D85). This port's live answer to each example row is
+        // the family; upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert of the fix as the fix; and an empty match at 0 stands in for an
+        // unrelated defect on the same pattern.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "keyed-tail-guard", StringComparison.Ordinal))
+            .Subject;
+
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(entry.Example);
+        foreach (OracleRow row in rows)
+        {
+            (ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!)?.Id)
+                .Should()
+                .Be(entry.Id, "this port's live answer to {0} is the family", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            entry
+                .Applies(
+                    row,
+                    new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null)
+                )
+                .Should()
+                .BeFalse("an empty match at 0 over {0} is a defect, not this family", row.Subject);
+        }
+
+        // A port bug on the same pattern: upstream recorded an answer that neither this port nor
+        // upstream's guards give (here, no match for `( +)*\1` over four spaces). This port's live
+        // answer diverges from it, but the ablation does not reproduce it, so the entry must leave
+        // the row to fail the sweep.
+        OracleRow portBug = rows[0] with
+        {
+            Expected = new NoMatchOutcome(),
+        };
+        IOracleOutcome live = OracleComparer.Run(portBug, TimeSpan.FromSeconds(5))!;
+        OracleComparer.Compare(portBug, live).Should().Be(OracleVerdict.Diverge);
+        entry.Applies(portBug, live).Should().BeFalse("upstream's guards do not give no match either");
+        ExpectedDivergences.For(portBug, live).Should().BeNull("no entry explains a no-match over four spaces");
+    }
+
+    [Test]
     [Arguments("partial-retry-reversed-slice")]
-    [Arguments("bestmatch-walk-truncated-by-a-skip")]
     [Arguments("bounded-lazy-repeat-partial")]
     [Arguments("turkic-default-folding-without-spans")]
     [Arguments("end-of-line-reads-a-skip-moved-slice")]
@@ -1788,6 +1915,66 @@ public sealed class OracleWaveTests
                 .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 1, 1, [new OracleSpan(1, 1)])], -1, null))
                 .Should()
                 .BeNull("a match at 1 over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    [Arguments("keep-undone-past-an-atomic-group")]
+    [Arguments("keep-undone-past-a-lookaround")]
+    public void A_row_the_keep_undone_past_its_construct_does_not_explain_is_not_accounted_for(string id)
+    {
+        // The control for D88's two entries (ledger entry 86), built like the verb scope's. Upstream's
+        // own answer is what this port gave before the fix, so accepting it would classify a revert
+        // as the fix; a match at (2, 2), which no example gives on either side, stands in for an
+        // unrelated defect; and this port's live answer must be accepted, or the entry classifies
+        // nothing. Each example belongs to its own entry and not to the other.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergence? live = ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!);
+            live.Should().NotBeNull("this port's live answer to {0} is the family", row.Pattern);
+            live.Id.Should().Be(id, "{0} belongs to its own entry", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 2, 0, [new OracleSpan(2, 0)])], -1, null))
+                .Should()
+                .BeNull("a match at (2, 2) over {0} is a defect, not this family", row.Subject);
+        }
+    }
+
+    [Test]
+    public void A_row_the_step_from_the_attempt_does_not_explain_is_not_accounted_for()
+    {
+        // The control for D92's entry (ledger entry 87), built like D88's. Upstream's own answer is
+        // what this port gave before the fix; a match at (0, 0), which no example gives on either
+        // side, stands in for an unrelated defect; and this port's live answer must be accepted.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "keep-before-a-verb-skips-no-start", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergence? live = ExpectedDivergences.For(row, OracleComparer.Run(row, TimeSpan.FromSeconds(5))!);
+            live.Should().NotBeNull("this port's live answer to {0} is the family", row.Pattern);
+            live.Id.Should().Be(entry.Id, "{0} belongs to its own entry", row.Pattern);
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("upstream's own answer to {0} is not this family", row.Pattern);
+            ExpectedDivergences
+                .For(row, new MatchOutcome([new OracleGroup(0, Success: true, 0, 0, [new OracleSpan(0, 0)])], -1, null))
+                .Should()
+                .BeNull("a match at (0, 0) over {0} is a defect, not this family", row.Subject);
         }
     }
 

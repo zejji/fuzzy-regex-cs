@@ -29,6 +29,9 @@ internal static class Optimiser
         // followed at some point by a reference to a group.
         _ = AddRepeatGuards(pattern, pattern.StartNode!);
 
+        // NOT UPSTREAM (D85): the body guards that walk missed a reference for.
+        DropBodyGuardsThatReadAGroup(pattern);
+
         // Record the index of repeats and fuzzy sections within the body of atomic and lookaround
         // nodes.
         RecordSubpatternRepeatsAndFuzzySections(null, 0, pattern.RepeatCount, pattern.StartNode);
@@ -55,6 +58,9 @@ internal static class Optimiser
         // NOT UPSTREAM (D17). List the groups an empty iteration's state is keyed by.
         CollectTestedGroups(pattern);
         FindFuzzyLimit(pattern);
+
+        // NOT UPSTREAM (D85): what each tail guard must be keyed on.
+        TailGuardLiveness.FindTailKeys(pattern);
 
         // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
         // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
@@ -187,12 +193,13 @@ internal static class Optimiser
         // re-searches from each candidate's start, is unresearched, and running it there gave answers
         // that were neither u nor c (`(?b)(?:\mdog){1<=e<=2}` finditer over 'do; xdog-dog').
         // Upgrade path: derive how H' composes with the walk's ranking, then refutation-review it.
-        pattern.LiftsAnchorBanWhenPartial =
+        // The same gate serves a partial search (D100): a partial reports the least start from which
+        // the full search matches some completion, and for a gated-out pattern that search keeps the
+        // ban on every completed text.
+        pattern.LiftsAnchorBan =
             pattern.IsFuzzy
             && (pattern.Flags & RegexFlags.BestMatch) == 0
-            && pattern.NodeList.Any(static n => PermitsAnInsertion(n));
-        pattern.LiftsAnchorBan =
-            pattern.LiftsAnchorBanWhenPartial
+            && pattern.NodeList.Any(static n => PermitsAnInsertion(n))
             && (
                 pattern.HasFuzzyMinimum
                 || pattern.HasGroupCalls
@@ -541,6 +548,90 @@ internal static class Optimiser
     }
 
     /// <summary>
+    /// NOT UPSTREAM (D85): switches off the body guard of every repeat whose body can read a group,
+    /// which <see cref="AddRepeatGuards"/> misses when the reference is inside a bounded repeat.
+    /// </summary>
+    /// <remarks>
+    /// A body guard says the body cannot match from a position: <c>END_GREEDY_REPEAT</c> marks
+    /// every position the body did match from, and a failure there leaves the mark as it is, so a
+    /// position is blocked only if the body never got to its end from it. That depends on nothing
+    /// outside the body, but on everything inside it, so upstream switches the guard off when its
+    /// walk meets a reference or group condition in the body. The walk marks a bounded repeat's body
+    /// without walking it (<c>_regex.c:23383-23386</c>), so a reference inside <c>(?:...)?</c> or
+    /// <c>{m,n}</c> is not seen, either for that repeat or for one enclosing it, and a failure
+    /// recorded under one value of the group blocks a path that matches under another (ledger entry
+    /// 84). This pass looks at every node between a repeat's start and its own end node instead.
+    /// It follows both successors of every node, which can only find more references than the
+    /// body holds, never fewer, so at worst it switches off a guard that was sound.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    private static void DropBodyGuardsThatReadAGroup(PatternObject pattern)
+    {
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var stack = new Stack<Node>();
+
+        foreach (Node repeat in pattern.NodeList)
+        {
+            if (repeat.Op is not (Opcode.GreedyRepeat or Opcode.LazyRepeat))
+            {
+                continue;
+            }
+
+            uint index = repeat.Values[0];
+            RepeatInfo info = pattern.RepeatInfoAt((int)index);
+            if ((info.Status & NodeStatus.Body) == 0)
+            {
+                continue;
+            }
+
+            seen.Clear();
+            stack.Clear();
+            stack.Push(repeat.Next1.Node!);
+            while (stack.Count > 0)
+            {
+                Node node = stack.Pop();
+                if (
+                    !seen.Add(node)
+                    || (node.Op is Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat && node.Values[0] == index)
+                )
+                {
+                    continue;
+                }
+
+                if (ReadsAGroup(node))
+                {
+                    info.Status &= ~NodeStatus.Body;
+                    info.BodyGuardDroppedForD85 = true;
+                    break;
+                }
+
+                if (node.Next1.Node is Node next1)
+                {
+                    stack.Push(next1);
+                }
+
+                if (node.Next2.Node is Node next2)
+                {
+                    stack.Push(next2);
+                }
+            }
+        }
+    }
+
+    /// <summary>Whether a node is one <see cref="AddRepeatGuards"/> counts as a reference.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> for a backreference or a group-exists conditional.</returns>
+    private static bool ReadsAGroup(Node node) =>
+        node.Op
+            is Opcode.RefGroup
+                or Opcode.RefGroupFld
+                or Opcode.RefGroupFldRev
+                or Opcode.RefGroupIgn
+                or Opcode.RefGroupIgnRev
+                or Opcode.RefGroupRev
+                or Opcode.GroupExists;
+
+    /// <summary>
     /// Upstream <c>add_index</c> (line 23482): appends an index to a node's values unless it is
     /// already there.
     /// </summary>
@@ -596,49 +687,65 @@ internal static class Optimiser
         Node? node
     )
     {
-        while (node is not null)
+        // NOT UPSTREAM'S SHAPE (D110): upstream recurses into Next1 at a branch, a conditional and
+        // a repeat and loops on Next2. A conditional's Next1 runs on to the rest of the pattern, so
+        // the recursion was as deep as the number of conditionals in a row, and 12,000 of them
+        // overflowed a 1 MB stack and ended the process (upstream's C overflows at about 62,000).
+        // The Next2 edges wait on a heap stack instead, popped in the order the returns would have
+        // taken them, so the nodes are visited in upstream's order.
+        Stack<Node?> pending = new();
+        pending.Push(node);
+        while (pending.TryPop(out node))
         {
-            if ((node.Status & NodeStatus.VisitedRep) != 0)
-            {
-                return;
-            }
+            WalkFrom(node);
+        }
 
-            node.Status |= NodeStatus.VisitedRep;
-
-            switch (node.Op)
+        void WalkFrom(Node? node)
+        {
+            while (node is not null)
             {
-                case Opcode.Branch:
-                case Opcode.GroupExists:
-                    RecordSubpatternRepeatsAndFuzzySections(parentNode, offset, repeatCount, node.Next1.Node);
-                    node = node.Next2.Node;
-                    break;
-                case Opcode.EndFuzzy:
-                    node = node.Next1.Node;
-                    break;
-                case Opcode.EndGreedyRepeat:
-                case Opcode.EndLazyRepeat:
+                if ((node.Status & NodeStatus.VisitedRep) != 0)
+                {
                     return;
-                case Opcode.Fuzzy:
-                    // Record the fuzzy index.
-                    AddIndex(parentNode, offset, repeatCount + (int)node.Values[0]);
-                    node = node.Next1.Node;
-                    break;
-                case Opcode.GreedyRepeat:
-                case Opcode.LazyRepeat:
-                    // Record the repeat index.
-                    AddIndex(parentNode, offset, (int)node.Values[0]);
-                    RecordSubpatternRepeatsAndFuzzySections(parentNode, offset, repeatCount, node.Next1.Node);
-                    node = node.Next2.Node;
-                    break;
-                case Opcode.GreedyRepeatOne:
-                case Opcode.LazyRepeatOne:
-                    // Record the repeat index.
-                    AddIndex(parentNode, offset, (int)node.Values[0]);
-                    node = node.Next1.Node;
-                    break;
-                default:
-                    node = node.Next1.Node;
-                    break;
+                }
+
+                node.Status |= NodeStatus.VisitedRep;
+
+                switch (node.Op)
+                {
+                    case Opcode.Branch:
+                    case Opcode.GroupExists:
+                        pending.Push(node.Next2.Node);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.EndFuzzy:
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.EndGreedyRepeat:
+                    case Opcode.EndLazyRepeat:
+                        return;
+                    case Opcode.Fuzzy:
+                        // Record the fuzzy index.
+                        AddIndex(parentNode, offset, repeatCount + (int)node.Values[0]);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.GreedyRepeat:
+                    case Opcode.LazyRepeat:
+                        // Record the repeat index.
+                        AddIndex(parentNode, offset, (int)node.Values[0]);
+                        pending.Push(node.Next2.Node);
+                        node = node.Next1.Node;
+                        break;
+                    case Opcode.GreedyRepeatOne:
+                    case Opcode.LazyRepeatOne:
+                        // Record the repeat index.
+                        AddIndex(parentNode, offset, (int)node.Values[0]);
+                        node = node.Next1.Node;
+                        break;
+                    default:
+                        node = node.Next1.Node;
+                        break;
+                }
             }
         }
     }

@@ -310,23 +310,28 @@ public sealed class LeftRecursionRefusalTests
     }
 
     /// <summary>
-    /// The check is linear in the pattern. A chain of 1,000 nested groups, each calling the one
-    /// inside it, needs a group's answer before its parent's; reading every body again on each
-    /// round of the fixpoint took 20.3 s (blind review, 2026-10-08). The bound is generous: the
-    /// whole compile takes a few milliseconds.
+    /// The check is linear in the pattern. A chain of nested groups, each calling the one inside
+    /// it, needs a group's answer before its parent's; reading every body again on each round of
+    /// the fixpoint took 20.3 s at 1,000 groups (blind review, 2026-10-08), and 10-16 s in a Release
+    /// build with that loop put back (2026-10-18). The chain is now 500 groups, the most the parser
+    /// allows (D110), where that quadratic loop would cost about a quarter as much: 2.5 s or more.
+    /// The whole compile takes about 20 ms alone at 500 (Release and Debug, 2026-10-19), and at
+    /// 1,000 it took up to 2.3 s alongside the rest of the suite, about 0.6 s scaled to 500, so the
+    /// test runs on its own and the bound sits between the two.
     /// </summary>
     [Test]
-    public void A_thousand_nested_groups_that_call_each_other_compile_quickly()
+    [NotInParallel]
+    public void Five_hundred_nested_groups_that_call_each_other_compile_quickly()
     {
-        // (?<g1>(?<g2>...(?<g1000>)(?&g1000))...(?&g2))x
+        // (?<g1>(?<g2>...(?<g500>)(?&g500))...(?&g2))x
         System.Text.StringBuilder text = new();
-        for (int i = 1; i < 1000; i++)
+        for (int i = 1; i < 500; i++)
         {
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?<g{i}>");
         }
 
-        text.Append("(?<g1000>)");
-        for (int i = 999; i >= 1; i--)
+        text.Append("(?<g500>)");
+        for (int i = 499; i >= 1; i--)
         {
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
         }
@@ -348,7 +353,7 @@ public sealed class LeftRecursionRefusalTests
         compile.Start();
         compile.Join();
 
-        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
     }
 
     /// <summary>

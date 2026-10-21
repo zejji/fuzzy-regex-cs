@@ -2382,6 +2382,9 @@ BOUNDARY_CLUSTERS = (
     "\U0001f469‍\U0001f466",  # An emoji ZWJ sequence: GB11 and WB3c.
     "à",  # A base letter and a combining mark: GB9, and Extend for WB4.
     "क्ष",  # Devanagari consonant, virama, consonant: GB9c.
+    # A virama after a letter that is not a consonant, then a consonant: one cluster under Unicode
+    # 18.0.0's GB9c, two under upstream's older rule (ledger entry 95, GraphemeBreakTest line 859).
+    "a्त",
     "can't",  # WB6/WB7 across an apostrophe, which is what `(?w)` is for.
     "3.2",  # WB11/WB12 across a decimal point.
 )
@@ -7275,10 +7278,26 @@ def _question_of(row: dict) -> dict:
     return {key: row[key] for key in ROW_INPUT_KEYS if key in row}
 
 
+# A CRASH'S EXIT CODE NAMES THE SAME FAULT DIFFERENTLY ON EACH PLATFORM. Measured 2026-10-19, CPython
+# 3.14: `faulthandler._read_null()` exits 0xC0000005 on Windows and -11 (SIGSEGV) on Linux (WSL);
+# `os.abort()` exits 0xC0000409 on Windows and -6 (SIGABRT) on Linux. Windows exit 3 is NOT mapped:
+# the C runtime's `raise` exits 3 for SIGSEGV and SIGABRT alike, so it names no one signal. The
+# numbers are Linux's, where CI records; Windows' own `signal.SIGABRT` is 22.
+_SIGNAL_OF_NTSTATUS = {0xC0000005: -11, 0xC0000409: -6}
+
+
+def _comparable(key: str, answer):
+    if key == "outcome" and isinstance(answer, dict) and answer.get("kind") == "crashed":
+        code = answer.get("exitCode")
+        return {**answer, "exitCode": _SIGNAL_OF_NTSTATUS.get(code, code)}
+    return answer
+
+
 def _answer_changes(stored: dict, fresh: dict) -> list[str]:
     # Only the answers the stored row HAS: an example recorded before a field existed (S44 found
     # three without `anchoredScan`) is not stale for lacking it.
-    return sorted(key for key in stored if key not in ROW_INPUT_KEYS and fresh.get(key) != stored[key])
+    return sorted(key for key in stored if key not in ROW_INPUT_KEYS
+                  and _comparable(key, fresh.get(key)) != _comparable(key, stored[key]))
 
 
 def recheck(paths: list[Path]) -> int:
@@ -7747,6 +7766,23 @@ def _recheck_failures() -> list[str]:
     if _answer_changes(stored, _record_row_and_its_control_answers(regex, _question_of(stored))):
         failures.append("a stored answer upstream still gives was reported as changed")
 
+    # A CRASH IS THE SAME CRASH ON EVERY PLATFORM: a row recorded on Windows stores the NTSTATUS
+    # code, and Linux reports the signal, so CI's recheck read the ledger 11 crash example as a
+    # changed answer and failed every seed (run 39224762300, 2026-10-19).
+    def crashed(code: int) -> dict:
+        return {**stored, "codepointSpan": None,
+                "outcome": {"kind": "crashed", "exitCode": code, "reproducedAlone": True}}
+
+    for stored_code, fresh_code, expected in ((0xC0000005, -11, []), (0xC0000409, -6, []),
+                                              (-11, -6, ["outcome"])):
+        changes = _answer_changes(crashed(stored_code), crashed(fresh_code))
+        if changes != expected:
+            failures.append(f"a crash stored as exit {stored_code} and recorded again as exit "
+                            f"{fresh_code} was reported as {changes}, expected {expected}")
+    changes = _answer_changes(crashed(0xC0000005), stored)
+    if changes != ["codepointSpan", "outcome"]:
+        failures.append(f"a stored crash upstream now answers was reported as {changes}")
+
     # A CHANGE IS EXCUSED ONLY ON A ROW MSAN FLAGS FROM A KNOWN ORIGIN - never on a clean row, and
     # never on one with an unknown origin. Screened by a stub, so the rule is checked without Docker.
     stale = [({"entry": name, "row": {"pattern": name, "subject": ""}}, {}, ["outcome"])
@@ -7856,6 +7892,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.worker_rows is not None:
+        # One row once took regex 2026.9.10 to 19 GB (battery run 20261016-2). Capped, it raises
+        # MemoryError, which `_record_row` records as a `resource` row, and the wave goes on.
+        # 4 GB, not the 2 a single row gets elsewhere, because the worker also holds its share of
+        # the wave. tools/memcap.py; BATTERY_MEMCAP_GB=0 turns it off.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import memcap
+        memcap.cap_this_process(4)
         return _worker(args.worker_rows, args.worker_start, args.worker_output)
 
     if args.recheck is not None:

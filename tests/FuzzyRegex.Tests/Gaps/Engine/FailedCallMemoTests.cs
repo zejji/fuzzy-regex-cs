@@ -209,9 +209,21 @@ public sealed class FailedCallMemoTests
         on.PatternObject.LiftsAnchorBan = false;
         Match m = on.Match("xa");
 
+        FuzzyRegex off = WithMemo(pattern, eager: false);
+        off.PatternObject.LiftsAnchorBan = false;
+        Match offMatch = off.Match("xa");
+
+        // D111 moved the answer: memo off it was (1, 0) with one deletion, found by a refinement
+        // inside the slice narrowed to (0, 1). With the refinement held to a window instead, the
+        // first match (0, 1) with a substitution and a deletion stands, the flagless pattern's own
+        // answer - and the same answer the memo used to give, so this row no longer tells memo on
+        // from memo off. What still pins the rule is UseCallMemo below; the paragraph above
+        // describes the row before D111. SHORTCUT: a new witness for the memo-on answer is owed
+        // (D111 report).
         on.PatternObject.UseCallMemo.Should().BeFalse();
-        (m.Index, m.Length).Should().Be((1, 0));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        (m.Index, m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
+        (offMatch.Index, offMatch.Length, offMatch.FuzzyCounts).Should().Be((m.Index, m.Length, m.FuzzyCounts));
     }
 
     [Test]

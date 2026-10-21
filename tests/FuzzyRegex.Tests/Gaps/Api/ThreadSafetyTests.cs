@@ -764,8 +764,6 @@ public sealed class ThreadSafetyTests
             // And AnchorGuards, S57c's, written by Optimiser.FindAnchorGuards for BESTMATCH patterns
             // only since D61.
             "PatternObject.AnchorGuards",
-            // And LiftsAnchorBanWhenPartial, written beside it.
-            "PatternObject.LiftsAnchorBanWhenPartial",
             // Written by NodeCompiler.BuildBoundary inside Compile, read by
             // Optimiser.KeepFailureMemosSound.
             "PatternObject.KeepInSubmatch",
@@ -795,6 +793,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
             // OracleComparer.RunWithTheUpstreamDefaultBoundary.
             "PatternObject.UpstreamDefaultBoundary",
+            // Ledger entry 95 (D120) added UpstreamGraphemeConjunct, likewise set only by
+            // OracleComparer.RunWithTheUpstreamGraphemeConjunct.
+            "PatternObject.UpstreamGraphemeConjunct",
             // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
             // likewise set only by the OracleComparer ablations.
             "PatternObject.SkipExactDeletionRetry",
@@ -805,9 +806,16 @@ public sealed class ThreadSafetyTests
             // Ledger entry 47 added VerbsAreConfinedToTheInnermostGroup, likewise set only by
             // OracleComparer.RunWithTheUpstreamVerbScope.
             "PatternObject.VerbsAreConfinedToTheInnermostGroup",
+            // D88 (ledger entry 86) added KeepOutlivesALookaround and KeepOutlivesAnAtomicGroup,
+            // likewise set only by OracleComparer.RunWithTheKeepOutlivingItsConstruct.
+            "PatternObject.KeepOutlivesALookaround",
+            "PatternObject.KeepOutlivesAnAtomicGroup",
             // D77 added SkipsALazyRunDespiteAVerb, likewise set only by
             // OracleComparer.RunWithTheUpstreamLazyStartSkip.
             "PatternObject.SkipsALazyRunDespiteAVerb",
+            // D92 added StepsOnFromTheKeptStart, likewise set only by
+            // OracleComparer.RunWithTheUpstreamStepFromTheKeptStart and RunWithTheKeepOutlivingItsConstruct.
+            "PatternObject.StepsOnFromTheKeptStart",
             // D78 added BansAnEmptyMatchAtEveryCandidate, likewise set only by
             // OracleComparer.RunWithTheUpstreamBestMatchAdvance.
             "PatternObject.BansAnEmptyMatchAtEveryCandidate",
@@ -818,6 +826,9 @@ public sealed class ThreadSafetyTests
             // only by the oracle's ablations on a pattern it compiled for one call.
             "PatternObject.KeepSectionOpenAfterAVerb",
             "PatternObject.KeepDiscardedTotals",
+            // D102 added BoundsReachDecidingBodies, likewise set only by
+            // OracleComparer.RunWithTheDiscardedTotals.
+            "PatternObject.BoundsReachDecidingBodies",
             // D54 (ledger entry 65) added DropNegativeTestCaptures, likewise set only by
             // OracleComparer.RunWithTheUpstreamNegativeTestCaptures.
             "PatternObject.DropNegativeTestCaptures",
@@ -856,6 +867,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.TailRunOutAsBeforeD67",
             // D81 added RunOutAsBeforeD81, likewise set only by OracleComparer's named ablations.
             "PatternObject.RunOutAsBeforeD81",
+            // D108 added UpstreamReverseGrapheme, written once by the FuzzyRegex constructor right
+            // after PatternObject.Compile, and true only for OracleComparer.RunWithTheUpstreamReverseGrapheme.
+            "PatternObject.UpstreamReverseGrapheme",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
@@ -869,6 +883,12 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasGroupCalls",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasBacktrackingVerb",
+            // D111: written by Compile in the node-numbering loop, beside HasSkipVerb.
+            "PatternObject.RefinesInAWindow",
+            // D115: written by Compile in the node-numbering loop, beside RefinesInAWindow.
+            "PatternObject.ReadsTheSearchAnchor",
+            // D115: written by the compiler where it builds a lookaround or a conditional's test.
+            "PatternObject.LooksAgainstTheScan",
             // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
             "PatternObject.AnAttemptCanMoveTheNextStart",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through
@@ -878,6 +898,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasWeightedFuzzyCosts",
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
+            // D93's performance follow-up added NarrowsPastReturns, written by Compile beside it.
+            "PatternObject.NarrowsPastReturns",
             // Its repair round added ExactDeletionCeiling, written by Compile after the node loop,
             // and moved two node fields onto the pattern as tables written by Compile once the
             // nodes are numbered: FuzzyRunExits (SetFuzzyRunLengths) and OptionalPassEndOf, built
@@ -893,6 +915,9 @@ public sealed class ThreadSafetyTests
             // D81 added these two, written by Compile after the node-numbering loop.
             "PatternObject.NestsFuzzySections",
             "PatternObject.KeepsSectionLinks",
+            // D94's insertion pruning added one, written by Compile beside KeepsSectionLinks.
+            "PatternObject.SubstitutionTests",
+            "PatternObject.RepeatStateMemoCaps",
             // The capture-dependent call guard added one, written in Compile beside MemoGroups.
             "PatternObject.CallReadGroups",
             "PatternObject.CapturesAgainstDirection",
@@ -910,6 +935,10 @@ public sealed class ThreadSafetyTests
             // (tools/matrix/port-runner.cs) and FailedCallMemoTests set it on a pattern compiled
             // for that one purpose.
             "PatternObject.CallMemoKeyOmitsPosition",
+            // D93's ablation, likewise never written by the library: the oracle's
+            // RunWithTheReentryInANewSection and the matrix's xreentry variant set it on a pattern
+            // compiled for that one call.
+            "PatternObject.CallGuardComparesAcrossSections",
             "PatternObject.IsFuzzy",
             // S60b added LeadingRepeat, written once by Compile after FuzzyLiteralFilter. It points
             // at a node of the compiled graph and matching only reads it.
@@ -1000,5 +1029,23 @@ public sealed class ThreadSafetyTests
             // C5 (S2d): written once by NodeCompiler.BuildRepeat inside Compile and read only by
             // Optimiser.FindFirstIterationAtStart, also inside Compile; matching never touches it.
             "RepeatInfo.FirstIterationStart",
+            // D85: written once by TailGuardLiveness.FindTailKeys inside Compile (Optimiser), read by
+            // MatchState.Create and MatchState.KeyedTailGuardList; matching never writes it.
+            "RepeatInfo.TailKey",
+            // D85: set by TailGuardLiveness.MarkBodiesHoldingKeyedTails inside Compile, read by
+            // MatchState.ActiveGuardList; matching never writes it.
+            "RepeatInfo.BodyHoldsKeyedTail",
+            // D85: set by Optimiser.DropBodyGuardsThatReadAGroup inside Compile; the library never
+            // reads it. Only OracleComparer.RunWithTheUpstreamRepeatGuards does, on a pattern it
+            // compiled for that one call.
+            "RepeatInfo.BodyGuardDroppedForD85",
+            // D90: set by NodeCompiler.BuildRepeat inside Compile, read by
+            // MatchState.PoppedEntrySawABlockedEnd; matching never writes it.
+            "RepeatInfo.InsideACutBody",
+            // D104: TailGuardLiveness.FindTailKeys writes it inside Compile (Optimiser), and
+            // PatternObject.SetLookaroundBodies writes its ContinuationKeyRepeats, also inside
+            // Compile. MatchState.Create, CutBodyKeyOf and ContinuationKeyOf read them, and
+            // matching never writes them.
+            "PatternObject.CutBodies",
         };
 }

@@ -16,7 +16,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// tested where the cluster starts matching and never where it ends. The match then stops after
 /// one codepoint: <c>regex.findall(r'(?r)\X', 'e\u0301a')</c> is <c>['a', '\u0301']</c> and the
 /// 'e' is lost. Upstream fails 465 of the 766 lines of <c>GraphemeBreakTest.txt</c> 17.0.0 in
-/// reverse and none forwards (regex 2026.9.10, measured 2026-09-26). This port inherited the fault
+/// reverse and none forwards (regex 2026.9.10, measured 2026-09-26), and 516 of 18.0.0's 853 in
+/// reverse (regex 2026.9.29, 2026-10-18; forwards it fails the 10 in
+/// <see cref="IndicConjunctGraphemeTests"/>). This port inherited the fault
 /// and fixed it the same day, ledger entry 43.
 /// </para>
 /// <para>
@@ -110,6 +112,100 @@ public sealed class ReverseGraphemeTests
         Span(m).Should().Be((0, 3));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
     }
+
+    // D108. Forwards, the slice end is the end of the text, so a cluster cut by it ends there
+    // (GB2). Backwards the slice start is not the start of the text (ledger 24): the test at the
+    // cluster's far end read the character before it, found no break, and the '\X' could not go
+    // on past the slice start to find one, so the cut cluster was lost. Upstream regex 2026.9.10
+    // gives every row the same answer through finditer with pos and endpos (measured 2026-10-18)
+    // except the conjunct, where it answers (3, 4): its reversed '\X' stops after one codepoint
+    // and splits the virama from the consonant after it (GB9c), ledger entry 43.
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [Arguments(@"(?r)\X", "äb", 1, 3, "(2,3) (1,2)")]
+    [Arguments(@"(?r)\X", "aक्त", 2, 4, "(2,4)")]
+    [Arguments(@"(?r)\X", "é́b", 2, 4, "(3,4) (2,3)")]
+    [Arguments(@"\X", "äb", 0, 1, "(0,1)")]
+    [Arguments(@"(?r)\X{2}", "äb", 1, 3, "(1,3)")]
+    [Arguments(@"(?r)\X+", "äb", 1, 3, "(1,3)")]
+    // An empty text has no cluster to cut, so a '\X' whose character is deleted still finds no
+    // boundary there (GB1), either way round.
+    [Arguments(@"(?:\X){e<=1}", "", 0, 0, "")]
+    [Arguments(@"(?r)(?:\X){e<=1}", "", 0, 0, "")]
+    public void A_reversed_grapheme_cut_by_the_slice_start_ends_there(
+        string pattern,
+        string subject,
+        int beginning,
+        int end,
+        string spans
+    )
+    {
+        Spans(pattern, subject, beginning, end, partial: false).Should().Be(spans);
+    }
+
+    // D108, partial. Forwards a partial call first tries a normal match, and the slice end is the
+    // end of the text, so '\X' over 'äb' [0, 1) is (0, 1) and then an empty partial at the
+    // slice end; upstream answers the same. Backwards the mirror image holds. Upstream answers
+    // (2, 3) (1, 2) without the trailing empty partial, which it also leaves out over [2, 3), where
+    // nothing is cut.
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_reversed_partial_grapheme_cut_by_the_slice_start_mirrors_the_forward_cut()
+    {
+        Spans(@"\X", "äb", 0, 1, partial: true).Should().Be("(0,1) P(1,1)");
+        Spans(@"(?r)\X", "äb", 1, 3, partial: true).Should().Be("(2,3) (1,2) P(1,1)");
+    }
+
+    // D108, found by the blind review. ENHANCEMATCH re-runs inside the span it found, with the
+    // slice start moved to that span's start, but the caller's slice still holds the whole of
+    // 'ä', so '\X' may not end between the two. Forwards, '(?e)(?:z̈|y\X){e<=1}' over
+    // 'yä' is (0, 3) with no error. Upstream answers (1, 3) and (2, 4) with no error,
+    // because its reversed '\X' is always one codepoint (ledger entry 43).
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [Arguments("äy", 1, 3)]
+    [Arguments("bäy", 2, 4)]
+    public void A_refinement_does_not_cut_a_reversed_grapheme_at_its_own_start(string subject, int start, int end)
+    {
+        Match m = new FuzzyRegex(@"(?re)(?:̈z|\Xy){e<=1}").Match(subject);
+
+        Span(m).Should().Be((start, end - start));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    // D108. A partial call's second pass reads the text before the slice start as the text to
+    // come (ledger entry 24), so a cluster that reaches it may go on there and '\X' runs out, as a
+    // forward '\X' at the slice end does. '^' can never hold at 1, so only the second pass answers.
+    // Upstream answers no match (ledger entry 24 is where the two differ).
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_partial_second_pass_does_not_cut_a_reversed_grapheme()
+    {
+        Spans(@"(?r)^\X", "äb", 1, 2, partial: true).Should().Be("P(1,2)");
+    }
+
+    // D108. A lookbehind reads outside the slice (as Python re and upstream do: (?<=a)b over 'ab'
+    // from 1 is (1, 2) on both), so the '\X' inside one takes the whole cluster before the slice
+    // start, whichever way the pattern runs. Upstream's group is (1, 2) both ways, ledger entry 43.
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [Arguments(@"(?<=(\X))b")]
+    [Arguments(@"(?r)(?<=(\X))b")]
+    public void A_grapheme_in_a_lookbehind_is_not_cut_by_the_slice_start(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).Match("äb", 1);
+
+        Span(m).Should().Be((2, 1));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 2));
+    }
+
+    private static string Spans(string pattern, string subject, int beginning, int end, bool partial) =>
+        string.Join(
+            " ",
+            new FuzzyRegex(pattern)
+                .Matches(subject, beginning, end - beginning, partial: partial)
+                .Select(static m => $"{(m.PartialMatch ? "P" : "")}({m.Index},{m.Index + m.Length})")
+        );
 
     private static string[] Values(string pattern, string subject) =>
         [.. new FuzzyRegex(pattern).Matches(subject).Select(static m => m.Value)];

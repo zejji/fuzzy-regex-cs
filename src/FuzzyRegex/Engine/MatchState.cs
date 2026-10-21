@@ -40,6 +40,28 @@ internal readonly record struct GroupSpan(int Start, int End);
 internal readonly record struct FuzzyChange(byte Type, int Pos);
 
 /// <summary>
+/// NOT UPSTREAM'S (D93): the fuzzy section a group call was made in, as the call guard compares it
+/// (<see cref="MatchState.ActiveCalls"/>): which open section, and the errors it had counted.
+/// </summary>
+/// <remarks>
+/// A call that re-enters a group inside the section instance an open call of it was made in, with
+/// other counts, is not a repeat of that call: every error the called group tries is judged against
+/// those counts, so the deeper call takes paths in another order, and the written-out group finds its
+/// first fit down one of them (<c>(?:(?P&lt;g&gt;a(?&amp;g)b|c)){d&lt;=2}</c> over 'cbb'). Counts only
+/// grow along a path within one instance, so such calls nest no deeper than the section's budget. A
+/// count the section never limits is kept only up to the minimums it must reach
+/// (<c>Matcher.CallSectionAt</c>), so a recursion spending such errors is still refused. A re-entry
+/// inside a section opened after the open call is refused as before, whatever its counts: there the
+/// counts start again from zero at every level, and comparing them made such recursion exponential.
+/// </remarks>
+/// <param name="Frame">The section's frame on the saved stack (<see cref="MatchState.SectionFrame"/>); -1 outside a section.</param>
+/// <param name="Sub">The substitutions it has counted.</param>
+/// <param name="Ins">The insertions.</param>
+/// <param name="Del">The deletions.</param>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct CallSection(int Frame, long Sub, long Ins, long Del);
+
+/// <summary>
 /// NOT UPSTREAM'S: what of a group that a conditional or backreference reads the call guard
 /// compares, to tell whether a call would repeat an open one (<see cref="MatchState.ActiveCalls"/>).
 /// </summary>
@@ -364,6 +386,19 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
 
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): the last subject position where some test of
+    /// <see cref="PatternObject.SubstitutionTests"/> rejects the character, so where a substitution
+    /// could last be taken; -1 for none, <see cref="int.MinValue"/> until first asked.
+    /// </summary>
+    internal int LastSubstitutablePos = int.MinValue;
+
+    /// <summary>NOT UPSTREAM (D94 performance): the repeat-end states known to fail (<c>Matcher.StateKnownToFail</c>).</summary>
+    internal HashSet<RepeatStateKey>? FailedRepeatStates;
+
+    /// <summary>NOT UPSTREAM (D94 performance): the keys of the failed-state marks on the backtrack stack.</summary>
+    internal readonly List<RepeatStateKey> MarkedStates = [];
+
     /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
     internal int SliceStart;
 
@@ -385,6 +420,53 @@ internal sealed class MatchState : IDisposable
 
     /// <inheritdoc cref="InitialSliceStart" />
     internal int InitialSliceEnd;
+
+    /// <summary>
+    /// NOT UPSTREAM (D111): the span a BESTMATCH or ENHANCEMATCH refinement holds its matches to.
+    /// <see cref="int.MinValue"/> and <see cref="int.MaxValue"/> (no limit) outside a refinement.
+    /// </summary>
+    /// <remarks>
+    /// Upstream narrows the SLICE to the span instead, and the narrowed slice end cuts what an atomic
+    /// group, a possessive repeat, <c>\R</c> or <c>\X</c> reads, so a refinement could report a span
+    /// the pattern does not match in the text: <c>(?e)(?:xaq|a(?&gt;a*)){e&lt;=1}</c> over 'xaaa' was
+    /// (1, 3) exact, where the atomic <c>a*</c> takes 'aaa'. The slice now stays the caller's, so
+    /// every construct reads the text as the plain search does, and this window is a filter: an
+    /// attempt starts inside it (<see cref="SearchSliceStart"/>, <see cref="SearchSliceEnd"/>) and a
+    /// match that ends outside it backtracks (<c>Matcher.EndsOutsideTheRefinement</c>).
+    /// </remarks>
+    internal int RefineStart = int.MinValue;
+
+    /// <inheritdoc cref="RefineStart" />
+    internal int RefineEnd = int.MaxValue;
+
+    /// <summary>
+    /// NOT UPSTREAM (D114): whether a refinement held to a window also narrows the slice's far end
+    /// (forwards <see cref="SliceEnd"/>, reversed <see cref="SliceStart"/>) to the window outside
+    /// every body that lifts the ranking bounds (<see cref="BoundlessBodies"/>). Inside one, the far
+    /// end is the caller's (<see cref="RefineCallerFarEnd"/>).
+    /// </summary>
+    /// <remarks>
+    /// The window alone (D111) lets every part of the pattern read past the span, so on adversarial
+    /// text each attempt inside the span read to the end of the text (KNOWN-DEFECTS D114). Only a body
+    /// that commits to what it read, an atomic group, can answer differently when the text past the
+    /// span is cut off; a lookaround or a condition's test already reads the whole text. Outside the
+    /// bodies, a path that reads past the span ends past it, because forward matching moves only
+    /// right there, so the window would refuse it anyway; the narrowed end only refuses it sooner.
+    /// <c>Matcher.NarrowsTheRefinementOutsideBodies</c> says where that argument holds.
+    /// </remarks>
+    internal bool RefinesInANarrowedSlice;
+
+    /// <summary>D114: the caller's far slice end, which a body that lifts the ranking bounds reads to. See <see cref="RefinesInANarrowedSlice"/>.</summary>
+    internal int RefineCallerFarEnd;
+
+    /// <summary>
+    /// D111: the lowest position a search may start an attempt at (or, reversed, scan down to):
+    /// the slice start, raised to a refinement's window.
+    /// </summary>
+    internal int SearchSliceStart => Math.Max(SliceStart, RefineStart);
+
+    /// <summary>D111: the slice end, lowered to a refinement's window. See <see cref="SearchSliceStart"/>.</summary>
+    internal int SearchSliceEnd => Math.Min(SliceEnd, RefineEnd);
 
     /// <summary>
     /// Upstream <c>text_start</c>. Always 0: upstream documents the bounds as an open start and a
@@ -601,9 +683,10 @@ internal sealed class MatchState : IDisposable
 
     /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one entry per call: the key
-    /// <c>(call index &lt;&lt; 32) | text position</c>, and the <see cref="ReachedWidth"/> when the
-    /// call was made. In a pattern where a conditional or backreference reads a group, two open
-    /// calls can share an entry, so <see cref="ActiveCallCounts"/> is used in its place.
+    /// <c>(call index &lt;&lt; 32) | text position</c>, the <see cref="ReachedWidth"/> when the
+    /// call was made. In a pattern where a conditional or backreference reads a group, or where a
+    /// call can be made inside a fuzzy section, two open calls can share an entry, so
+    /// <see cref="ActiveCallCounts"/> is used in its place.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -611,7 +694,8 @@ internal sealed class MatchState : IDisposable
     /// re-enters a group at the text position where a call of that group is already open, when the
     /// attempt has reached no text since that call opened AND with every group a conditional or
     /// backreference reads showing what it showed then (<see cref="CallRead"/>: set or not for a
-    /// conditional, the text for a backreference), can only repeat the open call's work one level
+    /// conditional, the text for a backreference) AND, if it is made in the section instance that
+    /// call was made in, with the same counts (D93: <see cref="CallSection"/>), can only repeat the open call's work one level
     /// deeper, so that path recurses for ever and is failed. The captures matter
     /// because a group set between the two calls can change what a conditional or backreference
     /// inside does (<c>GroupCallTests.A_call_that_reaches_nothing_new_but_sees_a_new_capture_is_let_through</c>;
@@ -631,10 +715,12 @@ internal sealed class MatchState : IDisposable
     /// number of groups read. Groups nothing reads are left out
     /// of the key, which matters: keying on them let <c>(?:()|()|...|())(?R)|\1x</c> open a call
     /// for every order of setting the empty groups, about k! paths. When no group is read at all
-    /// the bound is <c>n + 1</c>.
+    /// the bound is <c>n + 1</c>. The counts multiply the bound by a constant of the pattern: only a call in
+    /// the same section instance is compared by them, and there each count is either capped by a
+    /// finite limit of the section or kept only up to its minimums.
     /// </para>
     /// <para>
-    /// A set rather than a counter where no group is read, because an entry is only ever added when
+    /// A set rather than a counter where no group is read and no call can be made in a section, because an entry is only ever added when
     /// it is absent - that is what the guard tests. Where groups are read, a count per key
     /// (<see cref="ActiveCallCounts"/>), so a call whose key and reach no open call shares is let
     /// through without looking at any capture; only when one does are the open calls with that key
@@ -701,8 +787,34 @@ internal sealed class MatchState : IDisposable
     /// backtrack arm records a key it finds here; a call that returned is re-opened by
     /// <c>GROUP_RETURN</c>'s backtrack arm with none, so it is never recorded.
     /// </para>
+    /// <para>
+    /// <c>FrameBase</c> is the saved stack's count before the call pushed its frame, which is
+    /// <c>SstackDepth</c> again for the caller's own call when the caller pushed nothing else
+    /// between; <c>Matcher.DeletionsPastReturns</c> walks the frames with it.
+    /// </para>
+    /// <para>
+    /// <c>BstackAt</c> is where the call's <c>GROUP_CALL</c> entry lies on <see cref="Bstack"/>, so
+    /// that a run-out inside a call a lookaround's body opened can undo the call as that entry's
+    /// backtrack arm would (D98, <c>Matcher.AbandonTheCallsTheBodyOpened</c>). A call re-opened by
+    /// <c>GROUP_RETURN</c>'s backtrack arm gets it back from that entry.
+    /// </para>
     /// </remarks>
-    internal readonly List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> OpenCalls = [];
+    internal readonly List<(
+        long Key,
+        int Reach,
+        int SstackDepth,
+        long[]? MemoKey,
+        int FrameBase,
+        int BstackAt
+    )> OpenCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D93): for each entry of <see cref="OpenCalls"/>, in the same order, the fuzzy
+    /// section the call was made in (<see cref="CallSection"/>). Kept only where a call can be made
+    /// inside a fuzzy section (<see cref="PatternObject.NestsFuzzySections"/>), so a pattern with no
+    /// section pays nothing for it; empty otherwise.
+    /// </summary>
+    internal readonly List<CallSection> OpenCallSections = [];
 
     /// <summary>
     /// NOT UPSTREAM'S: for each entry of <see cref="OpenCalls"/>, in the same order, the packed span
@@ -860,6 +972,155 @@ internal sealed class MatchState : IDisposable
     /// </para>
     /// </remarks>
     internal long MaxCost;
+
+    /// <summary>
+    /// NOT UPSTREAM (D102, D109): how many bodies are open that run with the ranking bounds lifted:
+    /// a lookaround's, a conditional's test and an atomic group's (with a possessive repeat's, and
+    /// <c>\R</c>'s and <c>\X</c>'s, which compile to one). While any is, <see cref="MaxErrors"/>
+    /// and <see cref="MaxCost"/> are lifted, and the bounds the run was given wait in
+    /// <see cref="HeldMaxErrors"/> and <see cref="HeldMaxCost"/>.
+    /// </summary>
+    /// <remarks>
+    /// The two bounds are how BESTMATCH and ENHANCEMATCH hold a run to better than the last; they
+    /// say nothing about what the pattern matches. A body whose failure makes its construct succeed
+    /// would otherwise fail for want of budget and turn the test the wrong way (D102):
+    /// <c>(?b)(?=a{d&lt;=1})\w??(?!a{s&lt;=1})</c> over 'x' answered (0, 0), although
+    /// <c>a{s&lt;=1}</c> matches 'x'. And a body that commits to its first match would commit to a
+    /// different one (D109, <c>Matcher.OverTheBudget</c>). Counted rather than saved in each frame,
+    /// so a pattern pays nothing for it unless it is fuzzy.
+    /// </remarks>
+    internal int BoundlessBodies;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: the BESTMATCH walk searches of this scan that failed, at most
+    /// <see cref="BestWalkFailureSlots"/>, one per pair of bounds, oldest first. Without them each
+    /// match of a finditer re-reads the rest of the text looking for a better match that is not
+    /// there, which is quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; <see cref="Init"/>
+    /// empties it. <c>Matcher.BestWalkKnownToFail</c> says what a fact proves.
+    /// </summary>
+    internal readonly List<BestWalkFailure> BestWalkFailures = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: how many facts <see cref="BestWalkFailures"/> keeps. A walk tries one
+    /// pair of bounds per better match it finds, so a scan meets few pairs; past this many the
+    /// oldest is overwritten, which costs a search, never an answer.
+    /// </summary>
+    internal const int BestWalkFailureSlots = 8;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: a search that makes its first attempt only, at the position it starts
+    /// from, with no prefilter. Set by <c>Matcher.DoBestFuzzyMatch</c> around one call of
+    /// <c>Matcher.BasicMatch</c>; <c>Matcher.BestWalkKnownToFail</c> says why.
+    /// </summary>
+    internal bool OneAttempt;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: one failed BESTMATCH walk search: where it started, the bounds it was
+    /// held to, whether it banned an empty match at its start, and the slice it ran in.
+    /// </summary>
+    /// <param name="From">Where the search started.</param>
+    /// <param name="Errors">Its <see cref="MaxErrors"/>.</param>
+    /// <param name="Cost">Its <see cref="MaxCost"/>.</param>
+    /// <param name="MustAdvance">Its <see cref="MustAdvance"/>.</param>
+    /// <param name="SliceStart">Its <see cref="SliceStart"/>.</param>
+    /// <param name="SliceEnd">Its <see cref="SliceEnd"/>.</param>
+    internal readonly record struct BestWalkFailure(
+        int From,
+        long Errors,
+        long Cost,
+        bool MustAdvance,
+        int SliceStart,
+        int SliceEnd
+    );
+
+    /// <summary>NOT UPSTREAM (D102): <see cref="MaxErrors"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
+    internal long HeldMaxErrors;
+
+    /// <summary>NOT UPSTREAM (D102): <see cref="MaxCost"/> while <see cref="BoundlessBodies"/> lifts it.</summary>
+    internal long HeldMaxCost;
+
+    /// <summary>NOT UPSTREAM (D102): a body that decides a test opens; lift the bounds for it.</summary>
+    internal void OpenABoundlessBody()
+    {
+        if (Pattern.BoundsReachDecidingBodies)
+        {
+            return;
+        }
+
+        if (BoundlessBodies++ == 0)
+        {
+            HeldMaxErrors = MaxErrors;
+            HeldMaxCost = MaxCost;
+            MaxErrors = long.MaxValue;
+            MaxCost = long.MaxValue;
+
+            // D114: the body reads the text as far as the caller's slice, as the plain search does.
+            // A lookaround or a test has set the whole text already, which the min and max keep.
+            if (RefinesInANarrowedSlice)
+            {
+                if (Reverse)
+                {
+                    SliceStart = Math.Min(SliceStart, RefineCallerFarEnd);
+                }
+                else
+                {
+                    SliceEnd = Math.Max(SliceEnd, RefineCallerFarEnd);
+                }
+            }
+        }
+    }
+
+    /// <summary>NOT UPSTREAM (D102): a body that decides a test closes; the outermost puts the bounds back.</summary>
+    internal void CloseABoundlessBody()
+    {
+        if (Pattern.BoundsReachDecidingBodies)
+        {
+            return;
+        }
+
+        Debug.Assert(BoundlessBodies > 0, "D102: a boundless body closes that was never opened");
+        if (--BoundlessBodies == 0)
+        {
+            MaxErrors = HeldMaxErrors;
+            MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
+        }
+    }
+
+    /// <summary>
+    /// D114: outside every body, a refinement in a narrowed slice reads no further than its window
+    /// (<see cref="RefinesInANarrowedSlice"/>). A lookaround or a test that closes has put back the
+    /// slice it saved, which is this one already.
+    /// </summary>
+    private void NarrowTheRefinementsFarEnd()
+    {
+        if (RefinesInANarrowedSlice)
+        {
+            if (Reverse)
+            {
+                SliceStart = RefineStart;
+            }
+            else
+            {
+                SliceEnd = RefineEnd;
+            }
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D102): a run has ended, so any body still open is abandoned with it (a partial
+    /// answered from inside one); the run's own bounds go back.
+    /// </summary>
+    internal void CloseEveryBoundlessBody()
+    {
+        if (BoundlessBodies != 0)
+        {
+            BoundlessBodies = 0;
+            MaxErrors = HeldMaxErrors;
+            MaxCost = HeldMaxCost;
+            NarrowTheRefinementsFarEnd();
+        }
+    }
 
     /// <summary>Upstream <c>total_errors</c>.</summary>
     internal long TotalErrors;
@@ -1385,7 +1646,27 @@ internal sealed class MatchState : IDisposable
         for (int r = 0; r < Repeats.Length; r++)
         {
             Repeats[r] = new RepeatData();
+
+            // NOT UPSTREAM (D85): see KeyedTailGuardList.
+            if (pattern.RepeatInfoAt(r).TailKey is not null)
+            {
+                Repeats[r].KeyedTail = new KeyedTailGuards();
+            }
         }
+
+        int tailKeyLength = MaxTailKeyLength(pattern);
+        _tailKeyScratch = tailKeyLength == 0 ? [] : new long[tailKeyLength];
+        if (CutBodyKeyLength(pattern) is > 0 and int cutBodyKeyLength)
+        {
+            bool keysContinuations = pattern.CutBodies?.ContinuationKeyRepeats is not null;
+            _cutBody = new CutBodyRecords(
+                cutBodyKeyLength,
+                keysContinuations ? 2 * pattern.TrueGroupCount : 0,
+                keysContinuations
+            );
+        }
+        _tailTextSpans = tailKeyLength == 0 ? [] : new long[pattern.TrueGroupCount];
+        _tailTextValues = tailKeyLength == 0 ? [] : new long[pattern.TrueGroupCount];
 
         EmptyIterationScratch =
             pattern.TestedGroups.Length > 0 ? new long[2 + FuzzyValue.Count + (2 * pattern.TestedGroups.Length)] : null;
@@ -1520,7 +1801,11 @@ internal sealed class MatchState : IDisposable
 
         Text = text;
         TextLength = text.Length;
+        LastSubstitutablePos = int.MinValue; // D94 performance: worked out on first use
+        FailedRepeatStates?.Clear();
+        MarkedStates.Clear();
         CaptureTexts.Reset(text);
+        Array.Clear(_tailTextValues); // the ids above start again (D85)
 
         // Nothing is searched here: NoHighSurrogateIn looks only as far as the match asks (D83).
         (_cleanStart, _cleanEnd, _highSurrogateFound) = scan;
@@ -1547,6 +1832,7 @@ internal sealed class MatchState : IDisposable
         {
             repeat.BodyGuardList.Reset();
             repeat.TailGuardList.Reset();
+            repeat.KeyedTail?.Clear();
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
@@ -1562,12 +1848,19 @@ internal sealed class MatchState : IDisposable
             Array.Clear(EmptyIterationScratch);
         }
 
+        KeyedTailWrites = 0;
+        _cutBody?.Clear();
+        BlockedEndMark = -1;
+        Array.Clear(_tailKeyScratch);
+        Array.Clear(_tailTextSpans);
+
         // Every pass writes its slot before its end reads it, so this is for reuse alone.
         Array.Clear(OptionalPasses);
 
         ActiveCalls.Clear();
         ActiveCallCounts.Clear();
         OpenCalls.Clear();
+        OpenCallSections.Clear();
         OpenCallSpans.Clear();
         FailedCalls = null;
         CallsThisPass = 0;
@@ -1590,6 +1883,11 @@ internal sealed class MatchState : IDisposable
         BestTotalCost = 0;
         MaxErrors = 0;
         MaxCost = 0;
+        BoundlessBodies = 0;
+        BestWalkFailures.Clear();
+        OneAttempt = false;
+        HeldMaxErrors = 0;
+        HeldMaxCost = 0;
         TotalErrors = 0;
         TotalCost = 0;
         FewestErrors = 0;
@@ -1654,6 +1952,10 @@ internal sealed class MatchState : IDisposable
         SliceEnd = end;
         InitialSliceStart = start;
         InitialSliceEnd = end;
+        RefineStart = int.MinValue;
+        RefineEnd = int.MaxValue;
+        RefinesInANarrowedSlice = false;
+        RefineCallerFarEnd = 0;
 
         Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 
@@ -1781,6 +2083,7 @@ internal sealed class MatchState : IDisposable
 
         Text = default;
         CaptureTexts.Reset(default);
+        Array.Clear(_tailTextValues);
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
@@ -2038,23 +2341,59 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation was already continued
-    /// from the same frame (the dedup). Reads only the entries at or above the frame, from the end.
+    /// NOT UPSTREAM'S, D11 M2: whether a success with the same continuation as the one the state
+    /// holds now was already continued from the same frame (the dedup). Reads only the entries at or
+    /// above the frame, from the end, and the state in place.
     /// </summary>
-    /// <param name="success">The success.</param>
-    /// <returns><see langword="true"/> if an entry of the same frame leads where it does.</returns>
-    internal bool HasSameContinuation(LookaroundSuccess success)
+    /// <remarks>
+    /// The state is compared in place, so a repeat costs no copy. Until D98's follow-up each
+    /// success was copied into a <see cref="LookaroundSuccess"/> first: `(x)(?=(?1)*y)\Z` searched
+    /// over 'x' * n reaches its blocked end twice per attempt, the second time a repeat, and
+    /// allocated 432 bytes per character.
+    /// </remarks>
+    /// <param name="frame">The lookaround's frame.</param>
+    /// <param name="withChanges">Whether the fuzzy changes are part of the key (<c>(?b)</c>, <c>(?e)</c>).</param>
+    /// <returns><see langword="true"/> if an earlier success of the frame had the same key.</returns>
+    internal bool HasSameContinuation(int frame, bool withChanges)
     {
-        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= success.Frame; i--)
+        for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= frame; i--)
         {
             DedupEntriesExamined++;
-            if (success.SameContinuation(LookaroundSuccesses[i]))
+            LookaroundSuccess other = LookaroundSuccesses[i];
+            if (
+                other.Frame == frame
+                && SameCapturesAsNow(other.Captures)
+                && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
+                && (withChanges ? CollectionsMarshal.AsSpan(FuzzyChanges) : []).SequenceEqual(other.FuzzyChanges)
+            )
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>Whether each group's current capture is the one a dedup entry recorded.</summary>
+    /// <param name="captures">The entry's captures, (-1, -1) for a group with none.</param>
+    /// <returns><see langword="true"/> if all are the same.</returns>
+    private bool SameCapturesAsNow(GroupSpan[] captures)
+    {
+        if (captures.Length != Groups.Length)
+        {
+            return false;
+        }
+
+        for (int g = 0; g < Groups.Length; g++)
+        {
+            GroupData group = Groups[g];
+            if ((group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1)) != captures[g])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 A12: drops the dedup entries of the frames at or above a position.</summary>
@@ -2110,6 +2449,7 @@ internal sealed class MatchState : IDisposable
     {
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
+        MarkedStates.Clear();
         LookaroundSuccesses.Clear();
         Sstack.Reset();
         SetBstackCount(0);
@@ -2235,14 +2575,14 @@ internal sealed class MatchState : IDisposable
     /// behind <see cref="AttemptStart"/> in the scan's direction, when it is the attempt's start.
     /// </summary>
     /// <remarks>
-    /// The scan steps on from <see cref="MatchPos"/> after a match (overlapped) and after a failed
-    /// attempt (<c>Matcher</c>'s failure arm, upstream <c>_regex.c:15695</c>), taking it to be where
+    /// The overlapped scan steps on from <see cref="MatchPos"/> after a match, taking it to be where
     /// the attempt began. A positive lookaround throws away the entry that would undo its
     /// <c>\K</c>, so the reported start can outlive the attempt, and a lookbehind (or a lookahead in
     /// a reversed pattern) leaves it behind the attempt: the step then lands on the attempt again,
-    /// and the scan or the search loops for ever. Stepping from the attempt instead cannot land
-    /// behind it. A start left AHEAD of the attempt is not changed here; that skips attempts rather
-    /// than repeating one, and is upstream's answer.
+    /// and the scan loops for ever. Stepping from the attempt instead cannot land behind it. A
+    /// start AHEAD of the attempt is the start the match reports, and the overlapped scan steps
+    /// from it, as upstream does. After a failed attempt there is no reported start, and
+    /// <c>Matcher</c>'s failure arm always steps from the attempt (D92).
     /// </remarks>
     /// <returns>The position to step on from.</returns>
     internal int StartNotBehindTheAttempt()
@@ -2445,8 +2785,13 @@ internal sealed class MatchState : IDisposable
     /// Whether to leave the body guard lists of failure-memo repeats as they are. <b>Not
     /// upstream</b>; see <see cref="PatternObject.KeepsFailureMemosAcrossAttempts"/>.
     /// </param>
-    internal void ResetGuards(bool keepFailureMemos = false)
+    /// <param name="nextAttempt">
+    /// Whether this is the reset between two starts of one pass, which keeps the records written
+    /// after blocked ends. <b>Not upstream</b> (D104).
+    /// </param>
+    internal void ResetGuards(bool keepFailureMemos = false, bool nextAttempt = false)
     {
+        BlockedEndMark = -1;
         // Reset the guards for the repeats.
         for (int i = 0; i < Repeats.Length; i++)
         {
@@ -2458,6 +2803,24 @@ internal sealed class MatchState : IDisposable
             }
 
             repeat.TailGuardList.Reset();
+            repeat.KeyedTail?.Reset();
+        }
+
+        KeyedTailWrites = 0;
+
+        // D104: the records after blocked ends stay for the whole pass. Each says that a subtree
+        // failed from a state its key holds in full, and a later start reaches that state with
+        // nothing else changed: the touch flag is in the key, the fork budget writes no record,
+        // and the start itself is read by nothing a record covers. The must-advance rule refuses a
+        // success and so does write records, but only from the first start: the memo runs on the
+        // main thread with no construct open (ContinuationKeyOf), where a match ending at the
+        // search anchor started there, and no later start can end there. Kept, each state is
+        // proved once per pass rather than once per start, which made option G cubic on the
+        // register's witness. A \K can move the next start (and starts it touched), so a pattern
+        // with one empties the store as before.
+        if (!nextAttempt || Pattern.KeepInSubmatch)
+        {
+            _cutBody?.Reset();
         }
 
         // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
@@ -2480,7 +2843,9 @@ internal sealed class MatchState : IDisposable
     /// <param name="index">The repeat index.</param>
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     /// <returns>The list, or <see langword="null"/> if this repeat needs no guard of that type.</returns>
-    private GuardList? ActiveGuardList(int index, uint guardType)
+    /// <param name="textPos">The position asked about or guarded (D85: a keyed tail's key reads it).</param>
+    /// <param name="write">Whether the caller writes to the list rather than reads it (D85).</param>
+    private GuardList? ActiveGuardList(int index, uint guardType, int textPos, bool write)
     {
         // Is a guard active here?
         if ((Pattern.RepeatInfoAt(index).Status & guardType) == 0)
@@ -2490,8 +2855,848 @@ internal sealed class MatchState : IDisposable
 
         // Which guard list?
         RepeatData repeat = Repeats[index];
-        return (guardType & NodeStatus.Body) != 0 ? repeat.BodyGuardList : repeat.TailGuardList;
+        if ((guardType & NodeStatus.Body) != 0)
+        {
+            // NOT UPSTREAM (D85): see RepeatInfo.BodyHoldsKeyedTail.
+            return Pattern.RepeatInfoAt(index).BodyHoldsKeyedTail ? null : repeat.BodyGuardList;
+        }
+
+        // NOT UPSTREAM (D85): a repeat inside a group whose parked start the key cannot find.
+        if (Pattern.RepeatInfoAt(index).TailKey is { HasUnknownInside: true })
+        {
+            return null;
+        }
+
+        // NOT UPSTREAM (D85): a repeat whose tail reads group state keeps one list per key.
+        // sync-divergence: upstream keeps one tail_guard_list per repeat (_regex.c :339, :9458,
+        // :9546, :9559) and drops the tail guard only where add_repeat_guards sees a reference /
+        // a repeat whose tail can read a group keeps one list per value of the groups it reads
+        // (KeyedTailGuards, keys from TailGuardLiveness) / D85, ledger 84: a failure recorded under
+        // one group value cut a path that succeeds under another. Re-aligning: if upstream fixes
+        // ledger 84, compare answers and cost with its fix and adopt its shape if they agree.
+        return repeat.KeyedTail is null ? repeat.TailGuardList : KeyedTailGuardList(index, textPos, write);
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): how many keyed tail guard writes one attempt may make before further
+    /// ones are skipped, which bounds the memory the keyed lists take (each write adds at most one
+    /// span). Skipping a write only loses pruning. The same figure as the failure memo's cap.
+    /// </summary>
+    internal const long KeyedTailWriteCap = 1 << 20;
+
+    /// <summary>NOT UPSTREAM (D85): keyed tail guard writes made in this attempt; see <see cref="KeyedTailWriteCap"/>.</summary>
+    internal long KeyedTailWrites;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): where <see cref="TailGuardKeyOf"/> builds a key, so a lookup allocates
+    /// nothing; as long as the longest key, and zero past the end of a shorter one.
+    /// </summary>
+    private readonly long[] _tailKeyScratch;
+
+    /// <summary>The longest tail key any repeat of <paramref name="pattern"/> needs.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The length.</returns>
+    private static int MaxTailKeyLength(PatternObject pattern)
+    {
+        int longest = 0;
+        foreach (RepeatInfo info in pattern.RepeatInfoList)
+        {
+            if (info.TailKey is TailGuardKeySpec spec)
+            {
+                longest = Math.Max(longest, spec.KeyLength);
+            }
+        }
+
+        foreach (CutBodyRepeat? cut in pattern.CutBodies?.Repeats ?? [])
+        {
+            longest = Math.Max(longest, cut?.Key.KeyLength ?? 0);
+        }
+
+        return longest;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the tail guard list of repeat <paramref name="index"/> for the group
+    /// state the rest of the match can read now, or <see langword="null"/> for a read under a key
+    /// with no list yet (or a write past the cap).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A tail guard at p records that the rest of the match, entered at p, failed. Upstream keys it
+    /// on p alone and switches it off where <c>add_repeat_guards</c> sees the rest read a group,
+    /// but that walk stops at the enclosing repeat's end and skips bounded bodies, so it leaves the
+    /// guard on where a group is read (ledger entry 84). The rest of the match is a deterministic
+    /// function of p and of the state it reads; the key is that state, as
+    /// <see cref="TailGuardLiveness"/> narrows it: for each live group, what the rest can see of it,
+    /// and for each enclosing repeat whose body captures a read group, whether its iteration has
+    /// already made progress.
+    /// </para>
+    /// <para>
+    /// The write is sound because a tail guard is written only when backtracking has undone the
+    /// whole tail back to the repeat (the TailStart entry, and the one-character repeat's arm), so
+    /// every capture and every repeat field the key reads is back to its value at the tail's entry:
+    /// they are restored from the backtrack stack (<c>PushGroupStateData</c>, <c>PushRepeatData</c>)
+    /// before that entry is popped.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position the tail is entered at.</param>
+    /// <param name="write">Whether the caller guards rather than asks.</param>
+    /// <returns>The list.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private GuardList? KeyedTailGuardList(int index, int textPos, bool write)
+    {
+        KeyedTailGuards store = Repeats[index].KeyedTail!;
+
+        // A fuzzy match never reads a repeat guard (IsRepeatGuarded), so its writes are skipped.
+        if (IsFuzzy || (!write && store.Count == 0))
+        {
+            return null;
+        }
+
+        long[] key = TailGuardKeyOf(Pattern.RepeatInfoAt(index).TailKey!, textPos);
+        return write ? store.ForWrite(key, mayAdd: KeyedTailWrites++ < KeyedTailWriteCap) : store.Find(key);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the last span whose text <see cref="CachedTextValue"/> looked up for each
+    /// group, packed, and the value it got (0 for none: no text value is 0), so a long capture's
+    /// text is hashed once rather than at every guard check.
+    /// </summary>
+    private readonly long[] _tailTextSpans;
+
+    /// <summary>NOT UPSTREAM (D85): see <see cref="_tailTextSpans"/>.</summary>
+    private readonly long[] _tailTextValues;
+
+    /// <summary>NOT UPSTREAM (D85): <c>Matcher.TextValue</c> of a group's span, cached per group.</summary>
+    /// <param name="group">The group, as an index into <see cref="Groups"/>.</param>
+    /// <param name="span">Its current span.</param>
+    /// <returns>The value.</returns>
+    private long CachedTextValue(int group, GroupSpan span)
+    {
+        long packed = ((long)span.Start << 32) | (uint)span.End;
+        if (_tailTextValues[group] != 0 && _tailTextSpans[group] == packed)
+        {
+            return _tailTextValues[group];
+        }
+
+        long value = Matcher.TextValue(this, span.Start, span.End - span.Start);
+        _tailTextSpans[group] = packed;
+        _tailTextValues[group] = value;
+        return value;
+    }
+
+    /// <summary>NOT UPSTREAM (D85): the key of a tail entered at <paramref name="textPos"/> now.</summary>
+    /// <remarks>
+    /// Per group: -1 when unset; else its exact span (made negative) when a new capture in the
+    /// tail could equal the current span, which decides whether the capture bumps the counter
+    /// (the repeat inside the group's brackets, a capture against the direction, or a span that
+    /// starts at or after p, or in reverse ends at or before p); else its text for a
+    /// backreferenced group (<c>Matcher.TextValue</c>), else 0. Per enclosing progress repeat: 1
+    /// when its iteration has already advanced or changed a capture, else 0.
+    /// </remarks>
+    /// <param name="spec">The repeat's key spec.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>The key, in <see cref="_tailKeyScratch"/>.</returns>
+    private long[] TailGuardKeyOf(TailGuardKeySpec spec, int textPos)
+    {
+        long[] key = _tailKeyScratch;
+        Array.Clear(
+            key,
+            spec.Groups.Length + spec.ProgressRepeats.Length,
+            key.Length - spec.Groups.Length - spec.ProgressRepeats.Length
+        );
+        // The parked start of each group the repeat is inside: the tail's capture of it runs
+        // from there, so the text it captures depends on it. `.?(a*)(?:b\1)?c` over aabaac
+        // reaches the tail of a* at 2 with g1 open at 1 and then open at 0, and only the second
+        // matches. Outside fuzzy sections and group calls the save stack holds exactly the
+        // parked starts of the groups open around the repeat, innermost on top.
+        int extra = spec.Groups.Length + spec.ProgressRepeats.Length;
+        for (int i = 0; i < spec.InsideDepths.Length; i++)
+        {
+            int depth = spec.InsideDepths[i];
+            if (depth >= 0)
+            {
+                int offset = Sstack.Count - (sizeof(long) * (depth + 1));
+                key[extra + i] = offset >= 0 ? Sstack.SizeAt(offset) : long.MinValue;
+            }
+        }
+
+        for (int i = 0; i < spec.Groups.Length; i++)
+        {
+            GroupData group = Groups[spec.Groups[i]];
+            byte mode = spec.Modes[i];
+            if (group.Current < 0)
+            {
+                key[i] = -1;
+                continue;
+            }
+
+            GroupSpan span = group.Captures[group.Current];
+            if (span.Start < 0)
+            {
+                // A capture a run-out in a partial call's second pass made unknown (Matcher.UnknownSpan)
+                // has no text to key on, and a backreference or condition reads it unlike any known
+                // capture, so it keys as itself. `x?(?:(?=(?:(a)|b)*a?)a){2,}\1a` over 'aab' threw
+                // here before.
+                key[i] = long.MinValue | ((long)span.Start << 32) | (uint)span.End;
+                continue;
+            }
+
+            bool mayMeet =
+                spec.ExactSpans
+                || (mode & TailGuardLiveness.Inside) != 0
+                || (
+                    (mode & TailGuardLiveness.Span) != 0 && (spec.Forward ? span.Start >= textPos : span.End <= textPos)
+                );
+            if (mayMeet && CollapsesInside(spec, i, mode, span, key))
+            {
+                key[i] = -2;
+            }
+            else if (mayMeet)
+            {
+                key[i] = long.MinValue | ((long)span.Start << 32) | (uint)span.End;
+            }
+            else
+            {
+                key[i] = (mode & TailGuardLiveness.Text) != 0 ? CachedTextValue(spec.Groups[i], span) : 0;
+            }
+        }
+
+        for (int j = 0; j < spec.ProgressRepeats.Length; j++)
+        {
+            RepeatData around = Repeats[spec.ProgressRepeats[j]];
+            key[spec.Groups.Length + j] = around.Start != textPos || around.CaptureChange != CaptureChange ? 1 : 0;
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): whether an inside group's last capture can be left out of the key. The
+    /// tail captures the group from its parked start (already in the key) and compares the new span
+    /// with the last one only to decide whether the capture counts as a change; a last capture that
+    /// does not start (forward) or end (reverse) at the parked start can never be equal, so its exact
+    /// value does not matter. Not when the rest reads the group's value before capturing it again.
+    /// </summary>
+    /// <param name="spec">The repeat's key spec.</param>
+    /// <param name="i">The group's place in the spec.</param>
+    /// <param name="mode">Its mode.</param>
+    /// <param name="span">Its last capture.</param>
+    /// <param name="key">The key so far, its parked starts already filled in.</param>
+    /// <returns><see langword="true"/> when the last capture can be left out.</returns>
+    private static bool CollapsesInside(TailGuardKeySpec spec, int i, byte mode, GroupSpan span, long[] key)
+    {
+        if (
+            spec.ExactSpans
+            || (mode & TailGuardLiveness.Inside) == 0
+            || (mode & (TailGuardLiveness.Text | TailGuardLiveness.Set)) != 0
+            || spec.InsideDepths[i] < 0
+            || !spec.Collapsible[i]
+        )
+        {
+            return false;
+        }
+
+        long open = key[spec.Groups.Length + spec.ProgressRepeats.Length + i];
+        return (spec.Forward ? span.Start : span.End) != open;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the part of a guarded span around <paramref name="textPos"/>
+    /// over which the current state's key is the same as at <paramref name="textPos"/>. The key moves
+    /// only where a span-keyed group's span starts (forward) or ends (reverse), and at an enclosing
+    /// progress repeat's iteration start while its counter has not moved.
+    /// </summary>
+    /// <param name="spec">The repeat's key spec.</param>
+    /// <param name="textPos">The position asked about.</param>
+    /// <param name="span">The guarded span holding it.</param>
+    /// <returns>The clipped span.</returns>
+    private GuardSpan ClipTailSpan(TailGuardKeySpec spec, int textPos, GuardSpan span)
+    {
+        int low = span.Low;
+        int high = span.High;
+        if (!spec.ExactSpans)
+        {
+            for (int i = 0; i < spec.Groups.Length; i++)
+            {
+                byte mode = spec.Modes[i];
+                GroupData group = Groups[spec.Groups[i]];
+                if (group.Current < 0 || (mode & TailGuardLiveness.Span) == 0 || (mode & TailGuardLiveness.Inside) != 0)
+                {
+                    continue;
+                }
+
+                GroupSpan current = group.Captures[group.Current];
+                if (spec.Forward)
+                {
+                    // Exact for y <= Start, text above.
+                    if (low <= current.Start && current.Start < textPos)
+                    {
+                        low = current.Start + 1;
+                    }
+
+                    if (textPos <= current.Start && current.Start < high)
+                    {
+                        high = current.Start;
+                    }
+                }
+                else
+                {
+                    // Exact for y >= End, text below.
+                    if (low < current.End && current.End <= textPos)
+                    {
+                        low = current.End;
+                    }
+
+                    if (textPos < current.End && current.End <= high)
+                    {
+                        high = current.End - 1;
+                    }
+                }
+            }
+        }
+
+        foreach (int r in spec.ProgressRepeats)
+        {
+            RepeatData around = Repeats[r];
+            if (around.CaptureChange != CaptureChange)
+            {
+                continue;
+            }
+
+            int start = around.Start;
+            if (start == textPos)
+            {
+                low = high = textPos;
+            }
+            else if (low <= start && start < textPos)
+            {
+                low = start + 1;
+            }
+            else if (textPos < start && start <= high)
+            {
+                high = start - 1;
+            }
+        }
+
+        return new GuardSpan(low, high, span.Protect);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): every entry below this count on the backtracking stack was pushed before
+    /// the last blocked end and is still there, so its failure, when it is popped, takes in what
+    /// follows that blocked construct (or a run-out: see the remarks). -1 when neither has happened
+    /// in the attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A guard inside a lookaround, condition test or atomic group records that the construct cannot
+    /// reach its end from a position, a fact about the position, because the construct's cut drops
+    /// its body's entries before anything after it runs. In a partial call's second pass a blocked
+    /// end keeps them (<c>Matcher.EndALookaroundInTheSecondPass</c>, <c>Matcher.BlockAtomicCut</c>):
+    /// matching goes on after the construct, and when that fails, backtracking comes back into the
+    /// body. A record written then says that the continuation failed, which depends on where the
+    /// construct started and on what came before it, and a later instance of the construct read it
+    /// and cut a path that matches: `a*(?=(?:ab|a)*b?y)aa` over 'aaba' answered P(3, 4), not P(0, 4).
+    /// Such a record is not written (<see cref="PoppedEntrySawABlockedEnd"/>).
+    /// </para>
+    /// <para>
+    /// The same holds for the second pass's other outcomes that are not a failure: a run-out in a
+    /// body (<c>Matcher.RunOutInALookaroundBody</c>), a run-out that waits for the body's other
+    /// paths (<c>Matcher.RunOutCanWaitForTheBody</c>; round 2 of the review:
+    /// `a?(?>(?=a?b?y)a)` over 'ab' was P(2, 2), not P(0, 2), because `b?`'s tail guard recorded
+    /// the run-out at 2 as a failure), and the LOOKAROUND arm going on after a negative body or a
+    /// waiting run-out it could not decide. Each sets the mark like a blocked end. The one
+    /// exception is a run-out in a negative lookaround with no atomic group, possessive repeat,
+    /// lookaround or test around it (and no verb or call in the pattern): there a stale record can
+    /// only turn an undecided pass into a decided one, which nothing reads
+    /// (<c>Matcher.RunOutInALookaroundBody</c>; `.scratch/s1016/d90/NOTES.md`, option (b)).
+    /// </para>
+    /// <para>
+    /// The mark is the lowest count the stack has had since the last blocked end, as far as the
+    /// guard-writing entries see it: <see cref="NoteGuardWritingEntry"/> lowers it on a push and
+    /// <see cref="PoppedEntrySawABlockedEnd"/> on a pop. An entry below it was pushed before that
+    /// end and not popped since; one at or above it was pushed after. Where a pop of another kind
+    /// lowered the stack unseen, the mark is higher than the true minimum, which can only withhold
+    /// a sound record, never keep a stale one.
+    /// </para>
+    /// <para>
+    /// Only the repeats inside such a construct are affected (<see cref="RepeatInfo.InsideACutBody"/>).
+    /// A repeat outside one keeps every record: its body or tail is the same whatever path entered
+    /// it, as in the first pass, and a construct inside it continues into its own rest. The search
+    /// that found D90 (5.6 million rows, <c>.scratch/s1016/d90/grid</c>) gives the guards-off answer
+    /// on every row with this rule.
+    /// </para>
+    /// </remarks>
+    internal int BlockedEndMark = -1;
+
+    /// <summary>NOT UPSTREAM (D90): a blocked construct's continuation starts here; see <see cref="BlockedEndMark"/>.</summary>
+    internal void NoteABlockedEnd() => BlockedEndMark = Bstack.Count;
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): an entry whose pop writes a guard is about to be pushed; see
+    /// <see cref="BlockedEndMark"/>.
+    /// </summary>
+    // AggressiveInlining: one compare on every repeat entry, in BasicMatchCore's hottest arms.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void NoteGuardWritingEntry()
+    {
+        if (BlockedEndMark > Bstack.Count)
+        {
+            BlockedEndMark = Bstack.Count;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D90): whether the entry just popped for repeat <paramref name="index"/> was
+    /// pushed before a blocked end, so that the guard its pop writes would record the failure of
+    /// what follows the blocked construct; see <see cref="BlockedEndMark"/>.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <returns><see langword="true"/> if the guard must not be written.</returns>
+    internal bool PoppedEntrySawABlockedEnd(int index)
+    {
+        int count = Bstack.Count;
+        if (count >= BlockedEndMark)
+        {
+            return false;
+        }
+
+        BlockedEndMark = count;
+
+        // A called group's repeat can run inside a construct's body wherever the group is written.
+        return Pattern.HasGroupCalls || Pattern.RepeatInfoAt(index).InsideACutBody;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the records that <see cref="PoppedEntrySawABlockedEnd"/> keeps out of
+    /// the plain guard lists, kept here under the instance they were written in instead
+    /// (<see cref="CutBodyKeyOf"/>), so that a later arrival in the same state can still be cut.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Such a record says that the subtree under the entry failed, the construct's continuation
+    /// included: everything matched after the construct's blocked end, to the end of the pattern.
+    /// That holds for every arrival whose future is the same, and the future after the entry is a
+    /// deterministic function of what it reads: the position; where each open construct started
+    /// and the slice it set (the continuation resumes there); the count, start and progress of
+    /// each enclosing loop; the groups the rest can read, as D85 keys a tail
+    /// (<see cref="TailGuardKeyOf"/>, whose liveness at the repeat runs on through the
+    /// construct's end); and whether the attempt has touched the text to come. A later arrival
+    /// with the same key fails the same way, so the record may cut it. D90's bug was reading the
+    /// record under the position alone; with no record at all (D90's fix) the second pass explored
+    /// what the guards-off build explores until the fork budget stopped it, D104's C5 phantom.
+    /// </para>
+    /// <para>
+    /// Left out of the key, each because it cannot change the outcome. The repeat's own count and
+    /// start: a plain record leaves them out too. The touch marks below the entry: they decide only
+    /// whether an end is blocked, and a blocked end explores a superset of what a cut end does, so
+    /// a failure under either holds for the other or was never written (a cut drops the entry).
+    /// The touch flag is sticky within an attempt and a touched success only turns into a failure,
+    /// so a record written while touched holds for every later arrival. A run-out that waits
+    /// (<c>Matcher.RunOutCanWaitForTheBody</c>) is answered once per construct frame by its
+    /// <c>LOOKAROUND</c> arm, whichever path set it, from state the key holds. The dedup of
+    /// continuations, D17's empty-iteration states and other records only cut failing paths, and
+    /// the fork budget only ends a search early with a partial, never writes a failure.
+    /// </para>
+    /// <para>
+    /// The records are facts for the whole pass, so the store is never saved or restored with
+    /// the plain lists (<c>PushRepeatData</c>) and is emptied only where a pass begins
+    /// (<see cref="ResetGuards"/>). Group calls, backtracking verbs, fuzzy matching and a group
+    /// whose parked start the key cannot find keep D90's rule: no record. Made only for a pattern
+    /// with a repeat that can record (<see cref="CutBodyKeyLength"/>), so that every other state
+    /// allocates and holds no more than before D104.
+    /// </para>
+    /// </remarks>
+    private readonly CutBodyRecords? _cutBody;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): how many keys <see cref="_cutBody"/> may hold; a write under a new key
+    /// past it is skipped, which only loses pruning.
+    /// </summary>
+    /// <remarks>
+    /// The store lasts the whole pass, not one attempt (<see cref="ResetGuards"/>), so this cap and
+    /// <see cref="KeyedTailWriteCap"/>, which bounds <see cref="CutBodyRecords.Writes"/>, are spent
+    /// once per pass across every start.
+    /// </remarks>
+    internal const int CutBodyKeyCap = 1 << 16;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): how many open constructs a key holds; with more open, D90's rule
+    /// applies and nothing is recorded. Each open construct multiplies the keys by its starts.
+    /// </summary>
+    internal const int CutBodyFrameCap = 4;
+
+    /// <summary>The length of every key <see cref="CutBodyKeyOf"/> builds for <paramref name="pattern"/>.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The length, or 0 when no repeat records after a blocked end.</returns>
+    private static int CutBodyKeyLength(PatternObject pattern)
+    {
+        int loops = -1;
+        int groups = 0;
+        if (pattern.CutBodies is not CutBodyFacts facts)
+        {
+            return 0;
+        }
+
+        foreach (CutBodyRepeat cut in facts.Repeats.OfType<CutBodyRepeat>())
+        {
+            loops = Math.Max(loops, cut.EnclosingLoops.Length);
+            groups = Math.Max(groups, cut.Key.KeyLength);
+        }
+
+        return loops < 0 ? 0 : 4 + (4 * CutBodyFrameCap) + (3 * loops) + groups;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): whether repeat <paramref name="index"/> keeps its records written after
+    /// a blocked end in <see cref="_cutBody"/>; see there for the exclusions. A guard that is
+    /// off for a plain record (<see cref="ActiveGuardList"/>) is off here too.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <returns><see langword="true"/> if it does.</returns>
+    private bool RecordsAfterBlockedEnd(int index, uint guardType)
+    {
+        RepeatInfo info = Pattern.RepeatInfoAt(index);
+        return Pattern.CutBodyAt(index) is { Key.HasUnknownInside: false } cut
+            && (info.Status & guardType) != 0
+            && !IsFuzzy
+            && !Pattern.HasGroupCalls
+            && !Pattern.HasBacktrackingVerb
+            && (
+                (guardType & NodeStatus.Body) != 0
+                    ? !info.BodyHoldsKeyedTail && cut.CountFreeBody
+                    : info.TailKey is not { HasUnknownInside: true }
+            );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the key of an arrival at repeat <paramref name="index"/> at
+    /// <paramref name="textPos"/> now; see <see cref="_cutBody"/>.
+    /// </summary>
+    /// <remarks>
+    /// Built when the entry is popped, a key reads the state the entry was pushed in: every
+    /// capture, repeat and frame above the entry has been restored from the stacks by then, and so
+    /// has the capture-change counter (each capture's entry holds it), as D85's tail key relies on.
+    /// Layout: index, guard type, touch flag, open constructs; per construct its opcode, start and
+    /// slice (zero for an atomic group, whose continuation starts where its body ended, which the
+    /// subtree decides); per enclosing loop its count (at most its minimum when it has no maximum,
+    /// as past that the count decides nothing), start and progress bit; then the groups' key.
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>The key, in <see cref="CutBodyRecords.Key"/>; <see langword="null"/> with too many constructs open.</returns>
+    /// <param name="dropFrames">How many open frames on top to leave out: 1 for a continuation key, whose lookaround's own frame is still open.</param>
+    private long[]? CutBodyKeyOf(int index, uint guardType, int textPos, int dropFrames = 0)
+    {
+        int frames = (Pstack.Count / sizeof(long)) - dropFrames;
+        if (frames > CutBodyFrameCap)
+        {
+            return null;
+        }
+
+        CutBodyRepeat cut = Pattern.CutBodyAt(index)!;
+        long[] key = _cutBody!.Key;
+        Array.Clear(key);
+        key[0] = index;
+        key[1] = guardType;
+        // SHORTCUT: defensive. The flag is read only at an attempt's start and at a success, and a
+        // record means no success below it, so the slot looks redundant: with it set to 0 no answer
+        // changed in about 254,000 grid rows, 80,000 of them fullmatch (2026-10-20). Kept because
+        // that argument is not proven for fullmatch's single attempt; it costs only hits. Upgrade:
+        // prove the argument or find the row, then drop the slot or pin that row.
+        key[2] = AttemptTouchedTheTextToCome ? 1 : 0;
+        key[3] = frames;
+        int k = 4;
+        for (int f = 0; f < frames; f++, k += 4)
+        {
+            // A negative construct's blocked success backtracks into its body (the frame is
+            // tainted, Matcher.EndALookaroundInTheSecondPass), so below one, a continuation that
+            // "failed" may have succeeded for some text to come; whether it did depends on the
+            // w-marks above the frame, which the key does not hold. D90's rule applies there: no
+            // record (D113's second shape, `(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))` over 'a', match,
+            // was P(0, 1) for None once such a record cut the decided alternative).
+            if (
+                !Matcher.ReadConstructStart(
+                    this,
+                    (int)Pstack.SizeAt(f * sizeof(long)),
+                    out Opcode op,
+                    out int start,
+                    out int sliceStart,
+                    out int sliceEnd,
+                    out bool negative
+                ) || negative
+            )
+            {
+                return null;
+            }
+
+            key[k] = (long)op;
+            key[k + 1] = start;
+            key[k + 2] = sliceStart;
+            key[k + 3] = sliceEnd;
+        }
+
+        k = 4 + (4 * CutBodyFrameCap);
+        for (int i = 0; i < cut.EnclosingLoops.Length; i++, k += 3)
+        {
+            RepeatData loop = Repeats[cut.EnclosingLoops[i]];
+            key[k] = Math.Min(loop.Count, cut.EnclosingLoopCaps[i]);
+            key[k + 1] = loop.Start;
+            key[k + 2] = loop.CaptureChange != CaptureChange ? 1 : 0;
+        }
+
+        TailGuardKeySpec spec = cut.Key;
+        if (spec.KeyLength > 0)
+        {
+            Array.Copy(TailGuardKeyOf(spec, textPos), 0, key, _cutBody.BaseLength - spec.KeyLength, spec.KeyLength);
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): records that repeat <paramref name="index"/>'s entry at
+    /// <paramref name="loPos"/> to <paramref name="hiPos"/>, pushed before a blocked end, failed
+    /// with the construct's continuation; see <see cref="_cutBody"/>. The positions share
+    /// the key built at <paramref name="loPos"/>, unless the groups' key can move with the
+    /// position, and then only <paramref name="loPos"/> is recorded.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="loPos">The lowest position.</param>
+    /// <param name="hiPos">The highest, inclusive.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    internal void GuardRepeatAfterBlockedEnd(int index, int loPos, int hiPos, uint guardType)
+    {
+        if (
+            _cutBody is not { Writes: < KeyedTailWriteCap } records
+            || !RecordsAfterBlockedEnd(index, guardType)
+            || CutBodyKeyOf(index, guardType, loPos) is not long[] key
+        )
+        {
+            return;
+        }
+
+        records.Writes++;
+        if (records.Store.ForWrite(key, mayAdd: records.Store.Count < CutBodyKeyCap) is not GuardList list)
+        {
+            return;
+        }
+
+        if (Pattern.CutBodyAt(index)!.Key.DependsOnPosition)
+        {
+            hiPos = loPos;
+        }
+
+        while (loPos <= hiPos)
+        {
+            loPos = list.GuardRange(loPos, hiPos, true);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): whether a record written after a blocked end guards repeat
+    /// <paramref name="index"/> at <paramref name="textPos"/> in the current state; see
+    /// <see cref="_cutBody"/>.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="span">The guarded span holding <paramref name="textPos"/>, cut where the key would change.</param>
+    /// <returns><see langword="true"/> if it is guarded.</returns>
+    private bool IsGuardedAfterBlockedEnd(int index, int textPos, uint guardType, out GuardSpan span)
+    {
+        span = default;
+        if (
+            _cutBody?.Store is not { Count: > 0 } store
+            || !RecordsAfterBlockedEnd(index, guardType)
+            || CutBodyKeyOf(index, guardType, textPos) is not long[] key
+            || store.Find(key) is not GuardList list
+            || !list.TryGetSpan(textPos, out span)
+            || !span.Protect
+        )
+        {
+            return false;
+        }
+
+        TailGuardKeySpec spec = Pattern.CutBodyAt(index)!.Key;
+        if (spec.DependsOnPosition)
+        {
+            span = ClipTailSpan(spec, textPos, span);
+        }
+
+        // The path this cuts would have reached the construct's blocked end, so a record that its
+        // cut lets an entry pushed before now write is about the instance too: it is kept under the
+        // instance (PoppedEntrySawABlockedEnd), and a write that follows from this hit without a
+        // pop checks CutBodyHits (blind review, 2026-10-19: `a?(?=(?:a|)*b?y)a` over 'ab', match,
+        // was None for P(0, 2) when GREEDY_REPEAT_ONE wrote its plain body guard from such hits).
+        NoteABlockedEnd();
+        _cutBody.Hits++;
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): an unblocked positive lookaround's continuation key waits in
+    /// <see cref="CutBodyRecords.ContinuationKey"/> for the END_LOOKAROUND arm to push its mark
+    /// (<see cref="PushPendingContinuationMark"/>); see <see cref="ContinuationKeyOf"/>.
+    /// </summary>
+    internal void HoldContinuation() => _cutBody!.Pending = true;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): pushes the mark of a continuation <see cref="HoldContinuation"/> held,
+    /// if there is one.
+    /// </summary>
+    /// <param name="textPos">Where the lookaround started.</param>
+    internal void PushPendingContinuationMark(int textPos)
+    {
+        if (_cutBody is { Pending: true } records)
+        {
+            records.Pending = false;
+            PushContinuationMark(textPos);
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): builds the key of the continuation after positive lookaround
+    /// <paramref name="look"/>, started at <paramref name="textPos"/>, in
+    /// <see cref="CutBodyRecords.ContinuationKey"/>; see <see cref="_cutBody"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The continuation memo. In a partial call's second pass, each way a lookahead's body can end
+    /// at the end of the text (a run-out on one branch, a real success on another) runs the whole
+    /// continuation again, and the continuation holds every later lookahead, so where a capture of
+    /// the body is read later the search was exponential up to the fork budget, whose partial is
+    /// a phantom (D104: `(?:(?=(?:ab|a)*(b?)a?)a)+(?(1)c|d)` over 'a' * 9 + 'b' answered P(0, 10)
+    /// for P(10, 10)). Records inside the body cannot help there: a real success makes the
+    /// lookahead atomic and discards them. So the continuation itself is recorded: when
+    /// backtracking pops its <see cref="Opcode.ContinuationMark"/>, nothing after the lookaround
+    /// matched or ran out from the state the key holds, and a later arrival at the same lookaround
+    /// with the same key fails at once. A cut drops the mark, so a cut writes nothing.
+    /// </para>
+    /// <para>
+    /// The key holds everything the continuation reads: the position it resumes at; every group's
+    /// current span, exactly; and, built by <see cref="CutBodyKeyOf"/> for the first keyed repeat
+    /// of the body (<see cref="CutBodyFacts.ContinuationKeyRepeats"/>), whose enclosing loops include the
+    /// lookaround's, the touch flag and those loops' count, start and progress bit. The memo is off
+    /// where anything else could differ: under fuzzy matching, group calls, backtracking verbs and
+    /// <c>\K</c>; with a construct open around the lookaround; and with anything saved below its
+    /// parked state (<paramref name="savedBelow"/>), such as the parked start of a group open
+    /// around it, from which the continuation would capture.
+    /// </para>
+    /// </remarks>
+    /// <param name="look">The LOOKAROUND node.</param>
+    /// <param name="textPos">Where it started.</param>
+    /// <param name="savedBelow">How many bytes the save stack held below its parked state.</param>
+    /// <returns><see langword="false"/> where the memo is off.</returns>
+    internal bool ContinuationKeyOf(Node look, int textPos, long savedBelow)
+    {
+        if (
+            Pattern.CutBodies?.ContinuationKeyRepeats is not int[] repeats
+            || repeats[look.Index] is not (>= 0 and int repeat)
+            || savedBelow != 0
+            || IsFuzzy
+            || PartialSide == PartialNone
+            || Pattern.HasGroupCalls
+            || Pattern.HasBacktrackingVerb
+            || Pattern.KeepInSubmatch
+            || Pstack.Count != 2 * sizeof(long)
+            || !Matcher.ReadConstructStart(this, (int)Pstack.SizeAt(0), out Opcode baseOp, out _, out _, out _)
+            || baseOp != Opcode.Failure
+            || CutBodyKeyOf(repeat, _continuationGuardType, textPos, dropFrames: 1) is not long[] key
+        )
+        {
+            return false;
+        }
+
+        // The borrowed key's groups are the ones live at the repeat; a group the body writes after
+        // it and the continuation reads is not, so every group's span is added, exactly. A finer
+        // key than needed only costs hits. The borrowed key is finer in a second way: it reads the
+        // save-stack slots of the groups the repeat is inside, which by the lookaround's end are
+        // closed, so the slots hold what the body left there rather than group starts, and two
+        // arrivals whose bodies took different paths get different keys (lost hits, D123).
+        key[0] = ~(long)look.Index;
+        int k = _cutBody!.BaseLength;
+        for (int g = 0; g < Groups.Length; g++, k += 2)
+        {
+            GroupData group = Groups[g];
+            GroupSpan span = group.Current < 0 ? new GroupSpan(-1, -1) : group.Captures[group.Current];
+            key[k] = span.Start;
+            key[k + 1] = span.End;
+        }
+
+        key.AsSpan().CopyTo(_cutBody.ContinuationKey);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the guard type a continuation key carries, so that it can equal no
+    /// repeat's key (<see cref="NodeStatus.Body"/> and <see cref="NodeStatus.Tail"/> are the others).
+    /// </summary>
+    private const uint _continuationGuardType = 4;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): whether the continuation keyed by <see cref="ContinuationKeyOf"/>
+    /// failed before from <paramref name="textPos"/>.
+    /// </summary>
+    /// <param name="textPos">Where the lookaround started.</param>
+    /// <returns><see langword="true"/> if it did.</returns>
+    internal bool ContinuationFailed(int textPos) =>
+        _cutBody?.Store is { Count: > 0 } store
+        && store.Find(_cutBody.ContinuationKey) is GuardList list
+        && list.IsGuarded(textPos);
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): pushes the mark whose pop records that the continuation keyed by
+    /// <see cref="ContinuationKeyOf"/> failed from <paramref name="textPos"/>.
+    /// </summary>
+    /// <remarks>The key rides the byte stack with the mark, so a continuation allocates nothing.</remarks>
+    /// <param name="textPos">Where the lookaround started.</param>
+    internal void PushContinuationMark(int textPos)
+    {
+        Bstack.PushBlock(MemoryMarshal.AsBytes(_cutBody!.ContinuationKey.AsSpan()));
+        Bstack.PushSize(textPos);
+        Bstack.PushUInt8((byte)Opcode.ContinuationMark);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the <see cref="Opcode.ContinuationMark"/> arm: the continuation
+    /// failed, so it is recorded under its key. A write past the key cap is skipped, which only
+    /// loses pruning.
+    /// </summary>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopContinuationMark()
+    {
+        CutBodyRecords records = _cutBody!;
+        if (
+            !Bstack.PopSize(out long textPos)
+            || !Bstack.PopBlock(MemoryMarshal.AsBytes(records.ContinuationKey.AsSpan()))
+        )
+        {
+            return false;
+        }
+
+        // Counted before the write, as GuardRepeatAfterBlockedEnd and the keyed tail store count.
+        if (
+            records.Writes++ < KeyedTailWriteCap
+            && records.Store.ForWrite(records.ContinuationKey, mayAdd: records.Store.Count < CutBodyKeyCap)
+                is GuardList list
+        )
+        {
+            list.Guard((int)textPos, true);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): how many guard checks the records after blocked ends have answered in
+    /// this pass, so that a record written because of them goes under the instance too.
+    /// </summary>
+    internal long CutBodyHits => _cutBody?.Hits ?? 0;
 
     /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>
     /// <param name="index">The repeat index.</param>
@@ -2504,7 +3709,7 @@ internal sealed class MatchState : IDisposable
     // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
-        ActiveGuardList(index, guardType)?.Guard(textPos, protect);
+        ActiveGuardList(index, guardType, textPos, write: true)?.Guard(textPos, protect);
 
     /// <summary>Upstream <c>guard_repeat_range</c> (line 9534).</summary>
     /// <param name="index">The repeat index.</param>
@@ -2514,7 +3719,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="protect">Whether the span blocks matching or merely records.</param>
     internal void GuardRepeatRange(int index, int loPos, int hiPos, uint guardType, bool protect)
     {
-        GuardList? guardList = ActiveGuardList(index, guardType);
+        GuardList? guardList = ActiveGuardList(index, guardType, loPos, write: true);
 
         if (guardList is null)
         {
@@ -2578,7 +3783,9 @@ internal sealed class MatchState : IDisposable
         }
 
         WorkCounter.GuardChecked();
-        bool guarded = ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
+        bool guarded =
+            (ActiveGuardList(index, guardType, textPos, write: false)?.IsGuarded(textPos) ?? false)
+            || IsGuardedAfterBlockedEnd(index, textPos, guardType, out _);
         NoteSecondPassGuard(guarded);
 
         return guarded;
@@ -2604,8 +3811,29 @@ internal sealed class MatchState : IDisposable
 
         WorkCounter.GuardChecked();
         bool guarded =
-            ActiveGuardList(index, guardType) is GuardList list && list.TryGetSpan(textPos, out span) && span.Protect;
+            ActiveGuardList(index, guardType, textPos, write: false) is GuardList list
+            && list.TryGetSpan(textPos, out span)
+            && span.Protect;
+        if (!guarded && IsGuardedAfterBlockedEnd(index, textPos, guardType, out span))
+        {
+            NoteSecondPassGuard(true);
+            return true;
+        }
+
         NoteSecondPassGuard(guarded);
+
+        // NOT UPSTREAM (D85): a keyed tail's key can depend on the position as well (whether a span
+        // starts at or after it, whether an enclosing iteration started there), so the rest of a
+        // span written under this key need not be guarded under the key the caller would get at
+        // those positions. The span is cut where the key would change (ClipTailSpan).
+        if (
+            guarded
+            && (guardType & NodeStatus.Tail) != 0
+            && Pattern.RepeatInfoAt(index).TailKey is { DependsOnPosition: true } clipSpec
+        )
+        {
+            span = ClipTailSpan(clipSpec, textPos, span);
+        }
 
         return guarded;
     }
@@ -2738,3 +3966,63 @@ internal sealed class MatchState : IDisposable
 /// </param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 internal readonly record struct OptionalPassStart(int TextPos, int Changes, long CaptureChange, int Verbs);
+
+/// <summary>
+/// NOT UPSTREAM (D104): a match state's records written after blocked ends and of failed
+/// continuations, with the scratch keys they are built in; made only for a pattern that can write
+/// them, so that every other state holds no more than before D104.
+/// </summary>
+/// <param name="baseLength">The length of a repeat's key (<c>MatchState.CutBodyKeyLength</c>).</param>
+/// <param name="spanSlots">Room past it for every group's span, for a continuation key; 0 when no lookaround is keyed.</param>
+/// <param name="keysContinuations">
+/// Whether a lookaround is keyed. Not the same as <paramref name="spanSlots"/> being above 0: a
+/// pattern with no groups keys its lookarounds with no span slots.
+/// </param>
+internal sealed class CutBodyRecords(int baseLength, int spanSlots, bool keysContinuations)
+{
+    /// <summary>Writes in this pass, capped by <c>MatchState.KeyedTailWriteCap</c>.</summary>
+    internal long Writes;
+
+    /// <summary>Guard checks answered from the store in this pass (<c>MatchState.CutBodyHits</c>).</summary>
+    internal long Hits;
+
+    /// <summary>A continuation's key waits for its mark (<c>MatchState.HoldContinuation</c>).</summary>
+    internal bool Pending;
+
+    /// <summary>The records, one guard list per key.</summary>
+    internal KeyedTailGuards Store { get; } = new();
+
+    /// <summary>
+    /// Where <c>MatchState.CutBodyKeyOf</c> builds a key. Past <see cref="BaseLength"/>, a
+    /// continuation key adds every group's span and a repeat's key leaves zeros, so every key in
+    /// the store has one length.
+    /// </summary>
+    internal long[] Key { get; } = new long[baseLength + spanSlots];
+
+    /// <summary>The length of a repeat's part of <see cref="Key"/>.</summary>
+    internal int BaseLength { get; } = baseLength;
+
+    /// <summary>
+    /// The key <c>MatchState.ContinuationKeyOf</c> built, kept apart from <see cref="Key"/> because
+    /// guard checks may build other keys before it is pushed; empty when no lookaround is keyed.
+    /// </summary>
+    internal long[] ContinuationKey { get; } = keysContinuations ? new long[baseLength + spanSlots] : [];
+
+    /// <summary>Forgets everything, for a state reused by another call.</summary>
+    internal void Clear()
+    {
+        Writes = 0;
+        Hits = 0;
+        Pending = false;
+        Store.Clear();
+    }
+
+    /// <summary>Forgets the records, where a pass begins.</summary>
+    internal void Reset()
+    {
+        Writes = 0;
+        Hits = 0;
+        Pending = false;
+        Store.Reset();
+    }
+}

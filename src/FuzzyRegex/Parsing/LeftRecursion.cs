@@ -153,6 +153,7 @@ internal static class LeftRecursion
         // Records each group body under its number, and what each body's answer rests on.
         void Collect(RegexBase node, RegexBase body, int number)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
             if (ReferenceEquals(node, body))
             {
                 numberOf[body] = number;
@@ -184,6 +185,7 @@ internal static class LeftRecursion
         // Before the fixpoint ends a body is read afresh each time; after it, once per node.
         bool Nullable(RegexBase node)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
             if (memo is not null && memo.TryGetValue(node, out bool known))
             {
                 return known;
@@ -223,6 +225,7 @@ internal static class LeftRecursion
         // Records the calls reachable from the start ('atStart') and queues every call's target.
         void Walk(RegexBase node, bool back, bool atStart, List<((int, bool), CallGroup?)> outgoing)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
             switch (node)
             {
                 case Sequence sequence:

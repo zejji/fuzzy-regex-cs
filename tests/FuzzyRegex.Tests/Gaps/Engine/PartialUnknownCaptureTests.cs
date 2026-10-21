@@ -176,4 +176,181 @@ public sealed class PartialUnknownCaptureTests
     [Arguments(@"(?=a(?>(.)b))(?(1)x|y)", "a")]
     public void A_run_out_in_a_pattern_that_reads_captures_no_longer_ends_the_attempt(string pattern, string text) =>
         new FuzzyRegex(pattern).MatchAtStart(text, partial: true).Success.Should().BeFalse();
+
+    /// <summary>
+    /// D97: a group call anywhere in the pattern, outside the lookaround that runs out, leaves the
+    /// run-out rule on for a pattern that reads captures, so each row answers as its written-out
+    /// form does. In <c>(x)(?1)(?=\1)\Z</c> over 'xx' the lookahead needs an 'x' at 2 and <c>\Z</c>
+    /// needs the text to end there, so no continuation completes it. Until the fix any call made
+    /// the run-out end the attempt as a partial, P(0, 2). The rows cover <c>(?R)</c>, a named call,
+    /// the call before the group and after the lookaround, a call to a group the lookaround does
+    /// not read, a lookahead inside a lookbehind, a call in the body after the read, and
+    /// <c>fullmatch</c> standing in for <c>\Z</c>.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream answers the partial at the run-out (D11).
+    [Test]
+    [Arguments(@"(x)(?1)(?=\1)\Z", "xx", "match")]
+    [Arguments(@"y(?R)|(x)x(?=\1)\Z", "xx", "match")]
+    [Arguments(@"(?P<a>x)(?&a)(?=(?P=a))\Z", "xx", "match")]
+    [Arguments(@"(?1)(x)(?=\1)\Z", "xx", "match")]
+    [Arguments(@"(x)x(?=\1)\Z(?1)?", "xx", "match")]
+    [Arguments(@"(x)(y)(?2)(?=\1)\Z", "xyy", "match")]
+    [Arguments(@"(x)(?1)(?<=x(?=\1))\Z", "xx", "match")]
+    [Arguments(@"(x)(?=\1(?1))\Z", "x", "match")]
+    [Arguments(@"(?P<b>x)(?&b)(?=(?P=b))", "xx", "fullmatch")]
+    public void A_group_call_leaves_the_run_out_rule_on_for_a_backreference_in_a_lookaround(
+        string pattern,
+        string text,
+        string operation
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "fullmatch", StringComparison.Ordinal)
+            ? regex.FullMatch(text, partial: true)
+            : regex.MatchAtStart(text, partial: true);
+
+        m.Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// D97, the scanning forms: the attempt at 0 is refused as in the anchored row, and the attempt
+    /// at 1 runs out at the call outside any body and answers P(1, 2), as the written-out
+    /// <c>(x)x(?=\1)\Z</c> does. Reversed, the attempt at 2 is refused and the one at 1 answers
+    /// P(0, 1), as <c>(?r)\A(?&lt;=\1)x(x)</c> does.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream answers P(0, 2) for each.
+    [Test]
+    [Arguments(@"(x)(?1)(?=\1)\Z", "search", 1, 1)]
+    [Arguments(@"(x)(?1)(?=\1)\Z", "finditer", 1, 1)]
+    [Arguments(@"(?r)\A(?<=\1)(?1)(x)", "search", 0, 0)]
+    public void A_scan_with_a_group_call_refuses_the_attempt_the_lookaround_rules_out(
+        string pattern,
+        string operation,
+        int index,
+        int groupIndex
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match[] found = string.Equals(operation, "finditer", StringComparison.Ordinal)
+            ? [.. regex.Matches("xx", partial: true)]
+            : [regex.Match("xx", partial: true)];
+
+        found
+            .Select(static m => (m.PartialMatch, m.Index, m.Length, m.Groups[1].Index))
+            .Should()
+            .Equal((true, index, 1, groupIndex));
+    }
+
+    /// <summary>
+    /// D97's controls, which the fix leaves as they were: a literal or a capture in the lookahead
+    /// in place of the backreference, a longer text, and a lookahead without <c>\Z</c> (refused or
+    /// completed by 'xx' + 'x'); a backreference outside any lookaround, which 'xx' + 'x' completes.
+    /// A run-out inside a call the body opened still answers at once (the SHORTCUT on
+    /// <c>Matcher.RunOutInALookaroundBody</c>), so <c>(x)(?=(?1)\1)\Z</c> is not among them.
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments(@"(x)(?1)(?=x)\Z", "xx", false)]
+    [Arguments(@"(x)(?1)(?=(x))\Z", "xx", false)]
+    [Arguments(@"(x)(?1)(?=\1)\Z", "xxx", false)]
+    [Arguments(@"(x)x(?=\1)\Z", "xx", false)]
+    [Arguments(@"(x)(?1)(?=\1)", "xx", true)]
+    [Arguments(@"(x)(?1)\1", "xx", true)]
+    public void A_group_call_pattern_s_other_partials_are_unchanged(string pattern, string text, bool partial)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+
+        (m.Success, m.PartialMatch).Should().Be((partial, partial));
+        if (partial)
+        {
+            (m.Index, m.Length).Should().Be((0, text.Length));
+        }
+    }
+
+    /// <summary>
+    /// D98: a run-out inside a group call that the lookaround's body opened is taken as any other
+    /// run-out in the body, so each row answers as its written-out form does. In
+    /// <c>(x)(?=(?1)\1)\Z</c> over 'x' the lookahead needs 'xx' at 1 and <c>\Z</c> needs the text to
+    /// end there, so no continuation completes it; until the fix the run-out inside <c>(?1)</c>
+    /// answered P(0, 1) at once. The rows cover a numbered, a named and a nested call,
+    /// <c>(?R)</c>, a lookahead inside a lookbehind and <c>fullmatch</c> standing in for <c>\Z</c>.
+    /// Over 'xx' the run-out is at <c>\1</c>, after the call has returned (D97 fixed that one).
+    /// Each None is the brute-force judge's (<c>.scratch/s1016/d98/judge-out.tsv</c>).
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream answers the partial at the run-out (D11).
+    [Test]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "x", "match")]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "xx", "match")]
+    [Arguments(@"(x)(?=(?1)y)\Z", "x", "match")]
+    [Arguments(@"(?P<a>x)(?=(?&a)(?P=a))\Z", "x", "match")]
+    [Arguments(@"x(?=(?R)?y)\Z", "x", "match")]
+    [Arguments(@"(x)(?=(?&b)\1)\Z(?(DEFINE)(?<b>y(?1)))", "x", "match")]
+    [Arguments(@"(x)(?=(?&b)\1)\Z(?(DEFINE)(?<b>y(?1)))", "xy", "match")]
+    [Arguments(@"(x)(?<=x(?=(?1)\1))\Z", "x", "match")]
+    [Arguments(@"(x)(?=(?1)\1)", "x", "fullmatch")]
+    public void A_run_out_inside_a_call_the_lookaround_opened_is_taken_as_a_run_out_in_the_body(
+        string pattern,
+        string text,
+        string operation
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = string.Equals(operation, "fullmatch", StringComparison.Ordinal)
+            ? regex.FullMatch(text, partial: true)
+            : regex.MatchAtStart(text, partial: true);
+
+        (m.Success, m.PartialMatch).Should().Be((false, false));
+    }
+
+    /// <summary>
+    /// D98, the scanning forms: every attempt that starts inside the text is refused as in the
+    /// anchored rows, and the attempt at the text's end runs out outside any body, as the
+    /// written-out forms (<c>(x)(?=x\1)\Z</c>, <c>x(?=x?y)\Z</c>) answer.
+    /// </summary>
+    // DIVERGES FROM UPSTREAM, deliberately: upstream answers the partial at the first attempt's run-out.
+    [Test]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "x", "search", 1)]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "xx", "search", 2)]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "x", "finditer", 1)]
+    [Arguments(@"(x)(?=(?1)\1)\Z", "xx", "finditer", 2)]
+    [Arguments(@"x(?=(?R)?y)\Z", "x", "search", 1)]
+    [Arguments(@"x(?=(?R)?y)\Z", "x", "finditer", 1)]
+    public void A_scan_refuses_the_attempts_a_run_out_inside_a_called_group_rules_out(
+        string pattern,
+        string text,
+        string operation,
+        int index
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match[] found = string.Equals(operation, "finditer", StringComparison.Ordinal)
+            ? [.. regex.Matches(text, partial: true)]
+            : [regex.Match(text, partial: true)];
+
+        found.Select(static m => (m.PartialMatch, m.Index, m.Length)).Should().Equal((true, index, 0));
+    }
+
+    /// <summary>
+    /// D98's controls, which the fix leaves as they were: a run-out inside the called group where a
+    /// continuation completes the match ('xx' after <c>(x)(?=(?1)\1)</c>; 'b' for the condition's
+    /// no-branch) or where the run-out after the lookaround decides it (<c>z</c>), so each stays a
+    /// partial; and negative lookaheads whose body fails on the held text, which match in full.
+    /// </summary>
+    // Upstream answers the same.
+    [Test]
+    [Arguments(@"(x)(?=(?1)\1)", "x", true)]
+    [Arguments(@"(x)(?=(?1)y)z", "x", true)]
+    [Arguments(@"(x)(?(?=(?1)\1)a|b)", "x", true)]
+    [Arguments(@"(x)(?!(?1)\1)\Z", "x", false)]
+    [Arguments(@"(x)(?!(?1)y)", "x", false)]
+    public void A_run_out_inside_a_called_group_that_a_continuation_completes_stays_a_partial(
+        string pattern,
+        string text,
+        bool partial
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, partial, 0, text.Length));
+    }
 }

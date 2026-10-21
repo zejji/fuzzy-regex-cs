@@ -2123,6 +2123,24 @@ internal sealed class CallGroup : RegexBase
     internal override long MaxWidth() => RegexFlags.Unlimited;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NOT UPSTREAM'S (D97 follow-up): the called group's own width, where upstream takes the
+    /// call's unlimited one, so a required string after the call is placed as it is after the
+    /// group written out. With the offset unknown a search tried every start, and a partial
+    /// search of <c>(.)(?1)(?=.*\1)x</c> over 'ab' * 1000 ran each lookahead to the end and back:
+    /// 51962 steps where <c>(.).(?=.*\1)x</c> takes 8. A group that holds a call is still
+    /// unlimited, since <see cref="MaxWidth"/> stays so, which also covers recursion; so is
+    /// <c>(?R)</c>, which has no defining group.
+    /// </remarks>
+    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) =>
+        (
+            _info.DefinedGroups.TryGetValue(GroupNumber, out var defined)
+                ? defined.Group.MaxWidth()
+                : RegexFlags.Unlimited,
+            null
+        );
+
+    /// <inheritdoc />
     internal override string RenderKey() =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({nameof(CallGroup)},{GroupNumber})");
 

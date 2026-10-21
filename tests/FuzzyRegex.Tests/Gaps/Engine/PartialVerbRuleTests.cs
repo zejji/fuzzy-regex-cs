@@ -36,6 +36,12 @@ public sealed class PartialVerbRuleTests
     [Arguments("search", @"a$(*SKIP)(?<=b)|a.")]
     [Arguments("match", @"(?:(?>a$(*PRUNE)(?<=b))|a.)")]
     [Arguments("search", @"(?>a$(*SKIP)(?<=b))|a.")]
+    // V1-V3 themselves, moved from OpenDefectTests on 2026-10-18: since build chunk 9 deleted S57d
+    // their `\b` read is a witness too. V3 was red before D11 (F54, merge 65265cfd, 2026-10-04),
+    // and V1 and V2 passed through S57d and have held through its deletion (measured 2026-10-18).
+    [Arguments("match", @"(?:a\b(*PRUNE)(?<=b)|a.)")]
+    [Arguments("match", @"(?:a\b(*SKIP)(?<=b)|a.)")]
+    [Arguments("search", @"a\b(*SKIP)(?<=b)|a.")]
     public void A_verb_after_a_read_of_the_text_to_come_does_nothing(string operation, string pattern)
     {
         Match m = Run(operation, pattern, "a");
@@ -66,13 +72,18 @@ public sealed class PartialVerbRuleTests
     /// build chunk 9, so there the Debug counts are the witness, and the twin is the one a Release
     /// build checks.
     /// </summary>
-    // Upstream answers None to the twin too.
+    /// <remarks>
+    /// V4's own answer, moved from <c>OpenDefectTests</c> on 2026-10-18: red before D11 (F54, merge
+    /// 65265cfd, 2026-10-04), green from it on (measured 2026-10-18).
+    /// </remarks>
+    // Upstream answers None to V4 and the twin.
     [Test]
     [Category(EngineWork.Category)]
     public void A_verb_before_the_read_prunes()
     {
         using MatchState state = RunPartial(@"(?:a(*PRUNE)\b(?<=b)|a.)", "a");
 
+        new FuzzyRegex(@"(?:a(*PRUNE)\b(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
         new FuzzyRegex(@"(?:a(*PRUNE)$(?<=b)|a.)").MatchAtStart("a", partial: true).Success.Should().BeFalse();
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.VerbSkipped).Should().Be(0);
@@ -138,13 +149,19 @@ public sealed class PartialVerbRuleTests
     /// <c>|a\B</c>, which the continuations where the group committed need.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers None to both.
+    // T1's own answer, moved from OpenDefectTests on 2026-10-18: it passed through S57d before D11
+    // and has held through its deletion by D11 (F54, merge 65265cfd, 2026-10-04; measured
+    // 2026-10-18).
     [Test]
     [Category(EngineWork.Category)]
     public void A_verb_reached_back_through_a_skipped_cut_does_nothing()
     {
-        using MatchState state = RunPartial(@"(?:(?>a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)", "a");
+        const string pattern = @"(?:(?>a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)";
+        using MatchState state = RunPartial(pattern, "a");
+        Match m = new FuzzyRegex(pattern).MatchAtStart("a", partial: true);
         Match twin = new FuzzyRegex(@"(?:(?>a$|)(?<!a)a(*PRUNE)(?<=b)|a\n)").MatchAtStart("a", partial: true);
 
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 0, 1));
         (twin.PartialMatch, twin.Index, twin.Length).Should().Be((true, 0, 1));
         EngineWork.SkipUnlessCounting();
         state.PartialEventCount(PartialEvent.SuccessTurnedPartial).Should().Be(1);
@@ -202,7 +219,10 @@ public sealed class PartialVerbRuleTests
     /// An attempt whose start a touched attempt chose has touched the text to come too. The first
     /// pass and the second run the same code only from the same start, and after a touched attempt
     /// the next start is the ordinary bump-along's only when nothing can move it: a <c>(*SKIP)</c>
-    /// moves it, and so does a <c>\K</c> whose entry a cut discarded. In each row the first pass
+    /// moves it. A <c>\K</c> whose entry a cut discarded used to move it too: D88 restored one a
+    /// construct's cut discarded, so <c>a(?=b\Z)(?>\K)x|b</c> left these rows (see
+    /// <c>KeepAcrossCutTests</c>), and D92 made the bump-along start from the attempt, so
+    /// <c>a(?=b\Z)\K(*PRUNE)x|b</c> left them (see <c>KeepBeforeVerbTests</c>). In each row the first pass
     /// jumps past start 1, the second pass reaches it, and <c>b</c> matches there on the held text:
     /// a success some continuations need, so a partial. Answered as a complete match, the port
     /// reported a match the held text does not have. The first two rows' completions are the port's
@@ -212,13 +232,11 @@ public sealed class PartialVerbRuleTests
     /// the second pass tries a start no continuation reaches. The other rows are the judge's.
     /// </summary>
     // DIVERGES FROM UPSTREAM, deliberately: upstream answers the first two rows F(1, 2) and F(1, 3)
-    // (its skip moves the slice when it runs) and the last three P(2, 2), a start too late.
+    // (its skip moves the slice when it runs) and the last P(2, 2), a start too late.
     [Test]
     [Arguments(@"(?=ab(*SKIP)c|a)a(*SKIP)x|b", "ab", 1, 2)]
     [Arguments(@"(?:(a)|b)(?=a(.)(*SKIP)b|a)a(*SKIP)\1|ab", "aab", 1, 3)]
     [Arguments(@"ab\Z(*SKIP)(*F)|b", "ab", 1, 2)]
-    [Arguments(@"a(?=b\Z)(?>\K)x|b", "ab", 1, 2)]
-    [Arguments(@"a(?=b\Z)\K(*PRUNE)x|b", "ab", 1, 2)]
     public void A_start_a_touched_attempt_chose_is_touched_too(string pattern, string text, int start, int end)
     {
         Match m = new FuzzyRegex(pattern).Match(text, partial: true);

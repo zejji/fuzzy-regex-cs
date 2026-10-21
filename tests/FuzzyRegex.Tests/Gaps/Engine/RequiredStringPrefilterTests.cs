@@ -201,6 +201,47 @@ public sealed class RequiredStringPrefilterTests
         Search("..needle", "xy needle no").Should().Be("(1,9)");
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D97 follow-up): a call to a group of bounded width counts that width towards
+    /// the offset, as the group written out does, so a call no longer makes the search try every
+    /// start. A group that holds a call, and <c>(?R)</c>, have no bound, as upstream has none for
+    /// any call. Upstream gives every call an unlimited width.
+    /// </summary>
+    [Test]
+    [Arguments(@"(.)(?1)x", 2)]
+    [Arguments(@"(.).x", 2)]
+    [Arguments(@"(?P<a>.b?)(?&a)x", 4)]
+    [Arguments(@"(.(?1)?)x", -1)]
+    [Arguments(@"(.)(?1)(?R)?x", -1)]
+    [Arguments(@"(.)(?2)(.(?1)?)x", -1)]
+    public void A_call_to_a_group_of_bounded_width_counts_towards_the_offset(string pattern, long offset) =>
+        new FuzzyRegex(pattern).PatternObject.ReqOffset.Should().Be(offset);
+
+    /// <summary>
+    /// The D97 cost row: with an unknown offset every start ran the lookahead's <c>.*</c> to the
+    /// end and back, quadratic in the text, where the written-out form starts at 1998. Measured on
+    /// fix/d97 before this: 51962 steps over 'ab' * 1000; the written-out form takes 8.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(.)(?1)(?=.*\1)x")]
+    [Arguments(@"(.).(?=.*\1)x")]
+    [Arguments(@"(.)(?1)(?=.*a)x")]
+    public void A_partial_search_through_a_call_starts_where_its_written_out_form_does(string pattern)
+    {
+        var regex = new FuzzyRegex(pattern);
+        string text = string.Concat(Enumerable.Repeat("ab", 1000));
+        Match m = regex.Match(text, partial: true);
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 1998, 2));
+
+        EngineWork.SkipUnlessCounting();
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.Match(text, partial: true),
+            40,
+            "the required string's offset places the first attempt at 1998"
+        );
+    }
+
     [Test]
     [Property("Upstream", "none - gap test")]
     public void A_required_string_behind_a_variable_head_only_bounds_the_search()

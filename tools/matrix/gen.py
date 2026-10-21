@@ -48,6 +48,7 @@ import tagger  # noqa: E402
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 ROW_ATTEMPTS_PER_CELL = 40  # attempts per row still needed before a cell is called infeasible
+WRITTEN_OUT_MAX = 4000  # longest depth-10 written-out form kept for C2 (characters)
 
 # ----------------------------------------------------------------------------------------------
 # Construct ids
@@ -574,6 +575,13 @@ def make_row(cell: tuple[str, ...], r: random.Random, families: dict, scoped=Fal
             try:
                 depths = (2, 3, 4, 5, 6) if recursive else (8,)
                 row["writtenOut"] = {str(d): render(root, t, inline=d, number=numbers) for d in depths}
+                if recursive:
+                    # Depths 8 and 10 as well: in run 20261016-1 two written-out forms reached the
+                    # call's answer only at depth 10. A body with two calls doubles per level, so
+                    # the deep pair is kept only while it stays small.
+                    deep = {str(d): render(root, t, inline=d, number=numbers) for d in (8, 10)}
+                    if len(deep["10"]) <= WRITTEN_OUT_MAX:
+                        row["writtenOut"].update(deep)
                 if not recursive and "(?!)" in row["writtenOut"]["8"]:
                     row["writtenOut"] = None
             except (KeyError, RecursionError):

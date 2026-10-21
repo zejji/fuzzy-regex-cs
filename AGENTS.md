@@ -30,7 +30,7 @@ src/FuzzyRegex/Engine/      port of upstream/src/_regex.c
 src/FuzzyRegex/Unicode/     tables and the C helpers over them; *.g.cs is generated
 src/FuzzyRegex/             public API (port of upstream/regex/_main.py)
 tools/transliterate-unicode.py   writes Unicode/*.g.cs from upstream/src/_regex_unicode.c
-tools/build-character-names.py   writes UnicodeCharacterNames.g.cs from the Unicode 17.0.0 UCD
+tools/build-character-names.py   writes UnicodeCharacterNames.g.cs from the Unicode 18.0.0 UCD
 tools/record-unicode-fixtures.py writes the Unicode oracle fixtures for the test suite
 tests/FuzzyRegex.Tests/Ported/     translated upstream tests - counts towards parity
 tests/FuzzyRegex.Tests/Gaps/       our own tests - does not count towards parity

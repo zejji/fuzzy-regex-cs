@@ -62,17 +62,7 @@ internal sealed record LookaroundSuccess(
     GroupSpan[] Captures,
     long[] FuzzyCounts,
     FuzzyChange[] FuzzyChanges
-)
-{
-    /// <summary>Whether another success of the same frame leads to the same continuation.</summary>
-    /// <param name="other">The other success.</param>
-    /// <returns><see langword="true"/> if the keys are equal.</returns>
-    internal bool SameContinuation(LookaroundSuccess other) =>
-        Frame == other.Frame
-        && Captures.AsSpan().SequenceEqual(other.Captures)
-        && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
-        && FuzzyChanges.AsSpan().SequenceEqual(other.FuzzyChanges);
-}
+);
 
 /// <summary>
 /// NOT UPSTREAM'S, D11: the second-pass events the port grid counts per row (design 8.1, item 2),
@@ -235,4 +225,10 @@ internal enum PartialEvent
     /// failed (<c>Matcher.AnOpenSectionIsOverItsLimits</c>).
     /// </summary>
     RunOutOverASectionsLimits,
+
+    /// <summary>
+    /// D98: a run-out inside a group call the body opened, in a body that feeds no decision,
+    /// undid the call and was taken at the call (<c>Matcher.AbandonTheCallsTheBodyOpened</c>).
+    /// </summary>
+    RunOutCallAbandoned,
 }

@@ -59,10 +59,10 @@ FOOTER = '}\n'
 # body means an upstream change to one of them fails here rather than leaving UnicodeCasing.cs
 # quietly stale. Re-pin only after reading the upstream diff and updating UnicodeCasing.cs.
 HAND_PORTED = {
-    'get_script_extensions': '2a5d6eabde079db1978ccfab3e2d8d348c6fd64f0529c54f06418331aec60ec9',
-    'get_all_cases': '4591b155724ba2e8b3d3bbcf86df9056f362af3ff6fb0a6a7b7c7d7d6f5293be',
-    'get_simple_case_folding': 'd44f1e16df10b15272418551545777b193fb19d0273eaa04823542aa40ab5678',
-    'get_full_case_folding': '72066f2ca5b21dc3801d5df2016ba48d416524cbede84507df06c016da9e31ca',
+    'get_script_extensions': 'b84aee6d1614f4a03f18fbaf7dcdfd8f14c0e8a7369c5b96b7874002299f868e',
+    'get_all_cases': '292c7c44f48d832b1a0bff8d8d464a7f638e4e8b2dcb7dcdf67eb00b16b7396d',
+    'get_simple_case_folding': '534e8ca197c3b1b59d8ecb28ad0f01f113f6330ae4d3f4790f5da86bdd803f5c',
+    'get_full_case_folding': '123cf5da172fba9ff134f637bfe700f8f979bdbea2a2e3a7caede953c46b6b6f',
 }
 
 
@@ -139,8 +139,8 @@ def parse_header(path: Path) -> tuple[list[tuple[str, str]], dict[str, int]]:
         r'typedef\s+[^;{]+;',                       # scalar typedefs
         r'typedef\s+struct\s+\w+\s*\{[^}]*\}\s*\w+;',  # struct typedefs
         r'typedef\s+\w+\s*\(\*\w+\)\([^)]*\);',     # function-pointer typedef
-        r'#if[^\n]*\n(?:[^\n]*\n)*?#endif\n',       # the FALSE/TRUE guard
-        r'(?:RE_UINT32|int)\s+re_\w+\([^)]*\);',    # function declarations
+        r'#include\s+<std(?:bool|int)\.h>\n',       # C99 bool and fixed-width integers
+        r'(?:uint32_t|int)\s+re_\w+\([^)]*\);',     # function declarations
     )
     while True:
         src.skip_trivia()
@@ -202,7 +202,7 @@ def parse_source(path: Path):
             continue
 
         # A function: RETTYPE name(args) { ... \n}
-        m = src.try_match(r'(RE_UINT32|int)\s+(\w+)\(([^)]*)\)\s*\{(.*?)\n\}\n', re.S)
+        m = src.try_match(r'(uint32_t|int)\s+(\w+)\(([^)]*)\)\s*\{(.*?)\n\}\n', re.S)
         if m:
             pieces.append({
                 'kind': 'function',
@@ -230,7 +230,7 @@ def _statement_rules():
         return pascal(name)
 
     return [
-        (re.compile(r'RE_UINT32 (field_2|field_1|field_0|offset|v);'),
+        (re.compile(r'uint32_t (field_2|field_1|field_0|offset|v);'),
          lambda m: f'uint {m.group(1)};'),
         (re.compile(r'(field_2|field_1|field_0|offset|v) = codepoint >> (\d+);'),
          lambda m: f'{m.group(1)} = codepoint >> {m.group(2)};'),
@@ -271,9 +271,9 @@ def _translate_statement(name: str, line: str) -> str:
 def translate_function(piece: dict) -> list[str]:
     """Translates one generic lookup function into C#."""
     name = piece['name']
-    if piece['args'].strip() != 'RE_UINT32 codepoint':
+    if piece['args'].strip() != 'uint32_t codepoint':
         raise Fail(f'{name}: unexpected signature {piece["args"]!r}')
-    if piece['ret'] != 'RE_UINT32':
+    if piece['ret'] != 'uint32_t':
         raise Fail(f'{name}: unexpected return type {piece["ret"]}')
 
     out = [f'    /// <summary>Upstream <c>{name}</c>.</summary>',
@@ -313,25 +313,31 @@ def translate_function(piece: dict) -> list[str]:
 # Emitting tables
 # --------------------------------------------------------------------------------------
 
+# The C element types upstream's generator emits (``determine_entry_type`` and the struct
+# typedefs), and the C# element type each becomes.
+CS_TYPE = {'uint8_t': 'byte', 'uint16_t': 'ushort', 'uint32_t': 'uint'}
+
+
 def emit_scalar_table(piece: dict):
-    """A RE_UINT8 or RE_UINT16 table. Returns the C# lines, the element count and the index."""
+    """A uint8_t, uint16_t or uint32_t table. Returns the C# lines, the element count and the index."""
     values = split_values(piece['body'])
     name = pascal(piece['name'])
     lines = []
     if piece['comment']:
         lines.append(f'    // {piece["comment"]}')
-    if piece['type'] == 'RE_UINT8':
+    if piece['type'] == 'uint8_t':
         # A ReadOnlySpan<byte> over a literal is emitted as RVA static data: no allocation,
         # no static constructor, and the JIT can fold the bounds check.
         lines.append(f'    internal static ReadOnlySpan<byte> {name} =>')
         lines.append('    [')
         lines.extend(_wrap(values, 16, '        '))
         lines.append('    ];')
-    elif piece['type'] == 'RE_UINT16':
-        # ReadOnlySpan RVA data is byte-only, so a 16-bit table is a static array. Roslyn
+    elif piece['type'] in ('uint16_t', 'uint32_t'):
+        # ReadOnlySpan RVA data is byte-only, so a wider table is a static array. Roslyn
         # still emits it as a metadata blob plus RuntimeHelpers.InitializeArray, which
         # handles endianness, rather than as element-wise stores.
-        lines.append(f'    internal static readonly ushort[] {name} = new ushort[]')
+        cs_type = CS_TYPE[piece['type']]
+        lines.append(f'    internal static readonly {cs_type}[] {name} = new {cs_type}[]')
         lines.append('    {')
         lines.extend(_wrap(values, 12, '        '))
         lines.append('    };')
@@ -454,8 +460,8 @@ PROPERTY_FIELDS = [('name', 'Name', 'ushort', 1), ('id', 'Id', 'byte', 1),
                    ('value_set', 'ValueSet', 'byte', 1)]
 PROPERTY_VALUE_FIELDS = [('name', 'Name', 'ushort', 1), ('value_set', 'ValueSet', 'byte', 1),
                          ('id', 'Id', 'ushort', 1)]
-ALL_CASES_FIELDS = [('delta', 'Delta', 'uint', 1), ('others', 'Others', 'ushort', 3)]
-FULL_FOLDING_FIELDS = [('data', 'Data', 'ushort', 3)]
+ALL_CASES_FIELDS = [('delta', 'Delta', 'uint', 1), ('others', 'Others', 'uint', 3)]
+FULL_FOLDING_FIELDS = [('data', 'Data', 'uint', 3)]
 
 
 def build() -> tuple[dict[str, str], dict]:

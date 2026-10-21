@@ -46,9 +46,10 @@ public sealed class RelativeCallAndAliasTests
 
     /// <summary><c>(?+1)</c> calls a group that has not been parsed yet.</summary>
     /// <remarks>
-    /// The forward call makes the required string unreachable from the start, so
-    /// <c>req_offset</c> is -1 rather than 0 - which is what a wrong <c>max_width</c> on
-    /// <c>CallGroup</c> would change.
+    /// Upstream's <c>req_offset</c> is -1: it gives every call an unlimited width. Here the call
+    /// counts its group's width, one character, so the offset is 1, where the required 'a' after
+    /// it sits (D97 follow-up, <c>CallGroup.GetRequiredString</c>). The offset proves the forward
+    /// call resolved to group 1.
     /// </remarks>
     [Test]
     public void A_forward_relative_call_resolves_to_a_group_defined_later()
@@ -56,7 +57,7 @@ public sealed class RelativeCallAndAliasTests
         CompiledPattern compiled = PatternCompiler.Compile("(?+1)(a)");
 
         compiled.Code.Should().Equal(31u, 0, 11, 0, 30, 1, 1, 1, 12, 1, 97, 20, 20, 1);
-        compiled.ReqOffset.Should().Be(-1);
+        compiled.ReqOffset.Should().Be(1);
         compiled.ReqChars.Should().Equal(97);
     }
 

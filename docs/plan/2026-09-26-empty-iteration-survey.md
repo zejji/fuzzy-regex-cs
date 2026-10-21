@@ -415,6 +415,10 @@ has a 2-second limit.
 | s6: the third review's grid, empty iterations possible only before a consuming one (`^`, conditionals) | 4,800 | 0 | 0 of 4,800 checked | 0 |
 | rand: the second review's random nested sweep, seeds 3 and 4, 13 constraint kinds | 7,200 | 0 | 0 of 7,200 checked | 1 (below) |
 
+Correction (2026-10-18, D95): s5's `{1<=d}` and `{2<=e}` rows tested literal braces, not budgets. A
+minimum with no maximum is literal text in upstream and in this port
+(`Gaps/Parsing/FuzzyMinimumWithoutMaximumTests`).
+
 "Lost" means the oracle found a match and "needed" did not, or, for `search`, that "needed" found
 its match at a later start than the oracle (the third review showed the script had checked only
 existence there; the s2 and s3 figures above include the start check).

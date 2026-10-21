@@ -105,8 +105,8 @@ itself has none:
 ## Fuzzy syntax in one page
 
 Fuzzy matching is written inside `{...}` straight after the construct it applies to - usually a
-group. Every example below compiles against `src/FuzzyRegex/PublicAPI.Unshipped.txt` as it stands
-today.
+group. Every example below compiles against the public API listed in
+`src/FuzzyRegex/PublicAPI.Shipped.txt`.
 
 ### `{e<=n}`: allow up to `n` errors of any kind
 
@@ -726,7 +726,8 @@ too. Internal-error escapes (`RuntimeError`, `AttributeError`, `TypeError`, `Key
 `V0|V1`) become `NotSupportedException` or `ArgumentOutOfRangeException`; the 1 GB backtracking
 bound and runaway recursion raise `InvalidOperationException`, never `OutOfMemoryException`; a
 matching timeout raises `System.Text.RegularExpressions.RegexMatchTimeoutException`; `\p{Infinity}`
-raises `OverflowException` carrying Python's own message.
+raises `OverflowException` carrying Python's own message. The `RecursionError` upstream raises for
+a deeply nested pattern becomes `FuzzyRegexParseException` (see "Nesting limit").
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -930,12 +931,12 @@ Match m = FuzzyRegex.Match("A", "(?ai)\\p{Ll}");
 Console.WriteLine(m.Success);   // True - upstream's regex.search(r'(?ai)\p{Ll}', 'A') is None
 ```
 
-### The Unicode data is version 17.0.0
+### The Unicode data is version 18.0.0
 
-`\N{...}` and other Unicode-table lookups resolve against Unicode 17.0.0 here, where upstream
-resolves through whatever `unicodedata` version the host CPython build ships (16.0.0 at the time
-this was measured). A small number of codepoints named in 17.0.0 but not 16.0.0 resolve here and
-raise upstream.
+`\N{...}` and other Unicode-table lookups resolve against Unicode 18.0.0 here, the version of
+upstream's own tables, where upstream resolves `\N{...}` through whatever `unicodedata` version the
+host CPython build ships (16.0.0 at the time this was measured). The codepoints named in 17.0.0 or
+18.0.0 but not 16.0.0 resolve here and raise upstream.
 
 `tests/FuzzyRegex.Tests/Gaps/Unicode/UnicodeCharacterNameTests.cs`'s `Every_stored_name_resolves_to_its_own_codepoint`
 pins one such name: `"TOLONG SIKI DIGIT ONE"` resolves to U+11DE1, a codepoint Unicode 17.0.0 added.
@@ -1194,6 +1195,10 @@ Match m = new FuzzyRegex(@"(?=..)[ab]").MatchAtStart("x", partial: true);
 Console.WriteLine(m.Success);   // False - upstream answers a partial at (0, 1)
 // The branch x of the negative lookahead matches the text held, so the lookahead fails for every continuation.
 Console.WriteLine(new FuzzyRegex(@"(?!.a|x)x").MatchAtStart("x", partial: true).Success);   // False - upstream: True
+// The same for a backreference, with a group call in the pattern: \1 needs an 'x' at 2, \Z the end.
+Console.WriteLine(new FuzzyRegex(@"(x)(?1)(?=\1)\Z").MatchAtStart("xx", partial: true).Success);   // False - upstream: True
+// And for a run-out inside a call the lookahead makes: it needs "xx" at 1, \Z the end there.
+Console.WriteLine(new FuzzyRegex(@"(x)(?=(?1)\1)\Z").MatchAtStart("x", partial: true).Success);   // False - upstream: True
 // A search can still start at the edge, where a longer text could begin a match.
 Match s = new FuzzyRegex(@"(?=..)[ab]").Match("x", partial: true);
 Console.WriteLine((s.Success, s.PartialMatch, s.Index, s.Length));   // (True, True, 1, 0)
@@ -1290,6 +1295,24 @@ The same rule gives some partial matches that no text completes, such as `(?wr)a
 partial contract allows it: a partial promises only that more text may complete the match (see
 `Match.PartialMatch`). There is no option to restore the upstream answer. Ledger entry 75.
 
+### A negative lookahead around a lookahead that holds for every continuation reports no partial
+
+When a lookahead's body has a lookaround that touches the end of the text in one alternative,
+upstream can leave the lookahead undecided even where another alternative makes it succeed for
+every continuation. A negative lookahead around it then reports a partial whose span the pattern
+cannot make at any length of text. Here the lookahead is decided, so the negative one fails.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))").MatchAtStart("a", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch));                       // (False, False) - upstream answers a partial (0, 1) for this zero-width pattern
+Match n = new FuzzyRegex(@"(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a").Match("aa", partial: true);
+Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));   // (True, True, 1, 1) - upstream answers a partial (0, 2) for this one-character pattern
+```
+
+There is no option to restore the upstream answer. Ledger entry 94.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted
@@ -1328,6 +1351,21 @@ the memory has already been spent by then, so a graph that is refused may be sma
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.
 
+### Nesting limit
+
+Compiling a pattern recurses once for each level of nesting, and in .NET a stack overflow cannot be
+caught: it ends the process. So this port refuses a pattern with more than 500 levels of groups
+and sets, throwing `FuzzyRegexParseException` with the message "too deeply nested: more than 500
+levels of groups and sets" and the offset of the bracket that opens the 501st level. In a Release
+build every construct tested compiles at 500 levels on a 1 MB stack. A thread with a smaller stack can run out
+sooner, and then gets `FuzzyRegexParseException` with the message "too deeply nested to compile on
+this thread: its stack ran out", an offset of -1, and the `InsufficientExecutionStackException`
+as its inner exception.
+
+Upstream has no limit of its own. Python's recursion limit stops it first, with `RecursionError`
+rather than `regex.error`, at 140 to 330 levels depending on the construct (regex 2026.9.10 on
+Python 3.14), so at Python's default recursion limit no pattern upstream compiles is refused here.
+
 ### A search may open a fuzzy match with an inserted character at the position it started from, when no later match would start inside it
 
 Upstream refuses to let a fuzzy match begin with an inserted character at the exact position the
@@ -1354,6 +1392,13 @@ search started and fails one character on. Upstream contradicts itself here, whi
 two ways according to where the caller started. Upstream issues 563 and 564 have tracked it since
 17 April 2025, with the maintainer's own comment "It looks like a bug". There is no option to
 restore the upstream answer.
+
+A partial search keeps the match at the starting position whenever more text could complete it,
+even if a later partial is also open, because whether that later one would start inside it depends
+on text that has not arrived. So the partial start is never later than the match the completed
+text gives, and sometimes earlier. With `(?:ab){1<=i<=2}`, the partial over `"ba"` starts at 0
+here and at 1 upstream, and `"bab"` matches from 0 here (upstream: no match). Over `"xxa"` the
+partial starts at 0 here and at 1 upstream, and `"xxab"` matches from 1 in both.
 
 ### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
 
@@ -1558,7 +1603,7 @@ no option to restore the upstream answer; deleting the constraint from the patte
 
 `(?w)` switches `\b`, `\B`, `\m` and `\M` to Unicode's default word boundaries, the rules of
 [UAX #29](https://www.unicode.org/reports/tr29/). Unicode publishes a conformance file for them,
-`WordBreakTest.txt`, and this port agrees with every one of its 1,944 lines for Unicode 17.0.0, the
+`WordBreakTest.txt`, and this port agrees with every one of its 1,944 lines for Unicode 18.0.0, the
 version of its tables. Upstream disagrees with 268, for three reasons.
 
 Combining marks and format characters, such as U+0308 COMBINING DIAERESIS or U+2060 WORD JOINER,
@@ -1587,7 +1632,7 @@ nothing changes there.
 [UAX #29](https://www.unicode.org/reports/tr29/): 'e' followed by U+0301 COMBINING ACUTE ACCENT is
 one cluster, and so is CR LF. Where a cluster starts and ends is a property of the text, so a
 reversed search, `(?r)`, should find the same clusters in the opposite order. Here it does, on every
-line of Unicode's conformance file for Unicode 17.0.0. Upstream's reversed `\X` stops after one
+line of Unicode's conformance file for Unicode 18.0.0. Upstream's reversed `\X` stops after one
 codepoint, so it splits the accent from its letter and loses the letter, and a lookbehind that
 holds `\X`, which also reads backwards, sees only part of a cluster.
 
@@ -1600,7 +1645,26 @@ Console.WriteLine(string.Join(" ", backwards.Matches("e\u0301a").Select(static m
 Console.WriteLine(new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index);                              // 2 - upstream: no match
 ```
 
-Forward matching is unchanged: upstream's forward `\X` already agrees with the whole file.
+Forwards, upstream's `\X` agrees with the whole file except for the Indic conjunct rule in the next
+section.
+
+### `\X` keeps a conjunct linker with the next consonant, as Unicode 18.0.0's GB9c says
+
+In Devanagari and many other Indic scripts a virama joins two consonants into one written conjunct,
+so the virama and the consonant after it belong to one grapheme cluster. Unicode 18.0.0 simplified
+the rule that says so: a virama, or another character Unicode marks as a conjunct linker, keeps the
+next consonant in its cluster whatever comes before the linker. Unicode 17.0.0 also required a
+consonant before it. Upstream moved its tables to 18.0.0 but kept the older rule, so its `\X`
+follows neither version and disagrees with 10 lines of the 18.0.0 conformance file. This port
+follows 18.0.0 and agrees with every line, in both directions.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'a', DEVANAGARI SIGN VIRAMA, DEVANAGARI LETTER TA: the virama keeps TA in its cluster.
+var cluster = new FuzzyRegex(@"\X");
+Console.WriteLine(string.Join(" ", cluster.Matches("a्त").Select(static m => m.Length)));  // 3 - upstream: 2 1
+```
 
 ### A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start
 
@@ -1858,6 +1922,25 @@ Console.WriteLine((s.Index, s.Length));   // (0, 3) - upstream: (2, 1)
 A minimum on substitutions or deletions alone cannot be met this way, since an insertion is
 neither. There is no option to restore the upstream answer. Ledger entry 51.
 
+### Below a fuzzy section's minimum, an item that matched exactly is also tried with a text character inserted in front of it
+
+The same order problem one step earlier. Upstream tries errors on an item only when it fails to
+match, so when a later item has to take the error a minimum asks for, and only an extra character
+in front of an earlier item would line it up, upstream finds nothing. Here an item that matched is
+also tried with an insertion in front of it while a minimum is unmet, after the deletion of that
+item and before any earlier choice.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The 'a' is inserted, and the 'b' is substituted for the pattern's 'a'.
+Match m = FuzzyRegex.FullMatch("ab", "(?:a){1<=s<=1,i<=1}");
+Console.WriteLine((m.Index, m.Length, m.FuzzyCounts.Substitutions, m.FuzzyCounts.Insertions));   // (0, 2, 1, 1) - upstream: no match
+```
+
+Upstream already finds the mirror image, 'ba', where the substitution comes first. There is no
+option to restore the upstream answer. Ledger entry 88.
+
 ### A fuzzy run can edit an expanding subject character as one character
 
 The same holds in the subject, the text being searched. `ǰ` folds to two characters, `j` and a
@@ -1996,6 +2079,56 @@ Console.WriteLine(m.FuzzyCounts.Total);   // 0
 
 There is no option to restore the upstream answer. Ledger entry 32.
 
+### BESTMATCH and ENHANCEMATCH never let their budget decide a negative lookaround or a conditional's test
+
+Both flags look for a better match by holding each new attempt to fewer errors than the last.
+That budget is how the search narrows down; it does not change what the pattern matches. So the
+body of a negative lookaround, or of a conditional's test, matches here exactly when it would
+without the flag. Upstream holds those bodies to the budget too, and a body with no errors left to
+spend passes a test the pattern fails.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?e)(?:x(?:b){d<=1}|(?!a{s<=1}))").Match("x");
+Console.WriteLine(m.Index);   // 1 - upstream: 0, which is not a match: a{s<=1} matches the 'x'
+Console.WriteLine(m.FuzzyCounts.Total);   // 0
+```
+
+There is no option to restore the upstream answer. Known defect D102, ledger entry 32.
+
+### BESTMATCH and ENHANCEMATCH answer a match the pattern can make
+
+An atomic group, a possessive repeat, a lookaround and a conditional's test take the first match
+of their body and never come back for another. Upstream's budget can make that first match fail,
+so the construct takes a later one, and the answer is a span the pattern without the flag does
+not match. Here the construct takes the same match it takes without the flag, and fails if that
+match costs more errors than the search allows. A `(*PRUNE)` or `(*SKIP)` has the same fault
+upstream, and no cheap repair: holding the search's limit only at the end of the match made it
+up to a hundred times slower and could pass over a better match. So BESTMATCH or ENHANCEMATCH on
+a fuzzy pattern that holds either verb is refused when the pattern is compiled, with an error
+that names the flag and the verb.
+
+The same fault had a second route. When ENHANCEMATCH looks for a better fit inside the match it
+found, upstream cuts the text off at that match's edges, so an atomic group or a possessive repeat
+stops at the cut instead of taking what follows. `(?e)(?:xaq|a(?>a*)){e<=1}` over 'xaaa' is (1, 3)
+exact upstream, but in the whole text the atomic `a*` at 1 takes 'aaa' and the match there is
+(1, 4). Here the better fit must still lie inside the first match, but the pattern reads the whole
+text, so the answer is (0, 3) with one substitution, as without the flag. Only the atomic group
+reads past the first match, so a pattern whose atomic group itself runs to the end of the text can
+search more slowly on long text built to defeat it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?b)(?:(?>ab|a)c){s<=1}").Match("aacbc");
+Console.WriteLine(m.Index);   // 0 - upstream: 1, which is not a match: at 1 the group takes 'ac'
+Console.WriteLine(m.FuzzyCounts.Total);   // 1
+```
+
+There is no option to restore the upstream answer. Known defects D109 and D111, ledger entries 32
+and 93.
+
 ### The calls inside a called group run with the call's direction and fuzziness too
 
 A call such as `(?&g)` matches what the group's body would match written out at the call: exactly
@@ -2012,6 +2145,24 @@ Console.WriteLine(new FuzzyRegex("(?&g4)(?:(?P<g4>(?&g3))){s<=1}(?P<g3>a)").Matc
 
 Upstream gives this port's answers with the calls written out. There is no option to restore the
 upstream answer. Ledger entry 56.
+
+### A whole-pattern call that re-opens a fuzzy section where the same call is already open is refused
+
+Inside a fuzzy section, `(?R)` calls the whole pattern, which opens the section again with its error
+counts at zero. When that call is made at the position where the same call is already open, this port
+refuses it, as it refuses any recursion that has read nothing new; Perl and PCRE2 raise an error there.
+Upstream runs it, and the deeper level can reach a `(*SKIP)` or `(*PRUNE)` on a path the outer section
+rejects, which moves the search on.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})").Match("b").Index); // 0 - upstream: 1
+```
+
+A call that stays in the section it was made in still runs when the section's counts have changed, so
+`(?:(?P<g>a(?&g)b|c)){d<=2}` matches all of 'cbb' with two deletions in both engines. There is no option
+to restore the upstream answer.
 
 ### A call inside a lookaround in a fuzzy section runs its group exactly, as the lookaround's own body does
 
@@ -2207,6 +2358,78 @@ using Fuzzy.Text.RegularExpressions;
 Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=3}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 3
 Console.WriteLine(new FuzzyRegex(@"(?e)(?:ob+?a){e<=2}").FullMatch("bab").FuzzyCounts.Total);  // 2 - upstream: 2
 ```
+
+### A `\K` inside a lookaround cannot make a scan or a search repeat itself
+
+`\K` moves the reported start of a match to where it stands. Inside a lookaround it can leave the
+reported start behind or ahead of where the attempt began, so a match that consumed nothing looks
+as if it did. Upstream's scan then reports the same match for ever: `finditer`, `split` and `sub`
+never return. Here a match that ends where its attempt began counts as empty, and the scan moves on
+from the attempt rather than from the reported start.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?=y\K)").Matches("y").Count());   // 1 - upstream: the same match for ever
+Console.WriteLine(new FuzzyRegex(@"(?<=\Ky)").Matches("y").Count());  // 1 - upstream: the same match for ever
+```
+
+Perl and PCRE2 refuse `\K` in a lookaround. There is no option to restore the upstream behaviour.
+Ledger entry 85.
+
+### A `\K` inside a lookaround, a condition's test, an atomic group or a possessive repeat is undone when matching backtracks past the construct
+
+Upstream lets a `\K` outlive the construct it sits in, so an alternative that failed after it can
+still move the start of a match found by another alternative. Here the start is restored when
+matching backtracks past the construct, so each match reports the start of the path that matched.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?=a\K)x|a").Match("a").Index);     // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(?>a\K)x|a").Match("a").Index);     // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(?=ab\K)x|b").Match("ab").Index);   // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?=a\K)a").Match("a").Index);       // 1 - upstream: 1
+```
+
+Ruby, the one surveyed engine that accepts `\K` in a lookaround, answers as here. There is no option
+to restore the upstream answer. Ledger entry 86.
+
+### A `\K` before a `(*PRUNE)` or `(*SKIP)` does not make a search skip start positions
+
+When a `(*PRUNE)` or `(*SKIP)` ends a failed attempt, the next attempt starts one character after
+where the failed one began, or at the `(*SKIP)`. Upstream steps on from the start a `\K` moved
+instead, so the start just after the failed attempt is never tried.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"a\K(*PRUNE)b").Match("aab").Index);     // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@".\Kb*(*SKIP)ab").Match("xxab").Index);  // 2 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"a(*PRUNE)b").Match("aab").Index);       // 1 - upstream: 1
+```
+
+PCRE2, Perl and Boost.Regex all answer as here. There is no option to restore the upstream answer.
+Ledger entry 87.
+
+### A search that reads a group after a guarded repeat finds the leftmost match
+
+To avoid trying the same thing twice, upstream records where the rest of a match has already
+failed after a repeat, and skips that position next time. When the rest of the match reads a group,
+a failure under one value of the group says nothing about another value, and upstream can skip
+the path that finds the leftmost match. Here the record is kept per value of the groups the rest of the
+match reads. Python's `re`, PCRE2, Perl, Java, JavaScript and .NET all give the earlier start.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(b?)(?:a*|b)*\1c").Match("bac").Index);  // 0 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(a*)a*(?:d\1)?c").Match("adc").Index);   // 0 - upstream: 1
+```
+
+A pattern that sets a variable-width group inside a repeat and reads it after the repeat, such as
+`(?:(a*)a*)*\1c$`, can be much slower than upstream, because more of the work has to be redone.
+There is no option to restore the upstream answer. Ledger entry 84.
 
 ### Inherited upstream bugs are fixed here
 

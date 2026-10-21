@@ -433,6 +433,11 @@ public sealed class PartialLookaroundRuleTests
     [Arguments("search", @"(?!(?=a.(*SKIP)b)x|.)a", true, 0)]
     [Arguments("match", @"(?!(?=(?=a.(*PRUNE)b))x|.)a", true, 0)]
     [Arguments("match", @"(?(?=(?=a.(*PRUNE)b)x|.)b|a)", true, 0)]
+    // Row Q3 itself, moved from OpenDefectTests on 2026-10-18: no witness of the taint, as above,
+    // but it guards the design row. It passed through S57d before D11 and
+    // has held through its deletion by D11 (F54, merge 65265cfd, 2026-10-04; measured 2026-10-18).
+    // Upstream answers the partial too.
+    [Arguments("match", @"(?!a.(*PRUNE)b|a)a", true, 0)]
     [Arguments("match", @"(?!a.b|.)a", false, 0)]
     public void A_run_out_taints_the_scope_of_a_verb_after_the_edge(
         string operation,

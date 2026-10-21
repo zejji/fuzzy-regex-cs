@@ -12,6 +12,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// pattern never uses - is also reported through it, with no <see cref="Pattern"/> or
 /// <see cref="Offset"/>, because upstream's <c>ValueError</c> carries neither (S07; see the
 /// reasoning at the throw sites in <c>Parsing/PatternCompiler.cs</c>).
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#exception-mapping">the comparison page</see>.
 /// </para>
 /// <para>
 /// Upstream's other errors map onto .NET types of their own: <c>IndexError</c> from
@@ -57,6 +58,18 @@ public class FuzzyRegexParseException : Exception
         Offset = offset;
     }
 
+    /// <summary>
+    /// D110: the pattern ran the compiling thread out of stack. There is no offset, because the
+    /// pass that ran out may be one that walks the parsed pattern rather than its text.
+    /// </summary>
+    /// <param name="pattern">The pattern that could not be compiled.</param>
+    /// <param name="innerException">The stack check that stopped the compile.</param>
+    internal FuzzyRegexParseException(string pattern, InsufficientExecutionStackException innerException)
+        : base("too deeply nested to compile on this thread: its stack ran out", innerException)
+    {
+        Pattern = pattern;
+    }
+
     /// <summary>The pattern that failed to parse, or <see langword="null"/> if not supplied.</summary>
     public string? Pattern { get; }
 
@@ -68,6 +81,7 @@ public class FuzzyRegexParseException : Exception
     /// <b>Indices are UTF-16 code units</b>, where upstream counts codepoints, so this differs
     /// from upstream's <c>error.pos</c> for a pattern holding a non-BMP character before the
     /// failure point.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#indices-are-utf-16-code-units-where-upstream-counts-codepoints">the comparison page</see>.
     /// </remarks>
     public int Offset { get; } = -1;
 }

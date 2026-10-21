@@ -11,6 +11,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// <para>
 /// <b>Indices are UTF-16 code units</b>, where upstream counts codepoints: <see cref="Index"/>
 /// and <see cref="Length"/> match the built-in <c>Regex</c> (design spec section 4).
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#indices-are-utf-16-code-units-where-upstream-counts-codepoints">the comparison page</see>.
 /// </para>
 /// <para>
 /// The engine works in <c>(start, end)</c> throughout, keeping upstream's names. This class and the
@@ -107,6 +108,12 @@ public class Group : Capture
     /// Group 0 is the whole match, which is captured exactly once, so its list is a single span and
     /// needs none of the machinery real capture lists do. Upstream's own accessor special-cases
     /// index 0 the same way (<c>match_get_spans_by_index</c>, <c>:19081</c>).
+    /// <para>
+    /// <b>Upstream's <c>allcaptures</c>, <c>allspans</c>, <c>groupdict</c> and <c>capturesdict</c>
+    /// are not on the public surface, and will not be.</b> <c>Groups</c> and <c>Group.Captures</c>
+    /// reach the same data. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#matchallcaptures-allspans-groupdict-and-capturesdict-are-not-on-the-public-surface-and-will-not-be">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public CaptureCollection Captures => _owner is null ? new([this]) : _owner.CapturesOf(_number);
 }
@@ -122,6 +129,7 @@ public class Group : Capture
 /// may not</b>. It holds a copy of everything it reports, taken before the engine's state was
 /// reused, so it neither shares with the pattern that produced it nor changes after it is
 /// handed over.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-match-may-be-read-from-any-thread-where-systemtextregularexpressionsmatch-may-not">the comparison page</see>.
 /// </para>
 /// <para>
 /// This is deliberately stronger than the built-in <see cref="System.Text.RegularExpressions.Match"/>,
@@ -137,6 +145,14 @@ public class Group : Capture
 /// <see cref="ResultFormat(string)"/>, <c>lastindex</c> is <see cref="LastGroupNumber"/> with
 /// Python's <see langword="None"/> rendered as <c>-1</c>, and <c>lastgroup</c> is
 /// <see cref="LastGroupName"/> with <see langword="None"/> rendered as <see langword="null"/>.
+/// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#regex-shaped-surface">the comparison page</see>.
+/// </para>
+/// <para>
+/// <b>Not ported at all</b>: <c>Pattern.scanner</c>, <c>Match.pos</c>, <c>endpos</c>,
+/// <c>string</c>, <c>re</c>, <c>regs</c> and <c>detach_string</c>, <c>regex.template</c>, the
+/// <c>LOCALE</c> and <c>DEBUG</c> options, <c>cache_pattern</c>, <c>regex.prefixmatch</c> and the
+/// copy protocol have no port equivalent. See
+/// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#not-ported-at-all">the comparison page</see>.
 /// </para>
 /// </remarks>
 public sealed class Match : Group
@@ -288,6 +304,20 @@ public sealed class Match : Group
     }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Match.Groups</c> is an <c>IReadOnlyDictionary&lt;string, Group&gt;</c> as well as a
+    /// list</b>, keyed by every group's name, or its number as text, in ascending group number;
+    /// upstream's <c>groupdict</c> is the named-only filter over it. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#matchgroups-is-an-ireadonlydictionarystring-group-as-well-as-a-list">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>Upstream's <c>allcaptures</c>, <c>allspans</c>, <c>groupdict</c> and <c>capturesdict</c>
+    /// are not on the public surface, and will not be.</b> <c>Groups</c> and <c>Group.Captures</c>
+    /// reach the same data. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#matchallcaptures-allspans-groupdict-and-capturesdict-are-not-on-the-public-surface-and-will-not-be">the comparison page</see>.
+    /// </para>
+    /// </remarks>
     public GroupCollection Groups => new(this, _regex.GroupCount);
 
     /// <summary>
@@ -399,6 +429,66 @@ public sealed class Match : Group
     /// one there on some pattern shapes and no match on others, because it holds two
     /// contradictory rules for the same boundary. Nothing else about <c>beginning</c> moves:
     /// <c>^</c> and <c>\A</c> still refuse a non-zero one.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#reversed-partial-matches-run-out-of-text-at-the-slice-start">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>This port's search prefilters never change the slow path's answer.</b> Where upstream's
+    /// prefilter and its own matcher disagree, this port answers what upstream's anchored
+    /// <c>match</c> answers, which a second engine confirms. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#this-ports-search-prefilters-never-change-the-slow-paths-answer">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A word or grapheme boundary decided at the end of the available text makes a partial
+    /// match.</b> <c>\b</c>, <c>\B</c>, <c>\m</c>, <c>\M</c> or <c>\X</c> judged there may change
+    /// with more text; upstream reports no match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-word-or-grapheme-boundary-decided-at-the-end-of-the-available-text-makes-a-partial-match">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A partial match is refused where the match failed on text the engine already held.</b> No
+    /// further text can change that outcome, and upstream reports a partial on some of these. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-match-is-refused-where-the-match-failed-on-text-the-engine-already-held">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A run-out of text inside a lookaround's body no longer ends a partial call with a
+    /// partial.</b> Matching goes on after the lookaround, and the answer is a partial only where
+    /// some continuation completes the match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-run-out-of-text-inside-a-lookarounds-body-no-longer-ends-a-partial-call-with-a-partial">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A partial call reports a partial where upstream refuses a completion that exists</b>, as
+    /// when a lazy repeat or a greedy body runs out at the end of the text. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-call-reports-a-partial-where-upstream-refuses-a-completion-that-exists">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A partial search tries a start inside the text to come for a pattern with no first
+    /// set</b>, and reports an empty partial at the edge where upstream answers no match. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-search-tries-a-start-inside-the-text-to-come-for-a-pattern-with-no-first-set">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b><c>\b</c> over the empty text is a partial, and <c>\Z</c> at the edge is false in a
+    /// partial call's second pass</b>, so <c>a\Zb</c> over <c>"a"</c> is no match here and a
+    /// partial upstream. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#b-over-the-empty-text-is-a-partial-and-z-at-the-edge-is-false-in-a-partial-calls-second-pass">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A partial match reports a group that closes before a repeat's tail runs out of text</b>,
+    /// as every completion of its path would; upstream reports the group unset. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-match-reports-a-group-that-closes-before-a-repeats-tail-runs-out-of-text">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A reversed partial search lets <c>$</c> hold before a final newline in the text to
+    /// come</b>, where upstream answers no match for an empty subject. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-reversed-partial-search-lets--hold-before-a-final-newline-in-the-text-to-come">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A negative lookahead around a lookahead that holds for every continuation reports no
+    /// partial</b>, where upstream can report a span the pattern cannot make. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-negative-lookahead-around-a-lookahead-that-holds-for-every-continuation-reports-no-partial">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A partial search's first-set check does not answer before the anchors it skips</b>, so
+    /// <c>\A</c>, <c>\G</c> and <c>$</c> decide at the edge of the text. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-partial-searchs-first-set-check-does-not-answer-before-the-anchors-it-skips">the comparison page</see>.
     /// </para>
     /// </remarks>
     public bool PartialMatch { get; }
@@ -544,6 +634,14 @@ public sealed class Match : Group
     /// Not derivable from <see cref="Groups"/>: verified against the local oracle 2026-08-29,
     /// <c>regex.match('((a))', 'a').lastindex</c> is <c>1</c> even though groups 1 and 2 both
     /// succeed and both span <c>(0, 1)</c>, so nothing about the groups distinguishes them.
+    /// <para>
+    /// <b><c>Regex</c>-shaped surface.</b> Upstream's <c>expand</c> is
+    /// <see cref="Match.Result(string)"/>, <c>expandf</c> is
+    /// <see cref="Match.ResultFormat(string)"/>, <c>lastindex</c> is
+    /// <see cref="Match.LastGroupNumber"/> with <c>None</c> as <c>-1</c>, and <c>lastgroup</c> is
+    /// <see cref="Match.LastGroupName"/> with <c>None</c> as <see langword="null"/>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#regex-shaped-surface">the comparison page</see>.
+    /// </para>
     /// </remarks>
     public int LastGroupNumber { get; }
 
@@ -559,6 +657,14 @@ public sealed class Match : Group
     /// (<c>match_lastgroup</c>, <c>:20442</c>). Only a named group is ever recorded as
     /// <c>lastgroup</c>, so the lookup always finds a real name and never falls back to the number
     /// that <see cref="FuzzyRegex.GroupNameFromNumber"/> gives an unnamed group.
+    /// </para>
+    /// <para>
+    /// <b><c>Regex</c>-shaped surface.</b> Upstream's <c>expand</c> is
+    /// <see cref="Match.Result(string)"/>, <c>expandf</c> is
+    /// <see cref="Match.ResultFormat(string)"/>, <c>lastindex</c> is
+    /// <see cref="Match.LastGroupNumber"/> with <c>None</c> as <c>-1</c>, and <c>lastgroup</c> is
+    /// <see cref="Match.LastGroupName"/> with <c>None</c> as <see langword="null"/>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#regex-shaped-surface">the comparison page</see>.
     /// </para>
     /// </remarks>
     public string? LastGroupName => _lastGroup >= 0 ? _regex.GroupNameFromNumber(_lastGroup) : null;
@@ -581,6 +687,13 @@ public sealed class Match : Group
     /// exception: it takes neither a timeout nor a <see cref="CancellationToken"/> and instead
     /// runs under the pattern's own <see cref="FuzzyRegex.MatchTimeout"/>, exactly as
     /// <see cref="System.Text.RegularExpressions.Match.NextMatch"/> does.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-per-call-timeout-on-every-input-dependent-method">the comparison page</see>.
+    /// </para>
+    /// <para>
+    /// <b>A <see cref="CancellationToken"/> on every input-dependent method.</b> Every method that
+    /// reads the subject takes one as its last parameter, except <see cref="Match.NextMatch"/>;
+    /// upstream has none, because a Python caller interrupts a long match with Ctrl-C. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-cancellationtoken-on-every-input-dependent-method">the comparison page</see>.
     /// </para>
     /// </remarks>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
@@ -624,12 +737,21 @@ public sealed class Match : Group
     /// <c>\n</c>, <c>\x41</c>, <c>\N{...}</c>), where <c>Regex</c> uses <c>$1</c>: the escape
     /// character is <c>\</c>, so those all mean what they mean upstream, and <c>$</c> is
     /// ordinary text.
+    /// See <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#replacement-templates-speak-upstreams-language">the comparison page</see>.
     /// </para>
     /// <para>
     /// The two languages cannot both be honoured because they disagree about
     /// <c>\</c> - verified against both engines 2026-08-29: for the template <c>\n</c>,
     /// <c>regex.sub('.', r'\n', 'x')</c> gives a newline where
     /// <c>Regex.Replace("x", ".", @"\n")</c> gives a backslash followed by <c>n</c>.
+    /// </para>
+    /// <para>
+    /// <b><c>Regex</c>-shaped surface.</b> Upstream's <c>expand</c> is
+    /// <see cref="Match.Result(string)"/>, <c>expandf</c> is
+    /// <see cref="Match.ResultFormat(string)"/>, <c>lastindex</c> is
+    /// <see cref="Match.LastGroupNumber"/> with <c>None</c> as <c>-1</c>, and <c>lastgroup</c> is
+    /// <see cref="Match.LastGroupName"/> with <c>None</c> as <see langword="null"/>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#regex-shaped-surface">the comparison page</see>.
     /// </para>
     /// </remarks>
     /// <param name="replacement">The replacement template, in upstream's syntax.</param>
@@ -666,6 +788,14 @@ public sealed class Match : Group
     /// Verified against the local oracle 2026-08-29:
     /// <c>regex.match(r'(\w+) (\w+)', 'a b').expandf('{1} {0}')</c> is <c>'a a b'</c>, which
     /// shows <c>{0}</c> standing for the whole match rather than for group 1.
+    /// <para>
+    /// <b><c>Regex</c>-shaped surface.</b> Upstream's <c>expand</c> is
+    /// <see cref="Match.Result(string)"/>, <c>expandf</c> is
+    /// <see cref="Match.ResultFormat(string)"/>, <c>lastindex</c> is
+    /// <see cref="Match.LastGroupNumber"/> with <c>None</c> as <c>-1</c>, and <c>lastgroup</c> is
+    /// <see cref="Match.LastGroupName"/> with <c>None</c> as <see langword="null"/>. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#regex-shaped-surface">the comparison page</see>.
+    /// </para>
     /// </remarks>
     /// <param name="format">The format template.</param>
     /// <returns>The expanded text.</returns>

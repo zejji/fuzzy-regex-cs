@@ -14,7 +14,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Unicode;
 /// <remarks>
 /// These are not upstream's - they are the host language's, and a port has to rebuild them from
 /// some Unicode data. <see cref="PythonStr"/> rebuilds them from upstream's tables, and this is
-/// what says the two agree. The 4,803 codepoints Unicode 17.0 added are excluded: the recording
+/// what says the two agree. The 17,810 codepoints Unicode 17.0 and 18.0 added are excluded: the recording
 /// host's <c>unicodedata</c> is 16.0.0 and has no answer for them.
 /// </remarks>
 public sealed class PythonStrTests
@@ -22,12 +22,12 @@ public sealed class PythonStrTests
     [Test]
     public void The_str_predicates_match_cpython_for_every_codepoint_it_knows()
     {
-        HashSet<int> newIn17 = [];
-        foreach ((int first, int last) in CharacterNameFixture.RangesAddedIn17)
+        HashSet<int> unknownToHost = [];
+        foreach ((int first, int last) in CharacterNameFixture.RangesUnknownToHost)
         {
             for (int codepoint = first; codepoint <= last; codepoint++)
             {
-                newIn17.Add(codepoint);
+                unknownToHost.Add(codepoint);
             }
         }
 
@@ -37,7 +37,7 @@ public sealed class PythonStrTests
 
         for (int codepoint = 0; codepoint <= 0x10FFFF; codepoint++)
         {
-            if (newIn17.Contains(codepoint))
+            if (unknownToHost.Contains(codepoint))
             {
                 continue;
             }
@@ -57,7 +57,7 @@ public sealed class PythonStrTests
         using (new AssertionScope())
         {
             counted.Should().Be(UnicodeFixture.PythonStrCodepointCount);
-            newIn17.Should().HaveCount(UnicodeFixture.PythonStrSkippedNewIn17);
+            unknownToHost.Should().HaveCount(UnicodeFixture.PythonStrSkippedUnknownToHost);
             Convert.ToHexStringLower(hash.GetHashAndReset()).Should().Be(UnicodeFixture.PythonStr);
         }
     }

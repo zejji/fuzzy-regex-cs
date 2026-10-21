@@ -391,4 +391,18 @@ internal enum Opcode : uint
     /// counts, node and totals back. It never appears on a node or in a code list.
     /// </summary>
     RunOutClosedSection = 105,
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): a failed-state memo mark on the backtrack stack
+    /// (<c>Matcher.StateKnownToFail</c>). It never appears on a node or in a code list.
+    /// </summary>
+    FailedStateMark = 106,
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the backtracking entry pushed where a positive lookaround's
+    /// continuation begins in a partial call's second pass, holding its key and start
+    /// (<c>MatchState.ContinuationKeyOf</c>). Backtracking onto it means the continuation failed.
+    /// It never appears on a node or in a code list.
+    /// </summary>
+    ContinuationMark = 107,
 }

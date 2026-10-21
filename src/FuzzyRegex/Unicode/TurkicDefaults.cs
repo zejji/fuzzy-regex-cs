@@ -6,7 +6,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What the definitive source says.</b> <c>CaseFolding.txt</c> (17.0.0, 2025-07-30) gives these
+/// <b>What the definitive source says.</b> <c>CaseFolding.txt</c> (18.0.0, 2026-02-03; 17.0.0 has the same rows) gives these
 /// rows for the four codepoints - and gives no other row for any of them:
 /// </para>
 /// <code>

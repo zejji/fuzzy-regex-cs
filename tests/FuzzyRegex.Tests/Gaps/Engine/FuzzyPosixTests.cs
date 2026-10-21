@@ -402,4 +402,50 @@ public sealed class FuzzyPosixTests
             .Should()
             .Equal("", "\n", "\U00010400", "");
     }
+
+    /// <summary>
+    /// Under POSIX with BESTMATCH or ENHANCEMATCH the answer does not depend on the order of the
+    /// alternatives or on whether a repeat is greedy: the fewest errors first, then the longest.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 89, found by battery runs 20261017-4 and -5. Upstream 2026.9.10 answers each
+    /// pair below differently (measured 2026-10-17): <c>(?bp)(?:ab|a){s&lt;=1}</c> over 'ax' is
+    /// (0, 2) with one substitution and <c>(?:a|ab)</c> is (0, 1) exact; <c>(?bp)(?:b?){s&lt;=1}</c>
+    /// over 'x xb' is (0, 1) with one substitution and <c>b??</c> is (0, 0). Both orders describe
+    /// the same set of matches, so a flag that chooses among them cannot depend on the order.
+    /// </remarks>
+    /// <param name="search">True to search, false to match at the start.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="flags">The choosing flags beside the pattern's own.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="length">The length of the exact match at 0 both spellings give.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments(false, "(?bp)(?:ab|a){s<=1}", FuzzyRegexOptions.None, "ax", 1)]
+    [Arguments(false, "(?bp)(?:a|ab){s<=1}", FuzzyRegexOptions.None, "ax", 1)]
+    [Arguments(false, "(?:abc|a){s<=1}", FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Posix, "axc", 1)]
+    [Arguments(false, "(?:a|abc){s<=1}", FuzzyRegexOptions.BestMatch | FuzzyRegexOptions.Posix, "axc", 1)]
+    [Arguments(false, "(?:abc|a){s<=1}", FuzzyRegexOptions.EnhanceMatch | FuzzyRegexOptions.Posix, "axc", 1)]
+    [Arguments(false, "(?:a|abc){s<=1}", FuzzyRegexOptions.EnhanceMatch | FuzzyRegexOptions.Posix, "axc", 1)]
+    [Arguments(false, "(?bp)(?:abc|ax|a){s<=1}", FuzzyRegexOptions.None, "axc", 2)]
+    [Arguments(false, "(?bp)(?:a|ax|abc){s<=1}", FuzzyRegexOptions.None, "axc", 2)]
+    [Arguments(true, "(?ep)(?:(?:ab|a).){s<=1}", FuzzyRegexOptions.None, "aaba", 2)]
+    [Arguments(true, "(?ep)(?:(?:a|ab).){s<=1}", FuzzyRegexOptions.None, "aaba", 2)]
+    [Arguments(true, "(?bp)(?:b?){s<=1}", FuzzyRegexOptions.None, "x xb", 0)]
+    [Arguments(true, "(?bp)(?:b??){s<=1}", FuzzyRegexOptions.None, "x xb", 0)]
+    public void Posix_with_a_choosing_flag_answers_alike_whatever_the_order_of_the_alternatives(
+        bool search,
+        string pattern,
+        FuzzyRegexOptions flags,
+        string subject,
+        int length
+    )
+    {
+        FuzzyRegex regex = new(pattern, flags | FuzzyRegexOptions.Version0);
+
+        Match m = search ? regex.Match(subject) : regex.MatchAtStart(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, length), pattern);
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0), pattern);
+    }
 }

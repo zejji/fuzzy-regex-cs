@@ -113,6 +113,13 @@ internal sealed class RepeatInfo
     internal bool FailureMemo;
 
     /// <summary>
+    /// NOT UPSTREAM (D90): whether the repeat is inside a lookaround, a condition's test, an atomic
+    /// group or a possessive repeat, whose end a partial call's second pass can block
+    /// (<c>MatchState.BlockedEndMark</c>). Set by <c>NodeCompiler</c>.
+    /// </summary>
+    internal bool InsideACutBody;
+
+    /// <summary>
     /// Where the copy of this repeat's first iteration starts, for a failure-memo repeat whose
     /// minimum was 1: the placeholder node <c>NodeCompiler.BuildRepeat</c> built the copy from, so
     /// a one-way branch that <c>Optimiser.FindFirstIterationAtStart</c> looks through. Otherwise
@@ -120,6 +127,31 @@ internal sealed class RepeatInfo
     /// <see cref="PatternObject.FirstIterationAtStart"/>.
     /// </summary>
     internal Node? FirstIterationStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): what this repeat's tail guard is keyed on, or <see langword="null"/>
+    /// when the rest of the match reads no group state and the position alone is the key. Set by
+    /// <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal TailGuardKeySpec? TailKey;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the body holds a repeat whose tail guard is keyed, so this repeat's body
+    /// guard is off. A body guard records that the body never got to its end from a position; a
+    /// keyed tail guard inside can stop the body under one value of a group the rest of the match
+    /// reads, so the record would block the body under another value
+    /// (<c>(c*).?(?:(?:a|d)*ac{1,3})*\1d</c> over <c>cadaacd</c>). Set by
+    /// <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal bool BodyHoldsKeyedTail;
+
+    /// <summary>
+    /// NOT UPSTREAM (D85), and never read by this library: <see cref="Status"/> lost its body guard
+    /// in <c>Optimiser.DropBodyGuardsThatReadAGroup</c>, where upstream would have kept it. The
+    /// oracle reads it to put upstream's guards back on a pattern it compiled for one call, to show
+    /// that D85 is the whole of a divergence.
+    /// </summary>
+    internal bool BodyGuardDroppedForD85;
 }
 
 /// <summary>
@@ -349,6 +381,33 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D111: whether the pattern holds something that commits to what it has read:
+    /// an atomic group, which a possessive repeat, <c>\R</c> and <c>\X</c> compile to. Only such a
+    /// pattern can match differently when text past a span is cut off, so only it needs a BESTMATCH
+    /// or ENHANCEMATCH refinement to keep the caller's slice (<see cref="MatchState.RefineStart"/>);
+    /// every other pattern keeps upstream's narrowed slice, which matches the same and reads no
+    /// further than the span. A <c>(*PRUNE)</c> or <c>(*SKIP)</c> commits too, but D109 refuses a
+    /// ranked pattern that holds one and can make errors, and only a match with errors is refined.
+    /// </summary>
+    internal bool RefinesInAWindow;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a <c>\G</c>, whose answer depends on where a
+    /// search began, so a failed search from one position says nothing about a search from a later
+    /// one. See <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool ReadsTheSearchAnchor;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a lookaround, or a conditional's lookaround
+    /// test, that reads against the scan's direction: a lookbehind in a forward pattern, a
+    /// lookahead in a reversed one. Its body can reach back from an attempt to where a search
+    /// began, so a failed search from one position says nothing about a search from a later one.
+    /// See <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool LooksAgainstTheScan;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
     /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
     /// </summary>
@@ -394,6 +453,14 @@ internal sealed class PatternObject
     internal bool NarrowExactDeletions;
 
     /// <summary>
+    /// NOT UPSTREAM (D93 performance): whether <c>Matcher.ExactDeletionMayMatch</c> may count the
+    /// items a match reads after a group call returns as part of an item's run
+    /// (<c>Matcher.DeletionsPastReturns</c>). Needs the narrowing and exactly one fuzzy section, so
+    /// a walk that crosses no <c>END_FUZZY</c> stays in the section instance it started in.
+    /// </summary>
+    internal bool NarrowsPastReturns;
+
+    /// <summary>
     /// NOT UPSTREAM (finding F-A): the most items an exact match's "delete it instead" choice can
     /// have left to delete and still be offered; <see cref="long.MaxValue"/> where there is no such
     /// ceiling. Set when the pattern is compiled; read first by <c>Matcher.ExactDeletionMayMatch</c>,
@@ -418,6 +485,24 @@ internal sealed class PatternObject
     /// <c>MatchState.SectionFrame</c>. Set when the pattern is compiled.
     /// </summary>
     internal bool HasFuzzyMinimum;
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): every one-character test inside a fuzzy section, when a
+    /// substitution can only be taken where one of them rejects the subject character; null when
+    /// the pattern holds an item this does not model (a fuzzy string, '.' or assertion, a
+    /// reference, a reverse item, a lookaround or a call), and then nothing is pruned. Read by
+    /// <c>Matcher.ASubstitutionMayFollow</c>. Set when the pattern is compiled, for a pattern with a
+    /// fuzzy minimum only.
+    /// </summary>
+    internal Node[]? SubstitutionTests;
+
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): null when the failed-state memo
+    /// (<c>Matcher.StateKnownToFail</c>) is off for this pattern; otherwise, per repeat, the count
+    /// above which its count no longer matters (its minimum when it has no maximum), or
+    /// <see cref="long.MaxValue"/> to keep it all. Set when a pattern with a fuzzy minimum is compiled.
+    /// </summary>
+    internal long[]? RepeatStateMemoCaps;
 
     /// <summary>
     /// NOT UPSTREAM (D81): whether one fuzzy section can be open inside another: the pattern has two
@@ -555,6 +640,15 @@ internal sealed class PatternObject
     internal bool CallMemoKeyOmitsPosition;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library (D93): whether the call guard compares a
+    /// re-entry's section counts with an open call's even when the re-entry has opened a new fuzzy
+    /// section, so such a re-entry runs where the library refuses it (DECISIONS, 2026-10-17). The
+    /// oracle and the matrix set it to show that the refusal is the whole of a difference from the
+    /// written-out form or from upstream (<c>OracleComparer.RunWithTheReentryInANewSection</c>).
+    /// </summary>
+    internal bool CallGuardComparesAcrossSections;
+
+    /// <summary>
     /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
     /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
     /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which
@@ -572,6 +666,18 @@ internal sealed class PatternObject
     /// excludes already.
     /// </remarks>
     internal bool KeepInSubmatch;
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): what the records written after a blocked end are keyed on;
+    /// <see langword="null"/> when no repeat is inside a cut body, so that a pattern that cannot
+    /// record allocates nothing for them. Set by <see cref="TailGuardLiveness.FindTailKeys"/>.
+    /// </summary>
+    internal CutBodyFacts? CutBodies;
+
+    /// <summary>NOT UPSTREAM (D104): repeat <paramref name="index"/>'s <see cref="CutBodyRepeat"/>, if it has one.</summary>
+    /// <param name="index">The repeat index.</param>
+    /// <returns>The facts, or <see langword="null"/>.</returns>
+    internal CutBodyRepeat? CutBodyAt(int index) => CutBodies?.Repeats[index];
 
     /// <summary>
     /// Whether a search keeps the failure memos (<see cref="RepeatInfo.FailureMemo"/>) from one
@@ -768,14 +874,6 @@ internal sealed class PatternObject
     internal bool LiftsAnchorBan;
 
     /// <summary>
-    /// Whether rule H' can change a search's answer under partial matching: any fuzzy pattern with a
-    /// section that permits an insertion, since removing leading insertions can leave a partial match
-    /// that starts later (<c>(?:a){i&lt;=1}</c> over 'x', partial). Filled with
-    /// <see cref="LiftsAnchorBan"/>, and cleared with it by the oracle's ablation.
-    /// </summary>
-    internal bool LiftsAnchorBanWhenPartial;
-
-    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
     /// reference treats a subject folding it loaded but never used as half-matched, which is
     /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the
@@ -847,11 +945,34 @@ internal sealed class PatternObject
     internal bool VerbsAreConfinedToTheInnermostGroup;
 
     /// <summary>
+    /// Oracle-only: a <c>\K</c> inside a lookaround or a condition's test outlives the construct's
+    /// cut, as upstream's <c>RE_OP_END_LOOKAROUND</c> (<c>_regex.c:12918</c>) lets it, instead of
+    /// being undone when matching backtracks past the construct (D88). Set only by
+    /// <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool KeepOutlivesALookaround;
+
+    /// <summary>
+    /// Oracle-only: a <c>\K</c> inside an atomic group or possessive repeat outlives the group's
+    /// cut, as upstream's <c>RE_OP_END_ATOMIC</c> lets it, instead of being undone when matching
+    /// backtracks past the group (D88). Set only by <c>OracleComparer</c>'s ablation; never by the
+    /// library.
+    /// </summary>
+    internal bool KeepOutlivesAnAtomicGroup;
+
+    /// <summary>
     /// Oracle-only: a failed attempt skips past the run of a lazy leading repeat even when the
     /// pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, as upstream does (<c>_regex.c:15705-15723</c>),
     /// instead of bumping along (D77). Set only by <c>OracleComparer</c>'s ablation; never by the library.
     /// </summary>
     internal bool SkipsALazyRunDespiteAVerb;
+
+    /// <summary>
+    /// Oracle-only: a failed attempt steps on from the reported start a <c>\K</c> left ahead of it,
+    /// as upstream steps on from <c>match_pos</c> (<c>_regex.c:15695</c>), instead of from where the
+    /// attempt began (D92). Set only by <c>OracleComparer</c>'s ablations; never by the library.
+    /// </summary>
+    internal bool StepsOnFromTheKeptStart;
 
     /// <summary>
     /// Oracle-only: a BESTMATCH or ENHANCEMATCH scan step bans an empty match at every candidate run's
@@ -893,6 +1014,14 @@ internal sealed class PatternObject
     /// <c>MatchState.PushSubAttemptFuzzyState</c>.
     /// </summary>
     internal bool KeepDiscardedTotals;
+
+    /// <summary>
+    /// Oracle-only: the budget BESTMATCH and ENHANCEMATCH tighten between runs also bounds every
+    /// lookaround's body, a conditional's test and an atomic group's body, as upstream's
+    /// <c>max_errors</c> does (D102 and D109, ledger entry 32's addenda of 2026-10-17 and -19). Set only by <c>OracleComparer</c>'s
+    /// ablation; never by the library. See <c>MatchState.BoundlessBodies</c>.
+    /// </summary>
+    internal bool BoundsReachDecidingBodies;
 
     /// <summary>
     /// Oracle-only: a conditional whose negative test fails, because the test's body matched, puts
@@ -965,6 +1094,21 @@ internal sealed class PatternObject
     /// of a divergence. See <c>Matcher.TailMayMatch</c>.
     /// </summary>
     internal bool TailRunOutAsBeforeD67;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether this pattern was compiled with
+    /// <see cref="Parsing.Info.UpstreamReverseGrapheme"/>, so that a reversed <c>\X</c> also keeps
+    /// upstream's answer at the slice start (D108). See <c>Matcher.ReversedGraphemeCutBySliceStart</c>.
+    /// </summary>
+    internal bool UpstreamReverseGrapheme;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether <c>\X</c>'s GB9c is UAX #29 revision
+    /// 47's, as upstream 2026.9.29 still applies it, rather than revision 49's (Unicode 18.0.0). The
+    /// oracle sets it on a pattern it compiled for one call, to show that the D120 fix is the whole of
+    /// a divergence. See <c>Matcher.AtGraphemeBoundary</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </summary>
+    internal bool UpstreamGraphemeConjunct;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
@@ -1223,6 +1367,18 @@ internal sealed class PatternObject
                 self.HasSkipVerb = true;
             }
 
+            // NOT UPSTREAM'S, D111: see RefinesInAWindow.
+            if (self.NodeList[i].Op == Opcode.Atomic)
+            {
+                self.RefinesInAWindow = true;
+            }
+
+            // NOT UPSTREAM'S, D115: see ReadsTheSearchAnchor.
+            if (self.NodeList[i].Op == Opcode.SearchAnchor)
+            {
+                self.ReadsTheSearchAnchor = true;
+            }
+
             // NOT UPSTREAM'S, D11: see HasBacktrackingVerb and ReadsCapturesWhileMatching.
             if (self.NodeList[i].Op is Opcode.Skip or Opcode.Prune)
             {
@@ -1280,10 +1436,18 @@ internal sealed class PatternObject
         self.NestsFuzzySections = sections > 1 || (sections == 1 && self.HasGroupCalls);
         self.KeepsSectionLinks = self.HasFuzzyMinimum || self.NestsFuzzySections;
 
+        // NOT UPSTREAM (D94 performance): see SubstitutionTests.
+        if (self.HasFuzzyMinimum)
+        {
+            self.SubstitutionTests = Matcher.CollectSubstitutionTests(self.NodeList);
+            self.RepeatStateMemoCaps = Matcher.MemoCapsFor(self, sections);
+        }
+
         // NOT UPSTREAM (D61): after the loop above, which settles HasFuzzyMinimum.
         Optimiser.FindAnchorBanLift(self);
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+        self.NarrowsPastReturns = self.NarrowExactDeletions && sections == 1 && self.HasGroupCalls;
         if (self.NarrowExactDeletions && !self.HasFuzzyMinimum)
         {
             self.ExactDeletionCeiling = DeletionCeiling(self);
@@ -1691,8 +1855,9 @@ internal sealed class PatternObject
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
-    /// group call's target is not followed, and a pattern with group calls does not continue a
-    /// run-out (<c>Matcher.RunOutInALookaroundBody</c>), so its bodies are never read.
+    /// group call's target is not followed: the walk goes on at its return node, and a run-out
+    /// inside a call the body opened is taken at the call node, or answered at once where the body
+    /// feeds a decision (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </remarks>
     /// <param name="pattern">The pattern, with its nodes numbered.</param>
     private static void SetLookaroundBodies(PatternObject pattern)
@@ -1740,9 +1905,39 @@ internal sealed class PatternObject
             int[] sorted = [.. nodes];
             Array.Sort(sorted);
             test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
+
+            // NOT UPSTREAM (D104): see CutBodyFacts.ContinuationKeyRepeats. The repeats' keys are set by then
+            // (TailGuardLiveness.FindTailKeys, in the optimiser).
+            if (test.Op == Opcode.Lookaround && test.Match)
+            {
+                foreach (int i in sorted)
+                {
+                    Node n = pattern.NodeList[i];
+                    if (
+                        n.Op
+                            is Opcode.GreedyRepeat
+                                or Opcode.LazyRepeat
+                                or Opcode.GreedyRepeatOne
+                                or Opcode.LazyRepeatOne
+                        && pattern.CutBodyAt((int)n.Values[0]) is { Key.HasUnknownInside: false }
+                    )
+                    {
+                        CutBodyFacts facts = pattern.CutBodies!;
+                        if (facts.ContinuationKeyRepeats is null)
+                        {
+                            facts.ContinuationKeyRepeats = new int[pattern.NodeList.Count];
+                            Array.Fill(facts.ContinuationKeyRepeats, -1);
+                        }
+
+                        facts.ContinuationKeyRepeats[test.Index] = (int)n.Values[0];
+                        break;
+                    }
+                }
+            }
         }
 
-        if (pattern.ReadsCapturesWhileMatching && !pattern.HasGroupCalls)
+        // A call is stepped over (D97): its return restores every capture, so it adds no group.
+        if (pattern.ReadsCapturesWhileMatching)
         {
             SetRunOutGroups(pattern);
         }
@@ -2069,4 +2264,58 @@ internal sealed class PatternObject
     /// <returns>The same characters, or an empty list when there are none.</returns>
     private static IReadOnlyList<int> GetRequiredChars(IReadOnlyList<int> reqChars) =>
         reqChars.Count < 1 ? [] : reqChars;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D104): a pattern's facts for the records written after a blocked end
+/// (<c>MatchState.CutBodyKeyOf</c>) and for its continuation memo (<c>MatchState.ContinuationKeyOf</c>).
+/// Written while the pattern is compiled, read-only while it matches.
+/// </summary>
+/// <param name="repeats">How many repeats the pattern has.</param>
+internal sealed class CutBodyFacts(int repeats)
+{
+    /// <summary>By repeat index, the facts of each repeat inside a cut body; <see langword="null"/> for the others.</summary>
+    internal CutBodyRepeat?[] Repeats { get; } = new CutBodyRepeat?[repeats];
+
+    /// <summary>
+    /// By node index, for a positive lookaround, the first repeat of its body whose records are
+    /// keyed, whose key a record of the lookaround's continuation borrows; -1 for none and for every
+    /// other node. <see langword="null"/> when no lookaround has one. Set by
+    /// <c>PatternObject.SetLookaroundBodies</c>.
+    /// </summary>
+    internal int[]? ContinuationKeyRepeats;
+}
+
+/// <summary>
+/// NOT UPSTREAM (D104): what a repeat inside a cut body keys its records written after a blocked end
+/// on besides the instance (<c>MatchState.CutBodyKeyOf</c>). Set by
+/// <see cref="TailGuardLiveness.FindTailKeys"/>.
+/// </summary>
+/// <param name="key">The groups live where the repeat is entered, as D85 keys a tail.</param>
+/// <param name="enclosingLoops">The loops enclosing the repeat, whose count, start and progress are in the key.</param>
+/// <param name="enclosingLoopCaps">For each enclosing loop, the count past which the key stops telling counts apart: the minimum of a loop with no maximum, else no cap.</param>
+/// <param name="countFreeBody">
+/// The repeat has no maximum and a minimum of at most 1, so its own count cannot change what its
+/// body leads to, and a body record may leave the count out of its key. A plain body record relies
+/// on the success mark instead (<c>GuardRepeat(..., protect: false)</c> at the iteration's end),
+/// which a record kept under its instance never gets.
+/// </param>
+internal sealed class CutBodyRepeat(
+    TailGuardKeySpec key,
+    int[] enclosingLoops,
+    long[] enclosingLoopCaps,
+    bool countFreeBody
+)
+{
+    /// <summary>The groups live where the repeat is entered.</summary>
+    internal TailGuardKeySpec Key { get; } = key;
+
+    /// <summary>The loops enclosing the repeat.</summary>
+    internal int[] EnclosingLoops { get; } = enclosingLoops;
+
+    /// <summary>For each enclosing loop, the count past which the key stops telling counts apart.</summary>
+    internal long[] EnclosingLoopCaps { get; } = enclosingLoopCaps;
+
+    /// <summary>Whether a body record may leave the repeat's own count out of its key.</summary>
+    internal bool CountFreeBody { get; } = countFreeBody;
 }

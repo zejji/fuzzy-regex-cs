@@ -39,11 +39,12 @@ CONTROLS = [
     # C2: D40, upstream's call features (tools/probes/call-site-features-rows.jsonl row 1).
     ({"pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "subject": "aab", "operation": "search",
       "writtenOut": {"8": "(?P<g3>a)(?P<g4>(?:a))(?:(?:(?:a))){s<=1}"}, "ablate": "callfeatures"}, "C2", "fail"),
-    # The same row unablated still fails C2, on its captures only: g3 keeps the captures its calls
-    # made, (1,2) and (2,3), which D51 (owner ruling (a)) says a return discards. So the quiet
-    # control is a capture-free recursion, compared at depths 4-6.
+    # The same row with only D51's fix off (ledger entry 63) fails C2 on its captures: g3 keeps the
+    # captures its calls made, (1,2) and (2,3), which a return discards since the fix. It was a
+    # firing control without the ablation until D51 was fixed. The quiet control is a capture-free
+    # recursion, compared at depths 4-6.
     ({"pattern": "(?P<g3>a)(?P<g4>(?&g3))(?:(?&g4)){s<=1}", "subject": "aab", "operation": "search",
-      "writtenOut": {"8": "(?P<g3>a)(?P<g4>(?:a))(?:(?:(?:a))){s<=1}"}}, "C2", "fail"),
+      "writtenOut": {"8": "(?P<g3>a)(?P<g4>(?:a))(?:(?:(?:a))){s<=1}"}, "ablate": "callcaptures"}, "C2", "fail"),
     ({"pattern": "a(?R)?b", "subject": "xaabbb", "operation": "search",
       "writtenOut": {"4": "a(?:a(?:a(?:a(?:a(?:(?!))?b)?b)?b)?b)?b",
                      "5": "a(?:a(?:a(?:a(?:a(?:a(?:(?!))?b)?b)?b)?b)?b)?b",
@@ -52,8 +53,9 @@ CONTROLS = [
     # Matcher.AssertMatchIsClosed (ExpectedDivergences' fuzzy-whole-pattern-call-returns-to-its-caller row 1).
     ({"pattern": "(?b)(?:b||b(?0)*){e<=2}", "subject": "azx", "operation": "fullmatch", "ablate": "d37"}, "C3", "fail"),
     ({"pattern": "(?b)(?:b||b(?0)*){e<=2}", "subject": "azx", "operation": "fullmatch"}, "C3", "pass"),
-    # C4: D26, still open on main (docs/KNOWN-DEFECTS.md): None, but ':' completes it.
-    ({"pattern": "(?:a$(?<=:)){i<=1}", "subject": "a", "operation": "match", "partial": True}, "C4", "fail"),
+    # C4: D26, fixed on main (F56) and brought back with D11's second pass as it was: None, but ':'
+    # completes it.
+    ({"pattern": "(?:a$(?<=:)){i<=1}", "subject": "a", "operation": "match", "partial": True, "ablate": "d11"}, "C4", "fail"),
     ({"pattern": "ab", "subject": "a", "operation": "match", "partial": True}, "C4", "pass"),
     # C5: every repeat's failure memo forced on, including where Optimiser.KeepFailureMemosSound
     # withdraws it because a group test reads the captures. Measured 2026-09-30: (0,3) with the
@@ -71,10 +73,10 @@ CONTROLS = [
     # match, so it answers (0,1) with one deletion where the ablated port answers None.
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match", "ablate": "exactdeletion"}, "C6", "fail"),
     ({"pattern": "(?:a){d<=1}a", "subject": "a", "operation": "match"}, "C6", "pass"),
-    # C7: D51, inherited from upstream and still on main (docs/KNOWN-DEFECTS.md): the port keeps the
-    # capture the call made, (0,1), in c's history although c is unset; PCRE2 and Perl leave c unset
-    # with nothing captured, which the owner's ruling (a) adopts.
-    ({"pattern": "(?(DEFINE)(?<c>a))(?&c)b", "subject": "ab", "operation": "search"}, "C7", "fail"),
+    # C7: D51, inherited from upstream, fixed on main (F45) and switched back on here: the port keeps
+    # the capture the call made, (0,1), in c's history although c is unset; PCRE2 and Perl leave c
+    # unset with nothing captured, which the owner's ruling (a) adopts.
+    ({"pattern": "(?(DEFINE)(?<c>a))(?&c)b", "subject": "ab", "operation": "search", "ablate": "callcaptures"}, "C7", "fail"),
     # Not a call: `(a|b)(?1)\1` over 'aba' fails C7 too, because the port's history for group 1 ends
     # with (1,2), the capture its call made, where the value and both engines say (0,1) (D51 again,
     # measured 2026-09-30). The quiet control is a lookahead's capture read by a backreference
@@ -133,6 +135,22 @@ CONTROLS = [
     ({"pattern": "[[:alpha:]]", "subject": "a", "operation": "search"}, "C6", "n/a"),
     # TRE misses this match (its automaton keeps the earlier start), so C8 must stay n/a, not fail.
     ({"pattern": "(?:a+b){s<=1}", "subject": "baaax", "operation": "search"}, "C8", "n/a"),
+    # Battery run 20261016-2's harness fixes. C6 rule 6a after rule 3: both engines delete the
+    # matched item before they would insert in front of it, so this order-only row passes ...
+    ({"pattern": "(?:bx){e<=2}(?:ab){1<=e<=2}", "subject": "bxab", "operation": "search"}, "C6", "pass"),
+    # ... and D94 (open) still fails: both engines miss the fit an insertion before 'a' makes.
+    ({"pattern": "(?:a){1<=s<=1,i<=1}", "subject": "ab", "operation": "fullmatch"}, "C6", "fail"),
+    # C6 rule 5a: a ^-anchored search is a match at the start, with no search-anchor ban.
+    ({"pattern": "^(?:a+){e<=2,1i+2d<=2}", "subject": "ba", "operation": "finditer"}, "C6", "pass"),
+    # A conditional inside a lookbehind runs at the other end of the body in a forwards matcher.
+    ({"pattern": "(?:[ab](?<=(?(?<!a).|ba))){2i+2d+1s<=4}", "subject": "a", "operation": "search"}, "C6", "n/a"),
+    # C7: a lookbehind's capture or conditional splits the engines by direction.
+    ({"pattern": "(?:\\w(?<!(?(?<=ba)bax|a))){1,2}?.", "subject": "axbax", "operation": "finditer"}, "C7",
+     "engines-disagree"),
+    ({"pattern": "aa(?<=(?:a|)(a{1,2}))", "subject": "aa", "operation": "match"}, "C7", "engines-disagree"),
+    # C4: reversed, \K moves a partial's end, and the judges report the attempt's.
+    ({"pattern": "(?:[ab]\\w)+?\\w\\Ka*", "subject": "xaaxaaaa", "operation": "fullmatch", "flags": 1024,
+      "partial": True}, "C4", "pass"),
 ]
 
 

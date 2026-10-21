@@ -1,0 +1,211 @@
+CaseFoldedScan
+--------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=11 to the Runner constructor to save time.
+
+WholeWordList
+-------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+ReverseFailedScan
+-----------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+PartialMatch
+------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+MatchesToEndDense
+-----------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=8 to the Runner constructor to save time.
+
+EnumerateMatchesFirstTwo
+------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=9 to the Runner constructor to save time.
+
+ReplaceTemplate
+---------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+SplitLong
+---------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+FuzzyShort
+----------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+FuzzyLong
+---------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=8 to the Runner constructor to save time.
+
+FuzzyNoMatchLong
+----------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+FuzzyBudgetThree
+----------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+PathologicalNestedRepeat
+------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=14 to the Runner constructor to save time.
+
+PathologicalWordsToEnd
+----------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=9 to the Runner constructor to save time.
+
+TestedGroupRepeat
+-----------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.
+
+ConditionalBesideBranch
+-----------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=10 to the Runner constructor to save time.
+
+ConditionalPerTokenNoMemo
+-------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=14 to the Runner constructor to save time.
+
+FuzzyPhraseOneIsMatch
+---------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=8 to the Runner constructor to save time.
+
+FuzzyPhraseOneMatch
+-------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=2 to the Runner constructor to save time.
+
+FuzzyPhraseOneEnhanced
+----------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=1 to the Runner constructor to save time.
+
+FuzzyPhraseThreeAlternation
+---------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=3 to the Runner constructor to save time.
+
+FuzzyPhraseThreeNamedList
+-------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=10 to the Runner constructor to save time.
+
+FuzzyPhraseThreeSeparatePasses
+------------------------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=10 to the Runner constructor to save time.
+
+ParseLogLines
+-------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=15 to the Runner constructor to save time.
+
+RedactDigits
+------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=12 to the Runner constructor to save time.
+
+CaseFoldAccented
+----------------
+
+Benchmark was run more times than necessary to get a stable result.
+Consider passing processes=9 to the Runner constructor to save time.
+
+WholeWordRecords
+----------------
+
+WARNING: the benchmark result may be unstable
+* Not enough samples to get a stable result (95% certainly of less than 1% variation)
+
+Try to rerun the benchmark with more runs, values and/or loops.
+Run 'python.exe -m pyperf system tune' command to reduce the system jitter.
+Use pyperf stats, pyperf dump and pyperf hist to analyze results.
+Use --quiet option to hide these warnings.

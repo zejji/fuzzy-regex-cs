@@ -31,7 +31,10 @@ public sealed class PartialBlockedEndTests
     [Arguments("C2", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
     [Arguments("C2", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]
     [Arguments("C3", "match", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", -1, -1, "n/a", "n/a")]
-    [Arguments("C3", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", 1, 1, "unset", "unset")]
+    // C3's search under upstream's capture rule lists c as C2 does: since D97 the run-out in the
+    // called lookahead goes on, the call returns, and b runs out after it. Before, a group call in
+    // a pattern with a condition answered the run-out inside the call, with c not yet captured.
+    [Arguments("C3", "search", @"(?(DEFINE)(?<c>(?=a$)))(?&c)b", "a", 1, 1, "1,1", "unset")]
     [Arguments("C4", "match", @"(?(DEFINE)(?<c>(?=a\b|a)))(?&c)(b)", "a", -1, -1, "n/a", "n/a")]
     [Arguments("C5", "match", @"(?(DEFINE)(?<c>(?!a\b)))(?&c)a", "a", 0, 1, "0,0", "unset")]
     [Arguments("C6", "match", @"(?(DEFINE)(?<c>(?!a$)))(?&c)a\n", "a", 0, 1, "0,0", "unset")]

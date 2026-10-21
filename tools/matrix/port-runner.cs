@@ -31,7 +31,9 @@
 // unsafememo (the failed-call memo forced on where the compiler turned it off, on `on` only),
 // callmemokey (the failed-call memo's key without the position, on `on` only),
 // d52 (a conditional's test compiled with the section's fuzziness, ledger entry 64) and d54 (a
-// failed negative test's captures dropped, ledger entry 65), each on every variant but `wo`.
+// failed negative test's captures dropped, ledger entry 65), callcaptures (D51 off: a group call's
+// captures kept when it returns, ledger entry 63) and d11 (D11's second pass as it was, which
+// brings D26 back), each on every variant but `wo`.
 // d37 and callfeatures also turn D52 and D54 on, as the oracle's named ablations do (OracleComparer.cs `namedAblation`).
 using System.Diagnostics;
 using System.Globalization;
@@ -74,13 +76,15 @@ FieldInfo minWidth = F("MinWidth"),
     upstreamMinWidth = F("UpstreamMinWidth");
 FieldInfo skipLookaroundInsertion = F("SkipLookaroundInsertion"),
     liftsAnchorBan = F("LiftsAnchorBan"),
-    liftsAnchorBanWhenPartial = F("LiftsAnchorBanWhenPartial"),
     anchorGuards = F("AnchorGuards"),
     upstreamDefaultBoundary = F("UpstreamDefaultBoundary"),
     skipTiming = F("SkipMovesTheSliceWhenItRuns"),
     verbScope = F("VerbsAreConfinedToTheInnermostGroup"),
     doubledInsertions = F("DoubleCountTrailingInsertions"),
-    dropNegativeTestCaptures = F("DropNegativeTestCaptures");
+    dropNegativeTestCaptures = F("DropNegativeTestCaptures"),
+    keepCallCaptures = F("KeepCallCaptures"),
+    secondPassAsBeforeD11 = F("SecondPassAsBeforeD11"),
+    reentryAcrossSections = F("CallGuardComparesAcrossSections");
 
 // Check C1x's pinned divergences: the fuzzy ablations OracleComparer's RunWith.../RunWithout...
 // helpers apply for ExpectedDivergences, one variant each. A C1x row whose difference from upstream
@@ -187,6 +191,8 @@ foreach (string line in File.ReadLines(input))
                 ? "ERR RowBudget"
                 : Answer(form.Value.GetString()!, subject, op, partial, pos, endpos, "wo");
         result["wo"] = forms;
+        // C2's one exception (D93): the answer with a call re-entering in a new section let run.
+        result["xreentry"] = Spent() ? "ERR RowBudget" : Answer(pattern, subject, op, partial, pos, endpos, "xreentry");
     }
     // A row may also ask for them itself (`askPinned`), for triaging a C1 row by hand.
     if (
@@ -212,7 +218,10 @@ foreach (string line in File.ReadLines(input))
 FuzzyRegex Compile(string pattern, string variant)
 {
     bool d37 = ablate == "d37" && variant != "wo";
-    bool callFeatures = (ablate == "callfeatures" && variant == "base") || variant == "xcallfeatures";
+    // C2's D93 variant carries the row's ablation too: without it a control that switches the
+    // call-features fix off had its xreentry answer taken from the live engine, which gives the
+    // written-out form, so the firing control read as D93's exception (2026-10-17).
+    bool callFeatures = (ablate == "callfeatures" && variant is "base" or "xreentry") || variant == "xcallfeatures";
     var regex = (FuzzyRegex)
         withDefaultVersion.Invoke(
             null,
@@ -249,6 +258,13 @@ FuzzyRegex Compile(string pattern, string variant)
     // (OracleComparer.cs: DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation).
     if ((ablate == "d54" && variant != "wo") || d37 || callFeatures)
         dropNegativeTestCaptures.SetValue(pobj, true);
+    // D51 off: a call's captures outlive its return, as OracleComparer.RunWithTheUpstreamCallCaptures.
+    if (ablate == "callcaptures" && variant != "wo")
+        keepCallCaptures.SetValue(pobj, true);
+    // D11's second pass as it was, which takes D26's fix with it: the switch
+    // OracleComparer.RunWithTheSecondPassAsBeforeD11 sets, alone.
+    if (ablate == "d11" && variant != "wo")
+        secondPassAsBeforeD11.SetValue(pobj, true);
     if (Array.IndexOf(pinned, variant) >= 0)
     {
         // OracleComparer.Run's withoutTheFuzzySearchFixes: entry 42 off always; entry 44 off except
@@ -262,7 +278,6 @@ FuzzyRegex Compile(string pattern, string variant)
         {
             // RunWithoutTheAnchorPin: rule H' off (D61).
             liftsAnchorBan.SetValue(pobj, false);
-            liftsAnchorBanWhenPartial.SetValue(pobj, false);
             anchorGuards.SetValue(pobj, null); // BESTMATCH keeps S57c's exemption (D61 scope cut)
         }
         if (variant == "xboundary")
@@ -274,6 +289,8 @@ FuzzyRegex Compile(string pattern, string variant)
         if (variant == "xdoubled")
             doubledInsertions.SetValue(pobj, true); // RunWithTheDoubledInsertionGuard
     }
+    if (variant == "xreentry")
+        reentryAcrossSections.SetValue(pobj, true); // OracleComparer.RunWithTheReentryInANewSection
     if (variant == "off")
     {
         skipCallMemo.SetValue(pobj, true);

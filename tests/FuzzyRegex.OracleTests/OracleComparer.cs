@@ -130,6 +130,16 @@ internal static class OracleComparer
             }
 
             IOracleOutcome? actual = engine(row);
+
+            // A broken invariant in this port, whatever upstream answered. Checked before Compare so
+            // that no expected-divergence entry can claim the row as a known difference.
+            if (actual is ErrorOutcome { Exception: nameof(FailedAssertException) })
+            {
+                tally[OracleVerdict.Fault] = tally.GetValueOrDefault(OracleVerdict.Fault) + 1;
+                faults.Add(OracleWave.Describe(row, actual, heading: "FAULT"));
+                continue;
+            }
+
             OracleVerdict verdict = Compare(row, actual);
 
             // A divergence only. An agreement is never reclassified: the entries exist to account
@@ -234,7 +244,7 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
-    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
+    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
     /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
@@ -696,8 +706,7 @@ internal static class OracleComparer
     /// <para>
     /// Rule H' lifts upstream's ban on a fuzzy insertion at the search anchor
     /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>) where the banned search finds no match
-    /// starting inside the attempt at the anchor. Clearing <c>PatternObject.LiftsAnchorBan</c> and
-    /// <c>LiftsAnchorBanWhenPartial</c> makes every plain and ENHANCEMATCH search keep the ban, and
+    /// starting inside the attempt at the anchor. Clearing <c>PatternObject.LiftsAnchorBan</c> makes every plain and ENHANCEMATCH search keep the ban, and
     /// emptying <c>PatternObject.AnchorGuards</c> removes the ledger 19/20 exemption BESTMATCH keeps
     /// (D61's scope cut), which together are upstream's rule exactly.
     /// </para>
@@ -722,7 +731,6 @@ internal static class OracleComparer
             ablate: static compiled =>
             {
                 compiled.PatternObject.LiftsAnchorBan = false;
-                compiled.PatternObject.LiftsAnchorBanWhenPartial = false;
                 compiled.PatternObject.AnchorGuards = null;
             }
         );
@@ -1100,8 +1108,8 @@ internal static class OracleComparer
     /// UAX #29's.
     /// </summary>
     /// <remarks>
-    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 revision 47, which passes all of
-    /// Unicode 17.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
+    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 (revision 47, now 49), which passes all of
+    /// Unicode 18.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
     /// <c>PatternObject.UpstreamDefaultBoundary</c> sends <c>Matcher.AtDefaultBoundary</c> to
     /// <c>AtUpstreamDefaultBoundary</c>, upstream's function as it stands, at every site that reads
     /// it. The <c>default-word-boundary-follows-uax29</c> entry keys on this.
@@ -1118,6 +1126,32 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's Indic conjunct rule, UAX #29 revision 47's
+    /// GB9c, in place of revision 49's.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 95 (D120): Unicode 18.0.0 made GB9c <c>Linker Extend* × Consonant</c>, and
+    /// upstream 2026.9.29 moved to the 18.0.0 tables but kept <c>Consonant [Extend Linker]* Linker
+    /// [Extend Linker]* × Consonant</c>. Setting <c>PatternObject.UpstreamGraphemeConjunct</c> makes
+    /// both GB9c sites in <c>Matcher</c> apply the old rule. The
+    /// <c>grapheme-conjunct-follows-unicode-18</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's rule, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamGraphemeConjunct(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            withoutTheFuzzySearchFixes: true,
+            ablate: static compiled => compiled.PatternObject.UpstreamGraphemeConjunct = true
         );
     }
 
@@ -1168,6 +1202,30 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SkipsALazyRunDespiteAVerb = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's step after a failed attempt, which goes on
+    /// from the start a <c>\K</c> left ahead of the attempt.
+    /// </summary>
+    /// <remarks>
+    /// D92 made the step go on from where the attempt began. Setting
+    /// <c>PatternObject.StepsOnFromTheKeptStart</c> restores upstream's step (<c>_regex.c:15695</c>).
+    /// The <c>keep-before-a-verb-skips-no-start</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's step, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamStepFromTheKeptStart(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.StepsOnFromTheKeptStart = true,
             upstreamCallCaptures: true
         );
     }
@@ -1251,6 +1309,46 @@ internal static class OracleComparer
             {
                 compiled.PatternObject.VerbsAreConfinedToTheInnermostGroup = true;
                 compiled.PatternObject.SkipMovesTheSliceWhenItRuns = withUpstreamSkipTiming;
+            },
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with a <c>\K</c> left in force when matching backtracks
+    /// past the construct it is in, as upstream leaves it (D88).
+    /// </summary>
+    /// <remarks>
+    /// <c>PatternObject.KeepOutlivesAnAtomicGroup</c> covers atomic groups and possessive repeats;
+    /// <paramref name="lookarounds"/> adds <c>PatternObject.KeepOutlivesALookaround</c>, which covers
+    /// lookarounds and conditions' tests. The <c>keep-undone-past-an-atomic-group</c> entry keys on
+    /// the first alone and <c>keep-undone-past-a-lookaround</c> on the second, alone or with the
+    /// first, so a row both explain belongs to the lookaround entry. Both also take upstream's step
+    /// after a failed attempt (<c>PatternObject.StepsOnFromTheKeptStart</c>, D92): a start that
+    /// outlives its construct is the one upstream steps on from, so its skipped starts are part of
+    /// what this ablation reproduces.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="atomicGroups">Leave a <c>\K</c> in an atomic group in force.</param>
+    /// <param name="lookarounds">Leave a <c>\K</c> in a lookaround or a condition's test in force.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheKeepOutlivingItsConstruct(
+        OracleRow row,
+        bool atomicGroups,
+        bool lookarounds
+    )
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: compiled =>
+            {
+                compiled.PatternObject.KeepOutlivesAnAtomicGroup = atomicGroups;
+                compiled.PatternObject.KeepOutlivesALookaround = lookarounds;
+                compiled.PatternObject.StepsOnFromTheKeptStart = true;
             },
             upstreamCallCaptures: true
         );
@@ -1350,6 +1448,13 @@ internal static class OracleComparer
     /// counts go back and the total does not, and <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> rank by
     /// the total. <c>PatternObject.KeepDiscardedTotals</c> restores that. The
     /// <c>fuzzy-total-drops-a-discarded-section</c> entry keys on this.
+    /// <para>
+    /// D102's fix is switched off with it (<c>PatternObject.BoundsReachDecidingBodies</c>). Where a
+    /// stale total makes a perfect match look imperfect, upstream's walk goes on with no budget, and
+    /// a negative lookaround's body held to that budget fails and lets the lookaround pass: the
+    /// first example row, <c>(?b)(a)(?:(?!.(?:(?1)){e&lt;=1})|.)+?b</c> over 'abbx', answers
+    /// upstream's (0, 2) only with both switched off.
+    /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
@@ -1361,7 +1466,36 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.KeepDiscardedTotals = true,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.KeepDiscardedTotals = true;
+                compiled.PatternObject.BoundsReachDecidingBodies = true;
+            },
+            withoutTheFuzzySearchFixes: true,
+            keepMinimumOrderFix: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the BESTMATCH and ENHANCEMATCH budget bounding every
+    /// body, as upstream's does (the D102 and D109 fixes switched off).
+    /// </summary>
+    /// <remarks>
+    /// <c>PatternObject.BoundsReachDecidingBodies</c> keeps the budget in force inside lookarounds,
+    /// conditional tests and atomic groups. The <c>ranked-budget-steered-a-commitment-by-ablation</c>
+    /// entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fixes, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheBudgetInEveryBody(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.BoundsReachDecidingBodies = true,
             withoutTheFuzzySearchFixes: true,
             keepMinimumOrderFix: true
         );
@@ -1584,6 +1718,68 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.TailRunOutAsBeforeD67 = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the call guard comparing section counts across a
+    /// newly opened fuzzy section (D93's exception switched off), so a call that re-enters an open
+    /// call of its group at the same position inside a new section runs, as upstream runs it.
+    /// </summary>
+    /// <remarks>
+    /// <c>CallGuardComparesAcrossSections</c> is the one switch, read only by the guard. The
+    /// <c>call-reentry-opening-a-section-is-refused</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without D93's exception, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheReentryInANewSection(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.CallGuardComparesAcrossSections = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with every repeat guard set up as upstream sets it up,
+    /// without D85 (ledger entry 84): one tail guard per repeat, whatever the rest of the match
+    /// reads, and a body guard wherever upstream's walk missed a reference in the body.
+    /// </summary>
+    /// <remarks>
+    /// D85 is three compile-time decisions, all on <c>RepeatInfo</c>: a tail key
+    /// (<c>TailKey</c>), a body guard switched off around a keyed tail
+    /// (<c>BodyHoldsKeyedTail</c>), and a body guard switched off where the body reads a group
+    /// (<c>BodyGuardDroppedForD85</c>). Undoing the three on a pattern compiled for this one call
+    /// leaves upstream's guards; the matcher takes upstream's path wherever <c>TailKey</c> is
+    /// <see langword="null"/>. The <c>keyed-tail-guard</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without D85, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamRepeatGuards(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                foreach (RepeatInfo info in compiled.PatternObject.RepeatInfoList)
+                {
+                    info.TailKey = null;
+                    info.BodyHoldsKeyedTail = false;
+                    if (info.BodyGuardDroppedForD85)
+                    {
+                        info.Status |= NodeStatus.Body;
+                    }
+                }
+            },
             upstreamCallCaptures: true
         );
     }

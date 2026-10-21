@@ -90,7 +90,8 @@ internal sealed class Node
     /// a run-out at this node leaves unknown (<c>Matcher.MarkTheBodysCapturesUnknown</c>). A group
     /// the body closed before it and cannot reach again keeps the span the held text gave it. Set
     /// by <c>PatternObject.SetRunOutGroups</c>, only for a pattern that reads captures while it
-    /// matches and has no group calls, the patterns whose run-outs make captures unknown.
+    /// matches, the patterns whose run-outs make captures unknown. A group call is stepped over:
+    /// its return restores every capture (D97).
     /// </summary>
     internal (int Private, int Public)[]? RunOutGroups;
 

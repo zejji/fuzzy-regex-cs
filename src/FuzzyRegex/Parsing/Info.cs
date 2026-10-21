@@ -58,6 +58,12 @@ internal sealed class Info
     internal int FlagScopeDepth { get; set; }
 
     /// <summary>
+    /// How many groups and sets enclose the current point. Not upstream state: the parser bounds it
+    /// at <see cref="ParseFunctions.MaxNestingDepth"/> (D110).
+    /// </summary>
+    internal int NestingDepth { get; set; }
+
+    /// <summary>
     /// The encoding flags in force outside every group. Not upstream state (S91): an encoding named
     /// there reaches the whole pattern, because outside a group encodings accumulate and a clash is
     /// rejected, so a node parsed under exactly these encodings needs no encoding of its own.
@@ -174,6 +180,13 @@ internal sealed class Info
     /// to know whether a call could carry a fuzzy budget into a section that allows no errors.
     /// </summary>
     internal bool HasGroupCall { get; set; }
+
+    /// <summary>
+    /// NOT UPSTREAM (D109): the first <c>(*PRUNE)</c> or <c>(*SKIP)</c> the parser met, its name and
+    /// position, or null. <see cref="PatternCompiler"/> refuses one in a fuzzy pattern under
+    /// BESTMATCH or ENHANCEMATCH.
+    /// </summary>
+    internal (string Name, int Position)? FirstBacktrackingVerb { get; set; }
 
     /// <summary>
     /// Negative alias to real group number, for a named group nested inside itself. Upstream

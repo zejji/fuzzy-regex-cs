@@ -63,7 +63,7 @@ public sealed class ComparisonCoversDivergencesTests
     // is C# or Python, not markdown), so this is a ceiling on today's file rather than a live bug.
     // Upgrade path: track fence state the same way SplitRowRespectingCodeSpans tracks backtick
     // state, and skip lines while inside one. Found by the second blind review pass, 2026-09-18.
-    private static List<string> ComparisonHeadingLines(string markdown) =>
+    internal static List<string> ComparisonHeadingLines(string markdown) =>
         [
             .. markdown
                 .Split('\n')
@@ -82,7 +82,7 @@ public sealed class ComparisonCoversDivergencesTests
     /// </summary>
     /// <param name="markdown">The raw contents of <c>docs/DIVERGENCES.md</c>.</param>
     /// <returns>One heading per SHIPPED row.</returns>
-    private static List<string> ShippedRowHeadings(string markdown)
+    internal static List<string> ShippedRowHeadings(string markdown)
     {
         List<string> headings = [];
         foreach (string line in markdown.Split('\n'))

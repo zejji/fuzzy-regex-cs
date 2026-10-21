@@ -163,22 +163,29 @@ public sealed class FuzzyAnchorPinTests
         Spans(@"(?b)\m(?:Y){1i+1d+1s<=2}\M", " XY Z").Should().Equal((1, 3), (4, 5));
     }
 
-    // The gate. A search with partial matching on is gated in, whatever the pattern: dropping the
-    // leading insertion leaves the partial (1, 1), which starts later. A pattern whose fuzzy sections
-    // permit no insertion is gated out. DIVERGES FROM UPSTREAM on the partial row (upstream P(1, 1)).
+    // The gate, the same with partial matching on or off (D100, DECISIONS 2026-10-17). A pattern with
+    // no position-dependent construct and no fuzzy minimum keeps the ban: every completed text that
+    // the attempt at the anchor matches has a match from one character on, so the port's full
+    // search never starts at the anchor there, and the partial contract gives upstream's answer.
+    // 'x' + 'a' is (1, 2) in the port; the partial was P(0, 1) with one insertion before D100.
     [Test]
-    public void Partial_matching_is_gated_in_and_a_section_without_insertions_is_gated_out()
+    [Arguments(@"(?:a){i<=1}", "x")]
+    [Arguments(@"(?:ab){i<=1}", "x")]
+    public void A_partial_search_keeps_the_ban_where_the_full_search_always_does(string pattern, string text)
     {
-        Match partial = new FuzzyRegex("(?:a){i<=1}").Match("x", partial: true);
-        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Insertions)
-            .Should()
-            .Be((true, 0, 1, 1));
+        Match partial = new FuzzyRegex(pattern).Match(text, partial: true);
 
+        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Total).Should().Be((true, 1, 0, 0));
+    }
+
+    // A pattern whose fuzzy sections permit no insertion is gated out.
+    [Test]
+    public void A_section_without_insertions_is_gated_out()
+    {
         new FuzzyRegex("(?:a){i<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
         new FuzzyRegex(@"\b(?:dog){i<=1}").PatternObject.LiftsAnchorBan.Should().BeTrue();
         new FuzzyRegex(@"\b(?:dog){s<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
         new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBan.Should().BeFalse();
-        new FuzzyRegex(@"\b(?:dog){d<=1}").PatternObject.LiftsAnchorBanWhenPartial.Should().BeFalse();
     }
 
     // Partial matching: a full match is preferred to a partial one, so H' runs on the full pass
@@ -202,14 +209,192 @@ public sealed class FuzzyAnchorPinTests
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
     }
 
-    // Upstream's answer: a partial from 1 exists, and it starts inside the candidate.
+    // D100, proposed for checkpoint 2: in the class rule H' gates in, a partial never starts after
+    // the least start of this port's full search over every continuation, and may start before it
+    // (reversed: never ends before the greatest end). A later partial never keeps the ban, so the
+    // attempt at the anchor stands whenever it is live: some continuation completes it, so its
+    // start is never too late; but every continuation that completes it may also complete a match
+    // inside it, and no rule over the two partials can tell (DECISIONS 2026-10-17), so it can be too
+    // early. `judge` is that least start (reversed: greatest end) over every continuation of up to
+    // 5 characters (tools/probes/partial-contract-judge.py, 2026-10-18); a longer continuation could
+    // only lower it, so the bound is safe for the "never later" half. The comment gives the
+    // witness continuation and the answer on main 06999a79.
     [Test]
-    public void A_partial_match_starts_at_the_leftmost_live_start()
+    // Too late on main, exact now.
+    [Arguments(@"(?:ab){1<=i<=2}", "ba", 0, 0, 0, 2)] // 'bab' is (0, 3); main P(1, 2), as upstream
+    [Arguments(@"(?:ab){1<=i<=2}", "xa", 0, 0, 0, 2)] // 'xab'; main P(1, 2)
+    [Arguments(@"(?:ab){2<=i<=2}", "xya", 0, 0, 0, 3)] // 'xyab'; main P(1, 3)
+    [Arguments(@"(?:b){2<=i<=2}", " b", 0, 0, 0, 2)] // ' ba' is (0, 3); main P(1, 2)
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2, 0, 2)] // 'bab'; main P(0, 1)
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ax", 0, 2, 0, 2)] // 'bax'; main P(0, 1)
+    [Arguments(@"(?r)(?:b){2<=i<=2}", "b ", 0, 2, 0, 2)] // 'ab '; main P(0, 1)
+    [Arguments(@"(?r)(?:b\b){i<=2}", "xx", 0, 2, 0, 2)] // 'bxx' is (0, 3); main P(0, 1)
+    // Too early on main and here alike: every completion of the attempt also completes a match
+    // inside it.
+    [Arguments(@"(?:a){i<=1}\b", "x", 0, 1, 0, 1)] // 'xa' is (1, 2)
+    [Arguments(@"(?:(?=a)a){e<=1}", "b", 0, 1, 0, 1)] // 'ba' is (1, 2)
+    [Arguments(@"(?:ab){1<=d<=1,i<=1}", " ", 0, 1, 0, 1)] // ' a'; a deletion needs no more text
+    [Arguments(@"(?r)(?:b){i<=2}\B", "a ", 0, 0, 0, 2)] // 'ba '
+    // Exact on main, too early here.
+    [Arguments(@"(?:ab){1<=i<=2}", "xxa", 0, 1, 0, 3)] // 'xxab': c (0, 4) i=2, u (1, 4) i=1
+    [Arguments(@"(?:ab){1<=i<=2}", "xba", 0, 1, 0, 3)] // 'xbab'
+    [Arguments(@"(?=x|ab)(?:ab){i<=1}", "xa", 0, 1, 0, 2)] // 'xab' is (1, 3)
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "axx", 0, 2, 0, 3)] // 'baxx'
+    [Arguments(@"(?V1)(?:a(?=b)a+){i<=1,1<=e<=2}", "ba", 0, 1, 0, 2)] // 'baba'
+    [Arguments(@"\m(?:(?:)[^x]b){i<=2}(?=b)", "x a", 0, 2, 0, 3)] // 'x abb'
+    [Arguments(@"(?i)(?r)(?<!a)(?:(?:a(?=b)){2<=i<=2}|a+){i<=2}", " b", 0, 1, 0, 2)] // 'a b'
+    [Arguments(@"(?r)\A(?:(?:a\Bb){2<=i<=2}|a(?=b)){i<=2}", "ba", 0, 1, 0, 2)] // 'aba'
+    [Arguments(@"(?r)\M(?:(?:ab)*){2<=i<=2}", "aa", 0, 1, 0, 2)] // 'a aa'
+    [Arguments(@"(?i)(?r)(?:abc(?:ab)*){1<=i<=2}", "abx", 0, 2, 0, 3)] // 'abcabx'
+    public void A_partial_never_starts_after_the_full_search_of_every_continuation(
+        string pattern,
+        string text,
+        int pos,
+        int judge,
+        int start,
+        int end
+    )
     {
-        Match m = new FuzzyRegex("(?=x|ab)(?:ab){i<=1}").Match("xa", partial: true);
+        Match m = new FuzzyRegex(pattern).Match(text, pos, partial: true);
 
-        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 1));
+        m.PartialMatch.Should().BeTrue();
+        if (pattern.Contains("(?r)", StringComparison.Ordinal))
+        {
+            (m.Index + m.Length).Should().BeGreaterThanOrEqualTo(judge);
+        }
+        else
+        {
+            m.Index.Should().BeLessThanOrEqualTo(judge);
+        }
+
+        (m.Index, m.Index + m.Length).Should().Be((start, end));
     }
+
+    // The same over finditer: the scan's one match is the same partial. Too late on main.
+    [Test]
+    [Arguments(@"(?:ab){1<=i<=2}", "ba", 0, 2)]
+    [Arguments(@"(?:b){2<=i<=2}", " b", 0, 2)]
+    [Arguments(@"(?r)(?:ba){1<=i<=2}", "ab", 0, 2)]
+    [Arguments(@"(?r)(?:b){2<=i<=2}", "b ", 0, 2)]
+    public void A_partial_scan_never_starts_after_the_full_search_of_every_continuation(
+        string pattern,
+        string text,
+        int start,
+        int end
+    )
+    {
+        Match[] matches = [.. new FuzzyRegex(pattern).Matches(text, partial: true)];
+
+        matches.Select(static m => (m.PartialMatch, m.Index, m.Index + m.Length)).Should().Equal((true, start, end));
+    }
+
+    // Rows where main and the one-sided rule above both give the judge's answer exactly. The first
+    // is gated out and keeps the ban; upstream agrees there.
+    [Test]
+    [Arguments(@"(?:ab){i<=1}", "xa", 1, 2)]
+    [Arguments(@"\b(?:ab){i<=1}", "xa", 0, 2)] // 'xab' is (0, 3), as `\b` fails at 1 and 2
+    [Arguments(@"(?:(?=a)){e<=1}", "s", 0, 1)] // 'sa' is (0, 1); the later (1, 1) starts at its end
+    public void A_partial_keeps_the_answer_the_judge_gives(string pattern, string text, int start, int end)
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+    }
+
+    // D100's blind review (2026-10-17, .scratch/s1016/review-d100): rows where a rule over the two
+    // partials (the later one began one character on, meets its minimums, must consume) gave the
+    // wrong start, too late and too early. Each expected start (reversed: end) is the judge's, the
+    // least start of this port's own full search over every continuation of up to 5 characters
+    // (tools/probes/partial-contract-judge.py); main gives the same, and so does D100's one-sided
+    // rule. The six rows that rule makes early are in
+    // A_partial_never_starts_after_the_full_search_of_every_continuation. The witness continuation
+    // is in the comment.
+    [Test]
+    [Arguments(@"(?V1)(?:^|x)(?:ab){i<=2}\B", "b", 0, 0)] // 'baba': (0, 4)
+    [Arguments(@"(?e)(?!b)(?:[^x]b(?:x|ab)){i<=2,e<=2}", "bxax", 3, 3)] // 'bxaxbbx'
+    [Arguments(@"\B(?:aba(?:x|ab)){i<=1}", "  ", 1, 1)] // '  abax'
+    [Arguments(@"(?r)x(?:[^x]b){i<=2}\B", " ", 0, 1)] // 'xab '
+    [Arguments(@"(?r)x(?:(a)b){i<=2,e<=2}\b", "a", 0, 1)] // 'xaba'
+    [Arguments(@"(?r)a(?:(?:a|bc)){i<=2}\B", " ", 0, 1)] // 'aa '
+    public void A_partial_reports_the_least_start_the_full_search_reaches(
+        string pattern,
+        string text,
+        int pos,
+        int edge
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, pos, partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (pattern.Contains("(?r)", StringComparison.Ordinal) ? m.Index + m.Length : m.Index).Should().Be(edge);
+    }
+
+    // D96: H' asks where u's attempt began, not the start a `\K` reports. In each row u's attempt
+    // starts inside c, so u stands, as without the `\K`. Upstream's answers (regex 2026.9.10,
+    // 2026-10-17), every one exact; before the fix the port kept c, with one insertion.
+    [Test]
+    [Arguments(@"(?:a){i<=1}\K", "ba", 2, 2)] // without \K: (1, 2) exact on both
+    [Arguments(@"(?:ab){i<=1}\K", "xab", 3, 3)] // without \K: (1, 3)
+    [Arguments(@"(?e)(?:a){i<=1}\K", "ba", 2, 2)]
+    [Arguments(@"(?r)\K(?:a){i<=1}", "ab", 0, 0)] // without \K: (0, 1)
+    [Arguments(@"(?r)\K(?:ab){i<=1}", "abx", 0, 0)] // without \K: (0, 2)
+    // u's attempt starts AT the anchor, so it is the answer; without \K, (0, 2) exact through xa.
+    [Arguments(@"(?:a){i<=1}|xa\K", "xa", 2, 2)]
+    // The same rows without the `\K`, and one where u's reported start already lies inside c:
+    // these passed before D96's fix and must not move.
+    [Arguments(@"(?:a){i<=1}", "ba", 1, 2)]
+    [Arguments(@"(?:ab){i<=1}", "xab", 1, 3)]
+    [Arguments(@"(?r)(?:a){i<=1}", "ab", 0, 1)]
+    [Arguments(@"(?r)(?:ab){i<=1}", "abx", 0, 2)]
+    [Arguments(@"(?:a){i<=1}|xa", "xa", 0, 2)]
+    [Arguments(@"(?:ab){i<=1}\Kc", "xabc", 3, 4)]
+    public void A_keep_does_not_change_which_attempt_wins(string pattern, string text, int start, int end)
+    {
+        Match m = new FuzzyRegex(pattern).Match(text);
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // D96 under partial matching and finditer: upstream's answers (2026-10-17), all exact.
+    [Test]
+    public void A_keep_does_not_change_which_attempt_wins_in_a_scan_or_a_partial_search()
+    {
+        Match partial = new FuzzyRegex(@"(?:ab){i<=1}\K").Match("xab", partial: true);
+        (partial.PartialMatch, partial.Index, partial.Length, partial.FuzzyCounts.Total).Should().Be((false, 3, 0, 0));
+
+        SpansAndErrors(@"(?:ab){i<=1}\K", "xab").Should().Equal((3, 3, 0));
+        SpansAndErrors(@"(?r)\K(?:ab){i<=1}", "abx").Should().Equal((0, 0, 0));
+        SpansAndErrors(@"(?:ab){i<=1}|xab\K", "xab").Should().Equal((3, 3, 0));
+        // The second match was (8, 8) with two insertions: c ran from 3 over the two spaces.
+        SpansAndErrors(@"\b(?:dog){e<=2}\K", "dog  dog").Should().Equal((3, 3, 0), (8, 8, 0));
+        SpansAndErrors(@"\b(?:dog){e<=2}", "dog  dog").Should().Equal((0, 3, 0), (5, 8, 0));
+
+        // H' still keeps c where u's attempt begins after it, as it does without the `\K`
+        // (Finditer_keeps_a_match_at_an_anchor_no_later_match_overlaps). DIVERGES FROM UPSTREAM,
+        // which gives [(5, 5)] with one insertion.
+        SpansAndErrors(@"(?:\ba){i<=1}\K", "xa xa").Should().Equal((2, 2, 1), (5, 5, 1));
+    }
+
+    // D96: when u wins, its attempt's start comes back with it. The overlapped scan steps on from
+    // the attempt when a `\K` in a lookbehind reports a start behind it (D87). Here u begins at 2
+    // and reports (1, 4); the scan kept c's attempt start, 0, stepped from the reported 1 to 2, and
+    // found the attempt at 2 a second time. Each attempt now answers once: 2 with 'b' inserted, then
+    // 3 exact, which is what the port gives with H' off. Upstream loops for ever here (D87).
+    [Test]
+    public void An_overlapped_scan_steps_on_from_the_winning_attempt()
+    {
+        Match[] all = [.. new FuzzyRegex(@"(?:c){i<=1}(?<=\K...)").Matches("xxbc", overlapped: true)];
+
+        all.Select(static m => (m.Index, m.Index + m.Length, m.FuzzyCounts.Total)).Should().Equal((1, 4, 1), (1, 4, 0));
+    }
+
+    private static (int Start, int End, int Errors)[] SpansAndErrors(string pattern, string text) =>
+        [
+            .. new FuzzyRegex(pattern)
+                .Matches(text)
+                .Select(static m => (m.Index, m.Index + m.Length, m.FuzzyCounts.Total)),
+        ];
 
     private static (int Start, int End) Span(Match m) => (m.Index, m.Index + m.Length);
 

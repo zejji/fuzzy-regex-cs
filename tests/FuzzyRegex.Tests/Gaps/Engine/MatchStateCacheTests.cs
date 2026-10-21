@@ -299,12 +299,14 @@ public sealed class MatchStateCacheTests
             // and readonly, so no call can set it. MatchState.PartialEventCounts is null exactly in
             // a Release build (D11). MatchState.EmptyIterationScratch is the same, null exactly when
             // the pattern tests no group; otherwise it is an array, which the long[] rule below
-            // scribbles, and a reused state must clear it.
+            // scribbles, and a reused state must clear it. Its D104 records (_cutBody) are the
+            // same, made in the constructor exactly when a repeat or lookaround can write them.
             if (
                 (
                     string.Equals(field.Name, nameof(MatchState.FilterMemory), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.PartialEventCounts), StringComparison.Ordinal)
                     || string.Equals(field.Name, nameof(MatchState.EmptyIterationScratch), StringComparison.Ordinal)
+                    || string.Equals(field.Name, "_cutBody", StringComparison.Ordinal)
                 ) && field.GetValue(state) is null
             )
             {
@@ -393,6 +395,17 @@ public sealed class MatchStateCacheTests
             case ByteStack stack:
                 stack.Push(7);
                 break;
+            case KeyedTailGuards store:
+                store.ForWrite([7], mayAdd: true)!.Guard(7, protect: true);
+                break;
+            case CutBodyRecords records:
+                records.Writes = 7;
+                records.Hits = 7;
+                records.Pending = true;
+                records.Store.ForWrite([7], mayAdd: true)!.Guard(7, protect: true);
+                Array.Fill(records.Key, 7);
+                Array.Fill(records.ContinuationKey, 7);
+                break;
             case FuzzyLiteralFilter.ScanMemory memory:
                 Array.Fill(memory.From, 7);
                 Array.Fill(memory.Found, 7);
@@ -426,8 +439,21 @@ public sealed class MatchStateCacheTests
             case List<FuzzyChange> changes:
                 changes.Add(new FuzzyChange(1, 7));
                 break;
-            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey)> calls:
-                calls.Add((7, 7, 7, null));
+            case HashSet<RepeatStateKey> failed:
+                failed.Add(new RepeatStateKey(7, 7, 7, 7, 7, 7, 7, true));
+                break;
+            case null when field.FieldType == typeof(HashSet<RepeatStateKey>):
+                // D94's failed-state memo, made on first use.
+                field.SetValue(state, new HashSet<RepeatStateKey> { new(7, 7, 7, 7, 7, 7, 7, true) });
+                break;
+            case List<RepeatStateKey> marked:
+                marked.Add(new RepeatStateKey(7, 7, 7, 7, 7, 7, 7, true));
+                break;
+            case List<(long Key, int Reach, int SstackDepth, long[]? MemoKey, int FrameBase, int BstackAt)> calls:
+                calls.Add((7, 7, 7, null, 7, 7));
+                break;
+            case List<CallSection> sections:
+                sections.Add(new CallSection(7, 7, 7, 7));
                 break;
             case List<long> numbers:
                 numbers.Add(7);
@@ -440,6 +466,9 @@ public sealed class MatchStateCacheTests
                 break;
             case List<WMark> marks:
                 marks.Add(new WMark(7, WMarkKind.Touch));
+                break;
+            case List<MatchState.BestWalkFailure> facts:
+                facts.Add(new MatchState.BestWalkFailure(7, 7, 7, true, 7, 7));
                 break;
             case List<LookaroundSuccess> successes:
                 successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
@@ -535,6 +564,26 @@ public sealed class MatchStateCacheTests
             case GuardList guards:
                 RenderItems(path, ((GuardSpan[])Private(guards, "_spans")).Take(guards.Count), lines);
                 break;
+            case KeyedTailGuards store:
+                lines.Add($"{path}.Changes={Private(store, "_changes")}");
+                foreach (
+                    (TailKeyValues key, GuardList list) in (
+                        (Dictionary<TailKeyValues, GuardList>)Private(store, "_lists")
+                    ).OrderBy(static entry => string.Join(" ", entry.Key.Values), StringComparer.Ordinal)
+                )
+                {
+                    Render($"{path}[{string.Join(" ", key.Values)}]", list, lines);
+                }
+
+                break;
+            case CutBodyRecords records:
+                lines.Add($"{path}=({records.Writes},{records.Hits},{records.Pending},{records.BaseLength})");
+                Render($"{path}.Store", records.Store, lines);
+                // Scratch: CutBodyKeyOf clears Key before it builds a key, and ContinuationKeyOf
+                // overwrites all of ContinuationKey, so only their lengths can carry over.
+                lines.Add($"{path}.Key.Length={records.Key.Length}");
+                lines.Add($"{path}.ContinuationKey.Length={records.ContinuationKey.Length}");
+                break;
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
                 break;
@@ -559,6 +608,10 @@ public sealed class MatchStateCacheTests
             case HashSet<EmptyIterationState> states:
                 // Allocated on first use and then kept, so an empty one is the same as none.
                 lines.Add(states.Count == 0 ? $"{path}=null" : $"{path}.Count={states.Count}");
+                break;
+            case HashSet<RepeatStateKey> failed:
+                // D94's failed-state memo: made on first use and then kept, so empty is none.
+                lines.Add(failed.Count == 0 ? $"{path}=null" : $"{path}.Count={failed.Count}");
                 break;
             case HashSet<long[]> keys:
                 RenderItems(

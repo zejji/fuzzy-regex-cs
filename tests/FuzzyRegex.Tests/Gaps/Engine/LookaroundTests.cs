@@ -197,4 +197,83 @@ public sealed class LookaroundTests
         Captures(own, 1).Should().Equal((0, 1));
         Captures(own, 2).Should().Equal((1, 2));
     }
+
+    /// <summary>
+    /// A lookbehind reads only text that is already there, so when it fails on that text a partial
+    /// match from that start is impossible whatever text follows.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 90, found by battery run 20261017-3 (bed pair 65). Upstream 2026.9.10 answers
+    /// P(2, 3) to the first four rows and P(3, 4) to the fifth (measured 2026-10-17); PCRE2 10.47
+    /// gives no partial on any of them. The cause is the reversed backtrack of a one-character
+    /// repeat before a string tail (<c>aba?</c> read right to left is <c>a?</c>, then "ab"), whose
+    /// tail search stops at the repeat's own start and reports reaching that limit as running out
+    /// of text.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="start">Where the match is asked to start.</param>
+    /// <param name="body">Text the lookbehind's body matches, for the control.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments("(?<=aba?)", "cab", 2, "ab")]
+    [Arguments("(?<=aba?)", "cax", 2, "ab")]
+    [Arguments("(?<=aba?)b", "cab", 2, "ab")]
+    [Arguments("(?i)(?<=aba?)", "cab", 2, "ab")]
+    [Arguments("(?<=abca?)", "ccab", 3, "abc")]
+    public void A_partial_match_after_a_lookbehind_that_fails_on_the_held_text_is_no_match(
+        string pattern,
+        string subject,
+        int start,
+        string body
+    )
+    {
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Version0)
+            .MatchAtStart(subject, start, partial: true)
+            .Success.Should()
+            .BeFalse(pattern);
+
+        // The control: the lookbehind reads before the start, so the same call holds once the
+        // text before the start spells the body.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Version0)
+            .MatchAtStart(body + subject[start..], body.Length, partial: true)
+            .Success.Should()
+            .BeTrue(pattern);
+    }
+
+    /// <summary>
+    /// The mirror of the test above. A reversed pattern's text can grow only at its start, and a
+    /// lookahead reads only the text after its position, which is all there. Where it fails on that
+    /// text, every match must lie wholly in text still to come, so the only partial a search can
+    /// give is the empty one at the start.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 90, addendum of 2026-10-18, found by battery run 20261018-9 (rows c8). Upstream
+    /// 2026.9.10 answers P(0, 1) to every row but the last, measured 2026-10-18, for example
+    /// <c>regex.compile(r'(?r)a(?=b?ab).').search('ba', partial=True)</c>. No text put in front of
+    /// these subjects gives a match that ends after 0. The cause is the forward backtrack of a
+    /// one-character repeat before a string tail (<c>b?</c>, then "ab"), whose reversed tail search
+    /// stops at the repeat's own start and reports reaching it as running out of text. With the
+    /// lazy <c>b??</c>, which takes the other arm, upstream answers P(0, 0) itself; that row is the
+    /// control.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    [Arguments("(?r)a(?=b?ab).", "ba")]
+    [Arguments("(?r)a(?=b?ab).", "bb")]
+    [Arguments("(?r)(?=b?ab).", "ba")]
+    [Arguments("(?r)a(?=b?abc).", "bcx")]
+    [Arguments("(?r)a(?=b?acb).", "bxy")]
+    [Arguments("(?r)a(?=b??ab).", "ba")]
+    public void A_reversed_partial_search_before_a_lookahead_that_fails_on_the_held_text_is_empty_at_the_start(
+        string pattern,
+        string subject
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 0), pattern);
+    }
 }

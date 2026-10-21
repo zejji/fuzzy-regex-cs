@@ -257,12 +257,62 @@ def only_changes_leaked(base: str, up: str, leak_free: str | None) -> bool:
     return True
 
 
-def c2_verdict(base: str, written: str, depth: str) -> tuple:
+_PARTIAL = re.compile(r"\((\d+),(\d+)\)P ([\d,]+)")
+
+
+def partial_ends(answer: str):
+    """Every match's end, partial marker and counts when every match is partial, else None."""
+    parts = answer[1:-1].split(" ; ") if answer.startswith("[") else [answer]
+    found = [_PARTIAL.match(p) for p in parts if p]
+    if not found or not all(found):
+        return None
+    return tuple((int(m.group(2)), m.group(3)) for m in found)
+
+
+def partial_start_before_judges(ans: str, judge: str | None, reverse: bool) -> bool:
+    """C4 under the decided partial contract (KNOWN-DEFECTS F66, D53): a partial reports the first
+    start whose path ran out of text, and the judges report the least start some continuation
+    completes. A path can run out without any continuation completing it, so a partial that ends
+    where the judges' does and starts before it is the contract, not a disagreement (battery run
+    20261016-1: 44 such rows, PCRE2 giving the port's start on every witness asked). A reversed
+    search scans from the right, so there the partial starts where the judges' does and ends after
+    it (28 rows). The other way round is still a failure: a start that completes, scanned earlier,
+    should have run out first."""
+    m, j = re.fullmatch(r"P\((\d+),(\d+)\)", ans), re.fullmatch(r"P\((\d+),(\d+)\)", judge or "")
+    if not (m and j):
+        return False
+    (ms, me), (js, je) = (int(m.group(1)), int(m.group(2))), (int(j.group(1)), int(j.group(2)))
+    return ms == js and me > je if reverse else me == je and ms < js
+
+
+def keep_moved_the_partial(ans: str, judge: str | None, reverse: bool) -> bool:
+    """Whether a partial differs from the judges' only where a \\K moves it: a later start, or
+    reversed, an earlier end, with the other edge where the judges have it."""
+    m, j = re.fullmatch(r"P\((\d+),(\d+)\)", ans), re.fullmatch(r"P\((\d+),(\d+)\)", judge or "")
+    if not (m and j):
+        return False
+    (ms, me), (js, je) = (int(m.group(1)), int(m.group(2))), (int(j.group(1)), int(j.group(2)))
+    return ms == js and me <= je if reverse else me == je and ms >= js
+
+
+def c2_verdict(base: str, written: str, depth: str, reentry: str | None = None) -> tuple:
     """A call means its body written out (D40), and a capture made inside a call is discarded on
     return (owner ruling D51 (a), 2026-09-30), which is what the non-capturing copy does. So the
-    whole answer must agree; the kind says whether the span or counts differ, or only the groups."""
+    whole answer must agree; the kind says whether the span or counts differ, or only the groups.
+    The one exception is D93's (DECISIONS 2026-10-17): a call that re-enters an open call of its
+    group at the same position inside a newly opened fuzzy section is refused. A row is that
+    exception when port-runner's `xreentry` variant, which lets such a re-entry run and changes
+    nothing else, gives the written-out answer."""
     if written == base:
         return ("pass", "", base, written)
+    if reentry == written:
+        return ("expected", "call re-entry in a new fuzzy section refused (D93)" + depth, base, written)
+    if partial_ends(written) is not None and partial_ends(written) == partial_ends(base):
+        # Both are partial matches that end alike and differ only in where they start. Under the
+        # partial contract (KNOWN-DEFECTS F63/F64, F66) a partial reports the first start whose path
+        # ran out, and a call and its written-out body may try their paths in a different order, so
+        # the start is not a property the two must share (battery run 20261016-1, R17).
+        return ("expected", "partial starts differ (F63/F64, F66 partial contract)" + depth, base, written)
     if head(written) != head(base):
         return ("fail", "span or counts differ from the written-out form" + depth, base, written)
     return ("fail", "groups or captures differ from the written-out form" + depth, base, written)
@@ -309,18 +359,27 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
         out["C2"] = ("n/a", "", None, None)
     elif not answered(base):
         out["C2"] = ("n/a", "base unanswered", base, None)
-    elif "8" in wo:
+    elif "10" in wo:
+        # A recursive call written out to depths 8 and 10 (gen.py; run 20261016-1 had two rows whose
+        # written-out form reached the call's answer only at depth 10): judged at depth 10 once the
+        # two depths agree.
+        w8, w10 = wo.get("8"), wo["10"]
+        if not (answered(w8) and answered(w10)) or head(w8) != head(w10):
+            out["C2"] = ("n/a", "written-out forms not stable at depths 8-10", base, w10)
+        else:
+            out["C2"] = c2_verdict(base, w10, " (depth 10)", port.get("xreentry"))
+    elif "8" in wo and "6" not in wo:
         w = wo["8"]
         if not answered(w):
             out["C2"] = ("n/a", "written-out unanswered", base, w)
         else:
-            out["C2"] = c2_verdict(base, w, "")
+            out["C2"] = c2_verdict(base, w, "", port.get("xreentry"))
     else:
         w4, w5, w6 = (wo.get(d) for d in ("4", "5", "6"))
         if not all(answered(w) for w in (w4, w5, w6)) or not head(w4) == head(w5) == head(w6):
             out["C2"] = ("n/a", "written-out forms not stable at depths 4-6", base, w6)
         else:
-            out["C2"] = c2_verdict(base, w6, " (depth 6)")
+            out["C2"] = c2_verdict(base, w6, " (depth 6)", port.get("xreentry"))
     # C3: asserts and crashes anywhere in the port's answers.
     everything = [port.get("base"), port.get("off"), port.get("on"), port.get("judge")] + list((wo or {}).values())
     bad = [a for a in everything if a and (a.startswith("ASSERT") or a.startswith("EXC"))]
@@ -346,14 +405,18 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
             kind = "phantom" if ans != "None" else "ok"
         if kind in ("ok", "phantom") and uj.startswith("P") and ans == "None":
             kind = "miss (upstream judge only)"
-        if (kind == "span-diff" and "\\K" in row["pattern"] and pj
-                and re.fullmatch(r"P\((\d+),(\d+)\)", ans) and ans.split(",")[1] == pj.split(",")[1]
-                and int(ans[2:].split(",")[0]) >= int(pj[2:].split(",")[0])):
+        reverse = bool(row["flags"] & 1024) or row["pattern"].startswith("(?r)")
+        if kind == "span-diff" and "\\K" in row["pattern"] and keep_moved_the_partial(ans, pj, reverse):
             # Both judges report a match/fullmatch partial as P(0,|t|), the attempt's start; with a
             # \K passed before the edge the reported start is where \K was passed, as upstream's own
             # partial answer has it (measured 2026-09-30: `(?:ba)*+.\K\w.` match 'baab' partial is
             # P(3,4) upstream and here). A judge convention, not a disagreement (matrix triage).
+            # Reversed, \K moves the reported end instead (battery run 20261016-2, m23:
+            # `(?r)(?:[ab]\w)+?\w\Ka*` fullmatch 'xaaxaaaa' partial is P(0,4) on both engines, and
+            # 'a' + the subject fullmatches (0,5) on both, so the end at 4 is right).
             kind = "ok"
+        if kind == "span-diff" and partial_start_before_judges(ans, pj, reverse):
+            kind = "F66"
         # How long a continuation the port judge tried: 3 characters, or up to 8 for a row the
         # port answers with a match and nothing shorter completes (port-runner.cs, `judgeBound`).
         # A phantom is "no completion up to N characters", a lower bound, so it names its N.
@@ -365,6 +428,9 @@ def judge_row(row: dict, port: dict, extra: dict, c1: dict | None) -> dict:
             judges = judges.replace("(continuations", "(deep phase, bounded: least start for the shortest completing length; continuations", 1)
         if kind == "ok":
             out["C4"] = ("pass", "", ans, judges)
+        elif kind == "F66":
+            out["C4"] = ("expected", "partial starts before the judges' least completing start (F66)"
+                                 + (", reversed" if reverse else ""), ans, judges)
         elif kind == "phantom":
             # The kind stays "phantom"; the bound is in the detail field, so the witness list does
             # not split by bound.

@@ -39,8 +39,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 C_PATH = REPO_ROOT / 'upstream/src/_regex_unicode.c'
 FIXTURE_PATH = REPO_ROOT / 'tests/FuzzyRegex.Tests/Gaps/Unicode/unicode-fixtures.json'
-# Written by tools/build-character-names.py; read here for the Unicode 17.0 additions, which the
-# host's older unicodedata cannot answer for. Run that script first.
+# Written by tools/build-character-names.py; read here for the codepoints assigned after the host's
+# Unicode version, which its unicodedata cannot answer for. Run that script first.
 CHARACTER_NAMES_PATH = REPO_ROOT / 'tests/FuzzyRegex.Tests/Gaps/Unicode/character-names.json'
 
 MAX_CODEPOINT = 0x10FFFF
@@ -196,14 +196,14 @@ def python_str_digest(_regex) -> dict:
     """``str.isalpha``, ``str.isdigit`` and ``str.isidentifier``, for every codepoint.
 
     These are CPython's, not upstream's, and CPython answers them from its own copy of the UCD -
-    16.0.0 on the recording host, against upstream's 17.0.0 tables. The 4,803 codepoints Unicode
-    17.0 added are therefore skipped: the host has no answer for them. Everything else is
+    16.0.0 on the recording host, against upstream's 18.0.0 tables. The 17,810 codepoints Unicode
+    17.0 and 18.0 added are therefore skipped: the host has no answer for them. Everything else is
     compared, so the mapping the port relies on is measured rather than assumed.
     """
     names = json.loads(CHARACTER_NAMES_PATH.read_text(encoding='utf-8'))
-    new_in_17 = set()
-    for first, last in names['codepointRangesAddedIn17']:
-        new_in_17.update(range(first, last + 1))
+    unknown_to_host = set()
+    for first, last in names['codepointRangesUnknownToHost']:
+        unknown_to_host.update(range(first, last + 1))
 
     properties = _regex.get_properties()
 
@@ -220,7 +220,7 @@ def python_str_digest(_regex) -> dict:
     answers = hashlib.sha256()
     counted = 0
     for codepoint in range(MAX_CODEPOINT + 1):
-        if codepoint in new_in_17:
+        if codepoint in unknown_to_host:
             continue
         character = chr(codepoint)
 
@@ -248,7 +248,7 @@ def python_str_digest(_regex) -> dict:
 
     return {
         'pythonStrCodepointCount': counted,
-        'pythonStrSkippedNewIn17': len(new_in_17),
+        'pythonStrSkippedUnknownToHost': len(unknown_to_host),
         'pythonStr': answers.hexdigest(),
     }
 

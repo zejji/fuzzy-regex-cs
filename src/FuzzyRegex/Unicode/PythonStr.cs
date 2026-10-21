@@ -17,9 +17,10 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </para>
 /// <para>
 /// The three mappings below were measured, not reasoned about. Over every codepoint from 0 to
-/// 0x10FFFF except the 4,803 added in Unicode 17.0 - which the host's 16.0.0 <c>unicodedata</c>
-/// cannot answer for - CPython 3.14.6 and these lookups agree on every one, with no exceptions
-/// (2026-08-30, and pinned by the <c>pythonStr</c> digest in the Unicode fixture):
+/// 0x10FFFF except the 17,810 added in Unicode 17.0 and 18.0 - which the host's 16.0.0
+/// <c>unicodedata</c> cannot answer for - CPython and these lookups agree on every one, with no
+/// exceptions (3.14.6 on 2026-08-30 against the 17.0.0 tables, 3.14.8 on 2026-10-18 against the
+/// 18.0.0 ones; pinned by the <c>pythonStr</c> digest in the Unicode fixture):
 /// </para>
 /// <list type="bullet">
 /// <item><c>str.isalpha</c> is exactly <c>\p{General_Category=L}</c>.</item>
@@ -92,11 +93,11 @@ internal static class PythonStr
     /// <para>
     /// The digit <i>value</i> comes from <see cref="DecimalValue"/> over upstream's own tables, not
     /// from <see cref="CharUnicodeInfo"/>. It has to: <see cref="IsDigit"/> reads upstream's
-    /// tables, which are Unicode 17.0.0, and .NET's are older, so the ten codepoints
+    /// tables, which are Unicode 18.0.0, and .NET 10's are 16.0.0, so the ten codepoints
     /// U+11DE0-U+11DE9 added in 17.0 would be a digit to the <c>isdigit</c> gate and not a decimal
     /// digit to the conversion - and the port would throw where upstream compiles. Found by the
     /// second S11 review pass, which is the same reason the port resolves <c>\N{...}</c> against
-    /// 17.0.0 rather than the host's (PORTMAP, "Character names are Unicode 17.0.0").
+    /// the tables' version rather than the host's (PORTMAP, decision B).
     /// </para>
     /// </remarks>
     internal static bool TryParseInt(string text, out System.Numerics.BigInteger value)
@@ -186,8 +187,8 @@ internal static class PythonStr
     /// <remarks>
     /// <para>
     /// One codepoint at a time, from <see cref="UnicodeLowercase"/>, which
-    /// <c>tools/build-lowercase.py</c> builds from the Unicode 17.0.0 UCD and checks against the
-    /// host CPython's <c>str.lower()</c> for all 1,109,309 codepoints that host knows.
+    /// <c>tools/build-lowercase.py</c> builds from the Unicode 18.0.0 UCD and checks against the
+    /// host CPython's <c>str.lower()</c> for all 1,096,302 codepoints that host knows.
     /// </para>
     /// <para>
     /// CPython's <c>str.lower</c> has one context-sensitive rule, final sigma, which this does not

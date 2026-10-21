@@ -18,7 +18,16 @@ port's answer) and did **not** fix the `(?<=(?&a))c` row S30 pinned.
 
 **S44 made 2026.9.10 the PIN on 2026-09-13**, so "the newest release" and "the version the oracle
 records against" are now the same thing, and that re-verification is no longer a separate act - the
-oracle itself performs it on every wave. Two consequences for this file:
+oracle itself performs it on every wave. **S81a moved the pin to 2026.9.19 on 2026-10-18**
+(`85e568c`, issue 619: a crash in `expand()` and `str()` of a capture after `detach_string()`, which
+the port cannot have). The oracle still records against PyPI's 2026.9.10, because 2026.9.19 records
+seeds 7, 4242 and 20260927 byte-identically and is not on PyPI; the entries below therefore stand as
+verified against 2026.9.10. **The 2026.9.29 sync moved the pin to `0e8cb05` on 2026-10-18**
+(Unicode 18.0.0, on branch `sync/2026.9.29` until it merges). That release is on PyPI and
+its sdist is byte-identical to the tag, so the oracle records against it; re-asking it every
+known-divergence example (`record-oracle.py --recheck`: 932 examples on 2026-10-18, 939 after
+main was merged in on 2026-10-20) gave every stored answer back, so no entry below changed
+status, and the sync added entry 95. Two consequences of the 2026.9.19 move for this file:
 
 - **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
   here, so there is nothing outstanding on either side. It stays in the file as history.
@@ -961,7 +970,7 @@ own clean walk. Pinned by
 
 **A second MSan origin on the same path (2026-10-13).** Scheduled-oracle row 20261012/38391
 (`verbs`, forward overlapped scan of `\b((?:[^a](*SKIP))+?)(?:[^a-f](*SKIP)){1,3}?(?:[^\d](*SKIP)){2,3}`)
-crashed upstream on Linux, and MSan named `data_r2368 in basic_match` beside `new_position`: one
+crashed upstream on Linux, and MSan named `data_r2368 in basic_match` (clang names it `data_r2261` from 2026.9.29) beside `new_position`: one
 read at `:15806` of bytes from the LAZY_REPEAT frame `data_r` (declared `:13567`, pushed `:13583`,
 popped `:15792`), next to eight reads traced to `new_position`. With `new_position` initialised to
 `state->text_pos` (a patched copy of the C source, built in the same MSan image), the row gives no
@@ -969,6 +978,21 @@ MSan report at all and answers (0, 5) with group 1 at (0, 1) in codepoints - ups
 walk, and this port's answer. So it is this entry's defect reaching a second frame, not a new one.
 The registry now lists the second origin under this entry, with the row as its reproduction
 (`--reverify` passes on all three). Pinned as case FOUR of the test above.
+
+**A third origin, through a partial search (2026-10-17).** Battery run 20261017-3, oracle2 FAULT
+row 16: `search` with `partial=True`, flags IGNORECASE|MULTILINE|VERSION1, of
+`^([[a-f]~~[d-k]])*?\1(?:[[:alpha:]](*SKIP)[^a]|[\w\s])$` over 'İİİİ\r\n'. The Windows wheel
+answers P(0, 6) with group 1 unset, a span no path can reach (from 0, `\1` with group 1 unset
+fails); this port answers P(6, 6), and so do both engines with `(*PRUNE)` for the verb or 'xxxx\r\n'
+for the subject. MSan names `new_position in basic_match` (four reads, `:11820` stored at
+`:11835`) and a heap block from `re_realloc` (`ByteStack_push_block` at `:12870`), which the
+registry does not list. With `new_position` initialised to `state->text_pos` in a patched copy
+built in the same MSan image, the row gives no MSan report at all, the heap origin included, and
+answers P(6, 6). So it is this entry's defect again, not a new one. Evidence:
+`.scratch/ledger-89/msan/` (`w0` unpatched, `w1` patched). Pinned by
+`Gaps/Engine/BacktrackingVerbTests.A_partial_search_where_upstream_reads_an_uninitialised_position_answers_its_clean_build`.
+The registry (`tools/msan/known-undefined.json`) does not yet list the `re_realloc` origin, so the
+screen still calls the row unknown.
 
 ---
 
@@ -4172,6 +4196,67 @@ positive twin, and `(?b)(?:(?>(?:(*SKIP)ab){e<=1}|c)(?:cd){e<=1}|b)` over 'abcxx
 (`FuzzyBestMatchTests.Bestmatch_does_not_count_the_errors_of_a_section_that_was_thrown_away`, all
 red with `PatternObject.KeepDiscardedTotals` set).
 
+### Addendum to 32, 2026-10-17: the budget decides a negative test (D102)
+
+Battery run 6 (oracle row R1) found a second fault on the same walk, in this port as well as
+upstream. `do_best_fuzzy_match` and `do_enhanced_fuzzy_match` hold each run to fewer errors than
+the last through `max_errors` (`_regex.c:17675`, `:17978`), and the body of a negative lookaround
+or a conditional's test is held to it too. There a body that fails makes the construct succeed,
+so a body with no budget left turns the test the wrong way. Measured with `regex` 2026.9.10 on
+2026-10-17, one row per process under `tools/memcap.py` at 1 GB:
+
+```
+search('(?e)(?:x(?:b){d<=1}|(?!a{s<=1}))', 'x')     -> span=(0, 0) fuzzy_counts=(0, 0, 0)
+search('(?:x(?:b){d<=1}|(?!a{s<=1}))', 'x')         -> span=(0, 1) fuzzy_counts=(0, 0, 1)
+search('(?b)(?r)(?<!a{s<=1})\w??', 'x')            -> span=(1, 1) fuzzy_counts=(0, 0, 0)
+search('(?r)(?<!a{s<=1})\w??', 'x')                -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?b)(?=a{d<=1})\w??(?!a{s<=1})', 'x')      -> MemoryError
+```
+
+Neither flagged answer is a match: at 0 in the first row, and before 1 in the third, `a{s<=1}`
+matches 'x' with one substitution, so the negative lookaround fails there. The third row's first
+run should find the exact (0, 1); that the walk goes on past it is most likely this entry's stale
+total (the body's substitution), after which the body has no budget left. That reading is not
+traced in upstream's C; the port, which restores the total, answers (0, 1). The forward
+BESTMATCH rows run away in memory, as this entry's other rows do.
+
+**This port** had the same fault on the forward rows: `(?b)(?=a{d<=1})\w??(?!a{s<=1})` over 'x'
+was (0, 0) where the flagless answer is (0, 1). Known defect D102 (F94) lifts the budget inside
+those bodies, and a conditional's test then takes a match of its body that fits the budget
+(DECISIONS 2026-10-17). The port answers (1, 1) with no error on the first row, (0, 1) on the third, and
+(0, 1) with one deletion on the fifth. Pinned by `Gaps/Engine/FuzzyBestMatchTests.cs`
+(`The_ranking_budget_does_not_stop_a_test_s_body_from_matching` and the controls beside it).
+
+### Addendum to 32, 2026-10-19: the budget decides what a construct commits to (D109)
+
+Battery run 11 found the same fault reached through commitment rather than a test, in this port as
+well as upstream. A body that commits to its first match (an atomic group, a possessive repeat,
+`\R`, `\X`, a lookaround, a conditional's test) is held to `max_errors` too, so where the flagless
+engine's first match needs more errors than the budget, the body commits to a later match; and a
+path the budget cuts short before a `(*PRUNE)` or `(*SKIP)` never fires the verb. Measured with
+`regex` 2026.9.10 on 2026-10-19:
+
+```
+search('(?b)(?:(?>ab|a)c){s<=1}', 'aacbc')          -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search('(?:(?>ab|a)c){s<=1}', 'aacbc')              -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+search('(?b)(?:a?+){e<=2}b', 'bbbxcc')              -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?b)(?:(?:a){s<=1}(*PRUNE)c|b)', 'ccab')    -> span=(3, 4) fuzzy_counts=(0, 0, 0)
+search('(?b)(?=(a{s<=1}|xy))\1', 'xy')              -> span=(0, 2) fuzzy_counts=(0, 0, 0)
+```
+
+None of the flagged spans is a match of the pattern without the flag: at 1 in the first row the
+flagless group takes 'ac' with a substitution and `c` then fails, and the group is atomic. A random
+probe of 36,000 rows (`.scratch/s1019/d109/probe/`) found the same in every committing construct,
+under both flags and both directions; upstream gave the port's answer on 186 of the 222 rows.
+
+**This port** had the same fault. Known defect D109 (F103) lifts the budget inside those bodies and
+fails the construct when the match it commits to is over the budget. A fuzzy pattern with a verb is
+refused under either flag: holding the budget only at the end of the match cost up to 110 times the
+steps and could lose a better match (DECISIONS 2026-10-19). Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.cs` (`The_ranking_budget_does_not_change_what_a_construct_commits_to`,
+`A_ranked_answer_is_a_match_of_the_flagless_pattern` and
+`A_ranked_fuzzy_pattern_with_a_backtracking_verb_is_refused`).
+
 ## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
 
 **Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
@@ -5934,6 +6019,35 @@ it do.
 which moves each `TrueNode` along the first exit of every BRANCH it meets, as upstream's optimiser
 does. No other pass reads `TrueNode`: its only other reader is the matcher's CONDITIONAL arm.
 
+### Addendum to 62, 2026-10-18: the reversed form (battery run 9, c1-2) - DRAFT - NOT FILED
+
+Battery run 20261018-9's bed-and-pairs judge found the same skip in a reversed pattern
+(`.scratch/battery/20261018-9/triage-bedpairs.md`, row c1-2; probes in the `triage-bedpairs`
+folder beside it). A reversed pattern matches its yes branch right to left, so the BRANCH the skip
+reaches first is the alternation at the branch's right end. `regex` 2026.9.10, measured
+2026-10-18, `compile(p).search(s)`:
+
+```
+search(r'(?r)(?(?!q)a(?:x|))', 'a')       -> None     here (0, 1)
+search(r'(?r)(?(?<!q)a(?:x|))', 'a')      -> None     here (0, 1)
+search(r'(?r)(?(?!q)a(?:x|)|b)', 'a')     -> None     here (0, 1)
+search(r'(?r)(?(?!q)a(?:xz|x))', 'ax')    -> None     here (0, 2)
+search(r'(?(?!q)a(?:x|))', 'a')           -> (0, 1)   the same   (the forward pattern)
+search(r'(?r)(?(?!q)(?:x|)a)', 'a')       -> (0, 1)   the same   (the alternation is met last)
+search(r'(?r)(?(?!q)a(?:x|y))', 'a')      -> None     the same   (no alternative can match)
+search(r'(?r)(?(?=q)q|a(?:x|))', 'a')     -> (0, 1)   the same   (a positive test)
+```
+
+The forward pattern matches (0, 1) over 'a', and a reversed search changes which match it finds
+first, never whether one exists, so None is wrong. PCRE2 and Perl have no reversed search to
+compare. The three controls behave as the forward entry predicts: the alternation the reversed yes
+branch meets last is out of the skip's reach, an alternation with no empty alternative gives the
+same answer either way, and a positive test never reads `true_node`. The battery's ablation
+reproduces the upstream answer with `RunWithTheUpstreamTrueBranchSkip` alone, so the cause is the
+same `:23206` test, and the proposed fix covers this form too. Pinned by the four reversed rows of
+`Gaps/Engine/BackrefAndConditionalTests.A_negative_condition_keeps_every_alternative_at_the_start_of_its_yes_branch`
+and the two reversed rows of its controls test.
+
 ## 63. A group call's captures stay on the group's capture list after it returns - DIVERGES HERE BY RULING (2026-09-30)
 
 **Status:** not filed, per the owner's rule. Known defect D51, owner ruling (a) of 2026-09-30
@@ -6304,6 +6418,29 @@ runs out in its own place. Pinned by
 `A_group_call_and_its_written_out_group_answer_the_same_partial`, and the oracle entry
 `partial-edge-read`.
 
+### Addendum to 72, 2026-10-17: a full-folded ligature answers before the `\b` in front (battery run 6, N2) - DRAFT - NOT FILED
+
+Battery run 20261017-6's oracle found a partial search that answers at a place its leading `\b`
+refuses. `regex` 2026.9.10, measured 2026-10-17, `compile(p).search(s, partial=True)`:
+
+```
+search(r'(?if)\bﬃA', 'xﬃ')         -> P(1, 2)   here P(2, 2)
+search(r'(?if)\bﬃA', 'xffi')       -> P(1, 4)   here P(4, 4)
+search(r'(?if)(?:z)?\bﬃA', 'xﬃ')   -> P(2, 2)   here P(2, 2)
+search(r'(?if)\BﬃA', 'xﬃ')         -> P(1, 2)   here P(1, 2)
+search(r'(?i)\bﬃA', 'xﬃ')          -> P(2, 2)   here P(2, 2)
+search(r'(?if)\bffiA', 'xffi')     -> P(4, 4)   here P(4, 4)
+search(r'(?if)\bﬃA', 'xﬃA')        -> None      here None     (not partial)
+```
+
+'x', 'f' and 'ﬃ' are all word characters, so `\b` fails at 1 whatever text follows, and the first
+two answers are wrong. The bug needs a partial search, full case folding and the ligature in the
+pattern (the plain `ffi` pattern and the non-partial search are right), and `(?:z)?` in front, which
+cannot change what the pattern matches, removes it: the same face as entry 72, a check at the
+pattern's start that answers before a zero-width test it skips. Which check it is was not traced.
+Pinned by `Gaps/Engine/PartialEdgeReadTests.A_full_case_folded_ligature_does_not_answer_before_the_word_boundary_in_front`
+(the first four rows).
+
 ## 73. A left-recursive group call compiles and then exhausts memory - DIVERGES HERE (D4, 2026-10-08)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defects D4 and D72, closed by refusing the
@@ -6670,6 +6807,125 @@ expected answer is the flag-free search's, never upstream's. Without a `\K` the 
 `MatchPos` are the same position, and the differential against main moved only `\K` rows under
 `(?b)` or `(?e)`.
 
+## 84. A repeat's tail guard is kept when the rest of the match reads a group, so a search misses the leftmost match - SHARED, FIXED HERE ON `fix/d85-c9` (D85, 2026-10-15)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D85, inherited; fixed on
+`fix/d85-c9` (keyed tail guards, final addendum below), not yet merged. Draft report: `entry-84-nested-tail-guard-before-a-backreference.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-15, `search`:
+
+```
+(b?)(?:a*|b)*\1c          over 'bac'     -> (1,3)   right (0,3)
+(b?)(?:a*|b)*\1c          over 'bbac'    -> (2,4)   right (0,4)
+(b?)(?:(?:a*|b)*x)*\1c    over 'baxc'    -> (1,4)   right (0,4)
+(?:(b)|)(?:a*|b)*(?(1)z|c) over 'bac'    -> (1,3)   right (0,3)
+(a?)(?:(?:\1d)?a*|b)*c    over 'adc'     -> (1,3)   right (0,3)
+(a*)a*(?:d\1)?c           over 'adc'     -> (1,3)   right (0,3)
+(b*)(?:a*|c|(b))*\1c      over 'baaaac'  -> (1,6)   right (0,6)   (the form it was found in)
+(b?)(?:a+|b)*\1c          over 'bac'     -> (0,3)   the same     (a+ writes no tail guard)
+(a*)a*(?:d\1)*c           over 'adc'     -> (0,3)   the same     (an unbounded body is walked)
+```
+
+**Why upstream is wrong.** Each right answer is an ordinary leftmost-first path: in the first row,
+group 1 = '', the star takes `b` then `a`, `\1` matches empty and `c` matches. Python re 3.14.7,
+PCRE2 10.47 (pcre2.py) and 10.45 (ripgrep), Perl 5.42, Java 26, Node 24 and .NET 10's
+System.Text.RegularExpressions (interpreted and compiled) all give it on every row
+(`.scratch/s1016/d85/survey-*.txt`); a blind reviewer given only the rows and the table derived
+each path by hand and reached the same verdict.
+
+**Mechanism, shown by trace.** A tail guard records "the rest of the match failed from this
+position" (GREEDY_REPEAT_ONE writes it while backtracking, `_regex.c:15855`, and checks it at
+`:13346`). That is sound only if the rest of the match reads no group, so `add_repeat_guards`
+(`:23273`) keeps the guard only when its walk of the tail meets no reference or group condition
+(`:23368`, `:23421`). The walk is blind in two places: it stops at the enclosing repeat's
+END_GREEDY_REPEAT/END_LAZY_REPEAT (`:23334-23337`), so it misses a reference after the enclosing
+repeat or earlier in its body (reached on the next iteration); and it marks a bounded repeat's
+body LIMITED without walking it (`:23383-23386`), so it misses a reference inside `(?:...)?` or
+`{m,n}`. A guard trace of the port on the first row (scratch instrumentation, `.scratch/s1016/d85/trace.txt`):
+with group 1 = 'b', a*'s tail guard (repeat 2) is written at 2; with group 1 = '', `check r2 tail
+@2 -> True` refuses a* its 'a', and the attempt at 0 fails. With the guards switched off the same
+build answers (0,3).
+
+**Proposed fix upstream:** in `add_repeat_guards`, give END_GREEDY_REPEAT/END_LAZY_REPEAT the
+reference status of the enclosing repeat's tail and body (the body runs again), and look for a
+reference in a bounded body even though its repeat status stays LIMITED; then every tail guard
+whose continuation can read a group is off.
+
+**Fix options here, sized 2026-10-15** (refuse/restrict priced first; the guards exist to stop
+exponential search, so each option names its adversary):
+
+- **(R1) Refuse** a pattern in which a guarded repeat is followed by a reference: zero engine
+  lines, but it rejects the commonest backreference shape there is, a repeated list followed by a
+  reference (`(\w+)(?:,\s*\w+)*\s*\1`). Not viable.
+- **(R2) Restrict:** switch every tail guard off in any pattern holding a reference or group
+  condition, beside `KeepFailureMemosSound`'s test. About 10 lines, trivially sound, no sync cost
+  beyond one row. Adversary: guards that were sound because the reference comes first. Measured
+  with every tail guard switched off (the scratch toggle, Debug build, one call, subject n 'a's
+  then 'cx'): `(x?)\1(?:a*a*)*c$` 0.3-2.0 ms for n = 8-24 as it is, 80 ms at n = 8 and over the
+  5 s timeout at n = 12 without; `(x?)\1(?:a*b?)*c$` 1.0 ms at n = 24 as it is, 446 ms at n = 16
+  and over 5 s at n = 20 without. Not acceptable.
+- **(B) Propagate** the reference status through repeat ends and bounded bodies (the proposed
+  upstream fix). About 30-40 lines in `Optimiser.AddRepeatGuards`, the same in C; one
+  SYNC-DIVERGENCE row until upstream takes it. Off exactly where the guard is unsound, so R2's
+  rows keep their guards. Adversary: a nested repeat before a reference, measured the same way:
+  `(x?)(?:a*a*)*\1c$` 2.3 ms at n = 24 as it is, 74 ms at n = 8 and over 5 s at n = 12 without;
+  `(x?)(?:a*|b)*\1c$` 1.3 ms at n = 24, 496 ms at n = 16 and over 5 s at n = 20 without; all eight
+  shapes tried go exponential (`.scratch/s1016/d85/cost-optionB.txt`). Python re takes 224 ms at
+  n = 12 and 31 s at n = 16 on the first, and PCRE2 10.47 stops with its match limit at n = 12,
+  so (B) is where the backtracking engines are; but it turns linear patterns here exponential.
+- **(E) Epoch:** keep the tail guards, and void them when a group the rest of the match can read
+  changes. A monotonic counter, bumped wherever such a group is set or restored (upstream's
+  `capture_change` will not do: it is restored on backtracking, `_regex.c:15631`, `:17348`); each
+  tail guard list remembers the counter at its last write and is treated as empty, and reset in
+  O(1), when the counter has moved. Sound without trusting the walk at all: a guard is consulted
+  only while every read group still holds the value it was written under. The witness is fixed
+  because group 1 goes from 'b' to '' between the write and the check. About 40-60 lines (the
+  counter at the capture set and restore sites, a stamp per guard list, the check in
+  `ActiveGuardList`, the restore of guard lists around atomic groups and lookarounds), no cost to
+  a pattern without references. Adversary: a read group set inside the guarded repeat's own loop,
+  which moves the counter every iteration and leaves (B)'s exponential search; measure before
+  building, with a grammar that puts the read group inside, before and after the repeat.
+- **(A) Key** the tail guard on the values the continuation reads (unset, or the captured text of
+  each read group), like `perf/memo-br`'s keyed failure memo. Keeps the pruning across epochs whose
+  values repeat. 150-250 lines (keyed guard storage, a key per check on the hot path), high sync
+  cost. Adversary: a read group captured inside the repeat, O(n^2) distinct keys; BR refuses that
+  case, so it would fall back to (B) there.
+
+Recommendation: (E), applied to every tail guard in a pattern that has a reference or group
+condition, so its soundness does not rest on the walk; the walk's two blind spots then cost
+nothing. Not (B) here: it gives the leftmost-first answer but turns the measured linear patterns
+exponential. The upstream report proposes (B) as the smallest change and mentions (E). (A) stays
+later optimisation work for `perf/memo-br`. Measure (E)'s adversary before building it.
+
+**Addendum, 2026-10-15 night (fix/d85-c9).** Two more forms, each measured on `regex` 2026.9.10
+against Python re 3.14.7 (`search`):
+
+```
+.?(a*)(?:b\1)?c                   over 'aabaac'   -> (2,6)   right (0,6)
+(c*).?(?:(?:a|d)*ac{1,3})*\1d     over 'cadaacd'  -> (1,7)   right (0,7)
+```
+
+The first is the smallest yet with no enclosing repeat: the tail of `a*` is entered at 2 twice,
+with group 1 opened at 1 and then at 0, so the guard written in the first pass blocks the second.
+A key on the group's last capture does not separate the two; only the position the group opened
+at does. The second is a body guard ("the body never reached its end from here") written while a
+guard inside the body cut a path under another value of group 1; it fails with the tail guards
+fixed and is right with that body guard off.
+
+**Final addendum, 2026-10-16: the fix here.** Option (A), not (E): an epoch voids the guards on
+every change of a read group, which leaves (B)'s exponential search whenever the group is set
+inside the loop, and that is the commonest shape. Each repeat whose tail can read a group (found by
+a liveness pass over the compiled graph) keeps one tail guard list per value of the groups it
+reads; a group set inside the loop is keyed also on the position it opened at (the first form
+above); a body guard is off where its body holds a keyed tail (the second). Measured on the merge
+with main (`fix/d85-c9` d98b8dbc): every one of the 2,903 D85 rows in a 276,591-row test bed now
+gives Python re's answer, with no new wrong answer, and a differential of 269,000 rows against main
+moves 8 rows, all to re's answer. The cost, accepted by the owner: 1.0-1.3x where the read group
+is set outside the loop, 1.5-4.7x for a fixed-width group set inside it, and about 40x for a
+variable-width group set inside it and read after it (`(?:(a*)a*)*\1c$` over 96 a's, 0.49 s
+against 12 ms, growing as n^3.3). The upstream report still proposes (B) as the smallest change
+for upstream and now names (A) as the fix that keeps the pruning.
+
 ## 85. A `\K` inside a lookaround makes a scan, or one search, repeat an attempt for ever - SHARED, FIXED HERE ON `fix/d87` (D87, 2026-10-15)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Entry 84 is on `fix/d85`; this is the next
@@ -6707,4 +6963,468 @@ line (`MatchState.AdvancePastMatch`, the `Matcher` failure arm); not traced in C
 overlapped step and the failure arm step on from `MatchState.AttemptStart` when the reported start
 lies behind it. BESTMATCH and ENHANCEMATCH restore `AttemptStart` with their best match, and a
 `Match` carries it for `NextMatch`. A start left ahead of the attempt is unchanged; that is known
-defect D88 (a failed attempt skips starts), not yet fixed.
+defect D88 (a failed attempt skips starts), fixed by entry 86.
+
+## 86. A `\K` inside a lookaround or atomic group outlives a path that failed - SHARED, FIXED HERE ON `fix/d88` (D88, 2026-10-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D88, fixed on `fix/d88` and pinned by `Gaps/Engine/KeepAcrossCutTests` and the ExpectedDivergences
+entries `keep-undone-past-a-lookaround` and `keep-undone-past-an-atomic-group`. Draft report:
+`entry-86-k-outlives-a-failed-path.md`. The decision (DECISIONS, 2026-10-16) rests on
+`.scratch/s1016/night/small/d88-analysis.md` and its blind review,
+`.scratch/s1016/night/d88-review/review.md`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-16 (`.scratch/s1016/night/d88/up.py` on
+`cases.jsonl`, table in `cases-table.txt`):
+
+```
+search(r'(?=ab\K)x|b', 'ab')         -> None     expected (1,2): upstream gives it from pos=1
+search(r'(?!ab\K)|b', 'ab')          -> None     expected (1,1)
+search(r'(?(?=ab\K)x|b)', 'ab')      -> None     expected (1,2), as (?(?=ab)x|b) gives
+search(r'(?=a\K)x|a', 'a')           -> (1,1)    expected (0,1), the answer of `a`
+search(r'(?!a\K)x|a', 'a')           -> (1,1)    expected (0,1)
+search(r'ax(?<=\Kx)y|axz', 'axz')    -> (1,3)    expected (0,3)
+search(r'(?r)x(?<=\Ka)|a', 'a')      -> (0,0)    expected (0,1)
+search(r'(?>a\K)x|a', 'a')           -> (1,1)    expected (0,1); Perl 5.42.3 agrees with upstream
+search(r'(?:a\K)++x|a', 'a')         -> (1,1)    expected (0,1)
+```
+
+**Why upstream is wrong.** A path that fails leaves no trace: that is what backtracking means, and
+upstream keeps the rule for captures, repeats and fuzzy counts, which every one of these constructs
+saves and restores. The first row contradicts itself: the attempt at 0 fails, yet changes the
+answer, since a search from 1 finds (1,2). Ruby 3.2.3, the one surveyed engine that accepts `\K` in
+a lookaround, answers every row as expected; PCRE2 10.47 and Ruby undo it in atomic groups, Perl
+5.42.3 does not. Perl and PCRE2 refuse `\K` in a lookaround.
+
+**Mechanism.** `\K` pushes `match_pos` and a `KEEP` entry so that backtracking puts the start back.
+A construct that succeeds cuts the backtracking stack to its frame: `RE_OP_END_LOOKAROUND`
+(`_regex.c:12918`), a negative lookaround whose body matched (`:12985-13009`, which restores
+captures and fuzzy counts but not `match_pos`), a condition's test, and `RE_OP_END_ATOMIC`. The
+`KEEP` entry goes with the cut, so the moved start survives, and the advance after a failed
+attempt (`:15695`) steps on from it. Traced by probe in this port, which copied each line; not
+traced in C.
+
+**The fix here.** When the pattern has a `\K` inside such a construct, each construct pushes a
+`KEEP` entry holding the current start below its frame (`Matcher.PushTheStartBeforeABody`). The cut
+stops at the frame, so the entry survives it, and backtracking past the construct restores the
+start, however many `\K`s the body ran. A negative lookaround whose body matched restores it at
+once. A verb's cut to the attempt still discards it, so `a\K(*PRUNE)x|a` stays None, as upstream
+and PCRE2 answer.
+
+## 87. After a `\K`, a `(*PRUNE)` or `(*SKIP)` that ends an attempt makes the search skip start positions - SHARED, FIXED HERE ON `fix/d92` (D92, 2026-10-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D92, found by battery run 1 (`.scratch/battery/20261016-1/triage-pairs.md`, clusters 118-119),
+fixed on `fix/d92` and pinned by `Gaps/Engine/KeepBeforeVerbTests` and the ExpectedDivergences
+entry `keep-before-a-verb-skips-no-start`. Evidence: `.scratch/s1016/d92/`.
+
+**Reproduction**, `regex` 2026.9.10 against PCRE2 10.47, Perl 5.42.3 and Boost.Regex, measured
+2026-10-16 (`tools/matrix/survey.py` on `d92-rows.jsonl`):
+
+```
+search(r'a\K(*PRUNE)b', 'aab')         -> None     PCRE2, Perl, Boost (2,3)
+search(r'a\K(*SKIP)b', 'aab')          -> None     PCRE2, Perl, Boost (2,3)
+search(r'.\Kb*(*SKIP)ab', 'xxab')      -> None     PCRE2, Perl, Boost (2,4)
+search(r'a\K(*PRUNE)x|b', 'ab')        -> None     PCRE2, Perl, Boost (1,2)
+finditer(r'a\K(*PRUNE)b', 'aabaab')    -> []       PCRE2, Perl, Boost (2,3) (5,6)
+search(r'a(*PRUNE)b', 'aab')           -> (1,3)    every engine (control: no \K)
+search(r'a\Kb', 'aab')                 -> (2,3)    every engine (control: no verb)
+```
+
+**Why upstream is wrong.** `\K` changes the start a match reports, not where the attempt began.
+pcre2pattern ("Backtracking control"): after `(*PRUNE)` ends an attempt, the search advances to the
+next starting character as usual, and `(*SKIP)` moves the next start to where the verb was reached.
+Neither verb's next start depends on a `\K`, and every surveyed engine agrees.
+
+**Mechanism.** `\K` sets `match_pos` and pushes a `KEEP` entry that puts it back on backtracking.
+The verb prunes the backtracking stack to the attempt, and that entry with it, so when the attempt
+fails `match_pos` still holds the moved start. The advance after a failed attempt (`_regex.c:15695`)
+steps on from `match_pos`, so it skips every start between the attempt's and the moved one. Traced
+in this port, which copied the line: the failure arm stepped from 1 after the attempt at 0 for
+`a\K(*PRUNE)b` over 'aab' (`.scratch/s1016/d92/trace-main.txt`).
+
+**The fix here.** The advance steps on from `MatchState.AttemptStart`, where the attempt began. A
+`(*SKIP)` has already moved the slice, and the step goes to it as before.
+
+## 88. A section below its minimum never tries an insertion in front of an item that matched - SHARED, FIXED HERE ON `fix/d94` (D94, 2026-10-17)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. This port had the same behaviour, known defect
+D94, found by battery run 2 (`.scratch/battery/20261016-2/triage-matrix.md`, R2). Fixed on
+`fix/d94` and pinned by `Gaps/Engine/FuzzyMinimumInsertionBeforeExactItemTests`. Evidence:
+`.scratch/s1016/d94/`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-17 (expected = this port's answer, argued
+below):
+
+```
+fullmatch(r'(?:a){1<=s<=1,i<=1}', 'ab')      -> None    expected (0, 2), 1 substitution, 1 insertion
+fullmatch(r'(?:a){1<=s<=1,1<=i<=1}', 'ab')   -> None    expected (0, 2), the same
+fullmatch(r'(?:ab){1<=s<=1,i<=1}', 'abb')    -> None    expected (0, 3), the same
+fullmatch(r'(?r)(?:a){1<=s<=1,i<=1}', 'ba')  -> None    expected (0, 2), the same
+search(r'(?:(?!x)[ab]){1<=s<=1,i<=1}', 'xaxbxxbb') -> None    expected (1, 3), the same
+fullmatch(r'(?:a){1<=s<=1,i<=1}', 'ba')      -> (0, 2), 1 substitution, 1 insertion  (the control)
+fullmatch(r'(?:ab){1<=s<=1,i<=1}', 'aab')    -> (0, 3), the same                      (the control)
+```
+
+**Why upstream is wrong.** A minimum says the match holds at least that many errors of that kind
+(`upstream/README.rst:538-566`), and an insertion is a text character the pattern does not account
+for, which may stand in front of any item. Over 'ab' the fit is the 'a' inserted and the 'b'
+substituted for the item. Upstream finds that fit when the insertion comes after the substitution
+(the controls) and misses it when it comes before, so the order of its search is the defect, as in
+entry 51. None of the engines the port's correctness survey uses has fuzzy matching, so the
+question is settled from the definition.
+
+**Mechanism.** Errors are tried on an item only when its exact test fails (`fuzzy_match_item`,
+`_regex.c:10185-10258`); an item that matches pushes nothing (`:11924-11927`, `:14742-14745`).
+When a minimum is unmet, a later item may need to take the error, and only an insertion in front
+of an earlier exact item can line it up with the character it must edit.
+
+**Proposed fix upstream:** while an open section, or one around it, is below a minimum, an item
+that matches exactly pushes the `fuzzy_match_item` frame marked so that its retry tries one
+insertion in front of the item and nothing else, when an insertion fits the section and every
+section around it.
+
+**The fix here.** `Matcher.InsertionMayMeetMinimum` decides, and the exact-match sites push an
+insertion-only frame (`_exactInsertionOnly`) beneath entry 42's deletion frame, for one-character
+items, strings, group references and their full-folded forms. So the deletion of the matched item
+is tried first and the insertion next, both before any earlier choice. A pattern with no minimum
+pays one test of `PatternObject.HasFuzzyMinimum`: its engine steps are unchanged on 9,550 runnable
+fuzzy rows without a minimum (rows-c, rows-d and the minimum grid with its lower bounds removed).
+
+## 89. Under POSIX, BESTMATCH and ENHANCEMATCH pick a different match when the alternatives are reordered - DIVERGES HERE (no defect row, 2026-10-17)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. No draft report yet. Found by battery run 4 (`.scratch/battery/20261017-4/triage-matrix.md`,
+NEW-A) and again by run 5 (`20261017-5/triage-matrix.md`, m7 and m26); runs 2 and 3 saw the same
+rows crash upstream (entry 9). Evidence: `.scratch/ledger-89/`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-17, one row per process:
+
+```
+match(r'(?bp)(?:ab|a){s<=1}', 'ax')          -> (0, 2), 1 substitution   here (0, 1) exact
+match(r'(?bp)(?:a|ab){s<=1}', 'ax')          -> (0, 1) exact             the same
+match(r'(?:abc|a){s<=1}', 'axc', B|POSIX)    -> (0, 3), 1 substitution   here (0, 1) exact
+match(r'(?:a|abc){s<=1}', 'axc', B|POSIX)    -> (0, 1) exact             the same
+match(r'(?bp)(?:abc|ax|a){s<=1}', 'axc')     -> (0, 3), 1 substitution   here (0, 2) exact
+match(r'(?bp)(?:a|ax|abc){s<=1}', 'axc')     -> (0, 2) exact             the same
+search(r'(?ep)(?:(?:ab|a).){s<=1}', 'aaba')  -> (0, 3), 1 substitution   here (0, 2) exact
+search(r'(?ep)(?:(?:a|ab).){s<=1}', 'aaba')  -> (0, 2) exact             the same
+search(r'(?bp)(?:b?){s<=1}', 'x xb')         -> (0, 1), 1 substitution   here (0, 0)
+search(r'(?bp)(?:b??){s<=1}', 'x xb')        -> (0, 0)                   the same
+```
+
+ENHANCEMATCH|POSIX answers the `abc|a` pair as BESTMATCH|POSIX does. The controls agree on both
+engines in both orders: over 'axc', POSIX alone gives (0, 3) with one substitution, and BESTMATCH
+alone and ENHANCEMATCH alone give (0, 1).
+
+**Why upstream is wrong.** `ab|a` and `a|ab` describe the same set of matches, and so do `b?` and
+`b??`. POSIX asks for the leftmost-longest match and BESTMATCH for the best one
+(`upstream/README.rst`), so each is a rule for choosing within that set, and the order in which
+the pattern lists its alternatives cannot be an input to it. Upstream answers each pair
+differently, so in every pair one answer breaks whatever rule upstream means to follow. Nor is it
+a consistent "longest first": S57f (DECISIONS 2026-09-22) measured upstream's POSIX shrinking to a
+cheaper exact match under ENHANCEMATCH, and the second spelling of each pair here does the same.
+No other engine ranks POSIX against an error cost (TRE has no BESTMATCH; PCRE2, Perl and Python
+`re` have no fuzzy matching), so the case rests on order-independence. A blind review (2026-10-17,
+given only the witnesses and both engines' answers) judged this port right, with medium-high
+confidence, for that reason.
+
+**Mechanism, not traced to a line.** The pairs suggest upstream keeps the first fit its search
+finds and then moves to a longer one without comparing cost, so the fit found first decides the
+answer.
+
+**Proposed fix upstream:** when POSIX meets BESTMATCH or ENHANCEMATCH, rank the candidates by cost
+and then by length (or by length and then cost, if that is the intent), never by the order in
+which they were found.
+
+**This port.** It ranks by cost first (BESTMATCH, ENHANCEMATCH) and then takes the longest (POSIX),
+so both spellings of every pair give one answer. No written ruling yet says how POSIX combines with
+the two choosing flags (DIVERGENCES row 57 covers cost ranking only); the order-independence is the
+point of this entry, whichever priority a ruling settles on. Pinned by
+`Gaps/Engine/FuzzyPosixTests.Posix_with_a_choosing_flag_answers_alike_whatever_the_order_of_the_alternatives`.
+
+## 90. A lookbehind that fails on the text before the start still yields a partial match - DIVERGES HERE (no defect row, 2026-10-17)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. No draft report yet. Found by battery run 3 (`.scratch/battery/20261017-3/triage-bedpairs.md`,
+bed pair 65). Evidence: `.scratch/ledger-89/`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-17, `match(..., partial=True)`:
+
+```
+match(r'(?<=aba?)', 'cab', 2)        -> P(2, 3)   here None
+match(r'(?<=aba?)', 'cax', 2)        -> P(2, 3)   here None
+match(r'(?<=aba?)b', 'cab', 2)       -> P(2, 3)   here None
+match(r'(?i)(?<=aba?)', 'cab', 2)    -> P(2, 3)   here None
+match(r'(?<=abca?)', 'ccab', 3)      -> P(3, 4)   here None
+match(r'(?<=aba?)', 'cbb', 2)        -> None      the same
+match(r'(?<=aba??)', 'cab', 2)       -> None      the same
+match(r'(?<=ab(?:a|))b', 'cab', 2)   -> None      the same
+match(r'(?<=aba?)', 'cab', 2)        -> None      the same, without partial
+```
+
+The battery row was `(?<=aba?)b*x` over 'caby' at 2, P(2, 4) upstream. Its search form gives
+P(2, 4) upstream and P(4, 4) here, the attempt from inside the text to come (entry 69).
+
+**Why upstream is wrong.** A partial match is one that "could be possible if the string had not
+been truncated" (`upstream/README.rst:270`). A lookbehind reads only text before its position, and
+that text is all there: before 2 in 'cab' stands 'ca', which `aba?` cannot match, so the assertion
+fails whatever follows. The body never reaches the start of the text, so this is not entry 67's
+run-out either. PCRE2 10.47 (soft partial, start offset as `pos`, via `tools/matrix/c7.py`) gives
+no match and no partial on every row above. A blind review (2026-10-17) judged this port right with
+high confidence.
+
+**Mechanism.** Read right to left, `aba?` is the one-character repeat `a?` followed by the string
+tail "ab". When the GREEDY_REPEAT_ONE backtrack gives back the 'a' it took, its reversed arm for a
+STRING_REV tail (`_regex.c:16239-16262`) looks for the tail with the forward `string_search`, using
+the repeat's own start as the limit. `simple_string_search` treats reaching its limit as running
+off the end of the text and, because a forward pattern's `partial_side` is RIGHT, reports a partial
+(`:5261-5265`) when the tail's first character sits just before that limit. So the witness needs
+the repeat to have taken a character, a tail of two characters or more, and the tail's first
+character just before the start ('a' at 1). Each prediction was checked: 'cbb' (the repeat takes
+nothing), `aba??` (the lazy arm) and `ab(?:a|)` (no one-character repeat) answer None, and
+`(?<=abca?)` over 'ccab' at 3 shows it with a three-character tail.
+
+**Proposed fix upstream:** in the reversed arms, take a partial from the tail search only when its
+limit is the end of the slice; a limit inside the text means the tail was not found.
+
+**This port.** It answers None to every row. Pinned by
+`Gaps/Engine/LookaroundTests.A_partial_match_after_a_lookbehind_that_fails_on_the_held_text_is_no_match`,
+with a control that the same calls hold once the text before the start spells the body.
+
+### Addendum to 90, 2026-10-18: the mirror form, a lookahead in a reversed pattern (battery run 9, c8) - DRAFT - NOT FILED
+
+Battery run 20261018-9's bed-and-pairs judge found the mirror of this entry
+(`.scratch/battery/20261018-9/triage-bedpairs.md`, rows c8-2, c8-3 and c8-4; probes in the
+`triage-bedpairs` folder beside it). `regex` 2026.9.10, measured 2026-10-18,
+`compile(p).search(s, partial=True)`:
+
+```
+search(r'(?r)a(?=b?ab).', 'ba')         -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?ab).', 'bb')         -> P(0, 1)   here P(0, 0)
+search(r'(?r)(?=b?ab).', 'ba')          -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?abc).', 'bcx')       -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b?acb).', 'bxy')       -> P(0, 1)   here P(0, 0)
+search(r'(?r)a(?=b??ab).', 'ba')        -> P(0, 0)   the same
+search(r'(?r)a(?=(?:b|)ab).', 'ba')     -> P(0, 0)   the same
+search(r'(?r)a(?=b?ab).', 'ca')         -> P(0, 0)   the same
+search(r'(?r)a(?=b?ab).', 'ba')         -> None      the same, without partial
+```
+
+**Why upstream is wrong.** A reversed pattern's text can grow only at its start
+(`partial_side` is LEFT, `_regex.c:18450`), and a lookahead reads only text after its position,
+which is all there. At every place in 'ba' the lookahead `b?ab` fails, so any match must lie wholly
+in text put in front, and end at 0 or before. Checked by search: over every text of up to four
+characters from 'abcx' put in front of each subject, no match ends after 0 (`regex` 2026.9.10,
+the slice held at the original end). A partial ending at 1 claims more than any completion gives,
+and upstream contradicts itself: the lazy `b??` and the alternation `(?:b|)`, which match exactly
+what `b?` matches, answer P(0, 0), this port's answer. Under the partial contract of 2026-10-08
+(`tests/FuzzyRegex.Tests/Gaps/Engine/PartialContractTests.cs`), P(0, 0) is the partial at the edge
+that a search may give while the text to come could still hold a match.
+
+**Mechanism.** The mirror of the one above. When the GREEDY_REPEAT_ONE backtrack gives back the 'b'
+it took, its forward arm for a STRING tail (`_regex.c:15999-16031`) looks for the tail with the
+reversed `string_search_rev`, using the repeat's own start as the limit. `simple_string_search_rev`
+treats reaching that limit as running off the start of the text and, because a reversed pattern's
+`partial_side` is LEFT, reports a partial (`:5724-5729`). So the witness needs the repeat to have
+taken a character and the text at its start to spell the end of the tail: 'b' for "ab" and "acb",
+"bc" for "abc". 'ca' (the repeat takes nothing), `b??` (the lazy arm) and `(?:b|)` (no
+one-character repeat) answer P(0, 0), as predicted. A three-character tail over 'ba' gives P(0, 0)
+too, because the arm first clamps the search to the slice and finds no room.
+
+**Proposed fix upstream:** the same as above, in the forward arms: take a partial from the tail
+search only when its limit is the start of the slice.
+
+**This port.** It answers P(0, 0) to every row. Pinned by
+`Gaps/Engine/LookaroundTests.A_reversed_partial_search_before_a_lookahead_that_fails_on_the_held_text_is_empty_at_the_start`,
+the five rows above and the lazy control.
+
+## 91. Under ASCII, a literal alone in a non-capturing group is full-folded and stops matching itself - DIVERGES HERE (no defect row, 2026-10-17)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. No known-defect row: this port already answers
+right. No draft report yet. Found by battery run 4 (`.scratch/battery/20261017-4/triage-oracle.md`,
+cluster 20, row R16). Evidence: `.scratch/ledger-89/`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-10-17, `search`, flags
+ASCII|IGNORECASE|VERSION1 (386) unless stated:
+
+```
+search(r'(?:ß)', 'ß')                       -> None      here (0, 1)
+search(r'(?:ß)', 'ss')                      -> (0, 2)    here None
+search(r'(?:ß)', 'SS')                      -> (0, 2)    here None
+search(r'(?:ﬀa)', 'ﬀa')                     -> None      here (0, 2)
+search(r'(?:ﬀa)', 'ffa')                    -> (0, 3)    here None
+search(r'(?:ß)', 'ß'), A|I|FULLCASE         -> None      here (0, 1)
+search(r'ß', 'ß')                           -> (0, 1)    the same
+search(r'ß', 'ss')                          -> None      the same
+search(r'(ß)', 'ß')                         -> (0, 1)    the same
+search(r'(?>ß)', 'ß')                       -> (0, 1)    the same
+search(r'(?:aß)', 'aß')                     -> (0, 2)    the same
+search(r'(?:ß)', 'ß'), A|I, no full folding -> (0, 1)    the same
+search(r'(?:ß)', 'ß'), I|V1, no ASCII       -> (0, 1)    the same
+```
+
+**Why upstream is wrong.** Upstream's own `make_case_flags` (`_regex_core.py:419-427`) turns
+FULLCASE off under ASCII, and its bare, capturing and atomic spellings follow that; only the lone
+literal in a non-capturing group does not. A grouping parenthesis cannot change what a literal
+matches, and a case-insensitive literal must match itself. Python `re` (ASCII|IGNORECASE) matches
+'ß' with `(?:ß)` and with `ß` and refuses 'ss' with both; Perl 5.42 does the same under `/aai`,
+and under `/ai` gives both spellings one answer. PCRE2 was not asked: the survey harness has no
+translation for the ASCII flag. A blind review (2026-10-17) judged this port right with high
+confidence.
+
+**Mechanism, traced to the compiled form, not to a line.** `regex.DEBUG` shows bare `ß` as
+`CHARACTER MATCH '\xdf' SIMPLE_IGNORE_CASE` and `(?:ß)` as `CHARACTER MATCH '\xdf'
+FULL_IGNORE_CASE`. The matcher then compares the pattern's full expansion 'ss' with a subject it
+folds under ASCII rules, so 'ß' fails and 'ss' matches. Some step that rebuilds the group's lone
+item takes FULLCASE from the scope's flags without `make_case_flags`: `(?:ß)+`, `(?i:ß)` and
+`(?:(?:ß))` fail on 'ß' too, while `x(?:ß)` and `(?:ß)x` match.
+
+**Proposed fix upstream:** wherever a group's item is rebuilt with the scope's case flags, take
+them from `make_case_flags(info)`.
+
+**This port.** It folds the grouped literal as it folds the bare one. Pinned by
+`Gaps/Engine/CaseInsensitiveMatchingTests.Under_ascii_a_grouped_literal_folds_as_the_bare_literal_does`.
+
+## 92. A long run of conditionals overflows the C stack while compiling and ends the process - FIXED HERE (F102, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found by the D110 work. Evidence:
+`.scratch/s1019/d110/probe/` (`up.py`, shape `seqcond`).
+
+**Reproduction**, `regex` 2026.9.10 on Python 3.14, Windows x64, measured 2026-10-19, each in a
+child process:
+
+```
+regex.compile('(a)?' + '(?(1)a|b)' * 61440)   -> compiles
+regex.compile('(a)?' + '(?(1)a|b)' * 62464)   -> process ends, exit code 0xC00000FD (stack overflow)
+```
+
+**Why upstream is wrong.** A pattern that is merely long, with no nesting at all, should compile
+or raise a catchable error; ending the interpreter means any program that compiles a pattern it
+did not write can be crashed. Deep nesting is caught by Python's recursion limit as a
+`RecursionError`; this is not, because the recursion is in C.
+
+**Mechanism.** `record_subpattern_repeats_and_fuzzy_sections` (`_regex.c`, around line 23517)
+recurses into `next_1` at a branch, a conditional and a repeat and loops on `next_2`. A
+conditional's `next_1` runs on to the rest of the pattern, so the recursion is as deep as the
+number of conditionals in a row.
+
+**Proposed fix upstream:** keep the pending `next_2` edges on a heap stack, as this port does; the
+walk then visits the same nodes in the same order.
+
+**This port.** `Optimiser.RecordSubpatternRepeatsAndFuzzySections` keeps its pending edges on a
+`Stack<Node?>`, so 20,000 conditionals compile on a 256 KB thread. Pinned by
+`Gaps/Parsing/NestingDepthTests.A_long_run_of_conditionals_compiles_on_a_small_stack`.
+
+## 93. ENHANCEMATCH's refinement cuts what an atomic group reads, and answers a span the pattern does not match - DIVERGES HERE (F104, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D111, found by the D109 builder's
+blind reviewer. Evidence: `.scratch/s1019/d111/` (DESIGN.md, `upstream/rows.py`).
+
+**Reproduction**, `regex` 2026.9.10 and 2026.9.29 on Python 3.14, measured 2026-10-19:
+
+```
+search(r'(?e)(?:xaq|a(?>a*)){e<=1}', 'xaaa')       -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search(r'(?:xaq|a(?>a*)){e<=1}', 'xaaa')           -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+search(r'(?e)(?:xaq|aa*+){e<=1}', 'xaaa')          -> span=(1, 3) fuzzy_counts=(0, 0, 0)
+search(r'(?er)(?:aax|(?:ab|a)*+b){e<=2}', 'aababax') -> span=(4, 5) fuzzy_counts=(0, 0, 0)
+search(r'(?r)(?:aax|(?:ab|a)*+b){e<=2}', 'aababax')  -> span=(4, 7) fuzzy_counts=(1, 0, 0)
+```
+
+**Why upstream is wrong.** (1, 3) is not a match of the pattern in 'xaaa': at 1 the atomic `a*`
+takes 'aaa' and never gives any back, so a match from 1 ends at 4. ENHANCEMATCH "will cause it to
+attempt to improve the fit ... of the match that it has found" (`upstream/README.rst:590-592`); it
+should not find a match the pattern cannot make.
+
+**Mechanism.** `do_enhanced_fuzzy_match` refines by narrowing the slice to the span of the match it
+found (`_regex.c:17985-17990`) and re-running with fewer errors allowed. An atomic group, a
+possessive repeat, `\R` and `\X` then stop at the slice end where in the text they would read on, so
+the re-run finds a span that only exists in the cut text. `do_best_fuzzy_match`'s fallback narrows
+the slice the same way (`:17812-17821`).
+
+**Proposed fix upstream:** keep the caller's slice during a refinement and reject, at the success
+test, any match that starts or ends outside the span, so every construct reads the text as the plain
+search does.
+
+**This port.** That fix, applied only to patterns that hold an atomic group
+(`PatternObject.RefinesInAWindow`); every other pattern matches the same in the narrowed slice and
+keeps it, since the window costs a read to the text end per attempt. D114 (F106) narrows the slice
+again outside the atomic, lookaround and test bodies, so only an atomic body reads past the span; a
+ranked pattern whose atomic body itself runs to the text end still scans quadratically (inherent). A `(*PRUNE)` or
+`(*SKIP)` would need the same, but D109 refuses a ranked fuzzy pattern that holds one. Pinned by
+`Gaps/Engine/RankedRefinementWindowTests`.
+
+## 94. A negative lookahead around a lookahead that holds for every continuation reports a partial span the pattern cannot make - DIVERGES HERE (F105, 2026-10-19)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D113's second shape, found by the
+D113 cost research's blind reviewer. Evidence: `.scratch/s1019/d113-cost/review/` (235 rows of 40
+patterns) and `.scratch/s1019/d113/probe3/rows.tsv`.
+
+**Reproduction**, `regex` 2026.9.10 and 2026.9.29 on Python 3.14, measured 2026-10-19,
+`partial=True`:
+
+```
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'a')       -> P(0, 1)   here None
+match(r'(?!(?=(?:(?=[ab]*c)|a)(?:ab|a)*a?))', 'aa')      -> P(0, 2)   here None
+search(r'(?!(?=(?:(?![ab]*c)a|aa)(?:ab|a)*a?))a', 'aa')  -> P(0, 2)   here P(1, 2)
+search(r'(?!(?=(?:(?=a*$)a|aa)(?:ab|a)*a?))a', 'aaa')    -> P(0, 3)   here P(2, 3)
+match(r'(?!(?=(?:a(?=[ab]*c)|aa)(?:ab|a)*a?))', 'aab')   -> P(0, 3)   here None
+```
+
+**Why upstream is wrong.** A partial match is one that "could be possible if the string had not
+been truncated" (`upstream/README.rst:270`), and no text makes a zero-width pattern span a
+character or a one-character pattern span two. Judged by brute force (upstream without partial,
+every continuation of up to four letters from {a, b, c}): no continuation of 'a' or 'aab'
+completes the first and last patterns, because the alternative `a` or `aa` succeeds at 0 whatever
+follows, so the negative lookahead always fails there; the earliest start any continuation
+completes is 1 for 'aa' (the continuation 'c' fails both alternatives at 1) and 2 for 'aaa'.
+
+**Mechanism upstream:** not traced. Upstream reaches the same spans as this port did before
+D113, whose cause was the port's own: the second pass's dedup at a blocked lookahead end let a
+repeat in the body record the continuation's failure, and that record cut the body's other
+alternative where it reached the same repeat with its end decided, so the inner lookahead stayed
+undecided. Upstream has no such dedup, so its route to the same answer is different.
+
+**This port.** The dedup marks the blocked end (`MatchState.NoteABlockedEnd`), so the record is
+not made. Pinned by
+`Gaps/Engine/PartialBlockedEndGuardTests.A_negative_lookahead_reports_no_partial_its_inner_lookahead_decides_for_every_continuation`.
+
+## 95. With the Unicode 18.0.0 tables, `\X` keeps Unicode 17.0.0's GB9c and follows neither version - DIVERGES HERE (D120, 2026-10-18)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Found by the 2026.9.29 sync, which ran Unicode's
+conformance files over the port and over upstream. Blind-reviewed 2026-10-20: a fresh reviewer
+fetched UAX #29 revision 49 and the 18.0.0 test file, ran every line through regex 2026.9.29 and
+measured the same 10 failing lines.
+
+**Reproduction**, `regex` 2026.9.29 from PyPI (sdist byte-identical to tag `2026.9.29`,
+`0e8cb05`), measured 2026-10-18:
+
+```
+findall(r'\X', 'a\u094d\u0924')   -> ['a\u094d', '\u0924']   18.0.0 file line 859: one cluster
+findall(r'\X', '\u094d\u0915')    -> ['\u094d', '\u0915']    line 179: one cluster
+findall(r'\X', '\u1cf5\u0915')    -> ['\u1cf5', '\u0915']    line 659: one cluster
+findall(r'\X', '\u0915\u094d\u0924') -> ['\u0915\u094d\u0924'] the same in both versions
+```
+
+Over all of `GraphemeBreakTest.txt` 18.0.0, forwards, upstream fails 10 of 853 lines: 179, 180,
+659, 660, 859, 860, 871, 875, 876 and 879, every one a GB9c line. 2026.9.10 with the 17.0.0
+tables passed every line of the 17.0.0 file forwards.
+
+**Why upstream is wrong.** UAX #29 revision 49, the one issued with Unicode 18.0.0, changed GB9c
+from `\p{InCB=Consonant} [\p{InCB=Extend}\p{InCB=Linker}]* \p{InCB=Linker}
+[\p{InCB=Extend}\p{InCB=Linker}]* × \p{InCB=Consonant}` to `\p{InCB=Linker} \p{InCB=Extend}* ×
+\p{InCB=Consonant}` (its Modifications section, citing UTC decision 187-C47). 2026.9.29 regenerated
+the tables, including Indic_Conjunct_Break, from 18.0.0 but left `unicode_at_grapheme_boundary`
+(`src/_regex.c:1786`, GB9c at `:1866-1897`) as it was apart from the stdbool/stdint renames. So the
+rule is 17.0.0's and the data 18.0.0's, and `\X` answers as neither version would.
+`upstream/README.rst` says the grapheme matcher conforms to the Unicode specification.
+
+**Proposed fix upstream:** in the GB9c block, walk left over `RE_INCB_EXTEND` only; a
+`RE_INCB_LINKER` there means no break, anything else ends the rule.
+
+**This port.** `AtGraphemeBoundary` and the reversed partial check apply revision 49's rule; the
+port passes all 853 lines forwards and backwards. Pinned by
+`Gaps/Engine/IndicConjunctGraphemeTests`. The oracle entry `grapheme-conjunct-follows-unicode-18`
+claims a row only when `PatternObject.UpstreamGraphemeConjunct`, which puts revision 47's rule
+back, reproduces upstream's answer; its example rows are lines 859, 660 and 860, recorded from
+`tools/probes/sync-2026-9-29-gb9c-rows.jsonl`.

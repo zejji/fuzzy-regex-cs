@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -84,6 +86,56 @@ internal sealed class GuardList
             {
                 return false;
             }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D85, D103): <see cref="PopFrom"/> for a keyed tail list, which a restore may
+    /// rebuild in a spare list that never held this save, so the array grows first if it must.
+    /// </summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool RestoreFrom(ByteStack stack)
+    {
+        if (!stack.TopSize(out long count))
+        {
+            return false;
+        }
+
+        if (count > _spans.Length)
+        {
+            _spans = new GuardSpan[Math.Max(16, (int)BitOperations.RoundUpToPowerOf2((uint)count))];
+        }
+
+        return PopFrom(stack);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D103), Debug only: whether the save <see cref="PushTo"/> left just below
+    /// <paramref name="top"/> holds exactly the live spans; moves <paramref name="top"/> below it.
+    /// </summary>
+    /// <param name="stack">The stack holding the save.</param>
+    /// <param name="top">The depth the save ends at; on return, the depth it starts at.</param>
+    /// <returns><see langword="true"/> if the save equals the list.</returns>
+    internal bool MatchesSaved(ByteStack stack, ref int top)
+    {
+        if (!stack.ReadSizeBelow(top, out long count) || count != Count)
+        {
+            return false;
+        }
+
+        top -= sizeof(long);
+        GuardSpan span = default;
+        for (int i = Count - 1; i >= 0; i--)
+        {
+            if (!stack.ReadBlockBelow(top, MemoryMarshal.AsBytes(new Span<GuardSpan>(ref span))) || span != _spans[i])
+            {
+                return false;
+            }
+
+            top -= Unsafe.SizeOf<GuardSpan>();
         }
 
         return true;
@@ -429,6 +481,13 @@ internal sealed class RepeatData
 
     /// <summary>Upstream <c>tail_guard_list</c>: where the tail has already failed.</summary>
     internal readonly GuardList TailGuardList = new();
+
+    /// <summary>
+    /// NOT UPSTREAM (D85): the tail guards, one list per key, for a repeat whose tail reads group
+    /// state (<see cref="RepeatInfo.TailKey"/>); <see langword="null"/> otherwise, when
+    /// <see cref="TailGuardList"/> is used as upstream uses it.
+    /// </summary>
+    internal KeyedTailGuards? KeyedTail;
 
     /// <summary>Upstream <c>count</c>: how many times the body has matched.</summary>
     internal long Count;

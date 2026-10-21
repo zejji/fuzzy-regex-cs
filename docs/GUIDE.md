@@ -226,6 +226,11 @@ form such as `{2i+1s<4}` - attaches to a group the same way a quantifier does. `
 "Fuzzy syntax in one page" is the complete reference for the syntax; this guide does not repeat
 it.
 
+A minimum needs a maximum. `{1<=d<=3}` asks for one to three deletions, while `{1<=d}` on its own
+reads as the six literal characters `{1<=d}`, as upstream reads it: `(?:qx){1<=d}` matches
+'qx{1<=d}' and leaves 'x' unmatched. To ask for at least one deletion with no real cap, give a
+large maximum: `{1<=d<=9999}`.
+
 A **named list** lets a fuzzy pattern check a placeholder against a fixed vocabulary instead of
 matching characters: `\L<colour>{e<=1}` matches a member of a list named `colour`, allowing one
 error, where `colour` is supplied through the `namedLists` constructor or static-method
@@ -282,6 +287,15 @@ With a cost equation, `(?b)` ranks by cost rather than by error count: `(?b)(?:a
 over 'axyd abXcd' returns 'axyd', two substitutions costing 2, rather than 'abXcd', one insertion
 costing 3. Upstream mrab-regex returns 'abXcd' here; `docs/COMPARISON.md`'s "`(?e)` and `(?b)`
 rank candidates by fuzzy COST" gives the conditions and the reasoning.
+
+Neither flag accepts a fuzzy pattern that holds `(*PRUNE)` or `(*SKIP)`: compiling one throws
+`FuzzyRegexParseException`, and the message gives the reason: "BESTMATCH cannot rank a fuzzy
+pattern that holds (*SKIP): (*PRUNE) and (*SKIP) depend on the order the search tries paths,
+which BESTMATCH changes; use the pattern without the flag or without the verb". In more detail,
+the flags search by holding each new attempt to fewer errors than the last, and that limit would
+decide where the verb acts, so the answer could be a span the pattern does not match. Drop the
+flag, or the verb, or make the section exact (`{e<=0}`). `docs/COMPARISON.md`'s "BESTMATCH and
+ENHANCEMATCH answer a match the pattern can make" gives the reasoning.
 
 The two flags cost very different amounts. `(?e)` costs little, because its extra searches look
 only inside the first match. `(?b)` keeps scanning the rest of the text after it finds a match,
@@ -438,6 +452,35 @@ promise. It holds firmly the other way round: where some longer text does comple
 partial call never answers no match, so a caller that stops reading at the first no match never
 misses one.
 
+For one kind of pattern the partial start is a bound. The pattern has a fuzzy section where one
+insertion fits within its limits, is not searched with `BestMatch`, and also holds at least one of:
+a test of the position (`^`, `$`, `\A`, `\Z`, `\G`, `\b`, `\B`, `\m`, `\M`, a grapheme boundary or a
+lookaround); a construct whose result depends on the path taken (a backreference, a conditional, a
+group call, `(*PRUNE)`, `(*SKIP)`, `(*FAIL)`, `\K`, an atomic group or a possessive quantifier); or a
+fuzzy minimum such as `{1<=i<=2}`. For such a pattern a partial search can start earlier than the
+match that more text would give, and never later. Under `(?r)` the same holds mirrored: the partial
+can end later than the completed match, and never earlier.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var pair = new FuzzyRegex(@"(?:ab){1<=i<=2}");
+Match early = pair.Match("xxa", partial: true);
+Console.WriteLine($"{early.Index} {early.Length}");
+Match complete = pair.Match("xxab");
+Console.WriteLine($"{complete.Index} {complete.Length}");
+// 0 3
+// 1 3
+```
+
+The attempt from 0 can still complete ('xxab', with both 'x' characters inserted), but every text
+that completes it also holds a match from 1, which the engine then prefers. Seeing that needs the
+text that has not arrived, so the partial keeps the earlier start, here 1 character early. Among
+generated partial searches that this behaviour moved, the start was 1 character early on 61, 2 on
+4, and 3 at most; that bound was observed, and is unproven. A caller that keeps the text from the
+partial start keeps those few extra characters and still holds the start of every match that is
+still arriving.
+
 A fuzzy partial's `FuzzyCounts` and `FuzzyChanges` are the errors of the path that was still open,
 and they stay within the limits of every fuzzy section around that point, including sections
 that had not closed yet. More text can only add errors, so a path already over a limit could never
@@ -514,12 +557,20 @@ instead) would be disproportionate to what it was worth compiling. It defaults t
 `maxCompiledNodes` constructor parameter; there is no "unlimited" value. A pattern that exceeds it
 throws `FuzzyRegexParseException` at compile time, naming the limit in its message.
 
+**Nesting** is limited to 500 levels of groups and sets: `new string('(', 501) + "a" + new
+string(')', 501)` throws `FuzzyRegexParseException` with the offset of the bracket that opens the
+501st level. Compiling recurses once per level, and a stack overflow would end the process rather
+than throw, so the compiler also checks the stack it has left; on a thread with a small stack a
+shallower pattern can be refused with "too deeply nested to compile on this thread". In a Release
+build every construct tested compiles at 500 levels on a 1 MB stack; a Debug build needs more. Python's `regex` stops at 140 to 330 levels.
+
 **`FuzzyRegex.CacheSize`** is the number of compiled patterns the static convenience methods keep
 ready between calls (fifteen by default); see Section 2 for when to bypass it with an instance
 instead.
 
 **Exceptions.** `FuzzyRegexParseException` is thrown for anything wrong with the pattern itself -
-a syntax error, an unknown flag combination, a pattern over `MaxCompiledNodes` - and carries
+a syntax error, an unknown flag combination, a pattern over `MaxCompiledNodes` or nested too
+deeply - and carries
 `Pattern` (the input pattern) and `Offset` (where in it parsing failed) alongside `Message`. Bad
 input elsewhere raises `ArgumentNullException` for a null pattern or subject,
 `ArgumentOutOfRangeException` for a group number the pattern does not define,
