@@ -23,6 +23,16 @@ per release.
   rule, which upstream's `\X` does not yet (see COMPARISON). Upstream's other change in that
   release, C type names, has nothing to port.
 
+### Fixed
+
+- **Partial matching with a capturing lookahead inside a repeat that a later conditional
+  reads** is polynomial, not exponential up to the fork budget, and answers the exact
+  partial where it used to answer a partial at the attempt's start that no text completes:
+  `(?:(?=(?:a|(b))*y)a)+(?(1)c|d)` over 'a' * 10 + 'b' is a partial at (11, 11), not (0, 11).
+- **A conditional in a repeat whose pattern ends in a backreference** no longer allocates per
+  call: `(\w)(?:(?(?=\w)\w+|\s))*\1$` over 1,000 characters allocated about 105 MB a call, now
+  24 bytes.
+
 ## [1.0.0] - 2026-10-20
 
 The first release. FuzzyRegex is a .NET port of mrab-regex, the Python `regex` module, tracking

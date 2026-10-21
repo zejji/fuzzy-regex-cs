@@ -47,11 +47,12 @@ public sealed class PartialContractTests
     /// lookahead's run-out needs 'd' (or 'c') next and the tail's <c>x</c> needs 'x' there. Where a
     /// cut or a conditional test read the edge, the alternatives made after that read are kept, so
     /// the call goes on to a path no text completes (N4-N6, T8 and D38's C4 rows,
-    /// <c>docs/plan/2026-09-28-partial-boundary-design.md</c> section 7). X1 is the fork budget
+    /// <c>docs/plan/2026-09-28-partial-boundary-design.md</c> section 7). X1 was the fork budget
     /// firing: every lookahead has two successes with different captures, and the backreferences
-    /// turn the repeat guards off. Upstream 2026.9.10, measured 2026-10-08: a partial for the
-    /// <c>a\b\B</c> search at (1, 1), the C4 search at (2, 2), and <c>b(?=a)c</c>, X1 and the
-    /// four fuzzy rows as here; None on the rest. The rows answering None are right under any
+    /// turn the repeat guards off. Since D104 a failed continuation is recorded, so X1 answers the
+    /// judge's None (<c>PartialContinuationMemoTests</c>). Upstream 2026.9.10, measured 2026-10-08:
+    /// a partial for the <c>a\b\B</c> search at (1, 1), the C4 search at (2, 2), X1 at (0, 21), and
+    /// <c>b(?=a)c</c> and the four fuzzy rows as here; None on the rest. The rows answering None are right under any
     /// contract and guard the same code.
     /// </remarks>
     [Test]
@@ -63,7 +64,7 @@ public sealed class PartialContractTests
     [Arguments("match", @"(?>a\b(?:|()))(?(1)|(?<=b))", "a", 0, 1)]
     [Arguments("match", @"(?=a\b(?:|()))(?(1)|(?<=b))", "a", 0, 1)]
     [Arguments("match", @"(?:(?=a\B|)(?<!a)a(*PRUNE)(?<=b)|a\B)", "a", -1, -1)]
-    [Arguments("match", @"(?:(?=(.*)z|())a)*b\1\2", "aaaaaaaaaaaaaaaaaaaac", 0, 21)]
+    [Arguments("match", @"(?:(?=(.*)z|())a)*b\1\2", "aaaaaaaaaaaaaaaaaaaac", -1, -1)] // DIVERGES FROM UPSTREAM (D104): upstream answers (0, 21)
     [Arguments("match", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby", 0, 3)]
     [Arguments("search", @"a(?=(?:(?:bcd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby", 0, 3)]
     [Arguments("match", @"a(?=(?:b(?:cd){1<=e<=1}))(?:b|c){1<=e<=1}x", "aby", 0, 3)]

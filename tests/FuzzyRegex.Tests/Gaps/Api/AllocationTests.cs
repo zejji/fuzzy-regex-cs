@@ -51,6 +51,64 @@ public sealed class AllocationTests
         allocated.Should().Be(0, "a predicate on a warm pattern has nothing it needs to build");
     }
 
+    /// <summary>
+    /// D103: every entry to a conditional saves each repeat's guard lists (upstream's
+    /// <c>push_repeats</c>), and the search enters this one about 10 n² times. D85's keyed tail
+    /// lists were saved as a new dictionary of copied lists, so a warm call allocated 105,408,000
+    /// bytes at n = 200 (0 before D85). They now go onto the byte stack like a plain list's spans.
+    /// </summary>
+    [Test]
+    public void A_conditional_inside_a_repeat_with_a_keyed_tail_allocates_nothing_when_warm()
+    {
+        string subject = string.Concat(Enumerable.Repeat("aaaa ", 200)) + "!";
+        bool actual = true;
+
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(@"(\w)(?:(?(?=\w)\w+|\s))*\1$");
+            _ = regex.IsMatch(subject);
+            return () => actual = regex.IsMatch(subject);
+        });
+
+        actual.Should().BeFalse();
+        allocated.Should().Be(0, "a warm predicate allocated nothing on this pattern before D85");
+    }
+
+    /// <summary>
+    /// D103 with many keys: group 1 takes every word in turn, so each save holds up to 24 keyed
+    /// lists. Main allocated 191,812,104 bytes for a warm <c>Match</c> here (2026-10-19, against
+    /// 120 now, the match object); the lists now go onto the byte stack instead.
+    /// </summary>
+    [Test]
+    public void A_conditional_saving_many_keyed_tail_lists_allocates_nothing_when_warm()
+    {
+        string subject = string.Concat(Enumerable.Range(0, 50).Select(static i => Word(i) + " ")) + "!";
+        bool actual = true;
+
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(@"(?:(\w+) )*(?:(?(?=\w)\w+|\s))*\1$");
+            _ = regex.IsMatch(subject);
+            return () => actual = regex.IsMatch(subject);
+        });
+
+        actual.Should().BeFalse();
+        allocated.Should().Be(0, "the keyed lists are saved on the byte stack, which a warm call reuses");
+
+        // a, b, ..., z, ab, bb, ...: distinct words, so group 1 never repeats a value.
+        static string Word(int i)
+        {
+            var sb = new System.Text.StringBuilder();
+            do
+            {
+                sb.Append((char)('a' + (i % 26)));
+                i /= 26;
+            } while (i > 0);
+
+            return sb.ToString();
+        }
+    }
+
     [Test]
     public void The_empty_iteration_record_allocates_only_for_the_states_it_keeps()
     {

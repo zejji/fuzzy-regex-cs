@@ -151,6 +151,23 @@ public sealed class NestedTailGuardTests
     }
 
     [Test]
+    // D103: a group's return restores the keyed tail lists saved at the call, which drops the
+    // failures recorded inside the callee, whose continuation (the return to the call site) is not
+    // the one the same repeat has when group 2 is matched in place. Without that restore the
+    // failure of b* inside the call, followed by c, cuts the direct match of 'b' (found 2026-10-18
+    // by a mutant that skipped the restore: 26,302 of 5.9 M generated rows changed, none caught by
+    // the suite). The answers are plain: b* takes the 'b' and the optional call is skipped.
+    [Arguments(@"(a?)(?:(?2)c)?(b*(?:a\1)?)", "b")]
+    [Arguments(@"(a?)(?:(?2)c|(b*(?:a\1)?))", "b")]
+    [Arguments(@"(b*)(?:(?2)c)?(b*(?:a\1)?)", "a")]
+    public void A_group_return_drops_the_keyed_tail_failures_recorded_inside_the_call(string pattern, string subject)
+    {
+        Match m = FuzzyRegex.FullMatch(subject, pattern);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, subject.Length));
+    }
+
+    [Test]
     // Controls: regex 2026.9.10 already gives these, and so must any fix. a+ writes no tail guard
     // at its minimum, a possessive or atomic a* never backtracks into one, a lazy b?? tries group
     // 1 = '' first, and an unbounded body is walked, so the reference in it is seen. Each matches

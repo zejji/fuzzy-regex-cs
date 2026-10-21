@@ -6308,10 +6308,43 @@ internal static class Matcher
             return LookaroundEnd.Backtrack;
         }
 
+        // NOT UPSTREAM (D104): the continuation memo (MatchState.ContinuationKeyOf). A
+        // continuation that failed under the same key fails again: a blocked end goes back into
+        // the body, an unblocked one cuts and fails as the dedup does.
+        bool keyed =
+            op == Opcode.Lookaround
+            && state.Bstack.ReadSizeBelow((int)mark - 1, out long parkedAt)
+            && state.ContinuationKeyOf(look.Node, look.TextPos, parkedAt - _lookaroundStateDataSize);
+        if (keyed && state.ContinuationFailed(look.TextPos))
+        {
+            // The cut path would have reached this blocked end and its continuation, so an entry
+            // pushed before now is about the instance too (blind review 2026-10-19, as the
+            // store-hit path in MatchState.IsGuardedAfterBlockedEnd).
+            state.NoteABlockedEnd();
+            if (blocked)
+            {
+                TaintTheFrame(state, frame);
+            }
+            else
+            {
+                // A RunOutPending mark is left, unlike the success below, so the arm could take the
+                // run-out and run the failed continuation again: at worst wasted work, since the
+                // touch flag is already set. No row of about 135,000 reached it (2026-10-21).
+                CutBstack(state, (int)mark);
+            }
+
+            return LookaroundEnd.Backtrack;
+        }
+
         if (!blocked)
         {
             // A run-out waiting for the body is answered by this success (RunOutCanWaitForTheBody).
             RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
+            if (keyed)
+            {
+                state.HoldContinuation();
+            }
+
             return HasWMarkAt(state, frame, WMarkKind.CutTaint) ? LookaroundEnd.CutTainted : LookaroundEnd.Cut;
         }
 
@@ -6354,6 +6387,11 @@ internal static class Matcher
         state.Bstack.PushUInt8((byte)Opcode.Reopen);
 
         /* bstack: sstack_bytes length section_frame call_base pstack_mark REOPEN */
+
+        if (keyed)
+        {
+            state.PushContinuationMark(look.TextPos);
+        }
 
         Debug.Assert(state.Sstack.Count == s0, "D11 amendment 2, assert 2: the depth a normal end leaves");
         CloseFramesAbove(state);
@@ -7573,6 +7611,64 @@ internal static class Matcher
         state.Sstack.Count = (int)sstackCount;
         read = PopLookaroundStateData(state.Pattern, state.Sstack, out look);
         state.Sstack.Count = sstackTop;
+        return read;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D104): the construct a pruning mark belongs to and, for a lookaround or a
+    /// condition's test, where it started and the slice it set (<c>MatchState.CutBodyKeyOf</c>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The backtracking-stack size the mark holds.</param>
+    /// <param name="op">Receives the construct's opcode.</param>
+    /// <param name="textPos">Receives where a lookaround or test started; 0 for anything else.</param>
+    /// <param name="sliceStart">Receives the slice start it set; 0 for anything else.</param>
+    /// <param name="sliceEnd">Receives the slice end it set; 0 for anything else.</param>
+    /// <returns><see langword="false"/> if the stacks do not hold what the mark promises.</returns>
+    internal static bool ReadConstructStart(
+        MatchState state,
+        int mark,
+        out Opcode op,
+        out int textPos,
+        out int sliceStart,
+        out int sliceEnd
+    )
+    {
+        bool read = ReadPruningMark(state, mark, out op, out LookaroundStateData look);
+        textPos = look.TextPos;
+        sliceStart = look.SliceStart;
+        sliceEnd = look.SliceEnd;
+        return read;
+    }
+
+    /// <summary>
+    /// <see cref="ReadConstructStart(MatchState, int, out Opcode, out int, out int, out int)"/>,
+    /// also saying whether the construct is a negative lookaround or a condition with a negative
+    /// test. <b>Not upstream</b> (D104).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="mark">The construct's pruning mark.</param>
+    /// <param name="op">Its opcode.</param>
+    /// <param name="textPos">Where it started.</param>
+    /// <param name="sliceStart">The slice start it parked.</param>
+    /// <param name="sliceEnd">The slice end it parked.</param>
+    /// <param name="negative">Whether its body's success fails it.</param>
+    /// <returns><see langword="false"/> if the stacks are not as the mark promises.</returns>
+    internal static bool ReadConstructStart(
+        MatchState state,
+        int mark,
+        out Opcode op,
+        out int textPos,
+        out int sliceStart,
+        out int sliceEnd,
+        out bool negative
+    )
+    {
+        bool read = ReadPruningMark(state, mark, out op, out LookaroundStateData look);
+        textPos = look.TextPos;
+        sliceStart = look.SliceStart;
+        sliceEnd = look.SliceEnd;
+        negative = op is Opcode.Lookaround or Opcode.Conditional && look.Node is { Match: false };
         return read;
     }
 
@@ -16024,6 +16120,7 @@ internal static class Matcher
                     // 'state->text_pos + (Py_ssize_t)count * node->step', stepped back a character
                     // at a time as the count comes down rather than recomputed by multiplication.
                     bool match = false;
+                    long cutBodyHits = state.CutBodyHits;
                     while (true)
                     {
                         if (count < node.Values[1])
@@ -16079,8 +16176,17 @@ internal static class Matcher
                             goto runOut;
                         }
 
-                        // The repeat has failed to match at this position.
-                        state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        // The repeat has failed to match at this position. NOT UPSTREAM (D104):
+                        // a tail guard kept under the instance said so, then so is this.
+                        if (state.CutBodyHits == cutBodyHits)
+                        {
+                            state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        }
+                        else
+                        {
+                            state.GuardRepeatAfterBlockedEnd(index, state.TextPos, state.TextPos, NodeStatus.Body);
+                        }
+
                         goto backtrack;
                     }
 
@@ -17412,6 +17518,16 @@ internal static class Matcher
                     {
                         state.GuardRepeat((int)bodyIndex, (int)bodyTextPos, NodeStatus.Body, true);
                     }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(
+                            (int)bodyIndex,
+                            (int)bodyTextPos,
+                            (int)bodyTextPos,
+                            NodeStatus.Body
+                        );
+                    }
                     break;
                 }
                 case Opcode.Branch: // 2-way branch.
@@ -17599,7 +17715,8 @@ internal static class Matcher
                     // Re-aligning: if upstream changes what a body guard means, or what reset_guards
                     // resets, re-check the argument there; nothing else moves.
                     state.ResetGuards(
-                        pattern.KeepsFailureMemosAcrossAttempts && state.PartialSide == MatchState.PartialNone
+                        pattern.KeepsFailureMemosAcrossAttempts && state.PartialSide == MatchState.PartialNone,
+                        nextAttempt: true
                     );
 
                     // Reset the stacks. Backtracking has popped every entry of the attempt, and each
@@ -17642,6 +17759,11 @@ internal static class Matcher
                     {
                         state.GuardRepeat(dataR.Index, dataR.TextPos, NodeStatus.Body, true);
                     }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(dataR.Index, dataR.TextPos, dataR.TextPos, NodeStatus.Body);
+                    }
 
                     // Restore the previous repeat.
                     rpData.Count = dataR.Count;
@@ -17680,9 +17802,15 @@ internal static class Matcher
                     // The tail failed to match at this position (NOT UPSTREAM, D90: see
                     // MatchState.PoppedEntrySawABlockedEnd; the range guard below follows it).
                     bool sawABlockedEnd = state.PoppedEntrySawABlockedEnd(index);
+                    long cutBodyHits = state.CutBodyHits;
                     if (!sawABlockedEnd)
                     {
                         state.GuardRepeat(index, pos, NodeStatus.Tail, true);
+                    }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(index, pos, pos, NodeStatus.Tail);
                     }
 
                     // A (*SKIP) might have changed the size of the slice.
@@ -17843,9 +17971,17 @@ internal static class Matcher
                     }
 
                     // Don't try this repeated match again.
-                    if (sawABlockedEnd)
+                    if (sawABlockedEnd || state.CutBodyHits != cutBodyHits)
                     {
-                        // NOT UPSTREAM (D90): the failure took in what follows a blocked construct.
+                        // NOT UPSTREAM (D90): the failure took in what follows a blocked construct,
+                        // so it is kept under the instance instead (D104), as it is when a tail
+                        // guard kept under the instance cut a position on the way down.
+                        state.GuardRepeatAfterBlockedEnd(
+                            index,
+                            Math.Min(limit, pos),
+                            Math.Max(limit, pos),
+                            NodeStatus.Body
+                        );
                     }
                     else if (step > 0)
                     {
@@ -18156,6 +18292,16 @@ internal static class Matcher
                     {
                         state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
                     }
+                    else
+                    {
+                        // D104: kept under the instance instead.
+                        state.GuardRepeatAfterBlockedEnd(
+                            (int)tailIndex,
+                            (int)tailTextPos,
+                            (int)tailTextPos,
+                            NodeStatus.Tail
+                        );
+                    }
                     break;
                 }
                 case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.
@@ -18171,6 +18317,13 @@ internal static class Matcher
                     if (status != _armContinue)
                     {
                         goto armExit;
+                    }
+
+                    break;
+                case Opcode.ContinuationMark: // NOT UPSTREAM (D104): see MatchState.ContinuationKeyOf.
+                    if (!state.PopContinuationMark())
+                    {
+                        return MatchStatus.Illegal;
                     }
 
                     break;
@@ -20056,6 +20209,9 @@ internal static class Matcher
                 state.AddWMark(state.Bstack.Count - 1, WMarkKind.CutTaint);
             }
 
+            // D104: the continuation starts here, above the entry that undoes the lookaround.
+            state.PushPendingContinuationMark(endLookData.TextPos);
+
             /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
 
             // D109: see OverTheBudget.
@@ -20225,7 +20381,7 @@ internal static class Matcher
         {
             groupCallRepeat.BodyGuardList.Reset();
             groupCallRepeat.TailGuardList.Reset();
-            groupCallRepeat.KeyedTail?.Reset(newAttempt: false);
+            groupCallRepeat.KeyedTail?.Reset();
         }
 
         // Call a group, skipping its CALL_REF node. Be aware that we might be calling

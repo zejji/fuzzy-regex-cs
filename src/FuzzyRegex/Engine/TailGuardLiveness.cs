@@ -102,16 +102,29 @@ internal static class TailGuardLiveness
     /// <summary>How many groups the bit masks have room for: four flags each in a <see langword="ulong"/>.</summary>
     private const int _maxSlots = 16;
 
-    /// <summary>Fills in <see cref="RepeatInfo.TailKey"/> for every repeat whose tail is guarded.</summary>
+    /// <summary>
+    /// Fills in <see cref="RepeatInfo.TailKey"/> for every repeat whose tail is guarded, and
+    /// <see cref="PatternObject.CutBodies"/> for every repeat inside a cut body (D104).
+    /// </summary>
     /// <param name="pattern">The pattern, after <c>Optimiser.CollectTestedGroups</c>.</param>
     internal static void FindTailKeys(PatternObject pattern)
     {
         int[] tested = pattern.TestedGroups;
-        if (tested.Length == 0)
+        bool cutBodies = pattern.RepeatInfoList.Exists(static info => info.InsideACutBody);
+        if (tested.Length != 0 || cutBodies)
         {
-            return;
+            // In a method of its own: the locals its lambdas capture live in an object made on
+            // entry, which a pattern with nothing to key should not pay for (D104's allocation gate).
+            FindKeys(pattern, tested, cutBodies);
         }
+    }
 
+    /// <summary><see cref="FindTailKeys"/> for a pattern with a tested group or a cut body.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="tested">Its tested groups.</param>
+    /// <param name="cutBodies">Whether a repeat is inside a cut body.</param>
+    private static void FindKeys(PatternObject pattern, int[] tested, bool cutBodies)
+    {
         List<Node> nodes = pattern.NodeList;
         var indexOf = new Dictionary<object, int>(nodes.Count, ReferenceEqualityComparer.Instance);
         for (int i = 0; i < nodes.Count; i++)
@@ -124,8 +137,8 @@ internal static class TailGuardLiveness
         // live at every tail, keyed on its exact span. SHORTCUT: the ceiling is 16 read groups and
         // no group calls; following call and return edges would narrow the second.
         bool everything = pattern.HasGroupCalls || tested.Length > _maxSlots;
-        ulong[] liveIn = everything ? [] : Solve(nodes, indexOf, tested);
-        Dictionary<int, List<int>> progress = FindProgressRepeats(pattern, tested);
+        ulong[] liveIn = everything || tested.Length == 0 ? [] : Solve(nodes, indexOf, tested);
+        Dictionary<int, List<int>> progress = FindEnclosingLoops(pattern, tested);
         Dictionary<object, int[]>? enclosing = null;
 
         // Which way the pattern's captures run, and how many nodes capture each group (by either
@@ -168,12 +181,26 @@ internal static class TailGuardLiveness
 
             bool one = repeat.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne;
             Node? tail = one ? repeat.Next1.Node : repeat.Next2.Node;
-            ulong live = ulong.MaxValue;
-            if (!everything)
-            {
-                live = tail is null ? 0 : liveIn[indexOf[tail]];
-            }
+            info.TailKey = SpecAt(repeat, tail is null ? 0 : LiveAt(tail));
+        }
 
+        if (cutBodies)
+        {
+            FindCutBodyKeys(pattern, nodes, node => SpecAt(node, LiveAt(node)));
+        }
+
+        MarkBodiesHoldingKeyedTails(pattern);
+        return;
+
+        // What is live on entry to `node`; nothing is tracked with no read group, and under
+        // `everything` SpecAt does not look.
+        ulong LiveAt(Node node) => liveIn.Length == 0 ? 0 : liveIn[indexOf[node]];
+
+        // The key for a guard written at `repeat` with `live` live there: a value per live group, a
+        // bit per enclosing progress repeat; null when it holds nothing.
+        TailGuardKeySpec? SpecAt(Node repeat, ulong live)
+        {
+            int index = (int)repeat.Values[0];
             var groups = new List<int>();
             var modes = new List<byte>();
             for (int slot = 0; slot < tested.Length; slot++)
@@ -191,7 +218,7 @@ internal static class TailGuardLiveness
             int[] around = progress.TryGetValue(index, out List<int>? list) ? [.. list] : [];
             if (groups.Count == 0 && around.Length == 0)
             {
-                continue;
+                return null;
             }
 
             int[] depths = new int[groups.Count];
@@ -225,14 +252,51 @@ internal static class TailGuardLiveness
             bool forward = repeat.Values[3] != 0;
             bool againstRepeat = forward ? capturesBackward : capturesForward;
 
-            info.TailKey = new TailGuardKeySpec([.. groups], [.. modes], around, forward, everything || againstRepeat)
+            return new TailGuardKeySpec([.. groups], [.. modes], around, forward, everything || againstRepeat)
             {
                 InsideDepths = depths,
                 Collapsible = [.. groups.Select(g => captureNodes.GetValueOrDefault(g + 1) == 1)],
             };
         }
+    }
 
-        MarkBodiesHoldingKeyedTails(pattern);
+    /// <summary>
+    /// NOT UPSTREAM (D104): for each repeat inside a cut body, what its records written after a
+    /// blocked end are keyed on besides the instance (<c>MatchState.CutBodyKeyOf</c>): the groups
+    /// live where the repeat is entered, as D85 keys a tail, and the loops enclosing it.
+    /// </summary>
+    /// <remarks>
+    /// The live-in of the repeat node takes in its body, its tail, and through the construct's end
+    /// (<c>END_LOOKAROUND</c> and the like lead on to the continuation in the graph) everything
+    /// after the construct, so one spec serves body and tail records alike.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="nodes">Its nodes.</param>
+    /// <param name="specAt">The D85 spec for the groups live on entry to a repeat node.</param>
+    private static void FindCutBodyKeys(PatternObject pattern, List<Node> nodes, Func<Node, TailGuardKeySpec?> specAt)
+    {
+        Dictionary<int, List<int>> loops = FindEnclosingLoops(pattern, null);
+        Dictionary<int, long> caps = nodes
+            .Where(static n => n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat)
+            .ToDictionary(static n => (int)n.Values[0], static n => ~n.Values[2] == 0 ? n.Values[1] : long.MaxValue);
+
+        foreach (
+            Node repeat in nodes.Where(n =>
+                n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat or Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne
+                && pattern.RepeatInfoAt((int)n.Values[0]).InsideACutBody
+            )
+        )
+        {
+            int index = (int)repeat.Values[0];
+            int[] enclosing = loops.TryGetValue(index, out List<int>? list) ? [.. list] : [];
+            pattern.CutBodies ??= new CutBodyFacts(pattern.RepeatCount);
+            pattern.CutBodies.Repeats[index] = new CutBodyRepeat(
+                specAt(repeat) ?? new TailGuardKeySpec([], [], [], repeat.Values[3] != 0, false),
+                enclosing,
+                [.. enclosing.Select(loop => caps[loop])],
+                ~repeat.Values[2] == 0 && repeat.Values[1] <= 1
+            );
+        }
     }
 
     /// <summary>
@@ -513,14 +577,15 @@ internal static class TailGuardLiveness
     /// For each repeat, the repeats enclosing it whose body captures a read group: their progress
     /// test (<c>END_GREEDY_REPEAT</c>, "advanced or changed a capture") reads the counter, and so
     /// whether the enclosing iteration has already made progress when the inner tail is entered.
+    /// With <paramref name="tested"/> null, every enclosing loop (D104).
     /// </summary>
     /// <param name="pattern">The pattern.</param>
-    /// <param name="tested">The read groups, one-based.</param>
+    /// <param name="tested">The read groups, one-based; null for every enclosing loop.</param>
     /// <returns>Inner repeat index to its enclosing repeats' indexes.</returns>
-    private static Dictionary<int, List<int>> FindProgressRepeats(PatternObject pattern, int[] tested)
+    private static Dictionary<int, List<int>> FindEnclosingLoops(PatternObject pattern, int[]? tested)
     {
         var result = new Dictionary<int, List<int>>();
-        var testedSet = new HashSet<int>(tested);
+        var testedSet = new HashSet<int>(tested ?? []);
         var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
         var todo = new Stack<Node>();
         var inner = new List<int>();
@@ -565,7 +630,7 @@ internal static class TailGuardLiveness
                 }
             }
 
-            if (!captures)
+            if (!captures && tested is not null)
             {
                 continue;
             }
