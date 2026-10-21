@@ -214,6 +214,20 @@ def workload_rows() -> list[Row]:
         lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
         lambda p=p: spans(p.finditer(long_)))
 
+    # WholeWordListIgnoreCase: the same list ignoring case (C6 option B).
+    p = compile_(r"(?i)\b\L<words>\b", V1, words=["amber", "copper", "violet", "harbour", "meadow",
+                                                  "lantern", "granite", "jump", "fox", "needle"])
+    add("WholeWordListIgnoreCase", p.pattern, V1, "len(findall())",
+        lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
+        lambda p=p: spans(p.finditer(long_)))
+
+    # WholeWordListIgnoreCaseKs: the same with kestrel and thistle for copper and violet (C6).
+    p = compile_(r"(?i)\b\L<words>\b", V1, words=["amber", "kestrel", "thistle", "harbour", "meadow",
+                                                  "lantern", "granite", "jump", "fox", "needle"])
+    add("WholeWordListIgnoreCaseKs", p.pattern, V1, "len(findall())",
+        lambda p=p: len(p.findall(long_)), lambda p=p: str(len(p.findall(long_))),
+        lambda p=p: spans(p.finditer(long_)))
+
     # ReverseFailedScan: RightToLeft IsMatch.
     fl = V1 | R
     p = compile_("zebra", fl)
@@ -430,6 +444,11 @@ def usage_rows(inputs: str) -> list[Row]:
     add("CaseBlindAlternation", blind.pattern, V1, "len(findall()) per record, summed",
         lambda: sum(len(blind.findall(r)) for r in records),
         lambda: "\n".join(spans(blind.finditer(r)) for r in records))
+
+    blind_ks = compile_("(?i)(?:amber|kestrel|thistle)", V1)
+    add("CaseBlindAlternationKs", blind_ks.pattern, V1, "len(findall()) per record, summed",
+        lambda: sum(len(blind_ks.findall(r)) for r in records),
+        lambda: "\n".join(spans(blind_ks.finditer(r)) for r in records))
 
     whole = compile_(r"\b\L<words>\b", V1, words=["ORBIT", "MEADOW", "GRANITE", "FALCON", "BEACON",
                                                   "THISTLE", "AMBER", "HARBOR", "PARCELS", "TIMBERLAND"])
