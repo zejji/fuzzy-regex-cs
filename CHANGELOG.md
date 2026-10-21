@@ -22,6 +22,9 @@ per release.
   lands inside it (`(?i)ß` finds it). `\X` follows Unicode 18.0.0's simplified Indic conjunct
   rule, which upstream's `\X` does not yet (see COMPARISON). Upstream's other change in that
   release, C type names, has nothing to port.
+- **Case-insensitive lists of literals are found two to three times faster**: `(?i)cat|dog`,
+  and `\L<list>` with IgnoreCase, now skip ahead with a vectorised search, including lists
+  with a `k` or an `s`, whose Kelvin sign and long s are handled near where they occur.
 
 ### Fixed
 

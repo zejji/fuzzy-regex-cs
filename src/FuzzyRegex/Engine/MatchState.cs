@@ -1273,6 +1273,27 @@ internal sealed class MatchState : IDisposable
     internal bool ScreenFoundFarthest;
 
     /// <summary>
+    /// NOT UPSTREAM (C6 option B): ignore-case leading-string searches made since
+    /// <c>Matcher.BasicMatchCore</c> was entered. See <c>Matcher.LeadingStringsSkipTooLittle</c>.
+    /// </summary>
+    internal int LeadingStringCalls;
+
+    /// <summary>NOT UPSTREAM (C6 option B): code units those searches skipped in all.</summary>
+    internal int LeadingStringSkipped;
+
+    /// <summary>
+    /// NOT UPSTREAM (C6 option B3): where the last search for <c>PatternObject.LeadingOutliers</c>
+    /// started; with <see cref="LeadingOutlierAt"/>, no outlier lies between the two.
+    /// </summary>
+    internal int LeadingOutlierFrom;
+
+    /// <summary>
+    /// NOT UPSTREAM (C6 option B3): the outlier that search found, or <see cref="int.MaxValue"/> when
+    /// none is left in the text.
+    /// </summary>
+    internal int LeadingOutlierAt;
+
+    /// <summary>
     /// NOT UPSTREAM: the stretch of attempt positions <see cref="RequiredStringScreen"/> has already
     /// cleared for a caller that does not jump, so that <c>Matcher.BasicMatch</c> can skip the call
     /// for each of them. Empty (low above high) when there is none.
@@ -1901,6 +1922,10 @@ internal sealed class MatchState : IDisposable
         ScreenFoundFarthest = false;
         ScreenClearedLow = 1;
         ScreenClearedHigh = 0;
+        LeadingStringCalls = 0;
+        LeadingStringSkipped = 0;
+        LeadingOutlierFrom = int.MaxValue;
+        LeadingOutlierAt = -1;
         FilterMemory?.Reset();
         IsFuzzy = pattern.IsFuzzy;
         AnchorBanScratch = null;

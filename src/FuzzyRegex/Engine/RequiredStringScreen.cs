@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -285,21 +286,35 @@ internal static class RequiredStringScreen
     {
         bool reverse = node.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
         uint first = node.Values[reverse ? node.Values.Length - 1 : 0];
-        var codepoints = new HashSet<uint> { first };
 
         if (node.Op is Opcode.StringRev or Opcode.String or Opcode.Character)
         {
-            return codepoints;
+            return [first];
         }
 
+        HashSet<uint> codepoints = CaseClosure(node.Encoding, first);
+        CaseEncoding encoding = node.Encoding;
+        codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
+        return codepoints;
+    }
+
+    /// <summary>
+    /// A character and every character reachable from it through <see cref="Encodings.AllCases"/>.
+    /// </summary>
+    /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
+    /// <param name="ch">The character.</param>
+    /// <returns>The closure, holding <paramref name="ch"/>.</returns>
+    private static HashSet<uint> CaseClosure(CaseEncoding encoding, uint ch)
+    {
+        var codepoints = new HashSet<uint> { ch };
         CaseBuffer casesBuffer = default;
         Span<uint> cases = casesBuffer;
         var pending = new Stack<uint>();
-        pending.Push(first);
+        pending.Push(ch);
 
         while (pending.Count > 0)
         {
-            int count = Encodings.AllCases(node.Encoding, pending.Pop(), cases);
+            int count = Encodings.AllCases(encoding, pending.Pop(), cases);
             for (int c = 0; c < count; c++)
             {
                 if (codepoints.Add(cases[c]))
@@ -309,9 +324,226 @@ internal static class RequiredStringScreen
             }
         }
 
-        CaseEncoding encoding = node.Encoding;
-        codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
         return codepoints;
+    }
+
+    /// <summary>
+    /// Whether a search for a literal node's characters under
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> finds every run of text the node can match,
+    /// so that <c>PatternObject.FindLeadingStrings</c> may screen it with whole strings (C6 option B).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// .NET's rule is not this engine's: measured over the BMP, a case-insensitive <c>k</c> here also
+    /// matches U+212A KELVIN SIGN and <c>s</c> matches U+017F LONG S, which an ordinal ignore-case
+    /// search does not; and under full case folding a single character can take several, as
+    /// <c>ß</c> takes <c>ss</c> and <c>ﬁ</c> takes <c>fi</c>. A screen that misses a real match
+    /// changes the answer, so the rule is derived from the case tables rather than listed. A
+    /// case-sensitive node is always covered, since an exact match is an ignore-case one. For a
+    /// case-insensitive one, every character must be in the BMP and each member of its closure under
+    /// <see cref="Encodings.AllCases"/> equal to it under .NET's rule; that is what the matcher's
+    /// one-for-one comparison (<c>SameCharIgn</c>) can accept, and it rules out <c>k</c> and
+    /// <c>s</c> under the Unicode encoding but not under ASCII. A full-folding node must also hold
+    /// no run that the full folding of a case of a <see cref="Specials"/> character spells: outside
+    /// the specials a character folds to one character of its own closure (see
+    /// <see cref="FirstUnits"/>), so only a special can take a run of another length or outside
+    /// the closure, and the matcher takes a folding whole or not at all (its <c>STRING_FLD</c> arm
+    /// fails when the string ends inside one). That rules out <c>ss</c>, <c>st</c>, <c>fi</c>,
+    /// <c>ff</c>, <c>fl</c> and the like, and nothing else in ASCII.
+    /// </para>
+    /// <para>
+    /// A match the ordinal search makes and the engine would not, such as a case-sensitive literal's
+    /// other case, costs only an attempt that fails; only a missed one matters.
+    /// </para>
+    /// <para>
+    /// C6 option B3 (2026-10-16): a character whose closure holds BMP characters outside its .NET
+    /// class, as <c>k</c> holds the Kelvin sign, is not refused but adds them to
+    /// <paramref name="outliers"/>. A match the search misses then holds one of them, and every
+    /// such match is the same length as its literal (every closure member is one code unit), so
+    /// the search can hand over to the code units near each outlier in the text
+    /// (<c>Matcher.NextLeadingStringPastOutliers</c>).
+    /// </para>
+    /// </remarks>
+    /// <param name="node">
+    /// A forward <c>String</c>, <c>Character</c>, <c>StringIgn</c>, <c>StringFld</c> or
+    /// <c>CharacterIgn</c> node, not <c>LOCALE</c> if it ignores case.
+    /// </param>
+    /// <param name="perCharacter">
+    /// A cache of <see cref="OrdinalIgnoreCaseOutliers(CaseEncoding, uint)"/>, keyed by encoding and
+    /// character.
+    /// </param>
+    /// <param name="outliers">Gains the characters the search would miss in this node's matches.</param>
+    /// <returns>
+    /// <see langword="true"/> if the search finds every match of the node, or every one that holds
+    /// none of <paramref name="outliers"/>.
+    /// </returns>
+    internal static bool OrdinalIgnoreCaseCovers(
+        Node node,
+        Dictionary<(CaseEncoding, uint), char[]?> perCharacter,
+        HashSet<char> outliers
+    )
+    {
+        if (node.Op is Opcode.String or Opcode.Character)
+        {
+            return true;
+        }
+
+        Debug.Assert(
+            node.Op is Opcode.StringIgn or Opcode.StringFld or Opcode.CharacterIgn
+                && node.Encoding != CaseEncoding.Locale,
+            "C6 option B: a forward case-insensitive literal outside LOCALE"
+        );
+
+        foreach (uint ch in node.Values)
+        {
+            if (!perCharacter.TryGetValue((node.Encoding, ch), out char[]? missed))
+            {
+                missed = OrdinalIgnoreCaseOutliers(node.Encoding, ch);
+                perCharacter[(node.Encoding, ch)] = missed;
+            }
+
+            if (missed is null)
+            {
+                return false;
+            }
+
+            outliers.UnionWith(missed);
+        }
+
+        if (node.Op != Opcode.StringFld)
+        {
+            return true;
+        }
+
+        foreach ((uint subject, uint[] folding) in SpecialFoldings(node.Encoding))
+        {
+            for (int start = 0; start + folding.Length <= node.Values.Length; start++)
+            {
+                int length = 0;
+                while (
+                    length < folding.Length
+                    && Matcher.SameCharIgn(node.Encoding, node.Values[start + length], folding[length])
+                )
+                {
+                    ++length;
+                }
+
+                // A run of several characters is one subject character's, which an ordinal search
+                // cannot take; a run of one is covered when the subject character equals it.
+                if (length == folding.Length && (length != 1 || !OrdinalIgnoreCaseEquals(subject, node.Values[start])))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether every character a case-insensitive comparison here can take for <paramref name="ch"/>
+    /// one for one is <paramref name="ch"/> under <see cref="StringComparison.OrdinalIgnoreCase"/>.
+    /// See <see cref="OrdinalIgnoreCaseCovers(Node, Dictionary{ValueTuple{CaseEncoding, uint}, char[]}, HashSet{char})"/>.
+    /// </summary>
+    /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
+    /// <param name="ch">The pattern character.</param>
+    /// <returns><see langword="true"/> if it is.</returns>
+    internal static bool OrdinalIgnoreCaseCovers(CaseEncoding encoding, uint ch) =>
+        OrdinalIgnoreCaseOutliers(encoding, ch) is { Length: 0 };
+
+    /// <summary>
+    /// The characters a case-insensitive comparison here can take for <paramref name="ch"/> one for
+    /// one that <see cref="StringComparison.OrdinalIgnoreCase"/> does not count as equal to it (C6
+    /// option B3), or <see langword="null"/> when <paramref name="ch"/> or one of them is outside the
+    /// BMP or a surrogate.
+    /// </summary>
+    /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
+    /// <param name="ch">The pattern character.</param>
+    /// <returns>The outliers, empty when the search finds every case of the character.</returns>
+    internal static char[]? OrdinalIgnoreCaseOutliers(CaseEncoding encoding, uint ch)
+    {
+        if (ch > char.MaxValue || char.IsSurrogate((char)ch))
+        {
+            return null;
+        }
+
+        var missed = new List<char>();
+        foreach (uint other in CaseClosure(encoding, ch))
+        {
+            if (OrdinalIgnoreCaseEquals(other, ch))
+            {
+                continue;
+            }
+
+            if (other > char.MaxValue || char.IsSurrogate((char)other))
+            {
+                return null;
+            }
+
+            missed.Add((char)other);
+        }
+
+        return [.. missed];
+    }
+
+    /// <summary>
+    /// Whether two BMP characters are equal under <see cref="StringComparison.OrdinalIgnoreCase"/>.
+    /// </summary>
+    /// <param name="first">One codepoint.</param>
+    /// <param name="second">The other.</param>
+    /// <returns><see langword="false"/> when either is outside the BMP or a surrogate, or they differ.</returns>
+    private static bool OrdinalIgnoreCaseEquals(uint first, uint second)
+    {
+        if (
+            first > char.MaxValue
+            || second > char.MaxValue
+            || char.IsSurrogate((char)first)
+            || char.IsSurrogate((char)second)
+        )
+        {
+            return false;
+        }
+
+        char one = (char)first;
+        char two = (char)second;
+        return MemoryExtensions.Equals(
+            new ReadOnlySpan<char>(in one),
+            new ReadOnlySpan<char>(in two),
+            StringComparison.OrdinalIgnoreCase
+        );
+    }
+
+    /// <summary>
+    /// Every case of every <see cref="Specials"/> character with its full folding under
+    /// <paramref name="encoding"/>.
+    /// </summary>
+    /// <param name="encoding">The Unicode or ASCII encoding.</param>
+    /// <returns>Each case with its folding, in text order.</returns>
+    private static (uint Subject, uint[] Folding)[] SpecialFoldings(CaseEncoding encoding) =>
+        encoding == CaseEncoding.Ascii ? _asciiSpecialFoldings : _unicodeSpecialFoldings;
+
+    /// <summary>Computes <see cref="SpecialFoldings"/>.</summary>
+    /// <param name="encoding">The encoding.</param>
+    /// <returns>The foldings.</returns>
+    private static (uint Subject, uint[] Folding)[] ComputeSpecialFoldings(CaseEncoding encoding)
+    {
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+        var foldings = new List<(uint Subject, uint[] Folding)>();
+
+        foreach (uint special in Specials)
+        {
+            int count = Encodings.AllCases(encoding, special, cases);
+            for (int c = 0; c < count; c++)
+            {
+                int length = Encodings.FullCaseFold(encoding, cases[c], folded);
+                foldings.Add((cases[c], folded[..length].ToArray()));
+            }
+        }
+
+        return [.. foldings];
     }
 
     /// <summary>
@@ -429,6 +661,21 @@ internal static class RequiredStringScreen
         0xFB17,
         0x1DF95,
     ];
+
+    // Declared after Specials, which their initialisers read.
+
+    /// <summary>
+    /// Every case of every <see cref="Specials"/> character with its full folding under the
+    /// Unicode encoding.
+    /// </summary>
+    private static readonly (uint Subject, uint[] Folding)[] _unicodeSpecialFoldings = ComputeSpecialFoldings(
+        CaseEncoding.Unicode
+    );
+
+    /// <summary>As <see cref="_unicodeSpecialFoldings"/>, under the ASCII encoding.</summary>
+    private static readonly (uint Subject, uint[] Folding)[] _asciiSpecialFoldings = ComputeSpecialFoldings(
+        CaseEncoding.Ascii
+    );
 
     /// <summary>
     /// Whether the full folding of any case of <paramref name="ch"/> holds a character that is

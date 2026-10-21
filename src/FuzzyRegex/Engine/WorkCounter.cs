@@ -95,6 +95,13 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long SearchStartCalls { get; private set; }
 
+    /// <summary>
+    /// Times an ignore-case leading-string screen gave way to its code units on this thread because
+    /// it skipped too little (C6 option B; <c>Matcher.LeadingStringsSkipTooLittle</c>).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long LeadingStringFallbacks { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -164,6 +171,10 @@ internal static class WorkCounter
     /// <summary>Counts one call of the start-position prefilter.</summary>
     [Conditional("DEBUG")]
     internal static void SearchStartCalled() => SearchStartCalls++;
+
+    /// <summary>Counts one fall-back from ignore-case leading strings to their code units.</summary>
+    [Conditional("DEBUG")]
+    internal static void LeadingStringFellBack() => LeadingStringFallbacks++;
 
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]

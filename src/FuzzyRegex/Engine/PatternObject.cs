@@ -752,8 +752,9 @@ internal sealed class PatternObject
 
     /// <summary>
     /// The literals a search attempt can start with when the pattern opens with an alternation
-    /// whose every branch opens with one, or <see langword="null"/>. <b>This port's own field</b>
-    /// (S60b item 14); see <see cref="FindLeadingStrings"/>.
+    /// whose every branch opens with one, or <see langword="null"/>: ordinal when every literal is
+    /// case-sensitive, ordinal ignore-case when .NET's rule finds every match of each (C6 option B).
+    /// <b>This port's own field</b> (S60b item 14); see <see cref="FindLeadingStrings"/>.
     /// </summary>
     internal SearchValues<string>? LeadingStrings;
 
@@ -764,6 +765,30 @@ internal sealed class PatternObject
     /// see <see cref="FindLeadingStrings"/>.
     /// </summary>
     internal SearchValues<char>? LeadingUnits;
+
+    /// <summary>
+    /// When <see cref="LeadingStrings"/> ignores case (C6 option B), the code units those literals
+    /// start on, as <see cref="LeadingUnits"/> would hold them; otherwise <see langword="null"/>.
+    /// The search falls back to them when the string search skips too little
+    /// (<c>Matcher.LeadingStringsSkipTooLittle</c>). <b>This port's own field.</b>
+    /// </summary>
+    internal SearchValues<char>? LeadingFallbackUnits;
+
+    /// <summary>
+    /// When <see cref="LeadingStrings"/> ignores case and would miss a match holding one of these
+    /// characters, as <c>k</c> under the Unicode encoding misses U+212A KELVIN SIGN, those
+    /// characters (C6 option B3); otherwise <see langword="null"/>. Near one the search uses
+    /// <see cref="LeadingFallbackUnits"/> instead (<c>Matcher.NextLeadingStringPastOutliers</c>).
+    /// <b>This port's own field.</b>
+    /// </summary>
+    internal SearchValues<char>? LeadingOutliers;
+
+    /// <summary>
+    /// The longest of the <see cref="LeadingStrings"/> in code units, set with
+    /// <see cref="LeadingOutliers"/>: a match holding an outlier starts at most this many units less
+    /// one before it.
+    /// </summary>
+    internal int LeadingStringsMaxLength;
 
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
@@ -1489,7 +1514,13 @@ internal sealed class PatternObject
 
         self.LeadingRepeat = FindLeadingRepeat(self);
 
-        (self.LeadingStrings, self.LeadingUnits) = FindLeadingStrings(self);
+        (
+            self.LeadingStrings,
+            self.LeadingUnits,
+            self.LeadingFallbackUnits,
+            self.LeadingOutliers,
+            self.LeadingStringsMaxLength
+        ) = FindLeadingStrings(self);
 
         // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
         BranchChain.Build(self.NodeList);
@@ -1526,7 +1557,11 @@ internal sealed class PatternObject
     /// </para>
     /// <para>
     /// When every literal is case-sensitive the result is the literals themselves, since a search
-    /// for whole strings skips more than one for first characters. When one ignores case, which
+    /// for whole strings skips more than one for first characters. So it is, searched with
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/>, when some ignore case but .NET's rule finds
+    /// every match the engine's would (<see cref="RequiredStringScreen.OrdinalIgnoreCaseCovers(Node, Dictionary{ValueTuple{CaseEncoding, uint}, char[]}, HashSet{char})"/>)
+    /// and each has at least <see cref="_minIgnoreCaseLeadingLength"/> characters (C6 option B,
+    /// 2026-10-15). Otherwise, when one ignores case, which
     /// under full case folding can let <c>ﬅ</c> start <c>st</c> or <c>ß</c> start <c>ss</c>, the
     /// result is the first UTF-16 unit of every character that could start any of them, by the
     /// rule <see cref="RequiredStringScreen.FirstCodepoints"/> applies to a required string. An
@@ -1544,12 +1579,22 @@ internal sealed class PatternObject
     /// </para>
     /// </remarks>
     /// <param name="pattern">The compiled pattern.</param>
-    /// <returns>The literals or the code units, at most one of them set.</returns>
-    private static (SearchValues<string>? Strings, SearchValues<char>? Units) FindLeadingStrings(PatternObject pattern)
+    /// <returns>
+    /// The literals or the code units, at most one of them set; the code units again beside
+    /// ignore-case literals, for the fall-back; and the outliers with the longest literal's length
+    /// when that search would miss some matches (C6 option B3).
+    /// </returns>
+    private static (
+        SearchValues<string>? Strings,
+        SearchValues<char>? Units,
+        SearchValues<char>? FallbackUnits,
+        SearchValues<char>? Outliers,
+        int MaxLength
+    ) FindLeadingStrings(PatternObject pattern)
     {
         if (pattern.IsFuzzy || (pattern.Flags & RegexFlags.Reverse) != 0)
         {
-            return (null, null);
+            return (null, null, null, null, 0);
         }
 
         var heads = new List<Node>();
@@ -1557,7 +1602,7 @@ internal sealed class PatternObject
 
         if (!Collect(pattern.StartNode) || branches == 0)
         {
-            return (null, null);
+            return (null, null, null, null, 0);
         }
 
         if (heads.TrueForAll(static head => head.Op is Opcode.String or Opcode.Character))
@@ -1571,7 +1616,10 @@ internal sealed class PatternObject
                     ],
                     StringComparison.Ordinal
                 ),
-                null
+                null,
+                null,
+                null,
+                0
             );
         }
 
@@ -1584,7 +1632,37 @@ internal sealed class PatternObject
             }
         }
 
-        return (null, SearchValues.Create([.. units]));
+        // C6 option B: whole strings under .NET's ignore-case rule when that rule finds every match
+        // the engine's would, and every literal is long enough for a string search to beat the
+        // units below.
+        // C6 option B3: and when it would miss only matches holding an outlier, the search hands
+        // over to the units near each one.
+        var perCharacter = new Dictionary<(CaseEncoding, uint), char[]?>();
+        var outliers = new HashSet<char>();
+        if (
+            heads.TrueForAll(static head => head.Values.Length >= _minIgnoreCaseLeadingLength)
+            && heads.TrueForAll(head => RequiredStringScreen.OrdinalIgnoreCaseCovers(head, perCharacter, outliers))
+        )
+        {
+            return (
+                SearchValues.Create(
+                    [
+                        .. heads.Select(static head =>
+                            string.Concat(head.Values.Select(static c => char.ConvertFromUtf32((int)c)))
+                        ),
+                    ],
+                    StringComparison.OrdinalIgnoreCase
+                ),
+                null,
+                SearchValues.Create([.. units]),
+                outliers.Count == 0 ? null : SearchValues.Create([.. outliers]),
+                outliers.Count == 0
+                    ? 0
+                    : heads.Max(static head => head.Values.Sum(static c => c > char.MaxValue ? 2 : 1))
+            );
+        }
+
+        return (null, SearchValues.Create([.. units]), null, null, 0);
 
         bool Collect(Node? node)
         {
@@ -1678,6 +1756,12 @@ internal sealed class PatternObject
 
     /// <summary>The most branches <see cref="FindLeadingStrings"/> walks before giving up.</summary>
     private const int _maxLeadingBranches = 1000;
+
+    /// <summary>
+    /// The shortest case-insensitive literal <see cref="FindLeadingStrings"/> searches for as a
+    /// whole string rather than by its first code units (C6 option B).
+    /// </summary>
+    private const int _minIgnoreCaseLeadingLength = 2;
 
     /// <summary>
     /// Finds <see cref="LeadingRepeat"/>. Upstream takes the start node when it is a
