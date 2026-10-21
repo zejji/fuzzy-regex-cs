@@ -46,4 +46,17 @@ public sealed class OpenDefectTests
         Match m = regex.Match(subject, partial: true);
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 10, 0));
     }
+
+    // D124. The negative lookahead's body `(?:x){d<=1}` matches the empty string by deleting its
+    // 'x', whatever text follows, so the lookahead fails at every position and no text completes a
+    // start inside the subject. The port answers the run-out at the second 'x' as a partial, as
+    // upstream 2026.9.29 does; without the fuzzy section, `(x)(?!x?)`, whose body also matches
+    // empty, the port answers the edge partial (2, 2), and that is the answer expected here.
+    [Test]
+    public void A_fuzzy_negative_body_that_matches_empty_by_deletion_decides_at_the_end_of_the_text()
+    {
+        Match m = new FuzzyRegex("(x)(?!(?:x){d<=1})").Match("xx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
+    }
 }
