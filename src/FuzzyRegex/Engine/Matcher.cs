@@ -14556,6 +14556,14 @@ internal static class Matcher
         // Split: a moved hot arm returns the node as it left it, on every exit, and puts what to
         // do next in armStatus (_armContinue, or a code armExit handles). Returning the node
         // rather than writing it through 'ref' keeps a write barrier off each repeat iteration.
+        // sync-divergence: upstream's basic_match holds every opcode's code in one function
+        // (_regex.c:11714-17403) / the repeat arms (GREEDY_REPEAT, LAZY_REPEAT, *_REPEAT_ONE,
+        // END_*_REPEAT and their backtracking arms MATCH_BODY, MATCH_TAIL, TAIL_START, BODY_START,
+        // BODY_END), STRING_FLD and the FAILURE backtrack arm run in NoInlining Advance*/Backtrack*
+        // helpers, each arm's code unchanged / the method's locals and inlinees no longer fit the
+        // JIT's budget, and the helpers took its prolog zeroing from 1,488 to 720 bytes (D82).
+        // Re-aligning: when upstream changes one of those arms, apply the change inside its helper,
+        // keeping its exit map (every goto and return becomes 'armStatus = <code>; return node;').
         int armStatus;
         int status;
 
