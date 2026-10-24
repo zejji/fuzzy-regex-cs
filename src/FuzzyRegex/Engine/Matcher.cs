@@ -16368,7 +16368,7 @@ internal static class Matcher
         runOut:
         armNode = node;
         armStringPos = stringPos;
-        status = RunOut(state, ref armNode, ref armStringPos);
+        status = RunOut(state, ref armNode, ref armStringPos, gfoldedPos, foldChangesStart);
         node = armNode;
         stringPos = armStringPos;
         goto armExit;
@@ -17863,6 +17863,13 @@ internal static class Matcher
             {
                 if (state.TextPos >= state.TextEnd && state.RunsOutRight)
                 {
+                    // D124: the group character at stringPos is not folded yet when the last one was
+                    // used up, which KeepTheDeletionOfAnItemThatRanOut reads as 0.
+                    if (gfoldedPos >= gfoldedLen)
+                    {
+                        gfoldedPos = 0;
+                    }
+
                     return _armRunOut;
                 }
 
@@ -19485,6 +19492,12 @@ internal static class Matcher
                 foldedLen = 0;
                 foldChangesStart = state.FuzzyChanges.Count;
             }
+            else if (RanOutOnTheLeft(state, state.TextPos))
+            {
+                // NOT UPSTREAM'S, D124: the mirror of STRING_FLD's kept deletion at the edge.
+                Debug.Assert(foldedPos == 0, "D124: the kept deletion folded nothing");
+                foldedLen = 0;
+            }
             else
             {
                 // Only Phase 5's fuzzy retry reaches this arm.
@@ -20756,9 +20769,11 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="node">The current node; the next one on return.</param>
     /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="gfoldedPos">The position within the group character's folding ('gfolded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int RunOut(MatchState state, ref Node node, ref int stringPos)
+    private static int RunOut(MatchState state, ref Node node, ref int stringPos, int gfoldedPos, int foldChangesStart)
     {
         PatternObject pattern = state.Pattern;
 
@@ -20767,6 +20782,11 @@ internal static class Matcher
             state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
             stringPos = -1;
             return _armBacktrack;
+        }
+
+        if ((node.Status & NodeStatus.Fuzzy) != 0)
+        {
+            KeepTheDeletionOfAnItemThatRanOut(state, node, stringPos, gfoldedPos, foldChangesStart);
         }
 
         if (RunOutCanWaitForTheBody(state))
@@ -20794,6 +20814,202 @@ internal static class Matcher
         stringPos = -1;
         node = runOutEnd;
         return _armAdvance;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124, the run-out rule (<see cref="KeepTheAlternativeThatDidNotRunOut"/>) for
+    /// a fuzzy item: a consuming item ran out of text at the edge, and deleting it is an error that
+    /// needs no text, so that choice is kept on the backtracking stack before the run-out is taken,
+    /// when the run-out goes on in a body whose outcome feeds a decision
+    /// (<see cref="RunOutFeedsADecision"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The item ran out before its fuzzy choices were tried, as upstream's does (a run-out returns
+    /// the partial at once), so the deletion that the first pass takes at the end of the text was
+    /// never offered. A substitution or an insertion needs a character of the text to come, so the
+    /// run-out already stands for them. Without the deletion a negative lookaround whose body
+    /// matches the empty string by deleting its items passed undecided where the held text decides
+    /// it: `(x)(?!(?:x){d&lt;=1})` over 'xx' answered P(1, 2), where the body matches whatever
+    /// follows, the lookahead fails for every continuation, and `(x)(?!x?)` answers P(2, 2).
+    /// </para>
+    /// <para>
+    /// The frame is the one an exact match of the item pushes (<see cref="PushExactItemFrame"/>,
+    /// <see cref="PushExactStringFrame"/>, <see cref="PushExactStringFldFrame"/>,
+    /// <see cref="PushExactGroupFldFrame"/>), whose retry tries the deletion alone; a deletion reads
+    /// no text. The retry of a string or group reference re-enters its arm, which tests the edge
+    /// before it reads the next character; a full-case-folded string's arm refolds the character at
+    /// the text position on re-entry, so at the edge it takes an empty folding
+    /// (<see cref="AdvanceStringFld"/>, <see cref="AdvanceStringFldRev"/>), as a full-case-folded
+    /// group reference's already does (D24). Outside such a body the run-out answers the partial,
+    /// or the kept choice would only repeat what the first pass found, so nothing is pushed.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The fuzzy item that ran out.</param>
+    /// <param name="stringPos">How far into a string or group reference the item had got.</param>
+    /// <param name="gfoldedPos">How far into the group character's folding a full-case-folded group
+    /// reference had got (<see cref="AdvanceRefGroupFld"/> leaves 0 for a character not yet folded).</param>
+    /// <param name="foldChangesStart">The change count when a full-case-folded item began.</param>
+    private static void KeepTheDeletionOfAnItemThatRanOut(
+        MatchState state,
+        Node node,
+        int stringPos,
+        int gfoldedPos,
+        int foldChangesStart
+    )
+    {
+        const int item = 0,
+            text = 1,
+            folded = 2,
+            groupFolded = 3;
+        sbyte step;
+        int kind;
+        switch (node.Op)
+        {
+            case Opcode.String or Opcode.StringIgn or Opcode.RefGroup or Opcode.RefGroupIgn:
+                (step, kind) = (1, text);
+                break;
+            case Opcode.StringRev or Opcode.StringIgnRev or Opcode.RefGroupRev or Opcode.RefGroupIgnRev:
+                (step, kind) = (-1, text);
+                break;
+            case Opcode.StringFld:
+                (step, kind) = (1, folded);
+                break;
+            case Opcode.StringFldRev:
+                (step, kind) = (-1, folded);
+                break;
+            case Opcode.RefGroupFld:
+                (step, kind) = (1, groupFolded);
+                break;
+            case Opcode.RefGroupFldRev:
+                (step, kind) = (-1, groupFolded);
+                break;
+            case Opcode.AnyRev
+            or Opcode.AnyAllRev
+            or Opcode.AnyURev
+            or Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.PropertyRev
+            or Opcode.PropertyIgnRev
+            or Opcode.RangeRev
+            or Opcode.RangeIgnRev
+            or Opcode.SetDiffRev
+            or Opcode.SetDiffIgnRev
+            or Opcode.SetInterRev
+            or Opcode.SetInterIgnRev
+            or Opcode.SetSymDiffRev
+            or Opcode.SetSymDiffIgnRev
+            or Opcode.SetUnionRev
+            or Opcode.SetUnionIgnRev:
+                (step, kind) = (-1, item);
+                break;
+            default:
+                if (!NodeQueries.MatchesOneCharacter(node))
+                {
+                    // A zero-width item's run-out is its insertion's, and a deletion of it moves
+                    // nothing (NextFuzzyMatchItem).
+                    return;
+                }
+
+                (step, kind) = (1, item);
+                break;
+        }
+
+        // A reference to a capture that a run-out left unknown "runs out" wherever it stands
+        // (AdvanceRefGroup, chunk 8): it presumes the rest of the text, and keeps no deletion.
+        bool isReference =
+            node.Op
+            is Opcode.RefGroup
+                or Opcode.RefGroupIgn
+                or Opcode.RefGroupRev
+                or Opcode.RefGroupIgnRev
+                or Opcode.RefGroupFld
+                or Opcode.RefGroupFldRev;
+        if (isReference && state.HasUnknownCaptures && IsUnknown(state.Groups[(int)node.Values[0] - 1]))
+        {
+            return;
+        }
+
+        if (!ThisErrorPermitted(state, FuzzyValue.Del) || !RunOutFeedsADecision(state))
+        {
+            return;
+        }
+
+        Debug.Assert(
+            step > 0 ? state.TextPos >= state.TextEnd : state.TextPos <= state.SliceStart,
+            "D124: a consuming item runs out only at the edge, where no substitution or insertion fits"
+        );
+        Debug.Assert(kind == item || stringPos >= 0, "D124: a string runs out part way through itself");
+
+        switch (kind)
+        {
+            case text:
+                PushExactStringFrame(state, node, stringPos, step, _exactFuzzyType);
+                break;
+            case folded:
+                // Nothing of the subject is folded at the edge.
+                PushExactStringFldFrame(state, node, stringPos, 0, 0, step, foldChangesStart, _exactFuzzyType);
+                break;
+            case groupFolded:
+            {
+                // The group character the arm stands on, folded as its re-entry folds it.
+                FoldBuffer buffer = default;
+                int gfoldedLen = Encodings.FullCaseFold(
+                    node.Encoding,
+                    step > 0 ? state.CharAt(stringPos) : state.CharBefore(stringPos),
+                    buffer
+                );
+                if (step < 0 && gfoldedPos <= 0)
+                {
+                    gfoldedPos = gfoldedLen;
+                }
+
+                Debug.Assert(
+                    step > 0 ? gfoldedPos < gfoldedLen : gfoldedPos > 0,
+                    "D124: the group reference stands inside a group character's folding"
+                );
+                PushExactGroupFldFrame(
+                    state,
+                    node,
+                    0,
+                    0,
+                    stringPos,
+                    gfoldedPos,
+                    gfoldedLen,
+                    step,
+                    foldChangesStart,
+                    _exactFuzzyType
+                );
+
+                // D24's whole deletion of an expanding group character, above the folded one as an
+                // exact comparison leaves it: a captured ß is one deletion, not two. Its other kinds
+                // need a subject character, and the subject's folding is empty at the edge, so
+                // `search`, which only an insertion reads, does not matter.
+                if (gfoldedLen > 1 && gfoldedPos == (step > 0 ? 0 : gfoldedLen))
+                {
+                    OfferWholeFoldedGroupCharEdit(
+                        state,
+                        node,
+                        step,
+                        0,
+                        0,
+                        stringPos,
+                        gfoldedPos,
+                        gfoldedLen,
+                        foldChangesStart,
+                        search: false
+                    );
+                }
+
+                break;
+            }
+            default:
+                PushExactItemFrame(state, node, step, _exactFuzzyType);
+                break;
+        }
+
+        state.NotePartialEvent(PartialEvent.RunOutKeptDeletion);
     }
 
     /// <summary>
@@ -23064,6 +23280,15 @@ internal static class Matcher
                 foldedPos = 0;
                 foldedLen = 0;
                 foldChangesStart = state.FuzzyChanges.Count;
+            }
+            else if (state.TextPos >= state.TextEnd && state.RunsOutRight)
+            {
+                // NOT UPSTREAM'S, D124: the deletion a run-out kept at the edge
+                // (KeepTheDeletionOfAnItemThatRanOut). No character is left to fold, so the next
+                // comparison runs out again or the string ends. No other retry re-enters here: at
+                // the edge of a partial call the arm runs out before it tries an error.
+                Debug.Assert(foldedPos == 0, "D124: the kept deletion folded nothing");
+                foldedLen = 0;
             }
             else
             {

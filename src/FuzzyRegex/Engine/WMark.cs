@@ -231,4 +231,10 @@ internal enum PartialEvent
     /// undid the call and was taken at the call (<c>Matcher.AbandonTheCallsTheBodyOpened</c>).
     /// </summary>
     RunOutCallAbandoned,
+
+    /// <summary>
+    /// D124: a fuzzy item that ran out kept its deletion, in a body whose outcome feeds a decision
+    /// (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>).
+    /// </summary>
+    RunOutKeptDeletion,
 }
