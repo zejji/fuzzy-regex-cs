@@ -14555,6 +14555,12 @@ internal static class Matcher
         int armFoldedPos;
         int armGFoldedPos;
         int armFoldChangesStart;
+
+        // Split: what a moved hot arm hands back. A non-null node means go on there; null means
+        // leave by armStatus. Returning the node keeps a heap write barrier off every repeat
+        // iteration, which a write through 'ref Node' would cost.
+        Node? armNext;
+        int armStatus;
         int status;
 
         start_match:
@@ -15459,462 +15465,25 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndGreedyRepeat: // End of a greedy repeat.
-                {
-                    // Repeat indexes are 0-based.
-                    int index = (int)node.Values[0];
-                    RepeatData rpData = state.Repeats[index];
-
-                    // The body has matched successfully at this position. NOT UPSTREAM: not
-                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
-                    if (!state.KeepsFailureMemo(index))
+                    armNext = AdvanceEndGreedyRepeat(state, node, out armStatus);
+                    if (armNext is null)
                     {
-                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                        status = armStatus;
+                        goto armExit;
                     }
 
-                    ++rpData.Count;
-
-                    // Have we advanced through the text or has a capture group change?
-                    bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
-
-                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
-                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
-                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
-                    // since undone, so how many empty deleting iterations a loop takes depends on the
-                    // path, and where a section inside the body restarts its budget it loops until
-                    // MemoryError. Here an empty iteration is progress only when it spent edits that
-                    // something needs, or changed a tested group; then the repeat memo drops any
-                    // iteration whose state this run of the repeat has already reached.
-                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
-                    {
-                        int stands = FuzzyIterationStands(state, rpData, node, changed);
-                        if (stands < 0)
-                        {
-                            --rpData.Count;
-                            goto backtrack;
-                        }
-
-                        changed = stands > 0;
-                    }
-                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
-                    {
-                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
-                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
-                        changed = !(
-                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
-                        );
-                    }
-
-                    // NOT UPSTREAM (D17): a changed group is no progress if it only brought the run
-                    // back to a state it had already reached. After the fuzzy rules, which decide
-                    // whether an empty iteration stands at all; see RevisitsEmptyIterationState.
-                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
-                    {
-                        changed = false;
-                    }
-
-                    // Could the body or tail match?
-                    // NOT UPSTREAM (D94 performance): a state already known to fail.
-                    if (StateKnownToFail(state, node))
-                    {
-                        --rpData.Count;
-                        goto backtrack;
-                    }
-
-                    bool tryBody =
-                        changed
-                        && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
-                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
-                    int bodyStatus;
-                    nextBodyPosition = default;
-
-                    if (tryBody)
-                    {
-                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus < 0)
-                        {
-                            // Upstream turns the body's run-out into a failure once the minimum is
-                            // reached at the end of the text, so that the tail's complete match wins
-                            // (:12575). Only a partial call's second pass gets a PARTIAL here (from
-                            // TryMatch's test node), and there every complete match is the first
-                            // pass's, already refused: a tail success reads the text to come, and
-                            // under fullmatch it backtracks. NOT UPSTREAM'S, D11: so the run-out
-                            // stays a run-out, through the run-out rule below, with the tail kept
-                            // (KeepTheAlternativeThatDidNotRunOut); `(?:.\b)+` fullmatch over 'a '
-                            // found no partial where 'a b' matches (D11 fix round 3's grid). The
-                            // oracle's pre-D11 ablation keeps upstream's failure.
-                            if (bodyStatus == MatchStatus.Partial && !pattern.SecondPassAsBeforeD11)
-                            {
-                                // Design assert A15: only a partial call's second pass gets here.
-                                Debug.Assert(
-                                    state.PartialSide != MatchState.PartialNone || state.InsideW,
-                                    "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
-                                );
-                                state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
-                                state.NoteRunOutCause(PartialEvent.GreedyBodyRunOutKept);
-                            }
-                            else if (
-                                bodyStatus == MatchStatus.Partial
-                                && rpData.Count >= node.Values[1]
-                                && AtEnd(state)
-                            )
-                            {
-                                bodyStatus = MatchStatus.Failure;
-                            }
-                            else
-                            {
-                                return bodyStatus;
-                            }
-                        }
-
-                        if (bodyStatus == MatchStatus.Failure)
-                        {
-                            tryBody = false;
-                        }
-                    }
-                    else
-                    {
-                        bodyStatus = MatchStatus.Failure;
-                    }
-
-                    bool tryTail =
-                        (!changed || rpData.Count >= node.Values[1])
-                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
-                    int tailStatus;
-                    nextTailPosition = default;
-
-                    if (tryTail)
-                    {
-                        tailStatus = TailMayMatch(
-                            state,
-                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
-                        );
-
-                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
-                        if (tailStatus is < 0 and not MatchStatus.Partial)
-                        {
-                            return tailStatus;
-                        }
-
-                        if (tailStatus == MatchStatus.Failure)
-                        {
-                            tryTail = false;
-                        }
-                    }
-                    else
-                    {
-                        tailStatus = MatchStatus.Failure;
-                    }
-
-                    if (!tryBody && !tryTail)
-                    {
-                        // Neither the body nor the tail could match.
-                        --rpData.Count;
-                        goto backtrack;
-                    }
-
-                    // Record info in case we backtrack into the body.
-                    PushBodyEndStateData(
-                        state.Bstack,
-                        rpData.Count - 1,
-                        rpData.Start,
-                        rpData.CaptureChange,
-                        index,
-                        rpData.ChangesAtStart,
-                        state.IsFuzzy
-                    );
-                    state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
-
-                    /* bstack: count start capture_change index BODY_END */
-
-                    // NOT UPSTREAM'S, D11, the run-out rule: upstream returns the partial here,
-                    // dropping the other alternative. BODY_END goes first, as for an entered
-                    // alternative, so backtracking from the run-out puts the count back (inside a
-                    // body it re-enters this case through the body: `(?!(?:.\b|.){1,3}b)` over 'ab').
-                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
-                    {
-                        KeepTheAlternativeThatDidNotRunOut(
-                            state,
-                            bodyStatus,
-                            tailStatus,
-                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                            rpData.Count,
-                            state.TextPos,
-                            state.CaptureChange,
-                            index,
-                            state.TextPos,
-                            bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
-                        );
-                        goto runOut;
-                    }
-
-                    if (tryBody)
-                    {
-                        if (tryTail)
-                        {
-                            // Both the body and the tail could match, but the body takes precedence.
-                            // If the body fails to match then we want to try the tail before
-                            // backtracking further.
-                            PushMatchBodyTailStateData(
-                                state.Bstack,
-                                nextTailPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                state.FuzzyChanges.Count,
-                                state.IsFuzzy
-                            );
-                            state.Bstack.PushUInt8((byte)Opcode.MatchTail);
-
-                            /* bstack: position count start capture_change index text_pos MATCH_TAIL */
-                        }
-
-                        // Record backtracking info in case the body fails to match.
-                        state.NoteGuardWritingEntry();
-                        state.Bstack.PushCode((uint)index);
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
-
-                        /* bstack: index text_pos BODY_START */
-
-                        rpData.CaptureChange = state.CaptureChange;
-
-                        rpData.ChangesAtStart = IterationStart(state);
-                        rpData.Start = state.TextPos;
-
-                        // Advance into the body.
-                        node = nextBodyPosition.Node;
-                        state.TextPos = nextBodyPosition.TextPos;
-                    }
-                    else
-                    {
-                        // Only the tail could match.
-
-                        // Record backtracking info in case the tail fails to match.
-                        state.NoteGuardWritingEntry();
-                        state.Bstack.PushCode((uint)index);
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
-
-                        /* bstack: index text_pos TAIL_START */
-
-                        // Advance into the tail.
-                        node = nextTailPosition.Node;
-                        state.TextPos = nextTailPosition.TextPos;
-                    }
-
+                    node = armNext;
                     break;
-                }
                 case Opcode.EndLazyRepeat: // End of a lazy repeat.
-                {
-                    // Repeat indexes are 0-based.
-                    int index = (int)node.Values[0];
-                    RepeatData rpData = state.Repeats[index];
-
-                    // The body has matched successfully at this position. NOT UPSTREAM: not
-                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
-                    if (!state.KeepsFailureMemo(index))
+                    armNext = AdvanceEndLazyRepeat(state, node, out armStatus);
+                    if (armNext is null)
                     {
-                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                        status = armStatus;
+                        goto armExit;
                     }
 
-                    ++rpData.Count;
-
-                    // Have we advanced through the text or has a capture group change?
-                    bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
-
-                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
-                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
-                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
-                    // since undone, so how many empty deleting iterations a loop takes depends on the
-                    // path, and where a section inside the body restarts its budget it loops until
-                    // MemoryError. Here an empty iteration is progress only when it spent edits that
-                    // something needs, or changed a tested group; then the repeat memo drops any
-                    // iteration whose state this run of the repeat has already reached.
-                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
-                    {
-                        int stands = FuzzyIterationStands(state, rpData, node, changed);
-                        if (stands < 0)
-                        {
-                            --rpData.Count;
-                            goto backtrack;
-                        }
-
-                        changed = stands > 0;
-                    }
-                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
-                    {
-                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
-                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
-                        changed = !(
-                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
-                        );
-                    }
-
-                    // NOT UPSTREAM (D17), as in END_GREEDY_REPEAT above.
-                    if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
-                    {
-                        changed = false;
-                    }
-
-                    // Could the body or tail match?
-                    bool tryBody =
-                        changed
-                        && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
-                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
-                    int bodyStatus;
-                    nextBodyPosition = default;
-
-                    if (tryBody)
-                    {
-                        // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
-                        // minimum has been reached and the text has run out (:12575); this case does
-                        // not, and the asymmetry is upstream's own. NOT UPSTREAM'S, D11: a run-out is
-                        // handled below, with the tail kept.
-                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
-                        if (bodyStatus is < 0 and not MatchStatus.Partial)
-                        {
-                            return bodyStatus;
-                        }
-
-                        if (bodyStatus == MatchStatus.Failure)
-                        {
-                            tryBody = false;
-                        }
-                    }
-                    else
-                    {
-                        bodyStatus = MatchStatus.Failure;
-                    }
-
-                    bool tryTail =
-                        (!changed || rpData.Count >= node.Values[1])
-                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
-                    int tailStatus;
-                    nextTailPosition = default;
-
-                    if (tryTail)
-                    {
-                        tailStatus = TailMayMatch(
-                            state,
-                            TryMatch(state, node.Next2, state.TextPos, out nextTailPosition)
-                        );
-
-                        // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
-                        if (tailStatus is < 0 and not MatchStatus.Partial)
-                        {
-                            return tailStatus;
-                        }
-
-                        if (tailStatus == MatchStatus.Failure)
-                        {
-                            tryTail = false;
-                        }
-                    }
-                    else
-                    {
-                        tailStatus = MatchStatus.Failure;
-                    }
-
-                    if (!tryBody && !tryTail)
-                    {
-                        // Neither the body nor the tail could match.
-                        --rpData.Count;
-                        goto backtrack;
-                    }
-
-                    // Record info in case we backtrack into the body.
-                    PushBodyEndStateData(
-                        state.Bstack,
-                        rpData.Count - 1,
-                        rpData.Start,
-                        rpData.CaptureChange,
-                        index,
-                        rpData.ChangesAtStart,
-                        state.IsFuzzy
-                    );
-                    state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
-
-                    /* bstack: count start capture_change index BODY_END */
-
-                    // NOT UPSTREAM'S, D11, the run-out rule, as in END_GREEDY_REPEAT above.
-                    if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
-                    {
-                        KeepTheAlternativeThatDidNotRunOut(
-                            state,
-                            bodyStatus,
-                            tailStatus,
-                            bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
-                            rpData.Count,
-                            state.TextPos,
-                            state.CaptureChange,
-                            index,
-                            state.TextPos,
-                            state.FuzzyChanges.Count
-                        );
-                        goto runOut;
-                    }
-
-                    if (tryTail)
-                    {
-                        if (tryBody)
-                        {
-                            // Both the body and the tail could match, but the tail takes precedence.
-                            // If the tail fails to match then we want to try the body before
-                            // backtracking further.
-                            PushMatchBodyTailStateData(
-                                state.Bstack,
-                                nextBodyPosition,
-                                rpData.Count,
-                                state.TextPos,
-                                state.CaptureChange,
-                                index,
-                                state.TextPos,
-                                state.FuzzyChanges.Count,
-                                state.IsFuzzy
-                            );
-                            state.Bstack.PushUInt8((byte)Opcode.MatchBody);
-
-                            /* bstack: position count start capture_change index text_pos MATCH_BODY */
-                        }
-
-                        // Record backtracking info in case the tail fails to match.
-                        state.NoteGuardWritingEntry();
-                        state.Bstack.PushCode((uint)index);
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
-
-                        /* bstack: index text_pos TAIL_START */
-
-                        // Advance into the tail.
-                        node = nextTailPosition.Node;
-                        state.TextPos = nextTailPosition.TextPos;
-                    }
-                    else
-                    {
-                        // Only the body could match.
-
-                        // Record backtracking info in case the body fails to match.
-                        state.NoteGuardWritingEntry();
-                        state.Bstack.PushCode((uint)index);
-                        state.Bstack.PushSize(state.TextPos);
-                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
-
-                        /* bstack: index text_pos BODY_START */
-
-                        rpData.CaptureChange = state.CaptureChange;
-
-                        rpData.ChangesAtStart = IterationStart(state);
-                        rpData.Start = state.TextPos;
-
-                        // Advance into the body.
-                        node = nextBodyPosition.Node;
-                        state.TextPos = nextBodyPosition.TextPos;
-                    }
-
+                    node = armNext;
                     break;
-                }
                 case Opcode.EndLookaround: // End of a lookaround subpattern (:12918).
                     armNode = node;
                     status = AdvanceEndLookaround(state, ref armNode, search);
@@ -22867,6 +22436,490 @@ internal static class Matcher
         }
 
         return _armContinue;
+    }
+
+    /// <summary>
+    /// The EndGreedyRepeat arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlinees are not part of that method's frame (the BasicMatchCore split).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node.</param>
+    /// <param name="armStatus">When the result is null: an <c>Arm</c> code, or the status the match returns.</param>
+    /// <returns>The node to go on at, or null to leave by <paramref name="armStatus"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node? AdvanceEndGreedyRepeat(MatchState state, Node node, out int armStatus)
+    {
+        PatternObject pattern = state.Pattern;
+        Position nextBodyPosition;
+        Position nextTailPosition;
+
+        // Repeat indexes are 0-based.
+        int index = (int)node.Values[0];
+        RepeatData rpData = state.Repeats[index];
+
+        // The body has matched successfully at this position. NOT UPSTREAM: not
+        // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+        if (!state.KeepsFailureMemo(index))
+        {
+            state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+        }
+
+        ++rpData.Count;
+
+        // Have we advanced through the text or has a capture group change?
+        bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
+
+        // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+        // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+        // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+        // since undone, so how many empty deleting iterations a loop takes depends on the
+        // path, and where a section inside the body restarts its budget it loops until
+        // MemoryError. Here an empty iteration is progress only when it spent edits that
+        // something needs, or changed a tested group; then the repeat memo drops any
+        // iteration whose state this run of the repeat has already reached.
+        if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
+        {
+            int stands = FuzzyIterationStands(state, rpData, node, changed);
+            if (stands < 0)
+            {
+                --rpData.Count;
+                armStatus = _armBacktrack;
+                return null;
+            }
+
+            changed = stands > 0;
+        }
+        else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+        {
+            // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+            // rule (:12555-12557), which stops a repeat only at the end of the slice.
+            changed = !(node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart);
+        }
+
+        // NOT UPSTREAM (D17): a changed group is no progress if it only brought the run
+        // back to a state it had already reached. After the fuzzy rules, which decide
+        // whether an empty iteration stands at all; see RevisitsEmptyIterationState.
+        if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+        {
+            changed = false;
+        }
+
+        // Could the body or tail match?
+        // NOT UPSTREAM (D94 performance): a state already known to fail.
+        if (StateKnownToFail(state, node))
+        {
+            --rpData.Count;
+            armStatus = _armBacktrack;
+            return null;
+        }
+
+        bool tryBody =
+            changed
+            && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
+            && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+        int bodyStatus;
+        nextBodyPosition = default;
+
+        if (tryBody)
+        {
+            bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
+            if (bodyStatus < 0)
+            {
+                // Upstream turns the body's run-out into a failure once the minimum is
+                // reached at the end of the text, so that the tail's complete match wins
+                // (:12575). Only a partial call's second pass gets a PARTIAL here (from
+                // TryMatch's test node), and there every complete match is the first
+                // pass's, already refused: a tail success reads the text to come, and
+                // under fullmatch it backtracks. NOT UPSTREAM'S, D11: so the run-out
+                // stays a run-out, through the run-out rule below, with the tail kept
+                // (KeepTheAlternativeThatDidNotRunOut); `(?:.\b)+` fullmatch over 'a '
+                // found no partial where 'a b' matches (D11 fix round 3's grid). The
+                // oracle's pre-D11 ablation keeps upstream's failure.
+                if (bodyStatus == MatchStatus.Partial && !pattern.SecondPassAsBeforeD11)
+                {
+                    // Design assert A15: only a partial call's second pass gets here.
+                    Debug.Assert(
+                        state.PartialSide != MatchState.PartialNone || state.InsideW,
+                        "D11 A15: a repeat body's run-out comes only from a partial call's second pass"
+                    );
+                    state.NotePartialEvent(PartialEvent.GreedyBodyRunOutKept);
+                    state.NoteRunOutCause(PartialEvent.GreedyBodyRunOutKept);
+                }
+                else if (bodyStatus == MatchStatus.Partial && rpData.Count >= node.Values[1] && AtEnd(state))
+                {
+                    bodyStatus = MatchStatus.Failure;
+                }
+                else
+                {
+                    armStatus = bodyStatus;
+                    return null;
+                }
+            }
+
+            if (bodyStatus == MatchStatus.Failure)
+            {
+                tryBody = false;
+            }
+        }
+        else
+        {
+            bodyStatus = MatchStatus.Failure;
+        }
+
+        bool tryTail =
+            (!changed || rpData.Count >= node.Values[1])
+            && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
+        int tailStatus;
+        nextTailPosition = default;
+
+        if (tryTail)
+        {
+            tailStatus = TailMayMatch(state, TryMatch(state, node.Next2, state.TextPos, out nextTailPosition));
+
+            // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+            if (tailStatus is < 0 and not MatchStatus.Partial)
+            {
+                armStatus = tailStatus;
+                return null;
+            }
+
+            if (tailStatus == MatchStatus.Failure)
+            {
+                tryTail = false;
+            }
+        }
+        else
+        {
+            tailStatus = MatchStatus.Failure;
+        }
+
+        if (!tryBody && !tryTail)
+        {
+            // Neither the body nor the tail could match.
+            --rpData.Count;
+            armStatus = _armBacktrack;
+            return null;
+        }
+
+        // Record info in case we backtrack into the body.
+        PushBodyEndStateData(
+            state.Bstack,
+            rpData.Count - 1,
+            rpData.Start,
+            rpData.CaptureChange,
+            index,
+            rpData.ChangesAtStart,
+            state.IsFuzzy
+        );
+        state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
+
+        /* bstack: count start capture_change index BODY_END */
+
+        // NOT UPSTREAM'S, D11, the run-out rule: upstream returns the partial here,
+        // dropping the other alternative. BODY_END goes first, as for an entered
+        // alternative, so backtracking from the run-out puts the count back (inside a
+        // body it re-enters this case through the body: `(?!(?:.\b|.){1,3}b)` over 'ab').
+        if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+        {
+            KeepTheAlternativeThatDidNotRunOut(
+                state,
+                bodyStatus,
+                tailStatus,
+                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                rpData.Count,
+                state.TextPos,
+                state.CaptureChange,
+                index,
+                state.TextPos,
+                bodyStatus == MatchStatus.Success ? IterationStart(state) : state.FuzzyChanges.Count
+            );
+            armStatus = _armRunOut;
+            return null;
+        }
+
+        if (tryBody)
+        {
+            if (tryTail)
+            {
+                // Both the body and the tail could match, but the body takes precedence.
+                // If the body fails to match then we want to try the tail before
+                // backtracking further.
+                PushMatchBodyTailStateData(
+                    state.Bstack,
+                    nextTailPosition,
+                    rpData.Count,
+                    state.TextPos,
+                    state.CaptureChange,
+                    index,
+                    state.TextPos,
+                    state.FuzzyChanges.Count,
+                    state.IsFuzzy
+                );
+                state.Bstack.PushUInt8((byte)Opcode.MatchTail);
+
+                /* bstack: position count start capture_change index text_pos MATCH_TAIL */
+            }
+
+            // Record backtracking info in case the body fails to match.
+            state.NoteGuardWritingEntry();
+            state.Bstack.PushCode((uint)index);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+            /* bstack: index text_pos BODY_START */
+
+            rpData.CaptureChange = state.CaptureChange;
+
+            rpData.ChangesAtStart = IterationStart(state);
+            rpData.Start = state.TextPos;
+
+            // Advance into the body.
+            node = nextBodyPosition.Node;
+            state.TextPos = nextBodyPosition.TextPos;
+        }
+        else
+        {
+            // Only the tail could match.
+
+            // Record backtracking info in case the tail fails to match.
+            state.NoteGuardWritingEntry();
+            state.Bstack.PushCode((uint)index);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+            /* bstack: index text_pos TAIL_START */
+
+            // Advance into the tail.
+            node = nextTailPosition.Node;
+            state.TextPos = nextTailPosition.TextPos;
+        }
+
+        armStatus = _armContinue;
+        return node;
+    }
+
+    /// <summary>
+    /// The EndLazyRepeat arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlinees are not part of that method's frame (the BasicMatchCore split).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node.</param>
+    /// <param name="armStatus">When the result is null: an <c>Arm</c> code, or the status the match returns.</param>
+    /// <returns>The node to go on at, or null to leave by <paramref name="armStatus"/>.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node? AdvanceEndLazyRepeat(MatchState state, Node node, out int armStatus)
+    {
+        PatternObject pattern = state.Pattern;
+        Position nextBodyPosition;
+        Position nextTailPosition;
+
+        // Repeat indexes are 0-based.
+        int index = (int)node.Values[0];
+        RepeatData rpData = state.Repeats[index];
+
+        // The body has matched successfully at this position. NOT UPSTREAM: not
+        // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+        if (!state.KeepsFailureMemo(index))
+        {
+            state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+        }
+
+        ++rpData.Count;
+
+        // Have we advanced through the text or has a capture group change?
+        bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
+
+        // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+        // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+        // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+        // since undone, so how many empty deleting iterations a loop takes depends on the
+        // path, and where a section inside the body restarts its budget it loops until
+        // MemoryError. Here an empty iteration is progress only when it spent edits that
+        // something needs, or changed a tested group; then the repeat memo drops any
+        // iteration whose state this run of the repeat has already reached.
+        if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
+        {
+            int stands = FuzzyIterationStands(state, rpData, node, changed);
+            if (stands < 0)
+            {
+                --rpData.Count;
+                armStatus = _armBacktrack;
+                return null;
+            }
+
+            changed = stands > 0;
+        }
+        else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+        {
+            // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+            // rule (:12555-12557), which stops a repeat only at the end of the slice.
+            changed = !(node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart);
+        }
+
+        // NOT UPSTREAM (D17), as in END_GREEDY_REPEAT above.
+        if (changed && state.TextPos == rpData.Start && RevisitsEmptyIterationState(state, rpData, node))
+        {
+            changed = false;
+        }
+
+        // Could the body or tail match?
+        bool tryBody =
+            changed
+            && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
+            && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+        int bodyStatus;
+        nextBodyPosition = default;
+
+        if (tryBody)
+        {
+            // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
+            // minimum has been reached and the text has run out (:12575); this case does
+            // not, and the asymmetry is upstream's own. NOT UPSTREAM'S, D11: a run-out is
+            // handled below, with the tail kept.
+            bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
+            if (bodyStatus is < 0 and not MatchStatus.Partial)
+            {
+                armStatus = bodyStatus;
+                return null;
+            }
+
+            if (bodyStatus == MatchStatus.Failure)
+            {
+                tryBody = false;
+            }
+        }
+        else
+        {
+            bodyStatus = MatchStatus.Failure;
+        }
+
+        bool tryTail =
+            (!changed || rpData.Count >= node.Values[1])
+            && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
+        int tailStatus;
+        nextTailPosition = default;
+
+        if (tryTail)
+        {
+            tailStatus = TailMayMatch(state, TryMatch(state, node.Next2, state.TextPos, out nextTailPosition));
+
+            // NOT UPSTREAM'S, D11: a run-out is handled below, with the body kept.
+            if (tailStatus is < 0 and not MatchStatus.Partial)
+            {
+                armStatus = tailStatus;
+                return null;
+            }
+
+            if (tailStatus == MatchStatus.Failure)
+            {
+                tryTail = false;
+            }
+        }
+        else
+        {
+            tailStatus = MatchStatus.Failure;
+        }
+
+        if (!tryBody && !tryTail)
+        {
+            // Neither the body nor the tail could match.
+            --rpData.Count;
+            armStatus = _armBacktrack;
+            return null;
+        }
+
+        // Record info in case we backtrack into the body.
+        PushBodyEndStateData(
+            state.Bstack,
+            rpData.Count - 1,
+            rpData.Start,
+            rpData.CaptureChange,
+            index,
+            rpData.ChangesAtStart,
+            state.IsFuzzy
+        );
+        state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
+
+        /* bstack: count start capture_change index BODY_END */
+
+        // NOT UPSTREAM'S, D11, the run-out rule, as in END_GREEDY_REPEAT above.
+        if (bodyStatus == MatchStatus.Partial || tailStatus == MatchStatus.Partial)
+        {
+            KeepTheAlternativeThatDidNotRunOut(
+                state,
+                bodyStatus,
+                tailStatus,
+                bodyStatus == MatchStatus.Success ? nextBodyPosition : nextTailPosition,
+                rpData.Count,
+                state.TextPos,
+                state.CaptureChange,
+                index,
+                state.TextPos,
+                state.FuzzyChanges.Count
+            );
+            armStatus = _armRunOut;
+            return null;
+        }
+
+        if (tryTail)
+        {
+            if (tryBody)
+            {
+                // Both the body and the tail could match, but the tail takes precedence.
+                // If the tail fails to match then we want to try the body before
+                // backtracking further.
+                PushMatchBodyTailStateData(
+                    state.Bstack,
+                    nextBodyPosition,
+                    rpData.Count,
+                    state.TextPos,
+                    state.CaptureChange,
+                    index,
+                    state.TextPos,
+                    state.FuzzyChanges.Count,
+                    state.IsFuzzy
+                );
+                state.Bstack.PushUInt8((byte)Opcode.MatchBody);
+
+                /* bstack: position count start capture_change index text_pos MATCH_BODY */
+            }
+
+            // Record backtracking info in case the tail fails to match.
+            state.NoteGuardWritingEntry();
+            state.Bstack.PushCode((uint)index);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+            /* bstack: index text_pos TAIL_START */
+
+            // Advance into the tail.
+            node = nextTailPosition.Node;
+            state.TextPos = nextTailPosition.TextPos;
+        }
+        else
+        {
+            // Only the body could match.
+
+            // Record backtracking info in case the body fails to match.
+            state.NoteGuardWritingEntry();
+            state.Bstack.PushCode((uint)index);
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+            /* bstack: index text_pos BODY_START */
+
+            rpData.CaptureChange = state.CaptureChange;
+
+            rpData.ChangesAtStart = IterationStart(state);
+            rpData.Start = state.TextPos;
+
+            // Advance into the body.
+            node = nextBodyPosition.Node;
+            state.TextPos = nextBodyPosition.TextPos;
+        }
+
+        armStatus = _armContinue;
+        return node;
     }
 
     /// <summary>
