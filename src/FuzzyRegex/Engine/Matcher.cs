@@ -16067,209 +16067,28 @@ internal static class Matcher
                 // characters. 'text_pos' advances only when the subject's folding is used up,
                 // which is why 'foldedPos' has to survive a backtrack into this node.
                 case Opcode.StringFld: // A string, ignoring case.
-                {
-                    int foldedLen;
-
-                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armFoldChangesStart = foldChangesStart;
+                    node = AdvanceStringFld(
+                        state,
+                        node,
+                        search,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armFoldChangesStart,
+                        out armStatus
+                    );
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
+                    if (armStatus != _armContinue)
                     {
-                        // Unreachable until Phase 7 ports this arm of the required-string locator
-                        // (:11143-11365); S60 ported the case-sensitive forward one only.
-                        state.TextPos = state.ReqEnd;
-                    }
-                    else
-                    {
-                        int length = node.Values.Length;
-
-                        if (stringPos < 0)
-                        {
-                            stringPos = 0;
-                            foldedPos = 0;
-                            foldedLen = 0;
-                            foldChangesStart = state.FuzzyChanges.Count;
-                        }
-                        else
-                        {
-                            // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
-
-                            if (foldedPos >= foldedLen)
-                            {
-                                if (state.TextPos >= state.SliceEnd)
-                                {
-                                    goto backtrack;
-                                }
-
-                                state.TextPos = state.NextPos(state.TextPos);
-                                foldedPos = 0;
-                                foldedLen = 0;
-                            }
-                        }
-
-                        // Try comparing.
-                        while (stringPos < length)
-                        {
-                            if (foldedPos >= foldedLen)
-                            {
-                                if (state.TextPos >= state.TextEnd && state.RunsOutRight)
-                                {
-                                    goto runOut;
-                                }
-
-                                foldedLen =
-                                    state.TextPos < state.SliceEnd
-                                        ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
-                                        : 0;
-
-                                foldedPos = 0;
-                            }
-
-                            if (
-                                foldedPos < foldedLen
-                                && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
-                            )
-                            {
-                                // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
-                                if (foldedLen > 1 && foldedPos == 0 && (node.Status & NodeStatus.Fuzzy) != 0)
-                                {
-                                    OfferWholeFoldedCharEdit(
-                                        state,
-                                        node,
-                                        1,
-                                        stringPos,
-                                        0,
-                                        foldedLen,
-                                        foldChangesStart,
-                                        folded
-                                    );
-                                }
-
-                                if ((node.Status & NodeStatus.Fuzzy) != 0)
-                                {
-                                    PushExactStringFldDeletion(
-                                        state,
-                                        node,
-                                        stringPos,
-                                        foldedPos,
-                                        foldedLen,
-                                        1,
-                                        foldChangesStart
-                                    );
-                                }
-
-                                ++stringPos;
-                                ++foldedPos;
-
-                                if (foldedPos >= foldedLen)
-                                {
-                                    state.TextPos = state.NextPos(state.TextPos);
-                                }
-                            }
-                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
-                            {
-                                armStringPos = stringPos;
-                                armFoldedPos = foldedPos;
-                                status = FuzzyMatchStringFld(
-                                    state,
-                                    search,
-                                    node,
-                                    ref armStringPos,
-                                    ref armFoldedPos,
-                                    foldedLen,
-                                    1,
-                                    foldChangesStart
-                                );
-                                stringPos = armStringPos;
-                                foldedPos = armFoldedPos;
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-
-                                if (foldedPos >= foldedLen && foldedLen > 0)
-                                {
-                                    state.TextPos = state.NextPos(state.TextPos);
-                                }
-                            }
-                            else
-                            {
-                                stringPos = -1;
-                                goto backtrack;
-                            }
-                        }
-
-                        // The pattern ran out part way through the subject character's folding, and
-                        // a fuzzy string is allowed to charge the leftovers as errors rather than
-                        // fail (:14855). Every other arm reaches its 'goto backtrack' below instead.
-                        // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' here and at :14874;
-                        // see FoldingIsPartUsed.
-                        if ((node.Status & NodeStatus.Fuzzy) != 0)
-                        {
-                            while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
-                            {
-                                armStringPos = stringPos;
-                                armFoldedPos = foldedPos;
-                                status = FuzzyMatchStringFld(
-                                    state,
-                                    search,
-                                    node,
-                                    ref armStringPos,
-                                    ref armFoldedPos,
-                                    foldedLen,
-                                    1,
-                                    foldChangesStart
-                                );
-                                stringPos = armStringPos;
-                                foldedPos = armFoldedPos;
-
-                                if (status < 0)
-                                {
-                                    if (status == MatchStatus.Partial)
-                                    {
-                                        goto runOut;
-                                    }
-
-                                    return status;
-                                }
-
-                                if (status == MatchStatus.Failure)
-                                {
-                                    stringPos = -1;
-                                    goto backtrack;
-                                }
-
-                                if (foldedPos >= foldedLen && foldedLen > 0)
-                                {
-                                    state.TextPos = state.NextPos(state.TextPos);
-                                }
-                            }
-                        }
-
-                        stringPos = -1;
-
-                        // The subject character's folding was longer than what the pattern
-                        // consumed, so this string is only part of it.
-                        if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
-                        {
-                            goto backtrack;
-                        }
+                        status = armStatus;
+                        goto armExit;
                     }
 
-                    // Successful match.
-                    node = node.Next1.Node!;
                     break;
-                }
                 // STRING_IGN (:14989): STRING with 'same_char_ign' in place of 'same_char'.
                 case Opcode.StringIgn: // A string, ignoring case.
                 {
@@ -23187,6 +23006,221 @@ internal static class Matcher
         state.SetBstackCount(0);
         state.Pstack.Reset();
         armStatus = _armStartMatch;
+        return node;
+    }
+
+    /// <summary>
+    /// The StringFld arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
+    /// its locals and inlinees are not part of that method's frame (the BasicMatchCore split).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The current node.</param>
+    /// <param name="search">Whether to search, or to match at the current position only.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference ('string_pos').</param>
+    /// <param name="foldedPos">The position within the folded character ('folded_pos').</param>
+    /// <param name="foldChangesStart">The fuzzy changes recorded when the current full-folded item began.</param>
+    /// <param name="armStatus">An <c>Arm</c> code, or the status the match returns.</param>
+    /// <returns>The current node, as the arm left it, on every exit.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Node AdvanceStringFld(
+        MatchState state,
+        Node node,
+        bool search,
+        ref int stringPos,
+        ref int foldedPos,
+        ref int foldChangesStart,
+        out int armStatus
+    )
+    {
+        int status;
+        // The arm refolds the subject character on every entry that continues an item
+        // (stringPos >= 0), so the buffer can live in this frame (split, DESIGN.md 2.3).
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+
+        int foldedLen;
+
+        if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+        {
+            // Unreachable until Phase 7 ports this arm of the required-string locator
+            // (:11143-11365); S60 ported the case-sensitive forward one only.
+            state.TextPos = state.ReqEnd;
+        }
+        else
+        {
+            int length = node.Values.Length;
+
+            if (stringPos < 0)
+            {
+                stringPos = 0;
+                foldedPos = 0;
+                foldedLen = 0;
+                foldChangesStart = state.FuzzyChanges.Count;
+            }
+            else
+            {
+                // Only Phase 5's fuzzy retry reaches this arm.
+                foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
+
+                if (foldedPos >= foldedLen)
+                {
+                    if (state.TextPos >= state.SliceEnd)
+                    {
+                        armStatus = _armBacktrack;
+                        return node;
+                    }
+
+                    state.TextPos = state.NextPos(state.TextPos);
+                    foldedPos = 0;
+                    foldedLen = 0;
+                }
+            }
+
+            // Try comparing.
+            while (stringPos < length)
+            {
+                if (foldedPos >= foldedLen)
+                {
+                    if (state.TextPos >= state.TextEnd && state.RunsOutRight)
+                    {
+                        armStatus = _armRunOut;
+                        return node;
+                    }
+
+                    foldedLen =
+                        state.TextPos < state.SliceEnd
+                            ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
+                            : 0;
+
+                    foldedPos = 0;
+                }
+
+                if (foldedPos < foldedLen && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos]))
+                {
+                    // NOT UPSTREAM (D7): see OfferWholeFoldedCharEdit.
+                    if (foldedLen > 1 && foldedPos == 0 && (node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        OfferWholeFoldedCharEdit(state, node, 1, stringPos, 0, foldedLen, foldChangesStart, folded);
+                    }
+
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        PushExactStringFldDeletion(state, node, stringPos, foldedPos, foldedLen, 1, foldChangesStart);
+                    }
+
+                    ++stringPos;
+                    ++foldedPos;
+
+                    if (foldedPos >= foldedLen)
+                    {
+                        state.TextPos = state.NextPos(state.TextPos);
+                    }
+                }
+                else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    status = FuzzyMatchStringFld(
+                        state,
+                        search,
+                        node,
+                        ref stringPos,
+                        ref foldedPos,
+                        foldedLen,
+                        1,
+                        foldChangesStart
+                    );
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            armStatus = _armRunOut;
+                            return node;
+                        }
+
+                        armStatus = status;
+                        return node;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        armStatus = _armBacktrack;
+                        return node;
+                    }
+
+                    if (foldedPos >= foldedLen && foldedLen > 0)
+                    {
+                        state.TextPos = state.NextPos(state.TextPos);
+                    }
+                }
+                else
+                {
+                    stringPos = -1;
+                    armStatus = _armBacktrack;
+                    return node;
+                }
+            }
+
+            // The pattern ran out part way through the subject character's folding, and
+            // a fuzzy string is allowed to charge the leftovers as errors rather than
+            // fail (:14855). Every other arm reaches its 'goto backtrack' below instead.
+            // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' here and at :14874;
+            // see FoldingIsPartUsed.
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
+                {
+                    status = FuzzyMatchStringFld(
+                        state,
+                        search,
+                        node,
+                        ref stringPos,
+                        ref foldedPos,
+                        foldedLen,
+                        1,
+                        foldChangesStart
+                    );
+
+                    if (status < 0)
+                    {
+                        if (status == MatchStatus.Partial)
+                        {
+                            armStatus = _armRunOut;
+                            return node;
+                        }
+
+                        armStatus = status;
+                        return node;
+                    }
+
+                    if (status == MatchStatus.Failure)
+                    {
+                        stringPos = -1;
+                        armStatus = _armBacktrack;
+                        return node;
+                    }
+
+                    if (foldedPos >= foldedLen && foldedLen > 0)
+                    {
+                        state.TextPos = state.NextPos(state.TextPos);
+                    }
+                }
+            }
+
+            stringPos = -1;
+
+            // The subject character's folding was longer than what the pattern
+            // consumed, so this string is only part of it.
+            if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
+            {
+                armStatus = _armBacktrack;
+                return node;
+            }
+        }
+
+        // Successful match.
+        node = node.Next1.Node!;
+        armStatus = _armContinue;
         return node;
     }
 
