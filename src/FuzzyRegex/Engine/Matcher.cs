@@ -14483,6 +14483,12 @@ internal static class Matcher
         Span<uint> folded = foldedBuffer;
         Span<uint> gfolded = gfoldedBuffer;
 
+        // The positions the repeat arms' TryMatch calls write. Declared once here rather than in each
+        // arm: an 'out' local is address-taken and holds a reference, so the JIT gives each declaration
+        // its own frame slot and zeroes it in the prolog on every call, used or not.
+        Position nextBodyPosition;
+        Position nextTailPosition;
+
         state.FewestErrors = state.MaxErrors;
 
         // Whether the start-position prefilter runs at all (:11767-11772). The first two clauses are
@@ -15495,7 +15501,7 @@ internal static class Matcher
                         && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
                         && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
                     int bodyStatus;
-                    Position nextBodyPosition = default;
+                    nextBodyPosition = default;
 
                     if (tryBody)
                     {
@@ -15550,7 +15556,7 @@ internal static class Matcher
                         (!changed || rpData.Count >= node.Values[1])
                         && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
                     int tailStatus;
-                    Position nextTailPosition = default;
+                    nextTailPosition = default;
 
                     if (tryTail)
                     {
@@ -15734,7 +15740,7 @@ internal static class Matcher
                         && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
                         && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
                     int bodyStatus;
-                    Position nextBodyPosition = default;
+                    nextBodyPosition = default;
 
                     if (tryBody)
                     {
@@ -15762,7 +15768,7 @@ internal static class Matcher
                         (!changed || rpData.Count >= node.Values[1])
                         && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
                     int tailStatus;
-                    Position nextTailPosition = default;
+                    nextTailPosition = default;
 
                     if (tryTail)
                     {
@@ -16131,7 +16137,7 @@ internal static class Matcher
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
                     int bodyStatus;
-                    Position nextBodyPosition = default;
+                    nextBodyPosition = default;
 
                     if (tryBody)
                     {
@@ -16155,7 +16161,7 @@ internal static class Matcher
 
                     bool tryTail = node.Values[1] == 0;
                     int tailStatus;
-                    Position nextTailPosition = default;
+                    nextTailPosition = default;
 
                     if (tryTail)
                     {
@@ -16538,7 +16544,7 @@ internal static class Matcher
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
                     int bodyStatus;
-                    Position nextBodyPosition = default;
+                    nextBodyPosition = default;
 
                     if (tryBody)
                     {
@@ -16562,7 +16568,7 @@ internal static class Matcher
 
                     bool tryTail = node.Values[1] == 0;
                     int tailStatus;
-                    Position nextTailPosition = default;
+                    nextTailPosition = default;
 
                     if (tryTail)
                     {
