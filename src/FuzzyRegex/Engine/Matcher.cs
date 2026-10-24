@@ -14545,6 +14545,16 @@ internal static class Matcher
                 : null;
 
         Node node;
+
+        // Split step 1: the D82 helpers and the fuzzy calls take their hot locals by 'ref'. Passing
+        // 'node' or 'stringPos' itself makes it address-exposed for the whole method, so it lives
+        // in a stack slot on every step. These scratch copies are what gets exposed instead: each
+        // call copies in, passes the copy, and copies back unconditionally before testing status.
+        Node armNode;
+        int armStringPos;
+        int armFoldedPos;
+        int armGFoldedPos;
+        int armFoldChangesStart;
         int status;
 
         start_match:
@@ -14980,7 +14990,9 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        status = FuzzyMatchItem(state, search, ref node, 1);
+                        armNode = node;
+                        status = FuzzyMatchItem(state, search, ref armNode, 1);
+                        node = armNode;
 
                         if (status < 0)
                         {
@@ -15027,7 +15039,9 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        status = FuzzyMatchItem(state, search, ref node, 1);
+                        armNode = node;
+                        status = FuzzyMatchItem(state, search, ref armNode, 1);
+                        node = armNode;
 
                         if (status < 0)
                         {
@@ -15074,7 +15088,9 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        status = FuzzyMatchItem(state, search, ref node, 1);
+                        armNode = node;
+                        status = FuzzyMatchItem(state, search, ref armNode, 1);
+                        node = armNode;
 
                         if (status < 0)
                         {
@@ -15104,7 +15120,9 @@ internal static class Matcher
                 case Opcode.AnyRev: // Any character except a newline, backwards.
                 case Opcode.AnyAllRev: // Any character at all, backwards.
                 case Opcode.AnyURev: // Any character except a line separator, backwards.
-                    status = AdvanceAnyRev(state, ref node, search);
+                    armNode = node;
+                    status = AdvanceAnyRev(state, ref armNode, search);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15254,7 +15272,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Conditional: // Start of a conditional subpattern (:12213).
-                    status = AdvanceConditional(state, ref node);
+                    armNode = node;
+                    status = AdvanceConditional(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15262,7 +15282,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndConditional: // End of a conditional subpattern (:12356).
-                    status = AdvanceEndConditional(state, ref node);
+                    armNode = node;
+                    status = AdvanceEndConditional(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15427,7 +15449,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndFuzzy: // End of fuzzy matching (:12448).
-                    status = AdvanceEndFuzzy(state, ref node);
+                    armNode = node;
+                    status = AdvanceEndFuzzy(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15892,7 +15916,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.EndLookaround: // End of a lookaround subpattern (:12918).
-                    status = AdvanceEndLookaround(state, ref node, search);
+                    armNode = node;
+                    status = AdvanceEndLookaround(state, ref armNode, search);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15900,7 +15926,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.CallRef: // A group call reference (:12106).
-                    status = AdvanceCallRef(state, ref node);
+                    armNode = node;
+                    status = AdvanceCallRef(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -15952,7 +15980,9 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        status = FuzzyMatchItem(state, search, ref node, 1);
+                        armNode = node;
+                        status = FuzzyMatchItem(state, search, ref armNode, 1);
+                        node = armNode;
 
                         if (status < 0)
                         {
@@ -15993,7 +16023,9 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev: // Set symmetric difference, backwards, ignoring case.
                 case Opcode.SetUnionRev: // Set union, backwards.
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
-                    status = AdvanceCharacterRev(state, ref node, search);
+                    armNode = node;
+                    status = AdvanceCharacterRev(state, ref armNode, search);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16060,7 +16092,9 @@ internal static class Matcher
                     {
                         // A step of 0: a zero-width item consumes nothing, so it can be neither
                         // deleted nor substituted, and an insertion is the only error left.
-                        status = FuzzyMatchItem(state, search, ref node, 0);
+                        armNode = node;
+                        status = FuzzyMatchItem(state, search, ref armNode, 0);
+                        node = armNode;
 
                         if (status < 0)
                         {
@@ -16086,7 +16120,9 @@ internal static class Matcher
                 case Opcode.Failure: // Failure.
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
-                    status = AdvanceFuzzy(state, ref node);
+                    armNode = node;
+                    status = AdvanceFuzzy(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16417,7 +16453,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.GroupCall: // Group call (:13394).
-                    status = AdvanceGroupCall(state, ref node);
+                    armNode = node;
+                    status = AdvanceGroupCall(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16477,7 +16515,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.GroupReturn: // Group return (:13474).
-                    status = AdvanceGroupReturn(state, ref node, readGroupCount);
+                    armNode = node;
+                    status = AdvanceGroupReturn(state, ref armNode, readGroupCount);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16485,7 +16525,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.Keep: // Keep.
-                    status = AdvanceKeep(state, ref node);
+                    armNode = node;
+                    status = AdvanceKeep(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16493,7 +16535,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                    status = AdvanceEndOptionalPass(state, ref node);
+                    armNode = node;
+                    status = AdvanceEndOptionalPass(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16725,7 +16769,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Lookaround: // Start of a lookaround subpattern (:13758).
-                    status = AdvanceLookaround(state, ref node);
+                    armNode = node;
+                    status = AdvanceLookaround(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16733,7 +16779,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.Prune: // Prune the backtracking (:13894).
-                    status = AdvancePrune(state, ref node);
+                    armNode = node;
+                    status = AdvancePrune(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16744,7 +16792,11 @@ internal static class Matcher
                 // only state it carries between visits is 'stringPos', which the fuzzy retry block
                 // (:17269) reads and which Phase 5 will need a backtrack arm for.
                 case Opcode.RefGroup: // Reference to a capture group.
-                    status = AdvanceRefGroup(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceRefGroup(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16754,7 +16806,11 @@ internal static class Matcher
                 // REF_GROUP_REV (:14375). The same walk from the other end: 'stringPos' starts at
                 // the capture's end and both sides retreat.
                 case Opcode.RefGroupRev: // Reference to a capture group, backwards.
-                    status = AdvanceRefGroupRev(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceRefGroupRev(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16763,7 +16819,11 @@ internal static class Matcher
                     break;
                 // REF_GROUP_IGN_REV (:14318).
                 case Opcode.RefGroupIgnRev: // Reference to a capture group, backwards, ignoring case.
-                    status = AdvanceRefGroupIgnRev(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceRefGroupIgnRev(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16777,17 +16837,27 @@ internal static class Matcher
                 // 'FuzzyMatchGroupFld(..., gfoldedLen, -1)' below reads it, so the disapplication is
                 // gone.
                 case Opcode.RefGroupFldRev: // Reference to a capture group, backwards, ignoring case.
+                    armNode = node;
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armGFoldedPos = gfoldedPos;
+                    armFoldChangesStart = foldChangesStart;
                     status = AdvanceRefGroupFldRev(
                         state,
-                        ref node,
-                        ref stringPos,
-                        ref foldedPos,
-                        ref gfoldedPos,
-                        ref foldChangesStart,
+                        ref armNode,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armGFoldedPos,
+                        ref armFoldChangesStart,
                         search,
                         folded,
                         gfolded
                     );
+                    node = armNode;
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    gfoldedPos = armGFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16799,17 +16869,27 @@ internal static class Matcher
                 // has its own buffer and its own position and only advances when its buffer runs
                 // out. 'gfolded' is the group's side, 'folded' the subject's.
                 case Opcode.RefGroupFld: // Reference to a capture group, ignoring case.
+                    armNode = node;
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armGFoldedPos = gfoldedPos;
+                    armFoldChangesStart = foldChangesStart;
                     status = AdvanceRefGroupFld(
                         state,
-                        ref node,
-                        ref stringPos,
-                        ref foldedPos,
-                        ref gfoldedPos,
-                        ref foldChangesStart,
+                        ref armNode,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armGFoldedPos,
+                        ref armFoldChangesStart,
                         search,
                         folded,
                         gfolded
                     );
+                    node = armNode;
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    gfoldedPos = armGFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16819,7 +16899,11 @@ internal static class Matcher
                 // REF_GROUP_IGN (:14262): REF_GROUP with 'same_char_ign' in place of 'same_char'.
                 // Simple folding, so both sides still advance one character at a time.
                 case Opcode.RefGroupIgn: // Reference to a capture group, ignoring case.
-                    status = AdvanceRefGroupIgn(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceRefGroupIgn(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16827,7 +16911,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.Skip: // Skip the part of the text already matched (:14544).
-                    status = AdvanceSkip(state, ref node);
+                    armNode = node;
+                    status = AdvanceSkip(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -16884,7 +16970,9 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                status = FuzzyMatchString(state, search, node, ref stringPos, 1, false);
+                                armStringPos = stringPos;
+                                status = FuzzyMatchString(state, search, node, ref armStringPos, 1, false);
+                                stringPos = armStringPos;
 
                                 if (status < 0)
                                 {
@@ -17026,16 +17114,20 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
+                                armStringPos = stringPos;
+                                armFoldedPos = foldedPos;
                                 status = FuzzyMatchStringFld(
                                     state,
                                     search,
                                     node,
-                                    ref stringPos,
-                                    ref foldedPos,
+                                    ref armStringPos,
+                                    ref armFoldedPos,
                                     foldedLen,
                                     1,
                                     foldChangesStart
                                 );
+                                stringPos = armStringPos;
+                                foldedPos = armFoldedPos;
 
                                 if (status < 0)
                                 {
@@ -17074,16 +17166,20 @@ internal static class Matcher
                         {
                             while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
                             {
+                                armStringPos = stringPos;
+                                armFoldedPos = foldedPos;
                                 status = FuzzyMatchStringFld(
                                     state,
                                     search,
                                     node,
-                                    ref stringPos,
-                                    ref foldedPos,
+                                    ref armStringPos,
+                                    ref armFoldedPos,
                                     foldedLen,
                                     1,
                                     foldChangesStart
                                 );
+                                stringPos = armStringPos;
+                                foldedPos = armFoldedPos;
 
                                 if (status < 0)
                                 {
@@ -17166,7 +17262,9 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                status = FuzzyMatchString(state, search, node, ref stringPos, 1, false);
+                                armStringPos = stringPos;
+                                status = FuzzyMatchString(state, search, node, ref armStringPos, 1, false);
+                                stringPos = armStringPos;
 
                                 if (status < 0)
                                 {
@@ -17206,7 +17304,11 @@ internal static class Matcher
                 // STRING_REV (:15103). The pattern's values are consumed from the last back, and the
                 // subject retreats with them.
                 case Opcode.StringRev: // A string, backwards.
-                    status = AdvanceStringRev(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceStringRev(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17215,7 +17317,11 @@ internal static class Matcher
                     break;
                 // STRING_IGN_REV (:15046): STRING_REV with 'same_char_ign' in place of 'same_char'.
                 case Opcode.StringIgnRev: // A string, backwards, ignoring case.
-                    status = AdvanceStringIgnRev(state, ref node, ref stringPos, search);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = AdvanceStringIgnRev(state, ref armNode, ref armStringPos, search);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17228,15 +17334,23 @@ internal static class Matcher
                 // same reason as REF_GROUP_FLD_REV's above: 'FuzzyMatchStringFld(..., foldedLen, -1)'
                 // is the reader it was waiting for.
                 case Opcode.StringFldRev: // A string, backwards, ignoring case.
+                    armNode = node;
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armFoldChangesStart = foldChangesStart;
                     status = AdvanceStringFldRev(
                         state,
-                        ref node,
-                        ref stringPos,
-                        ref foldedPos,
-                        ref foldChangesStart,
+                        ref armNode,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armFoldChangesStart,
                         search,
                         folded
                     );
+                    node = armNode;
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17371,7 +17485,11 @@ internal static class Matcher
         // partial call's second pass, matching goes on at the body's end (RunOutInALookaroundBody);
         // anywhere else the attempt answers the partial, as it always has.
         runOut:
-        status = RunOut(state, ref node, ref stringPos);
+        armNode = node;
+        armStringPos = stringPos;
+        status = RunOut(state, ref armNode, ref armStringPos);
+        node = armNode;
+        stringPos = armStringPos;
         goto armExit;
 
         backtrack:
@@ -17446,7 +17564,9 @@ internal static class Matcher
                 case Opcode.SetUnionIgn:
                 case Opcode.SetUnionIgnRev:
                 case Opcode.SetUnionRev:
-                    status = BacktrackFuzzyRetryChar(state, ref node, search, op);
+                    armNode = node;
+                    status = BacktrackFuzzyRetryChar(state, ref armNode, search, op);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17475,7 +17595,9 @@ internal static class Matcher
                 case Opcode.StartOfLineU:
                 case Opcode.StartOfString:
                 case Opcode.StartOfWord:
-                    status = BacktrackFuzzyRetryZeroWidth(state, ref node, search, op);
+                    armNode = node;
+                    status = BacktrackFuzzyRetryZeroWidth(state, ref armNode, search, op);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17493,7 +17615,11 @@ internal static class Matcher
                 case Opcode.StringIgn:
                 case Opcode.StringIgnRev:
                 case Opcode.StringRev:
-                    status = BacktrackFuzzyRetryString(state, ref node, ref stringPos, search, op);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = BacktrackFuzzyRetryString(state, ref armNode, ref armStringPos, search, op);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17503,16 +17629,26 @@ internal static class Matcher
                 // Upstream :17291-17306.
                 case Opcode.RefGroupFld:
                 case Opcode.RefGroupFldRev:
+                    armNode = node;
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armGFoldedPos = gfoldedPos;
+                    armFoldChangesStart = foldChangesStart;
                     status = BacktrackFuzzyRetryGroupFld(
                         state,
-                        ref node,
-                        ref stringPos,
-                        ref foldedPos,
-                        ref gfoldedPos,
-                        ref foldChangesStart,
+                        ref armNode,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armGFoldedPos,
+                        ref armFoldChangesStart,
                         search,
                         op
                     );
+                    node = armNode;
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    gfoldedPos = armGFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17522,15 +17658,23 @@ internal static class Matcher
                 // Upstream :17361-17376.
                 case Opcode.StringFld:
                 case Opcode.StringFldRev:
+                    armNode = node;
+                    armStringPos = stringPos;
+                    armFoldedPos = foldedPos;
+                    armFoldChangesStart = foldChangesStart;
                     status = BacktrackFuzzyRetryStringFld(
                         state,
-                        ref node,
-                        ref stringPos,
-                        ref foldedPos,
-                        ref foldChangesStart,
+                        ref armNode,
+                        ref armStringPos,
+                        ref armFoldedPos,
+                        ref armFoldChangesStart,
                         search,
                         op
                     );
+                    node = armNode;
+                    stringPos = armStringPos;
+                    foldedPos = armFoldedPos;
+                    foldChangesStart = armFoldChangesStart;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17538,7 +17682,11 @@ internal static class Matcher
 
                     break;
                 case Opcode.FuzzyInsert: // One more inserted character after a string (:15766).
-                    status = BacktrackFuzzyInsert(state, ref node, ref stringPos);
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = BacktrackFuzzyInsert(state, ref armNode, ref armStringPos);
+                    node = armNode;
+                    stringPos = armStringPos;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17622,7 +17770,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.Conditional: // Conditional subpattern (:15378).
-                    status = BacktrackConditional(state, ref node);
+                    armNode = node;
+                    status = BacktrackConditional(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17638,7 +17788,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndFuzzy: // End of fuzzy matching (:15488).
-                    status = BacktrackEndFuzzy(state, ref node);
+                    armNode = node;
+                    status = BacktrackEndFuzzy(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -17670,7 +17822,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.EndOptionalPass: // NOT UPSTREAM (ledger entry 44's addendum).
-                    status = BacktrackEndOptionalPass(state, ref node);
+                    armNode = node;
+                    status = BacktrackEndOptionalPass(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -18387,7 +18541,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.Lookaround: // Lookaround subpattern (:17109).
-                    status = BacktrackLookaround(state, ref node, search);
+                    armNode = node;
+                    status = BacktrackLookaround(state, ref armNode, search);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -18498,7 +18654,9 @@ internal static class Matcher
                     break;
                 }
                 case Opcode.UndeterminedFuzzyRetry: // NOT UPSTREAM'S, D11: the failing side of a fuzzy test.
-                    status = BacktrackUndeterminedFuzzyRetry(state, ref node, search);
+                    armNode = node;
+                    status = BacktrackUndeterminedFuzzyRetry(state, ref armNode, search);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
@@ -18541,7 +18699,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
-                    status = BacktrackNoBranch(state, ref node);
+                    armNode = node;
+                    status = BacktrackNoBranch(state, ref armNode);
+                    node = armNode;
                     if (status != _armContinue)
                     {
                         goto armExit;
