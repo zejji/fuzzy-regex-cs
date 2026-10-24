@@ -6271,6 +6271,36 @@ branch's test that runs out inside a body goes through the same rule (the repeat
 `partial-edge-read` in `ExpectedDivergences.cs`, keyed on the pre-D11 ablation
 `OracleComparer.RunWithTheSecondPassAsBeforeD11`, which reproduces upstream's answer on these rows.
 
+### Addendum to 67, 2026-10-24: a fuzzy body that deletes its way to the empty string (D124) - DRAFT - NOT FILED
+
+Found 2026-10-21 by the D101 interaction matrix (48 rows). Upstream's run-out returns the partial
+before a fuzzy item tries its errors, so the deletion, which needs no text, is never offered. A
+negative lookaround or a condition's test whose body matches the empty string by deleting its items
+matches whatever follows the edge, so the construct fails for every continuation, and the partial
+upstream reports cannot be completed. Measured with `regex` 2026.9.29 on 2026-10-24
+(`.scratch/s1024/d124/up/probe.py`, one row per child process), `partial=True`:
+
+```
+search(r'(x)(?!(?:x){d<=1})', 'xx')            -> P(1, 2)   here P(2, 2)
+match(r'(x)(?!(?:x){d<=1})', 'x')              -> P(0, 1)   here None
+search(r'(?r)(?<!(?:x){d<=1})(x)', 'x')        -> P(0, 1)   here P(0, 0)
+search(r'(x)(?(?!(?:x){d<=1})|(?!))', 'x')     -> P(0, 1)   here P(1, 1)
+match(r'(?fi)(ss)(?!(?:\1){d<=2})', 'ss')      -> P(0, 2)   here None
+```
+
+Judged by the port's own non-partial answers over every continuation of up to three characters: no
+continuation completes any of these at a start inside the text, so each search's answer is the edge
+partial the partial contract allows and each match's is None. Upstream gives the same P(1, 2) to
+`(x)(?!x?)`, entry 67's own shape; the port already answered P(2, 2) there.
+
+**This port** answered as upstream until D124 (F114): the second pass took the run-out at once and
+the deletion was lost in the body too. A fuzzy item that runs out in a body whose outcome feeds a
+decision now keeps its deletion on the backtracking stack before the run-out is taken
+(`Matcher.KeepTheDeletionOfAnItemThatRanOut`), as D11 keeps a repeat's other alternative, so a
+success of the body on the held text decides the construct. The oracle entry `partial-edge-read`
+covers these rows as it covers entry 67's: its pre-D11 ablation turns the kept deletion off with
+the rest of the rule. Pinned by `Gaps/Engine/PartialRunOutDeletionTests`.
+
 ## 68. Upstream bounds a lazy repeat by the text held and turns a greedy body's run-out at the end into a failure, so it refuses completions - DIVERGES HERE (D11, decision (a), 2026-10-04)
 
 **Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D11, decision (a) ("The two run-out

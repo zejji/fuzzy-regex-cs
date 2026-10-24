@@ -40,6 +40,11 @@ per release.
 - **A conditional in a repeat whose pattern ends in a backreference** no longer allocates per
   call: `(\w)(?:(?(?=\w)\w+|\s))*\1$` over 1,000 characters allocated about 105 MB a call, now
   24 bytes.
+- **Partial matching with a negative lookaround whose fuzzy body can delete its way to the empty
+  string** decides the lookaround at the end of the text, where the body matches whatever
+  follows: `(x)(?!(?:x){d<=1})` over 'xx' is a partial at the edge, (2, 2), as `(x)(?!x?)` is,
+  not (1, 2), which no text completes. The same holds for a condition's test, a reversed
+  lookbehind and full case folding (`(?fi)(ß)(?!(?:\1){d<=1})` over 'ßß').
 
 ## [1.0.0] - 2026-10-20
 
