@@ -20953,6 +20953,17 @@ internal static class Matcher
                 break;
             case groupFolded:
             {
+                // A REF_GROUP_FLD runs out only at the loop's edge test, with a group character left.
+                // Its leftovers loop, where the group is used up, never runs out: it runs while the
+                // subject's folding is part used, so an insertion or substitution steps inside that
+                // folding (NextFuzzyMatchGroupFld) and neither reaches CheckFuzzyPartial.
+                Debug.Assert(
+                    state.Groups[(int)node.Values[0] - 1] is var refGroup
+                        && refGroup.Captures[refGroup.Current] is var span
+                        && (step > 0 ? stringPos < span.End : stringPos > span.Start),
+                    "D124: a full-folded group reference runs out with a group character left"
+                );
+
                 // The group character the arm stands on, folded as its re-entry folds it.
                 FoldBuffer buffer = default;
                 int gfoldedLen = Encodings.FullCaseFold(

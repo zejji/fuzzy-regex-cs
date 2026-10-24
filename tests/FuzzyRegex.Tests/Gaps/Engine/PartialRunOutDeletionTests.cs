@@ -64,6 +64,10 @@ public sealed class PartialRunOutDeletionTests
     // The text ends after the group's ß, before its x: the x is the character the arm stands on,
     // not yet folded (the ß's folding is used up). 'ßxß' + 'xz' completes at 2. Main: P(0, 3).
     [Arguments("folded reference, between characters", "search", @"(?fi)(ßx)(?!(?:\1){d<=1})", "ßxß", 2, 3)]
+    // The group's s is used up part way through the subject's ß, so the leftovers loop runs; it
+    // never runs out, and a Debug build asserts that no run-out reaches the kept deletion with the
+    // group used up (blind review of 9d17988f).
+    [Arguments("folded reference, leftovers", "search", @"(?fi)(s)(?!(?:\1){d<=1})", "sß", 2, 2)]
     public void A_negative_body_that_deletes_its_way_to_empty_decides_at_the_edge(
         string kind,
         string operation,
