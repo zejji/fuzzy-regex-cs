@@ -151,6 +151,28 @@ one-line forwarder). Branch merged onto `fc5b190c` and measured against it, Rele
   the code that `DOTNET_JitMaxLocalsToTrack=0x2000` produces. Further gains here mean splitting the
   loop itself, which is a design question rather than a trim.
 
+## Measured by the split, BasicMatchCore's heavy hot arms out of line (2026-10-24)
+
+Cause and history: D82 in `docs/KNOWN-DEFECTS.md`; design, review and build log in
+`.scratch/s1021/split/` (DESIGN.md, REVIEW.md, LOG.md). The weight in the method was in the repeat
+arms, which are hot, so the split went by weight, not rarity. Kept: every repeat arm, `STRING_FLD` and
+the backtracking `FAILURE` arm as NoInlining helpers that return the node (exit code in an `out int`);
+the hot locals the helpers take by `ref` pass through scratch copies; `STRING_FLD`'s fold buffer
+moves into its helper. Rejected: returning null on a non-continue exit, which lost a node set before
+`goto runOut` (7 partial tests caught it); and reading read-only values at their use to free
+registers for `node`, which left `node` spilled and made the split profile zero more (freed locals
+let the JIT inline more).
+
+- Tier-1 disassembly (split harness, literal-only in brackets): prolog zeroing 1,488 B (1,296) to
+  720 B (528), frame 0x798 to 0x478, base locals about 307 to 111.
+- Cold-arm harness, perf/layout-f against the step-3 build (`.scratch/s1021/split/time-2t3t.txt`):
+  tiny 0.910, short 0.923, dense 0.895, classscan 0.900, wordsend 0.860, cond 0.857, lazystring
+  0.863, lazystringfld 0.874, look 0.898, other rows 0.93-0.97, foldfuzzy 1.00. The step-3 build matches the
+  knob ceiling (`DOTNET_JitMaxLocalsToTrack=0x2000` on the base) on most rows and trails it on
+  backref, foldfuzzy and best.
+- Left: 528-720 B still zeroed per call (GC-holding temporaries, most likely from inlined callees),
+  and `node` spilled at the dispatch (register pressure, not the locals cap).
+
 ## Measured by C3, the fuzzy-literal bit-parallel scan (2026-10-14)
 
 `FuzzyLiteralFilter.LiteralScan` (design: `docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md`).

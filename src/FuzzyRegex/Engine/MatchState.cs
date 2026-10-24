@@ -2818,9 +2818,9 @@ internal sealed class MatchState : IDisposable
         // proved once per pass rather than once per start, which made option G cubic on the
         // register's witness. A \K can move the next start (and starts it touched), so a pattern
         // with one empties the store as before.
-        if (!nextAttempt || Pattern.KeepInSubmatch)
+        if (_cutBody is { } cutBody && (!nextAttempt || Pattern.KeepInSubmatch))
         {
-            _cutBody?.Reset();
+            cutBody.Reset();
         }
 
         // NOT UPSTREAM (D17). The states belong to runs of this attempt; a new start position
@@ -3498,6 +3498,20 @@ internal sealed class MatchState : IDisposable
     }
 
     /// <summary>
+    /// <see cref="IsGuardedAfterBlockedEnd(int, int, uint, out GuardSpan)"/> without the span, for the
+    /// inlined <see cref="IsRepeatGuarded(int, int, uint)"/>: kept out of line so that each of
+    /// BasicMatchCore's inlines of that method does not add an address-taken span to its frame,
+    /// which the prolog zeroes on every call.
+    /// </summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <returns><see langword="true"/> if it is guarded.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool IsGuardedAfterBlockedEnd(int index, int textPos, uint guardType) =>
+        IsGuardedAfterBlockedEnd(index, textPos, guardType, out _);
+
+    /// <summary>
     /// NOT UPSTREAM (D104): whether a record written after a blocked end guards repeat
     /// <paramref name="index"/> at <paramref name="textPos"/> in the current state; see
     /// <see cref="_cutBody"/>.
@@ -3785,7 +3799,7 @@ internal sealed class MatchState : IDisposable
         WorkCounter.GuardChecked();
         bool guarded =
             (ActiveGuardList(index, guardType, textPos, write: false)?.IsGuarded(textPos) ?? false)
-            || IsGuardedAfterBlockedEnd(index, textPos, guardType, out _);
+            || (_cutBody is not null && IsGuardedAfterBlockedEnd(index, textPos, guardType));
         NoteSecondPassGuard(guarded);
 
         return guarded;
