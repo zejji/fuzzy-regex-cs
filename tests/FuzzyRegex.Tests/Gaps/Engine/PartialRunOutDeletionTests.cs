@@ -236,10 +236,12 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
-    /// C1's guards. A verb between the inner and the outer END_FUZZY is crossed by the deletion's
-    /// path and acts when the outer END_FUZZY fails (REVIEW-1000 counterexample: without the guard
-    /// the match is a phantom P(0, 1); main and upstream give None). An outer section that allows a
-    /// deletion, or a consuming item before the inner END_FUZZY, keeps the deletion.
+    /// The guards of round 6's prunes (OPT.md, REVIEW-1000), each row a16e35a0's or a9082250's
+    /// answer. C1: a verb between the inner and the outer END_FUZZY (the review's counterexample,
+    /// which measured None even with the guard dropped), an outer section that allows a deletion,
+    /// and a consuming item before the inner END_FUZZY keep the deletion. B1: inside a fuzzy
+    /// section the counts bound the section, and under BESTMATCH they rank the matches, so they
+    /// stay in the dedup key (the review's counterexample is the first B1 row).
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="subject">The text.</param>
@@ -250,7 +252,9 @@ public sealed class PartialRunOutDeletionTests
     [Arguments(@"(?:(?(?=y(?:(?:x){d<=1}(*PRUNE)){i<=1}|y)|(?!))){1<=s<=1}", "y", false, -1, -1)]
     [Arguments(@"(x)(?!(?:(?:x){d<=1}){e<=1})", "xx", true, 2, 2)]
     [Arguments(@"(x)(?!(?:(?:x){d<=1}y){i<=1})", "xx", true, 0, 1)]
-    public void A_deletion_the_outer_section_might_pass_is_kept(
+    [Arguments(@"(?:(?=zy|xy)q){s<=1}", "x", false, 0, 1)]
+    [Arguments(@"(?b)x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", true, 1, 1)]
+    public void A_guard_row_keeps_its_answer(
         string pattern,
         string subject,
         bool search,
@@ -264,6 +268,30 @@ public sealed class PartialRunOutDeletionTests
         (start < 0 ? (m.Success, -1, -1) : (m.Success, m.Index, m.Index + m.Length))
             .Should()
             .Be((start >= 0, start, end));
+    }
+
+    /// <summary>
+    /// The dedup ignores fuzzy counts outside every fuzzy section (OPT.md B1): a later blocked
+    /// success of the same positive test, with the same captures, has the same continuation
+    /// whatever errors its body spent, since nothing after the test reads top-level counts in a
+    /// call without BESTMATCH or ENHANCEMATCH. The second blocked yes-run after the first deletion
+    /// is skipped. The bound is a9082250's count less the skipped run (69 before).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_blocked_success_that_differs_only_in_counts_is_not_continued_again()
+    {
+        var regex = new FuzzyRegex(@"x(?(?=(?:xx){e<=2})(?!)|)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+            },
+            63,
+            "the second continuation differs from the first only in its counts"
+        );
     }
 
     /// <summary>

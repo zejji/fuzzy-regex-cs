@@ -6330,7 +6330,20 @@ internal static class Matcher
         }
 
         bool withChanges = (state.Pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) != 0;
-        if (state.HasSameContinuation(frame, withChanges))
+
+        // NOT UPSTREAM'S, D124 (OPT.md B1): outside every fuzzy section (the open section is none,
+        // a dynamic test, since a construct in a section whose body has no FUZZY node of its own
+        // closes nothing) and without ranking, nothing after the construct reads the counts: a
+        // later section starts from cleared counts and checks only its own, and the match's error
+        // and cost bounds are unlimited (DoSimpleFuzzyMatch). So a blocked success that differs from
+        // an earlier one only in its counts has the same continuation, which failed. POSIX keeps
+        // looking after a match and calls can enter the construct from a section, so both keep them.
+        bool withCounts =
+            withChanges
+            || state.FuzzyNode is not null
+            || state.Pattern.HasGroupCalls
+            || (state.Pattern.Flags & RegexFlags.Posix) != 0;
+        if (state.HasSameContinuation(frame, withChanges, withCounts))
         {
             state.NotePartialEvent(PartialEvent.Dedup);
             if (blocked)

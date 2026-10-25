@@ -2353,8 +2353,10 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     /// <param name="frame">The lookaround's frame.</param>
     /// <param name="withChanges">Whether the fuzzy changes are part of the key (<c>(?b)</c>, <c>(?e)</c>).</param>
+    /// <param name="withCounts">Whether the fuzzy counts are part of the key: they are, unless nothing
+    /// after the construct reads them (D124, OPT.md B1, <c>Matcher.EndALookaroundInTheSecondPass</c>).</param>
     /// <returns><see langword="true"/> if an earlier success of the frame had the same key.</returns>
-    internal bool HasSameContinuation(int frame, bool withChanges)
+    internal bool HasSameContinuation(int frame, bool withChanges, bool withCounts)
     {
         for (int i = LookaroundSuccesses.Count - 1; i >= 0 && LookaroundSuccesses[i].Frame >= frame; i--)
         {
@@ -2363,7 +2365,7 @@ internal sealed class MatchState : IDisposable
             if (
                 other.Frame == frame
                 && SameCapturesAsNow(other.Captures)
-                && FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts)
+                && (!withCounts || FuzzyCounts.AsSpan().SequenceEqual(other.FuzzyCounts))
                 && (withChanges ? CollectionsMarshal.AsSpan(FuzzyChanges) : []).SequenceEqual(other.FuzzyChanges)
             )
             {
