@@ -241,6 +241,9 @@ internal enum PartialEvent
     /// <summary>D124: a deletion that could not empty the rest of its body was not kept (the certifier).</summary>
     RunOutDeletionCertifiedOut,
 
+    /// <summary>D124 (OPT.md C1): a deletion an enclosing section of the body forbids was not kept.</summary>
+    RunOutDeletionForbiddenOutside,
+
     /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
     RunOutPendingDropped,
 

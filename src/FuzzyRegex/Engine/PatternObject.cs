@@ -2129,6 +2129,7 @@ internal sealed class PatternObject
             else if (n.Op == Opcode.Fuzzy)
             {
                 outerOf[n.Index] = section;
+                n.EnclosingSection = section;
                 after = n;
             }
             else if (n.Op == Opcode.EndFuzzy && section is not null)

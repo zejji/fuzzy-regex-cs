@@ -213,6 +213,60 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A deletion that cannot pass an enclosing section of the body is not kept (OPT.md C1): the
+    /// outer <c>{i&lt;=1}</c> allows no deletion, so the inner deletion fails at the outer
+    /// END_FUZZY on every path, and keeping it only walked to that failure. The bound is main's
+    /// count (a16e35a0); keeping it cost 116.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_deletion_an_enclosing_section_of_the_body_forbids_is_not_kept()
+    {
+        var regex = new FuzzyRegex(@"(?(?!(?:(?:x){d<=1}){i<=1})a|b)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("xxy", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 3, 0));
+            },
+            110,
+            "the deletion cannot pass the outer section"
+        );
+    }
+
+    /// <summary>
+    /// C1's guards. A verb between the inner and the outer END_FUZZY is crossed by the deletion's
+    /// path and acts when the outer END_FUZZY fails (REVIEW-1000 counterexample: without the guard
+    /// the match is a phantom P(0, 1); main and upstream give None). An outer section that allows a
+    /// deletion, or a consuming item before the inner END_FUZZY, keeps the deletion.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="search">Whether the call searches, rather than matches at the start.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    /// <param name="end">The partial's end.</param>
+    [Test]
+    [Arguments(@"(?:(?(?=y(?:(?:x){d<=1}(*PRUNE)){i<=1}|y)|(?!))){1<=s<=1}", "y", false, -1, -1)]
+    [Arguments(@"(x)(?!(?:(?:x){d<=1}){e<=1})", "xx", true, 2, 2)]
+    [Arguments(@"(x)(?!(?:(?:x){d<=1}y){i<=1})", "xx", true, 0, 1)]
+    public void A_deletion_the_outer_section_might_pass_is_kept(
+        string pattern,
+        string subject,
+        bool search,
+        int start,
+        int end
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(subject, partial: true) : regex.MatchAtStart(subject, partial: true);
+
+        (start < 0 ? (m.Success, -1, -1) : (m.Success, m.Index, m.Index + m.Length))
+            .Should()
+            .Be((start >= 0, start, end));
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice

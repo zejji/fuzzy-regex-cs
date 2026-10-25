@@ -96,8 +96,8 @@ internal sealed class Node
     internal (int Private, int Public)[]? RunOutGroups;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, the fuzzy section it
-    /// lies in, or <see langword="null"/> for none; the section a run-out in its body closes back to
+    /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, or (D124) a FUZZY node,
+    /// the fuzzy section it lies in, or <see langword="null"/> for none; the section a run-out in its body closes back to
     /// (<c>Matcher.CloseTheBodysSection</c>). Set by <c>PatternObject.SetEnclosingSections</c> for
     /// every fuzzy pattern without group calls, so <see langword="null"/> means outside every
     /// section there, which is how the matcher reads it (D124 review, 2026-10-25: until then a

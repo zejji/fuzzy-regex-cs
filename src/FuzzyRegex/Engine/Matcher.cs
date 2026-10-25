@@ -21074,6 +21074,13 @@ internal static class Matcher
             toDelete = 1;
         }
 
+        if ((kind == item || (kind == text && !isReference && toDelete == 1)) && DeletionIsForbiddenOutside(state, node, top))
+        {
+            state.NotePartialEvent(PartialEvent.RunOutDeletionForbiddenOutside);
+            deletionFirst = false;
+            return false;
+        }
+
         if (
             deletionFirst
             && (kind == item || (kind == text && !isReference))
@@ -21170,6 +21177,77 @@ internal static class Matcher
 
         state.NotePartialEvent(PartialEvent.RunOutKeptDeletion);
         return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md C1): whether the deletion of an item that ran out, its last
+    /// character, can never pass the section around its own one, inside the construct's body.
+    /// </summary>
+    /// <remarks>
+    /// END_FUZZY adds the inner section's counts to the outer one's, and the outer END_FUZZY checks
+    /// its limits on them. Where the outer section allows no deletion (no deletions, no errors, or
+    /// a deletion dearer than its cost limit), the deletion is at least one there on every path. If
+    /// nothing but group boundaries lies between the item and the two END_FUZZY nodes, the path
+    /// reaches no run-out and no other item before that check, so it ends in a failure, and keeping
+    /// it only walked to it: `(?(?!(?:(?:x){d&lt;=1}){i&lt;=1})a|b)` cost 6 steps more than main.
+    /// The outer section must lie inside the innermost construct's body: outside it, the
+    /// construct decides before the outer END_FUZZY is reached. A verb between the two END_FUZZY
+    /// nodes would act when the outer one fails (REVIEW-1000:
+    /// `(?:(?(?=y(?:(?:x){d&lt;=1}(*PRUNE)){i&lt;=1}|y)|(?!))){1&lt;=s&lt;=1}` over 'y'), so a
+    /// pattern with a verb keeps the deletion; so does one with group calls, where the sections
+    /// are not set (<see cref="PatternObject.SetEnclosingSections"/>).
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="item">The item that ran out, in the open section.</param>
+    /// <param name="top">The innermost open construct, read (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the deletion's path can only fail.</returns>
+    private static bool DeletionIsForbiddenOutside(MatchState state, Node item, in InnermostConstruct top)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            pattern.HasBacktrackingVerb
+            || pattern.HasGroupCalls
+            || state.FuzzyNode?.EnclosingSection is not { } outer
+            || top.Look.Node.BodyInfo is not { } body
+            || Array.BinarySearch(body.Nodes, outer.Index) < 0
+        )
+        {
+            return false;
+        }
+
+        uint[] limits = outer.Values;
+        if (
+            limits[FuzzyValue.MaxDel] != 0
+            && limits[FuzzyValue.MaxErr] != 0
+            && limits[FuzzyValue.DelCost] <= limits[FuzzyValue.MaxCost]
+        )
+        {
+            return false;
+        }
+
+        bool passedOwn = false;
+        Node? next = item.Next1.Node;
+
+        // A bound only against a malformed cycle; the chain is short.
+        for (int i = 0; i < 64 && next is not null; i++)
+        {
+            switch (next.Op)
+            {
+                case Opcode.StartGroup or Opcode.EndGroup:
+                    break;
+                case Opcode.EndFuzzy when !passedOwn:
+                    passedOwn = true;
+                    break;
+                case Opcode.EndFuzzy:
+                    return true;
+                default:
+                    return false;
+            }
+
+            next = next.Next1.Node;
+        }
+
+        return false;
     }
 
     /// <summary>
