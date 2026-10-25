@@ -336,6 +336,32 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A run-out in a negative construct's body is taken in place (OPT.md A', REVIEW-1200): its
+    /// path would only close the body's section, touch, reach the blocked end, taint the frame and
+    /// come back, so the run-out does those effects and backtracks. The staged tree before A' took
+    /// 110 and 34; main (a16e35a0) takes 105 and 31. The first row keeps 2 steps over main: its
+    /// deletion's path still enters <c>x*</c>'s body before its tail.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", "xxy", false, 107)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})", "x", true, 31)]
+    public void A_negative_bodys_run_out_is_taken_in_place(string pattern, string subject, bool full, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the run-out's cycle is not walked"
+        );
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice

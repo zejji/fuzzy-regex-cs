@@ -247,6 +247,9 @@ internal enum PartialEvent
     /// <summary>D124 (OPT.md B2): a positive test's run-out whose blocked end the dedup would catch failed at once.</summary>
     RunOutCaughtByTheDedup,
 
+    /// <summary>D124 (OPT.md A'): a run-out in a negative construct's body was taken in place: frame tainted, back into the body.</summary>
+    RunOutTakenInPlace,
+
     /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
     RunOutPendingDropped,
 

@@ -6679,19 +6679,9 @@ internal static class Matcher
     private static bool CloseTheBodysSection(MatchState state, Node test, int lookMark)
     {
         Node? outer = test.EnclosingSection;
-
-        /* bstack: ... fuzzy_counts change_count capture_change sstack LOOKAROUND | CONDITIONAL */
-
-        int countsAt = lookMark - 1 - (3 * sizeof(long)) - (FuzzyValue.Count * sizeof(long));
         FuzzyCountBuffer mergedBuffer = default;
         Span<long> merged = mergedBuffer;
-        for (int kind = 0; kind < FuzzyValue.Count; kind++)
-        {
-            merged[kind] = state.Bstack.SizeAt(countsAt + (kind * sizeof(long))) + state.FuzzyCounts[kind];
-        }
-
-        long errors = TotalErrors(merged);
-        if (errors > state.MaxErrors || (outer is not null && !WithinTheLimits(merged, outer)))
+        if (!TheBodysErrorsFitOutside(state, test, lookMark, merged, out long errors))
         {
             return false;
         }
@@ -20951,7 +20941,7 @@ internal static class Matcher
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
     private static int TakeTheRunOut(MatchState state, ref Node node, ref int stringPos, in InnermostConstruct top)
     {
-        if (RunOutCanWaitForTheBody(state, top))
+        if (RunOutCanWaitForTheBody(state, top) || TakeANegativeRunOutInPlace(state, top))
         {
             stringPos = -1;
             return _armBacktrack;
@@ -21306,6 +21296,104 @@ internal static class Matcher
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// <see cref="CloseTheBodysSection"/>'s test, alone: the counts the body's section adds to the
+    /// enclosing section's at the construct's entry, and whether they fit the enclosing section's
+    /// limits and the match's error limit.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The lookaround or condition whose body ran out.</param>
+    /// <param name="lookMark">The backtracking-stack position just above its entry.</param>
+    /// <param name="merged">Receives the added counts.</param>
+    /// <param name="errors">Receives their total.</param>
+    /// <returns><see langword="false"/> if they are over a limit.</returns>
+    private static bool TheBodysErrorsFitOutside(
+        MatchState state,
+        Node test,
+        int lookMark,
+        Span<long> merged,
+        out long errors
+    )
+    {
+        Node? outer = test.EnclosingSection;
+
+        /* bstack: ... fuzzy_counts change_count capture_change sstack LOOKAROUND | CONDITIONAL */
+
+        int countsAt = lookMark - 1 - (3 * sizeof(long)) - (FuzzyValue.Count * sizeof(long));
+        for (int kind = 0; kind < FuzzyValue.Count; kind++)
+        {
+            merged[kind] = state.Bstack.SizeAt(countsAt + (kind * sizeof(long))) + state.FuzzyCounts[kind];
+        }
+
+        errors = TotalErrors(merged);
+        return errors <= state.MaxErrors && (outer is null || WithinTheLimits(merged, outer));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md A', REVIEW-1200): a run-out in a negative lookaround's or a
+    /// negative test's body, taken in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Where the construct's mark tops the pruning stack (no atomic group, possessive repeat or
+    /// other construct open around the item) and the pattern has no verb and no group call, the
+    /// run-out (<see cref="RunOutInALookaroundBody"/>, then the jump to the body's end node) only
+    /// closes the body's section, pushes a touch, notes D90's blocked end, and reaches
+    /// <see cref="EndALookaroundInTheSecondPass"/>, where a negative construct's blocked end taints
+    /// the frame and backtracks; backtracking then pops the touch and the section entry. So this
+    /// does what stays (the touched flag, the D90 note under the same condition, the frame's cut
+    /// taint) and backtracks, or fails the path where closing the section would fail. Captures
+    /// marked unknown would be undone by the same backtrack, so they are not marked.
+    /// </para>
+    /// <para>
+    /// It spares the cycle (the end node, the touch and the section entry, 3 steps) on every such
+    /// run-out, main's own included.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the run-out was taken here, and the path backtracks.</returns>
+    private static bool TakeANegativeRunOutInPlace(MatchState state, in InnermostConstruct top)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            !top.Read
+            || top.Op is not (Opcode.Lookaround or Opcode.Conditional)
+            || top.Look.Node.Match
+            || pattern.HasBacktrackingVerb
+            || pattern.HasGroupCalls
+            || state.PartialSide == MatchState.PartialNone
+            || pattern.SecondPassAsBeforeD11
+        )
+        {
+            return false;
+        }
+
+        Node look = top.Look.Node;
+        if (pattern.HasFuzzyInABody && state.FuzzyNode != look.EnclosingSection)
+        {
+            FuzzyCountBuffer mergedBuffer = default;
+            if (!TheBodysErrorsFitOutside(state, look, (int)top.Mark, mergedBuffer, out _))
+            {
+                state.NoteRunOutTaken(answered: false);
+                return true;
+            }
+        }
+
+        state.AttemptTouchedTheTextToCome = true;
+
+        // RunOutInALookaroundBody's D90 condition, for a negative construct.
+        if (look.Op != Opcode.Lookaround || !OnlyTheAttemptsMarkIsBelow(state, state.Pstack.Count - sizeof(long)))
+        {
+            state.NoteABlockedEnd();
+        }
+
+        TaintTheFrame(state, (int)top.Mark - 1);
+        state.NotePartialEvent(PartialEvent.RunOutTakenInPlace);
+        state.NoteRunOutTaken(answered: false);
+        return true;
     }
 
     /// <summary>
