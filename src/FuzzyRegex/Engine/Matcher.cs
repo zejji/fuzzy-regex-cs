@@ -11679,11 +11679,98 @@ internal static class Matcher
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
 
+        // NOT UPSTREAM'S, D124 (OPT.md P-d1): the rest of the string, deleted at the edge in this
+        // retry. Each deletion is pushed, recorded and counted as the per-character walk does, so
+        // backtracking takes them back one by one; only the re-entries and run-outs between them
+        // are skipped.
+        if (
+            poppedType == _exactFuzzyType
+            && data.FuzzyType == FuzzyValue.Del
+            && TheRestOfTheStringGoesAtOnce(state, newNode!, (Opcode)op, step)
+        )
+        {
+            while (step > 0 ? data.NewStringPos < newNode!.Values.Length : data.NewStringPos > 0)
+            {
+                int before = data.NewStringPos;
+                if (NextFuzzyMatchItem(state, ref data, true, step) != MatchStatus.Success)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                state.Bstack.PushNode(newNode);
+                state.Bstack.PushInt8(data.Step);
+                state.Bstack.PushSize(before);
+                state.Bstack.PushSize(state.TextPos);
+                state.Bstack.PushUInt8((byte)FuzzyValue.Del);
+                state.Bstack.PushUInt8(op);
+
+                state.RecordFuzzy(FuzzyValue.Del, state.TextPos);
+                ++fuzzyCounts[FuzzyValue.Del];
+                state.CaptureChange += MatchState.FuzzyEditChange;
+            }
+        }
+
         state.TextPos = data.NewTextPos;
         node = newNode!;
         stringPos = data.NewStringPos;
 
         return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md P-d1, REVIEW-1200): whether a plain string's deletion at the
+    /// edge can take the rest of the string with it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// At the edge only deletions fit, so the walk is deletion, re-entry, run-out, deletion. Each
+    /// run-out between the first deletion and the last adds nothing here:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>in a positive test under B2's conditions whose frame is tainted, it
+    /// fails at once (<see cref="TheDedupWouldCatchTheRunOut"/>);</description></item>
+    /// <item><description>in a negative lookaround that takes its deletion first
+    /// (<see cref="DeletionGoesFirst"/>), it is taken in place, a cut taint, or pushed as one more
+    /// pending run-out, which the run-out pending since the first deletion already stands for
+    /// (<see cref="TakeANegativeRunOutInPlace"/>, (g)).</description></item>
+    /// </list>
+    /// <para>
+    /// A deletion that does not fit stops the walk at a run-out of the same kind, so the batch
+    /// fails there instead. Plain strings only: a reference's position is in the text, and a
+    /// full-case-folded string deletes by folded characters.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state, with the text position after the first deletion.</param>
+    /// <param name="node">The string.</param>
+    /// <param name="op">The retry's opcode.</param>
+    /// <param name="step">Its direction.</param>
+    /// <returns><see langword="true"/> if the rest can be deleted in this retry.</returns>
+    private static bool TheRestOfTheStringGoesAtOnce(MatchState state, Node node, Opcode op, sbyte step)
+    {
+        if (
+            op is not (Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev)
+            || node.Op != op
+            || (
+                step > 0 ? state.TextPos < state.TextEnd || !state.RunsOutRight : !RanOutOnTheLeft(state, state.TextPos)
+            )
+        )
+        {
+            return false;
+        }
+
+        InnermostConstruct top = ReadInnermostConstruct(state);
+        if (!top.Read)
+        {
+            return false;
+        }
+
+        return top.Op == Opcode.Conditional
+            ? TheDedupWouldCatchTheRunOut(state, top)
+            : top.Op == Opcode.Lookaround
+                && !top.Look.Node.Match
+                && state.PartialSide != MatchState.PartialNone
+                && !state.Pattern.SecondPassAsBeforeD11
+                && DeletionGoesFirst(state, top);
     }
 
     /// <summary>

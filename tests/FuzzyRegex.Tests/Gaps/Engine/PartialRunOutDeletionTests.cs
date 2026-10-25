@@ -430,6 +430,37 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// At the edge a string's remaining characters can only be deleted, and each state between
+    /// the first deletion and the last is a run-out that B2 (a positive test) or the in-place
+    /// run-out and the pending one (a negative lookaround) make redundant, so one retry deletes
+    /// the rest (OPT.md P-d1, REVIEW-1200). The bounds are the per-character walk less its
+    /// re-entries; the tree before P-d1 took 26 and 31, main (a16e35a0) 23 and 26.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?=(?:xy){d<=2})(?!)|)\Z", "", true, 24)]
+    [Arguments(@"x(?(?=(?:xyz){d<=3})(?!)|)\Z", "x", false, 27)]
+    public void The_rest_of_a_string_is_deleted_at_the_edge_in_one_retry(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletions at the edge need no re-entry between them"
+        );
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice
