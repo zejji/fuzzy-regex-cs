@@ -17084,6 +17084,9 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.RunOutHeldTest: // NOT UPSTREAM'S, D124 (OPT.md P-e): a test its deletions would hold.
+                    HoldTheTestIfItsBlockedRunFailed(state);
+                    goto backtrack;
                 case Opcode.RunOutPending: // NOT UPSTREAM'S, D124: the run-out after a deletion that failed.
                     armNode = node;
                     armStringPos = stringPos;
@@ -21324,8 +21327,117 @@ internal static class Matcher
                 break;
         }
 
+        if (
+            (kind == item || (kind == text && !isReference)) && TheDeletionsWouldHoldTheTest(state, node, toDelete, top)
+        )
+        {
+            state.Bstack.PushUInt8((byte)Opcode.RunOutHeldTest);
+
+            /* bstack: RUN_OUT_HELD_TEST */
+        }
+
         state.NotePartialEvent(PartialEvent.RunOutKeptDeletion);
         return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md P-e, REVIEW-1200): whether a positive test's kept deletion can
+    /// only lead to (P)'s cut-and-fail, so the test can be held where that path would start.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The exact predicate: from the item, the path holds only fuzzy items of the item's own
+    /// section (single characters, or plain strings), none with an earlier deletion twin, then
+    /// the section's END_FUZZY, then the test's end, and their deletions fit
+    /// <see cref="DeletionRoom"/>. Deleting them reads no text, so the path reaches the test's end
+    /// with nothing touched above the frame (required here: no w-mark above it now) and the
+    /// decided end's clause holds; with B2's conditions and <see cref="DecidedRerunCannotDiffer"/>,
+    /// (P) then cuts, holds and fails. Run-outs on the way are B2's, and fail. The blocked run is
+    /// still taken first: the entry sits above the deletion's frame, and its arm holds the test
+    /// only once the frame carries the blocked end's taint, falling through to the real deletion
+    /// otherwise.
+    /// </para>
+    /// <para>
+    /// <see cref="DeletionsCanEmptyTheRest"/> is not this test: it answers yes on what it cannot
+    /// read.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="item">The item that ran out.</param>
+    /// <param name="toDelete">How many of its characters are left to delete.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the deletions would hold the test.</returns>
+    private static bool TheDeletionsWouldHoldTheTest(
+        MatchState state,
+        Node item,
+        int toDelete,
+        in InnermostConstruct top
+    )
+    {
+        if (
+            !APositiveTestsLaterRunOutsAreDropped(state, top)
+            || !DecidedRerunCannotDiffer(state)
+            || item.HasEarlierDeletionTwin
+            || (state.WMarks.Count != 0 && state.WMarks[^1].Position > (int)top.Mark - 1)
+            || state.FuzzyNode is null
+        )
+        {
+            return false;
+        }
+
+        long room = DeletionRoom(state);
+        long count = toDelete;
+        Node? next = item.Next1.Node;
+
+        // A bound only against a malformed cycle; the chain is short.
+        for (int i = 0; i < 64 && next is not null && count <= room; i++)
+        {
+            if (next.Op == Opcode.EndFuzzy)
+            {
+                return next.Next1.Node is { } end && end == top.Look.Node.LookaroundEnd;
+            }
+
+            bool isString = next.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev;
+            if (
+                (!isString && !NodeQueries.MatchesOneCharacter(next))
+                || (next.Status & NodeStatus.Fuzzy) == 0
+                || next.HasEarlierDeletionTwin
+            )
+            {
+                return false;
+            }
+
+            count += isString ? next.Values.Length : 1;
+            next = next.Next1.Node;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md P-e): the arm of <see cref="Opcode.RunOutHeldTest"/>. Once the
+    /// test's blocked run has failed (the frame carries its cut taint and nothing is touched above
+    /// it), does what (P) does at the decided end the deletion's path would reach: cut the body,
+    /// hold the test, and fail. Otherwise it does nothing, and backtracking takes the deletion.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void HoldTheTestIfItsBlockedRunFailed(MatchState state)
+    {
+        InnermostConstruct top = ReadInnermostConstruct(state);
+        if (!top.Read || top.Op != Opcode.Conditional || !top.Look.Node.Match)
+        {
+            return;
+        }
+
+        int frame = (int)top.Mark - 1;
+        if (!HasWMarkAt(state, frame, WMarkKind.CutTaint) || state.WMarks[^1].Position > frame)
+        {
+            return;
+        }
+
+        CutBstack(state, (int)top.Mark);
+        state.AddWMark(frame, WMarkKind.Held);
+        state.NotePartialEvent(PartialEvent.RunOutTestHeld);
     }
 
     /// <summary>

@@ -413,4 +413,12 @@ internal enum Opcode : uint
     /// never appears on a node or in a code list.
     /// </summary>
     RunOutPending = 108,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124, OPT.md P-e): the entry above a positive test's kept deletion whose path
+    /// can only reach (P)'s cut-and-fail (<c>Matcher.TheDeletionsWouldHoldTheTest</c>). Backtracking
+    /// onto it after the test's blocked run failed holds the test at once. It never appears on a
+    /// node or in a code list.
+    /// </summary>
+    RunOutHeldTest = 109,
 }

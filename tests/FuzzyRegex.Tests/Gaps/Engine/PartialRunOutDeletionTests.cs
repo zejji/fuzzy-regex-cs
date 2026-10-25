@@ -461,6 +461,51 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A positive test whose rest can be deleted within the budget is held once its blocked run
+    /// has failed (OPT.md P-e, REVIEW-1200): the deletion's path can only reach (P)'s cut-and-fail,
+    /// so that is done where the path would start, without walking it. The bounds are main's
+    /// counts (a16e35a0); the tree before P-e took 24 and 53.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?=(?:xx){d<=1})(?!)|)\Z", "x", true, 23)]
+    [Arguments(@"x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", false, 51)]
+    public void A_positive_test_its_deletions_would_decide_is_held_without_the_walk(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletion's path would only reach the held test's cut-and-fail"
+        );
+    }
+
+    /// <summary>
+    /// P-e's guard: a touch inside the body before the item (the undetermined <c>\B</c> at the
+    /// edge) makes the deletion's end blocked, not decided, so the test is not held and the
+    /// no-branch's run-out answers (the staged tree's P(0, 1)). REVIEW-1200's own row,
+    /// <c>x(?(?=\B(?:y){d&lt;=1})(?!)|)</c> over 'x', completes in the first pass and never runs
+    /// out, so the <c>z</c> is added.
+    /// </summary>
+    [Test]
+    public void A_positive_test_with_a_touch_before_the_item_is_not_held()
+    {
+        Match m = new FuzzyRegex(@"x(?(?=\B(?:y){d<=1})(?!)|)z").Match("x", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice
@@ -593,7 +638,14 @@ public sealed class PartialRunOutDeletionTests
         _ = Matcher.DoMatch(state, search);
 
         EngineWork.SkipUnlessCounting();
-        (state.PartialEventCount(PartialEvent.DecidedRerunSkipped) != 0).Should().Be(skipped);
+        // P-e holds the test where the deletion's path would start, which is (P) done early.
+        (
+            state.PartialEventCount(PartialEvent.DecidedRerunSkipped)
+                + state.PartialEventCount(PartialEvent.RunOutTestHeld)
+            != 0
+        )
+            .Should()
+            .Be(skipped);
     }
 
     /// <summary>
