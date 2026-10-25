@@ -2083,7 +2083,10 @@ internal sealed class PatternObject
     /// A walk from the start node that carries the section open at each node: FUZZY opens its own
     /// for its body, and END_FUZZY goes back to the one FUZZY was reached in. Sections nest, so each
     /// node is reached in one section whichever path reaches it; a repeat's end leads back to its
-    /// body in the same section.
+    /// body in the same section. It runs whether or not a body holds a FUZZY node: the matcher
+    /// reads a null section as "outside every section" (the decided end, RunOutCanWaitForTheBody,
+    /// D124's deletion-first order and certifier), which must hold for a construct inside a
+    /// section whose body has no section of its own too.
     /// </remarks>
     /// <param name="pattern">The pattern, with its bodies set.</param>
     private static void SetEnclosingSections(PatternObject pattern)
@@ -2100,12 +2103,12 @@ internal sealed class PatternObject
             }
         }
 
-        if (!fuzzyInABody || pattern.StartNode is not { } start)
+        if (pattern.StartNode is not { } start)
         {
             return;
         }
 
-        pattern.HasFuzzyInABody = true;
+        pattern.HasFuzzyInABody = fuzzyInABody;
         var outerOf = new Dictionary<int, Node?>();
         var seen = new HashSet<int>();
         var todo = new Stack<(Node Node, Node? Section)>();
