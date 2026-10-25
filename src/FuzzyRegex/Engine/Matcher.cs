@@ -20992,7 +20992,7 @@ internal static class Matcher
             return false;
         }
 
-        if (!ThisErrorPermitted(state, FuzzyValue.Del) || !RunOutFeedsADecision(state))
+        if (!ThisErrorPermitted(state, FuzzyValue.Del) || !RunOutFeedsADecision(state) || DecisionIsVacuous(state))
         {
             return false;
         }
@@ -21170,6 +21170,20 @@ internal static class Matcher
             && !pattern.HasGroupCalls
             && OnlyTheAttemptsMarkIsBelow(state, state.Pstack.Count - sizeof(long));
     }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md (V)): whether the innermost open construct is a positive
+    /// lookaround whose decision nothing can read (<see cref="PatternObject.VacuousDecisionLookarounds"/>),
+    /// so a deletion that decides it cannot change which paths survive.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the decision is vacuous.</returns>
+    private static bool DecisionIsVacuous(MatchState state) =>
+        state.Pattern.VacuousDecisionLookarounds is { } vacuous
+        && state.Pstack.TopSize(out long mark)
+        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+        && op == Opcode.Lookaround
+        && vacuous[look.Node.Index];
 
     /// <summary>
     /// NOT UPSTREAM'S, D124: whether the innermost open construct, the one whose mark tops the

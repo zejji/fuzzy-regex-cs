@@ -833,6 +833,18 @@ internal sealed class PatternObject
     internal Node?[]? FuzzyRunExits;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D124: by <see cref="Node.Index"/>, the positive lookarounds whose decision
+    /// no construct can read, although <c>Matcher.RunOutFeedsADecision</c> says one does. Each
+    /// lies in no other lookaround's or condition test's body, and every atomic group (or
+    /// possessive repeat) around it is commit-neutral: nothing in the group's body outside this
+    /// lookaround's body can leave an alternative on the backtracking stack, so the commit a
+    /// decided lookaround allows discards no path. A fuzzy item that runs out in such a body keeps
+    /// no deletion (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>). Null for a pattern with none,
+    /// and never set with a group call or a verb.
+    /// </summary>
+    internal bool[]? VacuousDecisionLookarounds;
+
+    /// <summary>
     /// NOT UPSTREAM (ledger entry 44's addendum): how many alternations have an
     /// <c>END_OPTIONAL_PASS</c>, and so a slot in <see cref="MatchState.OptionalPasses"/>. Counted
     /// by <c>NodeCompiler.BuildBranch</c>.
@@ -1494,6 +1506,12 @@ internal sealed class PatternObject
         // reads, once the nodes are numbered.
         SetLookaroundBodies(self);
 
+        // NOT UPSTREAM'S, D124: see VacuousDecisionLookarounds.
+        if (self.IsFuzzy && !self.HasGroupCalls && !self.HasBacktrackingVerb)
+        {
+            SetVacuousDecisionLookarounds(self);
+        }
+
         // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
         if (self.OptionalPassBranches is { } optionalPassBranches)
         {
@@ -1851,6 +1869,118 @@ internal sealed class PatternObject
 
         return ceiling;
     }
+
+    /// <summary>NOT UPSTREAM'S, D124: sets <see cref="VacuousDecisionLookarounds"/>.</summary>
+    /// <remarks>
+    /// An atomic group's body is the nodes reachable from its first node before its own
+    /// <c>END_ATOMIC</c>, counted by nesting depth. A node can leave an alternative unless it is a
+    /// group boundary, an exact one-character item or string, or the lookaround in question with
+    /// its end; everything else (a branch, any repeat, a fuzzy node, another lookaround or test, a
+    /// nested atomic group, a zero-width test) counts as one, which only keeps a deletion that
+    /// could have gone.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered and its lookaround bodies set.</param>
+    private static void SetVacuousDecisionLookarounds(PatternObject pattern)
+    {
+        List<Node> nodes = pattern.NodeList;
+        var inATestBody = new bool[nodes.Count];
+        foreach (Node test in nodes)
+        {
+            if (test.BodyInfo is { } body)
+            {
+                foreach (int i in body.Nodes)
+                {
+                    inATestBody[i] = true;
+                }
+            }
+        }
+
+        // For each atomic group: the lookarounds directly in its body, and whether it is neutral
+        // for each (all its body's other nodes are alternative-free).
+        var enclosing = new Dictionary<int, List<(HashSet<int> Body, Node Atomic)>>();
+        foreach (Node atomic in nodes)
+        {
+            if (atomic.Op != Opcode.Atomic)
+            {
+                continue;
+            }
+
+            var body = new HashSet<int>();
+            var todo = new Stack<(Node Node, int Depth)>();
+            todo.Push((atomic.Next1.Node!, 0));
+            while (todo.Count > 0)
+            {
+                (Node n, int depth) = todo.Pop();
+                if (n.Op == Opcode.EndAtomic && depth == 0)
+                {
+                    continue;
+                }
+
+                if (!body.Add(n.Index))
+                {
+                    continue;
+                }
+
+                int next = depth + (n.Op == Opcode.Atomic ? 1 : 0) - (n.Op == Opcode.EndAtomic ? 1 : 0);
+                foreach (Node? to in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                {
+                    if (to is not null)
+                    {
+                        todo.Push((to, next));
+                    }
+                }
+            }
+
+            foreach (int i in body.Where(i => nodes[i] is { Op: Opcode.Lookaround, Match: true }))
+            {
+                if (!enclosing.TryGetValue(i, out var list))
+                {
+                    enclosing[i] = list = [];
+                }
+
+                list.Add((body, atomic));
+            }
+        }
+
+        foreach ((int index, var atomics) in enclosing)
+        {
+            Node look = nodes[index];
+            if (inATestBody[index] || look.BodyInfo is not { } lookBody)
+            {
+                continue;
+            }
+
+            var own = new HashSet<int>(lookBody.Nodes) { look.Index };
+            if (look.LookaroundEnd is { } end)
+            {
+                own.Add(end.Index);
+            }
+
+            bool neutral = atomics.TrueForAll(a => a.Body.All(i => own.Contains(i) || LeavesNoAlternative(nodes[i])));
+            if (neutral)
+            {
+                pattern.VacuousDecisionLookarounds ??= new bool[nodes.Count];
+                pattern.VacuousDecisionLookarounds[index] = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// D124: whether matching a node can never leave an alternative on the backtracking stack: a
+    /// group boundary, or an exact one-character item or string. See
+    /// <see cref="SetVacuousDecisionLookarounds"/>.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> if it cannot.</returns>
+    private static bool LeavesNoAlternative(Node node) =>
+        node.Op is Opcode.StartGroup or Opcode.EndGroup
+        || (
+            (node.Status & NodeStatus.Fuzzy) == 0
+            && (
+                node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev
+                || NodeQueries.MatchesOneCharacter(node)
+            )
+        );
 
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>

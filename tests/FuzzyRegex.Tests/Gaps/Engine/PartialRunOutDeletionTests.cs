@@ -349,6 +349,66 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A positive lookaround whose only enclosing constructs are commit-neutral atomic groups keeps
+    /// no deletion: a decided success would let the group commit, but nothing in the group outside
+    /// the lookaround can leave an alternative, so the commit discards no path (OPT.md (V)). The
+    /// bound is main's count (a16e35a0); the kept deletion cost 35.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_lookaround_whose_decision_nothing_reads_keeps_no_deletion()
+    {
+        var regex = new FuzzyRegex("(x)(?>(?=(?:x+){d<=1}))y");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+            },
+            30,
+            "the atomic group's commit discards nothing"
+        );
+    }
+
+    /// <summary>
+    /// Each kind of node that can leave an alternative inside the atomic group makes the commit
+    /// matter, so the deletion is kept there: an alternation, an optional or a lazy repeat, a
+    /// possessive repeat (an atomic group around a repeat), a fuzzy item, and a second lookaround.
+    /// The first row is the neutral control, where none is kept.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched over 'x'.</param>
+    /// <param name="kept">Whether the deletion is kept.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(x)(?>(?=(?:x){d<=1}))y", false)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})|y)z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})x?)z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})x*?)z", true)]
+    [Arguments("(x)(?:(?=(?:x){d<=1})x?)++z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?:y){e<=1})z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?=y?))z", true)]
+    public void A_choice_point_in_the_atomic_group_keeps_the_deletion(string pattern, bool kept)
+    {
+        var regex = new FuzzyRegex(pattern);
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            "x".AsMemory(),
+            0,
+            1,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: true);
+
+        EngineWork.SkipUnlessCounting();
+        (state.PartialEventCount(PartialEvent.RunOutKeptDeletion) != 0).Should().Be(kept);
+    }
+
+    /// <summary>
     /// A reference to a capture a run-out left unknown runs out where it stands, away from the
     /// edge, and keeps no deletion: it presumes the rest of the text (build chunk 8). The lookahead
     /// at 1 runs out with <c>a+</c> wanting more, so group 1 is unknown in the negative lookahead.

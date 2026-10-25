@@ -908,6 +908,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.FuzzyRunExits",
             "PatternObject.OptionalPassBranches",
             "PatternObject.OptionalPassEndOf",
+            // D124 added this table, written by Compile once the lookaround bodies are set
+            // (SetVacuousDecisionLookarounds).
+            "PatternObject.VacuousDecisionLookarounds",
             // The empty-iteration rule added these three, written by Compile after the node loop.
             "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
