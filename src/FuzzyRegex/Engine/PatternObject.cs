@@ -833,18 +833,6 @@ internal sealed class PatternObject
     internal Node?[]? FuzzyRunExits;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D124: by <see cref="Node.Index"/>, the positive lookarounds whose decision
-    /// no construct can read, although <c>Matcher.RunOutFeedsADecision</c> says one does. Each
-    /// lies in no other lookaround's or condition test's body, and every atomic group (or
-    /// possessive repeat) around it is commit-neutral: nothing in the group's body outside this
-    /// lookaround's body can leave an alternative on the backtracking stack, so the commit a
-    /// decided lookaround allows discards no path. A fuzzy item that runs out in such a body keeps
-    /// no deletion (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>). Null for a pattern with none,
-    /// and never set with a group call or a verb.
-    /// </summary>
-    internal bool[]? VacuousDecisionLookarounds;
-
-    /// <summary>
     /// NOT UPSTREAM (ledger entry 44's addendum): how many alternations have an
     /// <c>END_OPTIONAL_PASS</c>, and so a slot in <see cref="MatchState.OptionalPasses"/>. Counted
     /// by <c>NodeCompiler.BuildBranch</c>.
@@ -1506,8 +1494,8 @@ internal sealed class PatternObject
         // reads, once the nodes are numbered.
         SetLookaroundBodies(self);
 
-        // NOT UPSTREAM'S, D124: see VacuousDecisionLookarounds.
-        if (self.IsFuzzy && !self.HasGroupCalls && !self.HasBacktrackingVerb)
+        // NOT UPSTREAM'S, D124: see Node.HasVacuousDecision.
+        if (self.IsFuzzy && !self.HasGroupCalls && !self.HasBacktrackingVerb && HasAtomicAndPositiveLookaround(self))
         {
             SetVacuousDecisionLookarounds(self);
         }
@@ -1870,7 +1858,28 @@ internal sealed class PatternObject
         return ceiling;
     }
 
-    /// <summary>NOT UPSTREAM'S, D124: sets <see cref="VacuousDecisionLookarounds"/>.</summary>
+    /// <summary>
+    /// D124: whether the pattern has an atomic group and a positive lookaround, without which
+    /// <see cref="SetVacuousDecisionLookarounds"/> has nothing to set. Asked before calling it, not
+    /// inside: its lambdas capture a local, so entering it allocates their closure (the BDN gate of
+    /// 2026-10-25 found compiling every fuzzy pattern dearer).
+    /// </summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <returns><see langword="true"/> if it has both.</returns>
+    private static bool HasAtomicAndPositiveLookaround(PatternObject pattern)
+    {
+        bool anyAtomic = false;
+        bool anyPositive = false;
+        foreach (Node n in pattern.NodeList)
+        {
+            anyAtomic |= n.Op == Opcode.Atomic;
+            anyPositive |= n is { Op: Opcode.Lookaround, Match: true };
+        }
+
+        return anyAtomic && anyPositive;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D124: sets <see cref="Node.HasVacuousDecision"/>.</summary>
     /// <remarks>
     /// An atomic group's body is the nodes reachable from its first node before its own
     /// <c>END_ATOMIC</c>, counted by nesting depth. A node can leave an alternative unless it is a
@@ -1959,8 +1968,7 @@ internal sealed class PatternObject
             bool neutral = atomics.TrueForAll(a => a.Body.All(i => own.Contains(i) || LeavesNoAlternative(nodes[i])));
             if (neutral)
             {
-                pattern.VacuousDecisionLookarounds ??= new bool[nodes.Count];
-                pattern.VacuousDecisionLookarounds[index] = true;
+                look.HasVacuousDecision = true;
             }
         }
     }
@@ -2092,10 +2100,12 @@ internal sealed class PatternObject
     private static void SetEnclosingSections(PatternObject pattern)
     {
         var fuzzyInABody = false;
+        var anyBody = false;
         foreach (Node test in pattern.NodeList)
         {
             if (test.BodyInfo is { } body)
             {
+                anyBody = true;
                 foreach (int i in body.Nodes)
                 {
                     fuzzyInABody |= pattern.NodeList[i].Op == Opcode.Fuzzy;
@@ -2103,7 +2113,9 @@ internal sealed class PatternObject
             }
         }
 
-        if (pattern.StartNode is not { } start)
+        // With no lookaround or condition test nothing reads a section (a run-out in a body is the
+        // only reader), so nothing is built: compiling such a pattern allocates what it did before.
+        if (!anyBody || pattern.StartNode is not { } start)
         {
             return;
         }

@@ -206,6 +206,19 @@ internal sealed class Node
     /// </summary>
     internal bool HasEarlierDeletionTwin;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: for a positive lookaround, whether no construct can read its decision,
+    /// although <c>Matcher.RunOutFeedsADecision</c> says one does. It lies in no other lookaround's
+    /// or condition test's body, and every atomic group (or possessive repeat) around it is
+    /// commit-neutral: nothing in the group's body outside this lookaround's body can leave an
+    /// alternative on the backtracking stack, so the commit a decided lookaround allows discards no
+    /// path. A fuzzy item that runs out in such a body keeps no deletion
+    /// (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>). Never set with a group call or a verb
+    /// (<c>PatternObject.SetVacuousDecisionLookarounds</c>). A flag here fits the padding the two
+    /// fields above leave, where an array on the pattern added 8 bytes to every compile.
+    /// </summary>
+    internal bool HasVacuousDecision;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

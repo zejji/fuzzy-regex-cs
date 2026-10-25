@@ -21197,7 +21197,7 @@ internal static class Matcher
         // decision test may walk the pruning stack.
         if (
             !top.Read
-            || DecisionIsVacuous(state, top)
+            || DecisionIsVacuous(top)
             || TheRepeatEndWouldDropTheDeletion(state, node, kind == item)
             || !ThisErrorPermitted(state, FuzzyValue.Del)
             || !InnermostRunOutFeedsADecision(state, top)
@@ -21789,16 +21789,13 @@ internal static class Matcher
 
     /// <summary>
     /// NOT UPSTREAM'S, D124 (OPT.md (V)): whether the innermost open construct is a positive
-    /// lookaround whose decision nothing can read (<see cref="PatternObject.VacuousDecisionLookarounds"/>),
+    /// lookaround whose decision nothing can read (<see cref="Node.HasVacuousDecision"/>),
     /// so a deletion that decides it cannot change which paths survive.
     /// </summary>
-    /// <param name="state">The match state.</param>
     /// <param name="top">The innermost open construct, read (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns><see langword="true"/> if the decision is vacuous.</returns>
-    private static bool DecisionIsVacuous(MatchState state, in InnermostConstruct top) =>
-        state.Pattern.VacuousDecisionLookarounds is { } vacuous
-        && top.Op == Opcode.Lookaround
-        && vacuous[top.Look.Node.Index];
+    private static bool DecisionIsVacuous(in InnermostConstruct top) =>
+        top.Op == Opcode.Lookaround && top.Look.Node.HasVacuousDecision;
 
     /// <summary>
     /// NOT UPSTREAM'S, D124: <see cref="RunOutFeedsADecision"/>, answered from the innermost open
