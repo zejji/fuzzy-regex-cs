@@ -20894,7 +20894,49 @@ internal static class Matcher
             return _armBacktrack;
         }
 
+        if (TheDedupWouldCatchTheRunOut(state, top))
+        {
+            // As the dedup's hit at a blocked end does (D90, D113).
+            state.AttemptTouchedTheTextToCome = true;
+            state.NoteABlockedEnd();
+            state.NotePartialEvent(PartialEvent.RunOutCaughtByTheDedup);
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
         return TakeTheRunOut(state, ref node, ref stringPos, top);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md B2): whether a run-out in a positive condition test would only
+    /// reach a blocked end that the dedup catches, so it can fail at once.
+    /// </summary>
+    /// <remarks>
+    /// The frame's cut taint says an earlier blocked end of this instance continued, and stored its
+    /// captures for the dedup. The body holds no group, so every end of it has those captures. The
+    /// test lies outside every fuzzy section and the call does not rank, so the dedup leaves the
+    /// counts out of its key (B1, <see cref="EndALookaroundInTheSecondPass"/>) and catches this end.
+    /// On the way the run-out would only close the body's section (which cannot fail: the match's
+    /// bounds are unlimited and there is no outer section), touch, and note a blocked end. A verb
+    /// would also taint its scope there (REVIEW-1000: `(?(?=x\b|(?:xx){d&lt;=1})a|x)|(*PRUNE)q`
+    /// over 'x'), so a pattern with one takes the run-out.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the run-out can fail at once.</returns>
+    private static bool TheDedupWouldCatchTheRunOut(MatchState state, in InnermostConstruct top)
+    {
+        PatternObject pattern = state.Pattern;
+        return top.Read
+            && top.Op == Opcode.Conditional
+            && top.Look.Node.Match
+            && (top.Look.Node.Status & NodeStatus.HasGroups) == 0
+            && pattern.IsFuzzy
+            && top.Look.Node.EnclosingSection is null
+            && !pattern.HasBacktrackingVerb
+            && !pattern.HasGroupCalls
+            && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) == 0
+            && HasWMarkAt(state, (int)top.Mark - 1, WMarkKind.CutTaint);
     }
 
     /// <summary>

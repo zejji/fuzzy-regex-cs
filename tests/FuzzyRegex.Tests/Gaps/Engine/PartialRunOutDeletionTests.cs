@@ -241,7 +241,9 @@ public sealed class PartialRunOutDeletionTests
     /// which measured None even with the guard dropped), an outer section that allows a deletion,
     /// and a consuming item before the inner END_FUZZY keep the deletion. B1: inside a fuzzy
     /// section the counts bound the section, and under BESTMATCH they rank the matches, so they
-    /// stay in the dedup key (the review's counterexample is the first B1 row).
+    /// stay in the dedup key (the review's counterexample is the first B1 row). B2: a verb makes
+    /// the run-out taint the verb's scope, so a pattern with one keeps its second run-out (the
+    /// review's counterexample).
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="subject">The text.</param>
@@ -254,6 +256,7 @@ public sealed class PartialRunOutDeletionTests
     [Arguments(@"(x)(?!(?:(?:x){d<=1}y){i<=1})", "xx", true, 0, 1)]
     [Arguments(@"(?:(?=zy|xy)q){s<=1}", "x", false, 0, 1)]
     [Arguments(@"(?b)x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", true, 1, 1)]
+    [Arguments(@"(?(?=x\b|(?:xx){d<=1})a|x)|(*PRUNE)q", "x", true, 0, 1)]
     public void A_guard_row_keeps_its_answer(
         string pattern,
         string subject,
@@ -291,6 +294,29 @@ public sealed class PartialRunOutDeletionTests
             },
             63,
             "the second continuation differs from the first only in its counts"
+        );
+    }
+
+    /// <summary>
+    /// A positive test's second run-out, after a blocked end of the same instance, fails at once
+    /// where its blocked end would meet B1's dedup (OPT.md B2): the body holds no group, so the
+    /// captures are the stored entry's, and the test lies outside every fuzzy section. The bound is
+    /// B1's count less the dropped cycles (63 with B1, 69 before).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_positive_test_drops_a_run_out_its_dedup_would_catch()
+    {
+        var regex = new FuzzyRegex(@"x(?(?=(?:xx){e<=2})(?!)|)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+            },
+            57,
+            "the second run-out's blocked end would repeat the first"
         );
     }
 
