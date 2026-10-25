@@ -21105,6 +21105,7 @@ internal static class Matcher
         if (
             !top.Read
             || DecisionIsVacuous(state, top)
+            || TheRepeatEndWouldDropTheDeletion(state, node, kind == item)
             || !ThisErrorPermitted(state, FuzzyValue.Del)
             || !InnermostRunOutFeedsADecision(state, top)
         )
@@ -21238,6 +21239,45 @@ internal static class Matcher
 
         state.NotePartialEvent(PartialEvent.RunOutKeptDeletion);
         return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md P-b, REVIEW-1200): whether the deletion of an item that ran out
+    /// would only make an iteration the repeat's end drops.
+    /// </summary>
+    /// <remarks>
+    /// The item is the whole of a repeat's body up to its end node, and the iteration has consumed
+    /// nothing and changed no group, so deleting the item ends an empty iteration whose only edit
+    /// is that deletion. <see cref="FuzzyIterationStands"/> drops such an iteration (-1) unless
+    /// <see cref="EmptyIterationAdmitted"/> admits it: when the count, with this iteration, would
+    /// not exceed the minimum, when a group changed, or when it raises an unmet fuzzy minimum
+    /// (never, without one); or <see cref="CrossedAVerb"/> holds (never, without a verb). So the
+    /// deletion's path fails at the end node, and keeping it only walked there. With a fuzzy
+    /// minimum the iteration can stand: `a(?!(?:x+){2&lt;=d&lt;=2})` over 'a' needs it.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="item">The item that ran out.</param>
+    /// <param name="oneCharacter">Whether the item is a single-character item.</param>
+    /// <returns><see langword="true"/> if the repeat's end would drop the deletion's iteration.</returns>
+    private static bool TheRepeatEndWouldDropTheDeletion(MatchState state, Node item, bool oneCharacter)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            !oneCharacter
+            || item.Next1.Node is not { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
+            || !state.IsFuzzy
+            || pattern.UpstreamEmptyIterations
+            || pattern.HasFuzzyMinimum
+            || pattern.HasBacktrackingVerb
+        )
+        {
+            return false;
+        }
+
+        RepeatData rpData = state.Repeats[(int)end.Values[0]];
+        return state.TextPos == rpData.Start
+            && rpData.Count >= end.Values[1]
+            && MatchState.GroupChanges(state.CaptureChange) == MatchState.GroupChanges(rpData.CaptureChange);
     }
 
     /// <summary>

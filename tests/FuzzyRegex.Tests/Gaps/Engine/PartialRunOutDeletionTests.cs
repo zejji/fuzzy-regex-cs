@@ -392,6 +392,44 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// The deletion of an item that is a repeat's whole body, at the start of an iteration, makes
+    /// an empty deleting iteration, which the repeat's end drops where the count already meets
+    /// the minimum and nothing reads a fuzzy minimum (OPT.md P-b, REVIEW-1200). So it is not kept.
+    /// The tree before P-b took 69 and 112; main (a16e35a0) takes 62 and 106. The first row keeps
+    /// 3 steps over main, the walk of the first <c>x</c>'s deletion, which empties the body.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text, searched.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})y", "xx", 65)]
+    [Arguments(@"x(?(?=(?:x+){d<=1})(?!)|)\Z", "xxx", 106)]
+    public void A_deletion_the_repeat_end_would_drop_is_not_kept(string pattern, string subject, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = regex.Match(subject, partial: true),
+            steps,
+            "the empty deleting iteration is dropped at the repeat's end"
+        );
+    }
+
+    /// <summary>
+    /// P-b's minimum guard (REVIEW-1200's counterexample): with a fuzzy minimum the repeat's end
+    /// admits the empty deleting iteration, which the minimum needs, so the deletion is kept and
+    /// the lookahead fails for every continuation.
+    /// </summary>
+    [Test]
+    public void A_deletion_a_fuzzy_minimum_needs_is_kept()
+    {
+        Match m = new FuzzyRegex(@"a(?!(?:x+){2<=d<=2})").Match("a", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice
