@@ -259,6 +259,96 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A positive test whose decided success comes after a blocked one fails at once, without
+    /// running its yes-branch again, where nothing around the test reads the decision (OPT.md (P)).
+    /// The bound is main's count (a16e35a0); running the branch again cost 35.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_positive_test_decided_after_a_blocked_success_does_not_run_its_branch_again()
+    {
+        var regex = new FuzzyRegex("(x)(?(?=(?:x){d<=1})(?!)|)");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.FullMatch("x", partial: true).Success.Should().BeFalse(),
+            33,
+            "the blocked run of the yes-branch already failed"
+        );
+    }
+
+    /// <summary>
+    /// Each boundary of (P): the answer and counts are the order-preserving engine's (fix/d124 at
+    /// 592719c9, equal to 16c77967 on the gate), and the skip fires only where the argument holds.
+    /// It fires through an enclosing repeat, whose later iterations the blocked run also ran, and
+    /// with a <c>\K</c> in the body, which moves only the start of a run that is never reported. It
+    /// does not fire when any of these hold:
+    /// <list type="bullet">
+    /// <item><description>the test lies in a fuzzy section;</description></item>
+    /// <item><description>an atomic group or a negative lookahead encloses it;</description></item>
+    /// <item><description>its body sets a group the pattern reads;</description></item>
+    /// <item><description>the pattern has a fuzzy minimum;</description></item>
+    /// <item><description>the pattern has BESTMATCH or ENHANCEMATCH;</description></item>
+    /// <item><description>the pattern has a verb.</description></item>
+    /// </list>
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="search">Whether the call searches, rather than matches at the start.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    /// <param name="end">The partial's end.</param>
+    /// <param name="skipped">Whether the skip fires.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, true)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "x", false, -1, -1, true)]
+    [Arguments(@"x(?(?=(?:y){d<=1}\K)(?!)|w)", "x", true, 1, 1, true)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w)){e<=1}", "x", true, 0, 1, false)]
+    [Arguments(@"(?>x(?(?=(?:y){d<=1})(?!)|w)v?)", "x", true, 1, 1, false)]
+    [Arguments(@"x(?(?=((?:y){d<=1}))(?!)|w)\1", "x", true, 1, 1, false)]
+    [Arguments(@"x(?(?=(?:y){d<=1})(?!)|w)(?:v){1<=e<=1}", "x", true, 1, 1, false)]
+    [Arguments(@"(?b)(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, false)]
+    [Arguments(@"(?e)(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, false)]
+    [Arguments(@"x(?(?=(?:y){d<=1})(?!)|w)(*PRUNE)", "x", true, 0, 1, false)]
+    public void The_decided_rerun_is_skipped_only_where_nothing_reads_it(
+        string pattern,
+        string subject,
+        bool search,
+        int start,
+        int end,
+        bool skipped
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(subject, partial: true) : regex.MatchAtStart(subject, partial: true);
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.Success, m.PartialMatch, m.Index, m.Index + m.Length, m.FuzzyCounts.Total)
+                .Should()
+                .Be((true, true, start, end, 0));
+        }
+
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search);
+
+        EngineWork.SkipUnlessCounting();
+        (state.PartialEventCount(PartialEvent.DecidedRerunSkipped) != 0).Should().Be(skipped);
+    }
+
+    /// <summary>
     /// A reference to a capture a run-out left unknown runs out where it stands, away from the
     /// edge, and keeps no deletion: it presumes the rest of the text (build chunk 8). The lookahead
     /// at 1 runs out with <c>a+</c> wanting more, so group 1 is unknown in the negative lookahead.

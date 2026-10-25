@@ -243,4 +243,7 @@ internal enum PartialEvent
 
     /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
     RunOutPendingDropped,
+
+    /// <summary>D124: a positive test's decided success after a failed blocked one failed without its rerun.</summary>
+    DecidedRerunSkipped,
 }

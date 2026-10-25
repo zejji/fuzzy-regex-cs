@@ -6274,6 +6274,27 @@ internal static class Matcher
         {
             RemoveWMarkAt(state, frame, WMarkKind.RunOutPending);
             state.NotePartialEvent(PartialEvent.DecidedAfterBlocked);
+
+            // NOT UPSTREAM'S, D124 (OPT.md (P)): a positive test that nothing around reads. The
+            // blocked success before this one has already run the yes-branch from the same
+            // position, and failed, or the call would have ended with its partial. That run treated
+            // every undecided construct after the test both ways, so it covered every outcome a
+            // decided run can reach; and the decided run starts from the same matching state,
+            // since the body sets no group read while matching and the test lies outside every
+            // fuzzy section (the clause above). Only the reported changes and a \K's start differ,
+            // and neither decides success; with no fuzzy minimum and no ranking, the errors the body
+            // spent cannot either. So the decided run would fail too: the test holds for every
+            // continuation, and the conditional fails without its no-branch, as the dedup's
+            // cut-and-fail does (D38).
+            if (op == Opcode.Conditional && DecidedRerunCannotDiffer(state))
+            {
+                CutBstack(state, (int)mark);
+                TaintTheFrame(state, frame); // the clause above took the blocked end's taint off
+                state.AddWMark(frame, WMarkKind.Held);
+                state.NotePartialEvent(PartialEvent.DecidedRerunSkipped);
+                return LookaroundEnd.Backtrack;
+            }
+
             return LookaroundEnd.Cut;
         }
 
@@ -21129,6 +21150,25 @@ internal static class Matcher
                 ((look.Node.Status & NodeStatus.HasGroups) == 0 || !pattern.ReadsCapturesWhileMatching)
                 && (!pattern.IsFuzzy || look.Node.EnclosingSection is null)
             );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md (P)): whether a positive test's decided success, reached after
+    /// a blocked one whose continuation failed, can be failed without running its yes-branch again:
+    /// no construct below the test's mark reads its decision (only the attempt's FAILURE mark lies
+    /// below), and nothing in the pattern makes the outcome depend on the errors spent or on a
+    /// verb's or a call's scope (no fuzzy minimum, no BESTMATCH or ENHANCEMATCH, no verb, no call).
+    /// </summary>
+    /// <param name="state">The match state, with the test's mark on top of the pruning stack.</param>
+    /// <returns><see langword="true"/> if the rerun can be skipped.</returns>
+    private static bool DecidedRerunCannotDiffer(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        return !pattern.HasFuzzyMinimum
+            && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch)) == 0
+            && !pattern.HasBacktrackingVerb
+            && !pattern.HasGroupCalls
+            && OnlyTheAttemptsMarkIsBelow(state, state.Pstack.Count - sizeof(long));
     }
 
     /// <summary>
