@@ -237,4 +237,10 @@ internal enum PartialEvent
     /// (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>).
     /// </summary>
     RunOutKeptDeletion,
+
+    /// <summary>D124: a deletion that could not empty the rest of its body was not kept (the certifier).</summary>
+    RunOutDeletionCertifiedOut,
+
+    /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
+    RunOutPendingDropped,
 }

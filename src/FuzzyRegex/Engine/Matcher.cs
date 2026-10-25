@@ -20982,6 +20982,26 @@ internal static class Matcher
         );
         Debug.Assert(kind == item || stringPos >= 0, "D124: a string runs out part way through itself");
 
+        // The certifier (OPT.md (c'), corrected): where the deletion goes first and the construct
+        // lies outside every fuzzy section, a deletion that cannot empty the rest of the body is
+        // not kept, so the run-out is taken at once, as on main.
+        int toDelete = step > 0 ? node.Values.Length - stringPos : stringPos;
+        if (kind == item)
+        {
+            toDelete = 1;
+        }
+
+        if (
+            deletionFirst
+            && (kind == item || (kind == text && !isReference))
+            && ConstructIsOutsideEverySection(state)
+            && !DeletionsCanEmptyTheRest(state, node, toDelete)
+        )
+        {
+            state.NotePartialEvent(PartialEvent.RunOutDeletionCertifiedOut);
+            return false;
+        }
+
         if (deletionFirst)
         {
             PushPendingRunOut(state, node, stringPos);
@@ -21112,6 +21132,109 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D124: whether the innermost open construct, the one whose mark tops the
+    /// pruning stack, lies outside every fuzzy section, so no section's minimum or count after it
+    /// can depend on the path its body takes.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if it does.</returns>
+    private static bool ConstructIsOutsideEverySection(MatchState state) =>
+        state.Pstack.TopSize(out long mark)
+        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+        && op is Opcode.Lookaround or Opcode.Conditional
+        && look.Node.EnclosingSection is null;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: whether deleting a fuzzy item that ran out at the edge, and every item
+    /// after it up to the end of its body, could fit the budget, so that the deletion could let the
+    /// body succeed on the held text. A prune: <see langword="false"/> only when it certainly
+    /// cannot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// After the deletion the position is still the edge, so every consuming item the body reaches
+    /// next runs out too, and deleting it is the body's only way on without the text to come. The
+    /// walk follows the body's straight chain from the item, and the reasoning holds only up to the
+    /// end of the item's own section: a section a repeat enters again starts with a fresh budget.
+    /// </para>
+    /// <para>The nodes, in order:</para>
+    /// <list type="bullet">
+    /// <item><description>a fuzzy item of that section adds its width to the deletions needed;</description></item>
+    /// <item><description>an item outside every section can neither match at the edge nor be
+    /// deleted, so no success lies past it;</description></item>
+    /// <item><description>a group boundary nothing tests reads nothing;</description></item>
+    /// <item><description>anything else keeps the choice: a branch, a repeat, a zero-width test,
+    /// a nested section or construct, a reference, or a fuzzy item past the section's end.</description></item>
+    /// </list>
+    /// <para>
+    /// The budget is <see cref="DeletionRoom"/>, the section's and the whole match's. Called only
+    /// for a negative lookaround or negative test outside every section
+    /// (<see cref="DeletionGoesFirst"/>, <see cref="ConstructIsOutsideEverySection"/>), where a
+    /// success the walk rules out could only have failed the construct.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item that ran out.</param>
+    /// <param name="remaining">The item's own characters left to delete.</param>
+    /// <returns><see langword="false"/> when the deletions needed cannot fit.</returns>
+    private static bool DeletionsCanEmptyTheRest(MatchState state, Node node, int remaining)
+    {
+        long room = DeletionRoom(state);
+        long count = remaining;
+        if (count > room)
+        {
+            return false;
+        }
+
+        bool ownSection = true;
+        Node? next = node.Next1.Node;
+
+        // A bound only against a malformed cycle; a body's chain is short.
+        for (int i = 0; i < 64 && next is not null; i++)
+        {
+            switch (next.Op)
+            {
+                case Opcode.EndLookaround or Opcode.EndConditional:
+                    return true;
+                case Opcode.EndFuzzy when ownSection:
+                    ownSection = false;
+                    next = next.Next1.Node;
+                    continue;
+                case Opcode.StartGroup
+                or Opcode.EndGroup when !state.Pattern.GroupInfoAt((int)next.Values[0]).Referenced:
+                    next = next.Next1.Node;
+                    continue;
+            }
+
+            bool isString = next.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev;
+            if (!isString && !NodeQueries.MatchesOneCharacter(next))
+            {
+                return true;
+            }
+
+            if ((next.Status & NodeStatus.Fuzzy) == 0)
+            {
+                return false;
+            }
+
+            if (!ownSection)
+            {
+                return true;
+            }
+
+            count += isString ? next.Values.Length : 1;
+            if (count > room)
+            {
+                return false;
+            }
+
+            next = next.Next1.Node;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D124: pushes the run-out a fuzzy item's deletion goes before
     /// (<see cref="DeletionGoesFirst"/>), to be taken if the deletion's path fails.
     /// </summary>
@@ -21151,6 +21274,31 @@ internal static class Matcher
         state.TextPos = (int)textPos;
         stringPos = (int)itemStringPos;
         node = item!;
+
+        // OPT.md (g): in a negative lookaround a run-out only marks the body undetermined (its
+        // blocked end goes back into the body, never past the construct), and a blocked end already
+        // left that mark on the frame (a cut taint). A second run-out adds nothing, so it is not
+        // taken. What it would have done to the guards is kept: D90's blocked-end note, where
+        // RunOutInALookaroundBody makes it.
+        int top = state.Pstack.Count - sizeof(long);
+        if (
+            top >= 0
+            && ReadPruningMark(state, (int)state.Pstack.SizeAt(top), out Opcode op, out LookaroundStateData look)
+            && op == Opcode.Lookaround
+            && !look.Node.Match
+            && HasWMarkAt(state, (int)state.Pstack.SizeAt(top) - 1, WMarkKind.CutTaint)
+        )
+        {
+            if (!OnlyTheAttemptsMarkIsBelow(state, top) || state.Pattern.HasGroupCalls)
+            {
+                state.NoteABlockedEnd();
+            }
+
+            state.NotePartialEvent(PartialEvent.RunOutPendingDropped);
+            stringPos = -1;
+            return _armBacktrack;
+        }
+
         return TakeTheRunOut(state, ref node, ref stringPos);
     }
 

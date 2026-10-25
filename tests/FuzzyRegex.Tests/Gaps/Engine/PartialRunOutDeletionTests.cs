@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -182,6 +183,79 @@ public sealed class PartialRunOutDeletionTests
         Match m = new FuzzyRegex(pattern).MatchAtStart("ax", partial: true);
 
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+    }
+
+    /// <summary>
+    /// The certifier: where the rest of a negative body cannot be deleted within the budget, or
+    /// holds an item outside every fuzzy section past the item's own section, the deletion is not
+    /// kept and the run-out is taken at once, at main's cost. The bounds are main's counts
+    /// (a16e35a0); the deletion first cost 32 and 36.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(x)(?!(?:xx){d<=1})y", 25)]
+    [Arguments("(x)(?!(?:x){d<=1}y)y", 28)]
+    public void A_deletion_that_cannot_empty_the_body_is_not_kept(string pattern, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+            },
+            steps,
+            "the deletion holds no success of the body"
+        );
+    }
+
+    /// <summary>
+    /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
+    /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
+    /// outer section allows two), so a count against the inner budget alone would skip a choice
+    /// the body needs. 'xx' + anything: the body deletes both x, the lookahead fails everywhere,
+    /// and the search's answer is the edge.
+    /// </summary>
+    [Test]
+    public void A_deletion_the_enclosing_section_completes_is_kept()
+    {
+        Match m = new FuzzyRegex("(x)(?!(?:(?:x){d<=1}x){d<=2})").Match("xx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
+    }
+
+    /// <summary>
+    /// The frame drop: in a negative lookaround a run-out only marks the body undetermined, so a
+    /// pending run-out beneath a deletion whose path has already taken one (the y after
+    /// <c>\b</c> runs out) is dropped. The answer is the same and the drop is counted in a Debug
+    /// build.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_second_run_out_in_an_undetermined_negative_body_is_dropped()
+    {
+        var regex = new FuzzyRegex(@"(x)(?!(?:x){d<=1}\by)y");
+        Match m = regex.Match("x", partial: true);
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            "x".AsMemory(),
+            0,
+            1,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: true);
+
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.RunOutPendingDropped).Should().Be(1);
     }
 
     /// <summary>
