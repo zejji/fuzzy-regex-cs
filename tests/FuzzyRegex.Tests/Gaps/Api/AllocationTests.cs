@@ -213,6 +213,27 @@ public sealed class AllocationTests
         allocated.Should().Be(0, "a warm pattern keeps what its state needs, whatever other threads rent");
     }
 
+    /// <summary>
+    /// D124 added partial-matching tables built at compile time. A pattern with no lookaround or
+    /// condition test, or with no atomic group around a positive lookaround, never reads them, so
+    /// compiling it allocates no more than before D124. The ceilings are a16e35a0's Debug counts
+    /// (the BDN gate of 2026-10-25 found +760 B on <c>UncachedFuzzyIsMatch</c> and +8 B on every
+    /// compile row).
+    /// </summary>
+    /// <param name="pattern">The pattern, one of the BDN compile rows'.</param>
+    /// <param name="ceiling">a16e35a0's bytes for one compile, Debug.</param>
+    [Test]
+    [Arguments(@"(?:needle){e<=1}", 13_344)]
+    [Arguments(@"(quick|slow)\s+(?<colour>[a-z]+)\s+fox", 33_176)]
+    public void Compiling_a_pattern_without_lookarounds_allocates_what_it_did_before_D124(string pattern, long ceiling)
+    {
+        _ = new FuzzyRegex(pattern);
+
+        long allocated = AllocatedBy(() => () => _ = new FuzzyRegex(pattern));
+
+        allocated.Should().BeLessThanOrEqualTo(ceiling, "nothing reads the partial-matching tables here");
+    }
+
     [Test]
     public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
     {

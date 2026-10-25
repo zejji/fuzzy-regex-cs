@@ -1002,6 +1002,8 @@ public sealed class ThreadSafetyTests
             "Node.RunOutGroups",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections.
             "Node.EnclosingSection",
+            // D124: written by Compile once the lookaround bodies are set (SetVacuousDecisionLookarounds).
+            "Node.HasVacuousDecision",
             "Node.Match",
             "Node.Op",
             "Node.Status",

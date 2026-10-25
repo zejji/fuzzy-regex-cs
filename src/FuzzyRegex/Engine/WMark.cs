@@ -231,4 +231,34 @@ internal enum PartialEvent
     /// undid the call and was taken at the call (<c>Matcher.AbandonTheCallsTheBodyOpened</c>).
     /// </summary>
     RunOutCallAbandoned,
+
+    /// <summary>
+    /// D124: a fuzzy item that ran out kept its deletion, in a body whose outcome feeds a decision
+    /// (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>).
+    /// </summary>
+    RunOutKeptDeletion,
+
+    /// <summary>D124: a deletion that could not empty the rest of its body was not kept (the certifier).</summary>
+    RunOutDeletionCertifiedOut,
+
+    /// <summary>D124 (OPT.md C1): a deletion an enclosing section of the body forbids was not kept.</summary>
+    RunOutDeletionForbiddenOutside,
+
+    /// <summary>D124 (OPT.md B2): a positive test's run-out whose blocked end the dedup would catch failed at once.</summary>
+    RunOutCaughtByTheDedup,
+
+    /// <summary>D124 (OPT.md A'): a run-out in a negative construct's body was taken in place: frame tainted, back into the body.</summary>
+    RunOutTakenInPlace,
+
+    /// <summary>D124 (OPT.md P-e): a positive test whose deletions would decide it was held without walking them.</summary>
+    RunOutTestHeld,
+
+    /// <summary>D124 (OPT.md A1): a greedy repeat's body that could only run out went after its tail.</summary>
+    RunOutDeferred,
+
+    /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
+    RunOutPendingDropped,
+
+    /// <summary>D124: a positive test's decided success after a failed blocked one failed without its rerun.</summary>
+    DecidedRerunSkipped,
 }

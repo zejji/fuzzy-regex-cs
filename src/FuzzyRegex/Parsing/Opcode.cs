@@ -405,4 +405,28 @@ internal enum Opcode : uint
     /// It never appears on a node or in a code list.
     /// </summary>
     ContinuationMark = 107,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124): the backtracking entry of a run-out that a fuzzy item's deletion went
+    /// before, in a negative lookaround or a negative test (<c>Matcher.DeletionGoesFirst</c>).
+    /// Backtracking onto it means the deletion's path failed, and its arm takes the run-out. It
+    /// never appears on a node or in a code list.
+    /// </summary>
+    RunOutPending = 108,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124, OPT.md P-e): the entry above a positive test's kept deletion whose path
+    /// can only reach (P)'s cut-and-fail (<c>Matcher.TheDeletionsWouldHoldTheTest</c>). Backtracking
+    /// onto it after the test's blocked run failed holds the test at once. It never appears on a
+    /// node or in a code list.
+    /// </summary>
+    RunOutHeldTest = 109,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124, OPT.md A1): a greedy repeat's body run-out, deferred beneath its tail in
+    /// a negative construct (<c>Matcher.TheBodyCanOnlyRunOut</c>). Backtracking onto it means the
+    /// tail's path failed, and its arm takes the run-out in place. It never appears on a node or in
+    /// a code list.
+    /// </summary>
+    RunOutDeferred = 110,
 }

@@ -1,0 +1,748 @@
+using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
+
+namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
+
+/// <summary>
+/// D124: a fuzzy item that runs out of text inside a negative lookaround's body, or a condition's
+/// test, keeps its deletion, an error that needs no text (<c>Matcher.KeepTheDeletionOfAnItemThatRanOut</c>).
+/// </summary>
+/// <remarks>
+/// <para>
+/// A body that matches the empty string by deleting its items, such as <c>(?:x){d&lt;=1}</c>,
+/// matches whatever follows the edge, so the negative lookaround fails for every continuation.
+/// The run-out went on undecided and the deletion was never tried, so the run-out before the
+/// lookaround was answered as a partial that no text completes: <c>(x)(?!(?:x){d&lt;=1})</c> over
+/// 'xx' was P(1, 2), as upstream 2026.9.29 answers, where <c>(x)(?!x?)</c>, whose body also
+/// matches empty, gives the search's edge partial P(2, 2).
+/// </para>
+/// <para>
+/// The expected answers are the port's own: its non-partial answers over every continuation of up
+/// to three characters (<c>.scratch/s1024/d124/g/judge.cs</c>), or the search's edge partial
+/// (P(n, n) forward, P(0, 0) reversed) where no continuation completes, which the partial
+/// contract allows. The comment on each row gives main's answer before the fix.
+/// </para>
+/// </remarks>
+public sealed class PartialRunOutDeletionTests
+{
+    /// <summary>One witness per kind of item, forward and reversed.</summary>
+    /// <param name="kind">The item kind the row reaches.</param>
+    /// <param name="operation">search, match or fullmatch.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    /// <param name="end">The partial's end.</param>
+    [Test]
+    // The register's witness. Main: P(1, 2).
+    [Arguments("character", "search", "(x)(?!(?:x){d<=1})", "xx", 2, 2)]
+    // Main: P(0, 1) on every row down to the folded ones.
+    [Arguments("character", "match", "(x)(?!(?:x){d<=1})", "x", -1, -1)]
+    [Arguments("character", "fullmatch", "(x)(?!(?:x){d<=1})y", "x", -1, -1)]
+    [Arguments("character, reversed", "search", "(?r)(?<!(?:x){d<=1})(x)", "x", 0, 0)]
+    [Arguments("any", "search", "(x)(?!(?:.){d<=1})", "x", 1, 1)]
+    [Arguments("set", "search", "(x)(?!(?:[xy]){d<=1})", "x", 1, 1)]
+    [Arguments("property", "search", @"(x)(?!(?:\w){d<=1})", "x", 1, 1)]
+    [Arguments("string", "search", "(x)(?!(?:xx){d<=2})", "x", 1, 1)]
+    [Arguments("string, reversed", "search", "(?r)(?<!(?:xx){d<=2})(x)", "x", 0, 0)]
+    [Arguments("string ignoring case", "match", "(?i)(x)(?!(?:xx){d<=2})", "x", -1, -1)]
+    [Arguments("reference", "search", @"(x)(?!(?:\1){d<=1})", "x", 1, 1)]
+    [Arguments("reference, reversed", "search", @"(?r)(?<!(?:\1){d<=1})(x)", "x", 0, 0)]
+    [Arguments("condition's test", "search", "(x)(?(?!(?:x){d<=1})|(?!))", "x", 1, 1)]
+    // Full case folding: the arm re-enters at the edge with an empty folding.
+    [Arguments("folded string", "search", "(?fi)(x)(?!(?:ss){d<=2})", "x", 1, 1)]
+    [Arguments("folded string, reversed", "search", "(?rfi)(?<!(?:ss){d<=2})(x)", "x", 0, 0)]
+    [Arguments("folded string", "match", "(?fi)(x)(?!(?:ß){d<=2})", "x", -1, -1)]
+    // Main: P(0, 2).
+    [Arguments("folded reference", "match", @"(?fi)(ss)(?!(?:\1){d<=2})", "ss", -1, -1)]
+    [Arguments("folded reference, reversed", "match", @"(?rfi)(?<!(?:\1){d<=2})(ss)", "ss", -1, -1)]
+    // A captured ß is one deletion (D24's whole deletion of a group character). Main: P(1, 2) and
+    // P(0, 1); 'ßß' + 'ssz' completes the search at 2.
+    [Arguments("folded reference, whole character", "search", @"(?fi)(ß)(?!(?:\1){d<=1})", "ßß", 2, 2)]
+    [Arguments("folded reference, whole character, reversed", "search", @"(?rfi)(?<!(?:\1){d<=1})(ß)", "ßß", 0, 0)]
+    // Part way through a group character's folding: the first s of the ß deleted, then the second.
+    // Main: P(1, 2).
+    [Arguments("folded reference, inside a folding", "search", @"(?fi)(ß)(?!(?:\1){d<=2})", "ßß", 2, 2)]
+    // The text ends after the group's ß, before its x: the x is the character the arm stands on,
+    // not yet folded (the ß's folding is used up). 'ßxß' + 'xz' completes at 2. Main: P(0, 3).
+    [Arguments("folded reference, between characters", "search", @"(?fi)(ßx)(?!(?:\1){d<=1})", "ßxß", 2, 3)]
+    // The group's s is used up part way through the subject's ß, so the leftovers loop runs; it
+    // never runs out, and a Debug build asserts that no run-out reaches the kept deletion with the
+    // group used up (blind review of 9d17988f).
+    [Arguments("folded reference, leftovers", "search", @"(?fi)(s)(?!(?:\1){d<=1})", "sß", 2, 2)]
+    public void A_negative_body_that_deletes_its_way_to_empty_decides_at_the_edge(
+        string kind,
+        string operation,
+        string pattern,
+        string subject,
+        int start,
+        int end
+    )
+    {
+        _ = kind;
+        var regex = new FuzzyRegex(pattern);
+        Match m = operation switch
+        {
+            "match" => regex.MatchAtStart(subject, partial: true),
+            "fullmatch" => regex.FullMatch(subject, partial: true),
+            _ => regex.Match(subject, partial: true),
+        };
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+            return;
+        }
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+    }
+
+    /// <summary>
+    /// Controls, which answered the same before the fix: the non-fuzzy twin, a body whose budget
+    /// cannot empty it (the kept deletion spends the budget, so the text to come still decides),
+    /// and the same pattern without <c>partial</c>.
+    /// </summary>
+    [Test]
+    public void The_kept_deletion_keeps_to_the_budget_and_leaves_the_rest_alone()
+    {
+        // The twin without the fuzzy section, which the fixed answer now equals.
+        Match twin = new FuzzyRegex("(x)(?!x?)").Match("xx", partial: true);
+        (twin.Success, twin.PartialMatch, twin.Index, twin.Length).Should().Be((true, true, 2, 0));
+
+        // One deletion leaves the y: 'x' + 'z' completes at 0.
+        Match budget = new FuzzyRegex("(x)(?!(?:xy){d<=1})z").Match("x", partial: true);
+        (budget.Success, budget.PartialMatch, budget.Index, budget.Length).Should().Be((true, true, 0, 1));
+
+        // The same in a folded string: 'x' + 'z' completes at 0.
+        Match folded = new FuzzyRegex("(?fi)(x)(?!(?:ss){d<=1})z").Match("x", partial: true);
+        (folded.Success, folded.PartialMatch, folded.Index, folded.Length).Should().Be((true, true, 0, 1));
+
+        new FuzzyRegex("(x)(?!(?:x){d<=1})").Match("xx").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// In a negative lookaround or a negative test, the deletion is tried before the run-out, so
+    /// a body that deletes its way to empty decides the construct without the run-out's cycle, and
+    /// an answer main already had costs no more than main's steps. The bounds are main's counts,
+    /// measured on a16e35a0; with the run-out first they were 32 and 26.
+    /// </summary>
+    /// <param name="operation">search or fullmatch.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("fullmatch", "(x)(?!(?:xx){d<=2})", 27, -1)]
+    [Arguments("search", "(x)(?(?!(?:x){d<=1})a|b)", 25, 0)]
+    public void A_negative_body_tries_its_deletion_before_the_run_out(
+        string operation,
+        string pattern,
+        long steps,
+        int start
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = string.Equals(operation, "fullmatch", StringComparison.Ordinal)
+                    ? regex.FullMatch("x", partial: true)
+                    : regex.Match("x", partial: true);
+                if (start < 0)
+                {
+                    m.Success.Should().BeFalse();
+                }
+                else
+                {
+                    (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, start, 1));
+                }
+            },
+            steps,
+            "the deletion decides the construct before the run-out is taken"
+        );
+    }
+
+    /// <summary>
+    /// The deletion goes first only where nothing in the body can throw away the run-out kept
+    /// beneath it. In the inner negative lookahead an atomic group is open around the item that
+    /// runs out ('y' at the edge). Taken first, the deletion passes the atomic group's end
+    /// undisturbed, so the group commits and discards the pending run-out. The lookbehind then
+    /// decides the inner body fails, and the outer lookahead fails for every continuation. But
+    /// 'ax' + 'y' makes the inner body match ('xy', and the lookbehind sees 'y'), so the inner
+    /// lookahead fails and the outer one holds: (0, 1) completes there. The answer is P(0, 2),
+    /// the judge's. With the guard off, a mutation gives None, a miss. The blind review's own row,
+    /// `a(?!(?>(?:xy){d&lt;=1})(?&lt;!x))` over 'ax', is a complete match either way, because the
+    /// held text decides it in the first pass.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    [Test]
+    [Arguments(@"a(?!(?!(?>(?:xy){d<=1})(?<!x)))")]
+    [Arguments(@"a(?!(?!(?>(?:xy){d<=1})(?<=y)))")]
+    public void A_cut_in_the_body_keeps_the_run_out_first(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("ax", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+    }
+
+    /// <summary>
+    /// The certifier: where the rest of a negative body cannot be deleted within the budget, or
+    /// holds an item outside every fuzzy section past the item's own section, the deletion is not
+    /// kept and the run-out is taken at once, at main's cost. The bounds are main's counts
+    /// (a16e35a0); the deletion first cost 32 and 36.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(x)(?!(?:xx){d<=1})y", 25)]
+    [Arguments("(x)(?!(?:x){d<=1}y)y", 28)]
+    public void A_deletion_that_cannot_empty_the_body_is_not_kept(string pattern, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+            },
+            steps,
+            "the deletion holds no success of the body"
+        );
+    }
+
+    /// <summary>
+    /// A deletion that cannot pass an enclosing section of the body is not kept (OPT.md C1): the
+    /// outer <c>{i&lt;=1}</c> allows no deletion, so the inner deletion fails at the outer
+    /// END_FUZZY on every path, and keeping it only walked to that failure. The bound is main's
+    /// count (a16e35a0); keeping it cost 116.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_deletion_an_enclosing_section_of_the_body_forbids_is_not_kept()
+    {
+        var regex = new FuzzyRegex(@"(?(?!(?:(?:x){d<=1}){i<=1})a|b)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("xxy", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 3, 0));
+            },
+            110,
+            "the deletion cannot pass the outer section"
+        );
+    }
+
+    /// <summary>
+    /// The guards of round 6's prunes (OPT.md, REVIEW-1000), each row a16e35a0's or a9082250's
+    /// answer. C1: a verb between the inner and the outer END_FUZZY (the review's counterexample,
+    /// which measured None even with the guard dropped), an outer section that allows a deletion,
+    /// and a consuming item before the inner END_FUZZY keep the deletion. B1: inside a fuzzy
+    /// section the counts bound the section, and under BESTMATCH they rank the matches, so they
+    /// stay in the dedup key (the review's counterexample is the first B1 row). B2: a verb makes
+    /// the run-out taint the verb's scope, so a pattern with one keeps its second run-out (the
+    /// review's counterexample).
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="search">Whether the call searches, rather than matches at the start.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    /// <param name="end">The partial's end.</param>
+    [Test]
+    [Arguments(@"(?:(?(?=y(?:(?:x){d<=1}(*PRUNE)){i<=1}|y)|(?!))){1<=s<=1}", "y", false, -1, -1)]
+    [Arguments(@"(x)(?!(?:(?:x){d<=1}){e<=1})", "xx", true, 2, 2)]
+    [Arguments(@"(x)(?!(?:(?:x){d<=1}y){i<=1})", "xx", true, 0, 1)]
+    [Arguments(@"(?:(?=zy|xy)q){s<=1}", "x", false, 0, 1)]
+    [Arguments(@"(?b)x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", true, 1, 1)]
+    [Arguments(@"(?(?=x\b|(?:xx){d<=1})a|x)|(*PRUNE)q", "x", true, 0, 1)]
+    public void A_guard_row_keeps_its_answer(string pattern, string subject, bool search, int start, int end)
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(subject, partial: true) : regex.MatchAtStart(subject, partial: true);
+
+        (start < 0 ? (m.Success, -1, -1) : (m.Success, m.Index, m.Index + m.Length))
+            .Should()
+            .Be((start >= 0, start, end));
+    }
+
+    /// <summary>
+    /// The dedup ignores fuzzy counts outside every fuzzy section (OPT.md B1): a later blocked
+    /// success of the same positive test, with the same captures, has the same continuation
+    /// whatever errors its body spent, since nothing after the test reads top-level counts in a
+    /// call without BESTMATCH or ENHANCEMATCH. The second blocked yes-run after the first deletion
+    /// is skipped. The bound is a9082250's count less the skipped run (69 before).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_blocked_success_that_differs_only_in_counts_is_not_continued_again()
+    {
+        var regex = new FuzzyRegex(@"x(?(?=(?:xx){e<=2})(?!)|)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+            },
+            63,
+            "the second continuation differs from the first only in its counts"
+        );
+    }
+
+    /// <summary>
+    /// A positive test's second run-out, after a blocked end of the same instance, fails at once
+    /// where its blocked end would meet B1's dedup (OPT.md B2): the body holds no group, so the
+    /// captures are the stored entry's, and the test lies outside every fuzzy section. The bound is
+    /// B1's count less the dropped cycles (63 with B1, 69 before).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_positive_test_drops_a_run_out_its_dedup_would_catch()
+    {
+        var regex = new FuzzyRegex(@"x(?(?=(?:xx){e<=2})(?!)|)\Z");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+            },
+            57,
+            "the second run-out's blocked end would repeat the first"
+        );
+    }
+
+    /// <summary>
+    /// A condition decided by the kept deletion reports that deletion. D54: a negative test's
+    /// no-branch keeps the test body's errors, and the only path to the no-branch's run-out here
+    /// deletes the x at 3, so 0,0,1 is right (REVIEW-1000). The positive twin should report the
+    /// same by D54 but stays run-out-first and reports 0,0,0: a known gap, pinned as it stands
+    /// (OPT.md round 7; KNOWN-DEFECTS F114). Change the second row when the gap is closed.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched over 'xxy'.</param>
+    /// <param name="deletions">The deletions the partial reports.</param>
+    [Test]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", 1)]
+    [Arguments(@"(?(?=(?:x+){d<=1})b|a)\Z", 0)]
+    public void A_decided_condition_reports_the_deletion_that_decided_it(string pattern, int deletions)
+    {
+        Match m = new FuzzyRegex(pattern).Match("xxy", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((true, true, 3, 0, new FuzzyCounts(0, 0, deletions)));
+    }
+
+    /// <summary>
+    /// A run-out in a negative construct's body is taken in place (OPT.md A', REVIEW-1200): its
+    /// path would only close the body's section, touch, reach the blocked end, taint the frame and
+    /// come back, so the run-out does those effects and backtracks. The staged tree before A' took
+    /// 110 and 34; main (a16e35a0) takes 105 and 31. The first row keeps 2 steps over main: its
+    /// deletion's path still enters <c>x*</c>'s body before its tail.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", "xxy", false, 107)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})", "x", true, 31)]
+    public void A_negative_bodys_run_out_is_taken_in_place(string pattern, string subject, bool full, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the run-out's cycle is not walked"
+        );
+    }
+
+    /// <summary>
+    /// In a positive test under B2's conditions, a deletion whose path cannot empty the body is not
+    /// kept (OPT.md P-c): the run-out goes first and taints the frame, so every run-out on that
+    /// path is one B2 drops. The bounds are main's counts (a16e35a0); the tree before P-c took 31
+    /// and 57.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(x)(?(?=(?:xx){d<=1})(?!)|)y", "x", false, 28)]
+    [Arguments(@"(?(?=(?:x){d<=1}y)(?!)|)y", "xxy", false, 52)]
+    public void A_positive_tests_deletion_that_cannot_empty_the_body_is_not_kept(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletion's path can only run out again"
+        );
+    }
+
+    /// <summary>
+    /// The deletion of an item that is a repeat's whole body, at the start of an iteration, makes
+    /// an empty deleting iteration, which the repeat's end drops where the count already meets
+    /// the minimum and nothing reads a fuzzy minimum (OPT.md P-b, REVIEW-1200). So it is not kept.
+    /// The tree before P-b took 69 and 112; main (a16e35a0) takes 62 and 106. The first row keeps
+    /// 3 steps over main, the walk of the first <c>x</c>'s deletion, which empties the body.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text, searched.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})y", "xx", 65)]
+    [Arguments(@"x(?(?=(?:x+){d<=1})(?!)|)\Z", "xxx", 106)]
+    public void A_deletion_the_repeat_end_would_drop_is_not_kept(string pattern, string subject, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = regex.Match(subject, partial: true),
+            steps,
+            "the empty deleting iteration is dropped at the repeat's end"
+        );
+    }
+
+    /// <summary>
+    /// P-b's minimum guard (REVIEW-1200's counterexample): with a fuzzy minimum the repeat's end
+    /// admits the empty deleting iteration, which the minimum needs, so the deletion is kept and
+    /// the lookahead fails for every continuation.
+    /// </summary>
+    [Test]
+    public void A_deletion_a_fuzzy_minimum_needs_is_kept()
+    {
+        Match m = new FuzzyRegex(@"a(?!(?:x+){2<=d<=2})").Match("a", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 1, 0));
+    }
+
+    /// <summary>
+    /// At the edge a string's remaining characters can only be deleted, and each state between
+    /// the first deletion and the last is a run-out that B2 (a positive test) or the in-place
+    /// run-out and the pending one (a negative lookaround) make redundant, so one retry deletes
+    /// the rest (OPT.md P-d1, REVIEW-1200). The bounds are the per-character walk less its
+    /// re-entries; the tree before P-d1 took 26 and 31, main (a16e35a0) 23 and 26.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">The step count the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?=(?:xy){d<=2})(?!)|)\Z", "", true, 24)]
+    [Arguments(@"x(?(?=(?:xyz){d<=3})(?!)|)\Z", "x", false, 27)]
+    public void The_rest_of_a_string_is_deleted_at_the_edge_in_one_retry(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletions at the edge need no re-entry between them"
+        );
+    }
+
+    /// <summary>
+    /// A positive test whose rest can be deleted within the budget is held once its blocked run
+    /// has failed (OPT.md P-e, REVIEW-1200): the deletion's path can only reach (P)'s cut-and-fail,
+    /// so that is done where the path would start, without walking it. The bounds are main's
+    /// counts (a16e35a0); the tree before P-e took 24 and 53.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?=(?:xx){d<=1})(?!)|)\Z", "x", true, 23)]
+    [Arguments(@"x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", false, 51)]
+    public void A_positive_test_its_deletions_would_decide_is_held_without_the_walk(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletion's path would only reach the held test's cut-and-fail"
+        );
+    }
+
+    /// <summary>
+    /// P-e's guard: a touch inside the body before the item (the undetermined <c>\B</c> at the
+    /// edge) makes the deletion's end blocked, not decided, so the test is not held and the
+    /// no-branch's run-out answers (the staged tree's P(0, 1)). REVIEW-1200's own row,
+    /// <c>x(?(?=\B(?:y){d&lt;=1})(?!)|)</c> over 'x', completes in the first pass and never runs
+    /// out, so the <c>z</c> is added.
+    /// </summary>
+    [Test]
+    public void A_positive_test_with_a_touch_before_the_item_is_not_held()
+    {
+        Match m = new FuzzyRegex(@"x(?(?=\B(?:y){d<=1})(?!)|)z").Match("x", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+    }
+
+    /// <summary>
+    /// A greedy repeat whose body can only run out at the edge, in a negative construct, tries
+    /// its tail first and takes the body's run-out after it (OPT.md A1, REVIEW-1200): in a
+    /// negative construct a run-out only taints the frame, so its order against the tail changes
+    /// nothing, and a tail that decides cuts it. The bounds are main's counts (a16e35a0); the tree
+    /// before A1 took 107 and 65.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", "xxy", 105)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})y", "xx", 62)]
+    public void A_repeat_whose_body_can_only_run_out_tries_its_tail_first(string pattern, string subject, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = regex.Match(subject, partial: true),
+            steps,
+            "the body's run-out waits beneath the tail"
+        );
+    }
+
+    /// <summary>
+    /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
+    /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
+    /// outer section allows two), so a count against the inner budget alone would skip a choice
+    /// the body needs. 'xx' + anything: the body deletes both x, the lookahead fails everywhere,
+    /// and the search's answer is the edge.
+    /// </summary>
+    [Test]
+    public void A_deletion_the_enclosing_section_completes_is_kept()
+    {
+        Match m = new FuzzyRegex("(x)(?!(?:(?:x){d<=1}x){d<=2})").Match("xx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
+    }
+
+    /// <summary>
+    /// The frame drop: in a negative lookaround a run-out only marks the body undetermined, so a
+    /// pending run-out beneath a deletion whose path has already taken one (the y after
+    /// <c>\b</c> runs out) is dropped. The answer is the same and the drop is counted in a Debug
+    /// build.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_second_run_out_in_an_undetermined_negative_body_is_dropped()
+    {
+        var regex = new FuzzyRegex(@"(x)(?!(?:x){d<=1}\by)y");
+        Match m = regex.Match("x", partial: true);
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            "x".AsMemory(),
+            0,
+            1,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: true);
+
+        EngineWork.SkipUnlessCounting();
+        state.PartialEventCount(PartialEvent.RunOutPendingDropped).Should().Be(1);
+    }
+
+    /// <summary>
+    /// A positive test whose decided success comes after a blocked one fails at once, without
+    /// running its yes-branch again, where nothing around the test reads the decision (OPT.md (P)).
+    /// The bound is main's count (a16e35a0); running the branch again cost 35.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_positive_test_decided_after_a_blocked_success_does_not_run_its_branch_again()
+    {
+        var regex = new FuzzyRegex("(x)(?(?=(?:x){d<=1})(?!)|)");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => regex.FullMatch("x", partial: true).Success.Should().BeFalse(),
+            33,
+            "the blocked run of the yes-branch already failed"
+        );
+    }
+
+    /// <summary>
+    /// Each boundary of (P): the answer and counts are the order-preserving engine's (fix/d124 at
+    /// 592719c9, equal to 16c77967 on the gate), and the skip fires only where the argument holds.
+    /// It fires through an enclosing repeat, whose later iterations the blocked run also ran, and
+    /// with a <c>\K</c> in the body, which moves only the start of a run that is never reported. It
+    /// does not fire when any of these hold:
+    /// <list type="bullet">
+    /// <item><description>the test lies in a fuzzy section;</description></item>
+    /// <item><description>an atomic group or a negative lookahead encloses it;</description></item>
+    /// <item><description>its body sets a group the pattern reads;</description></item>
+    /// <item><description>the pattern has a fuzzy minimum;</description></item>
+    /// <item><description>the pattern has BESTMATCH or ENHANCEMATCH;</description></item>
+    /// <item><description>the pattern has a verb.</description></item>
+    /// </list>
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="search">Whether the call searches, rather than matches at the start.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    /// <param name="end">The partial's end.</param>
+    /// <param name="skipped">Whether the skip fires.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, true)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "x", false, -1, -1, true)]
+    [Arguments(@"x(?(?=(?:y){d<=1}\K)(?!)|w)", "x", true, 1, 1, true)]
+    [Arguments(@"(?:x(?(?=(?:y){d<=1})(?!)|w)){e<=1}", "x", true, 0, 1, false)]
+    [Arguments(@"(?>x(?(?=(?:y){d<=1})(?!)|w)v?)", "x", true, 1, 1, false)]
+    [Arguments(@"x(?(?=((?:y){d<=1}))(?!)|w)\1", "x", true, 1, 1, false)]
+    [Arguments(@"x(?(?=(?:y){d<=1})(?!)|w)(?:v){1<=e<=1}", "x", true, 1, 1, false)]
+    [Arguments(@"(?b)(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, false)]
+    [Arguments(@"(?e)(?:x(?(?=(?:y){d<=1})(?!)|w))+v", "xx", true, 2, 2, false)]
+    [Arguments(@"x(?(?=(?:y){d<=1})(?!)|w)(*PRUNE)", "x", true, 0, 1, false)]
+    public void The_decided_rerun_is_skipped_only_where_nothing_reads_it(
+        string pattern,
+        string subject,
+        bool search,
+        int start,
+        int end,
+        bool skipped
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(subject, partial: true) : regex.MatchAtStart(subject, partial: true);
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.Success, m.PartialMatch, m.Index, m.Index + m.Length, m.FuzzyCounts.Total)
+                .Should()
+                .Be((true, true, start, end, 0));
+        }
+
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search);
+
+        EngineWork.SkipUnlessCounting();
+        // P-e holds the test where the deletion's path would start, which is (P) done early.
+        (
+            state.PartialEventCount(PartialEvent.DecidedRerunSkipped)
+                + state.PartialEventCount(PartialEvent.RunOutTestHeld)
+            != 0
+        )
+            .Should()
+            .Be(skipped);
+    }
+
+    /// <summary>
+    /// A positive lookaround whose only enclosing constructs are commit-neutral atomic groups keeps
+    /// no deletion: a decided success would let the group commit, but nothing in the group outside
+    /// the lookaround can leave an alternative, so the commit discards no path (OPT.md (V)). The
+    /// bound is main's count (a16e35a0); the kept deletion cost 35.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_lookaround_whose_decision_nothing_reads_keeps_no_deletion()
+    {
+        var regex = new FuzzyRegex("(x)(?>(?=(?:x+){d<=1}))y");
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match("x", partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+            },
+            30,
+            "the atomic group's commit discards nothing"
+        );
+    }
+
+    /// <summary>
+    /// Each kind of node that can leave an alternative inside the atomic group makes the commit
+    /// matter, so the deletion is kept there: an alternation, an optional or a lazy repeat, a
+    /// possessive repeat (an atomic group around a repeat), a fuzzy item, and a second lookaround.
+    /// The first row is the neutral control, where none is kept.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched over 'x'.</param>
+    /// <param name="kept">Whether the deletion is kept.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("(x)(?>(?=(?:x){d<=1}))y", false)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})|y)z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})x?)z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})x*?)z", true)]
+    [Arguments("(x)(?:(?=(?:x){d<=1})x?)++z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?:y){e<=1})z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?=y?))z", true)]
+    public void A_choice_point_in_the_atomic_group_keeps_the_deletion(string pattern, bool kept)
+    {
+        var regex = new FuzzyRegex(pattern);
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            "x".AsMemory(),
+            0,
+            1,
+            overlapped: false,
+            partial: true,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+        _ = Matcher.DoMatch(state, search: true);
+
+        EngineWork.SkipUnlessCounting();
+        (state.PartialEventCount(PartialEvent.RunOutKeptDeletion) != 0).Should().Be(kept);
+    }
+
+    /// <summary>
+    /// A reference to a capture a run-out left unknown runs out where it stands, away from the
+    /// edge, and keeps no deletion: it presumes the rest of the text (build chunk 8). The lookahead
+    /// at 1 runs out with <c>a+</c> wanting more, so group 1 is unknown in the negative lookahead.
+    /// </summary>
+    [Test]
+    public void A_reference_to_an_unknown_capture_keeps_no_deletion()
+    {
+        Match m = new FuzzyRegex(@"x(?=(a+))(?!(?:\1){d<=1}q)b").Match("xa", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
+    }
+}

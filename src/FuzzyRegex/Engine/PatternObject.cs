@@ -1494,6 +1494,12 @@ internal sealed class PatternObject
         // reads, once the nodes are numbered.
         SetLookaroundBodies(self);
 
+        // NOT UPSTREAM'S, D124: see Node.HasVacuousDecision.
+        if (self.IsFuzzy && !self.HasGroupCalls && !self.HasBacktrackingVerb && HasAtomicAndPositiveLookaround(self))
+        {
+            SetVacuousDecisionLookarounds(self);
+        }
+
         // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
         if (self.OptionalPassBranches is { } optionalPassBranches)
         {
@@ -1852,6 +1858,138 @@ internal sealed class PatternObject
         return ceiling;
     }
 
+    /// <summary>
+    /// D124: whether the pattern has an atomic group and a positive lookaround, without which
+    /// <see cref="SetVacuousDecisionLookarounds"/> has nothing to set. Asked before calling it, not
+    /// inside: its lambdas capture a local, so entering it allocates their closure (the BDN gate of
+    /// 2026-10-25 found compiling every fuzzy pattern dearer).
+    /// </summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <returns><see langword="true"/> if it has both.</returns>
+    private static bool HasAtomicAndPositiveLookaround(PatternObject pattern)
+    {
+        bool anyAtomic = false;
+        bool anyPositive = false;
+        foreach (Node n in pattern.NodeList)
+        {
+            anyAtomic |= n.Op == Opcode.Atomic;
+            anyPositive |= n is { Op: Opcode.Lookaround, Match: true };
+        }
+
+        return anyAtomic && anyPositive;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D124: sets <see cref="Node.HasVacuousDecision"/>.</summary>
+    /// <remarks>
+    /// An atomic group's body is the nodes reachable from its first node before its own
+    /// <c>END_ATOMIC</c>, counted by nesting depth. A node can leave an alternative unless it is a
+    /// group boundary, an exact one-character item or string, or the lookaround in question with
+    /// its end; everything else (a branch, any repeat, a fuzzy node, another lookaround or test, a
+    /// nested atomic group, a zero-width test) counts as one, which only keeps a deletion that
+    /// could have gone.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered and its lookaround bodies set.</param>
+    private static void SetVacuousDecisionLookarounds(PatternObject pattern)
+    {
+        List<Node> nodes = pattern.NodeList;
+        var inATestBody = new bool[nodes.Count];
+        foreach (Node test in nodes)
+        {
+            if (test.BodyInfo is { } body)
+            {
+                foreach (int i in body.Nodes)
+                {
+                    inATestBody[i] = true;
+                }
+            }
+        }
+
+        // For each atomic group: the lookarounds directly in its body, and whether it is neutral
+        // for each (all its body's other nodes are alternative-free).
+        var enclosing = new Dictionary<int, List<(HashSet<int> Body, Node Atomic)>>();
+        foreach (Node atomic in nodes)
+        {
+            if (atomic.Op != Opcode.Atomic)
+            {
+                continue;
+            }
+
+            var body = new HashSet<int>();
+            var todo = new Stack<(Node Node, int Depth)>();
+            todo.Push((atomic.Next1.Node!, 0));
+            while (todo.Count > 0)
+            {
+                (Node n, int depth) = todo.Pop();
+                if (n.Op == Opcode.EndAtomic && depth == 0)
+                {
+                    continue;
+                }
+
+                if (!body.Add(n.Index))
+                {
+                    continue;
+                }
+
+                int next = depth + (n.Op == Opcode.Atomic ? 1 : 0) - (n.Op == Opcode.EndAtomic ? 1 : 0);
+                foreach (Node? to in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                {
+                    if (to is not null)
+                    {
+                        todo.Push((to, next));
+                    }
+                }
+            }
+
+            foreach (int i in body.Where(i => nodes[i] is { Op: Opcode.Lookaround, Match: true }))
+            {
+                if (!enclosing.TryGetValue(i, out var list))
+                {
+                    enclosing[i] = list = [];
+                }
+
+                list.Add((body, atomic));
+            }
+        }
+
+        foreach ((int index, var atomics) in enclosing)
+        {
+            Node look = nodes[index];
+            if (inATestBody[index] || look.BodyInfo is not { } lookBody)
+            {
+                continue;
+            }
+
+            var own = new HashSet<int>(lookBody.Nodes) { look.Index };
+            if (look.LookaroundEnd is { } end)
+            {
+                own.Add(end.Index);
+            }
+
+            bool neutral = atomics.TrueForAll(a => a.Body.All(i => own.Contains(i) || LeavesNoAlternative(nodes[i])));
+            if (neutral)
+            {
+                look.HasVacuousDecision = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// D124: whether matching a node can never leave an alternative on the backtracking stack: a
+    /// group boundary, or an exact one-character item or string. See
+    /// <see cref="SetVacuousDecisionLookarounds"/>.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> if it cannot.</returns>
+    private static bool LeavesNoAlternative(Node node) =>
+        node.Op is Opcode.StartGroup or Opcode.EndGroup
+        || (
+            (node.Status & NodeStatus.Fuzzy) == 0
+            && (
+                node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev
+                || NodeQueries.MatchesOneCharacter(node)
+            )
+        );
+
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
@@ -1953,16 +2091,21 @@ internal sealed class PatternObject
     /// A walk from the start node that carries the section open at each node: FUZZY opens its own
     /// for its body, and END_FUZZY goes back to the one FUZZY was reached in. Sections nest, so each
     /// node is reached in one section whichever path reaches it; a repeat's end leads back to its
-    /// body in the same section.
+    /// body in the same section. It runs whether or not a body holds a FUZZY node: the matcher
+    /// reads a null section as "outside every section" (the decided end, RunOutCanWaitForTheBody,
+    /// D124's deletion-first order and certifier), which must hold for a construct inside a
+    /// section whose body has no section of its own too.
     /// </remarks>
     /// <param name="pattern">The pattern, with its bodies set.</param>
     private static void SetEnclosingSections(PatternObject pattern)
     {
         var fuzzyInABody = false;
+        var anyBody = false;
         foreach (Node test in pattern.NodeList)
         {
             if (test.BodyInfo is { } body)
             {
+                anyBody = true;
                 foreach (int i in body.Nodes)
                 {
                     fuzzyInABody |= pattern.NodeList[i].Op == Opcode.Fuzzy;
@@ -1970,12 +2113,14 @@ internal sealed class PatternObject
             }
         }
 
-        if (!fuzzyInABody || pattern.StartNode is not { } start)
+        // With no lookaround or condition test nothing reads a section (a run-out in a body is the
+        // only reader), so nothing is built: compiling such a pattern allocates what it did before.
+        if (!anyBody || pattern.StartNode is not { } start)
         {
             return;
         }
 
-        pattern.HasFuzzyInABody = true;
+        pattern.HasFuzzyInABody = fuzzyInABody;
         var outerOf = new Dictionary<int, Node?>();
         var seen = new HashSet<int>();
         var todo = new Stack<(Node Node, Node? Section)>();
@@ -1996,6 +2141,7 @@ internal sealed class PatternObject
             else if (n.Op == Opcode.Fuzzy)
             {
                 outerOf[n.Index] = section;
+                n.EnclosingSection = section;
                 after = n;
             }
             else if (n.Op == Opcode.EndFuzzy && section is not null)
