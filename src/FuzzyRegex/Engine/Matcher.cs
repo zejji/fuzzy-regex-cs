@@ -21045,12 +21045,14 @@ internal static class Matcher
             return false;
         }
 
-        if (!ThisErrorPermitted(state, FuzzyValue.Del))
-        {
-            return false;
-        }
-
-        if (!top.Read || !InnermostRunOutFeedsADecision(state, top) || DecisionIsVacuous(state, top))
+        // Cheapest first: the vacuous test is one array read, the budget sums the counts, and the
+        // decision test may walk the pruning stack.
+        if (
+            !top.Read
+            || DecisionIsVacuous(state, top)
+            || !ThisErrorPermitted(state, FuzzyValue.Del)
+            || !InnermostRunOutFeedsADecision(state, top)
+        )
         {
             return false;
         }
