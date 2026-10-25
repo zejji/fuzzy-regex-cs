@@ -21129,7 +21129,10 @@ internal static class Matcher
             toDelete = 1;
         }
 
-        if ((kind == item || (kind == text && !isReference && toDelete == 1)) && DeletionIsForbiddenOutside(state, node, top))
+        if (
+            (kind == item || (kind == text && !isReference && toDelete == 1))
+            && DeletionIsForbiddenOutside(state, node, top)
+        )
         {
             state.NotePartialEvent(PartialEvent.RunOutDeletionForbiddenOutside);
             deletionFirst = false;

@@ -257,13 +257,7 @@ public sealed class PartialRunOutDeletionTests
     [Arguments(@"(?:(?=zy|xy)q){s<=1}", "x", false, 0, 1)]
     [Arguments(@"(?b)x(?(?=(?:xx){e<=2})(?!)|)\Z", "x", true, 1, 1)]
     [Arguments(@"(?(?=x\b|(?:xx){d<=1})a|x)|(*PRUNE)q", "x", true, 0, 1)]
-    public void A_guard_row_keeps_its_answer(
-        string pattern,
-        string subject,
-        bool search,
-        int start,
-        int end
-    )
+    public void A_guard_row_keeps_its_answer(string pattern, string subject, bool search, int start, int end)
     {
         var regex = new FuzzyRegex(pattern);
         Match m = search ? regex.Match(subject, partial: true) : regex.MatchAtStart(subject, partial: true);
@@ -318,6 +312,27 @@ public sealed class PartialRunOutDeletionTests
             57,
             "the second run-out's blocked end would repeat the first"
         );
+    }
+
+    /// <summary>
+    /// A condition decided by the kept deletion reports that deletion. D54: a negative test's
+    /// no-branch keeps the test body's errors, and the only path to the no-branch's run-out here
+    /// deletes the x at 3, so 0,0,1 is right (REVIEW-1000). The positive twin should report the
+    /// same by D54 but stays run-out-first and reports 0,0,0: a known gap, pinned as it stands
+    /// (OPT.md round 7; KNOWN-DEFECTS F114). Change the second row when the gap is closed.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched over 'xxy'.</param>
+    /// <param name="deletions">The deletions the partial reports.</param>
+    [Test]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", 1)]
+    [Arguments(@"(?(?=(?:x+){d<=1})b|a)\Z", 0)]
+    public void A_decided_condition_reports_the_deletion_that_decided_it(string pattern, int deletions)
+    {
+        Match m = new FuzzyRegex(pattern).Match("xxy", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length, m.FuzzyCounts)
+            .Should()
+            .Be((true, true, 3, 0, new FuzzyCounts(0, 0, deletions)));
     }
 
     /// <summary>
