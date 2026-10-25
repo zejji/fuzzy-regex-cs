@@ -4568,6 +4568,37 @@ internal static class Matcher
     private readonly record struct LookaroundStateData(Node Node, int SliceStart, int SliceEnd, int TextPos);
 
     /// <summary>
+    /// NOT UPSTREAM'S, D124: the innermost open construct at a run-out, the one whose mark tops the
+    /// pruning stack, read once (<see cref="ReadInnermostConstruct"/>) and handed to every test the
+    /// run-out makes. A read decodes the construct's parked state, and before 2026-10-25 a run-out
+    /// read it up to five times.
+    /// </summary>
+    /// <param name="Read">Whether there is one: the pruning stack is not empty and its mark reads.</param>
+    /// <param name="Mark">The backtracking-stack size its mark holds.</param>
+    /// <param name="Op">Its opcode.</param>
+    /// <param name="Look">Its parked state, for a lookaround or a condition's test.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct InnermostConstruct(bool Read, long Mark, Opcode Op, LookaroundStateData Look);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: reads the innermost open construct (<see cref="InnermostConstruct"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The construct, or one whose <c>Read</c> is <see langword="false"/>.</returns>
+    private static InnermostConstruct ReadInnermostConstruct(MatchState state)
+    {
+        if (
+            !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+        )
+        {
+            return default;
+        }
+
+        return new InnermostConstruct(true, mark, op, look);
+    }
+
+    /// <summary>
     /// Port of <c>RE_GroupStateData</c> (<c>upstream/src/_regex.c</c> lines 416-422): what
     /// <c>START_GROUP</c> and <c>END_GROUP</c> put on the backtracking stack so their own backtrack
     /// case can undo them.
@@ -6893,10 +6924,16 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="item">The item that ran out, for assert A10.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
     /// <param name="fails">Receives whether the path fails instead: the body's errors so far are
     /// already more than the section around the lookaround allows (<see cref="CloseTheBodysSection"/>).</param>
     /// <returns>The END_LOOKAROUND node to go on at, or <see langword="null"/> to answer the partial.</returns>
-    private static Node? RunOutInALookaroundBody(MatchState state, Node? item, out bool fails)
+    private static Node? RunOutInALookaroundBody(
+        MatchState state,
+        Node? item,
+        in InnermostConstruct top,
+        out bool fails
+    )
     {
         Debug.Assert(
             !state.RefinesInANarrowedSlice,
@@ -6910,28 +6947,18 @@ internal static class Matcher
         }
 
         // The innermost open lookaround, with only atomic groups open above it.
+        if (!top.Read)
+        {
+            return null;
+        }
+
         int atomics = 0;
         int offset = state.Pstack.Count - sizeof(long);
-        LookaroundStateData look;
-        long lookMark;
-        while (true)
+        LookaroundStateData look = top.Look;
+        long lookMark = top.Mark;
+        Opcode op = top.Op;
+        while (op is not (Opcode.Lookaround or Opcode.Conditional))
         {
-            if (offset < 0)
-            {
-                return null;
-            }
-
-            lookMark = state.Pstack.SizeAt(offset);
-            if (!ReadPruningMark(state, (int)lookMark, out Opcode op, out look))
-            {
-                return null;
-            }
-
-            if (op is Opcode.Lookaround or Opcode.Conditional)
-            {
-                break;
-            }
-
             if (op != Opcode.Atomic)
             {
                 return null;
@@ -6939,6 +6966,16 @@ internal static class Matcher
 
             atomics++;
             offset -= sizeof(long);
+            if (offset < 0)
+            {
+                return null;
+            }
+
+            lookMark = state.Pstack.SizeAt(offset);
+            if (!ReadPruningMark(state, (int)lookMark, out op, out look))
+            {
+                return null;
+            }
         }
 
         if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark))
@@ -7098,16 +7135,18 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns><see langword="true"/> if the run-out waits.</returns>
-    private static bool RunOutCanWaitForTheBody(MatchState state)
+    private static bool RunOutCanWaitForTheBody(MatchState state, in InnermostConstruct top)
     {
         PatternObject pattern = state.Pattern;
+        long mark = top.Mark;
+        LookaroundStateData look = top.Look;
         if (
             state.PartialSide == MatchState.PartialNone
             || pattern.SecondPassAsBeforeD11
-            || !state.Pstack.TopSize(out long mark)
-            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
-            || op != Opcode.Lookaround
+            || !top.Read
+            || top.Op != Opcode.Lookaround
             || !look.Node.Match
             || look.Node.BodyInfo is not { HasVerbOrCall: false }
             || ((look.Node.Status & NodeStatus.HasGroups) != 0 && pattern.ReadsCapturesWhileMatching)
@@ -20817,22 +20856,32 @@ internal static class Matcher
             return _armBacktrack;
         }
 
-        if ((node.Status & NodeStatus.Fuzzy) != 0)
-        {
-            bool deletionFirst = DeletionGoesFirst(state);
-            if (
-                KeepTheDeletionOfAnItemThatRanOut(state, node, stringPos, gfoldedPos, foldChangesStart, deletionFirst)
-                && deletionFirst
+        // The innermost construct, for every test below; none of them reads it outside a second pass.
+        InnermostConstruct top =
+            state.PartialSide != MatchState.PartialNone && !pattern.SecondPassAsBeforeD11
+                ? ReadInnermostConstruct(state)
+                : default;
+        if (
+            (node.Status & NodeStatus.Fuzzy) != 0
+            && KeepTheDeletionOfAnItemThatRanOut(
+                state,
+                node,
+                stringPos,
+                gfoldedPos,
+                foldChangesStart,
+                top,
+                out bool deletionFirst
             )
-            {
-                // The deletion frame is on top: backtracking takes it now, and the pending run-out
-                // beneath it only if the deletion's path fails.
-                stringPos = -1;
-                return _armBacktrack;
-            }
+            && deletionFirst
+        )
+        {
+            // The deletion frame is on top: backtracking takes it now, and the pending run-out
+            // beneath it only if the deletion's path fails.
+            stringPos = -1;
+            return _armBacktrack;
         }
 
-        return TakeTheRunOut(state, ref node, ref stringPos);
+        return TakeTheRunOut(state, ref node, ref stringPos, top);
     }
 
     /// <summary>
@@ -20843,16 +20892,17 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="node">The item that ran out; the next node on return.</param>
     /// <param name="stringPos">The position within the current STRING or group reference.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
-    private static int TakeTheRunOut(MatchState state, ref Node node, ref int stringPos)
+    private static int TakeTheRunOut(MatchState state, ref Node node, ref int stringPos, in InnermostConstruct top)
     {
-        if (RunOutCanWaitForTheBody(state))
+        if (RunOutCanWaitForTheBody(state, top))
         {
             stringPos = -1;
             return _armBacktrack;
         }
 
-        Node? runOutEnd = RunOutInALookaroundBody(state, node, out bool runOutFails);
+        Node? runOutEnd = RunOutInALookaroundBody(state, node, top, out bool runOutFails);
         state.NoteRunOutTaken(answered: !runOutFails && runOutEnd is null);
         if (runOutFails)
         {
@@ -20908,7 +20958,8 @@ internal static class Matcher
     /// <param name="gfoldedPos">How far into the group character's folding a full-case-folded group
     /// reference had got (<see cref="AdvanceRefGroupFld"/> leaves 0 for a character not yet folded).</param>
     /// <param name="foldChangesStart">The change count when a full-case-folded item began.</param>
-    /// <param name="deletionFirst">Whether to push the pending run-out beneath the deletion
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <param name="deletionFirst">Receives whether the pending run-out went beneath the deletion
     /// (<see cref="DeletionGoesFirst"/>).</param>
     /// <returns><see langword="true"/> if the deletion was kept.</returns>
     private static bool KeepTheDeletionOfAnItemThatRanOut(
@@ -20917,9 +20968,11 @@ internal static class Matcher
         int stringPos,
         int gfoldedPos,
         int foldChangesStart,
-        bool deletionFirst
+        in InnermostConstruct top,
+        out bool deletionFirst
     )
     {
+        deletionFirst = false;
         const int item = 0,
             text = 1,
             folded = 2,
@@ -20992,10 +21045,17 @@ internal static class Matcher
             return false;
         }
 
-        if (!ThisErrorPermitted(state, FuzzyValue.Del) || !RunOutFeedsADecision(state) || DecisionIsVacuous(state))
+        if (!ThisErrorPermitted(state, FuzzyValue.Del))
         {
             return false;
         }
+
+        if (!top.Read || !InnermostRunOutFeedsADecision(state, top) || DecisionIsVacuous(state, top))
+        {
+            return false;
+        }
+
+        deletionFirst = DeletionGoesFirst(state, top);
 
         Debug.Assert(
             step > 0 ? state.TextPos >= state.TextEnd : state.TextPos <= state.SliceStart,
@@ -21015,7 +21075,7 @@ internal static class Matcher
         if (
             deletionFirst
             && (kind == item || (kind == text && !isReference))
-            && ConstructIsOutsideEverySection(state)
+            && top.Look.Node.EnclosingSection is null
             && !DeletionsCanEmptyTheRest(state, node, toDelete)
         )
         {
@@ -21128,14 +21188,14 @@ internal static class Matcher
     /// main already had.
     /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct, read (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns><see langword="true"/> if the deletion goes first.</returns>
-    private static bool DeletionGoesFirst(MatchState state)
+    private static bool DeletionGoesFirst(MatchState state, in InnermostConstruct top)
     {
         PatternObject pattern = state.Pattern;
+        (long mark, Opcode op, LookaroundStateData look) = (top.Mark, top.Op, top.Look);
         if (
-            !state.Pstack.TopSize(out long mark)
-            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
-            || op is not (Opcode.Lookaround or Opcode.Conditional)
+            op is not (Opcode.Lookaround or Opcode.Conditional)
             || look.Node.Match
             || look.Node.BodyInfo is not { HasVerbOrCall: false }
             || pattern.HasBacktrackingVerb
@@ -21177,26 +21237,28 @@ internal static class Matcher
     /// so a deletion that decides it cannot change which paths survive.
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct, read (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns><see langword="true"/> if the decision is vacuous.</returns>
-    private static bool DecisionIsVacuous(MatchState state) =>
+    private static bool DecisionIsVacuous(MatchState state, in InnermostConstruct top) =>
         state.Pattern.VacuousDecisionLookarounds is { } vacuous
-        && state.Pstack.TopSize(out long mark)
-        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
-        && op == Opcode.Lookaround
-        && vacuous[look.Node.Index];
+        && top.Op == Opcode.Lookaround
+        && vacuous[top.Look.Node.Index];
 
     /// <summary>
-    /// NOT UPSTREAM'S, D124: whether the innermost open construct, the one whose mark tops the
-    /// pruning stack, lies outside every fuzzy section, so no section's minimum or count after it
-    /// can depend on the path its body takes.
+    /// NOT UPSTREAM'S, D124: <see cref="RunOutFeedsADecision"/>, answered from the innermost open
+    /// construct alone where it can be: a condition's test or a negative lookaround decides, in a
+    /// pattern without group calls (whose test the walk makes first). Anything else walks outward.
     /// </summary>
     /// <param name="state">The match state.</param>
-    /// <returns><see langword="true"/> if it does.</returns>
-    private static bool ConstructIsOutsideEverySection(MatchState state) =>
-        state.Pstack.TopSize(out long mark)
-        && ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
-        && op is Opcode.Lookaround or Opcode.Conditional
-        && look.Node.EnclosingSection is null;
+    /// <param name="top">The innermost open construct, read (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the run-out feeds a decision.</returns>
+    private static bool InnermostRunOutFeedsADecision(MatchState state, in InnermostConstruct top) =>
+        (
+            (top.Op == Opcode.Conditional || (top.Op == Opcode.Lookaround && !top.Look.Node.Match))
+            && !state.Pattern.HasGroupCalls
+            && state.PartialSide != MatchState.PartialNone
+            && !state.Pattern.SecondPassAsBeforeD11
+        ) || RunOutFeedsADecision(state);
 
     /// <summary>
     /// NOT UPSTREAM'S, D124: whether deleting a fuzzy item that ran out at the edge, and every item
@@ -21223,7 +21285,7 @@ internal static class Matcher
     /// <para>
     /// The budget is <see cref="DeletionRoom"/>, the section's and the whole match's. Called only
     /// for a negative lookaround or negative test outside every section
-    /// (<see cref="DeletionGoesFirst"/>, <see cref="ConstructIsOutsideEverySection"/>), where a
+    /// (<see cref="DeletionGoesFirst"/>, and the construct's own section is null), where a
     /// success the walk rules out could only have failed the construct.
     /// </para>
     /// </remarks>
@@ -21334,16 +21396,15 @@ internal static class Matcher
         // left that mark on the frame (a cut taint). A second run-out adds nothing, so it is not
         // taken. What it would have done to the guards is kept: D90's blocked-end note, where
         // RunOutInALookaroundBody makes it.
-        int top = state.Pstack.Count - sizeof(long);
+        InnermostConstruct top = ReadInnermostConstruct(state);
         if (
-            top >= 0
-            && ReadPruningMark(state, (int)state.Pstack.SizeAt(top), out Opcode op, out LookaroundStateData look)
-            && op == Opcode.Lookaround
-            && !look.Node.Match
-            && HasWMarkAt(state, (int)state.Pstack.SizeAt(top) - 1, WMarkKind.CutTaint)
+            top.Read
+            && top.Op == Opcode.Lookaround
+            && !top.Look.Node.Match
+            && HasWMarkAt(state, (int)top.Mark - 1, WMarkKind.CutTaint)
         )
         {
-            if (!OnlyTheAttemptsMarkIsBelow(state, top) || state.Pattern.HasGroupCalls)
+            if (!OnlyTheAttemptsMarkIsBelow(state, state.Pstack.Count - sizeof(long)) || state.Pattern.HasGroupCalls)
             {
                 state.NoteABlockedEnd();
             }
@@ -21353,7 +21414,7 @@ internal static class Matcher
             return _armBacktrack;
         }
 
-        return TakeTheRunOut(state, ref node, ref stringPos);
+        return TakeTheRunOut(state, ref node, ref stringPos, top);
     }
 
     /// <summary>
