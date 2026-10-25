@@ -362,6 +362,36 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// In a positive test under B2's conditions, a deletion whose path cannot empty the body is not
+    /// kept (OPT.md P-c): the run-out goes first and taints the frame, so every run-out on that
+    /// path is one B2 drops. The bounds are main's counts (a16e35a0); the tree before P-c took 31
+    /// and 57.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="full">Whether the call is a fullmatch, rather than a search.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(x)(?(?=(?:xx){d<=1})(?!)|)y", "x", false, 28)]
+    [Arguments(@"(?(?=(?:x){d<=1}y)(?!)|)y", "xxy", false, 52)]
+    public void A_positive_tests_deletion_that_cannot_empty_the_body_is_not_kept(
+        string pattern,
+        string subject,
+        bool full,
+        long steps
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = full ? regex.FullMatch(subject, partial: true) : regex.Match(subject, partial: true),
+            steps,
+            "the deletion's path can only run out again"
+        );
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice

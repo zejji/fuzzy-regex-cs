@@ -20914,7 +20914,18 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
     /// <returns><see langword="true"/> if the run-out can fail at once.</returns>
-    private static bool TheDedupWouldCatchTheRunOut(MatchState state, in InnermostConstruct top)
+    private static bool TheDedupWouldCatchTheRunOut(MatchState state, in InnermostConstruct top) =>
+        APositiveTestsLaterRunOutsAreDropped(state, top) && HasWMarkAt(state, (int)top.Mark - 1, WMarkKind.CutTaint);
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: B2's conditions without the frame's taint
+    /// (<see cref="TheDedupWouldCatchTheRunOut"/>): once the innermost positive test's first blocked
+    /// end has tainted its frame, each later run-out in its body fails at once.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="top">The innermost open construct (<see cref="ReadInnermostConstruct"/>).</param>
+    /// <returns><see langword="true"/> if the conditions hold.</returns>
+    private static bool APositiveTestsLaterRunOutsAreDropped(MatchState state, in InnermostConstruct top)
     {
         PatternObject pattern = state.Pattern;
         return top.Read
@@ -20925,8 +20936,7 @@ internal static class Matcher
             && top.Look.Node.EnclosingSection is null
             && !pattern.HasBacktrackingVerb
             && !pattern.HasGroupCalls
-            && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) == 0
-            && HasWMarkAt(state, (int)top.Mark - 1, WMarkKind.CutTaint);
+            && (pattern.Flags & (RegexFlags.BestMatch | RegexFlags.EnhanceMatch | RegexFlags.Posix)) == 0;
     }
 
     /// <summary>
@@ -21129,8 +21139,11 @@ internal static class Matcher
             return false;
         }
 
+        // OPT.md P-c (REVIEW-1200): in a positive test under B2's conditions the run-out goes first
+        // and taints the frame, so every run-out on a deletion's path that cannot empty the body is
+        // one B2 drops, and the path produces nothing.
         if (
-            deletionFirst
+            (deletionFirst || APositiveTestsLaterRunOutsAreDropped(state, top))
             && (kind == item || (kind == text && !isReference))
             && top.Look.Node.EnclosingSection is null
             && !DeletionsCanEmptyTheRest(state, node, toDelete)
