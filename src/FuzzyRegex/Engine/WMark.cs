@@ -253,6 +253,9 @@ internal enum PartialEvent
     /// <summary>D124 (OPT.md P-e): a positive test whose deletions would decide it was held without walking them.</summary>
     RunOutTestHeld,
 
+    /// <summary>D124 (OPT.md A1): a greedy repeat's body that could only run out went after its tail.</summary>
+    RunOutDeferred,
+
     /// <summary>D124: a pending run-out was dropped, as its negative body was already undetermined.</summary>
     RunOutPendingDropped,
 

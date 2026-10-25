@@ -506,6 +506,31 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// A greedy repeat whose body can only run out at the edge, in a negative construct, tries
+    /// its tail first and takes the body's run-out after it (OPT.md A1, REVIEW-1200): in a
+    /// negative construct a run-out only taints the frame, so its order against the tail changes
+    /// nothing, and a tail that decides cuts it. The bounds are main's counts (a16e35a0); the tree
+    /// before A1 took 107 and 65.
+    /// </summary>
+    /// <param name="pattern">The pattern, searched.</param>
+    /// <param name="subject">The text.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?(?!(?:x+){d<=1})a|b)\Z", "xxy", 105)]
+    [Arguments(@"(x)(?!(?:x+){d<=1})y", "xx", 62)]
+    public void A_repeat_whose_body_can_only_run_out_tries_its_tail_first(string pattern, string subject, long steps)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () => _ = regex.Match(subject, partial: true),
+            steps,
+            "the body's run-out waits beneath the tail"
+        );
+    }
+
+    /// <summary>
     /// The certifier keeps a deletion it cannot rule out. The rest of this body lies in the
     /// enclosing section, whose budget deletes it (the inner deletion counts there too, so the
     /// outer section allows two), so a count against the inner budget alone would skip a choice

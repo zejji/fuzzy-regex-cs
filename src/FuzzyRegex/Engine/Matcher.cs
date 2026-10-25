@@ -17084,6 +17084,9 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.RunOutDeferred: // NOT UPSTREAM'S, D124 (OPT.md A1): a body's run-out after the tail failed.
+                    _ = TakeANegativeRunOutInPlace(state, ReadInnermostConstruct(state));
+                    goto backtrack;
                 case Opcode.RunOutHeldTest: // NOT UPSTREAM'S, D124 (OPT.md P-e): a test its deletions would hold.
                     HoldTheTestIfItsBlockedRunFailed(state);
                     goto backtrack;
@@ -21441,6 +21444,81 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md A1, REVIEW-1200): whether a greedy repeat, entered at the edge
+    /// in a negative construct's body, has a body that can only run out there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The body is one fuzzy single-character item, the whole of it, and the repeat starts at the
+    /// edge its item reads past. Entered, the item runs out: its deletion would end an empty
+    /// iteration the repeat's end drops (<see cref="TheRepeatEndWouldDropTheDeletion"/>'s
+    /// conditions: no fuzzy minimum, verb or ablation, count at least the minimum, a fresh
+    /// iteration), so no deletion is kept, and the run-out is taken in place
+    /// (<see cref="TakeANegativeRunOutInPlace"/>: the construct's mark on top, no verb or call), a
+    /// cut taint or a failure. In a negative construct a run-out's taint is read only once the body
+    /// is exhausted, and a decided end cuts it with the body, so it can come after the tail; the
+    /// tail then goes first and the body's entry and its pop are spared. Fuzzy patterns only, whose
+    /// repeat guards are off, so no guard is written under the moved run-out (D90).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="repeat">The GREEDY_REPEAT node.</param>
+    /// <param name="rpData">Its fresh repeat data.</param>
+    /// <returns><see langword="true"/> if the body can only run out.</returns>
+    private static bool TheBodyCanOnlyRunOut(MatchState state, Node repeat, RepeatData rpData)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            !state.IsFuzzy
+            || pattern.UpstreamEmptyIterations
+            || pattern.HasFuzzyMinimum
+            || pattern.HasBacktrackingVerb
+            || pattern.HasGroupCalls
+            || state.PartialSide == MatchState.PartialNone
+            || pattern.SecondPassAsBeforeD11
+            || repeat.Next1.Node is not { } body
+            || (body.Status & NodeStatus.Fuzzy) == 0
+            || !NodeQueries.MatchesOneCharacter(body)
+            || body.Next1.Node is not { Op: Opcode.EndGreedyRepeat }
+            || rpData.Count < repeat.Values[1]
+            || !(
+                body.Step > 0
+                    ? state.TextPos >= state.TextEnd && state.RunsOutRight
+                    : RanOutOnTheLeft(state, state.TextPos)
+            )
+        )
+        {
+            return false;
+        }
+
+        InnermostConstruct top = ReadInnermostConstruct(state);
+        return top.Read && top.Op is Opcode.Lookaround or Opcode.Conditional && !top.Look.Node.Match;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124 (OPT.md A1): whether the deferred body's run-out would taint the frame
+    /// rather than fail, judged where it is deferred: the open sections' limits RunOut checks first
+    /// (D81) and the body's section closing (<see cref="TheBodysErrorsFitOutside"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the run-out would taint.</returns>
+    private static bool TheBodysRunOutWouldTaint(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        {
+            return false;
+        }
+
+        InnermostConstruct top = ReadInnermostConstruct(state);
+        Node look = top.Look.Node;
+        FuzzyCountBuffer mergedBuffer = default;
+        return !pattern.HasFuzzyInABody
+            || state.FuzzyNode == look.EnclosingSection
+            || TheBodysErrorsFitOutside(state, look, (int)top.Mark, mergedBuffer, out _);
+    }
+
+    /// <summary>
     /// NOT UPSTREAM'S, D124 (OPT.md P-b, REVIEW-1200): whether the deletion of an item that ran out
     /// would only make an iteration the repeat's end drops.
     /// </summary>
@@ -22817,6 +22895,34 @@ internal static class Matcher
                 rpData.ChangesAtStart
             );
             armStatus = _armRunOut;
+            return node;
+        }
+
+        // NOT UPSTREAM'S, D124 (OPT.md A1): the body can only run out, so its run-out waits beneath
+        // the tail, which goes first.
+        if (tryBody && tryTail && TheBodyCanOnlyRunOut(state, node, rpData))
+        {
+            if (TheBodysRunOutWouldTaint(state))
+            {
+                state.Bstack.PushUInt8((byte)Opcode.RunOutDeferred);
+
+                /* bstack: RUN_OUT_DEFERRED */
+            }
+
+            PushMatchBodyTailStateData(
+                state.Bstack,
+                nextTailPosition,
+                rpData.Count,
+                rpData.Start,
+                rpData.CaptureChange,
+                index,
+                state.TextPos,
+                rpData.ChangesAtStart,
+                state.IsFuzzy
+            );
+            state.Bstack.PushUInt8((byte)Opcode.MatchTail);
+            state.NotePartialEvent(PartialEvent.RunOutDeferred);
+            armStatus = _armBacktrack;
             return node;
         }
 

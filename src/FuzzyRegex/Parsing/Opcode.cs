@@ -421,4 +421,12 @@ internal enum Opcode : uint
     /// node or in a code list.
     /// </summary>
     RunOutHeldTest = 109,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124, OPT.md A1): a greedy repeat's body run-out, deferred beneath its tail in
+    /// a negative construct (<c>Matcher.TheBodyCanOnlyRunOut</c>). Backtracking onto it means the
+    /// tail's path failed, and its arm takes the run-out in place. It never appears on a node or in
+    /// a code list.
+    /// </summary>
+    RunOutDeferred = 110,
 }
