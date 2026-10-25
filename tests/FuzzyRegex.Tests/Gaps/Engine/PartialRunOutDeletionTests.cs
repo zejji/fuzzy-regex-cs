@@ -119,6 +119,72 @@ public sealed class PartialRunOutDeletionTests
     }
 
     /// <summary>
+    /// In a negative lookaround or a negative test, the deletion is tried before the run-out, so
+    /// a body that deletes its way to empty decides the construct without the run-out's cycle, and
+    /// an answer main already had costs no more than main's steps. The bounds are main's counts,
+    /// measured on a16e35a0; with the run-out first they were 32 and 26.
+    /// </summary>
+    /// <param name="operation">search or fullmatch.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="steps">Main's step count, which the call may not exceed.</param>
+    /// <param name="start">The partial's start, or -1 for no match.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments("fullmatch", "(x)(?!(?:xx){d<=2})", 27, -1)]
+    [Arguments("search", "(x)(?(?!(?:x){d<=1})a|b)", 25, 0)]
+    public void A_negative_body_tries_its_deletion_before_the_run_out(
+        string operation,
+        string pattern,
+        long steps,
+        int start
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = string.Equals(operation, "fullmatch", StringComparison.Ordinal)
+                    ? regex.FullMatch("x", partial: true)
+                    : regex.Match("x", partial: true);
+                if (start < 0)
+                {
+                    m.Success.Should().BeFalse();
+                }
+                else
+                {
+                    (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, start, 1));
+                }
+            },
+            steps,
+            "the deletion decides the construct before the run-out is taken"
+        );
+    }
+
+    /// <summary>
+    /// The deletion goes first only where nothing in the body can throw away the run-out kept
+    /// beneath it. In the inner negative lookahead an atomic group is open around the item that
+    /// runs out ('y' at the edge). Taken first, the deletion passes the atomic group's end
+    /// undisturbed, so the group commits and discards the pending run-out. The lookbehind then
+    /// decides the inner body fails, and the outer lookahead fails for every continuation. But
+    /// 'ax' + 'y' makes the inner body match ('xy', and the lookbehind sees 'y'), so the inner
+    /// lookahead fails and the outer one holds: (0, 1) completes there. The answer is P(0, 2),
+    /// the judge's. With the guard off, a mutation gives None, a miss. The blind review's own row,
+    /// `a(?!(?>(?:xy){d&lt;=1})(?&lt;!x))` over 'ax', is a complete match either way, because the
+    /// held text decides it in the first pass.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    [Test]
+    [Arguments(@"a(?!(?!(?>(?:xy){d<=1})(?<!x)))")]
+    [Arguments(@"a(?!(?!(?>(?:xy){d<=1})(?<=y)))")]
+    public void A_cut_in_the_body_keeps_the_run_out_first(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("ax", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+    }
+
+    /// <summary>
     /// A reference to a capture a run-out left unknown runs out where it stands, away from the
     /// edge, and keeps no deletion: it presumes the rest of the text (build chunk 8). The lookahead
     /// at 1 runs out with <c>a+</c> wanting more, so group 1 is unknown in the negative lookahead.

@@ -405,4 +405,12 @@ internal enum Opcode : uint
     /// It never appears on a node or in a code list.
     /// </summary>
     ContinuationMark = 107,
+
+    /// <summary>
+    /// NOT UPSTREAM (D124): the backtracking entry of a run-out that a fuzzy item's deletion went
+    /// before, in a negative lookaround or a negative test (<c>Matcher.DeletionGoesFirst</c>).
+    /// Backtracking onto it means the deletion's path failed, and its arm takes the run-out. It
+    /// never appears on a node or in a code list.
+    /// </summary>
+    RunOutPending = 108,
 }

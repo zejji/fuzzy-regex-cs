@@ -16934,6 +16934,18 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.RunOutPending: // NOT UPSTREAM'S, D124: the run-out after a deletion that failed.
+                    armNode = node;
+                    armStringPos = stringPos;
+                    status = BacktrackPendingRunOut(state, ref armNode, ref armStringPos);
+                    node = armNode;
+                    stringPos = armStringPos;
+                    if (status != _armContinue)
+                    {
+                        goto armExit;
+                    }
+
+                    break;
                 case Opcode.NoBranch: // NOT UPSTREAM'S, D11 M2: a blocked negative test's no-branch.
                     armNode = node;
                     status = BacktrackNoBranch(state, ref armNode);
@@ -20786,9 +20798,33 @@ internal static class Matcher
 
         if ((node.Status & NodeStatus.Fuzzy) != 0)
         {
-            KeepTheDeletionOfAnItemThatRanOut(state, node, stringPos, gfoldedPos, foldChangesStart);
+            bool deletionFirst = DeletionGoesFirst(state);
+            if (
+                KeepTheDeletionOfAnItemThatRanOut(state, node, stringPos, gfoldedPos, foldChangesStart, deletionFirst)
+                && deletionFirst
+            )
+            {
+                // The deletion frame is on top: backtracking takes it now, and the pending run-out
+                // beneath it only if the deletion's path fails.
+                stringPos = -1;
+                return _armBacktrack;
+            }
         }
 
+        return TakeTheRunOut(state, ref node, ref stringPos);
+    }
+
+    /// <summary>
+    /// The run-out itself, the rest of <see cref="RunOut"/>: wait for the body, go on at the body's
+    /// end, or answer the partial. Also the arm of a pending run-out (D124,
+    /// <see cref="BacktrackPendingRunOut"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item that ran out; the next node on return.</param>
+    /// <param name="stringPos">The position within the current STRING or group reference.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    private static int TakeTheRunOut(MatchState state, ref Node node, ref int stringPos)
+    {
         if (RunOutCanWaitForTheBody(state))
         {
             stringPos = -1;
@@ -20851,12 +20887,16 @@ internal static class Matcher
     /// <param name="gfoldedPos">How far into the group character's folding a full-case-folded group
     /// reference had got (<see cref="AdvanceRefGroupFld"/> leaves 0 for a character not yet folded).</param>
     /// <param name="foldChangesStart">The change count when a full-case-folded item began.</param>
-    private static void KeepTheDeletionOfAnItemThatRanOut(
+    /// <param name="deletionFirst">Whether to push the pending run-out beneath the deletion
+    /// (<see cref="DeletionGoesFirst"/>).</param>
+    /// <returns><see langword="true"/> if the deletion was kept.</returns>
+    private static bool KeepTheDeletionOfAnItemThatRanOut(
         MatchState state,
         Node node,
         int stringPos,
         int gfoldedPos,
-        int foldChangesStart
+        int foldChangesStart,
+        bool deletionFirst
     )
     {
         const int item = 0,
@@ -20909,7 +20949,7 @@ internal static class Matcher
                 {
                     // A zero-width item's run-out is its insertion's, and a deletion of it moves
                     // nothing (NextFuzzyMatchItem).
-                    return;
+                    return false;
                 }
 
                 (step, kind) = (1, item);
@@ -20928,12 +20968,12 @@ internal static class Matcher
                 or Opcode.RefGroupFldRev;
         if (isReference && state.HasUnknownCaptures && IsUnknown(state.Groups[(int)node.Values[0] - 1]))
         {
-            return;
+            return false;
         }
 
         if (!ThisErrorPermitted(state, FuzzyValue.Del) || !RunOutFeedsADecision(state))
         {
-            return;
+            return false;
         }
 
         Debug.Assert(
@@ -20941,6 +20981,11 @@ internal static class Matcher
             "D124: a consuming item runs out only at the edge, where no substitution or insertion fits"
         );
         Debug.Assert(kind == item || stringPos >= 0, "D124: a string runs out part way through itself");
+
+        if (deletionFirst)
+        {
+            PushPendingRunOut(state, node, stringPos);
+        }
 
         switch (kind)
         {
@@ -21021,6 +21066,92 @@ internal static class Matcher
         }
 
         state.NotePartialEvent(PartialEvent.RunOutKeptDeletion);
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: whether a fuzzy item that ran out tries its deletion before the
+    /// run-out (OPT.md (e'), kinds (i) and (ii)). Which comes first cannot change what the
+    /// construct does: in a negative lookaround a success of the body only fails the construct, and
+    /// a negative test whose body sets no group read while matching, outside every fuzzy section,
+    /// leaves the same state whichever success takes its no-branch. And nothing in the body can
+    /// throw the pending run-out away: the construct's own mark is the top of the pruning stack (no
+    /// atomic group, possessive repeat or nested lookaround is open around the item), the body holds
+    /// no verb or call, and no call it opened is open. A pattern with a verb anywhere keeps the
+    /// run-out first: the run-out taints the verb's scope (RunOutInALookaroundBody), and that taint
+    /// outlives a deletion that decides the construct later, so the order shows in the answer.
+    /// </summary>
+    /// <remarks>
+    /// The deletion first spares the run-out's cycle (touch, blocked end, back into the body) when
+    /// the deletion decides the construct, which is where the run-out first cost steps on answers
+    /// main already had.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if the deletion goes first.</returns>
+    private static bool DeletionGoesFirst(MatchState state)
+    {
+        PatternObject pattern = state.Pattern;
+        if (
+            !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op is not (Opcode.Lookaround or Opcode.Conditional)
+            || look.Node.Match
+            || look.Node.BodyInfo is not { HasVerbOrCall: false }
+            || pattern.HasBacktrackingVerb
+            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark))
+        )
+        {
+            return false;
+        }
+
+        return op == Opcode.Lookaround
+            || (
+                ((look.Node.Status & NodeStatus.HasGroups) == 0 || !pattern.ReadsCapturesWhileMatching)
+                && (!pattern.IsFuzzy || look.Node.EnclosingSection is null)
+            );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: pushes the run-out a fuzzy item's deletion goes before
+    /// (<see cref="DeletionGoesFirst"/>), to be taken if the deletion's path fails.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item that ran out.</param>
+    /// <param name="stringPos">How far into a string or group reference it had got.</param>
+    private static void PushPendingRunOut(MatchState state, Node node, int stringPos)
+    {
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushUInt8((byte)Opcode.RunOutPending);
+
+        /* bstack: text_pos string_pos node RUN_OUT_PENDING */
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D124: the arm of a pending run-out. The deletion that went first has failed
+    /// (backtracking undid its path), so the run-out is taken where the item ran out.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item; the next node on return.</param>
+    /// <param name="stringPos">Receives how far into a string or group reference it had got.</param>
+    /// <returns>An <c>Arm</c> code, or the status the match returns.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int BacktrackPendingRunOut(MatchState state, ref Node node, ref int stringPos)
+    {
+        if (
+            !state.Bstack.PopNode(state.Pattern, out Node? item)
+            || !state.Bstack.PopSize(out long itemStringPos)
+            || !state.Bstack.PopSize(out long textPos)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)textPos;
+        stringPos = (int)itemStringPos;
+        node = item!;
+        return TakeTheRunOut(state, ref node, ref stringPos);
     }
 
     /// <summary>
