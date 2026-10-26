@@ -8,7 +8,7 @@
       version for every commit between tags, has nothing to attach to here. `dotnet pack` takes
       `-p:VersionSuffix=rc.N` for a rehearsal build; the real release leaves it empty.
     -->
-    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionPrefix>1.1.0</VersionPrefix>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

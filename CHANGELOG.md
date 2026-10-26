@@ -14,6 +14,8 @@ per release.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-26
+
 ### Changed
 
 - **Tracks mrab-regex 2026.9.29** (commit `0e8cb05`): the Unicode data is 18.0.0, up from
@@ -284,5 +286,6 @@ a caller arriving from Python meets first:
 Most of the remaining rows are upstream defects fixed here and pinned by tests; each has an entry
 in `docs/plan/upstream-reports/LEDGER.md`.
 
-[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.0.0
