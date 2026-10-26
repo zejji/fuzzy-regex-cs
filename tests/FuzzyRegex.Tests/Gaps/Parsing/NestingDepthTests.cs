@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using AwesomeAssertions;
 
@@ -23,7 +24,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// <para>
 /// <b>These tests cannot crash the test host.</b> The tests the limit must decide compile on a
 /// 4 MB thread of their own, which held 1,100 to 1,450 levels before the fix on a quarter of
-/// that. The cases a missing guard would turn into a crash (100,000 levels, the 256 KB thread, the
+/// that. The cases a missing guard would turn into a crash (100,000 levels, the thread with little stack left, the
 /// runs of conditionals and of exact constraints) overflowed in a child process before the fix
 /// (<c>.scratch/s1019/d110/probe</c>, exit code 127, "Stack overflow.") and were proved there
 /// to stop with an exception after it, before they were run here.
@@ -167,11 +168,11 @@ public sealed class NestingDepthTests
     [Arguments("(?r)", "(?<=", ")")]
     public void A_thread_with_a_small_stack_gets_a_parse_error_under_the_limit(string lead, string open, string close)
     {
-        // 256 KB holds about 150 to 210 levels (measured before the fix, child process), so 500
-        // levels, which the limit allows, must be stopped by the stack check.
+        // 16 KB above the stack check holds a few dozen levels, so 500 levels, which the limit
+        // allows, must be stopped by the stack check.
         string pattern = Nest(lead, open, close, _limit);
 
-        Exception? thrown = OnThreadWithStack(() => _ = new FuzzyRegex(pattern));
+        Exception? thrown = WithLittleStackLeft(() => _ = new FuzzyRegex(pattern));
 
         FuzzyRegexParseException refused = thrown.Should().BeOfType<FuzzyRegexParseException>().Which;
         refused.Message.Should().Be("too deeply nested to compile on this thread: its stack ran out");
@@ -246,6 +247,45 @@ public sealed class NestingDepthTests
         FuzzyRegex? regex = null;
         OnThreadWithStack(() => regex = new FuzzyRegex(pattern), _largeStack).Should().BeNull();
         return regex!;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> with about 16 KB of stack above the point where
+    /// <see cref="RuntimeHelpers.EnsureSufficientExecutionStack"/> throws, whatever the thread's
+    /// real size. A thread's requested size is a floor, not the size it gets: on Linux glibc gives
+    /// a new thread a cached stack of up to four times the size asked for, so once a 512 KB or 1 MB
+    /// thread had finished, a "256 KB" thread compiled all 500 levels of every form here. CI's
+    /// ubuntu job failed a different case of the test above on each run (2026-10-26, .NET 10.0.14;
+    /// probe in <c>.scratch/ci1026/probe</c>: 289 to 391 levels on a fresh 256 KB thread, 500 after
+    /// a 512 KB one had finished).
+    /// </summary>
+    private static Exception? WithLittleStackLeft(Action action) =>
+        OnThreadWithStack(() => Descend(0, Descend(0, -1, null) - _chunksLeft, action));
+
+    private const int _chunksLeft = 4;
+
+    /// <summary>
+    /// Recurses, 4 KB a level, until the stack check would throw and returns that depth; or, given
+    /// <paramref name="stopAt"/>, runs <paramref name="action"/> at that depth. Both walks use the
+    /// same frames, so the second stops a known distance above the check.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int Descend(int depth, int stopAt, Action? action)
+    {
+        Span<byte> chunk = stackalloc byte[4096];
+        chunk[depth & 4095] = 1;
+        if (depth == stopAt)
+        {
+            action!();
+            return depth;
+        }
+
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            return depth;
+        }
+
+        return Descend(depth + 1, stopAt, action) + chunk[depth & 4095] - 1;
     }
 
     private static Exception? OnThreadWithStack(Action action, int kilobytes = 256)

@@ -27,8 +27,11 @@ per release.
 - **Case-insensitive lists of literals are found two to three times faster**: `(?i)cat|dog`,
   and `\L<list>` with IgnoreCase, now skip ahead with a vectorised search, including lists
   with a `k` or an `s`, whose Kelvin sign and long s are handled near where they occur.
-- **Matching is 10-25% faster across the benchmark suite**, most on counting many matches
-  (`Count` over a megabyte about 21% faster), repeats and short subjects; no benchmark is slower.
+- **Matching is faster on most of the benchmark suite.** Splitting the engine's main matching
+  method took 9-25% off most benchmarks when it was measured against the code before it, most on
+  counting many matches (`Count` over a megabyte about 21% faster), repeats and short subjects.
+  Each change in this release was timed against the code before it; 1.1.0 has not yet been
+  timed against 1.0.0 as a whole.
   The engine's main matching method is split, so its repeat handling, case-folded strings and
   failed-start handling run in their own smaller methods, and the JIT clears fewer stack slots
   on each call.

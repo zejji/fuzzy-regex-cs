@@ -216,17 +216,25 @@ public sealed class AllocationTests
     /// <summary>
     /// D124 added partial-matching tables built at compile time. A pattern with no lookaround or
     /// condition test, or with no atomic group around a positive lookaround, never reads them, so
-    /// compiling it allocates no more than before D124. The ceilings are a16e35a0's Debug counts
-    /// (the BDN gate of 2026-10-25 found +760 B on <c>UncachedFuzzyIsMatch</c> and +8 B on every
-    /// compile row).
+    /// compiling it allocates no more than before D124. The ceilings are a16e35a0's counts (the BDN
+    /// gate of 2026-10-25 found +760 B on <c>UncachedFuzzyIsMatch</c> and +8 B on every compile
+    /// row). Native AOT allocates more for the same compile than the JIT does, so it has its own
+    /// ceiling: a16e35a0 published with tools/run-aot-tests.ps1 on win-x64 (2026-10-26) allocated
+    /// exactly what the CI AOT jobs then found on main, on both win-x64 and linux-x64.
     /// </summary>
     /// <param name="pattern">The pattern, one of the BDN compile rows'.</param>
-    /// <param name="ceiling">a16e35a0's bytes for one compile, Debug.</param>
+    /// <param name="jitCeiling">a16e35a0's bytes for one compile under the JIT, Debug.</param>
+    /// <param name="aotCeiling">a16e35a0's bytes for one compile under Native AOT, Release.</param>
     [Test]
-    [Arguments(@"(?:needle){e<=1}", 13_344)]
-    [Arguments(@"(quick|slow)\s+(?<colour>[a-z]+)\s+fox", 33_176)]
-    public void Compiling_a_pattern_without_lookarounds_allocates_what_it_did_before_D124(string pattern, long ceiling)
+    [Arguments(@"(?:needle){e<=1}", 13_344, 13_432)]
+    [Arguments(@"(quick|slow)\s+(?<colour>[a-z]+)\s+fox", 33_176, 33_224)]
+    public void Compiling_a_pattern_without_lookarounds_allocates_what_it_did_before_D124(
+        string pattern,
+        long jitCeiling,
+        long aotCeiling
+    )
     {
+        long ceiling = System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported ? jitCeiling : aotCeiling;
         _ = new FuzzyRegex(pattern);
 
         long allocated = AllocatedBy(() => () => _ = new FuzzyRegex(pattern));
