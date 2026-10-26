@@ -2657,7 +2657,11 @@ internal static class ExpectedDivergences
     /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each. The last three are
     /// door H, recorded 2026-09-28 by <c>python tools/record-oracle.py --rows
     /// tools/probes/ignorecase-property-precheck-rows.jsonl</c>: oracle row 20260927:3732 and its two
-    /// minimised forms, where the first-set precheck is the set.
+    /// minimised forms, where the first-set precheck is the set. The last row is door H again, oracle
+    /// row 20261026:27021 (judged 2026-10-26): the precheck refuses U+FB01, which has no simple case
+    /// partner, so upstream substitutes nothing; with the precheck removed it matches (0,1) as this
+    /// port does, and the template's <c>{0[2]}</c> then raises IndexError upstream and this port's
+    /// equivalent ArgumentException (the 2026-09-13 ruling for row 93133).
     /// </summary>
     private const string _scopedEncodingPropertyRulesRows = """
         {"generator": "rows", "pattern": "(?a:(?s:\\w))", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
@@ -2669,6 +2673,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?r)(?P<g1>\\p{ASCII}{2})(\\p{Ll}+?)??", "flags": 10, "namedLists": {}, "subject": "\n\r\ud835\udd18\ud83d\ude00", "operation": "sub", "template": "\ud83d\ude00\\1]", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ud83d\ude00\n\r]\ud835\udd18\ud83d\ude00", "count": 1}}
         {"generator": "rows", "pattern": "(?i)\\p{Ll}?a{2}", "flags": 0, "namedLists": {}, "subject": "\u2102aa", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?ri)a{2}\\p{Ll}?", "flags": 0, "namedLists": {}, "subject": "aa\u2102", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "lookaround", "pattern": "^(?:(?=(\\p{Lu}+))\ufb01|S)", "flags": 2, "namedLists": {}, "subject": "\ufb01aS\u0130\u0131", "operation": "subf", "template": "]}}{0[2]}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\ufb01aS\u0130\u0131", "count": 0}}
         """;
 
     /// <summary>This port's judged answer to each row of <see cref="_scopedEncodingPropertyRulesRows"/>.</summary>
@@ -2683,6 +2688,7 @@ internal static class ExpectedDivergences
         "sub 1 '\\ud83d\\ude00\\u000a\\u000d]\\ud83d\\ude00'",
         "match 0:(0,3)[(0,3)] last=-1/-",
         "match 0:(0,3)[(0,3)] last=-1/-",
+        "error while matching ArgumentException: capture index out of range (Parameter 'format')",
     ];
 
     /// <summary><see cref="_scopedEncodingPropertyRulesRows"/> by its question, mapped to this port's judged answer.</summary>
