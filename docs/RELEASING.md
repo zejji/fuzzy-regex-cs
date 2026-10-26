@@ -36,15 +36,13 @@ owner's account.
 - CI is green on main for the commit you will tag.
 - `VersionPrefix` in `Directory.Build.props` is the version you are releasing.
 - `CHANGELOG.md` has the entry for this version.
+- The status line at the top of `README.md` names this version and links its release notes. The
+  package carries the README as it is in the tagged commit, so a stale status line stays on that
+  version's nuget.org page for good (1.1.0 shipped saying "Status: 1.0.0").
 - The release notes are at `docs/plan/release-notes-<version>.md` (for example
   `release-notes-1.0.0.md`) and have been reviewed. The GitHub release body is everything after the
   first line that is exactly `---`. The path is set once, in `RELEASE_NOTES_PATH_FORMAT` at the top
   of `release.yml`.
-- For the first release after 2026-10-20 only: the Actions bump of that date moved
-  `download-artifact` to v8, which only `release.yml` uses, so no run has exercised it yet. If the
-  `publish` job fails to find the packages, compare its first step (`actions/download-artifact`) with v8's release notes
-  (hash mismatches now fail; non-zip files are no longer unzipped). Delete this item once a
-  release has passed.
 
 ## The release
 
@@ -97,7 +95,7 @@ unlisted until that finishes, and you get an email when it is done.
   publishes as Native AOT (Step 2 of `docs/plan/RELEASE.md`, with nuget.org as the only source).
 - Open the next `[Unreleased]` section in `CHANGELOG.md`.
 - Set `PackageValidationBaselineVersion` in `src/FuzzyRegex/FuzzyRegex.csproj` to the version you
-  just published, so every later pack checks the public API against it. It is `1.0.0` now.
+  just published, so every later pack checks the public API against it. It is `1.1.0` now.
 - Bump `VersionPrefix` when work on the next version starts.
 
 ## Sources (read 2026-10-20)

@@ -33,7 +33,7 @@
       accidental breaking change fails the pack. Bump the baseline after each release, per
       docs/RELEASING.md.
     -->
-    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.1.0</PackageValidationBaselineVersion>
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 

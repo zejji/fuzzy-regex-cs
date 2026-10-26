@@ -7,8 +7,8 @@ with per-error-type budgets - insertions, deletions and substitutions inside pat
 `Fuzzy.Text.RegularExpressions`, and the main type is `FuzzyRegex`, shaped after
 `System.Text.RegularExpressions.Regex`.
 
-**Status: 1.0.0, released on [nuget.org](https://www.nuget.org/packages/FuzzyRegex)** ([release
-notes](https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.0.0)). Feature-complete against the
+**Status: 1.1.0, released on [nuget.org](https://www.nuget.org/packages/FuzzyRegex)** ([release
+notes](https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.1.0)). Feature-complete against the
 pinned upstream release - the whole ported upstream test suite passes (`docs/STATUS.md`) - and the
 public API follows semantic versioning from 1.0.0. Where this port deliberately answers differently
 from upstream is listed in [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md),
