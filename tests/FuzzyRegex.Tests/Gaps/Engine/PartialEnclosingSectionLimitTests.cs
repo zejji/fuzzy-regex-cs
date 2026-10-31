@@ -84,4 +84,47 @@ public sealed class PartialEnclosingSectionLimitTests
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, deletions));
     }
+
+    /// <summary>
+    /// D129: an insertion that needs the character after the text runs out of text only if the
+    /// insertion itself fits every open section. <c>^</c> fails past position 0, so after 'f' and
+    /// one inserted 'x' the only step left is a second insertion, which the inner section allows
+    /// and the outer one forbids. The port answered P(0, 2) with one insertion; the same path under
+    /// a single <c>{i&lt;=1}</c> was already None. PCRE2 10.47 agrees once the insertions are
+    /// written out: <c>f.{0,1}^</c> over 'fx' is None, <c>f.{0,2}^</c> is a partial. The rows are,
+    /// in order: the insertion arm of an item; scheduled-oracle row 179705086/41658, whose
+    /// insertions all count against the outer <c>{i&lt;=1}</c>; a trailing insertion at a section's
+    /// end; an outer insertion cost (two units, three allowed); an outer total; and a section
+    /// whose own next item is an exact character. Upstream answers None on each except the row,
+    /// where it reports P(0, 4) (ledger entry 81).
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?:f^){i<=2}){i<=1}", "fx")]
+    [Arguments(@"(?:a0(?:[a-f]^){e<=2:[^i]}x){s<=1,i<=1,d<=1}", "a0fx")]
+    [Arguments(@"(?:(?:f){i<=2}^){i<=1}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){2i<=3}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){e<=1}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}x){i<=1}", "fx")]
+    public void No_partial_where_the_insertion_that_runs_out_breaks_an_enclosing_section(string pattern, string text)
+    {
+        new FuzzyRegex(pattern).MatchAtStart(text, partial: true).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// D129's controls: where every open section can take the second insertion, it runs out of
+    /// text and the partial stands, as <c>f.{0,2}^</c> over 'fx' is a partial in PCRE2 10.47.
+    /// The counts are the path so far; the insertion that runs out is not counted.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:f){i<=2}^")]
+    [Arguments(@"(?:(?:f^){i<=2}){i<=2}")]
+    [Arguments(@"(?:(?:f){i<=2}^){i<=2}")]
+    [Arguments(@"(?:(?:f^){i<=2}){2i<=4}")]
+    public void A_run_out_insertion_every_section_allows_leaves_the_partial(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("fx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    }
 }

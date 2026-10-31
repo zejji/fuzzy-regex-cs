@@ -6838,6 +6838,49 @@ internal static class Matcher
             && TotalCost(counts, section) <= values[FuzzyValue.MaxCost];
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S (D129): whether the insertion an insertion run-out needs fits every open
+    /// fuzzy section, as <see cref="AnOpenSectionIsOverItsLimits"/> asks of the counts so far.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An insertion that needs the character after the text runs out of text (D11 RC5): the
+    /// insertion arm of <see cref="NextFuzzyMatchItem"/> and the trailing insertion at a section's
+    /// end. The run-out exists only because that insertion is made, so it is a step the path takes,
+    /// and it must be one the pattern allows. <see cref="ThisErrorPermitted"/> and
+    /// <see cref="InsertionPermitted"/> ask only the section the insertion is made in; an inner
+    /// section's errors also count against every section around it. `(?:(?:f^){i&lt;=2}){i&lt;=1}`
+    /// over 'fx' answered P(0, 2): after 'f' and one inserted 'x', `^` can pass only after a second
+    /// insertion, which the outer section forbids, where `(?:f^){i&lt;=1}` was already None and
+    /// PCRE2 10.47 answers <c>f.{0,1}^</c> over 'fx' with None.
+    /// </para>
+    /// <para>
+    /// The insertion is counted only for this question and taken back: the run-out still does not
+    /// count it (the path's counts are those so far), and <see cref="AnOpenSectionIsOverItsLimits"/>
+    /// walks the open sections exactly as a run-out's own check does, cost and the whole match's
+    /// limits included. A pattern with one section level pays nothing: the section the insertion is
+    /// made in has already allowed it. The oracle's D81 ablation turns it off with that check.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if every open section allows one more insertion.</returns>
+    private static bool ARunOutInsertionFitsTheOpenSections(MatchState state)
+    {
+        Debug.Assert(state.RunsOutRight || state.RunsOutLeft, "D129: asked only once an insertion has run out of text");
+        PatternObject pattern = state.Pattern;
+        if (!pattern.NestsFuzzySections || pattern.RunOutAsBeforeD81)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        ++counts[FuzzyValue.Ins];
+        bool over = AnOpenSectionIsOverItsLimits(state);
+        --counts[FuzzyValue.Ins];
+
+        return !over;
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 M2: removes a construct's own cut taint, if it has one.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="frame">The frame's backtracking-stack position.</param>
@@ -9439,7 +9482,8 @@ internal static class Matcher
                 // oracle's pre-D11 ablation keeps upstream's argument.
                 if (
                     CheckFuzzyPartial(state, state.Pattern.SecondPassAsBeforeD11 ? data.NewTextPos : newPos)
-                    == MatchStatus.Partial
+                        == MatchStatus.Partial
+                    && ARunOutInsertionFitsTheOpenSections(state)
                 )
                 {
                     state.NotePartialEvent(PartialEvent.InsertionRunOut);
@@ -18460,6 +18504,7 @@ internal static class Matcher
                 && !pattern.SecondPassAsBeforeD11
                 && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
                     == MatchStatus.Partial
+                && ARunOutInsertionFitsTheOpenSections(state)
             )
             {
                 // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
