@@ -27,8 +27,11 @@ public sealed class TailGuardLivenessTests
     [Arguments(@"(b?)(?:a*|b)*(?=\1c)", "r2:1:t")]
     [Arguments(@"(?:(b)|)(?:a*|b)*(?(1)z|c)", "r1:1:s")]
     [Arguments(@"(?r)c\1(?:a*|b)*(b?)", "r2:1:t")]
-    // A group call: every read group, exact spans.
-    [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1))", "r2:1:tpi|X")]
+    // A group call: every read group, exact spans. The called group recurses, so the call stays a
+    // call; since D101 a call nothing can tell from its group written out is written out, and keys
+    // as the written-out row above does (the row after).
+    [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1(?:x(?2))?))", "r2:1:tpi|X r3:1:tpi|X")]
+    [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1))", "r2:1:t")]
     // A loop in a lookbehind runs backwards while the lookahead capture in its body runs forwards,
     // so the span compare's "at or after the position" no longer holds: exact spans there, and
     // only there (2026-10-16 review gap 1).

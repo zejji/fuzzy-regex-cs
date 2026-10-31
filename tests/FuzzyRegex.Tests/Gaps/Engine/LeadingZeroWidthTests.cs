@@ -233,13 +233,15 @@ public sealed class LeadingZeroWidthTests
     /// 1, where <c>cat</c> starts, never runs. Since D88 (ledger entry 86) the failed attempt puts
     /// the start back and the search finds (3, 4), the answer a screen would give, so the guard is
     /// now only conservative for this row. A verb or a group call in the body is refused as
-    /// unproved.
+    /// unproved. The call is to a recursive group, which stays a call: D101 writes out a call
+    /// nothing can tell from its group, and <c>(?=(?&amp;w))</c> with <c>(?&lt;w&gt;c)</c> is then
+    /// <c>(?=c)</c>, which the walk reads.
     /// </summary>
     /// <param name="pattern">A pattern the screen must leave alone.</param>
     [Test]
     [Arguments(@"(?=[a-z][a-z]\K)(?:cat|dog)")]
     [Arguments(@"(?=c(*PRUNE)a|d)(?:cat|dog)")]
-    [Arguments(@"(?=(?&w))(?:cat|dog)(?<w>c)?")]
+    [Arguments(@"(?=(?&w))(?:cat|dog)(?<w>c(?&w)?)?")]
     public void The_walk_refuses_a_lookaround_that_can_move_the_next_start_or_is_unproved(string pattern)
     {
         PatternObject compiled = Compile(pattern, FuzzyRegexOptions.None);

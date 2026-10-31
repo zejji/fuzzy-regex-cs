@@ -85,6 +85,13 @@ internal sealed class Node
     internal Body? BodyInfo;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D101: for a negative lookaround, whether its outcome in a partial call's
+    /// second pass is kept per position for the pass (<c>Matcher.AdvanceLookaround</c>,
+    /// <c>PatternObject.SetNegativeOutcomeMemo</c>).
+    /// </summary>
+    internal bool MemoisesNegativeOutcome;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: for a node inside a lookaround body or condition test, the
     /// capture groups whose start or end the innermost such body can still reach from it: the groups
     /// a run-out at this node leaves unknown (<c>Matcher.MarkTheBodysCapturesUnknown</c>). A group
@@ -105,13 +112,25 @@ internal sealed class Node
     /// </summary>
     internal Node? EnclosingSection;
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 (B3a): for a lookaround or a condition's test in a fuzzy pattern with group
+    /// calls, whether a call can run it (it lies in a called group's code, or the whole pattern is
+    /// called), so the section it runs in depends on the call site and
+    /// <see cref="EnclosingSection"/> does not describe it. Set by
+    /// <c>PatternObject.SetEnclosingSections</c>.
+    /// </summary>
+    internal bool RunByACall;
+
     /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end
     /// node, sorted.</param>
     /// <param name="Groups">The capturing groups whose start or end is among them.</param>
     /// <param name="HasVerbOrCall">Whether a <c>(*PRUNE)</c>, <c>(*SKIP)</c> or group call is among
     /// them (a call can reach a verb in the group it calls).</param>
-    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups, bool HasVerbOrCall);
+    /// <param name="ReachesVerb">NOT UPSTREAM'S, D101 (B2'): whether a <c>(*PRUNE)</c> or
+    /// <c>(*SKIP)</c> is among them or in a group a call among them reaches, through any depth of
+    /// calls.</param>
+    internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups, bool HasVerbOrCall, bool ReachesVerb);
 
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
@@ -175,6 +194,17 @@ internal sealed class Node
 
     /// <summary>This node's place in <see cref="Chain"/>.</summary>
     internal int ChainIndex;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D (share 1): for a LOOKAROUND node, while the pattern compiles,
+    /// one more than the offset of the code it was compiled from, so the compiler's copies of one
+    /// lookaround (a repeat's unrolled iterations) share it (0 for any other node); once it has
+    /// compiled, for a node with <see cref="MemoisesNegativeOutcome"/>, the index its outcomes are
+    /// kept under: its own, or an interchangeable copy's (<c>PatternObject.SetNegativeOutcomeKeys</c>).
+    /// One field for both, since a node has room for one int in its padding and not two (312
+    /// bytes with one, 320 with two, measured 2026-10-25).
+    /// </summary>
+    internal int OutcomeKey;
 
     /// <summary>
     /// NOT UPSTREAM (finding F-A): how many items the fuzzy run starting at this node has, or 0 if

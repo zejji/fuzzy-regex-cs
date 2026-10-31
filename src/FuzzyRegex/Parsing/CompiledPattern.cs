@@ -65,4 +65,7 @@ internal sealed record CompiledPattern(
     /// part of upstream's tuple, which is why the bytecode itself carries no mark.
     /// </summary>
     internal IReadOnlyList<int> OptionalPassEnds { get; init; } = [];
+
+    /// <summary>NOT UPSTREAM (D101): how many group calls were written out (<see cref="CallInliner"/>).</summary>
+    internal int InlinedCalls { get; init; }
 }

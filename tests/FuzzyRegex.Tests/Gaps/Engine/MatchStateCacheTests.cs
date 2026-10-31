@@ -464,11 +464,31 @@ public sealed class MatchStateCacheTests
             case null when field.FieldType == typeof(HashSet<long[]>):
                 field.SetValue(state, new HashSet<long[]> { new long[] { 7 } });
                 break;
+            case null when field.FieldType == typeof(Dictionary<long, bool>):
+                // D101's negative outcome memo, made on first use.
+                field.SetValue(state, new Dictionary<long, bool> { [7] = true });
+                break;
             case List<WMark> marks:
                 marks.Add(new WMark(7, WMarkKind.Touch));
                 break;
             case List<MatchState.BestWalkFailure> facts:
                 facts.Add(new MatchState.BestWalkFailure(7, 7, 7, true, 7, 7));
+                break;
+            case List<MatchState.CallOutcomeTrack> tracks:
+                // D101's per-call outcome tracks.
+                tracks.Add(new MatchState.CallOutcomeTrack(true, true, true, 7));
+                break;
+            case List<MatchState.TailTrack> tails:
+                // D101 option D's followed tails.
+                tails.Add(new MatchState.TailTrack(7, 7, 7, 7, 7, 7, 7));
+                break;
+            case MatchState.TailTrack:
+                // D101 option D's pending visit.
+                field.SetValue(state, new MatchState.TailTrack(7, 7, 7, 7, 7, 7, 7));
+                break;
+            case null when field.FieldType == typeof(Dictionary<(long, long), long>):
+                // D101 option D's tail summaries, made on first use.
+                field.SetValue(state, new Dictionary<(long, long), long> { [(7, 7)] = 7 });
                 break;
             case List<LookaroundSuccess> successes:
                 successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
@@ -612,6 +632,17 @@ public sealed class MatchStateCacheTests
             case HashSet<RepeatStateKey> failed:
                 // D94's failed-state memo: made on first use and then kept, so empty is none.
                 lines.Add(failed.Count == 0 ? $"{path}=null" : $"{path}.Count={failed.Count}");
+                break;
+            case Dictionary<long, bool> outcomes:
+                // D101's negative outcome memo: made on first use and then kept, so empty is none.
+                lines.Add(outcomes.Count == 0 ? $"{path}=null" : $"{path}.Count={outcomes.Count}");
+                break;
+            case Dictionary<(long, long), long> tails:
+                // D101 option D's tail summaries: the same.
+                lines.Add(tails.Count == 0 ? $"{path}=null" : $"{path}.Count={tails.Count}");
+                break;
+            case MatchState.TailTrack track:
+                lines.Add($"{path}={track}");
                 break;
             case HashSet<long[]> keys:
                 RenderItems(

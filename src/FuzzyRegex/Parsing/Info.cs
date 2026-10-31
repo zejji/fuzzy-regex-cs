@@ -135,6 +135,20 @@ internal sealed class Info
     internal bool UpstreamCallCopies { get; init; }
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether every group call is compiled as a call,
+    /// as upstream compiles it, rather than written out where nothing can tell the two apart (D101,
+    /// <see cref="CallInliner"/>). The oracle and the tests set it to compare code with upstream's,
+    /// to test the call machinery itself, and before switching on upstream's capture rule
+    /// (<c>PatternObject.KeepCallCaptures</c>), under which every call is visible. It also leaves
+    /// the always-matching lookarounds unfolded (<see cref="LookaroundFolder"/>), so the code is
+    /// upstream's shape.
+    /// </summary>
+    internal bool UpstreamCalls { get; init; }
+
+    /// <summary>NOT UPSTREAM (D101): how many calls <see cref="CallInliner"/> wrote out.</summary>
+    internal int InlinedCalls { get; set; }
+
+    /// <summary>
     /// NOT UPSTREAM (D50): the parsed pattern, which the optimiser never touches when the pattern
     /// has a group call, so that a copy of the whole pattern can be prepared from it. Null until
     /// then, and in a pattern with no call.

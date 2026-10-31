@@ -2386,7 +2386,6 @@ internal sealed class Conditional : RegexBase
     private readonly Info _info;
     private readonly int _position;
     private readonly string _groupText;
-    private int? _group;
 
     /// <summary>Initializes a conditional subpattern.</summary>
     /// <param name="info">The parse state, which the conditional resolves its group against.</param>
@@ -2406,7 +2405,7 @@ internal sealed class Conditional : RegexBase
     private Conditional(Info info, string group, int? resolved, RegexBase yesItem, RegexBase noItem, int position)
         : this(info, group, yesItem, noItem, position)
     {
-        _group = resolved;
+        GroupNumber = resolved;
     }
 
     /// <summary>What to match when the group took part. Upstream <c>yes_item</c>.</summary>
@@ -2416,23 +2415,29 @@ internal sealed class Conditional : RegexBase
     internal RegexBase NoItem { get; set; }
 
     /// <summary>Whether this is a <c>DEFINE</c>, which resolves to group 0 and matches nothing in place.</summary>
-    internal bool IsDefine => _group == 0;
+    internal bool IsDefine => GroupNumber == 0;
+
+    /// <summary>
+    /// The group the condition tests, once <see cref="FixGroups"/> has resolved it; 0 for
+    /// <c>DEFINE</c>. Upstream <c>group</c>.
+    /// </summary>
+    internal int? GroupNumber { get; private set; }
 
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
     {
         if (ParseFunctions.TryParseGroupNumber(_groupText, out int group))
         {
-            _group = group;
+            GroupNumber = group;
         }
         else if (_info.GroupIndex.TryGetValue(_groupText, out int named))
         {
-            _group = named;
+            GroupNumber = named;
         }
         else if (string.Equals(_groupText, "DEFINE", StringComparison.Ordinal))
         {
             // 'DEFINE' is a special name unless there's a group with that name.
-            _group = 0;
+            GroupNumber = 0;
 
             // Port-only (D75): upstream accepts a no-branch here and the pattern never matches.
             // PCRE2 and Perl refuse it; an empty no-branch is kept, as upstream matches it.
@@ -2446,7 +2451,7 @@ internal sealed class Conditional : RegexBase
             throw new FuzzyRegexParseException("unknown group", pattern, _position);
         }
 
-        if (_group < 0 || _group > _info.GroupCount)
+        if (GroupNumber < 0 || GroupNumber > _info.GroupCount)
         {
             throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
         }
@@ -2460,7 +2465,7 @@ internal sealed class Conditional : RegexBase
         new Conditional(
             info,
             _groupText,
-            _group,
+            GroupNumber,
             YesItem.Optimise(info, reverse),
             NoItem.Optimise(info, reverse),
             _position
@@ -2476,7 +2481,7 @@ internal sealed class Conditional : RegexBase
 
     /// <inheritdoc />
     internal override RegexBase Clone() =>
-        new Conditional(_info, _groupText, _group, YesItem.Clone(), NoItem.Clone(), _position);
+        new Conditional(_info, _groupText, GroupNumber, YesItem.Clone(), NoItem.Clone(), _position);
 
     /// <inheritdoc />
     /// <remarks>
@@ -2537,7 +2542,7 @@ internal sealed class Conditional : RegexBase
     /// </remarks>
     public override bool Equals(object? obj) =>
         obj is Conditional other
-        && _group == other._group
+        && GroupNumber == other.GroupNumber
         && YesItem.Equals(other.YesItem)
         && NoItem.Equals(other.NoItem);
 
@@ -2555,7 +2560,7 @@ internal sealed class Conditional : RegexBase
     {
         List<uint[]> code =
         [
-            [(uint)Opcode.GroupExists, (uint)_group!.Value],
+            [(uint)Opcode.GroupExists, (uint)GroupNumber!.Value],
         ];
         code.AddRange(YesItem.Compile(reverse, fuzzy));
 
@@ -4736,7 +4741,7 @@ internal sealed class Fuzzy : RegexBase
     }
 
     /// <summary>What the section matches. Upstream <c>subpattern</c>.</summary>
-    internal RegexBase Subpattern { get; private set; }
+    internal RegexBase Subpattern { get; set; }
 
     /// <summary>The error budget. Upstream <c>constraints</c>.</summary>
     internal FuzzyConstraints Constraints { get; }

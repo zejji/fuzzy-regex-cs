@@ -488,7 +488,9 @@ public sealed class RepeatTests
 
         // Measured 2026-09-13 over the 1,534 compile-parity patterns: 639. One was in '\0?(?0){e}',
         // which D4's left-recursion check now refuses (2026-10-08).
-        repeatOnes.Should().Be(638, "the corpus is fixed, so a change here means the optimiser moved");
+        // 644 since D101: six called groups are now written out, and a one-character body under a
+        // repeat compiles to a repeat-one node, as the same group written out does (638 before).
+        repeatOnes.Should().Be(644, "the corpus is fixed, so a change here means the optimiser moved");
         withFuzzyTail.Should().BeEmpty();
     }
 

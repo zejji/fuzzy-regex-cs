@@ -80,6 +80,9 @@ internal static class PatternCompiler
     /// <param name="upstreamCallCopies">
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallCopies"/>.
     /// </param>
+    /// <param name="upstreamCalls">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCalls"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
@@ -91,7 +94,8 @@ internal static class PatternCompiler
         bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false,
         bool upstreamFuzzyConditionTest = false,
-        bool upstreamCallCopies = false
+        bool upstreamCallCopies = false,
+        bool upstreamCalls = false
     )
     {
         FuzzyRegexParseException unterminated;
@@ -107,7 +111,8 @@ internal static class PatternCompiler
                 upstreamWholePatternCall,
                 upstreamCallFeatures,
                 upstreamFuzzyConditionTest,
-                upstreamCallCopies
+                upstreamCallCopies,
+                upstreamCalls
             );
         }
         catch (FuzzyRegexParseException failed)
@@ -203,7 +208,8 @@ internal static class PatternCompiler
         bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false,
         bool upstreamFuzzyConditionTest = false,
-        bool upstreamCallCopies = false
+        bool upstreamCallCopies = false,
+        bool upstreamCalls = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -233,6 +239,7 @@ internal static class PatternCompiler
                     UpstreamCallFeatures = upstreamCallFeatures,
                     UpstreamFuzzyConditionTest = upstreamFuzzyConditionTest,
                     UpstreamCallCopies = upstreamCallCopies,
+                    UpstreamCalls = upstreamCalls,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -305,6 +312,27 @@ internal static class PatternCompiler
         parsed.FixGroups(pattern, reverse, false);
 
         // NOT PORTED: the DEBUG flag's parsed.dump(), which only prints.
+
+        // NOT UPSTREAM (D101): write out the calls nothing can tell from their groups written out.
+        // With every call gone, the sections that allow no errors go too, as they would have before
+        // FixGroups had the pattern been written without its calls (see ElideExactFuzzy above).
+        parsed = CallInliner.Run(info, parsed);
+        if (info.HasGroupCall && info.GroupCalls.Count == 0)
+        {
+            info.HasGroupCall = false;
+            parsed = parsed.ElideExactFuzzy();
+        }
+
+        // NOT UPSTREAM (D101): a lookaround whose body succeeds everywhere is decided now. The
+        // left-recursion refusal (D4, D72) is read first, on the tree as written, since a fold can
+        // remove the call that makes a pattern left-recursive (`\w(?<!(?:b(?R)?)*+)`), and the
+        // refusal must not depend on it; it is read again below for the copies.
+        if (info.GroupCalls.Count != 0)
+        {
+            LeftRecursion.Check(info, parsed, pattern);
+        }
+
+        parsed = LookaroundFolder.Run(parsed, info);
 
         // NOT UPSTREAM (D50): a pattern whose calls need copies is optimised from a copy of its tree,
         // so the tree as parsed is left as written for the called groups' copies
@@ -485,6 +513,7 @@ internal static class PatternCompiler
         )
         {
             OptionalPassEnds = optionalPassEnds ?? [],
+            InlinedCalls = info.InlinedCalls,
         };
     }
 

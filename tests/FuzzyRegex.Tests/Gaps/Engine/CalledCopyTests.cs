@@ -95,7 +95,8 @@ public sealed class CalledCopyTests
     [Arguments("Atomic", "(?(DEFINE)(?P<g1>(?>a|b)c))(?:(?&g1)){d<=1}", "(?:(?P<g1>(?>a|b)c)){d<=1}")]
     public void A_copy_compiles_to_the_code_of_its_group_written_out(string node, string called, string writtenOut)
     {
-        uint[] call = [.. PatternCompiler.Compile(called).Code];
+        // The call kept as a call (D101 would write it out): this is about the copy a call needs.
+        uint[] call = [.. PatternCompiler.Compile(called, upstreamCalls: true).Code];
         uint[] written = [.. PatternCompiler.Compile(writtenOut).Code];
 
         // The one copy follows the pattern's SUCCESS: CALL_REF and its reference, the group, and

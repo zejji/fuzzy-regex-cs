@@ -286,10 +286,14 @@ public sealed class FailedCallMemoTests
         (m.Index, m.Length).Should().Be((0, 2));
     }
 
-    /// <summary>A pattern compiled for one test, with the memo on from the first call, or off.</summary>
+    /// <summary>
+    /// A pattern compiled for one test, with the memo on from the first call, or off. Every call is
+    /// kept as a call: D101 writes out the calls nothing can tell from their groups, and these
+    /// tests are about the memo of the calls themselves.
+    /// </summary>
     private static FuzzyRegex WithMemo(string pattern, bool eager)
     {
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        FuzzyRegex regex = GroupCallTests.WithCallsKept(pattern, EngineWork.HangGuard);
         regex.PatternObject.EagerCallMemo = eager;
         regex.PatternObject.SkipCallMemo = !eager;
         return regex;

@@ -102,6 +102,36 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long LeadingStringFallbacks { get; private set; }
 
+    /// <summary>
+    /// D101 option D: repeat tails kept on this thread, as having run out across their call frame
+    /// without returning (<c>Matcher.TailAtEnd</c>).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long TailsRecorded { get; private set; }
+
+    /// <summary>D101 option D: tails replayed on this thread instead of being explored.</summary>
+    [field: ThreadStatic]
+    internal static long TailsReplayed { get; private set; }
+
+    /// <summary>
+    /// D101 option D: replays on this thread of a tail recorded in a different call frame instance,
+    /// the ones that test anything beyond the calls' own memo (design section 4.3).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long TailsReplayedAcrossFrames { get; private set; }
+
+    /// <summary>
+    /// D101: call-outcome tracks written on this thread when a run-out is taken
+    /// (<c>Matcher.NoteARunOutInTheOpenCalls</c>), so a test can say that a run-out costs the same
+    /// whatever the recursion's depth.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CallTracksMarked { get; private set; }
+
+    /// <summary>D101 option D: tails on this thread not kept because a guard of their frame held.</summary>
+    [field: ThreadStatic]
+    internal static long TailsPoisoned { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -183,6 +213,31 @@ internal static class WorkCounter
     /// <summary>Counts one repeat guard lookup.</summary>
     [Conditional("DEBUG")]
     internal static void GuardChecked() => GuardChecks++;
+
+    /// <summary>Counts call-outcome tracks written at a run-out (D101).</summary>
+    /// <param name="count">How many.</param>
+    [Conditional("DEBUG")]
+    internal static void CallTracksWritten(int count) => CallTracksMarked += count;
+
+    /// <summary>Counts one tail kept (D101 option D).</summary>
+    [Conditional("DEBUG")]
+    internal static void TailRecorded() => TailsRecorded++;
+
+    /// <summary>Counts one tail replayed, and whether another frame instance recorded it (D101 option D).</summary>
+    /// <param name="acrossFrames">Whether the recording frame instance is not the replaying one.</param>
+    [Conditional("DEBUG")]
+    internal static void TailReplayed(bool acrossFrames)
+    {
+        TailsReplayed++;
+        if (acrossFrames)
+        {
+            TailsReplayedAcrossFrames++;
+        }
+    }
+
+    /// <summary>Counts one tail not kept because a guard of its frame held (D101 option D).</summary>
+    [Conditional("DEBUG")]
+    internal static void TailPoisoned() => TailsPoisoned++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

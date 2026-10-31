@@ -94,7 +94,9 @@ public sealed class PartialBlockedEndTests
         bool keepCallCaptures
     )
     {
-        var regex = new FuzzyRegex(pattern);
+        // The calls kept as calls (D101 writes most of these out), so the rows still test the call
+        // machinery they were written for.
+        FuzzyRegex regex = GroupCallTests.WithCallsKept(pattern);
         regex.PatternObject.KeepCallCaptures = keepCallCaptures;
         id += keepCallCaptures ? " (upstream's capture rule)" : " (D51's capture rule)";
         Match m = operation switch

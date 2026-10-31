@@ -1930,8 +1930,11 @@ internal static class ExpectedDivergences
         // The COMPLETE match upstream degrades to a partial, trailing group and all - and the exact
         // answer upstream's own inline copy of the lookbehind gives, less the call's capture of g1
         // at 3, which the call discards on return since D51 (ledger entry 63). Judged 2026-09-30:
-        // it was "1:(3,1)[(3,1),(3,1)]" before.
-        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] 2:(5,0)[(5,0)] last=1/g1",
+        // it was "1:(3,1)[(3,1),(3,1)]" before. Since D101 the call is written out, and lastindex
+        // is 2, as upstream's own inline copy gives (regex 2026.9.29, 2026-10-24: (3, 5), lastindex
+        // 2); the call form said 1, a port defect of calls reached through a lookaround running the
+        // other way (`(?P<g1>x)(?:(?<!(?P>g1)))?(a)(b)` over 'xab' with the call kept: lastindex 1).
+        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1)] 2:(5,0)[(5,0)] last=2/g1",
     ];
 
     /// <summary>
@@ -2335,8 +2338,12 @@ internal static class ExpectedDivergences
     /// </remarks>
     private static readonly string[] _posixOvercostOurs =
     [
-        "matches 2 | match 0:(0,9)[(0,9)] 1:(0,7)[(0,7)] 2:(7,0)[(7,0)] 3:(8,1)[(8,1)] last=3/g3 "
-            + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:(1,0)[(1,0)] 3:(2,1)[(2,1)] last=3/g3",
+        // lastindex 1 since D101 writes the call out: the group a reverse match closes last is g1,
+        // as upstream's own written-out form answers (`(?r)(?P<g1>a)(b)(?P<g3>c)(?:(?(3)(?!c)x))*?`
+        // over 'abc': lastindex 1, regex 2026.9.29, 2026-10-24). The call form said 3, a port
+        // defect of calls reached through a lookaround running the other way.
+        "matches 2 | match 0:(0,9)[(0,9)] 1:(0,7)[(0,7)] 2:(7,0)[(7,0)] 3:(8,1)[(8,1)] last=1/g1 "
+            + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:(1,0)[(1,0)] 3:(2,1)[(2,1)] last=1/g1",
         "matches 1 | match 0:(0,3)[(0,3)] 1:(2,1)[(2,1)] last=1/- fuzzy=(0,0,1)[changes unavailable upstream]",
         // Deliberately NOT a verbatim string: `OracleWave.Printable` renders the ligature and the two
         // line endings as the six-character escapes themselves, so each backslash has to survive into

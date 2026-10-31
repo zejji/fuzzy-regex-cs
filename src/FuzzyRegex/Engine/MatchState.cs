@@ -1863,6 +1863,13 @@ internal sealed class MatchState : IDisposable
         OpenCallSections.Clear();
         OpenCallSpans.Clear();
         FailedCalls = null;
+        NegativeOutcomes?.Clear();
+        CallOutcomes?.Clear();
+        CallTracks.Clear();
+        if (TailsLive || TailStamp != 0 || TailRanOut is { Count: > 0 } || TailMemoCapacity != TailMemoCap)
+        {
+            ResetTheTails();
+        }
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
         CallMemoKey.Clear();
@@ -2088,8 +2095,13 @@ internal sealed class MatchState : IDisposable
         BestMatchGroups = null;
         Cancellation = default;
 
-        // The failed-call memo belongs to one pass, so a state waiting in the cache holds none.
+        // The failed-call memo belongs to one pass, so a state waiting in the cache holds none; nor
+        // does it hold D101's negative outcomes.
         FailedCalls = null;
+        NegativeOutcomes?.Clear();
+        CallOutcomes?.Clear();
+        CallTracks.Clear();
+        ClearTheTails();
     }
 
     /// <summary>
@@ -2447,8 +2459,204 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// Upstream <c>init_match</c> (<c>upstream/src/_regex.c</c> line 3404).
     /// </summary>
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: the outcomes of the negative lookarounds marked
+    /// <see cref="Node.MemoisesNegativeOutcome"/> in this pass of a partial call's second pass,
+    /// keyed by node index and position: <see langword="true"/> if it passed undetermined,
+    /// <see langword="false"/> if it passed decided. Made on first use; emptied by
+    /// <see cref="InitMatch"/>.
+    /// </summary>
+    internal Dictionary<long, bool>? NegativeOutcomes;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: what each open group call has done so far, one entry per entry of
+    /// <see cref="OpenCalls"/>, while <see cref="PatternObject.MemoisesCallOutcomes"/> keeps call
+    /// outcomes in a partial call's second pass.
+    /// </summary>
+    internal readonly List<CallOutcomeTrack> CallTracks = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: the outcomes of the calls <see cref="CallTracks"/> followed to their end in
+    /// this pass, keyed by <see cref="Matcher"/>'s active-call key (group and position):
+    /// <see langword="true"/> if a run-out crossed the call, <see langword="false"/> if it failed
+    /// without touching the text to come. Made on first use; emptied by <see cref="InitMatch"/>.
+    /// </summary>
+    internal Dictionary<long, bool>? CallOutcomes;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: what one open call has done (<see cref="CallTracks"/>). A run-out writes
+    /// only the innermost open call's track, and a call hands its track to its caller's when it
+    /// closes (<c>Matcher.PopOpenCall</c>), so a track is complete exactly when it is read, at its
+    /// own call's close, and a run-out costs the same at any depth.
+    /// </summary>
+    /// <param name="Returned">Whether it has returned, so its exits are not only failures.</param>
+    /// <param name="Touched">Whether a run-out was taken while it was open.</param>
+    /// <param name="RanOut">Whether it counts as crossed whatever <paramref name="LowestBody"/> says (a re-opened call).</param>
+    /// <param name="LowestBody">
+    /// The lowest saved-stack depth at which the innermost body of a run-out taken while it was open
+    /// began, -1 for a run-out with no body around it; <see cref="long.MaxValue"/> for none. A
+    /// run-out crossed the call when that body began below the call's frame.
+    /// </param>
+    [StructLayout(LayoutKind.Auto)]
+    internal readonly record struct CallOutcomeTrack(bool Returned, bool Touched, bool RanOut, long LowestBody)
+    {
+        /// <summary>The track of a call just opened.</summary>
+        internal static CallOutcomeTrack Opened => new(false, false, false, long.MaxValue);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the repeat tails summarised in this pass of a partial call's
+    /// second pass (<c>Matcher.TailAtEnd</c>). A key is present when the tail ran out across its
+    /// call frame and never returned; its value is the stamp of the frame instance that recorded
+    /// it (<see cref="FrameStamps"/>), which only the Debug counts read. Made on first use; emptied
+    /// by <see cref="InitMatch"/>; at most <see cref="TailMemoCap"/> entries.
+    /// </summary>
+    internal Dictionary<(long, long), long>? TailRanOut;
+
+    /// <summary>The most entries <see cref="TailRanOut"/> takes in one pass, as for the cut bodies' keys (D104).</summary>
+    internal const int TailMemoCap = 1 << 16;
+
+    /// <summary>
+    /// The cap in force: <see cref="TailMemoCap"/>, set by <see cref="Init"/>. Only a test lowers it,
+    /// on a state it made, to see the cap hold without a text long enough to reach the real one.
+    /// </summary>
+    internal int TailMemoCapacity = TailMemoCap;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the tails being explored, oldest first, each until
+    /// backtracking pops the entry its visit pushed. A cut that discards the entry leaves its track
+    /// behind; the next push or record above it drops it.
+    /// </summary>
+    internal readonly List<TailTrack> TailTracks = [];
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the visit deciding now, followed once it pushes its entry.</summary>
+    internal TailTrack PendingTail;
+
+    /// <summary>Whether <see cref="PendingTail"/> belongs to the visit deciding now.</summary>
+    internal bool HasPendingTail;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: whether a tail has been followed in this attempt, so
+    /// <see cref="TailTracks"/> may be non-empty or a visit may be pending. The matching loop's
+    /// gates read this flag rather than the list, so they add no reference-typed temporary to
+    /// <c>Matcher.BasicMatchCore</c>'s zeroed frame (memory note basicmatchcore-prolog-zeroing).
+    /// Cleared with the tracks.
+    /// </summary>
+    internal bool TailsLive;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the clock of the events a tail track reads. Not reset between
+    /// passes or attempts: every track compares against the value it started at, so a stamp left
+    /// by an earlier pass or attempt (one a time-out ended, say) is always older and reads as "no
+    /// event". <see cref="Init"/> resets it with the stamp arrays, once per call.
+    /// </summary>
+    internal long TailStamp;
+
+    /// <summary>When a run-out last had the body at each pruning-stack index as its innermost.</summary>
+    internal long[] RunOutStamps = [];
+
+    /// <summary>When the call frame at each depth (one-based) last returned or was closed by a restore.</summary>
+    internal long[] ReturnStamps = [];
+
+    /// <summary>When a repeat guard last held at each frame depth (one-based) while a tail was followed.</summary>
+    internal long[] PoisonStamps = [];
+
+    /// <summary>When the call frame at each depth (one-based) was opened: its instance, for the Debug counts.</summary>
+    internal long[] FrameStamps = [];
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: one followed tail (<see cref="TailTracks"/>).</summary>
+    /// <param name="K1">The key's repeat and position.</param>
+    /// <param name="K2">The key's count classes and frame group.</param>
+    /// <param name="BstackAt">The backtracking-stack size before the visit's entry.</param>
+    /// <param name="FrameDepth">The innermost call frame's depth at the visit.</param>
+    /// <param name="BodyIndex">The innermost body's pruning-stack index at the visit.</param>
+    /// <param name="BodyMark">That body's pruning mark, which the Debug assert compares.</param>
+    /// <param name="StartStamp">The <see cref="TailStamp"/> at the visit, before its guard checks.</param>
+    [StructLayout(LayoutKind.Auto)]
+    internal readonly record struct TailTrack(
+        long K1,
+        long K2,
+        int BstackAt,
+        int FrameDepth,
+        int BodyIndex,
+        long BodyMark,
+        long StartStamp
+    );
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: forgets the pass's tail summaries and the attempt's tracks.
+    /// Most calls followed none, so it is tested first: a reset here cost tiny matches about a
+    /// tenth of their time (Release A-B-B-A on the D98 sample, 2026-10-25).
+    /// </summary>
+    internal void ClearTheTails()
+    {
+        if (TailRanOut is { Count: > 0 } summaries)
+        {
+            summaries.Clear();
+        }
+
+        if (TailsLive)
+        {
+            TailTracks.Clear();
+            HasPendingTail = false;
+            PendingTail = default;
+            TailsLive = false;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: what <see cref="Init"/> forgets of a call that followed tails:
+    /// the summaries and tracks, the cap, and the clock with its stamps, together, so no stamp can
+    /// be newer than the clock (within a call they are never reset; see <see cref="TailStamp"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ResetTheTails()
+    {
+        TailRanOut?.Clear();
+        TailTracks.Clear();
+        HasPendingTail = false;
+        PendingTail = default;
+        TailsLive = false;
+        TailMemoCapacity = TailMemoCap;
+        TailStamp = 0;
+        RunOutStamps = [];
+        ReturnStamps = [];
+        PoisonStamps = [];
+        FrameStamps = [];
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: stamps an event at an index of one of the arrays above.</summary>
+    /// <param name="stamps">The array, grown on demand; new slots are 0, which no track reads as an event.</param>
+    /// <param name="index">The pruning-stack index or frame depth.</param>
+    internal void StampTail(ref long[] stamps, int index)
+    {
+        if (index >= stamps.Length)
+        {
+            Array.Resize(ref stamps, Math.Max(index + 1, stamps.Length * 2));
+        }
+
+        stamps[index] = ++TailStamp;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D (design section 6): a repeat guard held while a tail is followed
+    /// or a visit decides, so every tail of the current frame that started before it is poisoned:
+    /// the guard may have cut a path through the frame's return.
+    /// </summary>
+    /// <returns><see langword="true"/>, so that a guard check can return through it.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool NoteAGuardHitInTheTails()
+    {
+        StampTail(ref PoisonStamps, OpenCalls.Count);
+        return true;
+    }
+
     internal void InitMatch()
     {
+        NegativeOutcomes?.Clear();
+        CallOutcomes?.Clear();
+        CallTracks.Clear();
+        ClearTheTails();
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
         MarkedStates.Clear();
@@ -3804,7 +4012,10 @@ internal sealed class MatchState : IDisposable
             || (_cutBody is not null && IsGuardedAfterBlockedEnd(index, textPos, guardType));
         NoteSecondPassGuard(guarded);
 
-        return guarded;
+        // D101 option D's poison rule, written as one expression: a statement form here added
+        // 32 bytes to BasicMatchCore's zeroed prolog through its 12 inline sites (disasm,
+        // 2026-10-25), and that method pays its prolog on every match.
+        return guarded && (!TailsLive || NoteAGuardHitInTheTails());
     }
 
     /// <summary>
@@ -3833,10 +4044,19 @@ internal sealed class MatchState : IDisposable
         if (!guarded && IsGuardedAfterBlockedEnd(index, textPos, guardType, out span))
         {
             NoteSecondPassGuard(true);
+            if (TailsLive)
+            {
+                _ = NoteAGuardHitInTheTails();
+            }
+
             return true;
         }
 
         NoteSecondPassGuard(guarded);
+        if (guarded && TailsLive)
+        {
+            _ = NoteAGuardHitInTheTails();
+        }
 
         // NOT UPSTREAM (D85): a keyed tail's key can depend on the position as well (whether a span
         // starts at or after it, whether an enclosing iteration started there), so the rest of a
