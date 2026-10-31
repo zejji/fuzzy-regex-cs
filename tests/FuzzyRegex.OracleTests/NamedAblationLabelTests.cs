@@ -71,7 +71,12 @@ public sealed class NamedAblationLabelTests
             .Compare(row, OracleComparer.RunWithTheReentryInANewSection(row))
             .Should()
             .NotBe(OracleVerdict.Agree, "D93's ablation composed with D11's is D11's answer, not D93's");
-        (ExpectedDivergences.For(row, ours!)?.Id).Should().NotBe("call-reentry-opening-a-section-is-refused");
+        (ExpectedDivergences.For(row, ours!)?.Id)
+            .Should()
+            .Be(
+                "full-fold-run-edits-an-expanding-subject-character-whole",
+                "the subject's 'ﬀ' is an expanding full-fold character, and D93's ablation changes nothing"
+            );
     }
 
     [Test]

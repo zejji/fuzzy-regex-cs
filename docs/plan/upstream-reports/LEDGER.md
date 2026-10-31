@@ -6747,7 +6747,9 @@ limits at the run-out (`Matcher.AnOpenSectionIsOverItsLimits`, owner decision 20
 (b)) and backtracks to a legal path or None. `PatternObject.RunOutAsBeforeD81` restores upstream's
 behaviour for the oracle's ablations. Pinned by `Gaps/Engine/PartialEnclosingSectionLimitTests`
 and the judged rows 101045221/24643, 77181735/40114, 1061489043/24385 and 7/24857 (the
-scheduled seed-7 row, red on 2026-10-12 because CI ran a9ea2c95, before D81).
+scheduled seed-7 row, red on 2026-10-12 because CI ran a9ea2c95, before D81), and 7/41298,
+7/43009, 7/48897, 4242/40657 and 4242/42955 (2026-10-31, once named ablations stopped claiming
+ledger-81 rows; KNOWN-DEFECTS D80).
 
 ## 82. A lazy repeat before a full-folded literal reports a partial match where none can start - DIVERGES HERE (no defect row, 2026-10-12)
 
