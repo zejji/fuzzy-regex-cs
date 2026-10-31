@@ -47,18 +47,6 @@ public sealed class OpenDefectTests
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 10, 0));
     }
 
-    // D130. The lookahead's body is matched inside the outer {i<=1}, so its insertions count against
-    // it, as they do on a complete match: `(?:(?=a(?:c){i<=1})abc){i<=0}` fullmatch 'abc' is None in
-    // both engines. After 'f' and one inserted 'x', `^` passes only after a second insertion, which
-    // the outer section forbids, so no path runs out of text and there is no partial. The port
-    // answers P(0, 2) because a run-out inside a lookaround body checks only the sections the body
-    // opened (D81, D129); regex 2026.9.29 answers None (measured 2026-10-31).
-    [Test]
-    public void An_insertion_run_out_inside_a_lookahead_respects_the_section_around_it()
-    {
-        new FuzzyRegex(@"(?:(?=(?:f^){i<=2})f){i<=1}").MatchAtStart("fx", partial: true).Success.Should().BeFalse();
-    }
-
     // D131. Without partial, search finds no match over 'b' (both engines). So a partial call's
     // answer must be a partial or none: a complete match would be one the plain search finds. The
     // port answers a complete (0, 0) with one deletion, and in Debug its second pass trips design
@@ -73,5 +61,20 @@ public sealed class OpenDefectTests
 
         Match m = regex.Match("b", partial: true);
         (!m.Success || m.PartialMatch).Should().BeTrue();
+    }
+
+    // D132. As D130, through a condition's test: the test `(?=(?:f^){i<=2})` is positive and its
+    // body's insertions count against the outer {i<=1}, so the run-out insertion that would let `^`
+    // pass is forbidden, the test fails and the no-branch 'g' does not match 'f'. The port answers
+    // a partial from 0 to 2, because a condition's test still stops the run-out's walk (D130 kept
+    // that, option A). Upstream 2026.9.29 answers None (measured 2026-10-31), and so does the port
+    // when the walk goes past positive tests too.
+    [Test]
+    public void An_insertion_run_out_inside_a_condition_test_respects_the_section_around_it()
+    {
+        new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}")
+            .MatchAtStart("fx", partial: true)
+            .Success.Should()
+            .BeFalse();
     }
 }

@@ -6733,16 +6733,22 @@ internal static class Matcher
     /// insertion path is legal and 'cbx' completes it.
     /// </para>
     /// <para>
-    /// Inside a lookaround's body or a condition's test, only the sections the body opened are
-    /// asked. Their END_FUZZY lies inside the body, before the body can succeed, so a broken one
-    /// fails the body's path for every continuation. A section around the lookaround closes after
-    /// it, and the body's success does not wait for it: `(?:(?!(?:b){e&lt;=2}x)c){i&lt;=1}` over 'cx'
-    /// is None in both engines, because the body's path through a substitution succeeds and makes
-    /// the negative lookahead fail although the outer <c>{i&lt;=1}</c> forbids that substitution.
-    /// Failing that path at a run-out would turn such a lookahead true. The sections around the
-    /// lookaround are asked when matching goes on after it (<see cref="CloseTheBodysSection"/>,
-    /// and this check at any later run-out). A section's frame lies above the structure-stack depth
-    /// the innermost lookaround or test parked exactly when the body opened it.
+    /// Inside a negative lookaround's body or a condition's test, only the sections the body
+    /// opened are asked. A negative body's errors are dropped when it ends (its END_FUZZY lies inside
+    /// the body, and the lookaround's negative arm discards the sub-attempt's counts), so a section
+    /// around it has no claim on them, and failing the body's path at a run-out would turn the
+    /// lookaround true: `(?:(?!(?:b){e&lt;=2}x)c){i&lt;=1}` over 'cx' is None in both engines, because
+    /// the body's path through a substitution succeeds and makes the negative lookahead fail
+    /// although the outer <c>{i&lt;=1}</c> forbids that substitution. A positive lookaround's body
+    /// hands its errors out to the sections around it, as a complete match counts them
+    /// (<c>(?:(?=a(?:c){i&lt;=1})abc){i&lt;=0}</c> fullmatch 'abc' is None in both engines), so the
+    /// scan walks on past it (D130): <c>(?:(?=(?:f^){i&lt;=2})f){i&lt;=1}</c> over 'fx' answered P(0, 2),
+    /// through a run-out insertion the outer section forbids, and now answers None as upstream
+    /// does. A condition's test still stops the scan, positive or not; that is D132, left open.
+    /// The sections around a stopping construct are asked when matching goes on after it
+    /// (<see cref="CloseTheBodysSection"/>, and this check at any later run-out). A section's frame
+    /// lies above the structure-stack depth the innermost stopping lookaround or test parked exactly
+    /// when the body opened it.
     /// </para>
     /// <para>
     /// Cost: one step per open pruning mark above the innermost lookaround (atomic groups), then
@@ -6777,6 +6783,17 @@ internal static class Matcher
 
             if ((Opcode)code is Opcode.Lookaround or Opcode.Conditional)
             {
+                // D130: a positive lookaround's body hands its errors out to the sections around
+                // it, so its run-out answers to them as well, and the scan goes on outward.
+                if (
+                    (Opcode)code == Opcode.Lookaround
+                    && ReadPruningMark(state, mark, out _, out LookaroundStateData look)
+                    && look.Node is { Match: true }
+                )
+                {
+                    continue;
+                }
+
                 if (!state.Bstack.ReadSizeBelow(mark - 1, out bodyBase))
                 {
                     bodyBase = -1;
