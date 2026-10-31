@@ -326,8 +326,10 @@ internal static class OracleComparer
     /// <see cref="RunWithTheUpstreamVerbScope"/> and <see cref="RunWithTheSecondPassAsBeforeD11"/>.
     /// </param>
     /// <param name="composeWithD11">
-    /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
-    /// composed runs themselves pass <see langword="false"/>.
+    /// Whether an ablation on a partial row may be composed with D11's (see the body). The composed
+    /// runs themselves pass <see langword="false"/>, and so do the callers whose hook is not an
+    /// ablation but a second computation of the port's own answer (<see cref="RunOnAUsedPattern"/>,
+    /// <see cref="RunWithTheFrameByFrameRestore"/>; D128).
     /// </param>
     /// <param name="upstreamFuzzyConditionTest">
     /// Compile each conditional's lookaround test with the enclosing section's fuzziness, as
@@ -723,7 +725,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true
+            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true,
+            composeWithD11: false
         );
     }
 

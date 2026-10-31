@@ -482,6 +482,38 @@ public sealed class OracleWaveTests
             );
     }
 
+    /// <summary>
+    /// The same leak through <see cref="OracleComparer.RunWithTheFrameByFrameRestore"/>, which is a
+    /// second computation of the port's own answer for the D51 entry, not an ablation. The frame
+    /// restore acts only on a partial result with a group call still open, and this row has no
+    /// group call, so it must answer as <see cref="OracleComparer.Run(OracleRow)"/> does.
+    /// </summary>
+    [Test]
+    public void The_frame_by_frame_restore_is_asked_the_rows_question_with_no_ablation_composed_on_it()
+    {
+        OracleRow row = OracleWave.ParseRows(_d11ComposedOnAReusedPatternRow)[0] with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version0,
+        };
+        IOracleOutcome? fresh = OracleComparer.Run(row);
+
+        // The control, as above: a partial row that disagrees with upstream.
+        row.Partial.Should().BeTrue();
+        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+
+        IOracleOutcome? byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row);
+
+        OracleWave
+            .SameAnswer(fresh, byFrames)
+            .Should()
+            .BeTrue(
+                "no group call is open, so the frame restore has nothing to do; fresh:{0}{1}{0}by frames:{0}{2}",
+                Environment.NewLine,
+                OracleWave.Describe(row, fresh),
+                OracleWave.Describe(row, byFrames)
+            );
+    }
+
     /// <summary>Seed 936847660 row 49361, recorded against regex 2026.9.29.</summary>
     private const string _d11ComposedOnAReusedPatternRow = """
         {"generator":"fuzzy-overhang","pattern":"(?fi)(?r)(?:(?:\\Z(?:\\1)){1i+2d+1s<=4}){s<=2}(fi)","flags":0,"namedLists":{},"subject":"ﬀifi","operation":"search","partial":true,"codepointSpan":[0,0],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":0,"captures":[[0,0]]},{"number":1,"success":false,"index":0,"length":0,"captures":[]}],"lastIndex":-1,"lastGroup":null,"partial":true},"searchOnlyPartial":false}
