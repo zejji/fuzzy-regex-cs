@@ -146,4 +146,25 @@ public sealed class PartialNegativeOutcomeMemoTests
     {
         new FuzzyRegex(@"x(?!(?R)?q)(?R)?").FullMatch("xxy", partial: true).Success.Should().BeFalse();
     }
+
+    /// <summary>
+    /// Review finding (d101-frame-cut.md, finding 1): the frame cut's required literal can be a lone
+    /// surrogate, which the pattern holds as one unit. The run-out falls inside the called group,
+    /// inside the negative lookahead. regex 2026.9.29 answers all four P(0, 2), group 1 unset.
+    /// Measured 2026-10-31 on c78a073c (cut) and 184c256b (no cut): all four answer None and none
+    /// throws, the two rows without a surrogate included, so these inputs do not reach the cut's
+    /// literal search and the throw is not reproduced; the None is a separate divergence.
+    /// </summary>
+    [Test]
+    [Arguments(@"a(?!y?(?1))|(\ud800)", "ay")]
+    [Arguments(@"a(?!(?1))|(\ud800b)", "a\ud800")]
+    [Arguments(@"a(?!y?(?1))|(z)", "ay")]
+    [Arguments(@"a(?!(?1))|(zb)", "az")]
+    public void A_lone_surrogate_required_literal_does_not_stop_the_cut(string pattern, string text)
+    {
+        Match m = new FuzzyRegex(pattern).FullMatch(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+        m.Groups[1].Success.Should().BeFalse();
+    }
 }
