@@ -194,4 +194,103 @@ public sealed class PartialEnclosingSectionLimitTests
 
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((success, partial, start, end));
     }
+
+    /// <summary>
+    /// D132: a run-out insertion inside a positive condition test's body is checked against the
+    /// sections around the condition too. The test is atomic and its body's errors count against
+    /// those sections when the yes-branch runs, so an insertion they forbid fails the attempt on
+    /// every text. In <c>(?:(?(?=(?:f^){i&lt;=2})f|g)){i&lt;=1}</c> over 'fx' the test's `^` passes
+    /// only after a second insertion, which the outer section forbids. The port answered P(0, 2) on
+    /// each match row and P(0, 2) / P(1, 3) on the search rows; regex 2026.9.29 and judge132.py both
+    /// answer as here (D132-DESIGN.md, measured 2026-10-31). The rows: the witness under match,
+    /// <c>(?b)</c> and <c>(?e)</c>, and over 'fxa' (None before the fix too); the condition inside a
+    /// lookahead and inside an atomic group; the insertion at the inner section's end; a reversed
+    /// lookbehind test; the test calling a group; an outer insertion cost; then search, which moves
+    /// to the attempt at 1, and over 'afx' to 2.
+    /// The last rows are the design's dangerous shapes 2 to 6 (reviews/d132-design.md F4): a
+    /// positive test inside a negative lookaround, whose base stops the scan; a lookbehind test
+    /// needing the start of the text; two tests in one section; and a test calling a group.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "fxa", false, "None")]
+    [Arguments(@"(?b)(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?e)(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?:(?=(?(?=(?:f^){i<=2})f|g))f){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?:(?>(?(?=(?:f^){i<=2})f|g))){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?:(?(?=(?:f){i<=2}^)f|g)){i<=1}", "fx", false, "None")]
+    [Arguments(@"(?r)(?:(?(?<=(?:\Zf){i<=2})f|g)){i<=1}", "xf", false, "None")]
+    [Arguments(@"(?:(?(?=(?&h))f|g)){i<=1}(?(DEFINE)(?<h>(?:f^){i<=2}))", "fx", false, "None")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){2i<=3}", "fx", false, "None")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "fx", true, "P(1, 2)")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "afx", true, "P(2, 3)")]
+    [Arguments(@"(?:(?(?=(?:f){i<=2}^)f|g)){i<=1}", "fx", true, "P(1, 2)")]
+    [Arguments(@"(?:(?!(?(?=(?:f^){i<=2})f|g)x)f){i<=1}", "fx", false, "(0, 1)")]
+    [Arguments(@"(?:(?!(?(?=(?:f^){i<=2})f|g)x)f){i<=1}", "fx", true, "(0, 1)")]
+    [Arguments(@"(?r)(?:(?(?<=(?:^f){i<=2})f|g)){i<=1}", "xf", false, "(1, 2)")]
+    [Arguments(@"(?r)(?:(?(?<=(?:^f){i<=2})f|g)){i<=1}", "xf", true, "(1, 2)")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}", "fx", false, "P(0, 2)")]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}", "fx", true, "P(1, 2)")]
+    [Arguments(@"(?:(?(?=(?&t))f|g)){i<=1}(?(DEFINE)(?<t>(?:f^){i<=2}))", "fx", true, "P(1, 2)")]
+    public void A_run_out_in_a_positive_condition_test_respects_the_sections_around_it(
+        string pattern,
+        string text,
+        bool search,
+        string expected
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(text, partial: true) : regex.MatchAtStart(text, partial: true);
+
+        string kind = m.PartialMatch ? "P" : "";
+        string answer = m.Success ? $"{kind}({m.Index}, {m.Index + m.Length})" : "None";
+        answer.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// D132, counts: in <c>(?:(?(?=(?:f^){i&lt;=2})f|g)f){s&lt;=1}</c> over 'f' the yes-branch path
+    /// needs an insertion the outer section forbids, so the partial is the no-branch's, with 'g'
+    /// substituted for 'f' ('ff' completes it). The port answered P(0, 1) with no error; regex
+    /// 2026.9.29 answers P(0, 1) with counts (1, 0, 0).
+    /// </summary>
+    [Test]
+    public void A_condition_tests_forbidden_run_out_leaves_the_no_branchs_partial()
+    {
+        Match m = new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)f){s<=1}").MatchAtStart("f", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    /// <summary>
+    /// D132's controls, each the answer before the fix and regex 2026.9.29's: the witness over
+    /// texts ending before the run-out; outer sections with room; a negative test, whose
+    /// body's errors the port keeps (D54) and which the change does not walk past; a condition with
+    /// no no-branch and one with equal branches; an atomic group whose test needs the end of the
+    /// text; and a complete match with a substitution.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "", true, true, 0, 0)]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}", "f", true, true, 0, 1)]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=2}", "fx", true, true, 0, 2)]
+    [Arguments(@"(?r)(?:(?(?<=(?:\Zf){i<=2})f|g)){i<=2}", "xf", true, true, 0, 2)]
+    [Arguments(@"(?:(?(?=(?&h))f|g)){i<=2}(?(DEFINE)(?<h>(?:f^){i<=2}))", "fx", true, true, 0, 2)]
+    [Arguments(@"(?:(?(?!(?:f^){i<=2})f|g)){i<=1}", "fx", true, false, 0, 1)]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f)){i<=1}", "fx", true, false, 0, 0)]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|f)){i<=1}", "fx", true, false, 0, 1)]
+    [Arguments(@"(?:(?>(?(?=(?:f\Z){i<=2})f|g))){i<=1}", "fx", true, false, 0, 1)]
+    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)){e<=1}", "fx", true, false, 0, 1)]
+    public void A_condition_test_run_out_the_sections_allow_or_drop_is_unchanged(
+        string pattern,
+        string text,
+        bool success,
+        bool partial,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((success, partial, start, end));
+    }
 }
