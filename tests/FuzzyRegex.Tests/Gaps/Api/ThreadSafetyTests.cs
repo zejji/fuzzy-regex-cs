@@ -796,6 +796,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 95 (D120) added UpstreamGraphemeConjunct, likewise set only by
             // OracleComparer.RunWithTheUpstreamGraphemeConjunct.
             "PatternObject.UpstreamGraphemeConjunct",
+            // D121 added UpstreamConditionalRestore, likewise set only by
+            // OracleComparer.RunWithTheUpstreamConditionalRestore.
+            "PatternObject.UpstreamConditionalRestore",
             // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
             // likewise set only by the OracleComparer ablations.
             "PatternObject.SkipExactDeletionRetry",
