@@ -711,4 +711,20 @@ public sealed class FuzzyCountsAndChangesTests
             (position < text.Length && char.IsLowSurrogate(text[position])).Should().BeFalse();
         }
     }
+
+    /// <summary>
+    /// A lookbehind reads right to left, so its deletions are listed right to left: 'b' first, at
+    /// 1 unshifted, then 'a', at 1 plus the one deletion before it. In "xabc", the string with both
+    /// put back, 'a' sits at 1 and 'b' at 2, so the list is not that string's positions in order.
+    /// Upstream 2026.9.29 answers the same, measured 2026-10-31.
+    /// </summary>
+    [Test]
+    public void A_lookbehind_lists_its_deletions_right_to_left()
+    {
+        Match m = new FuzzyRegex(@"(?<=x(?:ab){d<=2})c").Match("xc");
+
+        (m.Index, m.Length).Should().Be((1, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        m.FuzzyChanges.Deletions.Should().Equal(1, 2);
+    }
 }

@@ -46,4 +46,16 @@ public sealed class OpenDefectTests
         Match m = regex.Match(subject, partial: true);
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 10, 0));
     }
+
+    // D130. The lookahead's body is matched inside the outer {i<=1}, so its insertions count against
+    // it, as they do on a complete match: `(?:(?=a(?:c){i<=1})abc){i<=0}` fullmatch 'abc' is None in
+    // both engines. After 'f' and one inserted 'x', `^` passes only after a second insertion, which
+    // the outer section forbids, so no path runs out of text and there is no partial. The port
+    // answers P(0, 2) because a run-out inside a lookaround body checks only the sections the body
+    // opened (D81, D129); regex 2026.9.29 answers None (measured 2026-10-31).
+    [Test]
+    public void An_insertion_run_out_inside_a_lookahead_respects_the_section_around_it()
+    {
+        new FuzzyRegex(@"(?:(?=(?:f^){i<=2})f){i<=1}").MatchAtStart("fx", partial: true).Success.Should().BeFalse();
+    }
 }

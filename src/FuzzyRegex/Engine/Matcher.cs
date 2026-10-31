@@ -6861,9 +6861,18 @@ internal static class Matcher
     /// limits included. A pattern with one section level pays nothing: the section the insertion is
     /// made in has already allowed it. The oracle's D81 ablation turns it off with that check.
     /// </para>
+    /// <para>
+    /// Kept out of line: it runs only on a run-out at the edge of a partial call, and its walk's
+    /// locals must not join the frame of <see cref="NextFuzzyMatchItem"/> or
+    /// <see cref="BacktrackEndFuzzy"/>. Measured 2026-10-31 (Release, tiered compilation off):
+    /// both callers keep main's frame (<c>sub rsp, 32</c> and <c>sub rsp, 160</c>, no zeroing added)
+    /// and grow by the one call: <see cref="NextFuzzyMatchItem"/> 425 to 438 bytes of code,
+    /// <see cref="BacktrackEndFuzzy"/> 2,108 to 2,125.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if every open section allows one more insertion.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool ARunOutInsertionFitsTheOpenSections(MatchState state)
     {
         Debug.Assert(state.RunsOutRight || state.RunsOutLeft, "D129: asked only once an insertion has run out of text");
@@ -6879,6 +6888,41 @@ internal static class Matcher
         --counts[FuzzyValue.Ins];
 
         return !over;
+    }
+
+    /// <summary>
+    /// Upstream's <c>check_fuzzy_partial</c> at the end of the substitution arm of
+    /// <see cref="NextFuzzyMatchItem"/> and the insertion and substitution arms of
+    /// <see cref="NextFuzzyMatchStringFld"/> and <see cref="NextFuzzyMatchGroupFld"/>, none of
+    /// which runs out of text in this port (D129 review).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The error arms are tried only after the item itself failed. A consuming item at the edge of
+    /// the text does not fail there: it runs out first (<see cref="RunOut"/>), before any error kind
+    /// is tried, so the substitution arm of <see cref="NextFuzzyMatchItem"/> starts strictly inside
+    /// the text and one step from there stays within it. The folded arms step a position in the
+    /// item's folded buffer, which is within the buffer before the step, and a full-folded item at
+    /// the edge has run out the same way. So none of these returns a partial, and the run-out check
+    /// <see cref="ARunOutInsertionFitsTheOpenSections"/> makes at the two insertion run-outs is not
+    /// needed here. The assertion holds that: on 2026-10-31 none of these sites answered a partial
+    /// over the Debug test suite, a 72,252-row grid of nested sections around zero-width items, a
+    /// 1,920-row reversed grid and an 86,400-row grid of full-folded strings and group references
+    /// under <c>(?fi)</c> and <c>(?fir)</c> (36,966 partial answers), where the insertion arm of
+    /// <see cref="NextFuzzyMatchItem"/> did.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="newPos">The position the error would have moved to.</param>
+    /// <returns><see cref="MatchStatus.Failure"/>, the only answer reachable here.</returns>
+    private static int ErrorArmAtTheEdge(MatchState state, int newPos)
+    {
+        int status = CheckFuzzyPartial(state, newPos);
+        Debug.Assert(
+            status != MatchStatus.Partial,
+            "D129: only an insertion arm runs out of text; a consuming item runs out before its errors are tried"
+        );
+        return status;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 M2: removes a construct's own cut taint, if it has one.</summary>
@@ -9514,7 +9558,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             default:
                 return MatchStatus.Failure;
         }
@@ -12248,7 +12292,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 newPos = data.NewFoldedPos + data.Step;
@@ -12266,7 +12310,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FoldWholeSub:
                 // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
                 // loop tries this kind only at the start of an expanding folding.
@@ -12939,7 +12983,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 newPos = data.NewFoldedPos + data.Step;
@@ -12957,7 +13001,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FoldWholeSub:
                 // NOT UPSTREAM (D22, D24): could the whole subject character have been substituted
                 // for one whole group character? The loop tries this kind only where one side

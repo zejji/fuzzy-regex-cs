@@ -95,8 +95,11 @@ public sealed class PartialEnclosingSectionLimitTests
     /// in order: the insertion arm of an item; scheduled-oracle row 179705086/41658, whose
     /// insertions all count against the outer <c>{i&lt;=1}</c>; a trailing insertion at a section's
     /// end; an outer insertion cost (two units, three allowed); an outer total; and a section
-    /// whose own next item is an exact character. Upstream answers None on each except the row,
-    /// where it reports P(0, 4) (ledger entry 81).
+    /// whose own next item is an exact character; then the trailing insertion reversed, where the
+    /// section's END_FUZZY is on the left and the run-out is at the start of the text; and the
+    /// inner section inside a called group, whose insertions count against the section around the
+    /// call. Upstream answers None on each except the oracle row, where it reports P(0, 4)
+    /// (ledger entry 81).
     /// </summary>
     [Test]
     [Arguments(@"(?:(?:f^){i<=2}){i<=1}", "fx")]
@@ -105,6 +108,8 @@ public sealed class PartialEnclosingSectionLimitTests
     [Arguments(@"(?:(?:f^){i<=2}){2i<=3}", "fx")]
     [Arguments(@"(?:(?:f^){i<=2}){e<=1}", "fx")]
     [Arguments(@"(?:(?:f^){i<=2}x){i<=1}", "fx")]
+    [Arguments(@"(?r)(?:$(?:f){i<=2}){i<=1}", "xf")]
+    [Arguments(@"(?:(?&g)){i<=1}(?(DEFINE)(?<g>(?:f^){i<=2}))", "fx")]
     public void No_partial_where_the_insertion_that_runs_out_breaks_an_enclosing_section(string pattern, string text)
     {
         new FuzzyRegex(pattern).MatchAtStart(text, partial: true).Success.Should().BeFalse();
@@ -116,13 +121,15 @@ public sealed class PartialEnclosingSectionLimitTests
     /// The counts are the path so far; the insertion that runs out is not counted.
     /// </summary>
     [Test]
-    [Arguments(@"(?:f){i<=2}^")]
-    [Arguments(@"(?:(?:f^){i<=2}){i<=2}")]
-    [Arguments(@"(?:(?:f){i<=2}^){i<=2}")]
-    [Arguments(@"(?:(?:f^){i<=2}){2i<=4}")]
-    public void A_run_out_insertion_every_section_allows_leaves_the_partial(string pattern)
+    [Arguments(@"(?:f){i<=2}^", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){i<=2}", "fx")]
+    [Arguments(@"(?:(?:f){i<=2}^){i<=2}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){2i<=4}", "fx")]
+    [Arguments(@"(?r)(?:$(?:f){i<=2}){i<=2}", "xf")]
+    [Arguments(@"(?:(?&g)){i<=2}(?(DEFINE)(?<g>(?:f^){i<=2}))", "fx")]
+    public void A_run_out_insertion_every_section_allows_leaves_the_partial(string pattern, string text)
     {
-        Match m = new FuzzyRegex(pattern).MatchAtStart("fx", partial: true);
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
 
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));

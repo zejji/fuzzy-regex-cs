@@ -554,11 +554,15 @@ public sealed class Match : Group
     /// <para>
     /// <b>A deletion's position is shifted by the deletions listed before it.</b> Upstream adds one
     /// to each deletion for every deletion before it in the list (<c>:20554-20557</c>), and this
-    /// port adds one code unit. In a forward match whose deleted characters are each one code unit,
-    /// the result is where the missing character would sit in a string with all of them put back,
-    /// which is how upstream's README reads it. A reversed match lists its deletions right to left,
-    /// so the shift lands on the ones further left, and a deleted character outside the BMP still
-    /// adds one. So a reported deletion can lie past the end of the match or of the subject,
+    /// port adds one code unit. Deletions are listed in the order the part of the pattern that made
+    /// them was read: left to right, except inside a lookbehind and under
+    /// <see cref="FuzzyRegexOptions.RightToLeft"/>, which read right to left. Where every deletion was
+    /// read left to right and each deleted character is one code unit, the result is where the
+    /// missing character would sit in a string with all of them put back, which is how upstream's
+    /// README reads it. Read right to left, the shift lands on the deletions further left:
+    /// <c>(?&lt;=x(?:ab){d&lt;=2})c</c> over "xc" lists 'b' first, at 1, and 'a' second, at 2. A deleted
+    /// character outside the BMP still adds one. So a reported deletion can lie past the end of the
+    /// match or of the subject,
     /// or between the two halves of a surrogate pair. Subtract its index in
     /// <see cref="FuzzyChanges.Deletions"/> to get the position in the subject where the character
     /// is missing, which is always between two characters.
