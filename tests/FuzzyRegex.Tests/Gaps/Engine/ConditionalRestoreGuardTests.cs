@@ -34,6 +34,15 @@ public sealed class ConditionalRestoreGuardTests
     // A lazy and a one-or-more repeat.
     [Arguments(@"(a?)(?(?=c)\w|\w)*?\1$", "ac", 0, 2, 0, 0)] // regex (1, 2)
     [Arguments(@"(a?)(?(?=c)\w|\w)+\1", "abc", 0, 3, 0, 0)] // regex (0, 2)
+    // Found by the blind review (2026-10-31): a bounded repeat, the conditional inside an
+    // alternation, and a lookbehind test.
+    [Arguments(@"(a?)(?(?=c)c|[ab]){0,5}\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    [Arguments(@"(a?)(?:x|(?(?=c)c|[ab]))*\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    [Arguments(@"(a?)(?(?<=a)c|[ab])*\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    // Controls from the same review, right here before the fix too: more of the body after the
+    // conditional, and a repeat inside the yes-branch. Upstream gets both wrong.
+    [Arguments(@"(a?)(?:(?(?=c)c|[ab])d?)*\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    [Arguments(@"(a?)(?(?=c)(?:c)+|[ab])*\1", "acc", 0, 3, 0, 0)] // regex (0, 1)
     // Control: the same choice made by a branch saves no repeats, and was always right.
     [Arguments(@"(a?)(?:(?=c)c|[ab])*\1", "ac", 0, 2, 0, 0)] // regex (0, 2)
     public void A_restore_after_a_conditional_keeps_the_marks_of_bodies_that_reached_their_end(

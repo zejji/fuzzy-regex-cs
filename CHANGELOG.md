@@ -14,6 +14,14 @@ per release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A search through a conditional inside a repeat finds the leftmost match** where a later
+  part of the pattern reads a group: `(a?)(?(?=c)c|[ab])*\1` over 'ac' is (0, 2), not (0, 1)
+  (D121). Backtracking into the conditional forgot that the repeat's body had matched, so a
+  failure recorded under one value of the group blocked a path under another. Python `regex`
+  gives (0, 1) for the positive-test form (see COMPARISON).
+
 ## [1.1.0] - 2026-10-26
 
 ### Changed

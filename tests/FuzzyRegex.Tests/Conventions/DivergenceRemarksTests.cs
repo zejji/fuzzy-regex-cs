@@ -325,6 +325,7 @@ public sealed class DivergenceRemarksTests
             "A search that reads a group after a guarded repeat finds the leftmost match",
             "engine behaviour on a pattern"
         ),
+        ("A search through a conditional inside a repeat finds the leftmost match", "engine behaviour on a pattern"),
     ];
 
     /// <summary>The members COMPARISON.md's fuzzy worked examples are copied onto, verbatim.</summary>
