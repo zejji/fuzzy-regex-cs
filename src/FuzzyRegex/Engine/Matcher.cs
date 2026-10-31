@@ -19516,6 +19516,13 @@ internal static class Matcher
             && outcomes.TryGetValue(NegativeOutcomeKey(node, state.TextPos), out bool undetermined)
         )
         {
+            // The original evaluation read the text to come inside the body (a run-out, or a test
+            // decided at the edge), which set the attempt's flag; the memo lives for the pass, the
+            // flag for the attempt, so a replay in a later attempt sets it again (REVIEW-0320 F1b,
+            // PartialOutcomeReplayTouchTests). Setting it where the original did not is harmless:
+            // the second pass runs only after the first found nothing, so no success of it may
+            // leave the flag false (assert A1).
+            state.AttemptTouchedTheTextToCome = true;
             if (undetermined)
             {
                 PushTouchMark(state);
