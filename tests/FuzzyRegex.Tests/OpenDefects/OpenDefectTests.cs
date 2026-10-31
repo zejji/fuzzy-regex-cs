@@ -58,4 +58,20 @@ public sealed class OpenDefectTests
     {
         new FuzzyRegex(@"(?:(?=(?:f^){i<=2})f){i<=1}").MatchAtStart("fx", partial: true).Success.Should().BeFalse();
     }
+
+    // D131. Without partial, search finds no match over 'b' (both engines). So a partial call's
+    // answer must be a partial or none: a complete match would be one the plain search finds. The
+    // port answers a complete (0, 0) with one deletion, and in Debug its second pass trips design
+    // assert A1 ("a second-pass success read the text to come"), on main 4205ad63 as on this
+    // branch. regex 2026.9.29 answers the partial (0, 1) with one substitution (measured
+    // 2026-10-31). Which partial is right is not settled here; that it is not complete is.
+    [Test]
+    public void A_partial_call_does_not_answer_a_complete_match_the_plain_search_does_not_find()
+    {
+        var regex = new FuzzyRegex(@"(?:(?=(?:ab){e<=2})){d<=1}");
+        regex.Match("b").Success.Should().BeFalse();
+
+        Match m = regex.Match("b", partial: true);
+        (!m.Success || m.PartialMatch).Should().BeTrue();
+    }
 }
