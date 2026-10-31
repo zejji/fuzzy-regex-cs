@@ -45,6 +45,17 @@ public sealed class ConditionalRestoreGuardTests
     [Arguments(@"(a?)(?(?=c)(?:c)+|[ab])*\1", "acc", 0, 3, 0, 0)] // regex (0, 1)
     // Control: the same choice made by a branch saves no repeats, and was always right.
     [Arguments(@"(a?)(?:(?=c)c|[ab])*\1", "ac", 0, 2, 0, 0)] // regex (0, 2)
+    // From the second blind review (2026-10-31): a reversed pattern, the repeat inside a named
+    // group, a group call before the loop, and a fuzzy section around the loop. The reversed row's
+    // answer is argued (its branch form is not equivalent when reversed); the others are
+    // upstream's branch form, and Node's where Node can write the pattern.
+    [Arguments(@"(?r)\1(?(?<=c)c|[ab])*(a?)", "ca", 0, 2, 2, 2)] // regex (1, 2)
+    [Arguments(@"(?P<g>(a?)(?(?=c)c|[ab])*\2)", "ac", 0, 2, 0, 2)] // regex (0, 1)
+    [Arguments(@"(a?)(?1)?(?(?=c)c|[ab])*\1(x?)", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    [Arguments(@"(a?)(?:(?(?=c)c|[ab])*){e<=0}\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
+    // The loop inside a nested repeat. Node's answer; upstream gives (0, 0) here and in its
+    // branch form too, so this one is checked against Node only.
+    [Arguments(@"(a?)(?:(?:(?(?=c)c|[ab]))*)*\1", "ac", 0, 2, 0, 0)] // regex (0, 0)
     public void A_restore_after_a_conditional_keeps_the_marks_of_bodies_that_reached_their_end(
         string pattern,
         string subject,
@@ -67,6 +78,18 @@ public sealed class ConditionalRestoreGuardTests
 
         (m.Success, m.Index, m.Length).Should().Be((true, 0, 6));
         m.Groups["g"].Value.Should().BeEmpty();
+    }
+
+    // From the second blind review (2026-10-31): the group the conditional after the loop tests
+    // is set on the path that marks the body at 1 and unset on the path that needs it. The answer
+    // is upstream's branch form; regex 2026.9.29 gives (0, 1).
+    [Test]
+    public void A_restore_keeps_the_mark_for_a_path_that_leaves_the_tested_group_unset()
+    {
+        Match m = new FuzzyRegex(@"(?:(a)|)(?:(?(?=c)c|[ab]))*(?(1)x)").Match("ac");
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, 0, 2));
+        m.Groups[1].Success.Should().BeFalse();
     }
 
     // A partial call's second pass: the positive test (?=cd) runs out at the edge, its blocked end
