@@ -91,11 +91,8 @@ internal sealed class Node
     /// </summary>
     internal bool MemoisesNegativeOutcome
     {
-        get => (_callMemoFlags & _memoisesNegativeOutcomeFlag) != 0;
-        set =>
-            _callMemoFlags = (byte)(
-                value ? _callMemoFlags | _memoisesNegativeOutcomeFlag : _callMemoFlags & ~_memoisesNegativeOutcomeFlag
-            );
+        get => (_flags & _memoisesNegativeOutcomeFlag) != 0;
+        set => SetFlag(_memoisesNegativeOutcomeFlag, value);
     }
 
     /// <summary>
@@ -128,23 +125,47 @@ internal sealed class Node
     /// </summary>
     internal bool RunByACall
     {
-        get => (_callMemoFlags & _runByACallFlag) != 0;
-        set => _callMemoFlags = (byte)(value ? _callMemoFlags | _runByACallFlag : _callMemoFlags & ~_runByACallFlag);
+        get => (_flags & _runByACallFlag) != 0;
+        set => SetFlag(_runByACallFlag, value);
     }
 
-    /// <summary>Bit of <see cref="_callMemoFlags"/> for <see cref="MemoisesNegativeOutcome"/>.</summary>
+    /// <summary>
+    /// NOT UPSTREAM (D10), for the oracle alone: for a lookaround, whether it saves the captures
+    /// around it only because its body calls a group. Upstream saves them only when the body holds a
+    /// capture group (<c>upstream/src/_regex.c</c>:13772), so a call's capture outlives a body that
+    /// is thrown away: <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> leaves group 1 with
+    /// [0,1][2,1]. Set by <c>NodeCompiler.BuildLookaround</c>; the oracle clears these lookarounds'
+    /// <see cref="NodeStatus.HasGroups"/> flag on a pattern it compiled for one call, to show that
+    /// the D10 fix is the whole of a divergence. Until D101 a list on the pattern
+    /// (<c>PatternObject.LookaroundsSavingOnlyForCalls</c>); a bit here costs no memory.
+    /// </summary>
+    internal bool SavesOnlyForCalls
+    {
+        get => (_flags & _savesOnlyForCallsFlag) != 0;
+        set => SetFlag(_savesOnlyForCallsFlag, value);
+    }
+
+    /// <summary>Bit of <see cref="_flags"/> for <see cref="MemoisesNegativeOutcome"/>.</summary>
     private const int _memoisesNegativeOutcomeFlag = 1;
 
-    /// <summary>Bit of <see cref="_callMemoFlags"/> for <see cref="RunByACall"/>.</summary>
+    /// <summary>Bit of <see cref="_flags"/> for <see cref="RunByACall"/>.</summary>
     private const int _runByACallFlag = 2;
 
+    /// <summary>Bit of <see cref="_flags"/> for <see cref="SavesOnlyForCalls"/>.</summary>
+    private const int _savesOnlyForCallsFlag = 4;
+
     /// <summary>
-    /// D101's two flags in one byte. As two <see langword="bool"/> fields, they and
+    /// Compile-time flags in one byte. As separate <see langword="bool"/> fields, D101's two and
     /// <see cref="OutcomeKey"/> took a node past main's 136 bytes to 144 (8 more bytes for every
     /// node of every compiled pattern; the BDN gate's +8% allocation on CompileLargePattern, with
     /// the lookaround folder's closures); in one byte they fit the padding main leaves.
     /// </summary>
-    private byte _callMemoFlags;
+    private byte _flags;
+
+    /// <summary>Sets or clears one bit of <see cref="_flags"/>.</summary>
+    /// <param name="bit">The bit.</param>
+    /// <param name="value">Whether to set it.</param>
+    private void SetFlag(int bit, bool value) => _flags = (byte)(value ? _flags | bit : _flags & ~bit);
 
     /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end

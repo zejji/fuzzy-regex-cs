@@ -394,7 +394,7 @@ public sealed class FuzzyRegex
     /// <param name="upstreamCalls">
     /// NOT UPSTREAM, and never set by this library: compile every group call as a call, as upstream
     /// does, rather than writing out the calls nothing can tell from their groups written out
-    /// (D101). The oracle and the tests set it; see <see cref="Parsing.Info.UpstreamCalls"/>.
+    /// (D101). The oracle and the tests set it; see <see cref="Parsing.PatternCompiler.Compile"/>'s <c>upstreamCalls</c>.
     /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(

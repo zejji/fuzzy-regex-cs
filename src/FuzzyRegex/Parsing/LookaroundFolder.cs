@@ -33,11 +33,13 @@ internal static class LookaroundFolder
     /// <summary>Folds the always-matching lookarounds of a tree, in place.</summary>
     /// <param name="node">The pattern, after the calls are written out.</param>
     /// <param name="info">The parse state: the calls a fold removed leave <see cref="Info.GroupCalls"/>.</param>
+    /// <param name="upstreamCalls">Whether every call is kept, as upstream compiles it (see
+    /// <see cref="PatternCompiler.Compile"/>): then nothing is folded.</param>
     /// <returns>The pattern with those lookarounds folded.</returns>
-    internal static RegexBase Run(RegexBase node, Info info)
+    internal static RegexBase Run(RegexBase node, Info info, bool upstreamCalls)
     {
         // The compile-parity seam compares code with upstream's, which has no such fold.
-        if (info.UpstreamCalls)
+        if (upstreamCalls)
         {
             return node;
         }

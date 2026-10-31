@@ -31,7 +31,7 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// condition on it), because the read would see the caller's group instead. A read of a group set
 /// outside the copy is fine.</item>
 /// <item>Every call in the body can be copied too.</item>
-/// <item>The pattern is not compiled to keep its calls (<see cref="Info.UpstreamCalls"/>, which
+/// <item>The pattern is not compiled to keep its calls (<c>upstreamCalls</c> of <see cref="Run"/>, which
 /// upstream's capture rule needs: there a call's capture stays on the list, so every call is
 /// visible), nor under an ablation that gives calls upstream's features or copies
 /// (<see cref="Info.UpstreamCallFeatures"/>, <see cref="Info.UpstreamCallCopies"/>).</item>
@@ -82,10 +82,16 @@ internal static class CallInliner
     /// </summary>
     /// <param name="info">The parse state, after <see cref="RegexBase.FixGroups"/>.</param>
     /// <param name="parsed">The pattern as parsed, not yet optimised.</param>
+    /// <param name="upstreamCalls">Whether every call is kept, as upstream compiles it; see
+    /// <see cref="PatternCompiler.Compile"/>'s parameter of that name. A parameter rather than a
+    /// field of <see cref="Info"/>, which would grow every compile's parse state.</param>
+    /// <param name="inlinedCalls">How many calls were written out (an out parameter rather than a
+    /// field of <see cref="Info"/>, which would grow every compile's parse state).</param>
     /// <returns>The pattern with the calls replaced.</returns>
-    internal static RegexBase Run(Info info, RegexBase parsed)
+    internal static RegexBase Run(Info info, RegexBase parsed, bool upstreamCalls, out int inlinedCalls)
     {
-        if (info.GroupCalls.Count == 0 || info.UpstreamCalls || info.UpstreamCallFeatures || info.UpstreamCallCopies)
+        inlinedCalls = 0;
+        if (info.GroupCalls.Count == 0 || upstreamCalls || info.UpstreamCallFeatures || info.UpstreamCallCopies)
         {
             return parsed;
         }
@@ -105,7 +111,7 @@ internal static class CallInliner
         if (walk.Copied.Count != 0)
         {
             ForgetTheCopiedCalls(info, walk.Copied);
-            info.InlinedCalls = walk.Copied.Count;
+            inlinedCalls = walk.Copied.Count;
         }
 
         return result;

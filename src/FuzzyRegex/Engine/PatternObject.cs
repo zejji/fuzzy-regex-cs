@@ -1191,21 +1191,6 @@ internal sealed class PatternObject
     internal bool SkipLookaroundInsertion;
 
     /// <summary>
-    /// NOT UPSTREAM, and never read by this library: the lookarounds that save and restore the
-    /// captures only because their body calls a group (D10), or <see langword="null"/> when there
-    /// are none. Written by <c>NodeCompiler.BuildLookaround</c>. The oracle clears their
-    /// <see cref="NodeStatus.HasGroups"/> flag on a pattern it compiled for one call, to show that
-    /// the D10 fix is the whole of a divergence.
-    /// </summary>
-    /// <remarks>
-    /// Upstream saves the captures around a lookaround only when its body holds a capture group
-    /// (<c>upstream/src/_regex.c</c>:13772), so a call's capture outlives a body that is thrown away:
-    /// <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> leaves group 1 with [0,1][2,1]. See
-    /// <c>NodeCompiler.BuildGroupCall</c>.
-    /// </remarks>
-    internal List<Node>? LookaroundsSavingOnlyForCalls;
-
-    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a group call's captures stay on the
     /// group's capture list when the call returns, which is upstream's rule. The oracle sets it on a
     /// pattern it compiled for one call, to show that the D51 fix (ledger entry 63) is the whole of a

@@ -1453,7 +1453,7 @@ internal static class NodeCompiler
         Debug.Assert(subargs.HasGroups || args.Pattern.GroupEndIndex == groupEndsBefore);
         if (subargs.HasGroups && args.Pattern.GroupEndIndex == groupEndsBefore)
         {
-            (args.Pattern.LookaroundsSavingOnlyForCalls ??= []).Add(lookaroundNode);
+            lookaroundNode.SavesOnlyForCalls = true;
         }
 
         if (subargs.HasRepeats)

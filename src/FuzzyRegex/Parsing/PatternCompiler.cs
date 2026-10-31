@@ -81,7 +81,13 @@ internal static class PatternCompiler
     /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCallCopies"/>.
     /// </param>
     /// <param name="upstreamCalls">
-    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamCalls"/>.
+    /// NOT UPSTREAM, and never set by this library: whether every group call is compiled as a call,
+    /// as upstream compiles it, rather than written out where nothing can tell the two apart (D101,
+    /// <see cref="CallInliner"/>). The oracle and the tests set it to compare code with upstream's,
+    /// to test the call machinery itself, and before switching on upstream's capture rule
+    /// (<c>PatternObject.KeepCallCaptures</c>), under which every call is visible. It also leaves
+    /// the always-matching lookarounds unfolded (<see cref="LookaroundFolder"/>), so the code is
+    /// upstream's shape.
     /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
@@ -239,7 +245,6 @@ internal static class PatternCompiler
                     UpstreamCallFeatures = upstreamCallFeatures,
                     UpstreamFuzzyConditionTest = upstreamFuzzyConditionTest,
                     UpstreamCallCopies = upstreamCallCopies,
-                    UpstreamCalls = upstreamCalls,
                 };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
@@ -316,7 +321,7 @@ internal static class PatternCompiler
         // NOT UPSTREAM (D101): write out the calls nothing can tell from their groups written out.
         // With every call gone, the sections that allow no errors go too, as they would have before
         // FixGroups had the pattern been written without its calls (see ElideExactFuzzy above).
-        parsed = CallInliner.Run(info, parsed);
+        parsed = CallInliner.Run(info, parsed, upstreamCalls, out int inlinedCalls);
         if (info.HasGroupCall && info.GroupCalls.Count == 0)
         {
             info.HasGroupCall = false;
@@ -332,7 +337,7 @@ internal static class PatternCompiler
             LeftRecursion.Check(info, parsed, pattern);
         }
 
-        parsed = LookaroundFolder.Run(parsed, info);
+        parsed = LookaroundFolder.Run(parsed, info, upstreamCalls);
 
         // NOT UPSTREAM (D50): a pattern whose calls need copies is optimised from a copy of its tree,
         // so the tree as parsed is left as written for the called groups' copies
@@ -513,7 +518,7 @@ internal static class PatternCompiler
         )
         {
             OptionalPassEnds = optionalPassEnds ?? [],
-            InlinedCalls = info.InlinedCalls,
+            InlinedCalls = inlinedCalls,
         };
     }
 

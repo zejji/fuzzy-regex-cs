@@ -4118,7 +4118,7 @@ internal static class ExpectedDivergences
                 + "a failed assertion captured.\n"
                 + "KEYED ON AN ABLATION. A row belongs here when "
                 + "`OracleComparer.RunWithTheUpstreamLookaroundCallCaptures`, which clears the flag on "
-                + "every lookaround in `PatternObject.LookaroundsSavingOnlyForCalls` with entries 42 "
+                + "every lookaround in `Node.SavesOnlyForCalls` with entries 42 "
                 + "and 44 off, reproduces upstream's recorded answer exactly, AND this port's live "
                 + "answer is the one being judged. The control is "
                 + "`A_row_the_lookaround_call_capture_fix_does_not_explain_is_not_accounted_for`.",

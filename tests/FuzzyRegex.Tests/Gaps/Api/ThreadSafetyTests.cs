@@ -853,11 +853,6 @@ public sealed class ThreadSafetyTests
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
-            // D10 (ledger entry 54) added LookaroundsSavingOnlyForCalls, filled by
-            // NodeCompiler.BuildLookaround inside Compile and never read by the library. Only
-            // OracleComparer.RunWithTheUpstreamLookaroundCallCaptures reads it, to clear its nodes'
-            // flag on a pattern compiled for that one call.
-            "PatternObject.LookaroundsSavingOnlyForCalls",
             // D51 (ledger entry 63) added KeepCallCaptures, never set by the library. Only
             // OracleComparer.RunWithTheUpstreamCallCaptures sets it, on a pattern compiled for that
             // one call. A property since D101, which refuses it on a pattern whose calls were
@@ -1016,8 +1011,9 @@ public sealed class ThreadSafetyTests
             "Node.BodyInfo",
             // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
             // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
-            // pattern compiles; one byte holds the two.
-            "Node._callMemoFlags",
+            // pattern compiles; one byte holds the two, and (D10) Node.SavesOnlyForCalls, set by
+            // NodeCompiler.BuildLookaround and read only by the oracle.
+            "Node._flags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
             "Node.RunOutGroups",

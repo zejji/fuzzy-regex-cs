@@ -1060,7 +1060,7 @@ internal static class OracleComparer
     /// Upstream saves the captures around a lookaround only when its body holds a capture group, so
     /// a call's capture outlives a body that is thrown away: <c>(a)(?:(?!.(?1))|.)+?b</c> over
     /// 'aaab' leaves group 1 with [0,1][2,1]. Clearing the saved-captures flag of every lookaround in
-    /// <c>PatternObject.LookaroundsSavingOnlyForCalls</c> restores that, which is the whole of the
+    /// <c>Node.SavesOnlyForCalls</c> restores that, which is the whole of the
     /// fix. The <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
@@ -1076,9 +1076,12 @@ internal static class OracleComparer
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled =>
             {
-                foreach (Node lookaround in compiled.PatternObject.LookaroundsSavingOnlyForCalls ?? [])
+                foreach (Node lookaround in compiled.PatternObject.NodeList)
                 {
-                    lookaround.Status &= ~NodeStatus.HasGroups;
+                    if (lookaround.SavesOnlyForCalls)
+                    {
+                        lookaround.Status &= ~NodeStatus.HasGroups;
+                    }
                 }
             },
             keepMinimumOrderFix: true
