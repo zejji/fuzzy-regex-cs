@@ -46,9 +46,9 @@ public sealed class ConditionalRestoreGuardTests
     // Control: the same choice made by a branch saves no repeats, and was always right.
     [Arguments(@"(a?)(?:(?=c)c|[ab])*\1", "ac", 0, 2, 0, 0)] // regex (0, 2)
     // From the second blind review (2026-10-31): a reversed pattern, the repeat inside a named
-    // group, a group call before the loop, and a fuzzy section around the loop. The reversed row's
-    // answer is argued (its branch form is not equivalent when reversed); the others are
-    // upstream's branch form, and Node's where Node can write the pattern.
+    // group, a group call before the loop, and a fuzzy section around the loop. The answers are
+    // upstream's branch form, and Node's where Node can write the pattern; the reversed row's
+    // branch form is (?r)\1(?:c(?<=c)|[ab](?<!c))*(a?), which regex gives (0, 2), group (2, 2).
     [Arguments(@"(?r)\1(?(?<=c)c|[ab])*(a?)", "ca", 0, 2, 2, 2)] // regex (1, 2)
     [Arguments(@"(?P<g>(a?)(?(?=c)c|[ab])*\2)", "ac", 0, 2, 0, 2)] // regex (0, 1)
     [Arguments(@"(a?)(?1)?(?(?=c)c|[ab])*\1(x?)", "ac", 0, 2, 0, 0)] // regex (0, 1)
@@ -56,6 +56,9 @@ public sealed class ConditionalRestoreGuardTests
     // The loop inside a nested repeat. Node's answer; upstream gives (0, 0) here and in its
     // branch form too, so this one is checked against Node only.
     [Arguments(@"(a?)(?:(?:(?(?=c)c|[ab]))*)*\1", "ac", 0, 2, 0, 0)] // regex (0, 0)
+    // Control: the same nested repeat with no conditional. Node's answer; upstream fails this one
+    // too.
+    [Arguments(@"(a?)(?:(?:[ac])*)*\1", "ac", 0, 2, 0, 0)] // regex (0, 1)
     public void A_restore_after_a_conditional_keeps_the_marks_of_bodies_that_reached_their_end(
         string pattern,
         string subject,
@@ -69,6 +72,20 @@ public sealed class ConditionalRestoreGuardTests
 
         (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
         (m.Groups[1].Index, m.Groups[1].Index + m.Groups[1].Length).Should().Be((groupStart, groupEnd));
+    }
+
+    // The nested-repeat row is checked against Node only, and its control without the conditional
+    // passes, so this shows the row rests on the fix: with upstream's restore the port answers
+    // (0, 1), as for the flat row. Upstream's own (0, 0) is not this divergence alone.
+    [Test]
+    public void The_nested_repeat_row_rests_on_the_fix()
+    {
+        var regex = new FuzzyRegex(@"(a?)(?:(?:(?(?=c)c|[ab]))*)*\1");
+        regex.PatternObject.UpstreamConditionalRestore = true;
+
+        Match m = regex.Match("ac");
+
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, 0, 1));
     }
 
     [Test]
