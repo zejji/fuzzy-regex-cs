@@ -679,4 +679,36 @@ public sealed class FuzzyCountsAndChangesTests
             AssertChangesAgreeWithCounts(m);
         }
     }
+
+    /// <summary>
+    /// A deletion's reported position is its position in the subject plus the number of deletions
+    /// listed before it, one code unit each, as upstream adds one codepoint each
+    /// (<c>upstream/src/_regex.c:20554-20557</c>). Upstream 2026.9.29 gives the same lists in
+    /// codepoints, measured 2026-10-31: [0, 1], [1, 1], [0, 1] and [1, 2]. The reported position
+    /// may fall between the halves of a surrogate pair (rows one and three), so it is not a
+    /// subject index; subtracting the list index gives one, between two characters inside the
+    /// match. Row two is reversed: 'y' is listed first, so the shift lands on 'x'.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:xy){d<=2}😀", "😀", new[] { 0, 1 })]
+    [Arguments(@"(?r)(?:x😀y){d<=2}", "😀", new[] { 2, 1 })]
+    [Arguments(@"(?:😀y){d<=2}x", "x", new[] { 0, 1 })]
+    [Arguments(@"😀(?:bc){d<=2}d", "😀d", new[] { 2, 3 })]
+    public void A_deletion_is_shifted_by_one_unit_per_deletion_listed_before_it(
+        string pattern,
+        string text,
+        int[] deletions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text);
+
+        m.Success.Should().BeTrue();
+        m.FuzzyChanges.Deletions.Should().Equal(deletions);
+        for (int k = 0; k < deletions.Length; k++)
+        {
+            int position = deletions[k] - k;
+            position.Should().BeInRange(m.Index, m.Index + m.Length);
+            (position < text.Length && char.IsLowSurrogate(text[position])).Should().BeFalse();
+        }
+    }
 }
