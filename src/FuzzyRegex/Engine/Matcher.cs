@@ -6904,14 +6904,6 @@ internal static class Matcher
         bool over = AnOpenSectionIsOverItsLimits(state);
         --counts[FuzzyValue.Ins];
 
-        // D129 cost: the counts with the insertion fit, so the same counts without it fit too
-        // (counts only add and no weight or limit term is negative), and RunOut's own check of
-        // them, next, cannot fail. Record that so it is made once.
-        if (!over)
-        {
-            state.RecordRunOutWalk();
-        }
-
         return !over;
     }
 
@@ -21059,20 +21051,7 @@ internal static class Matcher
     {
         PatternObject pattern = state.Pattern;
 
-        // D129 cost: an insertion run-out has just checked these counts with one insertion more
-        // (ARunOutInsertionFitsTheOpenSections), so the check below cannot fail; in Debug it is
-        // still made, and asserted.
-        bool checkedWithAnInsertion = state.RunOutWalkMatches();
-        Debug.Assert(
-            !checkedWithAnInsertion || !AnOpenSectionIsOverItsLimits(state),
-            "D129: counts that fit with one more insertion fit without it"
-        );
-        if (
-            !checkedWithAnInsertion
-            && pattern.NestsFuzzySections
-            && !pattern.RunOutAsBeforeD81
-            && AnOpenSectionIsOverItsLimits(state)
-        )
+        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
         {
             state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
             stringPos = -1;
