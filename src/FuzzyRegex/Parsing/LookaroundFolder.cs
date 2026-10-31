@@ -42,11 +42,8 @@ internal static class LookaroundFolder
             return node;
         }
 
-        RegexBase folded = Fold(
-            node,
-            inFuzzy: false,
-            patternHasVerbOrKeep: HoldsAVerbOrKeep(node, callsReachOne: false)
-        );
+        var verbs = new PatternVerbs(node);
+        RegexBase folded = Fold(node, inFuzzy: false, ref verbs);
         if (info.GroupCalls.Count != 0)
         {
             var left = new HashSet<RegexBase>(ReferenceEqualityComparer.Instance);
@@ -101,12 +98,12 @@ internal static class LookaroundFolder
         }
     }
 
-    private static RegexBase Fold(RegexBase node, bool inFuzzy, bool patternHasVerbOrKeep)
+    private static RegexBase Fold(RegexBase node, bool inFuzzy, ref PatternVerbs verbs)
     {
         switch (node)
         {
             case LookAround look:
-                look.Subpattern = Fold(look.Subpattern, inFuzzy, patternHasVerbOrKeep);
+                look.Subpattern = Fold(look.Subpattern, inFuzzy, ref verbs);
                 // A body that defines a group is kept whatever its sense: the group is numbered, may
                 // be called or read elsewhere, and its definition must stay in the compiled pattern
                 // (folded away, `a+(?<!(?1)(?P<g1>a*))` threw at match time).
@@ -114,7 +111,7 @@ internal static class LookaroundFolder
                     !inFuzzy
                     && !look.Subpattern.ContainsGroup()
                     && MatchesEmptyWithoutReading(look.Subpattern)
-                    && !HoldsAVerbOrKeep(look.Subpattern, patternHasVerbOrKeep)
+                    && !HoldsAVerbOrKeep(look.Subpattern, verbs.Any)
                 )
                 {
                     return look.Positive ? new Sequence() : new Failure();
@@ -124,7 +121,7 @@ internal static class LookaroundFolder
             case Sequence s:
                 for (int i = 0; i < s.Items.Count; i++)
                 {
-                    s.Items[i] = Fold(s.Items[i], inFuzzy, patternHasVerbOrKeep);
+                    s.Items[i] = Fold(s.Items[i], inFuzzy, ref verbs);
                 }
 
                 return s;
@@ -133,30 +130,30 @@ internal static class LookaroundFolder
             case Branch b:
                 for (int i = 0; i < b.Branches.Count; i++)
                 {
-                    b.Branches[i] = Fold(b.Branches[i], inFuzzy, patternHasVerbOrKeep);
+                    b.Branches[i] = Fold(b.Branches[i], inFuzzy, ref verbs);
                 }
 
                 return b;
             case GreedyRepeat r:
-                r.Subpattern = Fold(r.Subpattern, inFuzzy, patternHasVerbOrKeep);
+                r.Subpattern = Fold(r.Subpattern, inFuzzy, ref verbs);
                 return r;
             case Atomic a:
-                a.Subpattern = Fold(a.Subpattern, inFuzzy, patternHasVerbOrKeep);
+                a.Subpattern = Fold(a.Subpattern, inFuzzy, ref verbs);
                 return a;
             case Group g:
-                g.Subpattern = Fold(g.Subpattern, inFuzzy, patternHasVerbOrKeep);
+                g.Subpattern = Fold(g.Subpattern, inFuzzy, ref verbs);
                 return g;
             case LookAroundConditional c:
-                c.Subpattern = Fold(c.Subpattern, inFuzzy, patternHasVerbOrKeep);
-                c.YesItem = Fold(c.YesItem, inFuzzy, patternHasVerbOrKeep);
-                c.NoItem = Fold(c.NoItem, inFuzzy, patternHasVerbOrKeep);
+                c.Subpattern = Fold(c.Subpattern, inFuzzy, ref verbs);
+                c.YesItem = Fold(c.YesItem, inFuzzy, ref verbs);
+                c.NoItem = Fold(c.NoItem, inFuzzy, ref verbs);
                 return c;
             case Conditional c:
-                c.YesItem = Fold(c.YesItem, inFuzzy, patternHasVerbOrKeep);
-                c.NoItem = Fold(c.NoItem, inFuzzy, patternHasVerbOrKeep);
+                c.YesItem = Fold(c.YesItem, inFuzzy, ref verbs);
+                c.NoItem = Fold(c.NoItem, inFuzzy, ref verbs);
                 return c;
             case Fuzzy f:
-                f.Subpattern = Fold(f.Subpattern, inFuzzy: true, patternHasVerbOrKeep);
+                f.Subpattern = Fold(f.Subpattern, inFuzzy: true, ref verbs);
                 return f;
             default:
                 return node;
@@ -183,23 +180,68 @@ internal static class LookaroundFolder
     /// <param name="callsReachOne">Whether a call in it counts as one: true where the pattern holds a
     /// verb or <c>\K</c> somewhere a call could reach.</param>
     /// <returns><see langword="true"/> if it does.</returns>
-    private static bool HoldsAVerbOrKeep(RegexBase node, bool callsReachOne) =>
-        node switch
+    private static bool HoldsAVerbOrKeep(RegexBase node, bool callsReachOne)
+    {
+        // Loops rather than List.Exists: a lambda would capture callsReachOne and allocate a closure
+        // and a delegate at every sequence and branch (most of the +8% allocation the BDN gate found
+        // on CompileLargePattern, 2026-10-26).
+        switch (node)
         {
-            Prune or Skip or Keep => true,
-            CallGroup => callsReachOne,
-            Sequence s => s.Items.Exists(i => HoldsAVerbOrKeep(i, callsReachOne)),
-            StringSet => false,
-            Branch b => b.Branches.Exists(i => HoldsAVerbOrKeep(i, callsReachOne)),
-            GreedyRepeat r => HoldsAVerbOrKeep(r.Subpattern, callsReachOne),
-            Atomic a => HoldsAVerbOrKeep(a.Subpattern, callsReachOne),
-            Group g => HoldsAVerbOrKeep(g.Subpattern, callsReachOne),
-            LookAround l => HoldsAVerbOrKeep(l.Subpattern, callsReachOne),
-            LookAroundConditional c => HoldsAVerbOrKeep(c.Subpattern, callsReachOne)
-                || HoldsAVerbOrKeep(c.YesItem, callsReachOne)
-                || HoldsAVerbOrKeep(c.NoItem, callsReachOne),
-            Conditional c => HoldsAVerbOrKeep(c.YesItem, callsReachOne) || HoldsAVerbOrKeep(c.NoItem, callsReachOne),
-            Fuzzy f => HoldsAVerbOrKeep(f.Subpattern, callsReachOne),
-            _ => false,
-        };
+            case Prune or Skip or Keep:
+                return true;
+            case CallGroup:
+                return callsReachOne;
+            case Sequence s:
+                for (int i = 0; i < s.Items.Count; i++)
+                {
+                    if (HoldsAVerbOrKeep(s.Items[i], callsReachOne))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case Branch b:
+                for (int i = 0; i < b.Branches.Count; i++)
+                {
+                    if (HoldsAVerbOrKeep(b.Branches[i], callsReachOne))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case GreedyRepeat r:
+                return HoldsAVerbOrKeep(r.Subpattern, callsReachOne);
+            case Atomic a:
+                return HoldsAVerbOrKeep(a.Subpattern, callsReachOne);
+            case Group g:
+                return HoldsAVerbOrKeep(g.Subpattern, callsReachOne);
+            case LookAround l:
+                return HoldsAVerbOrKeep(l.Subpattern, callsReachOne);
+            case LookAroundConditional c:
+                return HoldsAVerbOrKeep(c.Subpattern, callsReachOne)
+                    || HoldsAVerbOrKeep(c.YesItem, callsReachOne)
+                    || HoldsAVerbOrKeep(c.NoItem, callsReachOne);
+            case Conditional c:
+                return HoldsAVerbOrKeep(c.YesItem, callsReachOne) || HoldsAVerbOrKeep(c.NoItem, callsReachOne);
+            case Fuzzy f:
+                return HoldsAVerbOrKeep(f.Subpattern, callsReachOne);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the whole pattern holds a verb or <c>\K</c>, asked only when a lookaround could fold:
+    /// most patterns have none that could, and the walk is the whole tree.
+    /// </summary>
+    /// <param name="root">The whole pattern.</param>
+    private struct PatternVerbs(RegexBase root)
+    {
+        private bool? _any;
+
+        /// <summary>Gets whether the pattern holds a verb or <c>\K</c> anywhere.</summary>
+        internal bool Any => _any ??= HoldsAVerbOrKeep(root, callsReachOne: false);
+    }
 }

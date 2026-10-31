@@ -19718,7 +19718,7 @@ internal static class Matcher
             return false;
         }
 
-        int[] enclosing = pattern.TailEnclosingRepeats![index];
+        int[] enclosing = pattern.TailTables!.EnclosingRepeats[index];
         if (enclosing.Length > 2)
         {
             return false;
@@ -19730,7 +19730,7 @@ internal static class Matcher
             RepeatData outer = state.Repeats[enclosing[i]];
             if (
                 state.TextPos == outer.Start
-                || pattern.TailRepeatNodes![enclosing[i]] is not { } outerNode
+                || pattern.TailTables.RepeatNodes[enclosing[i]] is not { } outerNode
                 || !TailClass(outerNode, outer.Count, out long outerClass)
             )
             {
@@ -19883,7 +19883,7 @@ internal static class Matcher
         if (
             frameSstack <= saved - _lookaroundStateDataSize
             || bstackAt < lookMark
-            || pattern.GroupRequiredLiterals is not { } literals
+            || pattern.TailTables?.GroupRequiredLiterals is not { } literals
             || group >= literals.Length
             || literals[group] < 0
             || LastOfTheGroupsLiteral(state, group, literals[group]) >= entry
@@ -19932,7 +19932,7 @@ internal static class Matcher
     private static int LastOfTheGroupsLiteral(MatchState state, int group, int literal)
     {
         int[] last = state.GroupLiteralLast ??= CreateUnknownLiteralPositions(
-            state.Pattern.GroupRequiredLiterals!.Length
+            state.Pattern.TailTables!.GroupRequiredLiterals.Length
         );
         if (last[group] == int.MinValue)
         {

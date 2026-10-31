@@ -102,7 +102,7 @@ public sealed class CallInliningTests
 
         // The calls nearest the chain's end are written out, the rest stay calls. A full match
         // needs 1,125,750 a's and every call saves every group (D68), so only a miss is run.
-        regex.PatternObject.InlinedCalls.Should().BeInRange(1, 100);
+        regex.InlinedCalls.Should().BeInRange(1, 100);
         regex.IsMatch(new string('a', 1_000)).Should().BeFalse();
     }
 

@@ -401,7 +401,7 @@ public sealed class PartialTailSummaryTests
         foreach (string group in groups)
         {
             var regex = new FuzzyRegex($"x(?!(?1))|!({group}(?:!(?1))?)");
-            int[]? literals = regex.PatternObject.GroupRequiredLiterals;
+            int[]? literals = regex.PatternObject.TailTables?.GroupRequiredLiterals;
             if (literals is null)
             {
                 continue;

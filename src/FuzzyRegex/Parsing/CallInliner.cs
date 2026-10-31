@@ -104,12 +104,22 @@ internal static class CallInliner
 
         if (walk.Copied.Count != 0)
         {
-            info.GroupCalls.RemoveAll(entry => walk.Copied.Contains((CallGroup)entry.Call));
+            ForgetTheCopiedCalls(info, walk.Copied);
             info.InlinedCalls = walk.Copied.Count;
         }
 
         return result;
     }
+
+    /// <summary>Drops the calls that were written out from <see cref="Info.GroupCalls"/>.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="copied">The calls written out.</param>
+    /// <remarks>
+    /// Its own method: a lambda in <see cref="Run"/> capturing a local there made Run allocate the
+    /// closure on entry, before its early return, on every compile (24 B).
+    /// </remarks>
+    private static void ForgetTheCopiedCalls(Info info, HashSet<CallGroup> copied) =>
+        info.GroupCalls.RemoveAll(entry => copied.Contains((CallGroup)entry.Call));
 
     /// <summary>
     /// The node count of a tree, with a repeat's body counted once per required repetition and

@@ -242,6 +242,38 @@ public sealed class AllocationTests
         allocated.Should().BeLessThanOrEqualTo(ceiling, "nothing reads the partial-matching tables here");
     }
 
+    /// <summary>
+    /// D101 added compile-time facts about lookaround bodies and calls (whether a body reaches a
+    /// verb, the lookarounds a call can run, the always-matching lookarounds folded away). A pattern
+    /// with lookarounds but no verb and no group call needs none of them, so compiling it allocates
+    /// no more than main did before D101. The ceilings are main 4205ad63's counts (Debug, JIT,
+    /// 2026-10-31); the rebased D101 branch allocated 1,288 to 1,736 B more on these rows. Native
+    /// AOT allocates differently for the same compile and has no measured ceiling here, so the test
+    /// runs under the JIT only.
+    /// </summary>
+    /// <param name="pattern">The pattern: lookarounds, no verb, no call.</param>
+    /// <param name="jitCeiling">Main 4205ad63's bytes for one compile under the JIT, Debug.</param>
+    [Test]
+    [Arguments(@"(?<=\s)(?:quick|slow)(?!\w)", 25_864)]
+    [Arguments(@"(?:needle){e<=1}(?=\s|$)", 20_856)]
+    [Arguments(@"\b(?=\w*\d)(?!\d+\b)\w+", 27_664)]
+    public void Compiling_a_pattern_with_lookarounds_and_no_verb_or_call_allocates_what_it_did_before_D101(
+        string pattern,
+        long jitCeiling
+    )
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceilings are the JIT's; Native AOT's were not measured");
+        }
+
+        _ = new FuzzyRegex(pattern);
+
+        long allocated = AllocatedBy(() => () => _ = new FuzzyRegex(pattern));
+
+        allocated.Should().BeLessThanOrEqualTo(jitCeiling, "nothing reads D101's call and verb facts here");
+    }
+
     [Test]
     public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
     {

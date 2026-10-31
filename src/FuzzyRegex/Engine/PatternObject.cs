@@ -647,20 +647,11 @@ internal sealed class PatternObject
     internal bool MemoisesTails;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D101 option D: per repeat index, the repeats whose body holds it in the
-    /// compiled code, whose counts are part of a tail's key. Null unless <see cref="MemoisesTails"/>.
+    /// NOT UPSTREAM'S, D101 option D: the tables the tail memo reads. Null unless
+    /// <see cref="MemoisesTails"/>; one field rather than one per table, so that a pattern without
+    /// the memo, nearly every pattern, compiles into an object no bigger than before D101.
     /// </summary>
-    internal int[][]? TailEnclosingRepeats;
-
-    /// <summary>NOT UPSTREAM'S, D101 option D: per repeat index, its GREEDY_REPEAT or LAZY_REPEAT node.</summary>
-    internal Node?[]? TailRepeatNodes;
-
-    /// <summary>
-    /// NOT UPSTREAM'S, D101 option D, the frame cut: per call index (<see cref="CallRefInfoList"/>),
-    /// a codepoint that every path from the group's start to its return consumes, or -1
-    /// (<see cref="RequiredLiteralOfGroup"/>). Null unless <see cref="MemoisesTails"/>.
-    /// </summary>
-    internal int[]? GroupRequiredLiterals;
+    internal TailMemoTables? TailTables;
 
     /// <summary>
     /// NOT UPSTREAM'S, D101: whether the pattern holds anything <c>Matcher.RunOutFeedsADecisionIf</c>
@@ -1237,7 +1228,7 @@ internal sealed class PatternObject
         get;
         set
         {
-            if (value && InlinedCalls != 0)
+            if (value && WroteCallsOut)
             {
                 throw new InvalidOperationException(
                     "upstream's call-capture rule needs every call kept: compile with upstreamCalls"
@@ -1248,8 +1239,12 @@ internal sealed class PatternObject
         }
     }
 
-    /// <summary>NOT UPSTREAM (D101): how many group calls were written out when this compiled.</summary>
-    internal int InlinedCalls { get; private init; }
+    /// <summary>
+    /// NOT UPSTREAM (D101): whether any group call was written out when this compiled. A flag, not
+    /// the count the compiler keeps (<see cref="CompiledPattern.InlinedCalls"/>): nothing here
+    /// needs the count, and four bytes more took the object past main's size.
+    /// </summary>
+    internal bool WroteCallsOut { get; private init; }
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a partial result restores the groups
@@ -1354,7 +1349,7 @@ internal sealed class PatternObject
             RequiredChars = reqChars,
             ReqFlags = compiled.ReqFlags,
             OptionalPassEnds = compiled.OptionalPassEnds.Count == 0 ? null : [.. compiled.OptionalPassEnds],
-            InlinedCalls = compiled.InlinedCalls,
+            WroteCallsOut = compiled.InlinedCalls != 0,
         };
 
         // Compile the regular expression code to nodes.
@@ -2152,13 +2147,34 @@ internal sealed class PatternObject
         {
             if (
                 node is { Op: Opcode.Lookaround, Match: false, BodyInfo: { HasVerbOrCall: true } body }
-                && Array.Exists(body.Nodes, i => pattern.NodeList[i].Op == Opcode.GroupCall)
+                && HoldsACall(pattern, body)
             )
             {
                 node.MemoisesNegativeOutcome = true;
                 pattern.MemoisesCallOutcomes = true;
             }
         }
+    }
+
+    /// <summary>Whether a lookaround body holds a group call (<see cref="SetNegativeOutcomeMemo"/>).</summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <param name="body">The body.</param>
+    /// <returns><see langword="true"/> if it holds one.</returns>
+    /// <remarks>
+    /// A loop rather than <c>Array.Exists</c> with a lambda: the lambda captured the caller's
+    /// parameter, so the caller allocated its closure on entry, on every compile.
+    /// </remarks>
+    private static bool HoldsACall(PatternObject pattern, Node.Body body)
+    {
+        for (int i = 0; i < body.Nodes.Length; i++)
+        {
+            if (pattern.NodeList[body.Nodes[i]].Op == Opcode.GroupCall)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2240,16 +2256,16 @@ internal sealed class PatternObject
             }
         }
 
-        pattern.GroupRequiredLiterals = new int[pattern.CallRefInfoList.Count];
-        for (int g = 0; g < pattern.GroupRequiredLiterals.Length; g++)
+        int[] groupRequiredLiterals = new int[pattern.CallRefInfoList.Count];
+        for (int g = 0; g < groupRequiredLiterals.Length; g++)
         {
-            pattern.GroupRequiredLiterals[g] = RequiredLiteralOfGroup(pattern, g);
+            groupRequiredLiterals[g] = RequiredLiteralOfGroup(pattern, g);
         }
 
-        pattern.TailRepeatNodes = nodes;
-        pattern.TailEnclosingRepeats = Array.ConvertAll(
-            enclosing,
-            static set => set is null ? [] : set.Order().ToArray()
+        pattern.TailTables = new TailMemoTables(
+            Array.ConvertAll(enclosing, static set => set is null ? [] : set.Order().ToArray()),
+            nodes,
+            groupRequiredLiterals
         );
         pattern.MemoisesTails = true;
     }
@@ -2534,6 +2550,28 @@ internal sealed class PatternObject
     /// <param name="body">The indices of its body's nodes.</param>
     /// <returns><see langword="true"/> if a verb is reachable.</returns>
     private static bool ReachesVerb(PatternObject pattern, Node test, HashSet<int> body)
+    {
+        // A pattern without a verb has none to reach: Compile sets HasBacktrackingVerb from every
+        // node in NodeList before the bodies are set (the node loop of Compile, at "D11: see
+        // HasBacktrackingVerb"), the walk answers true only at a PRUNE or SKIP node, and every node
+        // it meets is one of the graph's, all of which NodeList holds. Without this, every
+        // lookaround body of every pattern allocated the walk's set and stack (the witness is
+        // AllocationTests' D101 compile rows). No Debug.Assert re-runs the walk here: in Debug it
+        // would allocate the very set and stack those rows measure.
+        if (!pattern.HasBacktrackingVerb)
+        {
+            return false;
+        }
+
+        return WalkReachesVerb(pattern, test, body);
+    }
+
+    /// <summary>The walk of <see cref="ReachesVerb"/>.</summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <param name="test">The lookaround or condition.</param>
+    /// <param name="body">The indices of its body's nodes.</param>
+    /// <returns><see langword="true"/> if a verb is reachable.</returns>
+    private static bool WalkReachesVerb(PatternObject pattern, Node test, HashSet<int> body)
     {
         var seen = new HashSet<int>();
         var todo = new Stack<Node>();
@@ -3076,6 +3114,28 @@ internal sealed class PatternObject
     /// <returns>The same characters, or an empty list when there are none.</returns>
     private static IReadOnlyList<int> GetRequiredChars(IReadOnlyList<int> reqChars) =>
         reqChars.Count < 1 ? [] : reqChars;
+}
+
+/// <summary>
+/// NOT UPSTREAM'S, D101 option D: the tables of <see cref="PatternObject.TailTables"/>, built once by
+/// <c>PatternObject.SetTailMemo</c> while the pattern compiles.
+/// </summary>
+/// <param name="enclosingRepeats">Per repeat index, the repeats whose body holds it in the compiled
+/// code, whose counts are part of a tail's key.</param>
+/// <param name="repeatNodes">Per repeat index, its GREEDY_REPEAT or LAZY_REPEAT node.</param>
+/// <param name="groupRequiredLiterals">The frame cut: per call index
+/// (<see cref="PatternObject.CallRefInfoList"/>), a codepoint that every path from the group's start
+/// to its return consumes, or -1 (<c>PatternObject.RequiredLiteralOfGroup</c>).</param>
+internal sealed class TailMemoTables(int[][] enclosingRepeats, Node?[] repeatNodes, int[] groupRequiredLiterals)
+{
+    /// <summary>See the constructor's <c>enclosingRepeats</c>.</summary>
+    internal readonly int[][] EnclosingRepeats = enclosingRepeats;
+
+    /// <summary>See the constructor's <c>repeatNodes</c>.</summary>
+    internal readonly Node?[] RepeatNodes = repeatNodes;
+
+    /// <summary>See the constructor's <c>groupRequiredLiterals</c>.</summary>
+    internal readonly int[] GroupRequiredLiterals = groupRequiredLiterals;
 }
 
 /// <summary>

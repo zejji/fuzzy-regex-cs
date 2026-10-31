@@ -89,7 +89,14 @@ internal sealed class Node
     /// second pass is kept per position for the pass (<c>Matcher.AdvanceLookaround</c>,
     /// <c>PatternObject.SetNegativeOutcomeMemo</c>).
     /// </summary>
-    internal bool MemoisesNegativeOutcome;
+    internal bool MemoisesNegativeOutcome
+    {
+        get => (_callMemoFlags & _memoisesNegativeOutcomeFlag) != 0;
+        set =>
+            _callMemoFlags = (byte)(
+                value ? _callMemoFlags | _memoisesNegativeOutcomeFlag : _callMemoFlags & ~_memoisesNegativeOutcomeFlag
+            );
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: for a node inside a lookaround body or condition test, the
@@ -119,7 +126,25 @@ internal sealed class Node
     /// <see cref="EnclosingSection"/> does not describe it. Set by
     /// <c>PatternObject.SetEnclosingSections</c>.
     /// </summary>
-    internal bool RunByACall;
+    internal bool RunByACall
+    {
+        get => (_callMemoFlags & _runByACallFlag) != 0;
+        set => _callMemoFlags = (byte)(value ? _callMemoFlags | _runByACallFlag : _callMemoFlags & ~_runByACallFlag);
+    }
+
+    /// <summary>Bit of <see cref="_callMemoFlags"/> for <see cref="MemoisesNegativeOutcome"/>.</summary>
+    private const int _memoisesNegativeOutcomeFlag = 1;
+
+    /// <summary>Bit of <see cref="_callMemoFlags"/> for <see cref="RunByACall"/>.</summary>
+    private const int _runByACallFlag = 2;
+
+    /// <summary>
+    /// D101's two flags in one byte. As two <see langword="bool"/> fields, they and
+    /// <see cref="OutcomeKey"/> took a node past main's 136 bytes to 144 (8 more bytes for every
+    /// node of every compiled pattern; the BDN gate's +8% allocation on CompileLargePattern, with
+    /// the lookaround folder's closures); in one byte they fit the padding main leaves.
+    /// </summary>
+    private byte _callMemoFlags;
 
     /// <summary>A body's nodes and its capture groups as (private, public) indices.</summary>
     /// <param name="Nodes">The indices of every node from the test's first body node up to its end

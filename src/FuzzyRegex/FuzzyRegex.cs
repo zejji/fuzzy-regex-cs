@@ -472,22 +472,18 @@ public sealed class FuzzyRegex
         try
         {
             (_compiled, PatternObject) = CompileGraph(
-                keepCalls =>
-                    Parsing.PatternCompiler.Compile(
-                        pattern,
-                        (int)options,
-                        ToCompilerNamedLists(namedLists),
-                        defaultVersion,
-                        upstreamReverseGrapheme,
-                        upstreamFoldedRuns,
-                        upstreamWholePatternCall,
-                        upstreamCallFeatures,
-                        upstreamFuzzyConditionTest,
-                        upstreamCallCopies,
-                        upstreamCalls || keepCalls
-                    ),
                 pattern,
-                maxCompiledNodes
+                options,
+                namedLists,
+                defaultVersion,
+                maxCompiledNodes,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies,
+                upstreamCalls
             );
         }
         catch (InsufficientExecutionStackException outOfStack)
@@ -518,9 +514,18 @@ public sealed class FuzzyRegex
     }
 
     /// <summary>Compiles the pattern's code and then its graph.</summary>
-    /// <param name="compile">Compiles the code; its argument says to keep every group call.</param>
     /// <param name="pattern">The pattern text.</param>
+    /// <param name="options">The options.</param>
+    /// <param name="namedLists">The named lists.</param>
+    /// <param name="defaultVersion">The default version.</param>
     /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
+    /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamWholePatternCall">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFuzzyConditionTest">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallCopies">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCalls">See <see cref="WithDefaultVersion"/>.</param>
     /// <returns>The code and the graph.</returns>
     /// <remarks>
     /// Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is the
@@ -532,26 +537,56 @@ public sealed class FuzzyRegex
     /// <para>
     /// NOT UPSTREAM (D101): when the group calls written out make the graph bigger than the budget
     /// allows, the pattern is compiled again with its calls kept, which answer the same in a smaller
-    /// graph, and is refused only if that is too big as well.
+    /// graph, and is refused only if that is too big as well. The arguments are passed rather than
+    /// captured by a lambda, which allocated a closure and a delegate on every compile (+208 B on
+    /// the compile allocation tests, with the graph's own growth).
     /// </para>
     /// </remarks>
     private static (Parsing.CompiledPattern Compiled, Engine.PatternObject Graph) CompileGraph(
-        Func<bool, Parsing.CompiledPattern> compile,
         string pattern,
-        int maxCompiledNodes
+        FuzzyRegexOptions options,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
+        int defaultVersion,
+        int maxCompiledNodes,
+        bool upstreamReverseGrapheme,
+        bool upstreamFoldedRuns,
+        bool upstreamWholePatternCall,
+        bool upstreamCallFeatures,
+        bool upstreamFuzzyConditionTest,
+        bool upstreamCallCopies,
+        bool upstreamCalls
     )
     {
-        Parsing.CompiledPattern compiled = compile(false);
+        Parsing.CompiledPattern compiled = Code(keepCalls: false);
         try
         {
             return (compiled, Engine.PatternObject.Compile(compiled, pattern, maxCompiledNodes));
         }
         catch (FuzzyRegexParseException) when (compiled.InlinedCalls != 0)
         {
-            compiled = compile(true);
+            compiled = Code(keepCalls: true);
             return (compiled, Engine.PatternObject.Compile(compiled, pattern, maxCompiledNodes));
         }
+
+        // A local function, never made a delegate, so its captures live in a struct on the stack.
+        Parsing.CompiledPattern Code(bool keepCalls) =>
+            Parsing.PatternCompiler.Compile(
+                pattern,
+                (int)options,
+                ToCompilerNamedLists(namedLists),
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies,
+                upstreamCalls || keepCalls
+            );
     }
+
+    /// <summary>NOT UPSTREAM (D101): how many group calls were written out when this compiled.</summary>
+    internal int InlinedCalls => _compiled.InlinedCalls;
 
     /// <summary>The pattern this instance was compiled from.</summary>
     public string Pattern { get; }

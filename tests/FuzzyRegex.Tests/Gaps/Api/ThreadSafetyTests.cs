@@ -936,9 +936,7 @@ public sealed class ThreadSafetyTests
             "PatternObject.MemoisesCallOutcomes",
             // D101 option D: set once by PatternObject.SetTailMemo, after SetNegativeOutcomeMemo.
             "PatternObject.MemoisesTails",
-            "PatternObject.TailEnclosingRepeats",
-            "PatternObject.TailRepeatNodes",
-            "PatternObject.GroupRequiredLiterals",
+            "PatternObject.TailTables",
             // Share 1: Node.OutcomeKey, written by NodeCompiler.BuildLookaround and then by
             // PatternObject.SetNegativeOutcomeKeys, both while the pattern compiles.
             "Node.OutcomeKey",
@@ -1016,10 +1014,10 @@ public sealed class ThreadSafetyTests
             // D11 chunk 8: written by PatternObject.SetLookaroundBodies, which Compile calls once
             // the nodes are numbered.
             "Node.BodyInfo",
-            // D101: set once by PatternObject.SetNegativeOutcomeMemo while the pattern compiles.
-            "Node.MemoisesNegativeOutcome",
-            // D101 (B3a): set by PatternObject.MarkWhatACallCanRun while the pattern compiles.
-            "Node.RunByACall",
+            // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
+            // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
+            // pattern compiles; one byte holds the two.
+            "Node._callMemoFlags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
             "Node.RunOutGroups",
