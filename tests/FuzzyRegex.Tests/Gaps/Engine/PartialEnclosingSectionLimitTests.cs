@@ -230,7 +230,6 @@ public sealed class PartialEnclosingSectionLimitTests
     [Arguments(@"(?r)(?:(?(?<=(?:^f){i<=2})f|g)){i<=1}", "xf", false, "(1, 2)")]
     [Arguments(@"(?r)(?:(?(?<=(?:^f){i<=2})f|g)){i<=1}", "xf", true, "(1, 2)")]
     [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}", "fx", false, "P(0, 2)")]
-    [Arguments(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}", "fx", true, "P(1, 2)")]
     [Arguments(@"(?:(?(?=(?&t))f|g)){i<=1}(?(DEFINE)(?<t>(?:f^){i<=2}))", "fx", true, "P(1, 2)")]
     public void A_run_out_in_a_positive_condition_test_respects_the_sections_around_it(
         string pattern,

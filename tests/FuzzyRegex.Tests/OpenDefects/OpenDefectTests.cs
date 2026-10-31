@@ -63,18 +63,17 @@ public sealed class OpenDefectTests
         (!m.Success || m.PartialMatch).Should().BeTrue();
     }
 
-    // D132. As D130, through a condition's test: the test `(?=(?:f^){i<=2})` is positive and its
-    // body's insertions count against the outer {i<=1}, so the run-out insertion that would let `^`
-    // pass is forbidden, the test fails and the no-branch 'g' does not match 'f'. The port answers
-    // a partial from 0 to 2, because a condition's test still stops the run-out's walk (D130 kept
-    // that, option A). Upstream 2026.9.29 answers None (measured 2026-10-31), and so does the port
-    // when the walk goes past positive tests too.
+    // Not yet registered (found 2026-10-31 by the D132 blind review, F4 shape 6; reported in the
+    // night log). A partial search where a condition's positive test runs out at start 0 with
+    // room in every section: regex 2026.9.29 and judge132.py answer P(1, 2) (completion 'gg'),
+    // the port P(0, 2), before and after the D132 fix. The one-test form
+    // `(?:(?(?=(?:f^){i<=2})f|g)){i<=2}` over 'fx' differs the same way before the fix (port
+    // P(0, 2), upstream P(1, 2)), so no section limit is involved.
     [Test]
-    public void An_insertion_run_out_inside_a_condition_test_respects_the_section_around_it()
+    public void A_partial_search_past_a_condition_test_run_out_starts_where_upstream_does()
     {
-        new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}")
-            .MatchAtStart("fx", partial: true)
-            .Success.Should()
-            .BeFalse();
+        Match m = new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}").Match("fx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, 1, 2));
     }
 }
