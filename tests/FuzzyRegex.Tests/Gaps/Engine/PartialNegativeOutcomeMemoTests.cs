@@ -149,11 +149,12 @@ public sealed class PartialNegativeOutcomeMemoTests
 
     /// <summary>
     /// Review finding (d101-frame-cut.md, finding 1): the frame cut's required literal can be a lone
-    /// surrogate, which the pattern holds as one unit. The run-out falls inside the called group,
-    /// inside the negative lookahead. regex 2026.9.29 answers all four P(0, 2), group 1 unset.
-    /// Measured 2026-10-31 on c78a073c (cut) and 184c256b (no cut): all four answer None and none
-    /// throws, the two rows without a surrogate included, so these inputs do not reach the cut's
-    /// literal search and the throw is not reproduced; the None is a separate divergence.
+    /// surrogate, which the pattern holds as one unit. regex 2026.9.29 answers all four P(0, 2), but
+    /// no text completes a match (each branch matches exactly 'a' or the group's text; regex's
+    /// non-partial fullmatch over every suffix of up to 3 of 'ayzb\ud800' finds none), so None is
+    /// the answer and upstream's P is the phantom of ledger entry 67. The inliner turns these
+    /// <c>(?1)</c> into the group's body, so the cut is never reached: measured 2026-10-31 on
+    /// c78a073c and 184c256b, all four answer None and none throws.
     /// </summary>
     [Test]
     [Arguments(@"a(?!y?(?1))|(\ud800)", "ay")]
@@ -162,9 +163,21 @@ public sealed class PartialNegativeOutcomeMemoTests
     [Arguments(@"a(?!(?1))|(zb)", "az")]
     public void A_lone_surrogate_required_literal_does_not_stop_the_cut(string pattern, string text)
     {
-        Match m = new FuzzyRegex(pattern).FullMatch(text, partial: true);
+        new FuzzyRegex(pattern).FullMatch(text, partial: true).Success.Should().BeFalse();
+    }
 
-        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
-        m.Groups[1].Success.Should().BeFalse();
+    /// <summary>
+    /// Finding 1 with a recursive group, which the inliner keeps as a call. regex 2026.9.29 answers
+    /// P(0, 2) (ledger entry 67 again); no suffix of up to 3 of 'ayzb\ud800' completes either, so
+    /// the answer is None, and the call must not throw on the lone surrogate. Measured 2026-10-31 on
+    /// c78a073c: the first row throws ArgumentOutOfRangeException from <c>char.ConvertFromUtf32</c>
+    /// in <c>Matcher.LastOfTheGroupsLiteral</c> (red, the cut is not fixed here); the second answers None.
+    /// </summary>
+    [Test]
+    [Arguments(@"a(?!y?(?1))|(\ud800(?1)?)", "ay")]
+    [Arguments(@"a(?!(?1))|(\ud800b(?1)?)", "a\ud800")]
+    public void A_lone_surrogate_literal_of_a_recursive_group_does_not_throw(string pattern, string text)
+    {
+        new FuzzyRegex(pattern).FullMatch(text, partial: true).Success.Should().BeFalse();
     }
 }
