@@ -1225,6 +1225,68 @@ internal sealed class MatchState : IDisposable
     internal int SectionFrame = -1;
 
     /// <summary>
+    /// NOT UPSTREAM'S (D129 cost): set when an insertion run-out's check
+    /// (<c>Matcher.ARunOutInsertionFitsTheOpenSections</c>) found that one more insertion fits every
+    /// open section, so that the run-out it hands on to <c>Matcher.RunOut</c> can skip D81's check
+    /// of the same counts without the insertion, which then cannot fail. Read and cleared on every
+    /// entry to <c>Matcher.RunOut</c>, cleared by <see cref="InitMatch"/>, and honoured only while
+    /// the state the check read is unchanged (<see cref="RunOutWalkMatches"/>).
+    /// </summary>
+    internal bool RunOutWalkPassed;
+
+    /// <summary>What <see cref="RunOutWalkPassed"/> was recorded at: the position.</summary>
+    internal int RunOutWalkTextPos;
+
+    /// <summary>What <see cref="RunOutWalkPassed"/> was recorded at: <see cref="SectionFrame"/>.</summary>
+    internal int RunOutWalkFrame;
+
+    /// <summary>What <see cref="RunOutWalkPassed"/> was recorded at: the pruning-mark depth.</summary>
+    internal int RunOutWalkPstack;
+
+    /// <summary>What <see cref="RunOutWalkPassed"/> was recorded at: <see cref="FuzzyNode"/>.</summary>
+    internal Node? RunOutWalkNode;
+
+    /// <summary>What <see cref="RunOutWalkPassed"/> was recorded at: the three error counts.</summary>
+    internal long RunOutWalkSub,
+        RunOutWalkIns,
+        RunOutWalkDel;
+
+    /// <summary>Records that an insertion run-out's check passed on the state as it is now.</summary>
+    internal void RecordRunOutWalk()
+    {
+        RunOutWalkPassed = true;
+        RunOutWalkTextPos = TextPos;
+        RunOutWalkFrame = SectionFrame;
+        RunOutWalkPstack = Pstack.Count;
+        RunOutWalkNode = FuzzyNode;
+        RunOutWalkSub = FuzzyCounts[FuzzyValue.Sub];
+        RunOutWalkIns = FuzzyCounts[FuzzyValue.Ins];
+        RunOutWalkDel = FuzzyCounts[FuzzyValue.Del];
+    }
+
+    /// <summary>
+    /// Whether <see cref="RecordRunOutWalk"/> recorded the state as it is now; clears the record
+    /// either way, so it lives across one hand-off at most.
+    /// </summary>
+    /// <returns><see langword="true"/> if a passed check of this exact state was recorded.</returns>
+    internal bool RunOutWalkMatches()
+    {
+        if (!RunOutWalkPassed)
+        {
+            return false;
+        }
+
+        RunOutWalkPassed = false;
+        return RunOutWalkTextPos == TextPos
+            && RunOutWalkFrame == SectionFrame
+            && RunOutWalkPstack == Pstack.Count
+            && ReferenceEquals(RunOutWalkNode, FuzzyNode)
+            && RunOutWalkSub == FuzzyCounts[FuzzyValue.Sub]
+            && RunOutWalkIns == FuzzyCounts[FuzzyValue.Ins]
+            && RunOutWalkDel == FuzzyCounts[FuzzyValue.Del];
+    }
+
+    /// <summary>
     /// The bytes a section frame spans for a pattern that keeps <see cref="SectionFrame"/>: the link,
     /// three counts, the change count and the outer node.
     /// </summary>
@@ -1893,6 +1955,14 @@ internal sealed class MatchState : IDisposable
         FewestErrors = 0;
         CaptureChange = 0;
         SectionFrame = -1;
+        RunOutWalkPassed = false;
+        RunOutWalkTextPos = 0;
+        RunOutWalkFrame = 0;
+        RunOutWalkPstack = 0;
+        RunOutWalkNode = null;
+        RunOutWalkSub = 0;
+        RunOutWalkIns = 0;
+        RunOutWalkDel = 0;
         ReqEnd = 0;
         LastIndex = 0;
         LastGroup = 0;
@@ -2450,6 +2520,7 @@ internal sealed class MatchState : IDisposable
     internal void InitMatch()
     {
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
+        RunOutWalkPassed = false;
         WMarks.Clear();
         MarkedStates.Clear();
         LookaroundSuccesses.Clear();
