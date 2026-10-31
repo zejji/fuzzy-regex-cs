@@ -656,6 +656,13 @@ internal sealed class PatternObject
     internal Node?[]? TailRepeatNodes;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut: per call index (<see cref="CallRefInfoList"/>),
+    /// a codepoint that every path from the group's start to its return consumes, or -1
+    /// (<see cref="RequiredLiteralOfGroup"/>). Null unless <see cref="MemoisesTails"/>.
+    /// </summary>
+    internal int[]? GroupRequiredLiterals;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D101: whether the pattern holds anything <c>Matcher.RunOutFeedsADecisionIf</c>
     /// can answer yes for: a condition, a negative lookaround, an atomic group (a possessive repeat
     /// compiles to one) or a verb. Without one the walk over the pruning stack, as deep as a
@@ -2233,6 +2240,12 @@ internal sealed class PatternObject
             }
         }
 
+        pattern.GroupRequiredLiterals = new int[pattern.CallRefInfoList.Count];
+        for (int g = 0; g < pattern.GroupRequiredLiterals.Length; g++)
+        {
+            pattern.GroupRequiredLiterals[g] = RequiredLiteralOfGroup(pattern, g);
+        }
+
         pattern.TailRepeatNodes = nodes;
         pattern.TailEnclosingRepeats = Array.ConvertAll(
             enclosing,
@@ -2379,6 +2392,137 @@ internal sealed class PatternObject
         && y.TailKey is null
         && x.BodyHoldsKeyedTail == y.BodyHoldsKeyedTail
         && x.BodyGuardDroppedForD85 == y.BodyGuardDroppedForD85;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut: a codepoint that every path from a called
+    /// group's start to its <see cref="Opcode.GroupReturn"/> consumes, or -1.
+    /// </summary>
+    /// <remarks>
+    /// Only a case-sensitive <see cref="Opcode.Character"/> that must match counts: a literal under
+    /// a case-insensitive or full-case flag can be matched by other characters (KELVIN SIGN for
+    /// `(?i)k`, LONG S for `(?i)s`, 'ss' for `(?fi)ß`), and taking none only gives up the cut. The
+    /// walk follows every successor, steps over a lookaround to the node after it (its body
+    /// consumes nothing) and over a group call to its return (a callee may consume more, but
+    /// nothing a caller can rely on), and gives up at a condition. A candidate is required when
+    /// the return cannot be reached without passing it. Witnesses:
+    /// <c>PartialTailSummaryTests</c>'s cut rows and the brute-force property test
+    /// <c>Every_return_of_a_group_consumes_its_required_literal</c>.
+    /// </remarks>
+    /// <param name="pattern">The pattern, its nodes numbered.</param>
+    /// <param name="group">The call index.</param>
+    /// <returns>The codepoint, or -1.</returns>
+    internal static int RequiredLiteralOfGroup(PatternObject pattern, int group)
+    {
+        if (pattern.CallRefInfoList[group].Node?.Next1.Node is not { } start)
+        {
+            return -1;
+        }
+
+        var candidates = new List<Node>();
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        todo.Push(start);
+        while (todo.TryPop(out Node? n))
+        {
+            if (!seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.Conditional)
+            {
+                return -1;
+            }
+
+            if (n is { Op: Opcode.Character, Match: true })
+            {
+                candidates.Add(n);
+            }
+
+            foreach (Node next in LiteralWalkSuccessors(n))
+            {
+                todo.Push(next);
+            }
+        }
+
+        return candidates.Find(c => !ReachesTheReturnAvoiding(start, c)) is { } required ? (int)required.Values[0] : -1;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the literal walk's successors of a node (<see cref="RequiredLiteralOfGroup"/>).</summary>
+    /// <param name="n">The node.</param>
+    /// <returns>The nodes a path can go on to.</returns>
+    private static IEnumerable<Node> LiteralWalkSuccessors(Node n)
+    {
+        if (n.Op is Opcode.GroupReturn or Opcode.Success or Opcode.End)
+        {
+            yield break;
+        }
+
+        if (n.Op == Opcode.Lookaround)
+        {
+            if (n.LookaroundEnd?.Next1.Node is { } after)
+            {
+                yield return after;
+            }
+
+            yield break;
+        }
+
+        if (n.Op == Opcode.GroupCall)
+        {
+            if (n.Next1.Node is { } returnTo)
+            {
+                yield return returnTo;
+            }
+
+            yield break;
+        }
+
+        if (n.Next1.Node is { } next1)
+        {
+            yield return next1;
+        }
+
+        if (n.Next2.Node is { } next2)
+        {
+            yield return next2;
+        }
+
+        if (n.TrueNode is { } trueNode)
+        {
+            yield return trueNode;
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: whether some path from <paramref name="start"/> ends the group without passing <paramref name="avoid"/>.</summary>
+    /// <param name="start">The group's first node.</param>
+    /// <param name="avoid">The candidate literal.</param>
+    /// <returns><see langword="true"/> if the group can end without it.</returns>
+    private static bool ReachesTheReturnAvoiding(Node start, Node avoid)
+    {
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        todo.Push(start);
+        while (todo.TryPop(out Node? n))
+        {
+            if (ReferenceEquals(n, avoid) || !seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.GroupReturn or Opcode.Success or Opcode.End)
+            {
+                return true;
+            }
+
+            foreach (Node next in LiteralWalkSuccessors(n))
+            {
+                todo.Push(next);
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D101 (B2'): whether a verb lies in a body or in a group a call in it reaches,

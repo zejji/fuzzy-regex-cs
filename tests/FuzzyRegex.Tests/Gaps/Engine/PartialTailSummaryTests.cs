@@ -290,4 +290,141 @@ public sealed class PartialTailSummaryTests
         status.Should().Be(MatchStatus.Partial);
         state.TailRanOut.Should().NotBeNull().And.HaveCount(10);
     }
+
+    /// <summary>
+    /// The frame cut (FLOOR.md revision 2): rows the cut must leave alone, each with the frame kept
+    /// as a call (`(?:!(?1))?` makes the group recursive, so CallInliner does not write it out).
+    /// From REVIEW-0100: W-A, the literal checked from the frame's entry, not the run-out (a 'y'
+    /// after the entry); W-B to W-D, case folds (KELVIN SIGN, LONG S, full-case ss); W-E, an astral
+    /// literal searched as its UTF-16 pair; the three literal-walk rows, a literal only inside a
+    /// lookaround, in one alternative, or optional. Each answer is 00e980ef's, before the cut; a
+    /// cut that fired wrongly answers P(0, n) (the review's prototype with the predicate always
+    /// firing: 333 answers moved in its grid).
+    /// </summary>
+    [Test]
+    [Arguments(@"a(?!(?1)c)|!(.*y(?:!(?1))?)", "axyc", "P(4,4) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(?i:(.*k(?:!(?1))?))", "aKc", "P(3,3) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(?i:(.*s(?:!(?1))?))", "aſc", "P(3,3) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(?fi:(.*ss(?:!(?1))?))", "aßc", "P(3,3) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(?fi:(.*ß(?:!(?1))?))", "assc", "P(4,4) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(.*\U0001D52E(?:!(?1))?)", "a\U0001D52Ec", "P(4,4) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(.*(?!k)y(?:!(?1))?)", "axyc", "P(4,4) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(.*(?:k|y)(?:!(?1))?)", "axyc", "P(4,4) g1- | None g1- | None g1-")]
+    [Arguments(@"a(?!(?1)c)|!(.*k?y(?:!(?1))?)", "axyc", "P(4,4) g1- | None g1- | None g1-")]
+    public void A_frame_that_can_return_is_not_cut(string pattern, string text, string expected) =>
+        Answers(pattern, text).Should().Be(expected);
+
+    /// <summary>
+    /// The cut closes the frame only after RunOut has noted the run-out in the frame's call track,
+    /// so the call memo keeps "ran out" for the frame's key. Here the positive lookahead's call has
+    /// that key: with the track reset before the close (REVIEW-0100 round 2, mutation 4, 3,231
+    /// answers moved in its grid) it replays a failure, and the answers become P(1,1), None, None.
+    /// </summary>
+    [Test]
+    public void A_frame_cut_keeps_the_call_memos_run_out() =>
+        Answers(@"a(?!(?1)c)(?=(?1))|!(.*q(?:!(?1))?)", "a").Should().Be("P(0,1) g1- | P(0,1) g1- | None g1-");
+
+    /// <summary>
+    /// The cut's cost on row 122 and its single-negative sibling: each frame stops at its first
+    /// crossing run-out, since no return can pass the 'q' the text lacks. Before it (d447f368)
+    /// 2,903 and 2,503 Debug steps at n = 100, 11,603 and 10,003 at n = 400.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:x(?!(?!(?R)?y))|z)+q", 100, 2_200)]
+    [Arguments(@"(?:x(?!(?!(?R)?y))|z)+q", 400, 8_500)]
+    [Arguments(@"(?:x(?!(?R)?y)|z)+q", 100, 1_800)]
+    public void A_frame_that_cannot_return_is_cut_at_its_first_run_out(string pattern, int n, long maxSteps)
+    {
+        EngineWork.SkipUnlessCounting();
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string text = new('x', n);
+        long cutsBefore = WorkCounter.FramesCut;
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match(text, partial: true);
+                (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, n));
+            },
+            maxSteps,
+            "a frame that cannot return stops at its first run-out across it"
+        );
+        (WorkCounter.FramesCut - cutsBefore).Should().BePositive();
+    }
+
+    /// <summary>
+    /// The literal walk's property (REVIEW-0100): every text a group matches in full holds the
+    /// literal the walk says the group requires. Groups are every one or two of case-sensitive and folded
+    /// literals, an astral one, alternations, optional and repeated items and lookarounds; texts are
+    /// every string of up to three characters over an alphabet holding each literal, its fold
+    /// partners and the astral character. A literal under a fold must never be taken.
+    /// </summary>
+    [Test]
+    public void Every_return_of_a_group_consumes_its_required_literal()
+    {
+        string[] atoms =
+        [
+            "x",
+            "y",
+            "q",
+            "(?i:k)",
+            "(?i:s)",
+            "(?fi:ß)",
+            "\U0001D52E",
+            "(?:x|y)",
+            "(?:q|x)",
+            "y?",
+            "x*",
+            "(?=q)",
+            "(?!y)",
+            "(?:qy)?",
+            ".",
+            "q+",
+        ];
+        string[] alphabet = ["x", "y", "q", "k", "K", "s", "ſ", "ß", "\U0001D52E"];
+        var texts = new List<string> { string.Empty };
+        for (int length = 1; length <= 3; length++)
+        {
+            List<string> longer =
+            [
+                .. texts
+                    .Where(t => t.EnumerateRunes().Count() == length - 1)
+                    .SelectMany(t => alphabet.Select(a => t + a)),
+            ];
+            texts.AddRange(longer);
+        }
+
+        IEnumerable<string> groups = atoms.Concat(atoms.SelectMany(a => atoms.Select(b => a + b)));
+        int checkedGroups = 0;
+        int withLiteral = 0;
+        foreach (string group in groups)
+        {
+            var regex = new FuzzyRegex($"x(?!(?1))|!({group}(?:!(?1))?)");
+            int[]? literals = regex.PatternObject.GroupRequiredLiterals;
+            if (literals is null)
+            {
+                continue;
+            }
+
+            checkedGroups++;
+            literals.Should().ContainSingle("the one called group");
+            int literal = literals[0];
+            if (literal < 0)
+            {
+                continue;
+            }
+
+            withLiteral++;
+            string required = char.ConvertFromUtf32(literal);
+            var whole = new FuzzyRegex($"(?:{group})");
+            foreach (string text in texts.Where(t => whole.FullMatch(t).Success))
+            {
+                text.Should().Contain(required, $"`{group}` is said to require '{required}'");
+            }
+        }
+
+        checkedGroups.Should().BeGreaterThan(200);
+        withLiteral.Should().BeGreaterThan(30);
+    }
 }

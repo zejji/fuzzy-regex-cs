@@ -7065,6 +7065,13 @@ internal static class Matcher
                     return null;
                 }
 
+                // D101 option D: the innermost frame cannot return, so the rest of it is cut
+                // (CutAFrameThatCannotReturn). The run-out is then taken at the same item.
+                if (atomics == 0 && pattern.MemoisesTails && look.Node.Op == Opcode.Lookaround)
+                {
+                    CutAFrameThatCannotReturn(state, lookMark);
+                }
+
                 item = opened;
                 state.NotePartialEvent(PartialEvent.RunOutCallKeptOpen);
             }
@@ -19815,6 +19822,163 @@ internal static class Matcher
         )
         {
             WorkCounter.TailRecorded();
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut (<c>.scratch/s1024/d101/FLOOR.md</c>, revision 2,
+    /// reviewed in <c>.scratch/s1024/REVIEW-0100-floor.md</c>): a run-out inside the innermost open call
+    /// frame F, opened in a negative lookaround's body L0, where F cannot return: its group's
+    /// required literal does not occur from F's entry to the end of the text. Records F's followed
+    /// tails, then abandons F as D98 abandons a call and closes it as backtracked past.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// After a run-out has crossed F, the rest of F's exploration can change L0's outcome only by a
+    /// decided success of L0's body, which needs F to return (L0's body ends outside F). Every
+    /// return of F consumes its group's literal at or after F's entry, so with none there in the
+    /// text, no path F has left returns, and only failures and further run-outs remain, which add
+    /// nothing to a negative body that has already run out. The run-out is then taken at the item
+    /// the caller chose, the outermost call L0's body opened, where the call memo's own replay
+    /// (<see cref="AdvanceGroupCall"/>'s run-out arm) takes it for any later call with F's key.
+    /// Row 122 spent 10 of its 29 steps per character after this point (FLOOR.md).
+    /// </para>
+    /// <para>
+    /// Order matters twice (review round 2). The cut runs inside <see cref="RunOutInALookaroundBody"/>,
+    /// after <see cref="RunOut"/> has noted the run-out in F's call track, so F's close records
+    /// "ran out, never returned"; noted later, F would be recorded as failing, and a later call
+    /// with its key would replay a failure (witness
+    /// <c>PartialTailSummaryTests.A_frame_cut_keeps_the_call_memos_run_out</c>). F closes only
+    /// through <see cref="PopOpenCall"/> with <c>backtrackedPast</c>, which hands its run-outs to its
+    /// caller's track; <see cref="CloseFramesAbove"/> or a raw removal would lose them.
+    /// </para>
+    /// <para>
+    /// F's tails would otherwise be recorded when their entries are popped, which the cut skips; so
+    /// each live track of F that a run-out crossed, that never returned and was not poisoned is
+    /// recorded here. Its key's tail is a set of suffixes of paths from F's entry, none of which can
+    /// return, so "ran out across the frame, never returned" is the value its full exploration
+    /// would have given. Without this row 122 is quadratic again (option E's failure).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="lookMark">L0's pruning mark.</param>
+    private static void CutAFrameThatCannotReturn(MatchState state, long lookMark)
+    {
+        PatternObject pattern = state.Pattern;
+        if (state.OpenCalls.Count == 0 || !state.Bstack.ReadSizeBelow((int)lookMark - 1, out long saved))
+        {
+            return;
+        }
+
+        (long key, _, int frameSstack, _, _, int bstackAt) = state.OpenCalls[^1];
+        int group = (int)(key >> 32);
+        int entry = (int)(uint)key;
+        if (
+            frameSstack <= saved - _lookaroundStateDataSize
+            || bstackAt < lookMark
+            || pattern.GroupRequiredLiterals is not { } literals
+            || group >= literals.Length
+            || literals[group] < 0
+            || LastOfTheGroupsLiteral(state, group, literals[group]) >= entry
+            || !state.Bstack.ReadUInt8Below(bstackAt + 1, out byte op)
+            || op != (byte)Opcode.GroupCall
+        )
+        {
+            return;
+        }
+
+        Debug.Assert(
+            state.CallTracks.Count == 0 || state.CallTracks[^1].Touched,
+            "D101 option D: RunOut noted the run-out in the frame's call track before the cut"
+        );
+        RecordTheTailsOfACutFrame(state, bstackAt, state.OpenCalls.Count);
+
+        while (state.Pstack.TopSize(out long mark) && mark > bstackAt)
+        {
+            _ = state.Pstack.DropSize();
+        }
+
+        CutBstack(state, bstackAt);
+        /* sstack: caller_repeats capture_change caller_captures return_node */
+        state.Sstack.Count = frameSstack;
+        if (
+            !state.Sstack.DropSize()
+            || !PopCaptures(state, state.Sstack)
+            || !state.Sstack.PopSize(out long captureChange)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+        )
+        {
+            Debug.Assert(false, "D101 option D: the cut frame is whole");
+            return;
+        }
+
+        state.CaptureChange = captureChange;
+        _ = PopOpenCall(state, backtrackedPast: true);
+        WorkCounter.FrameCut();
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the last position of a group's literal in the text, cached per call.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="group">The call index.</param>
+    /// <param name="literal">The codepoint.</param>
+    /// <returns>Its last position, or -1.</returns>
+    private static int LastOfTheGroupsLiteral(MatchState state, int group, int literal)
+    {
+        int[] last = state.GroupLiteralLast ??= CreateUnknownLiteralPositions(
+            state.Pattern.GroupRequiredLiterals!.Length
+        );
+        if (last[group] == int.MinValue)
+        {
+            // Searched as its UTF-16 units, so an astral literal is its pair (REVIEW-0100 W-E).
+            last[group] = state.Text.Span[..state.TextEnd].LastIndexOf(char.ConvertFromUtf32(literal).AsSpan());
+        }
+
+        return last[group];
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: a cache with every position unknown.</summary>
+    /// <param name="count">The number of call indices.</param>
+    /// <returns>The array.</returns>
+    private static int[] CreateUnknownLiteralPositions(int count)
+    {
+        int[] last = new int[count];
+        Array.Fill(last, int.MinValue);
+        return last;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: records the followed tails of a frame about to be cut (see
+    /// <see cref="CutAFrameThatCannotReturn"/>) and drops every track above its entry.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="bstackAt">The frame's GROUP_CALL entry.</param>
+    /// <param name="depth">The frame's depth.</param>
+    private static void RecordTheTailsOfACutFrame(MatchState state, int bstackAt, int depth)
+    {
+        List<MatchState.TailTrack> tracks = state.TailTracks;
+        while (tracks.Count != 0 && tracks[^1].BstackAt >= bstackAt)
+        {
+            MatchState.TailTrack track = tracks[^1];
+            tracks.RemoveAt(tracks.Count - 1);
+            if (
+                track.FrameDepth != depth
+                || track.BodyIndex >= state.RunOutStamps.Length
+                || state.RunOutStamps[track.BodyIndex] <= track.StartStamp
+                || (depth < state.ReturnStamps.Length && state.ReturnStamps[depth] > track.StartStamp)
+                || (depth < state.PoisonStamps.Length && state.PoisonStamps[depth] > track.StartStamp)
+            )
+            {
+                continue;
+            }
+
+            Dictionary<(long, long), long> summaries = state.TailRanOut ??= [];
+            if (
+                summaries.Count < state.TailMemoCapacity
+                && summaries.TryAdd((track.K1, track.K2), FrameStampAt(state, depth))
+            )
+            {
+                WorkCounter.TailRecorded();
+            }
         }
     }
 

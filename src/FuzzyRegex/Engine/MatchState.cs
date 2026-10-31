@@ -1866,7 +1866,13 @@ internal sealed class MatchState : IDisposable
         NegativeOutcomes?.Clear();
         CallOutcomes?.Clear();
         CallTracks.Clear();
-        if (TailsLive || TailStamp != 0 || TailRanOut is { Count: > 0 } || TailMemoCapacity != TailMemoCap)
+        if (
+            TailsLive
+            || TailStamp != 0
+            || TailRanOut is { Count: > 0 }
+            || TailMemoCapacity != TailMemoCap
+            || GroupLiteralLast is not null
+        )
         {
             ResetTheTails();
         }
@@ -2564,6 +2570,13 @@ internal sealed class MatchState : IDisposable
     /// <summary>When the call frame at each depth (one-based) was opened: its instance, for the Debug counts.</summary>
     internal long[] FrameStamps = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut: per call index, the last position of the group's
+    /// required literal in the text (-1 for none), or int.MinValue until asked. Made on first use;
+    /// dropped by <see cref="Init"/> with the tail clock.
+    /// </summary>
+    internal int[]? GroupLiteralLast;
+
     /// <summary>NOT UPSTREAM'S, D101 option D: one followed tail (<see cref="TailTracks"/>).</summary>
     /// <param name="K1">The key's repeat and position.</param>
     /// <param name="K2">The key's count classes and frame group.</param>
@@ -2623,6 +2636,7 @@ internal sealed class MatchState : IDisposable
         ReturnStamps = [];
         PoisonStamps = [];
         FrameStamps = [];
+        GroupLiteralLast = null;
     }
 
     /// <summary>NOT UPSTREAM'S, D101 option D: stamps an event at an index of one of the arrays above.</summary>

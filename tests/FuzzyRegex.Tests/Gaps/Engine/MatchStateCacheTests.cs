@@ -486,6 +486,10 @@ public sealed class MatchStateCacheTests
                 // D101 option D's pending visit.
                 field.SetValue(state, new MatchState.TailTrack(7, 7, 7, 7, 7, 7, 7));
                 break;
+            case null when field.FieldType == typeof(int[]):
+                // D101 option D's frame cut: the group literals' last positions, made on first use.
+                field.SetValue(state, new[] { 7 });
+                break;
             case null when field.FieldType == typeof(Dictionary<(long, long), long>):
                 // D101 option D's tail summaries, made on first use.
                 field.SetValue(state, new Dictionary<(long, long), long> { [(7, 7)] = 7 });

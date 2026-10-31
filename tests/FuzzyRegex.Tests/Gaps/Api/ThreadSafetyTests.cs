@@ -295,6 +295,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<FramesCut>k__BackingField",
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<LeadingStringFallbacks>k__BackingField",
@@ -937,6 +938,7 @@ public sealed class ThreadSafetyTests
             "PatternObject.MemoisesTails",
             "PatternObject.TailEnclosingRepeats",
             "PatternObject.TailRepeatNodes",
+            "PatternObject.GroupRequiredLiterals",
             // Share 1: Node.OutcomeKey, written by NodeCompiler.BuildLookaround and then by
             // PatternObject.SetNegativeOutcomeKeys, both while the pattern compiles.
             "Node.OutcomeKey",

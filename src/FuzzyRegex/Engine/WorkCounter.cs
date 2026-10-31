@@ -128,6 +128,10 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long CallTracksMarked { get; private set; }
 
+    /// <summary>D101 option D: call frames cut on this thread because they could not return (<c>Matcher.CutAFrameThatCannotReturn</c>).</summary>
+    [field: ThreadStatic]
+    internal static long FramesCut { get; private set; }
+
     /// <summary>D101 option D: tails on this thread not kept because a guard of their frame held.</summary>
     [field: ThreadStatic]
     internal static long TailsPoisoned { get; private set; }
@@ -218,6 +222,10 @@ internal static class WorkCounter
     /// <param name="count">How many.</param>
     [Conditional("DEBUG")]
     internal static void CallTracksWritten(int count) => CallTracksMarked += count;
+
+    /// <summary>Counts one frame cut (D101 option D).</summary>
+    [Conditional("DEBUG")]
+    internal static void FrameCut() => FramesCut++;
 
     /// <summary>Counts one tail kept (D101 option D).</summary>
     [Conditional("DEBUG")]
