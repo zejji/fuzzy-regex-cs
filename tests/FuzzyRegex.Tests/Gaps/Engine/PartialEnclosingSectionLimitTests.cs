@@ -292,4 +292,22 @@ public sealed class PartialEnclosingSectionLimitTests
 
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((success, partial, start, end));
     }
+
+    /// <summary>
+    /// D132, a test that can fail on longer text (code review of the D132 fix, F1): over 'fx' the
+    /// test passes with one insertion and the yes-branch breaks the outer <c>{i&lt;=0}</c>, but more
+    /// text pushes the test's body past its own limit, the test fails and the no-branch `f` matches:
+    /// 'fxf' and 'fxff' complete them at (0, 1) under regex 2026.9.29. So the answer is a partial at
+    /// 0, not None. Upstream answers None, missing the partial. The port answers P(0, 2) before and
+    /// after the D132 fix (measured 2026-10-31 on d41b92b8 and 5b66704d); the review predicted None.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?(?=(?:f(?:$){i<=1}))f.*|f)){i<=0}")]
+    [Arguments(@"(?:(?(?=(?:f$){i<=2})f.*|f)){i<=0}")]
+    public void A_condition_test_that_can_fail_on_longer_text_keeps_the_partial(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("fx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index).Should().Be((true, true, 0));
+    }
 }
