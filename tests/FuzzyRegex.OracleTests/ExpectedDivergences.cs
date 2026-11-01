@@ -8239,10 +8239,11 @@ internal static class ExpectedDivergences
                 + "RC5, A FUZZY INSERTION AT THE EDGE RUNS OUT OF TEXT (design section 4.5, brought "
                 + "forward to build chunk 3): the insertion arm checks the position after the "
                 + "insertion, as the substitution arm does, where upstream checks the one before it "
-                + "(_regex.c:10156) and fails. Its phantoms are limit C2, the rest presumed after "
-                + "the inserted character: seed 7 row 7283 (`fuzzy-overhang`), fullmatch "
-                + "`(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}` over 'tXt', whose `^` "
-                + "no text satisfies (judge None; upstream and 11ccae7 None).\n"
+                + "(_regex.c:10156) and fails. Seed 7 row 7283 (`fuzzy-overhang`), fullmatch "
+                + "`(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}` over 'tXt', was listed "
+                + "here as one of its phantoms; it was D129 instead (2026-10-31): the run-out's "
+                + "insertion is one the outer `{e<=2,s<=1}` forbids, and the port now answers None "
+                + "as upstream does.\n"
                 + "THE ATTEMPT FROM INSIDE THE TEXT TO COME (design section 1, rule 3; chunk 2's "
                 + "post-repair design step): a search whose second pass finds nothing makes one more "
                 + "attempt, from a start inside the text to come with both of its sides unknown, and "
@@ -8272,7 +8273,6 @@ internal static class ExpectedDivergences
             {"generator": "partial-sliced", "pattern": "\\b(?P<g1>[\ud83c\udffb]{2,}?)\\1", "flags": 16642, "namedLists": {}, "subject": "\ud83c\udffb\r\n", "operation": "fullmatch", "partial": true, "pos": 3, "endpos": 3, "codepointSlice": [2, 2], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial-sliced", "pattern": "\\b([A]*){1}\\1", "flags": 256, "namedLists": {}, "subject": "\r\n", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 0, "codepointSlice": [0, 0], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-            {"generator": "fuzzy-overhang", "pattern": "(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}", "flags": 0, "namedLists": {}, "subject": "tXt", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """,
             Applies: static (row, ours) =>
                 row.Partial
