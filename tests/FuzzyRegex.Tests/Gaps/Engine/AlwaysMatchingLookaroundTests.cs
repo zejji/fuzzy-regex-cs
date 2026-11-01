@@ -73,4 +73,29 @@ public sealed class AlwaysMatchingLookaroundTests
         Action compile = static () => _ = new FuzzyRegex(@"\w(?<!(?:b(?R)?)*+)");
         compile.Should().Throw<FuzzyRegexParseException>();
     }
+
+    /// <summary>
+    /// The fold walks the whole parsed tree, so on a pattern without a lookaround it is pure compile
+    /// cost: the BDN gate of 2026-10-31 found <c>CompileLargePattern</c> (300 alternatives, no
+    /// lookaround) 1.06-1.08x slower than main, and the WPR profile put the fold, with its write of
+    /// every child back into its list, at the top of the difference. A pattern the parser built no
+    /// lookaround in is not walked at all; the second row, with one lookaround, shows the counter
+    /// does count.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="walked">Whether the fold walks it.</param>
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?:word000|word001|word002|word003)[0-9]{2,4}(?:[A-Za-z_]\w*)?\b", false)]
+    [Arguments(@"(?:word000|word001|word002|word003)[0-9]{2,4}(?=\w)", true)]
+    [Arguments(@"(?(?=a)ab|c)", true)]
+    public void The_fold_walks_only_a_pattern_that_has_a_lookaround(string pattern, bool walked)
+    {
+        EngineWork.SkipUnlessCounting();
+        long before = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LookaroundFoldVisits;
+
+        _ = new FuzzyRegex(pattern);
+
+        (Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LookaroundFoldVisits - before != 0).Should().Be(walked);
+    }
 }

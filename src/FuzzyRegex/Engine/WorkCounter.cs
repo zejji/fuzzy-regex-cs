@@ -136,6 +136,13 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long TailsPoisoned { get; private set; }
 
+    /// <summary>
+    /// D101: tree nodes the always-matching lookaround fold (<c>Parsing.LookaroundFolder</c>) visited
+    /// on this thread, while compiling.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long LookaroundFoldVisits { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -246,6 +253,10 @@ internal static class WorkCounter
     /// <summary>Counts one tail not kept because a guard of its frame held (D101 option D).</summary>
     [Conditional("DEBUG")]
     internal static void TailPoisoned() => TailsPoisoned++;
+
+    /// <summary>Counts one node the lookaround fold visited.</summary>
+    [Conditional("DEBUG")]
+    internal static void LookaroundFoldVisited() => LookaroundFoldVisits++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

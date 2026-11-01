@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -39,7 +41,12 @@ internal static class LookaroundFolder
     internal static RegexBase Run(RegexBase node, Info info, bool upstreamCalls)
     {
         // The compile-parity seam compares code with upstream's, which has no such fold.
-        if (upstreamCalls)
+        // Assumption (rule 10): a lookaround node exists only if the parser built one
+        // (ParseFunctions.ParseLookaround and ParseLookaroundConditional, which set HasLookaround);
+        // every other constructor of LookAround and LookAroundConditional is the Optimise or Clone
+        // of an existing one (Nodes.cs). The check walks the tree without allocating.
+        Debug.Assert(info.HasLookaround || !ContainsLookaround(node), "D101: a lookaround the parser did not record");
+        if (upstreamCalls || !info.HasLookaround)
         {
             return node;
         }
@@ -102,6 +109,7 @@ internal static class LookaroundFolder
 
     private static RegexBase Fold(RegexBase node, bool inFuzzy, ref PatternVerbs verbs)
     {
+        Engine.WorkCounter.LookaroundFoldVisited();
         switch (node)
         {
             case LookAround look:
@@ -123,7 +131,13 @@ internal static class LookaroundFolder
             case Sequence s:
                 for (int i = 0; i < s.Items.Count; i++)
                 {
-                    s.Items[i] = Fold(s.Items[i], inFuzzy, ref verbs);
+                    // Written back only when it changed: a store into the list is a checked
+                    // covariant array store, and most children never change.
+                    RegexBase item = s.Items[i];
+                    if (Fold(item, inFuzzy, ref verbs) is var folded && !ReferenceEquals(folded, item))
+                    {
+                        s.Items[i] = folded;
+                    }
                 }
 
                 return s;
@@ -132,7 +146,11 @@ internal static class LookaroundFolder
             case Branch b:
                 for (int i = 0; i < b.Branches.Count; i++)
                 {
-                    b.Branches[i] = Fold(b.Branches[i], inFuzzy, ref verbs);
+                    RegexBase branch = b.Branches[i];
+                    if (Fold(branch, inFuzzy, ref verbs) is var folded && !ReferenceEquals(folded, branch))
+                    {
+                        b.Branches[i] = folded;
+                    }
                 }
 
                 return b;
@@ -159,6 +177,50 @@ internal static class LookaroundFolder
                 return f;
             default:
                 return node;
+        }
+    }
+
+    /// <summary>Whether a tree holds a lookaround or a lookaround condition (Debug check only).</summary>
+    /// <param name="node">The tree.</param>
+    /// <returns><see langword="true"/> if it holds one.</returns>
+    private static bool ContainsLookaround(RegexBase node)
+    {
+        switch (node)
+        {
+            case LookAround or LookAroundConditional:
+                return true;
+            case Sequence s:
+                for (int i = 0; i < s.Items.Count; i++)
+                {
+                    if (ContainsLookaround(s.Items[i]))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case Branch b:
+                for (int i = 0; i < b.Branches.Count; i++)
+                {
+                    if (ContainsLookaround(b.Branches[i]))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case GreedyRepeat r:
+                return ContainsLookaround(r.Subpattern);
+            case Atomic a:
+                return ContainsLookaround(a.Subpattern);
+            case Group g:
+                return ContainsLookaround(g.Subpattern);
+            case Conditional c:
+                return ContainsLookaround(c.YesItem) || ContainsLookaround(c.NoItem);
+            case Fuzzy f:
+                return ContainsLookaround(f.Subpattern);
+            default:
+                return false;
         }
     }
 
