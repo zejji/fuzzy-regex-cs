@@ -404,11 +404,7 @@ public sealed class OracleWaveTests
             previous = row.Subject;
 
             IOracleOutcome? fresh = OracleComparer.Run(row);
-            IOracleOutcome? reused = OracleComparer.Run(
-                row,
-                OracleComparer.RowTimeout,
-                ablate: compiled => Dirty(compiled, dirt)
-            );
+            IOracleOutcome? reused = OracleComparer.RunOnAUsedPattern(row, compiled => Dirty(compiled, dirt));
             compared++;
 
             if (!OracleWave.SameAnswer(fresh, reused))
@@ -448,6 +444,80 @@ public sealed class OracleWaveTests
             }
         }
     }
+
+    /// <summary>
+    /// D128: the pattern-reuse sweep above must compare the port's answer with the port's answer.
+    /// It passed its dirtying walk to <see cref="OracleComparer.Run(OracleRow, TimeSpan, bool,
+    /// Action{FuzzyRegex}?, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool)"/>
+    /// as an ablation, and on a partial row that disagrees with upstream an ablation is retried with
+    /// D11's second pass taken away, the composition the named ablations need. So the "reused"
+    /// side answered upstream's way: seed 936847660 row 49361, CI run 40847036039, fresh P(0, 4),
+    /// "reused" P(0, 0). This row is that one, and the walk does nothing at all, so any difference
+    /// is the harness's.
+    /// </summary>
+    [Test]
+    public void A_used_pattern_is_asked_the_rows_question_with_no_ablation_composed_on_it()
+    {
+        OracleRow row = OracleWave.ParseRows(_d11ComposedOnAReusedPatternRow)[0] with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version0,
+        };
+        IOracleOutcome? fresh = OracleComparer.Run(row);
+
+        // The control: the row disagrees with upstream, partial, which is when the D11 composition
+        // runs at all. Without it this test could not go red.
+        row.Partial.Should().BeTrue();
+        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+
+        IOracleOutcome? used = OracleComparer.RunOnAUsedPattern(row, static _ => { });
+
+        OracleWave
+            .SameAnswer(fresh, used)
+            .Should()
+            .BeTrue(
+                "an unused walk leaves the pattern as fresh; fresh:{0}{1}{0}used:{0}{2}",
+                Environment.NewLine,
+                OracleWave.Describe(row, fresh),
+                OracleWave.Describe(row, used)
+            );
+    }
+
+    /// <summary>
+    /// The same leak through <see cref="OracleComparer.RunWithTheFrameByFrameRestore"/>, which is a
+    /// second computation of the port's own answer for the D51 entry, not an ablation. The frame
+    /// restore acts only on a partial result with a group call still open, and this row has no
+    /// group call, so it must answer as <see cref="OracleComparer.Run(OracleRow)"/> does.
+    /// </summary>
+    [Test]
+    public void The_frame_by_frame_restore_is_asked_the_rows_question_with_no_ablation_composed_on_it()
+    {
+        OracleRow row = OracleWave.ParseRows(_d11ComposedOnAReusedPatternRow)[0] with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version0,
+        };
+        IOracleOutcome? fresh = OracleComparer.Run(row);
+
+        // The control, as above: a partial row that disagrees with upstream.
+        row.Partial.Should().BeTrue();
+        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+
+        IOracleOutcome? byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row);
+
+        OracleWave
+            .SameAnswer(fresh, byFrames)
+            .Should()
+            .BeTrue(
+                "no group call is open, so the frame restore has nothing to do; fresh:{0}{1}{0}by frames:{0}{2}",
+                Environment.NewLine,
+                OracleWave.Describe(row, fresh),
+                OracleWave.Describe(row, byFrames)
+            );
+    }
+
+    /// <summary>Seed 936847660 row 49361, recorded against regex 2026.9.29.</summary>
+    private const string _d11ComposedOnAReusedPatternRow = """
+        {"generator":"fuzzy-overhang","pattern":"(?fi)(?r)(?:(?:\\Z(?:\\1)){1i+2d+1s<=4}){s<=2}(fi)","flags":0,"namedLists":{},"subject":"ﬀifi","operation":"search","partial":true,"codepointSpan":[0,0],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":0,"captures":[[0,0]]},{"number":1,"success":false,"index":0,"length":0,"captures":[]}],"lastIndex":-1,"lastGroup":null,"partial":true},"searchOnlyPartial":false}
+        """;
 
     [Test]
     public void The_self_consistency_checker_fires_on_a_contradiction_and_not_on_a_narrowing()
