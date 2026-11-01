@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 11:10 by Claude Code (item 3 merged; item 4 one seed to re-run).
+**Updated:** 2026-11-01 11:50 by Claude Code (items 3 and 4 merged).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -11,8 +11,8 @@
 |---|---|---|---|---|
 | 1 | v1.0 vs v1.1 benchmark note | `docs/v110-bench` | **merged** 5ac48534 | - |
 | 2 | Oracle workflow gate split | `ci/oracle-gate` | **merged** 002650bc | - |
-| 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | amend F115 text after #4 |
-| 4 | D129 + D130 run-out fit | `fix/insertion-runout` | main merged; 2 of 3 seeds green | seed 20261101 again, merge |
+| 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | - |
+| 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
 | 5 | D132 condition-test run-out | `fix/d132` | fix, reviews done | inspection, oracle 7/4242, D130-grid differential, merge |
 | 6 | D121 conditional restore | `fix/d121` | timing done; change accepted | inspection, merge |
 | 7 | D80 ablation labels | `fix/d80-labels` | row 41769 restored (uncommitted) | oracle 7/4242 consume, inspection, merge (conflicts with #3) |
@@ -40,11 +40,10 @@ pushes need the owner.
 
 - Uncommitted in `.claude/worktrees/d80` (`fix/d80-labels`): row 41769 restored
   (`JudgedDivergences.jsonl`, KNOWN-DEFECTS D80, LEDGER 81 list); needs the seed 7/4242 consume.
-- Item 4 (`.claude/worktrees/oracle-gate`): ratchet GREEN; oracle GREEN at 7 and 4242, RED at 20261101
-  only because Docker (MSan screen) stopped 10:52: re-run that seed with `.venvs/regex-2026.9.29/Scripts`
-  first on PATH (`.scratch/s1101/oracle-3-4.ps1`), after peer session s06b-e8's suite ends.
+- Oracle needs `.venvs/regex-2026.9.29/Scripts` first on PATH (`.scratch/s1101/oracle-3-4.ps1`).
+- Peer session s06b-e8 (future-ide) shares the machine: message it before any heavy step.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
 
-**Next action:** re-run item 4 seed 20261101, merge item 4.
+**Next action:** item 5 (`fix/d132`): merge main, then its gates.
