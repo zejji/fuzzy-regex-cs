@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 12:55 by Claude Code (gates 6 and 7 running).
+**Updated:** 2026-11-01 14:20 by Claude Code (gate 6 committing; gate 7 re-queued).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -15,7 +15,7 @@
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
 | 6 | D121 conditional restore | `fix/d121` | main merged (staged; D121 is F119), gate running | gate, then merge to main |
-| 7 | D80 ablation labels | `fix/d80-labels` | row 41769 WIP-committed; main merged (staged), gate queued | gate, then merge to main |
+| 7 | D80 ablation labels | `fix/d80-labels` | main merged (staged) + D128/D80 tests moved to row 40113 (red-proven) | gate, then merge to main |
 | 8 | D101 + frame cut (kept) | `fix/d101-rebase-cut`, `review/d101-cut-surrogate` 917b9de2 | timing settled | carry 184c256b onto the cut line, ratchet, non-partial A-B-B-A, full BDN, merge |
 | 9 | D122 continuation memo phantom | `fix/d122` | red tests, reviewed sizing | build option 1 test-first, gates, merge |
 | 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
