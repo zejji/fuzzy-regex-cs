@@ -38,13 +38,11 @@ pushes need the owner.
 
 ## In flight
 
-- Uncommitted in `.claude/worktrees/d80` (`fix/d80-labels`): row 41769 restored
-  (`JudgedDivergences.jsonl`, KNOWN-DEFECTS D80, LEDGER 81 list); needs the seed 7/4242 consume.
+- Uncommitted in `.claude/worktrees/d80`: row 41769 restored (jsonl, D80 row, LEDGER 81); needs 7/4242.
 - Item 5: `.scratch/s1101/gate5.ps1` (PID 50836, `gate5.status`) in `.claude/worktrees/d132`: ratchet,
   waits for `gate5.go` (create it after s06b-e8 says "go"), merge commit, oracle 7/4242. Then the
   differential: `.scratch/s1101/d132diff` (grid + probe per side), not yet run.
-- Oracle needs `.venvs/regex-2026.9.29/Scripts` first on PATH (`.scratch/s1101/oracle-3-4.ps1`).
-- Peer session s06b-e8 (future-ide) shares the machine: message it before any heavy step.
+- Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
