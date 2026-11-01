@@ -16,7 +16,7 @@
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
 | 6 | D121 conditional restore | `fix/d121` | **merged** 925345e8 (F119) | - |
 | 7 | D80 ablation labels | `fix/d80-labels` | **merged** 76b5b6c7 (mislabels; row 34508 stays open) | - |
-| 8 | D101 + frame cut (kept) | `review/d101-cut-surrogate` | main merged 35ff4cd4 (ratchet, inspections GREEN), oracle running | oracle 7/4242, non-partial A-B-B-A + full BDN (owner timing window), merge |
+| 8 | D101 + frame cut (kept) | `review/d101-cut-surrogate` | main merged 35ff4cd4; ratchet, inspections, oracle 7/4242 GREEN | non-partial A-B-B-A + full BDN (owner timing window), merge |
 | 9 | D122 continuation memo phantom | `fix/d122` | Opus builder running (background subagent, 2026-11-01 17:40) | merge main, review point 3 + store occupancy, option 1 test-first, grid, steps, gates; then blind review, oracle, merge |
 | 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
 | 11 | D131 committing construct + D81 run-out | `fix/d131` (WIP) | design v3 + review limits | implement test-first, gates (may share #10's root) |
@@ -38,11 +38,10 @@ pushes need the owner.
 
 ## In flight
 
-- Item 8: `.scratch/s1101/gate8b.ps1` (PID 42256, worktree d101cut, `gate8b.status`) on oracle 7/4242.
 - Item 9: background Opus builder in `.claude/worktrees/d122`; if the session ended, check its WIP commits.
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
-## Waiting on the owner: nothing.
+## Waiting on the owner: a timing window for item 8 (non-partial A-B-B-A, full BDN vs main).
 
 **Next action:** item 8 oracle result, then owner timing window for 8; item 9 builder report.
