@@ -1111,6 +1111,15 @@ internal sealed class PatternObject
     internal bool UpstreamGraphemeConjunct;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether backtracking into a conditional puts
+    /// back the repeat guard lists it saved exactly as they were, dropping the success marks made
+    /// since, as upstream does (D121). The oracle sets it on a pattern it compiled for one call, to
+    /// show that the D121 fix is the whole of a divergence. See
+    /// <see cref="GuardList.PopFromKeepingSuccessMarks"/> and <c>docs/DIVERGENCES.md</c>.
+    /// </summary>
+    internal bool UpstreamConditionalRestore;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
     /// open fuzzy sections' upper limits, as upstream's does (D81). The oracle sets it on a pattern
     /// it compiled for an ablation, since upstream has none of this port's fixes. See

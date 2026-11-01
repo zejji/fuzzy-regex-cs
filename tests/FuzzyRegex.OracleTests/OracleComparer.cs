@@ -270,7 +270,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
-    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
+    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithTheUpstreamConditionalRestore"/>,
+    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
     /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
@@ -1181,6 +1182,31 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamGraphemeConjunct = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's conditional restore: backtracking into a
+    /// conditional puts its saved repeat guard lists back exactly as they were.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 96 (D121): that restore drops the marks saying an enclosing repeat's body
+    /// reached its end, so the failure written next at such a position blocks a later path with
+    /// other group values. Setting <c>PatternObject.UpstreamConditionalRestore</c> makes both
+    /// conditional backtrack arms in <c>Matcher</c> restore as upstream does. The
+    /// <c>conditional-restore-keeps-success-marks</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's restore, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamConditionalRestore(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.UpstreamConditionalRestore = true
         );
     }
 

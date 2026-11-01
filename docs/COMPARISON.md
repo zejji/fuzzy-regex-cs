@@ -2431,6 +2431,24 @@ A pattern that sets a variable-width group inside a repeat and reads it after th
 `(?:(a*)a*)*\1c$`, can be much slower than upstream, because more of the work has to be redone.
 There is no option to restore the upstream answer. Ledger entry 84.
 
+### A search through a conditional inside a repeat finds the leftmost match
+
+The same record has a second gap. When a repeat's body matches, upstream notes it, so a later
+failure at that position is not recorded. A conditional in the body saves the records before its
+test, and backtracking into it puts the saved ones back, which drops the notes made since. The next
+failure is then recorded, though it held only for the group values of that path, and a later path
+with other values is skipped. Here the notes are kept. Perl and .NET give the same answers as this
+port.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(a?)(?(?=c)c|[ab])*\1").Match("ac").Length);   // 2 - upstream: 1
+Console.WriteLine(new FuzzyRegex(@"(a*)(?(?=c)c|[ab])*\1$").Match("accb").Index); // 0 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 96.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

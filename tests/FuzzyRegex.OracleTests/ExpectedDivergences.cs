@@ -3319,6 +3319,19 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>conditional-restore-keeps-success-marks</c> (D121), recorded 2026-10-31 by
+    /// <c>python tools/record-oracle.py --rows</c>: the smallest form, the reference at the end, the
+    /// D104 differential's row with a positive test, as a search and anchored. Perl 5.42 and .NET 10
+    /// give this port's answer to each.
+    /// </summary>
+    private const string _conditionalRestoreRows = """
+        {"generator": "rows", "pattern": "(a?)(?(?=c)c|[ab])*\\1", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a*)(?(?=c)c|[ab])*\\1$", "flags": 0, "namedLists": {}, "subject": "accb", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?=c)c|[ab])*$(?=(?P=g))", "flags": 0, "namedLists": {}, "subject": "bcccba", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": "g", "partial": false}}
+        {"generator": "rows", "pattern": "[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?=c)c|[ab])*$(?=(?P=g))", "flags": 0, "namedLists": {}, "subject": "bcccba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The rows of <c>keyed-tail-guard</c>. Four were recorded 2026-10-16 by
     /// <c>python tools/record-oracle.py --rows</c>: the smallest tail-guard form, the tail-guard
     /// witness and the two body-guard witnesses of docs/DIVERGENCES.md. Three are battery
@@ -8159,6 +8172,25 @@ internal static class ExpectedDivergences
             Example: _reentryInANewSectionRows,
             Applies: static (row, ours) =>
                 TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithTheReentryInANewSection(row))
+        ),
+        new(
+            Id: "conditional-restore-keeps-success-marks",
+            Reason: "PORT RIGHT, D121 (ledger entry 96): backtracking into a conditional puts back the "
+                + "repeat guard lists it saved before its test, and upstream puts them back whole "
+                + "(`_regex.c:15423`, `:15475`), so the marks saying a repeat's body reached its end "
+                + "from a position go, and the failure written there next blocks a later path with "
+                + "other group values. `(a?)(?(?=c)c|[ab])*\\1` over 'ac' is (0, 1) upstream and "
+                + "(0, 2) here, as Perl 5.42 and .NET 10 give. This port keeps those marks where the "
+                + "saved list has no record (`GuardList.PopFromKeepingSuccessMarks`).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamConditionalRestore`, which sets "
+                + "`PatternObject.UpstreamConditionalRestore` so both conditional backtrack arms "
+                + "restore as upstream does, reproduces upstream's recorded answer exactly, AND this "
+                + "port's live answer is the one being judged.",
+            PinnedBy: "ConditionalRestoreGuardTests",
+            Example: _conditionalRestoreRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalRestore(row))
         ),
         new(
             Id: "keyed-tail-guard",

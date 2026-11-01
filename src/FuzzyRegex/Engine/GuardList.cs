@@ -169,6 +169,179 @@ internal sealed class GuardList
         return stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D121): where <see cref="PopFromKeepingSuccessMarks"/> holds the success marks
+    /// while the save is popped, kept so a restore allocates only when it holds more than before.
+    /// </summary>
+    private GuardSpan[] _successMarks = [];
+
+    /// <summary>
+    /// NOT UPSTREAM (D121): where <see cref="PopFromKeepingSuccessMarks"/> builds the merged list,
+    /// kept for the same reason.
+    /// </summary>
+    private GuardSpan[] _merged = [];
+
+    /// <summary>
+    /// NOT UPSTREAM (D121): adds <paramref name="span"/> after the last of
+    /// <paramref name="spans"/>, joining it to that one when they touch and both block or both do
+    /// not, as <see cref="Guard"/> joins them.
+    /// </summary>
+    /// <param name="spans">The list being built, in order.</param>
+    /// <param name="count">How many of <paramref name="spans"/> are live; one more on return unless joined.</param>
+    /// <param name="span">The span, which starts after the last live one ends.</param>
+    private static void Append(GuardSpan[] spans, ref int count, GuardSpan span)
+    {
+        Debug.Assert(count == 0 || spans[count - 1].High < span.Low, "D121: the merge appends in order");
+        if (count > 0 && spans[count - 1].Protect == span.Protect && spans[count - 1].High + 1 == span.Low)
+        {
+            spans[count - 1] = spans[count - 1] with { High = span.High };
+            return;
+        }
+
+        spans[count++] = span;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D121): <see cref="PopFrom"/>, then the success marks the list holds now put back
+    /// wherever the save has nothing, so a restore never forgets that a body reached its end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A body guard blocks a position only when the body never got to its end from it:
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> mark the position the body started at with
+    /// an unprotected span, and the failure written when backtracking reaches the body's entry there
+    /// finds the mark and leaves it (<see cref="Guard"/> keeps the first record at a position). A
+    /// conditional saves the lists before its test and puts them back when backtracking reaches it,
+    /// after its branch and the rest of the match have run, and upstream puts them back whole
+    /// (<c>upstream/src/_regex.c</c> pop_repeats, from the CONDITIONAL and END_CONDITIONAL backtrack
+    /// arms), so a mark made since goes. The failure then written at that position is true only of
+    /// the path that wrote it: the rest of the match failed under its group values. A later path
+    /// with other values is refused, as in <c>(a?)(?(?=c)c|[ab])*\1</c> over 'ac', (0, 1) for
+    /// (0, 2).
+    /// </para>
+    /// <para>
+    /// Putting the marks back is sound whatever path made them, because an unprotected span never
+    /// blocks (<see cref="IsGuarded"/>, <see cref="TryGetSpan"/>'s callers read
+    /// <see cref="GuardSpan.Protect"/>) and a mark only fills a gap the save leaves: the save's
+    /// failures all stay, and the most the marks can do is let a path through. The failures written since still go, as upstream's restore intends: those inside the
+    /// test were about a subpattern that was only being asked about.
+    /// </para>
+    /// </remarks>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopFromKeepingSuccessMarks(ByteStack stack)
+    {
+        int marks = 0;
+        for (int i = 0; i < Count; i++)
+        {
+            if (!_spans[i].Protect)
+            {
+                if (marks == _successMarks.Length)
+                {
+                    Array.Resize(ref _successMarks, Math.Max(16, marks * 2));
+                }
+
+                _successMarks[marks++] = _spans[i];
+            }
+        }
+
+        if (!PopFrom(stack))
+        {
+            return false;
+        }
+
+        if (marks == 0)
+        {
+            return true;
+        }
+
+#if DEBUG
+        long protectedBefore = ProtectedPositions();
+#endif
+
+        // One merge of two sorted lists, so a restore costs O(spans + marks) like the pop itself;
+        // a GuardRange per mark would shift the array for each one, quadratic where marks and
+        // failures alternate. The save's spans go through as they are, and each mark only fills
+        // the gaps between them. At most every saved span and every gap a mark crosses: 2n + m.
+        int saved = Count;
+        int need = (2 * saved) + marks;
+        if (_merged.Length < need)
+        {
+            _merged = new GuardSpan[Math.Max(16, (int)BitOperations.RoundUpToPowerOf2((uint)need))];
+        }
+
+        GuardSpan[] spans = _spans;
+        GuardSpan[] merged = _merged;
+        int count = 0;
+        int next = 0;
+        for (int i = 0; i < marks; i++)
+        {
+            int loPos = _successMarks[i].Low;
+            int hiPos = _successMarks[i].High;
+            while (loPos <= hiPos)
+            {
+                while (next < saved && spans[next].High < loPos)
+                {
+                    Append(merged, ref count, spans[next++]);
+                }
+
+                if (next < saved && spans[next].Low <= loPos)
+                {
+                    // The save has a record here, which stays: the mark resumes after it. It is a
+                    // mark too: the list now grew from the save by Guard, which never overwrites a
+                    // record, and by pops of later saves, which held the same record.
+                    Debug.Assert(!spans[next].Protect, "D121: a success mark never sits on a failure the save holds");
+                    loPos = spans[next].High + 1;
+                    continue;
+                }
+
+                int end = next < saved ? Math.Min(hiPos, spans[next].Low - 1) : hiPos;
+                Append(merged, ref count, new GuardSpan(loPos, end, false));
+                loPos = end + 1;
+            }
+        }
+
+        while (next < saved)
+        {
+            Append(merged, ref count, spans[next++]);
+        }
+
+        // Copied back rather than swapped: PopFrom relies on _spans never shrinking.
+        if (count > _spans.Length)
+        {
+            _spans = new GuardSpan[(int)BitOperations.RoundUpToPowerOf2((uint)count)];
+        }
+
+        Array.Copy(merged, _spans, count);
+        Count = count;
+
+#if DEBUG
+        Debug.Assert(
+            ProtectedPositions() == protectedBefore,
+            "D121: putting the success marks back leaves every failure the save holds, and adds none"
+        );
+#endif
+        return true;
+    }
+
+#if DEBUG
+    /// <summary>NOT UPSTREAM (D121), Debug only: how many positions the live spans protect.</summary>
+    /// <returns>The count.</returns>
+    private long ProtectedPositions()
+    {
+        long total = 0;
+        for (int i = 0; i < Count; i++)
+        {
+            if (_spans[i].Protect)
+            {
+                total += (long)_spans[i].High - _spans[i].Low + 1;
+            }
+        }
+
+        return total;
+    }
+#endif
+
     /// <summary>Upstream <c>insert_guard_span</c> (line 9296): makes room at <paramref name="index"/>.</summary>
     /// <param name="index">Where the new span goes.</param>
     private void InsertSpan(int index)

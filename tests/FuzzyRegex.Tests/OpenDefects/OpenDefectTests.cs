@@ -17,19 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 [Explicit]
 public sealed class OpenDefectTests
 {
-    // D121. Start 0 matches: `[ab]*?` takes the 'b', the lookahead at 1 sets g to '' before a 'c',
-    // the conditional repeat takes 'cccba', and `(?=(?P=g))` matches the empty g at the end. The
-    // port reports the match from start 1; regex 2026.9.10 answers (0, 6), and so does the port
-    // with every repeat guard off.
-    [Test]
-    public void A_search_finds_the_leftmost_start_through_a_conditional_repeat_after_a_lookahead()
-    {
-        Match m = new FuzzyRegex(@"[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?!c)[ab]|c)*$(?=(?P=g))").Match("bcccba");
-
-        (m.Success, m.Index, m.Length).Should().Be((true, 0, 6));
-        m.Groups["g"].Value.Should().BeEmpty();
-    }
-
     // D122. Group 2 always takes part, so the conditional needs a 'c' after the last 'a' the
     // repeat takes, and no text after 'a' * 9 + 'b' puts one there: the 'b' is fixed. The anchored
     // calls have no completion, and the search's leftmost completable start is the edge. The port

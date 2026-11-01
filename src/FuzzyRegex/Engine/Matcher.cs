@@ -4858,6 +4858,10 @@ internal static class Matcher
     /// Whether a conditional's test has only just ended, so that nothing but the test has run since
     /// the push.
     /// </param>
+    /// <param name="keepSuccessMarks">
+    /// NOT UPSTREAM (D121): whether the body guard keeps the success marks it holds now; see
+    /// <see cref="GuardList.PopFromKeepingSuccessMarks"/>.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeatData(
         ByteStack stack,
@@ -4865,7 +4869,8 @@ internal static class Matcher
         bool fuzzy,
         bool runs,
         bool keepGuards,
-        bool testJustEnded
+        bool testJustEnded,
+        bool keepSuccessMarks
     )
     {
         long runId = 0;
@@ -4889,7 +4894,11 @@ internal static class Matcher
                 && (
                     (repeatData.KeyedTail is not null && !repeatData.KeyedTail.PopFrom(stack))
                     || !repeatData.TailGuardList.PopFrom(stack)
-                    || !repeatData.BodyGuardList.PopFrom(stack)
+                    || !(
+                        keepSuccessMarks
+                            ? repeatData.BodyGuardList.PopFromKeepingSuccessMarks(stack)
+                            : repeatData.BodyGuardList.PopFrom(stack)
+                    )
                 )
             )
         )
@@ -5057,9 +5066,25 @@ internal static class Matcher
     /// Whether this is a conditional's test that has only just ended, when a kept guard list must be
     /// exactly as the push left it; see <see cref="PushRepeats"/>.
     /// </param>
+    /// <param name="keepSuccessMarks">
+    /// NOT UPSTREAM (D121): whether each body guard keeps the success marks it holds now
+    /// (<see cref="GuardList.PopFromKeepingSuccessMarks"/>). A conditional's restore passes
+    /// <see langword="true"/> when its branch and the rest of the match have run since the push, so
+    /// an enclosing repeat's body can have reached its end since. A test that has only just ended
+    /// has run nothing that could: an enclosing repeat's end is outside the test, and each repeat
+    /// inside it has had its body entries cut with the test or popped before the test failed, so no
+    /// entry is left to write a failure over a mark the restore drops. A group call's restores
+    /// pass <see langword="false"/>: backtracking into a return saves the caller's lists as they
+    /// are then (<see cref="BacktrackGroupReturn"/>), so the caller gets back the marks it made
+    /// after the return whether the call returns again or fails.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded)
+    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded, bool keepSuccessMarks)
     {
+        Debug.Assert(
+            !(keepSuccessMarks && testJustEnded),
+            "D121: success marks are kept only where something after the test has run since the push"
+        );
         bool runs = state.Pattern.TestedGroups.Length > 0;
         if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
         {
@@ -5068,7 +5093,17 @@ internal static class Matcher
 
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, state.KeepsFailureMemo(r), testJustEnded))
+            if (
+                !PopRepeatData(
+                    stack,
+                    state.Repeats[r],
+                    state.IsFuzzy,
+                    runs,
+                    state.KeepsFailureMemo(r),
+                    testJustEnded,
+                    keepSuccessMarks
+                )
+            )
             {
                 return false;
             }
@@ -7426,7 +7461,7 @@ internal static class Matcher
             !state.Sstack.DropSize()
             || !PopCaptures(state, state.Sstack)
             || !state.Sstack.PopSize(out long captureChange)
-            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
         )
         {
             Debug.Assert(false, "D98: the call's frame is whole");
@@ -18966,7 +19001,7 @@ internal static class Matcher
 
             if (
                 !state.PopSubAttemptFuzzyState(state.Bstack)
-                || !PopRepeats(state, state.Bstack, testJustEnded: true)
+                || !PopRepeats(state, state.Bstack, testJustEnded: true, keepSuccessMarks: false)
                 || !PopCaptures(state, state.Bstack)
             )
             {
@@ -19328,7 +19363,7 @@ internal static class Matcher
             state.Bstack.PushSize(state.CaptureChange);
             if (
                 !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                || !PopRepeats(state, state.Sstack, testJustEnded: false)
+                || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
             )
             {
                 return MatchStatus.Illegal;
@@ -20054,10 +20089,17 @@ internal static class Matcher
         state.CaptureChange = condCaptureChange;
 
         // Only the test has run since the push, unless a positive test's end was blocked
-        // and let the yes-branch go on (D35's remarks, PushRepeats).
+        // and let the yes-branch go on (D35's remarks, PushRepeats). NOT UPSTREAM (D121):
+        // then the marks of the bodies that reached their end since are kept.
+        bool condBranchRan = condWasBlocked && condNode.Match;
         if (
             !state.PopSubAttemptFuzzyState(state.Bstack)
-            || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
+            || !PopRepeats(
+                state,
+                state.Bstack,
+                testJustEnded: !condBranchRan,
+                keepSuccessMarks: condBranchRan && !pattern.UpstreamConditionalRestore
+            )
             || !PopCaptures(state, state.Bstack)
         )
         {
@@ -20132,9 +20174,16 @@ internal static class Matcher
 
         state.CaptureChange = endCondCaptureChange;
 
+        // NOT UPSTREAM (D121): the branch and the rest of the match have run since the push,
+        // so the marks of the bodies that reached their end since are kept.
         if (
             !state.PopSubAttemptFuzzyState(state.Bstack)
-            || !PopRepeats(state, state.Bstack, testJustEnded: false)
+            || !PopRepeats(
+                state,
+                state.Bstack,
+                testJustEnded: false,
+                keepSuccessMarks: !state.Pattern.UpstreamConditionalRestore
+            )
             || !PopCaptures(state, state.Bstack)
         )
         {
@@ -20172,7 +20221,7 @@ internal static class Matcher
             !state.Sstack.DropSize()
             || !PopCallerCaptures(state)
             || !state.Sstack.PopSize(out long groupCallCaptureChange)
-            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
         )
         {
             return MatchStatus.Illegal;
@@ -20252,7 +20301,7 @@ internal static class Matcher
             state.Sstack.PushSize(state.CaptureChange);
             if (
                 !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                || !PopRepeats(state, state.Bstack, testJustEnded: false)
+                || !PopRepeats(state, state.Bstack, testJustEnded: false, keepSuccessMarks: false)
             )
             {
                 return MatchStatus.Illegal;

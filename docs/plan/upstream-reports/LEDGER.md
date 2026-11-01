@@ -7458,3 +7458,51 @@ port passes all 853 lines forwards and backwards. Pinned by
 claims a row only when `PatternObject.UpstreamGraphemeConjunct`, which puts revision 47's rule
 back, reproduces upstream's answer; its example rows are lines 859, 660 and 860, recorded from
 `tools/probes/sync-2026-9-29-gb9c-rows.jsonl`.
+
+## 96. Backtracking into a conditional forgets that a repeat's body matched, and a search misses the leftmost match - DIVERGES HERE (D121, 2026-10-31)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D121, found 2026-10-20 by the
+D104 differential (its row is the negative form below, which only this port got wrong; the
+positive form is upstream's too). Evidence: the D121 notes and probes in the fix/d121 builder's
+scratch folder; `tests/FuzzyRegex.Tests/Gaps/Engine/ConditionalRestoreGuardTests.cs`.
+
+**Reproduction**, `regex` 2026.9.29 on Python 3.14, measured 2026-10-31:
+
+```
+search(r'(a?)(?(?=c)c|[ab])*\1', 'ac')      -> span=(0, 1)   here (0, 2)
+search(r'(a*)(?(?=c)c|[ab])*\1$', 'accb')   -> span=(1, 4)   here (0, 4)
+search(r'[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?=c)c|[ab])*$(?=(?P=g))', 'bcccba') -> (1, 6)   here (0, 6)
+match(r'(a?)(?(?=c)c|[ab])*\1', 'ac')       -> span=(0, 1)   here (0, 2)
+```
+
+One change at a time from the first row, all on 2026.9.29: a negative test
+`(?(?!c)[ab]|c)`, a branch `(?:(?=c)c|[ab])`, a group condition `(?(1)\w|\w)` or the group's
+alternatives in the other order `(|a)` each give (0, 2); a bounded repeat `{0,9}` still gives
+(0, 1).
+
+**Why upstream is wrong.** Leftmost-first: at start 0 with group 1 = '' the repeat takes 'a' and
+'c' and the empty `\1` matches at 2, so (0, 2) is a match, and upstream itself finds it once the
+group tries '' first. Perl 5.42 and .NET 10's System.Text.RegularExpressions give (0, 2), (0, 4)
+and (0, 6) for the first three rows.
+
+**Mechanism.** `END_GREEDY_REPEAT` marks the position a body started at as "the body reached its
+end from here", and the failure that `guard_repeat` writes when backtracking later reaches the
+body's entry at that position leaves the mark (`guard`, `_regex.c` near 9378, keeps the first
+record). `CONDITIONAL` saves every repeat's guard lists before its test (`push_repeats`), and the
+backtrack arms of `CONDITIONAL` and `END_CONDITIONAL` put them back whole (`pop_repeats`,
+`_regex.c:15423` and `:15475`), after the branch and the rest of the match have run. The marks
+made in that time go, so the next failure written at such a position stands, though it is true
+only under the group values of the path that wrote it: with group 1 = 'a' the rest fails from 1,
+and the path with group 1 = '' is then refused the body at 1. A negative test upstream pops its
+block when the test's body matches (`:12431`), so nothing is restored later and it answers right.
+
+**Proposed fix upstream:** when those two arms restore a body guard list, keep the success marks
+the list holds now wherever the saved list has no record. A mark never blocks, so this can only
+let a path through; the failures recorded inside the test still go, as the restore intends.
+
+**This port.** That fix (`GuardList.PopFromKeepingSuccessMarks`, called from
+`Matcher.BacktrackEndConditional` and, after a blocked positive test in a partial call's second
+pass, `Matcher.BacktrackConditional`). The negative form was this port's own, through D54, which
+keeps a failed negative test's block as upstream keeps a positive one's.
+`PatternObject.UpstreamConditionalRestore` puts upstream's restore back for the oracle (entry
+`conditional-restore-keeps-success-marks`). Pinned by `Gaps/Engine/ConditionalRestoreGuardTests`.
