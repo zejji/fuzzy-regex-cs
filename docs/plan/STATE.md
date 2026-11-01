@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 10:21 by Claude Code (item 3 gate running; disk cleanup).
+**Updated:** 2026-11-01 10:24 by Claude Code (items 3 and 4 gates running in sequence).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -12,7 +12,7 @@
 | 1 | v1.0 vs v1.1 benchmark note | `docs/v110-bench` | **merged** 5ac48534 | - |
 | 2 | Oracle workflow gate split | `ci/oracle-gate` | **merged** 002650bc | - |
 | 3 | D128 oracle reuse test | `fix/reuse-c` | main merged in (555ac016); gate running | read gate, merge; amend D128 text after #4 |
-| 4 | D129 + D130 run-out fit | `fix/insertion-runout` | timing done; cost accepted | merge |
+| 4 | D129 + D130 run-out fit | `fix/insertion-runout` | main merged in; gate queued | read gate, merge |
 | 5 | D132 condition-test run-out | `fix/d132` | fix, reviews done | inspection, oracle 7/4242, D130-grid differential, merge |
 | 6 | D121 conditional restore | `fix/d121` | timing done; change accepted | inspection, merge |
 | 7 | D80 ablation labels | `fix/d80-labels` | row 41769 restored (uncommitted) | oracle 7/4242 consume, inspection, merge (conflicts with #3) |
@@ -42,6 +42,7 @@ pushes need the owner.
   (`JudgedDivergences.jsonl`, KNOWN-DEFECTS D80, LEDGER 81 list); needs the seed 7/4242 consume.
 - Running: guards (`.scratch/s1024/guards.pid`); item 3 gate PID 32788 (`.scratch/s1101/gate-reuse-c.ps1`,
   ratchet then oracle, logs beside it). Green: merge `fix/reuse-c`. Red: read the log, fix on the branch.
+  Queued behind it: item 4 gate PID 4380 (`gate-runout.ps1`, worktree `oracle-gate`, main merged 09973505).
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
