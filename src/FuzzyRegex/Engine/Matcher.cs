@@ -19936,8 +19936,15 @@ internal static class Matcher
         );
         if (last[group] == int.MinValue)
         {
-            // Searched as its UTF-16 units, so an astral literal is its pair (REVIEW-0100 W-E).
-            last[group] = state.Text.Span[..state.TextEnd].LastIndexOf(char.ConvertFromUtf32(literal).AsSpan());
+            // Searched as its UTF-16 units, so an astral literal is its pair (REVIEW-0100 W-E). A
+            // literal at or below 0xFFFF is one unit, a lone surrogate included, which
+            // char.ConvertFromUtf32 rejects. A surrogate unit found inside a pair can only move the
+            // last position later, which keeps the frame (the cut stays a no-op, never wrong).
+            ReadOnlySpan<char> text = state.Text.Span[..state.TextEnd];
+            last[group] =
+                literal <= char.MaxValue
+                    ? text.LastIndexOf((char)literal)
+                    : text.LastIndexOf(char.ConvertFromUtf32(literal).AsSpan());
         }
 
         return last[group];
