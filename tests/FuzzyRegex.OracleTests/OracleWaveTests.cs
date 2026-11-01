@@ -459,7 +459,10 @@ public sealed class OracleWaveTests
     /// upstream does, so the composition never runs. No recorded row still diverges in the shape the
     /// leak needs (1,268 partial divergent rows searched, 2026-11-01), so the row's recorded answer
     /// is set here to the port's answer without D11's second pass. That is the answer the composition
-    /// returns when it fires, which is all the harness compares; upstream is not asked.
+    /// returns when it fires, which is all the harness compares; upstream is not asked. Since D80
+    /// the composition's "D11 alone" control stacks only the switches the ablation stacks, so for
+    /// a walk that stacks none it is the composed run and the composition cannot fire; these tests
+    /// go red only with both that and this fix taken away.
     /// </remarks>
     [Test]
     public void A_used_pattern_is_asked_the_rows_question_with_no_ablation_composed_on_it()
@@ -504,14 +507,13 @@ public sealed class OracleWaveTests
     }
 
     /// <summary>
-    /// The D128 row with its recorded answer replaced by the port's answer without D11's second
-    /// pass, and the controls that make the two tests above able to go red: the row is partial, the
-    /// port's own answer disagrees with the recorded one, the D11-only answer agrees with it, and the
-    /// D11 run the composition tries first (which also sets <c>upstreamCallCaptures</c>) does not, so
-    /// the composition goes on to return the D11-only answer.
+    /// A row with its recorded answer replaced by the port's answer without D11's second pass, for
+    /// the D128 tests above and the D80 test in <see cref="NamedAblationLabelTests"/>, with the
+    /// controls they share: the row is partial, the port's own answer disagrees with the recorded
+    /// one, and the D11-only answer agrees with it.
     /// </summary>
     /// <returns>The row, and the port's own answer to it.</returns>
-    private static (OracleRow Row, IOracleOutcome? Fresh) ARowTheD11CompositionAnswersDifferently()
+    internal static (OracleRow Row, IOracleOutcome? Fresh) ARowTheD11CompositionAnswersDifferently()
     {
         OracleRow asked = OracleWave.ParseRows(_d11ComposedOnAUsedPatternRow)[0];
         IOracleOutcome? withoutD11 = OracleComparer.Run(
@@ -527,10 +529,6 @@ public sealed class OracleWaveTests
         row.Partial.Should().BeTrue();
         OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
         OracleComparer.Compare(row, withoutD11).Should().Be(OracleVerdict.Agree);
-        OracleComparer
-            .Compare(row, OracleComparer.RunWithTheSecondPassAsBeforeD11(row))
-            .Should()
-            .NotBe(OracleVerdict.Agree);
         return (row, fresh);
     }
 
