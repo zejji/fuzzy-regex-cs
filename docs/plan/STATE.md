@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 14:20 by Claude Code (gate 6 committing; gate 7 re-queued).
+**Updated:** 2026-11-01 14:45 by Claude Code (item 6 merged; item 7 gate committing).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -14,7 +14,7 @@
 | 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | - |
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
-| 6 | D121 conditional restore | `fix/d121` | main merged (staged; D121 is F119), gate running | gate, then merge to main |
+| 6 | D121 conditional restore | `fix/d121` | **merged** 925345e8 (F119) | - |
 | 7 | D80 ablation labels | `fix/d80-labels` | main merged (staged) + D128/D80 tests moved to row 40113 (red-proven) | gate, then merge to main |
 | 8 | D101 + frame cut (kept) | `fix/d101-rebase-cut`, `review/d101-cut-surrogate` 917b9de2 | timing settled | carry 184c256b onto the cut line, ratchet, non-partial A-B-B-A, full BDN, merge |
 | 9 | D122 continuation memo phantom | `fix/d122` | red tests, reviewed sizing | build option 1 test-first, gates, merge |
@@ -38,11 +38,11 @@ pushes need the owner.
 
 ## In flight
 
-- Gates: `.scratch/s1101/gate6.ps1` (PID 51356, worktree d121) then `gate7.ps1` (PID 8136, d80);
-  each: ratchet -UpdateBaseline, merge commit once 12 GB free, oracle 7/4242; `gateN.status`.
+- Item 7: `.scratch/s1101/gate7.ps1` (PID 7436, worktree d80, `gate7.status`): merge commit, then
+  oracle 7/4242. Then merge to main as items 3-6 were (`merge6.ps1` pattern).
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
 
-**Next action:** read gate6/gate7 results, merge items 6 and 7 to main.
+**Next action:** finish item 7 (gate, merge to main), then item 8.
