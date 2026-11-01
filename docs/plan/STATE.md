@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 12:45 by Claude Code (item 6 merge staged; peer timing window).
+**Updated:** 2026-11-01 12:55 by Claude Code (gates 6 and 7 running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -14,8 +14,8 @@
 | 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | - |
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
-| 6 | D121 conditional restore | `fix/d121` | main merged (staged, uncommitted; D121 is F119) | ratchet + baseline, inspection, oracle 7/4242, merge |
-| 7 | D80 ablation labels | `fix/d80-labels` | row 41769 restored (uncommitted) | oracle 7/4242 consume, inspection, merge (conflicts with #3) |
+| 6 | D121 conditional restore | `fix/d121` | main merged (staged; D121 is F119), gate running | gate, then merge to main |
+| 7 | D80 ablation labels | `fix/d80-labels` | row 41769 WIP-committed; main merged (staged), gate queued | gate, then merge to main |
 | 8 | D101 + frame cut (kept) | `fix/d101-rebase-cut`, `review/d101-cut-surrogate` 917b9de2 | timing settled | carry 184c256b onto the cut line, ratchet, non-partial A-B-B-A, full BDN, merge |
 | 9 | D122 continuation memo phantom | `fix/d122` | red tests, reviewed sizing | build option 1 test-first, gates, merge |
 | 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
@@ -38,12 +38,11 @@ pushes need the owner.
 
 ## In flight
 
-- Uncommitted in `.claude/worktrees/d80`: row 41769 restored (jsonl, D80 row, LEDGER 81); needs 7/4242.
-- Item 6: merge staged in `.claude/worktrees/d121`; run `.scratch/s1101/gate6.ps1` after peer s06b-e8
-  says "timing done", create `gate6.go` on its "go" for the inspection.
+- Gates: `.scratch/s1101/gate6.ps1` (PID 51356, worktree d121) then `gate7.ps1` (PID 8136, d80);
+  each: ratchet -UpdateBaseline, merge commit once 12 GB free, oracle 7/4242; `gateN.status`.
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
 
-**Next action:** item 6 gate (`gate6.ps1`), then merge item 6 to main.
+**Next action:** read gate6/gate7 results, merge items 6 and 7 to main.
