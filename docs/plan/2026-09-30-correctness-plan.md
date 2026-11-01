@@ -1,3 +1,5 @@
+> **Superseded** (2026-11-01): a point-in-time record. The current plan is `ROADMAP.md` phases 10-11; status is in `STATE.md`.
+
 # Correctness plan after the complete matrix (agreed 2026-09-30)
 
 The complete interaction matrix (`docs/plan/2026-09-30-complete-matrix.md`) sized the remaining
