@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 14:45 by Claude Code (item 6 merged; item 7 gate committing).
+**Updated:** 2026-11-01 15:25 by Claude Code (items 3-7 merged; oracle on main running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -15,7 +15,7 @@
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
 | 6 | D121 conditional restore | `fix/d121` | **merged** 925345e8 (F119) | - |
-| 7 | D80 ablation labels | `fix/d80-labels` | main merged (staged) + D128/D80 tests moved to row 40113 (red-proven) | gate, then merge to main |
+| 7 | D80 ablation labels | `fix/d80-labels` | **merged** 76b5b6c7 (mislabels; row 34508 stays open) | - |
 | 8 | D101 + frame cut (kept) | `fix/d101-rebase-cut`, `review/d101-cut-surrogate` 917b9de2 | timing settled | carry 184c256b onto the cut line, ratchet, non-partial A-B-B-A, full BDN, merge |
 | 9 | D122 continuation memo phantom | `fix/d122` | red tests, reviewed sizing | build option 1 test-first, gates, merge |
 | 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
@@ -38,11 +38,11 @@ pushes need the owner.
 
 ## In flight
 
-- Item 7: `.scratch/s1101/gate7.ps1` (PID 7436, worktree d80, `gate7.status`): merge commit, then
-  oracle 7/4242. Then merge to main as items 3-6 were (`merge6.ps1` pattern).
+- Oracle 7/4242 on main 76b5b6c7 (items 6 + 7 together): `.scratch/s1101/merge7.ps1`, PID 10020,
+  `merge7.status`, log `oracle-merge7.log`. Red means a fix-forward on main.
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
 
-**Next action:** finish item 7 (gate, merge to main), then item 8.
+**Next action:** read the main oracle result; then item 8 (D101 + frame cut).
