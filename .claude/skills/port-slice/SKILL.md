@@ -1,9 +1,14 @@
 ---
 name: port-slice
-description: Use to execute one slice of the mrab-regex to .NET port. Self-orients from STATE.md, the roadmap, the slice file and the generated status; works test-first; finishes with the ratchet green, a commit made and the slice file moved to done/. Invoke this at the start of any port working session, including after an interrupted one.
+description: Phase 0-7 slice workflow, kept as history. Use ONLY when docs/plan/STATE.md names a slice file under docs/plan/slices/ as the current item. Since 2026-10-16 work is a STATE.md checklist item instead: read AGENTS.md "Tracking state and progress" and STATE.md, not this skill.
 ---
 
 # Executing a port slice
+
+> **Historical (2026-11-01).** Current work is tracked in the `docs/plan/STATE.md` checklist, not
+> slice files; see `AGENTS.md`, "Tracking state and progress". Use this skill only if STATE.md
+> names a slice file as the current item. Its "30 lines" limit for STATE.md is now 50.
+
 
 One slice, one session, one commit. Context is not carried between slices, so everything you
 need is in the repository. Read the four small files below and nothing else until you know what
