@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 10:24 by Claude Code (items 3 and 4 gates running in sequence).
+**Updated:** 2026-11-01 10:29 by Claude Code (item 3 ratchet green; oracles running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -40,9 +40,9 @@ pushes need the owner.
 
 - Uncommitted in `.claude/worktrees/d80` (`fix/d80-labels`): row 41769 restored
   (`JudgedDivergences.jsonl`, KNOWN-DEFECTS D80, LEDGER 81 list); needs the seed 7/4242 consume.
-- Running: guards (`.scratch/s1024/guards.pid`); item 3 gate PID 32788 (`.scratch/s1101/gate-reuse-c.ps1`,
-  ratchet then oracle, logs beside it). Green: merge `fix/reuse-c`. Red: read the log, fix on the branch.
-  Queued behind it: item 4 gate PID 4380 (`gate-runout.ps1`, worktree `oracle-gate`, main merged 09973505).
+- Running: guards (`.scratch/s1024/guards.pid`). Ratchets: item 3 GREEN 10:28; item 4's in gate PID 4380
+  (its own oracle step will fail: bare `python` lacks `regex`; ignore it). Oracle with the 2026.9.29
+  venv: PID 33412 `.scratch/s1101/oracle-3-4.ps1`, item 3 then item 4; status/logs in `.scratch/s1101/`.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
