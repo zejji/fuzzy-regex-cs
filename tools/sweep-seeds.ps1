@@ -287,6 +287,26 @@ if ($perGenerator.Count -gt 0) {
     }
 }
 
+# On GitHub Actions, the same summary as a table on the run's page. The scheduled fresh seeds only
+# report (.github/workflows/oracle.yml), so this table is where a red fresh seed is seen.
+if ($env:GITHUB_STEP_SUMMARY) {
+    $verdict = if ($red.Count -eq 0) { "GREEN at all $($all.Count) seeds" } else { "RED at $($red.Count) of $($all.Count) seeds" }
+    $table = @(
+        "### Oracle sweep: $verdict ($Count rows a generator, $Configuration)"
+        ''
+        'Reproduce a seed with `pwsh -File tools/run-oracle.ps1 -Seeds <seed> -Count ' + $Count + '`; each red seed''s wave and report are in the run''s artifact.'
+        ''
+        '| seed | verdict | tally | unaccounted divergences |'
+        '| --- | --- | --- | --- |'
+        foreach ($entry in $all) {
+            $state = if ($entry['harnessFailed']) { 'HARNESS FAILED' } elseif ($entry['green']) { 'green' } else { 'RED' }
+            $where = ($entry['divergeBy'].Keys | Sort-Object | ForEach-Object { "$_ $($entry['divergeBy'][$_])" }) -join ', '
+            "| $($entry['seed']) | $state | $($entry['tally']) | $where |"
+        }
+    )
+    Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $table
+}
+
 if ($red.Count -eq 0) {
     Write-Host ''
     Write-Host "Sweep: GREEN - no row diverged from upstream at any of $($all.Count) seeds." -ForegroundColor Green

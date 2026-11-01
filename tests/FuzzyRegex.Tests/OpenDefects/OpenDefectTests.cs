@@ -17,19 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 [Explicit]
 public sealed class OpenDefectTests
 {
-    // D121. Start 0 matches: `[ab]*?` takes the 'b', the lookahead at 1 sets g to '' before a 'c',
-    // the conditional repeat takes 'cccba', and `(?=(?P=g))` matches the empty g at the end. The
-    // port reports the match from start 1; regex 2026.9.10 answers (0, 6), and so does the port
-    // with every repeat guard off.
-    [Test]
-    public void A_search_finds_the_leftmost_start_through_a_conditional_repeat_after_a_lookahead()
-    {
-        Match m = new FuzzyRegex(@"[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?!c)[ab]|c)*$(?=(?P=g))").Match("bcccba");
-
-        (m.Success, m.Index, m.Length).Should().Be((true, 0, 6));
-        m.Groups["g"].Value.Should().BeEmpty();
-    }
-
     // D122. Group 2 always takes part, so the conditional needs a 'c' after the last 'a' the
     // repeat takes, and no text after 'a' * 9 + 'b' puts one there: the 'b' is fixed. The anchored
     // calls have no completion, and the search's leftmost completable start is the edge. The port
@@ -92,19 +79,6 @@ public sealed class OpenDefectTests
         (m.Success, m.Index, m.Length, m.LastGroupNumber).Should().Be((true, 0, 3, 3));
     }
 
-    // D124. The negative lookahead's body `(?:x){d<=1}` matches the empty string by deleting its
-    // 'x', whatever text follows, so the lookahead fails at every position and no text completes a
-    // start inside the subject. The port answers the run-out at the second 'x' as a partial, as
-    // upstream 2026.9.29 does; without the fuzzy section, `(x)(?!x?)`, whose body also matches
-    // empty, the port answers the edge partial (2, 2), and that is the answer expected here.
-    [Test]
-    public void A_fuzzy_negative_body_that_matches_empty_by_deletion_decides_at_the_end_of_the_text()
-    {
-        Match m = new FuzzyRegex("(x)(?!(?:x){d<=1})").Match("xx", partial: true);
-
-        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
-    }
-
     // D126. The pattern consumes one 'x', so no text makes 'xxcw' + w a full match: None. The
     // lookahead's body is a search for a later 'y' (\X takes any character), so whatever follows
     // it cannot decide anything before the end of the pattern. The port's second pass forks once
@@ -116,5 +90,35 @@ public sealed class OpenDefectTests
     public void A_grapheme_inside_nested_repeats_under_a_negative_lookahead_stays_under_the_fork_budget()
     {
         new FuzzyRegex(@"x(?!(?:(?:\X|(?R)?)+w?)+y)").FullMatch("xxcw", partial: true).Success.Should().BeFalse();
+    }
+
+    // D131. Without partial, search finds no match over 'b' (both engines). So a partial call's
+    // answer must be a partial or none: a complete match would be one the plain search finds. The
+    // port answers a complete (0, 0) with one deletion, and in Debug its second pass trips design
+    // assert A1 ("a second-pass success read the text to come"), on main 4205ad63 as on this
+    // branch. regex 2026.9.29 answers the partial (0, 1) with one substitution (measured
+    // 2026-10-31). Which partial is right is not settled here; that it is not complete is.
+    [Test]
+    public void A_partial_call_does_not_answer_a_complete_match_the_plain_search_does_not_find()
+    {
+        var regex = new FuzzyRegex(@"(?:(?=(?:ab){e<=2})){d<=1}");
+        regex.Match("b").Success.Should().BeFalse();
+
+        Match m = regex.Match("b", partial: true);
+        (!m.Success || m.PartialMatch).Should().BeTrue();
+    }
+
+    // Not yet registered (found 2026-10-31 by the D132 blind review, F4 shape 6; reported in the
+    // night log). A partial search where a condition's positive test runs out at start 0 with
+    // room in every section: regex 2026.9.29 and judge132.py answer P(1, 2) (completion 'gg'),
+    // the port P(0, 2), before and after the D132 fix. The one-test form
+    // `(?:(?(?=(?:f^){i<=2})f|g)){i<=2}` over 'fx' differs the same way before the fix (port
+    // P(0, 2), upstream P(1, 2)), so no section limit is involved.
+    [Test]
+    public void A_partial_search_past_a_condition_test_run_out_starts_where_upstream_does()
+    {
+        Match m = new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)(?(?=(?:f^){i<=2})f|g)){i<=2}").Match("fx", partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, 1, 2));
     }
 }

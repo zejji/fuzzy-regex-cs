@@ -803,6 +803,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 95 (D120) added UpstreamGraphemeConjunct, likewise set only by
             // OracleComparer.RunWithTheUpstreamGraphemeConjunct.
             "PatternObject.UpstreamGraphemeConjunct",
+            // D121 added UpstreamConditionalRestore, likewise set only by
+            // OracleComparer.RunWithTheUpstreamConditionalRestore.
+            "PatternObject.UpstreamConditionalRestore",
             // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
             // likewise set only by the OracleComparer ablations.
             "PatternObject.SkipExactDeletionRetry",
@@ -931,7 +934,6 @@ public sealed class ThreadSafetyTests
             // D101: set by PatternObject.SetNegativeOutcomeMemo while the pattern compiles.
             "PatternObject.MemoisesCallOutcomes",
             // D101 option D: set once by PatternObject.SetTailMemo, after SetNegativeOutcomeMemo.
-            "PatternObject.MemoisesTails",
             "PatternObject.TailTables",
             // Share 1: Node.OutcomeKey, written by NodeCompiler.BuildLookaround and then by
             // PatternObject.SetNegativeOutcomeKeys, both while the pattern compiles.

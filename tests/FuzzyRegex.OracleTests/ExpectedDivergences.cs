@@ -3326,6 +3326,19 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>conditional-restore-keeps-success-marks</c> (D121), recorded 2026-10-31 by
+    /// <c>python tools/record-oracle.py --rows</c>: the smallest form, the reference at the end, the
+    /// D104 differential's row with a positive test, as a search and anchored. Perl 5.42 and .NET 10
+    /// give this port's answer to each.
+    /// </summary>
+    private const string _conditionalRestoreRows = """
+        {"generator": "rows", "pattern": "(a?)(?(?=c)c|[ab])*\\1", "flags": 0, "namedLists": {}, "subject": "ac", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(a*)(?(?=c)c|[ab])*\\1$", "flags": 0, "namedLists": {}, "subject": "accb", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?=c)c|[ab])*$(?=(?P=g))", "flags": 0, "namedLists": {}, "subject": "bcccba", "operation": "search", "codepointSpan": [1, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 5, "captures": [[1, 5]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": 1, "lastGroup": "g", "partial": false}}
+        {"generator": "rows", "pattern": "[ab]*?(?=(?P<g>[abc]*?)(?:c|cc))(?(?=c)c|[ab])*$(?=(?P=g))", "flags": 0, "namedLists": {}, "subject": "bcccba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
     /// The rows of <c>keyed-tail-guard</c>. Four were recorded 2026-10-16 by
     /// <c>python tools/record-oracle.py --rows</c>: the smallest tail-guard form, the tail-guard
     /// witness and the two body-guard witnesses of docs/DIVERGENCES.md. Three are battery
@@ -8168,6 +8181,25 @@ internal static class ExpectedDivergences
                 TheAblationExplainsItBarAPinnedLeak(row, ours, OracleComparer.RunWithTheReentryInANewSection(row))
         ),
         new(
+            Id: "conditional-restore-keeps-success-marks",
+            Reason: "PORT RIGHT, D121 (ledger entry 96): backtracking into a conditional puts back the "
+                + "repeat guard lists it saved before its test, and upstream puts them back whole "
+                + "(`_regex.c:15423`, `:15475`), so the marks saying a repeat's body reached its end "
+                + "from a position go, and the failure written there next blocks a later path with "
+                + "other group values. `(a?)(?(?=c)c|[ab])*\\1` over 'ac' is (0, 1) upstream and "
+                + "(0, 2) here, as Perl 5.42 and .NET 10 give. This port keeps those marks where the "
+                + "saved list has no record (`GuardList.PopFromKeepingSuccessMarks`).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamConditionalRestore`, which sets "
+                + "`PatternObject.UpstreamConditionalRestore` so both conditional backtrack arms "
+                + "restore as upstream does, reproduces upstream's recorded answer exactly, AND this "
+                + "port's live answer is the one being judged.",
+            PinnedBy: "ConditionalRestoreGuardTests",
+            Example: _conditionalRestoreRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalRestore(row))
+        ),
+        new(
             Id: "keyed-tail-guard",
             Reason: "PORT RIGHT, D85 (ledger entry 84, owner 2026-10-16): a repeat's guard records that "
                 + "the rest of the match failed from a position, and upstream keeps that record "
@@ -8214,10 +8246,11 @@ internal static class ExpectedDivergences
                 + "RC5, A FUZZY INSERTION AT THE EDGE RUNS OUT OF TEXT (design section 4.5, brought "
                 + "forward to build chunk 3): the insertion arm checks the position after the "
                 + "insertion, as the substitution arm does, where upstream checks the one before it "
-                + "(_regex.c:10156) and fails. Its phantoms are limit C2, the rest presumed after "
-                + "the inserted character: seed 7 row 7283 (`fuzzy-overhang`), fullmatch "
-                + "`(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}` over 'tXt', whose `^` "
-                + "no text satisfies (judge None; upstream and 11ccae7 None).\n"
+                + "(_regex.c:10156) and fails. Seed 7 row 7283 (`fuzzy-overhang`), fullmatch "
+                + "`(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}` over 'tXt', was listed "
+                + "here as one of its phantoms; it was D129 instead (2026-10-31): the run-out's "
+                + "insertion is one the outer `{e<=2,s<=1}` forbids, and the port now answers None "
+                + "as upstream does.\n"
                 + "THE ATTEMPT FROM INSIDE THE TEXT TO COME (design section 1, rule 3; chunk 2's "
                 + "post-repair design step): a search whose second pass finds nothing makes one more "
                 + "attempt, from a start inside the text to come with both of its sides unknown, and "
@@ -8247,7 +8280,6 @@ internal static class ExpectedDivergences
             {"generator": "partial-sliced", "pattern": "\\b(?P<g1>[\ud83c\udffb]{2,}?)\\1", "flags": 16642, "namedLists": {}, "subject": "\ud83c\udffb\r\n", "operation": "fullmatch", "partial": true, "pos": 3, "endpos": 3, "codepointSlice": [2, 2], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial-sliced", "pattern": "\\b([A]*){1}\\1", "flags": 256, "namedLists": {}, "subject": "\r\n", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 0, "codepointSlice": [0, 0], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "\ud801\udc00\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-            {"generator": "fuzzy-overhang", "pattern": "(?fi)(t)(?:x(?:(?:\\1)^){e<=3,1i+1d+2s<=3}){e<=2,s<=1}", "flags": 0, "namedLists": {}, "subject": "tXt", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """,
             Applies: static (row, ours) =>
                 row.Partial

@@ -4858,6 +4858,10 @@ internal static class Matcher
     /// Whether a conditional's test has only just ended, so that nothing but the test has run since
     /// the push.
     /// </param>
+    /// <param name="keepSuccessMarks">
+    /// NOT UPSTREAM (D121): whether the body guard keeps the success marks it holds now; see
+    /// <see cref="GuardList.PopFromKeepingSuccessMarks"/>.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeatData(
         ByteStack stack,
@@ -4865,7 +4869,8 @@ internal static class Matcher
         bool fuzzy,
         bool runs,
         bool keepGuards,
-        bool testJustEnded
+        bool testJustEnded,
+        bool keepSuccessMarks
     )
     {
         long runId = 0;
@@ -4889,7 +4894,11 @@ internal static class Matcher
                 && (
                     (repeatData.KeyedTail is not null && !repeatData.KeyedTail.PopFrom(stack))
                     || !repeatData.TailGuardList.PopFrom(stack)
-                    || !repeatData.BodyGuardList.PopFrom(stack)
+                    || !(
+                        keepSuccessMarks
+                            ? repeatData.BodyGuardList.PopFromKeepingSuccessMarks(stack)
+                            : repeatData.BodyGuardList.PopFrom(stack)
+                    )
                 )
             )
         )
@@ -5057,9 +5066,25 @@ internal static class Matcher
     /// Whether this is a conditional's test that has only just ended, when a kept guard list must be
     /// exactly as the push left it; see <see cref="PushRepeats"/>.
     /// </param>
+    /// <param name="keepSuccessMarks">
+    /// NOT UPSTREAM (D121): whether each body guard keeps the success marks it holds now
+    /// (<see cref="GuardList.PopFromKeepingSuccessMarks"/>). A conditional's restore passes
+    /// <see langword="true"/> when its branch and the rest of the match have run since the push, so
+    /// an enclosing repeat's body can have reached its end since. A test that has only just ended
+    /// has run nothing that could: an enclosing repeat's end is outside the test, and each repeat
+    /// inside it has had its body entries cut with the test or popped before the test failed, so no
+    /// entry is left to write a failure over a mark the restore drops. A group call's restores
+    /// pass <see langword="false"/>: backtracking into a return saves the caller's lists as they
+    /// are then (<see cref="BacktrackGroupReturn"/>), so the caller gets back the marks it made
+    /// after the return whether the call returns again or fails.
+    /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded)
+    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded, bool keepSuccessMarks)
     {
+        Debug.Assert(
+            !(keepSuccessMarks && testJustEnded),
+            "D121: success marks are kept only where something after the test has run since the push"
+        );
         bool runs = state.Pattern.TestedGroups.Length > 0;
         if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
         {
@@ -5068,7 +5093,17 @@ internal static class Matcher
 
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, state.KeepsFailureMemo(r), testJustEnded))
+            if (
+                !PopRepeatData(
+                    stack,
+                    state.Repeats[r],
+                    state.IsFuzzy,
+                    runs,
+                    state.KeepsFailureMemo(r),
+                    testJustEnded,
+                    keepSuccessMarks
+                )
+            )
             {
                 return false;
             }
@@ -6769,16 +6804,31 @@ internal static class Matcher
     /// insertion path is legal and 'cbx' completes it.
     /// </para>
     /// <para>
-    /// Inside a lookaround's body or a condition's test, only the sections the body opened are
-    /// asked. Their END_FUZZY lies inside the body, before the body can succeed, so a broken one
-    /// fails the body's path for every continuation. A section around the lookaround closes after
-    /// it, and the body's success does not wait for it: `(?:(?!(?:b){e&lt;=2}x)c){i&lt;=1}` over 'cx'
-    /// is None in both engines, because the body's path through a substitution succeeds and makes
-    /// the negative lookahead fail although the outer <c>{i&lt;=1}</c> forbids that substitution.
-    /// Failing that path at a run-out would turn such a lookahead true. The sections around the
-    /// lookaround are asked when matching goes on after it (<see cref="CloseTheBodysSection"/>,
-    /// and this check at any later run-out). A section's frame lies above the structure-stack depth
-    /// the innermost lookaround or test parked exactly when the body opened it.
+    /// Inside a negative lookaround's body or a condition's test, only the sections the body
+    /// opened are asked. A negative body's errors are dropped when it ends (its END_FUZZY lies inside
+    /// the body, and the lookaround's negative arm discards the sub-attempt's counts), so a section
+    /// around it has no claim on them, and failing the body's path at a run-out would turn the
+    /// lookaround true: `(?:(?!(?:b){e&lt;=2}x)c){i&lt;=1}` over 'cx' is None in both engines, because
+    /// the body's path through a substitution succeeds and makes the negative lookahead fail
+    /// although the outer <c>{i&lt;=1}</c> forbids that substitution. A positive lookaround's body
+    /// hands its errors out to the sections around it, as a complete match counts them
+    /// (<c>(?:(?=a(?:c){i&lt;=1})abc){i&lt;=0}</c> fullmatch 'abc' is None in both engines), so the
+    /// scan walks on past it (D130): <c>(?:(?=(?:f^){i&lt;=2})f){i&lt;=1}</c> over 'fx' answered P(0, 2),
+    /// through a run-out insertion the outer section forbids, and now answers None as upstream
+    /// does. A condition's test stops the scan, except a positive test under
+    /// <paramref name="pastPositiveTests"/> (D132), which only the run-out insertion's check sets
+    /// (<see cref="ARunOutInsertionFitsTheOpenSections"/>). The test is atomic and its body's errors
+    /// count against the sections around the condition when the yes-branch runs, so an insertion
+    /// those sections forbid fails the attempt on every continuation:
+    /// <c>(?:(?(?=(?:f^){i&lt;=2})f|g)){i&lt;=1}</c> over 'fx' answered P(0, 2) and now answers None,
+    /// as upstream does. A plain run-out still stops at every test: a condition is not monotone, and
+    /// failing the body's path there lets the no-branch run where a complete match would have
+    /// committed to the test (D132-DESIGN.md section 4: walking past tests there too turned 1,356
+    /// exact answers on its grid into partials no text completes).
+    /// The sections around a stopping construct are asked when matching goes on after it
+    /// (<see cref="CloseTheBodysSection"/>, and this check at any later run-out). A section's frame
+    /// lies above the structure-stack depth the innermost stopping lookaround or test parked exactly
+    /// when the body opened it.
     /// </para>
     /// <para>
     /// Cost: one step per open pruning mark above the innermost lookaround (atomic groups), then
@@ -6787,8 +6837,9 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state, which keeps the section links for such a pattern.</param>
+    /// <param name="pastPositiveTests">Whether the scan walks on past a positive condition test.</param>
     /// <returns><see langword="true"/> if some open section's upper limit is already broken.</returns>
-    private static bool AnOpenSectionIsOverItsLimits(MatchState state)
+    private static bool AnOpenSectionIsOverItsLimits(MatchState state, bool pastPositiveTests)
     {
         Debug.Assert(state.Pattern.KeepsSectionLinks, "D81: a pattern whose sections nest keeps their links");
 
@@ -6813,6 +6864,22 @@ internal static class Matcher
 
             if ((Opcode)code is Opcode.Lookaround or Opcode.Conditional)
             {
+                // D130: a positive lookaround's body hands its errors out to the sections around
+                // it, so its run-out answers to them as well, and the scan goes on outward. D132: so
+                // does a positive condition test's, for the run-out insertion's check.
+                Debug.Assert(
+                    (Opcode)code != Opcode.Conditional || state.PartialSide != MatchState.PartialNone,
+                    "D132: a run-out reads a condition's parked node, which only a partial call parks"
+                );
+                if (
+                    ((Opcode)code == Opcode.Lookaround || (pastPositiveTests && (Opcode)code == Opcode.Conditional))
+                    && ReadPruningMark(state, mark, out _, out LookaroundStateData look)
+                    && look.Node is { Match: true }
+                )
+                {
+                    continue;
+                }
+
                 if (!state.Bstack.ReadSizeBelow(mark - 1, out bodyBase))
                 {
                     bodyBase = -1;
@@ -6872,6 +6939,93 @@ internal static class Matcher
             && counts[FuzzyValue.Sub] <= values[FuzzyValue.MaxSub]
             && TotalErrors(counts) <= values[FuzzyValue.MaxErr]
             && TotalCost(counts, section) <= values[FuzzyValue.MaxCost];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D129): whether the insertion an insertion run-out needs fits every open
+    /// fuzzy section, as <see cref="AnOpenSectionIsOverItsLimits"/> asks of the counts so far.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An insertion that needs the character after the text runs out of text (D11 RC5): the
+    /// insertion arm of <see cref="NextFuzzyMatchItem"/> and the trailing insertion at a section's
+    /// end. The run-out exists only because that insertion is made, so it is a step the path takes,
+    /// and it must be one the pattern allows. <see cref="ThisErrorPermitted"/> and
+    /// <see cref="InsertionPermitted"/> ask only the section the insertion is made in; an inner
+    /// section's errors also count against every section around it. `(?:(?:f^){i&lt;=2}){i&lt;=1}`
+    /// over 'fx' answered P(0, 2): after 'f' and one inserted 'x', `^` can pass only after a second
+    /// insertion, which the outer section forbids, where `(?:f^){i&lt;=1}` was already None and
+    /// PCRE2 10.47 answers <c>f.{0,1}^</c> over 'fx' with None.
+    /// </para>
+    /// <para>
+    /// The insertion is counted only for this question and taken back: the run-out still does not
+    /// count it (the path's counts are those so far), and <see cref="AnOpenSectionIsOverItsLimits"/>
+    /// walks the open sections exactly as a run-out's own check does, cost and the whole match's
+    /// limits included. A pattern with one section level pays nothing: the section the insertion is
+    /// made in has already allowed it. The oracle's D81 ablation turns it off with that check.
+    /// </para>
+    /// <para>
+    /// Kept out of line: it runs only on a run-out at the edge of a partial call, and its walk's
+    /// locals must not join the frame of <see cref="NextFuzzyMatchItem"/> or
+    /// <see cref="BacktrackEndFuzzy"/>. Measured 2026-10-31 (Release, tiered compilation off):
+    /// both callers keep main's frame (<c>sub rsp, 32</c> and <c>sub rsp, 160</c>, no zeroing added)
+    /// and grow by the one call: <see cref="NextFuzzyMatchItem"/> 425 to 438 bytes of code,
+    /// <see cref="BacktrackEndFuzzy"/> 2,108 to 2,125.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if every open section allows one more insertion.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool ARunOutInsertionFitsTheOpenSections(MatchState state)
+    {
+        Debug.Assert(state.RunsOutRight || state.RunsOutLeft, "D129: asked only once an insertion has run out of text");
+        PatternObject pattern = state.Pattern;
+        if (!pattern.NestsFuzzySections || pattern.RunOutAsBeforeD81)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        ++counts[FuzzyValue.Ins];
+        bool over = AnOpenSectionIsOverItsLimits(state, pastPositiveTests: true);
+        --counts[FuzzyValue.Ins];
+
+        return !over;
+    }
+
+    /// <summary>
+    /// Upstream's <c>check_fuzzy_partial</c> at the end of the substitution arm of
+    /// <see cref="NextFuzzyMatchItem"/> and the insertion and substitution arms of
+    /// <see cref="NextFuzzyMatchStringFld"/> and <see cref="NextFuzzyMatchGroupFld"/>, none of
+    /// which runs out of text in this port (D129 review).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The error arms are tried only after the item itself failed. A consuming item at the edge of
+    /// the text does not fail there: it runs out first (<see cref="RunOut"/>), before any error kind
+    /// is tried, so the substitution arm of <see cref="NextFuzzyMatchItem"/> starts strictly inside
+    /// the text and one step from there stays within it. The folded arms step a position in the
+    /// item's folded buffer, which is within the buffer before the step, and a full-folded item at
+    /// the edge has run out the same way. So none of these returns a partial, and the run-out check
+    /// <see cref="ARunOutInsertionFitsTheOpenSections"/> makes at the two insertion run-outs is not
+    /// needed here. The assertion holds that: on 2026-10-31 none of these sites answered a partial
+    /// over the Debug test suite, a 72,252-row grid of nested sections around zero-width items, a
+    /// 1,920-row reversed grid and an 86,400-row grid of full-folded strings and group references
+    /// under <c>(?fi)</c> and <c>(?fir)</c> (36,966 partial answers), where the insertion arm of
+    /// <see cref="NextFuzzyMatchItem"/> did.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="newPos">The position the error would have moved to.</param>
+    /// <returns><see cref="MatchStatus.Failure"/>, the only answer reachable here.</returns>
+    private static int ErrorArmAtTheEdge(MatchState state, int newPos)
+    {
+        int status = CheckFuzzyPartial(state, newPos);
+        Debug.Assert(
+            status != MatchStatus.Partial,
+            "D129: only an insertion arm runs out of text; a consuming item runs out before its errors are tried"
+        );
+        return status;
     }
 
     /// <summary>NOT UPSTREAM'S, D11 M2: removes a construct's own cut taint, if it has one.</summary>
@@ -7499,7 +7653,7 @@ internal static class Matcher
             !state.Sstack.DropSize()
             || !PopCaptures(state, state.Sstack)
             || !state.Sstack.PopSize(out long captureChange)
-            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
         )
         {
             Debug.Assert(false, "D98: the call's frame is whole");
@@ -9635,7 +9789,8 @@ internal static class Matcher
                 // oracle's pre-D11 ablation keeps upstream's argument.
                 if (
                     CheckFuzzyPartial(state, state.Pattern.SecondPassAsBeforeD11 ? data.NewTextPos : newPos)
-                    == MatchStatus.Partial
+                        == MatchStatus.Partial
+                    && ARunOutInsertionFitsTheOpenSections(state)
                 )
                 {
                     state.NotePartialEvent(PartialEvent.InsertionRunOut);
@@ -9666,7 +9821,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             default:
                 return MatchStatus.Failure;
         }
@@ -12400,7 +12555,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 newPos = data.NewFoldedPos + data.Step;
@@ -12418,7 +12573,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FoldWholeSub:
                 // NOT UPSTREAM (D7): could the whole subject character have been substituted? The
                 // loop tries this kind only at the start of an expanding folding.
@@ -13091,7 +13246,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FuzzyValue.Sub:
                 // Could the character at text_pos have been substituted?
                 newPos = data.NewFoldedPos + data.Step;
@@ -13109,7 +13264,7 @@ internal static class Matcher
                     return MatchStatus.Success;
                 }
 
-                return CheckFuzzyPartial(state, newPos);
+                return ErrorArmAtTheEdge(state, newPos);
             case FoldWholeSub:
                 // NOT UPSTREAM (D22, D24): could the whole subject character have been substituted
                 // for one whole group character? The loop tries this kind only where one side
@@ -18664,6 +18819,7 @@ internal static class Matcher
                 && !pattern.SecondPassAsBeforeD11
                 && CheckFuzzyPartial(state, endFuzzyReverse ? state.TextPos - 1 : state.TextPos + 1)
                     == MatchStatus.Partial
+                && ARunOutInsertionFitsTheOpenSections(state)
             )
             {
                 // NOT UPSTREAM'S, D11 RC5 at the section's end (D41): the insertion
@@ -19049,7 +19205,7 @@ internal static class Matcher
 
             if (
                 !state.PopSubAttemptFuzzyState(state.Bstack)
-                || !PopRepeats(state, state.Bstack, testJustEnded: true)
+                || !PopRepeats(state, state.Bstack, testJustEnded: true, keepSuccessMarks: false)
                 || !PopCaptures(state, state.Bstack)
             )
             {
@@ -19443,7 +19599,7 @@ internal static class Matcher
             state.Bstack.PushSize(state.CaptureChange);
             if (
                 !state.Sstack.PopSize(out long groupReturnCaptureChange)
-                || !PopRepeats(state, state.Sstack, testJustEnded: false)
+                || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
             )
             {
                 return MatchStatus.Illegal;
@@ -19912,7 +20068,7 @@ internal static class Matcher
             !state.Sstack.DropSize()
             || !PopCaptures(state, state.Sstack)
             || !state.Sstack.PopSize(out long captureChange)
-            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
         )
         {
             Debug.Assert(false, "D101 option D: the cut frame is whole");
@@ -20685,10 +20841,17 @@ internal static class Matcher
         state.CaptureChange = condCaptureChange;
 
         // Only the test has run since the push, unless a positive test's end was blocked
-        // and let the yes-branch go on (D35's remarks, PushRepeats).
+        // and let the yes-branch go on (D35's remarks, PushRepeats). NOT UPSTREAM (D121):
+        // then the marks of the bodies that reached their end since are kept.
+        bool condBranchRan = condWasBlocked && condNode.Match;
         if (
             !state.PopSubAttemptFuzzyState(state.Bstack)
-            || !PopRepeats(state, state.Bstack, testJustEnded: !(condWasBlocked && condNode.Match))
+            || !PopRepeats(
+                state,
+                state.Bstack,
+                testJustEnded: !condBranchRan,
+                keepSuccessMarks: condBranchRan && !pattern.UpstreamConditionalRestore
+            )
             || !PopCaptures(state, state.Bstack)
         )
         {
@@ -20784,9 +20947,16 @@ internal static class Matcher
 
         state.CaptureChange = endCondCaptureChange;
 
+        // NOT UPSTREAM (D121): the branch and the rest of the match have run since the push,
+        // so the marks of the bodies that reached their end since are kept.
         if (
             !state.PopSubAttemptFuzzyState(state.Bstack)
-            || !PopRepeats(state, state.Bstack, testJustEnded: false)
+            || !PopRepeats(
+                state,
+                state.Bstack,
+                testJustEnded: false,
+                keepSuccessMarks: !state.Pattern.UpstreamConditionalRestore
+            )
             || !PopCaptures(state, state.Bstack)
         )
         {
@@ -20824,7 +20994,7 @@ internal static class Matcher
             !state.Sstack.DropSize()
             || !PopCallerCaptures(state)
             || !state.Sstack.PopSize(out long groupCallCaptureChange)
-            || !PopRepeats(state, state.Sstack, testJustEnded: false)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
         )
         {
             return MatchStatus.Illegal;
@@ -20904,7 +21074,7 @@ internal static class Matcher
             state.Sstack.PushSize(state.CaptureChange);
             if (
                 !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
-                || !PopRepeats(state, state.Bstack, testJustEnded: false)
+                || !PopRepeats(state, state.Bstack, testJustEnded: false, keepSuccessMarks: false)
             )
             {
                 return MatchStatus.Illegal;
@@ -21743,7 +21913,11 @@ internal static class Matcher
             NoteARunOutInTheTails(state);
         }
 
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        if (
+            pattern.NestsFuzzySections
+            && !pattern.RunOutAsBeforeD81
+            && AnOpenSectionIsOverItsLimits(state, pastPositiveTests: false)
+        )
         {
             state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
             stringPos = -1;
@@ -22303,7 +22477,11 @@ internal static class Matcher
     private static bool TheBodysRunOutWouldTaint(MatchState state)
     {
         PatternObject pattern = state.Pattern;
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        if (
+            pattern.NestsFuzzySections
+            && !pattern.RunOutAsBeforeD81
+            && AnOpenSectionIsOverItsLimits(state, pastPositiveTests: false)
+        )
         {
             return false;
         }

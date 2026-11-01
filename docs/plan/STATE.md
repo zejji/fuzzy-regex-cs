@@ -1,61 +1,48 @@
 # Current state
-**Branch `sync/2026.9.29` (worktree `.claude/worktrees/sync-2026-9-29`) holds the 2026.9.29 sync**, Unicode 18.0.0, ready to merge, with main merged in on 2026-10-20: tables, names and lowercase rebuilt, D119 and D120 fixed, ledger entry 95 drafted, ratchet and oracle (seed 7: diverge 0 of 7,880 rows, all 939 known examples re-asked unchanged) green against PyPI's 2026.9.29. PORTMAP's sync log has the per-entry dispositions. Merging it moves `.venvs/regex-2026.9.29` into use as the oracle.
 
-**S91 is done** (e78f8d2, 5522bc3; `docs/plan/slices/done/S91-scoped-encoding-everywhere.md`). A
-scoped `(?a:...)` or `(?u:...)` now answers exactly as the same encoding set for the whole pattern:
-the 40,672-row scoped/global grid went from 1,596 disagreeing rows to 0 (upstream 2,207), and the
-oracle is GREEN at three seeds with diverge 0. Ledger entry 36.
+**Updated:** 2026-11-01 15:35 by Claude Code (items 3-7 merged, oracle on main green; item 8 started).
+**Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
+**Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
+`DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
 
-**S90 is done** (`docs/plan/slices/done/S90-partial-fold-rows.md`). The three partial rows over a
-full-folded ligature are port-right. Each is a fold repair (ledger 28, 29 or 30) stacked on ledger
-11 mechanism B, and a new oracle entry, `full-fold-fix-behind-an-innermost-count`, claims them. No
-engine change. The fuzzy and default waves both give diverge 0 at all three seeds. S86, S89 and
-S61 are done too; closing notes in `docs/plan/slices/done/`.
+## Release 1.2 checklist, in merge order
 
-**S60b is in flight** (`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, notes
-in `docs/plan/slices/notes/S60b-sittings.md`). Its item 3 rewrote `TryMatch` and sends SUCCESS to
-the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it (DECISIONS
-2026-09-24), or `RepeatTests`'s byte test goes red.
+| # | Item | Branch | State | Left to do |
+|---|---|---|---|---|
+| 1 | v1.0 vs v1.1 benchmark note | `docs/v110-bench` | **merged** 5ac48534 | - |
+| 2 | Oracle workflow gate split | `ci/oracle-gate` | **merged** 002650bc | - |
+| 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | - |
+| 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
+| 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
+| 6 | D121 conditional restore | `fix/d121` | **merged** 925345e8 (F119) | - |
+| 7 | D80 ablation labels | `fix/d80-labels` | **merged** 76b5b6c7 (mislabels; row 34508 stays open) | - |
+| 8 | D101 + frame cut (kept) | `review/d101-cut-surrogate` (cut + surrogate fix 917b9de2) | 184c256b cherry-picked (staged), gate running | commit, merge main, ratchet, oracle, non-partial A-B-B-A + full BDN (owner timing window), merge |
+| 9 | D122 continuation memo phantom | `fix/d122` | red tests, reviewed sizing | build option 1 test-first, gates, merge |
+| 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
+| 11 | D131 committing construct + D81 run-out | `fix/d131` (WIP) | design v3 + review limits | implement test-first, gates (may share #10's root) |
+| 12 | D125 lastindex through a reversed call | `fix/d125` | red tests | root cause, fix, gates |
+| 13 | Release 1.2 | main | - | full BDN vs 1.1.0 incl. D82's rows, CHANGELOG, notes, `docs/RELEASING.md` |
 
-## Queue
+Every merge: JetBrains inspection (several Junie commits used `--no-verify`), ratchet, oracle 7 and
+4242, KNOWN-DEFECTS row updated. Commit or merge to main once verified per `docs/VERIFICATION.md`;
+pushes need the owner.
 
-1. The orchestrator re-records the full benchmark baseline in process on merged main. S86 asks for
-   `*WorkloadBenchmarks*` on the quiet gate: its one hot-path change is a compare in `TryMatch`.
-2. S60b item 3 and onwards.
+## Rules until 1.2 ships
 
-## Waiting on the owner
+- Work only on the list. No new oracle seed or review sweeps; a new find goes into KNOWN-DEFECTS as
+  deferred unless it is a wrong answer outside partial matching x nested fuzzy sections x
+  committing constructs.
+- Start `.scratch/s1024/watchdog.ps1` and `jbguard.ps1` before builds; commits under the
+  `.scratch/s1024/commit.lock` mutex at 14 GB free; timing only on a quiet machine with
+  LibreHardwareMonitor running.
 
+## In flight
 
-- O(1) backtracking state per repetition for a body with no alternative (DECISIONS 2026-09-24,
-  OPEN). A divergence from upstream in memory only; no code until decided.
+- Item 8: `.scratch/s1101/gate8a.ps1` (PID 35984, worktree d101cut, `gate8a.status`): ratchet, commit
+  the cherry-pick. Then merge main into it (56 behind). Oracle on main 76b5b6c7 GREEN at 7/4242.
+- Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
+- Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
-## Findings that need a slice
+## Waiting on the owner: nothing.
 
-0. Done: S91, scoped encodings everywhere (e78f8d2, 5522bc3). Its grid probe,
-   `tools/probes/s91-scoped-encoding-grid.py`, is cited by `ScopedEncodingGridTests` but was never
-   committed.
-0b. **The native-AOT allocation tests are flaky**: `AllocationTests` (S61) fail about one full
-   native run in three (4 of 12, 2026-09-25) with 280 B and no GC in the window, in different tests
-   (`A_warm_IsMatch_...`, `A_warm_Count_...`, and 7,744 B across two GCs in the span walk). Every test
-   passes alone, and the JIT suite never fails. CI runs this gate on three systems, so it will go red
-   intermittently. Not yet explained: not a GC trim (a forced gen-2 collection between warm-up and
-   measurement allocates nothing under JIT), not a per-call cost (the same calls are 0 B in 8 runs of
-   12). Next: an EventListener on GCAllocationTick inside the native run to name the type.
-
-1. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
-2. Classifier coverage, narrowed 2026-09-25: a fresh `sub`/`split` row over the dotless i is now
-   classified by a recorded control (the dotless i swapped for kra, `dotlessFreeOutcome`), which
-   takes all 18 such hand-judged rows on its own. A row holding the dotted capital U+0130 still
-   needs its row added to `turkic-default-folding-without-spans` by hand: no letter can stand in for
-   it (7 of the 24 listed rows).
-
-Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
-`Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
-ledger 25), and two classifier leaks (the full-fold doubled-guard arms claiming plain ledger 12
-rows, and ablation entries tallying a port timeout). DECISIONS 2026-09-25.
-
-Done 2026-09-26 on `maint/state-findings`: two upstream defects the sweep found, which this port
-does not share, pinned as port-right with DIVERGENCES rows, COMPARISON sections and draft reports
-(ledger 37, a scoped `(?i:...)` losing full folding in the required-string search; ledger 38, a
-lazy repeat missing a full-folded literal at its last position). No oracle entry yet: whether the
-generators draw them is unchecked.
+**Next action:** item 8: after gate8a, merge main into the cut line, gates; ask owner for timing.

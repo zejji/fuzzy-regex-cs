@@ -225,6 +225,32 @@ internal static class OracleComparer
         return Run(row, row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout, lazy);
     }
 
+    /// <summary>
+    /// Puts a row's question to a pattern that first answered another one, for
+    /// <see cref="OracleWaveTests.A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does"/>.
+    /// </summary>
+    /// <param name="row">The row to run.</param>
+    /// <param name="dirty">The call that uses the compiled pattern before the row's own question.</param>
+    /// <returns>This port's answer, to compare with <see cref="Run(OracleRow)"/>'s.</returns>
+    /// <remarks>
+    /// The walk goes in through the ablation hook, which is the one place that sees the compiled
+    /// pattern before the question, so D11's composition is switched off: it retries a partial row
+    /// that disagrees with upstream with D11's second pass taken away, which a named ablation needs
+    /// and which here would put an ablated answer against the port's own (D128). The row's own
+    /// budget, as <see cref="Run(OracleRow)"/> uses, so both sides are asked the same question.
+    /// </remarks>
+    internal static IOracleOutcome? RunOnAUsedPattern(OracleRow row, Action<FuzzyRegex> dirty)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            ablate: dirty,
+            composeWithD11: false
+        );
+    }
+
     /// <summary>Puts a row's question to this port, with an explicit deadline.</summary>
     /// <remarks>
     /// The deadline is a parameter only so a test can prove it reaches the engine without waiting
@@ -244,7 +270,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
-    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
+    /// <see cref="RunWithTheUpstreamGraphemeConjunct"/>, <see cref="RunWithTheUpstreamConditionalRestore"/>,
+    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/>,
     /// <see cref="RunWithTheUpstreamSkipTiming"/>, <see cref="RunWithTheUpstreamVerbScope"/>,
     /// <see cref="RunWithoutTheLookaroundInsertion"/>, <see cref="RunWithTheUpstreamMinimumOrder"/> and
     /// <see cref="RunWithTheUpstreamLookaroundCallCaptures"/>, <see cref="RunWithTheSectionLeftOpenByAVerb"/>,
@@ -300,8 +327,10 @@ internal static class OracleComparer
     /// <see cref="RunWithTheUpstreamVerbScope"/> and <see cref="RunWithTheSecondPassAsBeforeD11"/>.
     /// </param>
     /// <param name="composeWithD11">
-    /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
-    /// composed runs themselves pass <see langword="false"/>.
+    /// Whether an ablation on a partial row may be composed with D11's (see the body). The composed
+    /// runs themselves pass <see langword="false"/>, and so do the callers whose hook is not an
+    /// ablation but a second computation of the port's own answer (<see cref="RunOnAUsedPattern"/>,
+    /// <see cref="RunWithTheFrameByFrameRestore"/>; D128).
     /// </param>
     /// <param name="upstreamCalls">
     /// Keep every group call a call, as upstream compiles it, rather than writing out the ones
@@ -446,8 +475,11 @@ internal static class OracleComparer
 
         // Every named ablation also has D81 off: upstream answers a run-out without checking the
         // open sections' upper limits, so with the check on, taking another fix away cannot bring
-        // back upstream's answer on a partial row whose path breaks one.
-        compiled.PatternObject.RunOutAsBeforeD81 = namedAblation;
+        // back upstream's answer on a partial row whose path breaks one. Not where D81's switch
+        // alone already gives upstream's answer (D80): ledger entry 81 has no entry of its own, so
+        // there the first entry whose own fix changes nothing claimed the row.
+        compiled.PatternObject.RunOutAsBeforeD81 =
+            namedAblation && !TheRunOutCheckAloneExplainsIt(row, timeout, lazy, compiled);
         compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
         compiled.PatternObject.DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation;
 
@@ -486,13 +518,17 @@ internal static class OracleComparer
                 return alone;
             }
 
+            // With the switches this ablation stacks and no more, so that this run and the composed
+            // one below differ by the ablation alone (D80: an ablation stacking none was credited
+            // with a row D11's switch alone explains, because this run stacked them all).
             IOracleOutcome? d11Alone = Run(
                 row,
                 timeout,
                 lazy,
                 static c => c.PatternObject.SecondPassAsBeforeD11 = true,
-                upstreamCallCaptures: true,
-                composeWithD11: false
+                upstreamCallCaptures: namedAblation,
+                composeWithD11: false,
+                upstreamCalls: upstreamCalls
             );
 
             if (d11Alone is not null && Compare(row, d11Alone) == OracleVerdict.Agree)
@@ -694,6 +730,34 @@ internal static class OracleComparer
             : withTheFix;
 
     /// <summary>
+    /// Whether D81's switch, and nothing else, gives upstream's answer to a row (D80).
+    /// </summary>
+    /// <remarks>
+    /// Where it does, a named ablation keeps the D81 check on, so that its agreement with upstream,
+    /// if it has one, is its own fix's. The check acts only at a run-out (<c>Matcher.RunOut</c> and
+    /// <c>Matcher.TheBodysRunOutWouldTaint</c>) and only where fuzzy sections nest, so any other
+    /// row is not asked again. Seed 7 row 42099 on <c>fix/insertion-runout</c> is the case: ledger
+    /// entry 81 has no entry of its own, and <c>fuzzy-exact-item-offered-as-a-deletion</c> claimed
+    /// it only because its ablation turns D81 (and with it D129) off.
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    /// <param name="timeout">How long the matching call may take.</param>
+    /// <param name="lazy">As for the run being controlled.</param>
+    /// <param name="compiled">The pattern the controlled run compiled.</param>
+    /// <returns><see langword="true"/> if D81's switch alone agrees with upstream.</returns>
+    private static bool TheRunOutCheckAloneExplainsIt(
+        OracleRow row,
+        TimeSpan timeout,
+        bool lazy,
+        FuzzyRegex compiled
+    ) =>
+        row.Partial
+        && compiled.PatternObject.NestsFuzzySections
+        && Run(row, timeout, lazy, static c => c.PatternObject.RunOutAsBeforeD81 = true, composeWithD11: false)
+            is { } alone
+        && Compare(row, alone) == OracleVerdict.Agree;
+
+    /// <summary>
     /// Puts a row's question to this port with a partial result's groups restored by walking every
     /// open call's frame, innermost first (<c>PatternObject.PartialRestoresFrameByFrame</c>), and
     /// nothing else changed: a second computation of D62's answer, which the D51 entry compares
@@ -709,7 +773,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true
+            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true,
+            composeWithD11: false
         );
     }
 
@@ -1168,6 +1233,31 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamGraphemeConjunct = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's conditional restore: backtracking into a
+    /// conditional puts its saved repeat guard lists back exactly as they were.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 96 (D121): that restore drops the marks saying an enclosing repeat's body
+    /// reached its end, so the failure written next at such a position blocks a later path with
+    /// other group values. Setting <c>PatternObject.UpstreamConditionalRestore</c> makes both
+    /// conditional backtrack arms in <c>Matcher</c> restore as upstream does. The
+    /// <c>conditional-restore-keeps-success-marks</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's restore, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamConditionalRestore(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.UpstreamConditionalRestore = true
         );
     }
 

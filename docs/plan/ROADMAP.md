@@ -20,6 +20,8 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible. **Target stays `net10.0` (LTS) alone through 1.0 (owner, 2026-09-14): .NET 11's gains are JIT-side and reach a `net10.0` assembly on a .NET 11 host; S54 measures both runtimes from one build, and Phase 8 revisits a `net11.0` target only for a post-GA library API worth calling.** | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0. **The user documentation is written from `docs/DIVERGENCES.md`**, the running record of every deliberate difference from upstream (Version 1 default, cost ranking, fixed inherited bugs, API shape, timeouts); every slice appends there when it diverges, so Phase 8 starts from a list, not from memory (owner, 2026-09-14). The ledger's upstream reports are filed in this phase, owner-approved. | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, the engine in a Web Worker, deployed to GitHub Pages | 2-3 | Opus |
+| 10 | Release 1.2, correctness, **scope frozen 2026-11-01**: fix only the defects registered that day (merge order and status in `STATE.md`); no new oracle seed or review sweeps until it ships; a later find is deferred unless it is a wrong answer outside partial matching x nested fuzzy sections x committing constructs. Ends with a full BDN against 1.1.0 | about 5 days | Opus |
+| 11 | Release 1.3, performance, time-boxed (about a week): profile first (WPR, and D82 re-measured against 1.1.0), rank candidates by users touched x measured gain (D82, fuzzy hot path, D68, D29, D91, the pending phase 7 slices S60b-S63), fix the list and end date before starting; rare exponential shapes (D33, D99, D105, D116, D118, D123, D126) last or not at all | about 5 days | Opus |
 
 Roughly 52-80 slice sessions in total, at plus or minus 50%. The generated status board makes the
 real rate visible within the first two phases, which is when these numbers should be revised
@@ -917,8 +919,17 @@ the owner reviews progress, then authors and approves the next phase's slices. S
 
 ## Where the work queue actually is
 
-- `docs/plan/slices/` - pending, lowest number first. Listing this directory **is** the todo list.
-- `docs/plan/slices/done/` - completed, with closing notes appended.
-- `docs/plan/STATE.md` - current slice, blockers, next action. Thirty lines maximum, rewritten
-  each session.
-- `docs/plan/DECISIONS.md` - append-only dated one-liners.
+One place for each kind of information; nothing else holds status.
+
+- `docs/plan/STATE.md` - **the status page**: the current release's checklist in merge order, each
+  item's branch, state and what is left, the rules every session follows, and the next action.
+  Rewritten as items land; one screen (50 lines at most).
+- `docs/KNOWN-DEFECTS.md` - the defect register: one row per root cause, with its status.
+- `docs/plan/DECISIONS.md` - append-only dated one-liners, owner decisions included.
+- This file - what each phase covers. No status.
+- `docs/plan/slices/` - the phase 0-7 work queue. Since 2026-10-16 work is tracked as defect rows
+  and the `STATE.md` checklist instead; the five pending phase 7 slices are inputs to phase 11.
+- Dated documents in `docs/plan/` (`2026-...md`) are point-in-time records (designs, surveys,
+  measurements): history, never the current plan.
+- `.claude/driver/` session briefs say what happened since the last session; they point here and
+  to `STATE.md` and never replace them.

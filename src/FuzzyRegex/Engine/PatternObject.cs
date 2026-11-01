@@ -642,9 +642,12 @@ internal sealed class PatternObject
     /// <summary>
     /// NOT UPSTREAM'S, D101 option D: whether a partial call's second pass summarises repeat tails
     /// inside call frames (<c>Matcher.TailAtEnd</c>): set by <see cref="SetTailMemo"/> where
-    /// <see cref="MemoisesCallOutcomes"/> is set and no node is atomic.
+    /// <see cref="MemoisesCallOutcomes"/> is set and no node is atomic. Read from
+    /// <see cref="TailTables"/> rather than kept in a field of its own: with D121's switch beside
+    /// them, one more bool took a pattern without the memo 8 bytes past main's compile allocation
+    /// (<c>AllocationTests.Compiling_a_pattern_without_lookarounds_allocates_what_it_did_before_D124</c>).
     /// </summary>
-    internal bool MemoisesTails;
+    internal bool MemoisesTails => TailTables is not null;
 
     /// <summary>
     /// NOT UPSTREAM'S, D101 option D: the tables the tail memo reads. Null unless
@@ -1156,6 +1159,15 @@ internal sealed class PatternObject
     /// a divergence. See <c>Matcher.AtGraphemeBoundary</c> and <c>docs/DIVERGENCES.md</c>.
     /// </summary>
     internal bool UpstreamGraphemeConjunct;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether backtracking into a conditional puts
+    /// back the repeat guard lists it saved exactly as they were, dropping the success marks made
+    /// since, as upstream does (D121). The oracle sets it on a pattern it compiled for one call, to
+    /// show that the D121 fix is the whole of a divergence. See
+    /// <see cref="GuardList.PopFromKeepingSuccessMarks"/> and <c>docs/DIVERGENCES.md</c>.
+    /// </summary>
+    internal bool UpstreamConditionalRestore;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the
@@ -2252,7 +2264,6 @@ internal sealed class PatternObject
             nodes,
             groupRequiredLiterals
         );
-        pattern.MemoisesTails = true;
     }
 
     /// <summary>

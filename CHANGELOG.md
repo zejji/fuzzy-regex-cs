@@ -14,6 +14,14 @@ per release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A search through a conditional inside a repeat finds the leftmost match** where a later
+  part of the pattern reads a group: `(a?)(?(?=c)c|[ab])*\1` over 'ac' is (0, 2), not (0, 1)
+  (D121). Backtracking into the conditional forgot that the repeat's body had matched, so a
+  failure recorded under one value of the group blocked a path under another. Python `regex`
+  gives (0, 1) for the positive-test form (see COMPARISON).
+
 ## [1.1.0] - 2026-10-26
 
 ### Changed
@@ -32,6 +40,9 @@ per release.
   counting many matches (`Count` over a megabyte about 21% faster), repeats and short subjects.
   Each change in this release was timed against the code before it; 1.1.0 has not yet been
   timed against 1.0.0 as a whole.
+  <!-- Timed as a whole on 2026-10-31, after release: median 0.92x of 1.0.0 over 76 benchmarks, none
+  slower beyond noise. bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-10-31-v1.1.0-vs-v1.0.0.md -->
+
   The engine's main matching method is split, so its repeat handling, case-folded strings and
   failed-start handling run in their own smaller methods, and the JIT clears fewer stack slots
   on each call.

@@ -404,11 +404,7 @@ public sealed class OracleWaveTests
             previous = row.Subject;
 
             IOracleOutcome? fresh = OracleComparer.Run(row);
-            IOracleOutcome? reused = OracleComparer.Run(
-                row,
-                OracleComparer.RowTimeout,
-                ablate: compiled => Dirty(compiled, dirt)
-            );
+            IOracleOutcome? reused = OracleComparer.RunOnAUsedPattern(row, compiled => Dirty(compiled, dirt));
             compared++;
 
             if (!OracleWave.SameAnswer(fresh, reused))
@@ -448,6 +444,101 @@ public sealed class OracleWaveTests
             }
         }
     }
+
+    /// <summary>
+    /// D128: the pattern-reuse sweep above must compare the port's answer with the port's answer.
+    /// It passed its dirtying walk to <see cref="OracleComparer.Run(OracleRow, TimeSpan, bool,
+    /// Action{FuzzyRegex}?, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool)"/>
+    /// as an ablation, and on a partial row that disagrees with upstream an ablation is retried with
+    /// D11's second pass taken away, the composition the named ablations need. So the "reused"
+    /// side answered upstream's way: seed 936847660 row 49361, CI run 40847036039, fresh P(0, 4),
+    /// "reused" P(0, 0). The walk here does nothing at all, so any difference is the harness's.
+    /// </summary>
+    /// <remarks>
+    /// That row stopped being a witness when D129 and D130 were fixed: the port now answers it as
+    /// upstream does, so the composition never runs. No recorded row still diverges in the shape the
+    /// leak needs (1,268 partial divergent rows searched, 2026-11-01), so the row's recorded answer
+    /// is set here to the port's answer without D11's second pass. That is the answer the composition
+    /// returns when it fires, which is all the harness compares; upstream is not asked. Since D80
+    /// the composition's "D11 alone" control stacks only the switches the ablation stacks, so for
+    /// a walk that stacks none it is the composed run and the composition cannot fire; these tests
+    /// go red only with both that and this fix taken away.
+    /// </remarks>
+    [Test]
+    public void A_used_pattern_is_asked_the_rows_question_with_no_ablation_composed_on_it()
+    {
+        (OracleRow row, IOracleOutcome? fresh) = ARowTheD11CompositionAnswersDifferently();
+
+        IOracleOutcome? used = OracleComparer.RunOnAUsedPattern(row, static _ => { });
+
+        OracleWave
+            .SameAnswer(fresh, used)
+            .Should()
+            .BeTrue(
+                "an unused walk leaves the pattern as fresh; fresh:{0}{1}{0}used:{0}{2}",
+                Environment.NewLine,
+                OracleWave.Describe(row, fresh),
+                OracleWave.Describe(row, used)
+            );
+    }
+
+    /// <summary>
+    /// The same leak through <see cref="OracleComparer.RunWithTheFrameByFrameRestore"/>, which is a
+    /// second computation of the port's own answer for the D51 entry, not an ablation. The frame
+    /// restore acts only on a partial result with a group call still open, and this row has no
+    /// group call, so it must answer as <see cref="OracleComparer.Run(OracleRow)"/> does.
+    /// </summary>
+    [Test]
+    public void The_frame_by_frame_restore_is_asked_the_rows_question_with_no_ablation_composed_on_it()
+    {
+        (OracleRow row, IOracleOutcome? fresh) = ARowTheD11CompositionAnswersDifferently();
+
+        IOracleOutcome? byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row);
+
+        OracleWave
+            .SameAnswer(fresh, byFrames)
+            .Should()
+            .BeTrue(
+                "no group call is open, so the frame restore has nothing to do; fresh:{0}{1}{0}by frames:{0}{2}",
+                Environment.NewLine,
+                OracleWave.Describe(row, fresh),
+                OracleWave.Describe(row, byFrames)
+            );
+    }
+
+    /// <summary>
+    /// A row with its recorded answer replaced by the port's answer without D11's second pass, for
+    /// the D128 tests above and the D80 test in <see cref="NamedAblationLabelTests"/>, with the
+    /// controls they share: the row is partial, the port's own answer disagrees with the recorded
+    /// one, and the D11-only answer agrees with it.
+    /// </summary>
+    /// <returns>The row, and the port's own answer to it.</returns>
+    internal static (OracleRow Row, IOracleOutcome? Fresh) ARowTheD11CompositionAnswersDifferently()
+    {
+        OracleRow asked = OracleWave.ParseRows(_d11ComposedOnAUsedPatternRow)[0];
+        IOracleOutcome? withoutD11 = OracleComparer.Run(
+            asked,
+            OracleComparer.RowTimeout,
+            ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true,
+            composeWithD11: false
+        );
+        withoutD11.Should().NotBeNull();
+        OracleRow row = asked with { Expected = withoutD11 };
+        IOracleOutcome? fresh = OracleComparer.Run(row);
+
+        row.Partial.Should().BeTrue();
+        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+        OracleComparer.Compare(row, withoutD11).Should().Be(OracleVerdict.Agree);
+        return (row, fresh);
+    }
+
+    /// <summary>
+    /// Seed 247934140 row 40113 (JudgedDivergences, D11 + ledger 11), recorded against regex
+    /// 2026.9.29; its recorded answer is replaced before use, as the remarks above say.
+    /// </summary>
+    private const string _d11ComposedOnAUsedPatternRow = """
+        {"generator":"fuzzy","pattern":"(?b)(?e)(?i)(?:fo(?:\\Z0\\w){e<=2,i<=1}){1<=e<=2}","flags":0,"namedLists":{},"subject":"000a","operation":"search","partial":true,"codepointSpan":[1,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":1,"length":3,"captures":[[1,3]]}],"lastIndex":-1,"lastGroup":null,"partial":true,"fuzzyCounts":[0,1,0],"fuzzyChanges":{"substitutions":[1],"insertions":[],"deletions":[]}},"searchOnlyPartial":false}
+        """;
 
     [Test]
     public void The_self_consistency_checker_fires_on_a_contradiction_and_not_on_a_narrowing()

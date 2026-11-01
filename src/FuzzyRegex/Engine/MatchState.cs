@@ -3946,8 +3946,12 @@ internal sealed class MatchState : IDisposable
     // its inline policy scales profitability by (1 - locals / JitMaxLocalsToTrack), and that method
     // has hundreds of locals. They inline anyway once that limit is raised; the body is short.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
+    internal void GuardRepeat(int index, int textPos, uint guardType, bool protect)
+    {
+        // D121 relies on this: the one record that does not block is a body's success mark.
+        Debug.Assert(protect || guardType == NodeStatus.Body, "only a body guard holds a success mark");
         ActiveGuardList(index, guardType, textPos, write: true)?.Guard(textPos, protect);
+    }
 
     /// <summary>Upstream <c>guard_repeat_range</c> (line 9534).</summary>
     /// <param name="index">The repeat index.</param>
