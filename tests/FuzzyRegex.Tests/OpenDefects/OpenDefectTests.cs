@@ -46,4 +46,35 @@ public sealed class OpenDefectTests
         Match m = regex.Match(subject, partial: true);
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 10, 0));
     }
+
+    // D131. Without partial, search finds no match over 'b' (both engines). So a partial call's
+    // answer must be a partial or none: a complete match would be one the plain search finds. The
+    // port answers a complete (0, 0) with one deletion, and in Debug its second pass trips design
+    // assert A1 ("a second-pass success read the text to come"), on main 4205ad63 as on this
+    // branch. regex 2026.9.29 answers the partial (0, 1) with one substitution (measured
+    // 2026-10-31). Which partial is right is not settled here; that it is not complete is.
+    [Test]
+    public void A_partial_call_does_not_answer_a_complete_match_the_plain_search_does_not_find()
+    {
+        var regex = new FuzzyRegex(@"(?:(?=(?:ab){e<=2})){d<=1}");
+        regex.Match("b").Success.Should().BeFalse();
+
+        Match m = regex.Match("b", partial: true);
+        (!m.Success || m.PartialMatch).Should().BeTrue();
+    }
+
+    // D132. As D130, through a condition's test: the test `(?=(?:f^){i<=2})` is positive and its
+    // body's insertions count against the outer {i<=1}, so the run-out insertion that would let `^`
+    // pass is forbidden, the test fails and the no-branch 'g' does not match 'f'. The port answers
+    // a partial from 0 to 2, because a condition's test still stops the run-out's walk (D130 kept
+    // that, option A). Upstream 2026.9.29 answers None (measured 2026-10-31), and so does the port
+    // when the walk goes past positive tests too.
+    [Test]
+    public void An_insertion_run_out_inside_a_condition_test_respects_the_section_around_it()
+    {
+        new FuzzyRegex(@"(?:(?(?=(?:f^){i<=2})f|g)){i<=1}")
+            .MatchAtStart("fx", partial: true)
+            .Success.Should()
+            .BeFalse();
+    }
 }

@@ -452,22 +452,19 @@ public sealed class OracleWaveTests
     /// as an ablation, and on a partial row that disagrees with upstream an ablation is retried with
     /// D11's second pass taken away, the composition the named ablations need. So the "reused"
     /// side answered upstream's way: seed 936847660 row 49361, CI run 40847036039, fresh P(0, 4),
-    /// "reused" P(0, 0). This row is that one, and the walk does nothing at all, so any difference
-    /// is the harness's.
+    /// "reused" P(0, 0). The walk here does nothing at all, so any difference is the harness's.
     /// </summary>
+    /// <remarks>
+    /// That row stopped being a witness when D129 and D130 were fixed: the port now answers it as
+    /// upstream does, so the composition never runs. No recorded row still diverges in the shape the
+    /// leak needs (1,268 partial divergent rows searched, 2026-11-01), so the row's recorded answer
+    /// is set here to the port's answer without D11's second pass. That is the answer the composition
+    /// returns when it fires, which is all the harness compares; upstream is not asked.
+    /// </remarks>
     [Test]
     public void A_used_pattern_is_asked_the_rows_question_with_no_ablation_composed_on_it()
     {
-        OracleRow row = OracleWave.ParseRows(_d11ComposedOnAReusedPatternRow)[0] with
-        {
-            DefaultVersion = (int)FuzzyRegexOptions.Version0,
-        };
-        IOracleOutcome? fresh = OracleComparer.Run(row);
-
-        // The control: the row disagrees with upstream, partial, which is when the D11 composition
-        // runs at all. Without it this test could not go red.
-        row.Partial.Should().BeTrue();
-        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+        (OracleRow row, IOracleOutcome? fresh) = ARowTheD11CompositionAnswersDifferently();
 
         IOracleOutcome? used = OracleComparer.RunOnAUsedPattern(row, static _ => { });
 
@@ -491,15 +488,7 @@ public sealed class OracleWaveTests
     [Test]
     public void The_frame_by_frame_restore_is_asked_the_rows_question_with_no_ablation_composed_on_it()
     {
-        OracleRow row = OracleWave.ParseRows(_d11ComposedOnAReusedPatternRow)[0] with
-        {
-            DefaultVersion = (int)FuzzyRegexOptions.Version0,
-        };
-        IOracleOutcome? fresh = OracleComparer.Run(row);
-
-        // The control, as above: a partial row that disagrees with upstream.
-        row.Partial.Should().BeTrue();
-        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+        (OracleRow row, IOracleOutcome? fresh) = ARowTheD11CompositionAnswersDifferently();
 
         IOracleOutcome? byFrames = OracleComparer.RunWithTheFrameByFrameRestore(row);
 
@@ -514,9 +503,43 @@ public sealed class OracleWaveTests
             );
     }
 
-    /// <summary>Seed 936847660 row 49361, recorded against regex 2026.9.29.</summary>
-    private const string _d11ComposedOnAReusedPatternRow = """
-        {"generator":"fuzzy-overhang","pattern":"(?fi)(?r)(?:(?:\\Z(?:\\1)){1i+2d+1s<=4}){s<=2}(fi)","flags":0,"namedLists":{},"subject":"ﬀifi","operation":"search","partial":true,"codepointSpan":[0,0],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":0,"length":0,"captures":[[0,0]]},{"number":1,"success":false,"index":0,"length":0,"captures":[]}],"lastIndex":-1,"lastGroup":null,"partial":true},"searchOnlyPartial":false}
+    /// <summary>
+    /// The D128 row with its recorded answer replaced by the port's answer without D11's second
+    /// pass, and the controls that make the two tests above able to go red: the row is partial, the
+    /// port's own answer disagrees with the recorded one, the D11-only answer agrees with it, and the
+    /// D11 run the composition tries first (which also sets <c>upstreamCallCaptures</c>) does not, so
+    /// the composition goes on to return the D11-only answer.
+    /// </summary>
+    /// <returns>The row, and the port's own answer to it.</returns>
+    private static (OracleRow Row, IOracleOutcome? Fresh) ARowTheD11CompositionAnswersDifferently()
+    {
+        OracleRow asked = OracleWave.ParseRows(_d11ComposedOnAUsedPatternRow)[0];
+        IOracleOutcome? withoutD11 = OracleComparer.Run(
+            asked,
+            OracleComparer.RowTimeout,
+            ablate: static compiled => compiled.PatternObject.SecondPassAsBeforeD11 = true,
+            composeWithD11: false
+        );
+        withoutD11.Should().NotBeNull();
+        OracleRow row = asked with { Expected = withoutD11 };
+        IOracleOutcome? fresh = OracleComparer.Run(row);
+
+        row.Partial.Should().BeTrue();
+        OracleComparer.Compare(row, fresh).Should().NotBe(OracleVerdict.Agree);
+        OracleComparer.Compare(row, withoutD11).Should().Be(OracleVerdict.Agree);
+        OracleComparer
+            .Compare(row, OracleComparer.RunWithTheSecondPassAsBeforeD11(row))
+            .Should()
+            .NotBe(OracleVerdict.Agree);
+        return (row, fresh);
+    }
+
+    /// <summary>
+    /// Seed 247934140 row 40113 (JudgedDivergences, D11 + ledger 11), recorded against regex
+    /// 2026.9.29; its recorded answer is replaced before use, as the remarks above say.
+    /// </summary>
+    private const string _d11ComposedOnAUsedPatternRow = """
+        {"generator":"fuzzy","pattern":"(?b)(?e)(?i)(?:fo(?:\\Z0\\w){e<=2,i<=1}){1<=e<=2}","flags":0,"namedLists":{},"subject":"000a","operation":"search","partial":true,"codepointSpan":[1,4],"outcome":{"kind":"match","groups":[{"number":0,"success":true,"index":1,"length":3,"captures":[[1,3]]}],"lastIndex":-1,"lastGroup":null,"partial":true,"fuzzyCounts":[0,1,0],"fuzzyChanges":{"substitutions":[1],"insertions":[],"deletions":[]}},"searchOnlyPartial":false}
         """;
 
     [Test]

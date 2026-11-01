@@ -84,4 +84,114 @@ public sealed class PartialEnclosingSectionLimitTests
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, deletions));
     }
+
+    /// <summary>
+    /// D129: an insertion that needs the character after the text runs out of text only if the
+    /// insertion itself fits every open section. <c>^</c> fails past position 0, so after 'f' and
+    /// one inserted 'x' the only step left is a second insertion, which the inner section allows
+    /// and the outer one forbids. The port answered P(0, 2) with one insertion; the same path under
+    /// a single <c>{i&lt;=1}</c> was already None. PCRE2 10.47 agrees once the insertions are
+    /// written out: <c>f.{0,1}^</c> over 'fx' is None, <c>f.{0,2}^</c> is a partial. The rows are,
+    /// in order: the insertion arm of an item; scheduled-oracle row 179705086/41658, whose
+    /// insertions all count against the outer <c>{i&lt;=1}</c>; a trailing insertion at a section's
+    /// end; an outer insertion cost (two units, three allowed); an outer total; and a section
+    /// whose own next item is an exact character; then the trailing insertion reversed, where the
+    /// section's END_FUZZY is on the left and the run-out is at the start of the text; and the
+    /// inner section inside a called group, whose insertions count against the section around the
+    /// call. Upstream answers None on each except the oracle row, where it reports P(0, 4)
+    /// (ledger entry 81).
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?:f^){i<=2}){i<=1}", "fx")]
+    [Arguments(@"(?:a0(?:[a-f]^){e<=2:[^i]}x){s<=1,i<=1,d<=1}", "a0fx")]
+    [Arguments(@"(?:(?:f){i<=2}^){i<=1}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){2i<=3}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){e<=1}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}x){i<=1}", "fx")]
+    [Arguments(@"(?r)(?:$(?:f){i<=2}){i<=1}", "xf")]
+    [Arguments(@"(?:(?&g)){i<=1}(?(DEFINE)(?<g>(?:f^){i<=2}))", "fx")]
+    public void No_partial_where_the_insertion_that_runs_out_breaks_an_enclosing_section(string pattern, string text)
+    {
+        new FuzzyRegex(pattern).MatchAtStart(text, partial: true).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// D129's controls: where every open section can take the second insertion, it runs out of
+    /// text and the partial stands, as <c>f.{0,2}^</c> over 'fx' is a partial in PCRE2 10.47.
+    /// The counts are the path so far; the insertion that runs out is not counted.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:f){i<=2}^", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){i<=2}", "fx")]
+    [Arguments(@"(?:(?:f){i<=2}^){i<=2}", "fx")]
+    [Arguments(@"(?:(?:f^){i<=2}){2i<=4}", "fx")]
+    [Arguments(@"(?r)(?:$(?:f){i<=2}){i<=2}", "xf")]
+    [Arguments(@"(?:(?&g)){i<=2}(?(DEFINE)(?<g>(?:f^){i<=2}))", "fx")]
+    public void A_run_out_insertion_every_section_allows_leaves_the_partial(string pattern, string text)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    }
+
+    /// <summary>
+    /// D130: a positive lookaround's body counts its errors against the sections around the
+    /// lookaround, as a complete match does (<c>(?:(?=a(?:c){i&lt;=1})abc){i&lt;=0}</c> fullmatch 'abc'
+    /// is None in both engines), so a run-out inside the body is checked against them too. In
+    /// <c>(?:(?=(?:f^){i&lt;=2})f){i&lt;=1}</c> over 'fx' the body's `^` passes only after a second
+    /// insertion, which the outer section forbids. The port answered P(0, 2) on each row; regex
+    /// 2026.9.29 answers as here (D130-DESIGN.md, measured 2026-10-31). The rows: match; search,
+    /// which moves to the attempt at 1; the same over 'af'; a lookahead nested in a lookahead; and a
+    /// reversed lookbehind.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?=(?:f^){i<=2})f){i<=1}", "fx", false, -1, -1)]
+    [Arguments(@"(?:(?=(?:f^){i<=2})f){i<=1}", "fx", true, 1, 2)]
+    [Arguments(@"(?:(?=(?:f^){i<=2})f){i<=1}", "af", true, 1, 2)]
+    [Arguments(@"(?:(?=(?=(?:f^){i<=2}))f){i<=1}", "fx", false, -1, -1)]
+    [Arguments(@"(?r)(?:f(?<=(?:\Zf){i<=2})){i<=1}", "xf", false, -1, -1)]
+    public void A_run_out_in_a_positive_lookarounds_body_respects_the_sections_around_it(
+        string pattern,
+        string text,
+        bool search,
+        int start,
+        int end
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        Match m = search ? regex.Match(text, partial: true) : regex.MatchAtStart(text, partial: true);
+
+        if (start < 0)
+        {
+            m.Success.Should().BeFalse();
+        }
+        else
+        {
+            (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, start, end));
+        }
+    }
+
+    /// <summary>
+    /// D130's controls: an outer section with room keeps the partial; a negative lookaround's body
+    /// drops its errors, so the section around it has no claim on them; an atomic group was already
+    /// walked; and a complete match is unaffected. Each answer is the one before the fix.
+    /// </summary>
+    [Test]
+    [Arguments(@"(?:(?=(?:f^){i<=2})f){i<=2}", "fx", true, true, 0, 2)]
+    [Arguments(@"(?:(?!(?:abc){s<=2})x){s<=1}", "xy", true, false, 0, 1)]
+    [Arguments(@"(?:(?>(?:abc){s<=2})){s<=1}", "xy", true, true, 1, 2)]
+    public void A_lookaround_run_out_the_sections_allow_or_drop_is_unchanged(
+        string pattern,
+        string text,
+        bool success,
+        bool partial,
+        int start,
+        int end
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(text, partial: true);
+
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((success, partial, start, end));
+    }
 }
