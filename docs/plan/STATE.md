@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 12:00 by Claude Code (item 5 gate running).
+**Updated:** 2026-11-01 12:35 by Claude Code (items 3-5 merged).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -13,7 +13,7 @@
 | 2 | Oracle workflow gate split | `ci/oracle-gate` | **merged** 002650bc | - |
 | 3 | D128 oracle reuse test | `fix/reuse-c` | **merged** 53f27a93 (F115) | - |
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | **merged** c06653ec (F116, F117) | - |
-| 5 | D132 condition-test run-out | `fix/d132` | main merged (uncommitted), gate running | ratchet, inspection, oracle 7/4242, D130-grid differential, merge |
+| 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
 | 6 | D121 conditional restore | `fix/d121` | timing done; change accepted | inspection, merge |
 | 7 | D80 ablation labels | `fix/d80-labels` | row 41769 restored (uncommitted) | oracle 7/4242 consume, inspection, merge (conflicts with #3) |
 | 8 | D101 + frame cut (kept) | `fix/d101-rebase-cut`, `review/d101-cut-surrogate` 917b9de2 | timing settled | carry 184c256b onto the cut line, ratchet, non-partial A-B-B-A, full BDN, merge |
@@ -39,12 +39,9 @@ pushes need the owner.
 ## In flight
 
 - Uncommitted in `.claude/worktrees/d80`: row 41769 restored (jsonl, D80 row, LEDGER 81); needs 7/4242.
-- Item 5: `.scratch/s1101/gate5.ps1` (PID 50836, `gate5.status`) in `.claude/worktrees/d132`: ratchet,
-  waits for `gate5.go` (create it after s06b-e8 says "go"), merge commit, oracle 7/4242. Then the
-  differential: `.scratch/s1101/d132diff` (grid + probe per side), not yet run.
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing.
 
-**Next action:** finish item 5 gate and differential, merge item 5.
+**Next action:** item 6 (`fix/d121`): merge main, inspection, merge.
