@@ -6744,7 +6744,16 @@ internal static class Matcher
     /// (<c>(?:(?=a(?:c){i&lt;=1})abc){i&lt;=0}</c> fullmatch 'abc' is None in both engines), so the
     /// scan walks on past it (D130): <c>(?:(?=(?:f^){i&lt;=2})f){i&lt;=1}</c> over 'fx' answered P(0, 2),
     /// through a run-out insertion the outer section forbids, and now answers None as upstream
-    /// does. A condition's test still stops the scan, positive or not; that is D132, left open.
+    /// does. A condition's test stops the scan, except a positive test under
+    /// <paramref name="pastPositiveTests"/> (D132), which only the run-out insertion's check sets
+    /// (<see cref="ARunOutInsertionFitsTheOpenSections"/>). The test is atomic and its body's errors
+    /// count against the sections around the condition when the yes-branch runs, so an insertion
+    /// those sections forbid fails the attempt on every continuation:
+    /// <c>(?:(?(?=(?:f^){i&lt;=2})f|g)){i&lt;=1}</c> over 'fx' answered P(0, 2) and now answers None,
+    /// as upstream does. A plain run-out still stops at every test: a condition is not monotone, and
+    /// failing the body's path there lets the no-branch run where a complete match would have
+    /// committed to the test (D132-DESIGN.md section 4: walking past tests there too turned 1,356
+    /// exact answers on its grid into partials no text completes).
     /// The sections around a stopping construct are asked when matching goes on after it
     /// (<see cref="CloseTheBodysSection"/>, and this check at any later run-out). A section's frame
     /// lies above the structure-stack depth the innermost stopping lookaround or test parked exactly
@@ -6757,8 +6766,9 @@ internal static class Matcher
     /// </para>
     /// </remarks>
     /// <param name="state">The match state, which keeps the section links for such a pattern.</param>
+    /// <param name="pastPositiveTests">Whether the scan walks on past a positive condition test.</param>
     /// <returns><see langword="true"/> if some open section's upper limit is already broken.</returns>
-    private static bool AnOpenSectionIsOverItsLimits(MatchState state)
+    private static bool AnOpenSectionIsOverItsLimits(MatchState state, bool pastPositiveTests)
     {
         Debug.Assert(state.Pattern.KeepsSectionLinks, "D81: a pattern whose sections nest keeps their links");
 
@@ -6784,9 +6794,14 @@ internal static class Matcher
             if ((Opcode)code is Opcode.Lookaround or Opcode.Conditional)
             {
                 // D130: a positive lookaround's body hands its errors out to the sections around
-                // it, so its run-out answers to them as well, and the scan goes on outward.
+                // it, so its run-out answers to them as well, and the scan goes on outward. D132: so
+                // does a positive condition test's, for the run-out insertion's check.
+                Debug.Assert(
+                    (Opcode)code != Opcode.Conditional || state.PartialSide != MatchState.PartialNone,
+                    "D132: a run-out reads a condition's parked node, which only a partial call parks"
+                );
                 if (
-                    (Opcode)code == Opcode.Lookaround
+                    ((Opcode)code == Opcode.Lookaround || (pastPositiveTests && (Opcode)code == Opcode.Conditional))
                     && ReadPruningMark(state, mark, out _, out LookaroundStateData look)
                     && look.Node is { Match: true }
                 )
@@ -6901,7 +6916,7 @@ internal static class Matcher
 
         long[] counts = state.FuzzyCounts;
         ++counts[FuzzyValue.Ins];
-        bool over = AnOpenSectionIsOverItsLimits(state);
+        bool over = AnOpenSectionIsOverItsLimits(state, pastPositiveTests: true);
         --counts[FuzzyValue.Ins];
 
         return !over;
@@ -21051,7 +21066,11 @@ internal static class Matcher
     {
         PatternObject pattern = state.Pattern;
 
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        if (
+            pattern.NestsFuzzySections
+            && !pattern.RunOutAsBeforeD81
+            && AnOpenSectionIsOverItsLimits(state, pastPositiveTests: false)
+        )
         {
             state.NotePartialEvent(PartialEvent.RunOutOverASectionsLimits);
             stringPos = -1;
@@ -21611,7 +21630,11 @@ internal static class Matcher
     private static bool TheBodysRunOutWouldTaint(MatchState state)
     {
         PatternObject pattern = state.Pattern;
-        if (pattern.NestsFuzzySections && !pattern.RunOutAsBeforeD81 && AnOpenSectionIsOverItsLimits(state))
+        if (
+            pattern.NestsFuzzySections
+            && !pattern.RunOutAsBeforeD81
+            && AnOpenSectionIsOverItsLimits(state, pastPositiveTests: false)
+        )
         {
             return false;
         }
