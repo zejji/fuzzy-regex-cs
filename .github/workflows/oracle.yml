@@ -4,6 +4,12 @@ name: Differential oracle
 # results. Scheduled and on demand only, never a merge gate: the oracle needs Python, it is
 # property-based so its runtime varies, and a flaky ground truth must not be able to block a
 # merge. Every divergence it finds is minimised into an ordinary permanent test instead.
+#
+# Two kinds of seed (owner decision 2026-10-26). The fixed seeds 7 and 4242 are a gate: every row
+# they draw is accounted for, so the run fails when they go red. Fresh seeds - the date seed and
+# Thursday's sweep - only report, in the job summary and the uploaded artifact, and never fail the
+# run: they keep drawing new rows of upstream bugs already judged, and a run that is always red
+# cannot show a real regression.
 
 on:
   schedule:
@@ -134,13 +140,24 @@ jobs:
         # reproduce.
         run: python tools/record-oracle.py --verify-determinism
 
-      - name: Run the oracle
+      - name: Run the oracle at the fixed seeds (the gate)
         # Records a wave from the oracle built above and diffs this port's matching against it.
-        # The seed is random per run and recorded in the wave header, so each week explores rows
-        # last week did not and any divergence stays reproducible from the uploaded artifact.
-        # Every divergence fails the job; a row this port cannot answer yet is reported as
-        # unsupported and does not.
-        run: pwsh -File tools/run-oracle.ps1 -Configuration Release -Count 2000
+        # Seeds 7 and 4242 have every divergence judged, so a red here is a change: a port
+        # regression, or upstream no longer giving an answer a judged row recorded. Every
+        # divergence fails the job; a row this port cannot answer yet is reported as unsupported
+        # and does not.
+        run: pwsh -File tools/run-oracle.ps1 -Seeds 7,4242 -Configuration Release -Count 2000
+
+      - name: Run the oracle at the date seed (report only)
+        # A fresh seed every week, which keeps meeting known upstream bugs in new shapes, so a red
+        # one is triaged (docs/VERIFICATION.md, "Judging a red scheduled sweep"), not a failed
+        # run: it adds a warning and the job summary's table, and the job stays green. Until
+        # 2026-10-30 the date seed ran with the fixed ones, and the job was red at every run from
+        # 2026-09-21 whether or not the port had changed.
+        if: always()
+        run: |
+          pwsh -File tools/sweep-seeds.ps1 -Seeds "$(date -u +%Y%m%d)" -Count 2000 -Configuration Release \
+            || echo "::warning::The date seed is red or did not finish (report only): see the job summary and the oracle-divergences artifact."
 
       - name: Upload divergences
         if: always()
@@ -209,8 +226,10 @@ jobs:
           if [ -z "$MASTER" ]; then MASTER=$(date -u +%Y%m%d); fi
           COUNT="${{ github.event.inputs.seedCount }}"
           if [ -z "$COUNT" ]; then COUNT=6; fi
+          # Report only, like the date seed in the job above: a red seed is triaged, not a failed run.
           pwsh -File tools/sweep-seeds.ps1 \
-            -SeedCount "$COUNT" -MasterSeed "$MASTER" -Count 2000 -Configuration Release
+            -SeedCount "$COUNT" -MasterSeed "$MASTER" -Count 2000 -Configuration Release \
+            || echo "::warning::The sweep is red or did not finish (report only): see the job summary and the oracle-sweep artifact."
 
       - name: Upload the sweep log and every red seed's wave
         if: always()

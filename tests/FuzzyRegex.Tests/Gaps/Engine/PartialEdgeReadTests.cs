@@ -566,13 +566,15 @@ public sealed class PartialEdgeReadTests
 
         (m5367.PartialMatch, m5367.Index, m5367.Length).Should().Be((true, 0, 0));
 
-        // Row 6399, a phantom of limit C2: an insertion runs out of text on the left.
+        // Row 6399 was a phantom of limit C2, an insertion running out of text on the left. Since
+        // D129 it is None, as upstream and the judge answer: the path already holds two insertions,
+        // and the third, the one that runs out, breaks the outer {e<=2}.
         Match m6399 = new FuzzyRegex(@"(?fi)(?r)\m(?:(?:b+?\A){e<=3}){e<=2}", FuzzyRegexOptions.Version0).FullMatch(
             "BB",
             partial: true
         );
 
-        (m6399.PartialMatch, m6399.Index, m6399.Length).Should().Be((true, 0, 2));
+        m6399.Success.Should().BeFalse();
 
         // Row 6589 searched: the attempt at 4 runs out of text through an insertion at the edge,
         // a phantom of limit C2 (D19; the judge answers None).

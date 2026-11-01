@@ -225,6 +225,32 @@ internal static class OracleComparer
         return Run(row, row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout, lazy);
     }
 
+    /// <summary>
+    /// Puts a row's question to a pattern that first answered another one, for
+    /// <see cref="OracleWaveTests.A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does"/>.
+    /// </summary>
+    /// <param name="row">The row to run.</param>
+    /// <param name="dirty">The call that uses the compiled pattern before the row's own question.</param>
+    /// <returns>This port's answer, to compare with <see cref="Run(OracleRow)"/>'s.</returns>
+    /// <remarks>
+    /// The walk goes in through the ablation hook, which is the one place that sees the compiled
+    /// pattern before the question, so D11's composition is switched off: it retries a partial row
+    /// that disagrees with upstream with D11's second pass taken away, which a named ablation needs
+    /// and which here would put an ablated answer against the port's own (D128). The row's own
+    /// budget, as <see cref="Run(OracleRow)"/> uses, so both sides are asked the same question.
+    /// </remarks>
+    internal static IOracleOutcome? RunOnAUsedPattern(OracleRow row, Action<FuzzyRegex> dirty)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            ablate: dirty,
+            composeWithD11: false
+        );
+    }
+
     /// <summary>Puts a row's question to this port, with an explicit deadline.</summary>
     /// <remarks>
     /// The deadline is a parameter only so a test can prove it reaches the engine without waiting
@@ -300,8 +326,10 @@ internal static class OracleComparer
     /// <see cref="RunWithTheUpstreamVerbScope"/> and <see cref="RunWithTheSecondPassAsBeforeD11"/>.
     /// </param>
     /// <param name="composeWithD11">
-    /// Whether an ablation on a partial row may be composed with D11's (see the body). Only the
-    /// composed runs themselves pass <see langword="false"/>.
+    /// Whether an ablation on a partial row may be composed with D11's (see the body). The composed
+    /// runs themselves pass <see langword="false"/>, and so do the callers whose hook is not an
+    /// ablation but a second computation of the port's own answer (<see cref="RunOnAUsedPattern"/>,
+    /// <see cref="RunWithTheFrameByFrameRestore"/>; D128).
     /// </param>
     /// <param name="upstreamFuzzyConditionTest">
     /// Compile each conditional's lookaround test with the enclosing section's fuzziness, as
@@ -731,7 +759,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true
+            ablate: static compiled => compiled.PatternObject.PartialRestoresFrameByFrame = true,
+            composeWithD11: false
         );
     }
 

@@ -552,10 +552,20 @@ public sealed class Match : Group
     /// counts in code units throughout.
     /// </para>
     /// <para>
-    /// <b>A deletion's position is measured in a restored subject.</b> Upstream shifts each
-    /// deletion by the number of deletions recorded before it (<c>:20555-20558</c>), so what is
-    /// reported is where the missing character would sit in a string that had them all put back -
-    /// which can be past the end of the match, and past the end of the subject.
+    /// <b>A deletion's position is shifted by the deletions listed before it.</b> Upstream adds one
+    /// to each deletion for every deletion before it in the list (<c>:20554-20557</c>), and this
+    /// port adds one code unit. Deletions are listed in the order the part of the pattern that made
+    /// them was read: left to right, except inside a lookbehind and under
+    /// <see cref="FuzzyRegexOptions.RightToLeft"/>, which read right to left. Where every deletion was
+    /// read left to right and each deleted character is one code unit, the result is where the
+    /// missing character would sit in a string with all of them put back, which is how upstream's
+    /// README reads it. Read right to left, the shift lands on the deletions further left:
+    /// <c>(?&lt;=x(?:ab){d&lt;=2})c</c> over "xc" lists 'b' first, at 1, and 'a' second, at 2. A deleted
+    /// character outside the BMP still adds one. So a reported deletion can lie past the end of the
+    /// match or of the subject,
+    /// or between the two halves of a surrogate pair. Subtract its index in
+    /// <see cref="FuzzyChanges.Deletions"/> to get the position in the subject where the character
+    /// is missing, which is always between two characters.
     /// </para>
     /// <para>
     /// Cached, because upstream builds three fresh lists on every attribute read and a .NET property
