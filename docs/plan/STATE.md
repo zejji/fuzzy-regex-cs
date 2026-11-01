@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-01 10:30 by Claude Code.
+**Updated:** 2026-11-01 11:40 by Claude Code (checkpoint before a new session).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -9,8 +9,8 @@
 
 | # | Item | Branch | State | Left to do |
 |---|---|---|---|---|
-| 1 | v1.0 vs v1.1 benchmark note | `docs/v110-bench` | gates done | merge |
-| 2 | Oracle workflow gate split | `ci/oracle-gate` | gates done | merge |
+| 1 | v1.0 vs v1.1 benchmark note | `docs/v110-bench` | **merged** 5ac48534 | - |
+| 2 | Oracle workflow gate split | `ci/oracle-gate` | **merged** 002650bc | - |
 | 3 | D128 oracle reuse test | `fix/reuse-c` | review finding fixed | merge; amend D128 text after #4 |
 | 4 | D129 + D130 run-out fit | `fix/insertion-runout` | timing done; cost accepted | merge |
 | 5 | D132 condition-test run-out | `fix/d132` | fix, reviews done | inspection, oracle 7/4242, D130-grid differential, merge |
@@ -40,12 +40,11 @@ pushes need the owner.
 
 - Uncommitted in `.claude/worktrees/d80` (`fix/d80-labels`): row 41769 restored
   (`JudgedDivergences.jsonl`, KNOWN-DEFECTS D80, LEDGER 81 list); needs the seed 7/4242 consume.
-- Research subagent: CLAUDE.md / AGENTS.md best practice with tool-written blocks (headroom,
-  Serena), and whether the Serena block helps. Result goes to the owner, then into `CLAUDE.md`.
 - Running: watchdog and jbguard (PIDs in `.scratch/s1024/guards.pid`). No timing or builds.
+- Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner
 
 - Nothing.
 
-**Next action:** items 1-4, each with its gates, then ask the owner to approve the merges.
+**Next action:** item 3 (`fix/reuse-c`): check it merges onto main, ratchet, oracle 7/4242, merge; then item 4.
