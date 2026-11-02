@@ -490,6 +490,12 @@ internal static class OracleComparer
         compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
         compiled.PatternObject.DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation;
 
+        // D125 likewise: upstream's lastindex counts a called copy's group as closing after every
+        // group of the pattern, on every row with such a copy, and the switch changes nothing on a
+        // row without one. Its own entry sits before every ablation entry, so it claims only the
+        // rows D125 alone explains. See `called-copy-keeps-the-groups-close-order`.
+        compiled.PatternObject.UpstreamCopyEndIndex = namedAblation;
+
         ablate?.Invoke(compiled);
 
         // NOT A PORT BEHAVIOUR, D11: upstream has none of this port's fixes, so on a partial row an
@@ -1285,6 +1291,33 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamGraphemeConjunct = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's <c>lastindex</c> for a called copy: the
+    /// copy's group counts as closing after every group of the pattern.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 98 (D125): a group called with another direction or fuzziness is compiled again
+    /// after the pattern, and upstream's copy records the group's end index again, so
+    /// <c>lastindex</c> names the group wherever it matched. Setting
+    /// <c>PatternObject.UpstreamCopyEndIndex</c> reads that index. Every row has a call, so the D51
+    /// fix goes too, with the rest of the named ablations' stack. The
+    /// <c>called-copy-keeps-the-groups-close-order</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's end index, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamCopyEndIndex(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.UpstreamCopyEndIndex = true,
+            upstreamCallCaptures: true
         );
     }
 

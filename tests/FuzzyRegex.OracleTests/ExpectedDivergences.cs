@@ -3092,6 +3092,23 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>called-copy-keeps-the-groups-close-order</c> (D125), recorded 2026-11-02 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/d125-copy-end-index-rows.jsonl</c>: a
+    /// call in a lookbehind of a forward pattern, in a lookahead of a reverse pattern, in a fuzzy
+    /// section, and seed 4242 row 3639. Over 'xab' and 'abx' upstream finds no match on the call
+    /// forms (ledger entry 8), so the rows carry one more character. The negative lookbehind form
+    /// over 'cxab' is not here: upstream also keeps the call's capture from the matched negative
+    /// body there (D10), and `group-call-in-a-discarded-lookaround-leaves-no-capture`, whose
+    /// ablation has this one's switch on too, claims it.
+    /// </summary>
+    private const string _copyEndIndexRows = """
+        {"generator": "rows", "pattern": "(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)", "flags": 0, "namedLists": {}, "subject": "cxab", "operation": "search", "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1], [1, 1]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}, {"number": 3, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}}
+        {"generator": "rows", "pattern": "(?r)(a)(b)(?=(?P>g1))(?P<g1>x|y(?P>g1)y)", "flags": 0, "namedLists": {}, "subject": "abxc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1], [2, 1]]}], "lastIndex": 3, "lastGroup": "g1", "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g1>x|y(?P>g1)y)(?:(?P>g1)){e<=1}(a)(b)", "flags": 0, "namedLists": {}, "subject": "xxab", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [1, 1]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}, {"number": 3, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}}
+        {"generator": "rows", "pattern": "(?r)(\\D?)*(?P<g2>\\p{ASCII}+)(?:(?(2)(?!(?P>g2))[a\\d]|\\p{L}))+?", "flags": 8, "namedLists": {}, "subject": "\ud801\udc00\r\ud801\udc00\ud801\udc00", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 2], [0, 0]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 0, "captures": [[0, 2], [0, 0]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 3]}]}}
+        """;
+
+    /// <summary>
     /// The six rows of <c>group-call-copy-is-the-group-written-out</c>, recorded 2026-10-03 by
     /// <c>python tools/record-oracle.py --rows tools/probes/d50-call-copy-rows.jsonl</c>: a backwards
     /// and a fuzzy copy of a full-folded run, two fuzzy copies of an atomic alternation the
@@ -3909,6 +3926,30 @@ internal static class ExpectedDivergences
             Example: _negativeTestCaptureRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalTests(row))
+        ),
+        // Before every named ablation entry, after the switches that run alone (D51, D52, D54):
+        // every named ablation has this switch on as well, so after them any of them would claim a
+        // row D125 alone explains.
+        new(
+            Id: "called-copy-keeps-the-groups-close-order",
+            Reason: "PORT RIGHT, D125 (ledger entry 98): a group called with another direction or "
+                + "fuzziness is compiled again after the pattern's SUCCESS, and upstream's copy records "
+                + "the group's end index again (`record_group_end`, `_regex.c:24065`, called from `build_GROUP`, `:24821`), after every group "
+                + "of the pattern, so `lastindex` (the matched group that closed last) names the called "
+                + "group wherever it matched. `(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)` over 'cxab' has "
+                + "lastindex 1 upstream, and the call written out, `(?P<g1>x|y[xy]*y)(?<=x|y[xy]*y)(a)(b)`, "
+                + "has 3 upstream and here. This port's copy keeps the order in which the group as "
+                + "written closed (`NodeCompiler.BuildGroup`).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamCopyEndIndex`, which sets "
+                + "`PatternObject.UpstreamCopyEndIndex` so `lastindex` reads the copy's end index (with "
+                + "the switches every named ablation stacks), "
+                + "reproduces upstream's recorded answer exactly, AND this port's live answer is the one "
+                + "being judged.",
+            PinnedBy: "Gaps.Engine.CalledCopyTests",
+            Example: _copyEndIndexRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamCopyEndIndex(row))
         ),
         new(
             Id: "fuzzy-exact-item-offered-as-a-deletion",

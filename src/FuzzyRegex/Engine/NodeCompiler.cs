@@ -1171,6 +1171,11 @@ internal static class NodeCompiler
         startNode.Values[2] = 0;
         endNode.Values[2] = 1;
 
+        // NOT UPSTREAM (D125): see below where the group closes. MinWidthAtSuccess is set when the
+        // pattern's SUCCESS is built, and only the called copies come after it.
+        long endIndexAsWritten =
+            args.MinWidthAtSuccess >= 0 && privateGroup >= 1 ? args.Pattern.GroupInfoAt((int)privateGroup).EndIndex : 0;
+
         // Record that we have a new capture group.
         RecordGroup(args.Pattern, (int)privateGroup, startNode);
 
@@ -1220,6 +1225,20 @@ internal static class NodeCompiler
 
         // Record that the capture group has closed.
         RecordGroupEnd(args.Pattern, (int)privateGroup);
+
+        // NOT UPSTREAM (D125, ledger entry 98): a copy of the group, compiled after the pattern's SUCCESS for a call
+        // running the other way or with other fuzziness (PatternCompiler's additional groups),
+        // keeps the order in which the group as written closed. Upstream's copy records the group's
+        // end again, after every group of the pattern, so Matcher's lastindex (the matched group
+        // that closed last) names it: `(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)` over 'xab' answered
+        // lastindex 1 where the written-out `(?P<g1>x|y[xy]*y)(?<=x|y[xy]*y)(a)(b)` answers 3.
+        // The counter still moves, as BuildLookaround's check of a body's groups reads it.
+        if (args.MinWidthAtSuccess >= 0 && privateGroup >= 1)
+        {
+            GroupInfo info = args.Pattern.GroupInfoAt((int)privateGroup);
+            info.CopyEndIndex = (int)info.EndIndex;
+            info.EndIndex = endIndexAsWritten;
+        }
 
         // Append the capture group.
         AddNode(args.End!, startNode);

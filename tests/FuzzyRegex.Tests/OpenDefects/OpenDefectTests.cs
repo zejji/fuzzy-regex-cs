@@ -72,18 +72,6 @@ public sealed class OpenDefectTests
         (m.Success, m.PartialMatch, m.Index, m.Length).Should().Be((true, true, 2, 0));
     }
 
-    // D125. The groups close in the order g1, 2, 3, so lastindex is 3; the optional lookbehind
-    // holding the call changes no group. With the recursive call kept, the port answers lastindex 1;
-    // the written-out `(?P<g1>x+)(?:(?<!x+))?(a)(b)` answers 3, and so does upstream 2026.9.29's
-    // written-out form (its call form loses the match, ledger entry 8).
-    [Test]
-    public void A_call_through_a_lookaround_the_other_way_leaves_lastindex_alone()
-    {
-        Match m = new FuzzyRegex("(?P<g1>x(?P>g1)?)(?:(?<!(?P>g1)))?(a)(b)").Match("xab");
-
-        (m.Success, m.Index, m.Length, m.LastGroupNumber).Should().Be((true, 0, 3, 3));
-    }
-
     // D126. The pattern consumes one 'x', so no text makes 'xxcw' + w a full match: None. The
     // lookahead's body is a search for a later 'y' (\X takes any character), so whatever follows
     // it cannot decide anything before the end of the pattern. The port's second pass forks once

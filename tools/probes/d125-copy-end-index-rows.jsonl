@@ -1,0 +1,4 @@
+{"pattern": "(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)", "flags": 0, "subject": "cxab", "operation": "search"}
+{"pattern": "(?r)(a)(b)(?=(?P>g1))(?P<g1>x|y(?P>g1)y)", "flags": 0, "subject": "abxc", "operation": "search"}
+{"pattern": "(?P<g1>x|y(?P>g1)y)(?:(?P>g1)){e<=1}(a)(b)", "flags": 0, "subject": "xxab", "operation": "search"}
+{"pattern": "(?r)(\\D?)*(?P<g2>\\p{ASCII}+)(?:(?(2)(?!(?P>g2))[a\\d]|\\p{L}))+?", "flags": 8, "subject": "\ud801\udc00\r\ud801\udc00\ud801\udc00", "operation": "finditer-overlapped"}

@@ -7549,3 +7549,48 @@ links past atomic groups and positive lookaround bodies and stopping at a negati
 (its errors are dropped) and at every condition test (a test is not monotone: pruning there would
 make the no-branch run; left as upstream, D136). `PatternObject.MaximaAsBeforeD133` puts the late
 check back for the oracle.
+
+
+## 98. A called group's copy counts as closing after every group, so `lastindex` names it wherever it matched - DIVERGES HERE (D125, 2026-11-02)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D125, found 2026-10-24 by the
+D101 work (the oracle's judged rows moved when calls were written out); first registered as
+this port's alone, because upstream answers None on the shortest witness (entry 8). Evidence:
+`tools/probes/d125-copy-end-index-rows.jsonl`; `tests/FuzzyRegex.Tests/Gaps/Engine/CalledCopyTests.cs`.
+
+**Reproduction**, `regex` 2026.9.29 on Python 3.14, measured 2026-11-02:
+
+```
+search(r'(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)', 'cxab')       -> (1, 4), lastindex 1, 'g1'
+search(r'(?P<g1>x|y[xy]*y)(?<=x|y[xy]*y)(a)(b)', 'cxab')       -> (1, 4), lastindex 3, 'g1'   written out
+search(r'(?r)(a)(b)(?=(?P>g1))(?P<g1>x|y(?P>g1)y)', 'abxc')    -> (0, 3), lastindex 3, 'g1'
+search(r'(?r)(a)(b)(?=x|y[xy]*y)(?P<g1>x|y[xy]*y)', 'abxc')    -> (0, 3), lastindex 1, None   written out
+search(r'(?P<g1>x|y(?P>g1)y)(?:(?P>g1)){e<=1}(a)(b)', 'xxab')  -> (0, 4), lastindex 1, 'g1'
+search(r'(?P<g1>x|y[xy]*y)(?:x|y[xy]*y){e<=1}(a)(b)', 'xxab')  -> (0, 4), lastindex 3, 'g1'   written out
+```
+
+Spans and groups agree with the written-out forms; only `lastindex` and `lastgroup` move. The
+oracle's seed 4242 row 3639, `(?r)(\D?)*(?P<g2>\p{ASCII}+)(?:(?(2)(?!(?P>g2))[a\d]|\p{L}))+?`
+with flag 8 over '\U00010400\r\U00010400\U00010400', overlapped: lastindex 2 upstream, 1 with the
+call written out.
+
+**Why upstream is wrong.** `lastindex` is the group that closed last in the match
+(`regex.match('((a))', 'a').lastindex` is 1), read from each group's `end_index`, the order in
+which the compiler closed it (`_regex.c:18201`). A call matches the group's body; it does not
+close the group a second time after the rest of the pattern, and the written-out forms above
+answer 3 and 1.
+
+**Mechanism.** A group called with another direction or fuzziness than where it is written is
+compiled again as a copy after the pattern's SUCCESS (`_check_group_features`,
+`_regex_core.py:4421`; `_main.py:637`). `build_GROUP` calls `record_group_end` for the copy too
+(`_regex.c:24821`, `:24065`), which gives the group the next end index, past every group of the
+pattern, so whenever the group took part it is the one `lastindex` names.
+
+**Proposed fix upstream:** in `build_GROUP`, leave `end_index` alone when the group being built
+is a copy, that is, once the pattern's own SUCCESS has been built.
+
+**This port.** That fix (`NodeCompiler.BuildGroup` keeps the group's own end index for a copy;
+the counter still moves, as `BuildLookaround` reads it). `GroupInfo.CopyEndIndex` keeps upstream's
+value and `PatternObject.UpstreamCopyEndIndex` makes `lastindex` read it, for the oracle (entry
+`called-copy-keeps-the-groups-close-order`; every named ablation stacks it). Pinned by
+`Gaps/Engine/CalledCopyTests`.

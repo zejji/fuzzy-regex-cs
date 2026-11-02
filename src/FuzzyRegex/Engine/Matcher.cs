@@ -27650,9 +27650,13 @@ internal static class Matcher
             {
                 GroupInfo info = pattern.GroupInfoAt(g + 1);
 
-                if (state.Groups[g].Current >= 0 && info.EndIndex > maxEndIndex)
+                // NOT UPSTREAM's switch (D125): the oracle's ablation reads upstream's end index.
+                long endIndex =
+                    info.CopyEndIndex != 0 && pattern.UpstreamCopyEndIndex ? info.CopyEndIndex : info.EndIndex;
+
+                if (state.Groups[g].Current >= 0 && endIndex > maxEndIndex)
                 {
-                    maxEndIndex = info.EndIndex;
+                    maxEndIndex = endIndex;
                     state.LastIndex = g + 1;
                     if (info.HasName)
                     {

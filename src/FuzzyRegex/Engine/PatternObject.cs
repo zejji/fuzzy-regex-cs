@@ -36,6 +36,15 @@ internal sealed class GroupInfo
 
     /// <summary>Upstream <c>has_name</c>: the group is named.</summary>
     internal bool HasName;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D125): the <see cref="EndIndex"/> upstream leaves on the group, where a called
+    /// copy of it, compiled after the pattern, recorded its end again; 0 where no copy did. This
+    /// port keeps the group's own <see cref="EndIndex"/> (<c>NodeCompiler.BuildGroup</c>), and the
+    /// oracle reads this through <see cref="PatternObject.UpstreamCopyEndIndex"/>. An int, so the
+    /// object stays the size it was.
+    /// </summary>
+    internal int CopyEndIndex;
 }
 
 /// <summary>
@@ -1187,9 +1196,22 @@ internal sealed class PatternObject
     }
 
     /// <summary>
-    /// The oracle-only switches <see cref="UpstreamConditionalRestore"/> and
-    /// <see cref="MaximaAsBeforeD133"/>, in one byte: a bool field of its own for D133 grew every
-    /// compiled pattern by 8 bytes (<c>AllocationTests</c>, 2026-11-02).
+    /// NOT UPSTREAM, and never set by this library: whether <c>lastindex</c> reads the end index a
+    /// called copy of a group recorded, as upstream's does (D125, <see cref="GroupInfo.CopyEndIndex"/>).
+    /// The oracle sets it on a pattern it compiled for an ablation, since upstream has none of this
+    /// port's fixes.
+    /// </summary>
+    internal bool UpstreamCopyEndIndex
+    {
+        get => (_oracleSwitches & OracleSwitches.UpstreamCopyEndIndex) != OracleSwitches.None;
+        set => SetOracleSwitch(OracleSwitches.UpstreamCopyEndIndex, value);
+    }
+
+    /// <summary>
+    /// The oracle-only switches <see cref="UpstreamConditionalRestore"/>,
+    /// <see cref="MaximaAsBeforeD133"/> and <see cref="UpstreamCopyEndIndex"/>, in one byte: a bool
+    /// field of its own for D133 grew every compiled pattern by 8 bytes (<c>AllocationTests</c>,
+    /// 2026-11-02).
     /// </summary>
     private OracleSwitches _oracleSwitches;
 
@@ -1211,6 +1233,9 @@ internal sealed class PatternObject
 
         /// <summary><see cref="MaximaAsBeforeD133"/>.</summary>
         MaximaAsBeforeD133 = 2,
+
+        /// <summary><see cref="UpstreamCopyEndIndex"/>.</summary>
+        UpstreamCopyEndIndex = 4,
     }
 
     /// <summary>

@@ -1044,6 +1044,8 @@ public sealed class ThreadSafetyTests
             "GroupInfo.Referenced",
             "GroupInfo.TextRead",
             "GroupInfo.CapturedInRepeat",
+            // D125: written by NodeCompiler.BuildGroup when a called copy of the group is built.
+            "GroupInfo.CopyEndIndex",
             "CallRefInfo.Defined",
             "CallRefInfo.Node",
             "CallRefInfo.Used",

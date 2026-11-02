@@ -115,4 +115,76 @@ public sealed class CalledCopyTests
             .Any(j => written.AsSpan(j, copy.Length).SequenceEqual(copy));
         found.Should().BeTrue("the copy under {0} is the group written out: {1}", node, writtenOut);
     }
+
+    // D125 (port and upstream). A copy of g1 is compiled after the pattern's SUCCESS, and upstream's
+    // copy records g1's end index again, after every group of the pattern; lastindex is the matched
+    // group with the highest end index, so it named g1. The copy now keeps the group's own order
+    // (NodeCompiler.BuildGroup). g1 is recursive so that the call is kept rather than written out
+    // (D101), with the call inside it so that neither direction is left recursive. The expected
+    // values are regex 2026.9.29's for the written-out form, G = x|y[xy]*y:
+    //   (?P<g1>G)(?:(?<!G))?(a)(b)    'xab' search and match -> 3, 'g1', ((0,3),(0,1),(1,2),(2,3))
+    //   (?P<g1>G)(?<=G)(a)(b)         'xab' search -> 3, 'g1', same regs
+    //   (?r)(a)(b)(?:(?!G))?(?P<g1>G) 'abx' search -> 1, None, ((0,3),(0,1),(1,2),(2,3))
+    //   (?r)(a)(b)(?=G)(?P<g1>G)      'abx' search -> 1, None, same regs
+    // lastgroup is g1 where lastindex is 3: upstream's lastgroup is the named group with the highest
+    // end index. Upstream's call forms are no reference: over 'xab' it answers None (ledger entry 8,
+    // min-width inflation), and over a longer text it has this defect: the forward rows over 'cxab'
+    // give lastindex 1, the reversed rows over 'abxc' give 3, 'g1' (measured 2026-10-31).
+    [Test]
+    [Arguments(@"(?P<g1>x|y(?P>g1)y)(?:(?<!(?P>g1)))?(a)(b)", "xab", false, 3, "g1")]
+    [Arguments(@"(?P<g1>x|y(?P>g1)y)(?:(?<!(?P>g1)))?(a)(b)", "xab", true, 3, "g1")]
+    [Arguments(@"(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)", "xab", false, 3, "g1")]
+    [Arguments(@"(?r)(a)(b)(?:(?!(?P>g1)))?(?P<g1>x|y(?P>g1)y)", "abx", false, 1, null)]
+    [Arguments(@"(?r)(a)(b)(?=(?P>g1))(?P<g1>x|y(?P>g1)y)", "abx", false, 1, null)]
+    public void A_call_in_a_lookaround_the_other_way_does_not_change_the_last_group(
+        string pattern,
+        string subject,
+        bool atStart,
+        int lastIndex,
+        string? lastGroup
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        Match m = atStart ? regex.MatchAtStart(subject) : regex.Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 3));
+        (m.Groups[1].Index, m.Groups[2].Index, m.Groups[3].Index).Should().Be((0, 1, 2));
+        (m.LastGroupNumber, m.LastGroupName).Should().Be((lastIndex, lastGroup));
+    }
+
+    // D125's other copy: a call inside a fuzzy section to a group written outside one. regex
+    // 2026.9.29, search over 'xxab':
+    //   (?P<g1>x|y[xy]*y)(?:x|y[xy]*y){e<=1}(a)(b)       (0, 4), lastindex 3, 'g1' (written out)
+    //   (?P<g1>x|y(?P>g1)y)(?:(?P>g1)){e<=1}(a)(b)       (0, 4), lastindex 1, 'g1' (upstream's copy)
+    [Test]
+    public void A_call_in_a_fuzzy_section_does_not_change_the_last_group()
+    {
+        Match m = new FuzzyRegex(@"(?P<g1>x|y(?P>g1)y)(?:(?P>g1)){e<=1}(a)(b)").Match("xxab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 4));
+        (m.LastGroupNumber, m.LastGroupName).Should().Be((3, "g1"));
+    }
+
+    // Controls for D125, right before the fix as well: a call in a lookahead the same way makes no
+    // copy, and nested groups. regex 2026.9.29: 'xax' search -> 2, 'g1', ((0,2),(0,1),(1,2)); 'xa'
+    // match -> 1, None, ((0,2),(0,2),(0,1),(1,2)).
+    [Test]
+    [Arguments(@"(?P<g1>x)(a)(?=(?P>g1))", "xax", false, 2, "g1")]
+    [Arguments(@"((?P<g1>x)(a))", "xa", true, 1, null)]
+    public void A_call_the_same_way_and_nested_groups_keep_the_last_group(
+        string pattern,
+        string subject,
+        bool atStart,
+        int lastIndex,
+        string? lastGroup
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        Match m = atStart ? regex.MatchAtStart(subject) : regex.Match(subject);
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+        (m.LastGroupNumber, m.LastGroupName).Should().Be((lastIndex, lastGroup));
+    }
 }
