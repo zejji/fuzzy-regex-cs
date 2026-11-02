@@ -38,11 +38,11 @@ pushes need the owner.
 
 ## In flight
 
-- Nothing running. Main e23ee6eb: items 1-12 gated (ratchet, inspection, oracle 7/4242). Not pushed.
+- Nothing running. Main (a4337797 or later; code as of e23ee6eb): items 1-12 gated (ratchet, inspection, oracle 7/4242). Not pushed.
 - Deferred in the night: D134 (atomic around a recorded lookahead), D135 (D122 compile allocation, 1.3), D136 (condition tests under D133's rule).
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
-## Waiting on the owner: a push of main (e23ee6eb), and a timing window for item 13's full BDN vs 1.1.0.
+## Waiting on the owner: a push of main, and a timing window for item 13's full BDN vs 1.1.0.
 
 **Next action:** item 13: CHANGELOG and release notes for 1.2 (F115-F124) can start now; full BDN vs 1.1.0 incl. D82's rows in the owner's timing window; `docs/RELEASING.md`.
