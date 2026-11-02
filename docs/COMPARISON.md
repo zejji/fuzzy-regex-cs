@@ -2449,6 +2449,25 @@ Console.WriteLine(new FuzzyRegex(@"(a*)(?(?=c)c|[ab])*\1$").Match("accb").Index)
 
 There is no option to restore the upstream answer. Ledger entry 96.
 
+### A committing construct inside a fuzzy section keeps only a path every enclosing section allows
+
+When fuzzy sections nest, upstream checks an error against the innermost section when the error
+is made, and against the sections around it only when each of them ends. An atomic group, a
+possessive repeat, `(*PRUNE)` or a group call keeps the first way its body matched, so upstream can
+commit to a path that an outer section then refuses, and the match is lost although a path within
+every limit exists. Here each error is checked against every enclosing section when it is made, so
+the body's first match is one the outer sections allow. Where nothing commits the answers are the
+same, because counts only grow along a path. A condition's test keeps upstream's late check.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(new FuzzyRegex(@"(?:(?>(?:ab){e<=1})){d<=1}").MatchAtStart("bb").Length);  // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?:(?:ab){e<=1}){d<=1}").MatchAtStart("bb").Length);      // 1 - upstream: 1
+```
+
+There is no option to restore the upstream answer. Ledger entry 97.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

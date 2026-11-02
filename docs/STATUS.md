@@ -52,10 +52,10 @@ These are not upstream tests, so they do not count towards parity.
 
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
-| Conventions | 46 | 44 | 0 | 2 |
+| Conventions | 46 | 46 | 0 | 0 |
 | Docs | 66 | 66 | 0 | 0 |
 | EngineWorkTests | 2 | 2 | 0 | 0 |
-| Gaps | 8076 | 8076 | 0 | 0 |
+| Gaps | 8084 | 8084 | 0 | 0 |
 
 ## Tests waiting on a capability
 
