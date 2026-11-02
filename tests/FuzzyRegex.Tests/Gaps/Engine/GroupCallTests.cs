@@ -31,10 +31,34 @@ public sealed class GroupCallTests
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithUpstreamCallCaptures(string pattern)
     {
-        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget);
+        FuzzyRegex regex = WithCallsKept(pattern, _budget);
         regex.PatternObject.KeepCallCaptures = true;
         return regex;
     }
+
+    /// <summary>
+    /// The pattern compiled with every group call kept as a call, as upstream compiles it, rather
+    /// than written out where nothing can tell the two apart (D101, <c>Parsing.CallInliner</c>):
+    /// for a test of the call machinery itself, and for upstream's capture rule, under which every
+    /// call is visible.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="timeout">The match timeout; none by default.</param>
+    /// <param name="options">The options.</param>
+    /// <returns>The compiled pattern.</returns>
+    internal static FuzzyRegex WithCallsKept(
+        string pattern,
+        TimeSpan? timeout = null,
+        FuzzyRegexOptions options = FuzzyRegexOptions.None
+    ) =>
+        FuzzyRegex.WithDefaultVersion(
+            pattern,
+            options,
+            timeout ?? FuzzyRegex.InfiniteMatchTimeout,
+            null,
+            Fuzzy.Text.RegularExpressions.Parsing.PatternCompiler.DefaultVersion,
+            upstreamCalls: true
+        );
 
     [Test]
     public void A_call_restores_the_callers_span_and_capture_list()

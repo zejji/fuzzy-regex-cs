@@ -700,7 +700,10 @@ public sealed class PartialRunOutDeletionTests
     /// Each kind of node that can leave an alternative inside the atomic group makes the commit
     /// matter, so the deletion is kept there: an alternation, an optional or a lazy repeat, a
     /// possessive repeat (an atomic group around a repeat), a fuzzy item, and a second lookaround.
-    /// The first row is the neutral control, where none is kept.
+    /// The first row is the neutral control, where none is kept. A second lookaround whose body
+    /// succeeds everywhere, `(?=y?)`, is no choice point: D101's
+    /// <see cref="Fuzzy.Text.RegularExpressions.Parsing.LookaroundFolder"/> removes it, so its row
+    /// keeps none, as the control does.
     /// </summary>
     /// <param name="pattern">The pattern, searched over 'x'.</param>
     /// <param name="kept">Whether the deletion is kept.</param>
@@ -712,7 +715,8 @@ public sealed class PartialRunOutDeletionTests
     [Arguments("(x)(?>(?=(?:x){d<=1})x*?)z", true)]
     [Arguments("(x)(?:(?=(?:x){d<=1})x?)++z", true)]
     [Arguments("(x)(?>(?=(?:x){d<=1})(?:y){e<=1})z", true)]
-    [Arguments("(x)(?>(?=(?:x){d<=1})(?=y?))z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?<=x))z", true)]
+    [Arguments("(x)(?>(?=(?:x){d<=1})(?=y?))z", false)]
     public void A_choice_point_in_the_atomic_group_keeps_the_deletion(string pattern, bool kept)
     {
         var regex = new FuzzyRegex(pattern);

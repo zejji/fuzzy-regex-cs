@@ -126,7 +126,7 @@ public sealed class RecursiveTests
     /// <returns>The compiled pattern.</returns>
     private static FuzzyRegex WithUpstreamCallCaptures(string pattern)
     {
-        FuzzyRegex regex = Upstream.Compile(pattern);
+        FuzzyRegex regex = Upstream.CompileWithCallsKept(pattern);
         regex.PatternObject.KeepCallCaptures = true;
         return regex;
     }

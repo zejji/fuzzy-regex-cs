@@ -332,6 +332,11 @@ internal static class OracleComparer
     /// ablation but a second computation of the port's own answer (<see cref="RunOnAUsedPattern"/>,
     /// <see cref="RunWithTheFrameByFrameRestore"/>; D128).
     /// </param>
+    /// <param name="upstreamCalls">
+    /// Keep every group call a call, as upstream compiles it, rather than writing out the ones
+    /// nothing can tell from their groups (D101). Acts on the compile. On for every named ablation,
+    /// and passed by <see cref="RunWithTheUpstreamCallCaptures"/>, whose capture rule needs it.
+    /// </param>
     /// <param name="upstreamFuzzyConditionTest">
     /// Compile each conditional's lookaround test with the enclosing section's fuzziness, as
     /// upstream does (the D52 fix off, ledger entry 64). Acts on the compile. Every named ablation
@@ -360,7 +365,8 @@ internal static class OracleComparer
         bool upstreamFuzzyConditionTest = false,
         bool upstreamNegativeTestCaptures = false,
         bool upstreamCallCopies = false,
-        bool composeWithD11 = true
+        bool composeWithD11 = true,
+        bool upstreamCalls = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -416,7 +422,11 @@ internal static class OracleComparer
                 upstreamWholePatternCall: upstreamWholePatternCall,
                 upstreamCallFeatures: upstreamCallFeatures,
                 upstreamFuzzyConditionTest: upstreamFuzzyConditionTest || namedAblation,
-                upstreamCallCopies: upstreamCallCopies
+                upstreamCallCopies: upstreamCallCopies,
+                // D101 writes out the calls nothing can tell from their groups; upstream compiles
+                // every call as a call, and under upstream's capture rule, which every named
+                // ablation switches on, every call is visible, so those compiles keep them.
+                upstreamCalls: upstreamCalls || namedAblation
             );
         }
         catch (NotImplementedException)
@@ -499,7 +509,8 @@ internal static class OracleComparer
                 upstreamFuzzyConditionTest,
                 upstreamNegativeTestCaptures,
                 upstreamCallCopies,
-                composeWithD11: false
+                composeWithD11: false,
+                upstreamCalls: upstreamCalls
             );
 
             if (alone is null || Compare(row, alone) == OracleVerdict.Agree)
@@ -516,7 +527,8 @@ internal static class OracleComparer
                 lazy,
                 static c => c.PatternObject.SecondPassAsBeforeD11 = true,
                 upstreamCallCaptures: namedAblation,
-                composeWithD11: false
+                composeWithD11: false,
+                upstreamCalls: upstreamCalls
             );
 
             if (d11Alone is not null && Compare(row, d11Alone) == OracleVerdict.Agree)
@@ -544,7 +556,8 @@ internal static class OracleComparer
                 upstreamFuzzyConditionTest,
                 upstreamNegativeTestCaptures,
                 upstreamCallCopies,
-                composeWithD11: false
+                composeWithD11: false,
+                upstreamCalls: upstreamCalls
             );
 
             return both is not null && Compare(row, both) == OracleVerdict.Agree ? both : alone;
@@ -1099,7 +1112,8 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: static compiled => compiled.PatternObject.KeepCallCaptures = true
+            ablate: static compiled => compiled.PatternObject.KeepCallCaptures = true,
+            upstreamCalls: true
         );
     }
 
@@ -1111,7 +1125,7 @@ internal static class OracleComparer
     /// Upstream saves the captures around a lookaround only when its body holds a capture group, so
     /// a call's capture outlives a body that is thrown away: <c>(a)(?:(?!.(?1))|.)+?b</c> over
     /// 'aaab' leaves group 1 with [0,1][2,1]. Clearing the saved-captures flag of every lookaround in
-    /// <c>PatternObject.LookaroundsSavingOnlyForCalls</c> restores that, which is the whole of the
+    /// <c>Node.SavesOnlyForCalls</c> restores that, which is the whole of the
     /// fix. The <c>group-call-in-a-discarded-lookaround-leaves-no-capture</c> entry keys on this.
     /// </remarks>
     /// <param name="row">The row to run.</param>
@@ -1127,9 +1141,12 @@ internal static class OracleComparer
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled =>
             {
-                foreach (Node lookaround in compiled.PatternObject.LookaroundsSavingOnlyForCalls ?? [])
+                foreach (Node lookaround in compiled.PatternObject.NodeList)
                 {
-                    lookaround.Status &= ~NodeStatus.HasGroups;
+                    if (lookaround.SavesOnlyForCalls)
+                    {
+                        lookaround.Status &= ~NodeStatus.HasGroups;
+                    }
                 }
             },
             keepMinimumOrderFix: true

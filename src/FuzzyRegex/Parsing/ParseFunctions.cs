@@ -1230,6 +1230,7 @@ internal static class ParseFunctions
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
+        info.HasLookaround = true;
         return new LookAround(behind, positive, subpattern) { UpstreamCallFeatures = info.UpstreamCallFeatures };
     }
 
@@ -1327,6 +1328,7 @@ internal static class ParseFunctions
 
         source.Expect(")");
 
+        info.HasLookaround = true;
         return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch)
         {
             UpstreamCallFeatures = info.UpstreamCallFeatures,

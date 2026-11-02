@@ -5222,10 +5222,46 @@ internal static class Matcher
     /// so an empty list would be a bug in the bookkeeping rather than a state to handle.
     /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="backtrackedPast">Whether backtracking passed the call's entry (D101 records its outcome).</param>
     /// <returns>The closed call's key, and the text reached when it was made.</returns>
-    private static (long Key, int Reach) PopOpenCall(MatchState state)
+    private static (long Key, int Reach) PopOpenCall(MatchState state, bool backtrackedPast = false)
     {
         (long key, int reach, _, _, _, _) = state.OpenCalls[^1];
+        if (!backtrackedPast && state.TailsLive)
+        {
+            // D101 option D: the frame left through its return (or a restore threw it away), so a
+            // tail followed inside it is not one that never returned.
+            state.StampTail(ref state.ReturnStamps, state.OpenCalls.Count);
+        }
+
+        // NOT UPSTREAM'S, D101: a call backtracked past has tried everything; see
+        // PatternObject.MemoisesCallOutcomes.
+        if (state.CallTracks.Count != 0)
+        {
+            Debug.Assert(state.CallTracks.Count == state.OpenCalls.Count, "D101: one track per open call");
+            (bool returned, bool touched, bool crossedAnyway, long lowestBody) = state.CallTracks[^1];
+            state.CallTracks.RemoveAt(state.CallTracks.Count - 1);
+            bool ranOut = crossedAnyway || state.OpenCalls[^1].SstackDepth > lowestBody;
+
+            // Every run-out this call saw was taken while its caller was open too. A re-opened
+            // call's own Touched is set without a run-out, so what it hands on is the run-outs
+            // alone: LowestBody is below long.MaxValue exactly when one was taken.
+            if (lowestBody != long.MaxValue && state.CallTracks.Count != 0)
+            {
+                MatchState.CallOutcomeTrack caller = state.CallTracks[^1];
+                state.CallTracks[^1] = caller with
+                {
+                    Touched = true,
+                    LowestBody = Math.Min(caller.LowestBody, lowestBody),
+                };
+            }
+
+            if (backtrackedPast && !returned && (ranOut || !touched))
+            {
+                (state.CallOutcomes ??= [])[key] = ranOut;
+            }
+        }
+
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         if (state.Pattern.NestsFuzzySections)
         {
@@ -7068,11 +7104,17 @@ internal static class Matcher
     /// None, as `(x)(?=x\1)\Z` does. Until D98 every such run-out answered at once.
     /// </para>
     /// <para>
-    /// SHORTCUT: the same run-out in a body whose outcome feeds a decision
-    /// (<see cref="RunOutFeedsADecision"/>: a negative lookaround, a condition's test, a positive
-    /// lookaround inside an atomic group, a negative lookaround or a test, or any pattern with a
-    /// verb), in a fuzzy pattern, and every run-out under the oracle's pre-D11 ablation, answers the
-    /// partial at the attempt's start. There the call's other paths can decide the construct, so
+    /// D101 (option B1): in a negative lookaround or a negative condition test of a pattern that is
+    /// not fuzzy, the same run-out is taken with the call node as the item and the calls left open
+    /// (<see cref="RunsOutLikeACallFreeBody"/>), so `(x)(?!y?(?1))\Z` over 'xy' answers None, as
+    /// `(x)(?!y?(?:x))\Z` does.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the same run-out in a positive body whose outcome feeds a decision
+    /// (<see cref="RunOutFeedsADecision"/>: a positive condition test, or a positive lookaround
+    /// inside an atomic group, a negative lookaround or a test, or in a pattern with a verb), in a
+    /// fuzzy pattern, and every run-out under the oracle's pre-D11 ablation, answers the partial at
+    /// the attempt's start. There the call's other paths can decide the construct, so
     /// they cannot be cut, and REOPEN would have to open the call again (amendment 2). Ceiling: a
     /// partial at the attempt's start whatever follows, a phantom where the judge says None
     /// (`(?!(?1))ab((?=(?:ab)*(?&lt;=b)))?` over 'ab', P(0, 2); D98's witness search in
@@ -7135,27 +7177,80 @@ internal static class Matcher
             }
         }
 
-        if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark))
+        if (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, lookMark, look.Node))
         {
-            // D98: where the body feeds no decision, the run-out is taken at the call the body made.
-            if (
-                pattern.IsFuzzy
-                || RunOutFeedsADecisionIf(state, callsAnswerAtOnce: false)
-                || AbandonTheCallsTheBodyOpened(state, look.Node, lookMark) is not { } call
-            )
+            // Whether the body feeds a decision, asked once: the walk is as deep as the pruning
+            // stack, which a recursion makes deep, and both branches below need the answer (asking
+            // it twice made `(?:x(?=(?R)?y)|z)+q` 2.3x slower in Release with the same steps).
+            bool feedsADecision =
+                !pattern.IsFuzzy
+                && !RunsOutLikeACallFreeBody(pattern, look.Node)
+                && RunOutFeedsADecisionIf(state, callsAnswerAtOnce: false);
+
+            // D101 (B2'): in a positive body that can wait across calls, the run-out waits for the
+            // body's other paths, as RunOutCanWaitForTheBody makes a call-free one wait, and the
+            // calls the body opened are closed by their own arms as the path backtracks.
+            if (atomics == 0 && feedsADecision && WaitsAcrossCalls(pattern, look.Node))
             {
+                int waitFrame = (int)lookMark - 1;
+                Debug.Assert(
+                    state.Pstack.TopSize(out long topMark) && topMark == lookMark,
+                    "D101 B2': only atomic groups lie above the body's frame, and there are none"
+                );
+                if (!HasWMarkAt(state, waitFrame, WMarkKind.RunOutPending))
+                {
+                    state.AddWMark(waitFrame, WMarkKind.RunOutPending);
+                }
+
+                state.AttemptTouchedTheTextToCome = true;
+                state.NoteRunOutTaken(answered: false);
+                state.NotePartialEvent(PartialEvent.RunOutWaits);
+                state.NoteABlockedEnd();
+                fails = true;
                 return null;
             }
 
-            item = call;
-            atomics = 0;
-            for (
-                offset = state.Pstack.Count - sizeof(long);
-                state.Pstack.SizeAt(offset) != lookMark;
-                offset -= sizeof(long)
-            )
+            // D101: in a negative body the run-out is taken with the call the body made as its
+            // item, and the calls stay open (RunsOutLikeACallFreeBody).
+            if (RunsOutLikeACallFreeBody(pattern, look.Node))
             {
-                atomics++;
+                if (TheCallTheBodyOpened(state, look.Node, lookMark, out _) is not { } opened)
+                {
+                    return null;
+                }
+
+                // D101 option D: the innermost frame cannot return, so the rest of it is cut
+                // (CutAFrameThatCannotReturn). The run-out is then taken at the same item.
+                if (atomics == 0 && pattern.MemoisesTails && look.Node.Op == Opcode.Lookaround)
+                {
+                    CutAFrameThatCannotReturn(state, lookMark);
+                }
+
+                item = opened;
+                state.NotePartialEvent(PartialEvent.RunOutCallKeptOpen);
+            }
+            else
+            {
+                // D98: where the body feeds no decision, the run-out is taken at the call the body made.
+                if (
+                    pattern.IsFuzzy
+                    || feedsADecision
+                    || AbandonTheCallsTheBodyOpened(state, look.Node, lookMark) is not { } call
+                )
+                {
+                    return null;
+                }
+
+                item = call;
+                atomics = 0;
+                for (
+                    offset = state.Pstack.Count - sizeof(long);
+                    state.Pstack.SizeAt(offset) != lookMark;
+                    offset -= sizeof(long)
+                )
+                {
+                    atomics++;
+                }
             }
         }
 
@@ -7308,7 +7403,7 @@ internal static class Matcher
             || look.Node.BodyInfo is not { HasVerbOrCall: false }
             || ((look.Node.Status & NodeStatus.HasGroups) != 0 && pattern.ReadsCapturesWhileMatching)
             || (pattern.IsFuzzy && look.Node.EnclosingSection is not null)
-            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark))
+            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark, look.Node))
             || !RunOutFeedsADecision(state)
         )
         {
@@ -7354,11 +7449,14 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="mark">The construct's pruning mark.</param>
-    /// <returns><see langword="true"/> if a call opened in the body is open, or the pattern needs a
-    /// model the compiler skips for patterns with calls: the section around a lookaround
-    /// (<see cref="Node.EnclosingSection"/>, only where something is fuzzy).</returns>
-    private static bool ACallOpenedInTheBodyIsOpenOrUnmodelled(MatchState state, long mark) =>
-        state.Pattern.IsFuzzy || ACallOpenedInTheBodyIsOpen(state, mark);
+    /// <param name="look">The construct.</param>
+    /// <returns><see langword="true"/> if a call opened in the body is open, or, in a fuzzy pattern, a
+    /// call can run the construct or one is open around it, so the section it runs in
+    /// (<see cref="Node.EnclosingSection"/>) depends on the call site (D101, B3a: a construct no
+    /// call can run is modelled, as in a pattern without calls).</returns>
+    private static bool ACallOpenedInTheBodyIsOpenOrUnmodelled(MatchState state, long mark, Node look) =>
+        (state.Pattern.IsFuzzy && (look.RunByACall || state.OpenCalls.Count != 0))
+        || ACallOpenedInTheBodyIsOpen(state, mark);
 
     /// <summary>NOT UPSTREAM'S, D11: the half of <see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/> that reads the stacks.</summary>
     /// <param name="state">The match state.</param>
@@ -7370,6 +7468,118 @@ internal static class Matcher
             !state.Bstack.ReadSizeBelow((int)mark - 1, out long savedSstack)
             || state.OpenCalls[^1].SstackDepth > savedSstack - _lookaroundStateDataSize
         );
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D98 and D101: the <c>GROUP_CALL</c> node of the outermost open call that the
+    /// innermost body opened, found as the body's call node whose next node is the frame's return
+    /// node. Changes nothing.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="look">The lookaround or condition whose body opened the call.</param>
+    /// <param name="lookMark">Its pruning mark.</param>
+    /// <param name="outer">Receives the call's index in <see cref="MatchState.OpenCalls"/>, or -1.</param>
+    /// <returns>The call node, or <see langword="null"/> if the stacks are not as the marks promise.</returns>
+    private static Node? TheCallTheBodyOpened(MatchState state, Node look, long lookMark, out int outer)
+    {
+        outer = -1;
+        if (state.OpenCalls.Count == 0 || !state.Bstack.ReadSizeBelow((int)lookMark - 1, out long savedSstack))
+        {
+            return null;
+        }
+
+        long s0 = savedSstack - _lookaroundStateDataSize;
+        outer = state.OpenCalls.Count - 1;
+        while (outer > 0 && state.OpenCalls[outer - 1].SstackDepth > s0)
+        {
+            outer--;
+        }
+
+        int depth = state.OpenCalls[outer].SstackDepth;
+        Node? returnNode = depth >= sizeof(long) ? state.Sstack.NodeAt(state.Pattern, depth - sizeof(long)) : null;
+        foreach (int i in look.BodyInfo!.Nodes)
+        {
+            Node n = state.Pattern.NodeList[i];
+            // Two call nodes can share the return node where branches join after them
+            // (`(?:(?1)|(?2))\1`); either serves, since a call node's RunOutGroups are its return
+            // node's (D97) and its GROUP_CALL entry is found through OpenCalls, not through the node.
+            if (n.Op == Opcode.GroupCall && returnNode is not null && ReferenceEquals(n.Next1.Node, returnNode))
+            {
+                return n;
+            }
+        }
+
+        Debug.Assert(false, "D98: the outermost call the body opened is a call node of the body");
+        return null;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 (option B1): whether a run-out inside a group call this body opened is
+    /// taken as one in a call-free body, with the calls left open: the body is a negative
+    /// lookaround or a negative condition test, and the pattern is not fuzzy.
+    /// </summary>
+    /// <remarks>
+    /// A negative construct's blocked end goes back into its body
+    /// (<see cref="EndALookaroundInTheSecondPass"/>, design note E3), and never on past the
+    /// construct with the body's state. So the calls the body opened are closed by their own
+    /// backtracking arms, which put the caller's captures, repeats and capture change back, before
+    /// the construct's own arm passes it undetermined and restores the rest
+    /// (<see cref="BacktrackLookaround"/>, <see cref="BacktrackConditional"/>). Nothing is parked,
+    /// so <c>REOPEN</c>'s missing call entries (the SHORTCUT on
+    /// <see cref="RunOutInALookaroundBody"/>) never arise. The call node stands for the item only to
+    /// satisfy assert A10 (it is in the body, the item is not): the unknown-capture entries the
+    /// run-out then pushes for a pattern that reads captures (<see cref="MarkTheBodysCapturesUnknown"/>)
+    /// are popped again at once, since the blocked end goes straight back into the body, so no
+    /// continuation reads them.
+    /// A fuzzy pattern keeps the SHORTCUT: its sections are not modelled with calls
+    /// (<see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/>).
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="look">The innermost lookaround or condition.</param>
+    /// <returns><see langword="true"/> if the run-out goes on with the calls open.</returns>
+    private static bool RunsOutLikeACallFreeBody(PatternObject pattern, Node look) => !look.Match && !pattern.IsFuzzy;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 (option B2'): whether a run-out inside a group call this positive body
+    /// opened waits for the body's other paths (<see cref="RunOutInALookaroundBody"/>), as a
+    /// call-free one does (<see cref="RunOutCanWaitForTheBody"/>), with the calls left for their
+    /// own backtracking arms to close.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing is cut or parked: the run-out only backtracks, so each call the body opened is
+    /// closed by its own <c>GROUP_CALL</c> arm, which puts the caller's captures, repeats and
+    /// capture change back, before the construct's arm is reached (the backtracking stack's order;
+    /// asserted there). A success of the body on the held text then decides the construct as it
+    /// decides a call-free one (<see cref="EndALookaroundInTheSecondPass"/> drops the pending
+    /// mark); where none comes, the construct's arm goes on after it with a touch, from the
+    /// construct's own saved state, which is the caller's (<see cref="BacktrackLookaround"/>), or a
+    /// condition takes both branches (<see cref="BacktrackConditional"/>).
+    /// </para>
+    /// <para>
+    /// The conditions are <see cref="RunOutCanWaitForTheBody"/>'s, with the call allowed. Its
+    /// success must leave the same state for every continuation: the body sets no group of its own,
+    /// or nothing reads a capture while matching (the groups set inside the calls are put back by
+    /// each return, D51, D62). No verb on the run-out's path, reached directly or through any depth
+    /// of calls (<see cref="Node.Body.ReachesVerb"/>), which could prune the body's other paths; no
+    /// atomic group open around the item (the caller checks <c>atomics == 0</c>, which counts the
+    /// callees' too), which could commit on the run-out's longer path. Witness search, 2026-10-25:
+    /// removing the group, verb or atomic condition changed no answer to a wrong one on the (?R)
+    /// grid, D98's grids, 594 verb-in-callee rows (<c>.scratch/s1024/d101/p/verbrec.tsv</c>) and
+    /// 1,920 group and atomic rows (<c>b2w.jsonl</c>); each moved rows the conditions keep under the
+    /// SHORTCUT to the judge's answer instead. The verb and atomic conditions stay as the call-free
+    /// rule's own exclusions, argued there; no witness found. A fuzzy pattern keeps the SHORTCUT: its sections are not modelled with calls
+    /// (<see cref="ACallOpenedInTheBodyIsOpenOrUnmodelled"/>; B3).
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="look">The innermost lookaround or condition.</param>
+    /// <returns><see langword="true"/> if the run-out waits.</returns>
+    private static bool WaitsAcrossCalls(PatternObject pattern, Node look) =>
+        look.Match
+        && !pattern.IsFuzzy
+        && look.Op is Opcode.Lookaround or Opcode.Conditional
+        && look.BodyInfo is { ReachesVerb: false } body
+        && (body.Groups.Length == 0 || !pattern.ReadsCapturesWhileMatching);
 
     /// <summary>
     /// NOT UPSTREAM'S, D98: a run-out lies inside a group call that the innermost body opened, and
@@ -7404,31 +7614,13 @@ internal static class Matcher
     private static Node? AbandonTheCallsTheBodyOpened(MatchState state, Node look, long lookMark)
     {
         Debug.Assert(!state.RefinesInANarrowedSlice, "D114: a pattern with calls refines in the caller's slice");
-        if (!state.Bstack.ReadSizeBelow((int)lookMark - 1, out long savedSstack))
+        if (!state.Bstack.ReadSizeBelow((int)lookMark - 1, out _))
         {
             return null;
         }
 
-        long s0 = savedSstack - _lookaroundStateDataSize;
-        int outer = state.OpenCalls.Count - 1;
-        while (outer > 0 && state.OpenCalls[outer - 1].SstackDepth > s0)
-        {
-            outer--;
-        }
-
-        (_, _, int depth, _, _, int bstackAt) = state.OpenCalls[outer];
-        Node? returnNode = depth >= sizeof(long) ? state.Sstack.NodeAt(state.Pattern, depth - sizeof(long)) : null;
-        Node? call = null;
-        foreach (int i in look.BodyInfo!.Nodes)
-        {
-            Node n = state.Pattern.NodeList[i];
-            if (n.Op == Opcode.GroupCall && returnNode is not null && ReferenceEquals(n.Next1.Node, returnNode))
-            {
-                call = n;
-                break;
-            }
-        }
-
+        Node? call = TheCallTheBodyOpened(state, look, lookMark, out int outer);
+        (_, _, int depth, _, _, int bstackAt) = outer >= 0 ? state.OpenCalls[outer] : default;
         if (
             call is null
             || bstackAt < lookMark
@@ -7524,7 +7716,7 @@ internal static class Matcher
     private static bool RunOutFeedsADecisionIf(MatchState state, bool callsAnswerAtOnce)
     {
         PatternObject pattern = state.Pattern;
-        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11)
+        if (state.PartialSide == MatchState.PartialNone || pattern.SecondPassAsBeforeD11 || !pattern.CanDecideOnARunOut)
         {
             return false;
         }
@@ -7539,13 +7731,17 @@ internal static class Matcher
             }
 
             // The innermost body: a run-out inside a call it opened is answered at once, or (D98,
-            // where nothing else here returns true) taken at the call.
+            // where nothing else here returns true) taken at the call. A negative one in a pattern
+            // that is not fuzzy goes on as a call-free body does (D101, RunsOutLikeACallFreeBody),
+            // so it keeps its alternatives as one does.
             if (
                 callsAnswerAtOnce
                 && !inBody
                 && op is Opcode.Lookaround or Opcode.Conditional
                 && pattern.HasGroupCalls
-                && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark)
+                && !RunsOutLikeACallFreeBody(pattern, look.Node)
+                && !WaitsAcrossCalls(pattern, look.Node)
+                && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark, look.Node)
             )
             {
                 return false;
@@ -14972,6 +15168,14 @@ internal static class Matcher
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
+        state.CallTracks.Clear();
+        if (state.TailsLive)
+        {
+            state.TailTracks.Clear();
+            state.HasPendingTail = false;
+            state.TailsLive = false;
+        }
+
         state.OpenCallSections.Clear();
         if (CountsOpenCalls(state.Pattern))
         {
@@ -19209,6 +19413,19 @@ internal static class Matcher
     {
         PatternObject pattern = state.Pattern;
 
+        // NOT UPSTREAM'S, D101: a call already followed to its end at this position in this pass
+        // (PatternObject.MemoisesCallOutcomes) does again what it did: it runs out here, where the
+        // innermost body around it takes the run-out, or it fails.
+        if (
+            pattern.MemoisesCallOutcomes
+            && state.PartialSide != MatchState.PartialNone
+            && state.CallOutcomes is { } callOutcomes
+            && callOutcomes.TryGetValue(ActiveCallKey((int)node.Values[0], state.TextPos), out bool callRanOut)
+        )
+        {
+            return callRanOut ? _armRunOut : _armBacktrack;
+        }
+
         int groupCallIndex = (int)node.Values[0];
         Node groupCallReturnNode = node.Next1.Node!;
 
@@ -19272,6 +19489,11 @@ internal static class Matcher
             state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupCallReach,
             "the text reached never shrinks, so an inner call's reach is at least its caller's"
         );
+        if (TracksCallOutcomes(state))
+        {
+            state.CallTracks.Add(MatchState.CallOutcomeTrack.Opened);
+        }
+
         state.OpenCalls.Add(
             (
                 groupCallKey,
@@ -19282,10 +19504,24 @@ internal static class Matcher
                 groupCallBstackAt
             )
         );
+        if (state.Pattern.MemoisesTails && state.PartialSide != MatchState.PartialNone)
+        {
+            state.StampTail(ref state.FrameStamps, state.OpenCalls.Count);
+        }
         if (groupCallSections)
         {
             state.OpenCallSections.Add(groupCallSection);
         }
+
+        // D101 (design note E4): a partial call's second pass builds no failed-call key, since the
+        // memo's threshold is out of reach there: MatchState.InitCallMemo sets it to long.MaxValue
+        // whenever PartialSide is set, and a pattern that cannot use the memo never leaves Reset's
+        // long.MaxValue. So a call opened there carries none. A run-out that leaves a call open relies on this:
+        // nothing about the call lives outside the stacks and OpenCalls.
+        Debug.Assert(
+            state.PartialSide == MatchState.PartialNone || state.OpenCalls[^1].MemoKey is null,
+            "D101 E4: the failed-call memo is off in a partial call's second pass"
+        );
 
         /* sstack: caller_repeats capture_change caller_captures return_node
          *
@@ -19427,6 +19663,34 @@ internal static class Matcher
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int AdvanceLookaround(MatchState state, ref Node node)
     {
+        // NOT UPSTREAM'S, D101: a negative lookaround already decided at this position in this pass
+        // (PatternObject.SetNegativeOutcomeMemo) goes on as its backtracking arm went on.
+        if (
+            node.MemoisesNegativeOutcome
+            && state.PartialSide != MatchState.PartialNone
+            && state.NegativeOutcomes is { } outcomes
+            && outcomes.TryGetValue(NegativeOutcomeKey(node, state.TextPos), out bool undetermined)
+        )
+        {
+            // The original evaluation read the text to come inside the body (a run-out, or a test
+            // decided at the edge), which set the attempt's flag; the memo lives for the pass, the
+            // flag for the attempt, so a replay in a later attempt sets it again (REVIEW-0320 F1b,
+            // PartialOutcomeReplayTouchTests). Setting it where the original did not is harmless:
+            // the second pass runs only after the first found nothing, so no success of it may
+            // leave the flag false (assert A1).
+            state.AttemptTouchedTheTextToCome = true;
+            if (undetermined)
+            {
+                PushTouchMark(state);
+                state.NotePartialEvent(PartialEvent.NegativeUndetermined);
+                state.NoteABlockedEnd(); // D90: matching goes on after an undecided construct.
+                CountFork(state);
+            }
+
+            node = node.Next2.Node!;
+            return _armContinue;
+        }
+
         PushTheStartBeforeABody(state, atomic: false);
         PushLookaroundStateData(
             state.Sstack,
@@ -19471,6 +19735,488 @@ internal static class Matcher
         node = node.Next1.Node!;
         return _armContinue;
     }
+
+    /// <summary>NOT UPSTREAM'S, D101: whether this pass follows the calls' outcomes (<see cref="MatchState.CallTracks"/>).</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> in a partial call's second pass of a pattern that keeps them.</returns>
+    private static bool TracksCallOutcomes(MatchState state) =>
+        state.Pattern.MemoisesCallOutcomes && state.PartialSide != MatchState.PartialNone;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D (<c>.scratch/s1024/d101/D-DESIGN.md</c>, revision 2): at the end
+    /// of a non-empty iteration, inside a call frame whose call site lies in a negative lookaround's
+    /// body, in a partial call's second pass, replays a tail summarised at the same key, or gets
+    /// the visit ready to be followed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Row 122, `(?:x(?!(?!(?R)?y))|z)+q` over 'x' * n, explores the same repeat tail at the same
+    /// position once per recursion level, which made it quadratic once B1 stopped answering at the
+    /// first run-out. A tail's exploration is summarised when backtracking pops the entry its visit
+    /// pushed: if a run-out crossed the frame (its innermost body was the lookaround around the
+    /// call site) and no path left the frame through its return, a later visit with the same key
+    /// takes a run-out at the repeat instead of exploring. That run-out is what the exploration
+    /// showed outside the frame: a negative body's outcome is an OR over its paths, and a second
+    /// run-out adds nothing to a first. A path that returned is not kept: after the return the
+    /// caller's continuation could decide the lookaround.
+    /// </para>
+    /// <para>
+    /// The key: the repeat, the position, its count class, the frame's group and the count class of
+    /// each repeat around it in the code (at most two). A count class is the count up to the
+    /// minimum where the maximum is unbounded, else the count (below 64): the end decides with
+    /// `count &lt; max` and `count &gt;= min` and reads the count no other way. Witnesses for each
+    /// field: <c>PartialTailSummaryTests.A_part_of_the_tail_memo_keeps_its_witness</c>. Captures
+    /// are not in it: no capture is read (<see cref="PatternObject.MemoisesCallOutcomes"/>'s
+    /// conditions). Where an enclosing iteration began is not either: every enclosing iteration
+    /// must be non-empty, so its end's progress test cannot read it.
+    /// </para>
+    /// <para>
+    /// The guard rule (design section 6): a repeat guard that holds in the visit's own frame after
+    /// the visit began, its own two checks included, may have cut a path through the frame's
+    /// return, so the tail is not kept (<see cref="MatchState.PoisonStamps"/>). Guards in deeper
+    /// frames do not poison: their lists were made inside the exploration, and a path through the
+    /// visit's frame's return taken there is seen by the return stamp.
+    /// </para>
+    /// <para>
+    /// Only a negative lookaround as the innermost body: its blocked end goes back into its body
+    /// (<c>EndALookaroundInTheSecondPass</c>), so while a tail is followed every step runs inside
+    /// that body, and the body's pruning-stack index and the frame's depth name them exactly
+    /// (asserted when a tail is recorded). A positive body or a condition's test passes on at its
+    /// end, which that bookkeeping does not follow. No witness of a wrong answer was found with
+    /// either allowed (683,360 generated rows, 2026-10-25); the restriction is the mechanism's.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The END_GREEDY_REPEAT or END_LAZY_REPEAT node.</param>
+    /// <param name="rpData">The repeat's data, its count already advanced.</param>
+    /// <param name="index">The repeat's index.</param>
+    /// <param name="changed">Whether the iteration counts as progress.</param>
+    /// <returns><see langword="true"/> to take a run-out at the node.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool TailAtEnd(MatchState state, Node node, RepeatData rpData, int index, bool changed)
+    {
+        state.HasPendingTail = false;
+        return changed
+            && state.TextPos != rpData.Start
+            && state.PartialSide != MatchState.PartialNone
+            && TailClass(node, rpData.Count, out long countClass)
+            && TailSummarised(state, index, countClass);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, share 2 (design section 9): at the entry of a greedy or lazy
+    /// loop with minimum 0 and no maximum, replays or follows the tail under the key its end would
+    /// have after a non-empty iteration at this position (count class 0).
+    /// </summary>
+    /// <remarks>
+    /// Unpruned, the two decide alike: both try the body and the tail, and both start the body with
+    /// the iteration beginning here. They differ in guards: the end checks the tail guard and the
+    /// entry does not. A guard that holds in either poisons the visit, so every kept summary comes
+    /// from an unpruned decision. Its witness is the failure-record row of
+    /// <c>PartialTailSummaryTests.A_part_of_the_tail_memo_keeps_its_witness</c>: with failures kept
+    /// and no poison, an entry replayed what a pruned end had recorded. The entry also clears the
+    /// iteration memo and starts a new run number; run numbers exist only with tested groups (a
+    /// capture read, excluded), and the iteration memo is D17's, which the non-empty rule for the
+    /// repeats around it keeps out of the key.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The GREEDY_REPEAT or LAZY_REPEAT node.</param>
+    /// <param name="index">The repeat's index.</param>
+    /// <returns><see langword="true"/> to take a run-out at the node.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool TailAtEntry(MatchState state, Node node, int index)
+    {
+        state.HasPendingTail = false;
+        return node.Values[1] == 0
+            && ~node.Values[2] == 0
+            && state.PartialSide != MatchState.PartialNone
+            && TailSummarised(state, index, countClass: 0);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: a repeat's count class (see <see cref="TailAtEnd"/>).
+    /// </summary>
+    /// <param name="repeat">A node holding the repeat's minimum and maximum in Values[1] and [2].</param>
+    /// <param name="count">The count.</param>
+    /// <param name="countClass">Receives the class.</param>
+    /// <returns><see langword="false"/> if the class does not fit the key.</returns>
+    private static bool TailClass(Node repeat, long count, out long countClass)
+    {
+        uint min = repeat.Values[1];
+        uint max = repeat.Values[2];
+        countClass = ~max == 0 ? Math.Min(count, min) : count;
+        return countClass < 64 && (~max == 0 || max < 64);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the rest of <see cref="TailAtEnd"/>: the innermost body and
+    /// frame, the key, the memo's answer, and the pending visit.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="index">The repeat's index.</param>
+    /// <param name="countClass">Its count class.</param>
+    /// <returns><see langword="true"/> if the key is summarised.</returns>
+    private static bool TailSummarised(MatchState state, int index, long countClass)
+    {
+        PatternObject pattern = state.Pattern;
+        int depth = state.OpenCalls.Count;
+        long group = depth == 0 ? -1 : state.OpenCalls[^1].Key >> 32;
+        if (
+            group is < 0 or >= 1 << 16
+            || !state.Pstack.TopSize(out long mark)
+            || !ReadPruningMark(state, (int)mark, out Opcode op, out LookaroundStateData look)
+            || op != Opcode.Lookaround
+            || look.Node.Match
+            || !state.Bstack.ReadSizeBelow((int)mark - 1, out long saved)
+            || state.OpenCalls[^1].SstackDepth <= saved - _lookaroundStateDataSize
+        )
+        {
+            return false;
+        }
+
+        int[] enclosing = pattern.TailTables!.EnclosingRepeats[index];
+        if (enclosing.Length > 2)
+        {
+            return false;
+        }
+
+        long k2 = countClass | (group << 8);
+        for (int i = 0; i < enclosing.Length; i++)
+        {
+            RepeatData outer = state.Repeats[enclosing[i]];
+            if (
+                state.TextPos == outer.Start
+                || pattern.TailTables.RepeatNodes[enclosing[i]] is not { } outerNode
+                || !TailClass(outerNode, outer.Count, out long outerClass)
+            )
+            {
+                return false;
+            }
+
+            k2 |= outerClass << (24 + (8 * i));
+        }
+
+        long k1 = ((long)index << 32) | (uint)state.TextPos;
+        if (state.TailRanOut is { } summaries && summaries.TryGetValue((k1, k2), out long recordedIn))
+        {
+            WorkCounter.TailReplayed(recordedIn != FrameStampAt(state, depth));
+            return true;
+        }
+
+        state.PendingTail = new MatchState.TailTrack(
+            k1,
+            k2,
+            BstackAt: 0,
+            depth,
+            BodyIndex: (state.Pstack.Count / sizeof(long)) - 1,
+            mark,
+            state.TailStamp
+        );
+        state.HasPendingTail = true;
+        state.TailsLive = true;
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the visit is about to push its entry, so its tail is followed
+    /// from here. Tracks at or above this stack size were left by cuts and are dropped.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void FollowTheTail(MatchState state)
+    {
+        int at = state.Bstack.Count;
+        List<MatchState.TailTrack> tracks = state.TailTracks;
+        while (tracks.Count != 0 && tracks[^1].BstackAt >= at)
+        {
+            tracks.RemoveAt(tracks.Count - 1);
+        }
+
+        tracks.Add(state.PendingTail with { BstackAt = at });
+        state.HasPendingTail = false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: backtracking has popped a visit's entry, so if the top track is
+    /// that visit's, its tail has tried everything: kept if a run-out crossed its frame, the frame
+    /// never returned and no guard of the frame held (<see cref="TailAtEnd"/>).
+    /// </summary>
+    /// <param name="state">The match state, its backtracking stack back to the size before the entry.</param>
+    private static void RecordTheTail(MatchState state)
+    {
+        int at = state.Bstack.Count;
+        List<MatchState.TailTrack> tracks = state.TailTracks;
+        while (tracks.Count != 0 && tracks[^1].BstackAt > at)
+        {
+            tracks.RemoveAt(tracks.Count - 1);
+        }
+
+        if (tracks.Count == 0 || tracks[^1].BstackAt != at)
+        {
+            return;
+        }
+
+        MatchState.TailTrack track = tracks[^1];
+        tracks.RemoveAt(tracks.Count - 1);
+        int depth = track.FrameDepth;
+        bool returned = depth < state.ReturnStamps.Length && state.ReturnStamps[depth] > track.StartStamp;
+        Debug.Assert(
+            state.Pstack.Count / sizeof(long) > track.BodyIndex
+                && state.Pstack.SizeAt(track.BodyIndex * sizeof(long)) == track.BodyMark,
+            "D101 option D: the negative body around a followed tail is open until its entry is popped"
+        );
+        Debug.Assert(returned || state.OpenCalls.Count >= depth, "D101 option D: a frame that never returned is open");
+        bool crossed =
+            track.BodyIndex < state.RunOutStamps.Length && state.RunOutStamps[track.BodyIndex] > track.StartStamp;
+        if (!crossed || returned)
+        {
+            return;
+        }
+
+        if (depth < state.PoisonStamps.Length && state.PoisonStamps[depth] > track.StartStamp)
+        {
+            WorkCounter.TailPoisoned();
+            return;
+        }
+
+        Dictionary<(long, long), long> summaries = state.TailRanOut ??= [];
+        if (
+            summaries.Count < state.TailMemoCapacity
+            && summaries.TryAdd((track.K1, track.K2), FrameStampAt(state, depth))
+        )
+        {
+            WorkCounter.TailRecorded();
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut (<c>.scratch/s1024/d101/FLOOR.md</c>, revision 2,
+    /// reviewed in <c>.scratch/s1024/REVIEW-0100-floor.md</c>): a run-out inside the innermost open call
+    /// frame F, opened in a negative lookaround's body L0, where F cannot return: its group's
+    /// required literal does not occur from F's entry to the end of the text. Records F's followed
+    /// tails, then abandons F as D98 abandons a call and closes it as backtracked past.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// After a run-out has crossed F, the rest of F's exploration can change L0's outcome only by a
+    /// decided success of L0's body, which needs F to return (L0's body ends outside F). Every
+    /// return of F consumes its group's literal at or after F's entry, so with none there in the
+    /// text, no path F has left returns, and only failures and further run-outs remain, which add
+    /// nothing to a negative body that has already run out. The run-out is then taken at the item
+    /// the caller chose, the outermost call L0's body opened, where the call memo's own replay
+    /// (<see cref="AdvanceGroupCall"/>'s run-out arm) takes it for any later call with F's key.
+    /// Row 122 spent 10 of its 29 steps per character after this point (FLOOR.md).
+    /// </para>
+    /// <para>
+    /// Order matters twice (review round 2). The cut runs inside <see cref="RunOutInALookaroundBody"/>,
+    /// after <see cref="RunOut"/> has noted the run-out in F's call track, so F's close records
+    /// "ran out, never returned"; noted later, F would be recorded as failing, and a later call
+    /// with its key would replay a failure (witness
+    /// <c>PartialTailSummaryTests.A_frame_cut_keeps_the_call_memos_run_out</c>). F closes only
+    /// through <see cref="PopOpenCall"/> with <c>backtrackedPast</c>, which hands its run-outs to its
+    /// caller's track; <see cref="CloseFramesAbove"/> or a raw removal would lose them.
+    /// </para>
+    /// <para>
+    /// F's tails would otherwise be recorded when their entries are popped, which the cut skips; so
+    /// each live track of F that a run-out crossed, that never returned and was not poisoned is
+    /// recorded here. Its key's tail is a set of suffixes of paths from F's entry, none of which can
+    /// return, so "ran out across the frame, never returned" is the value its full exploration
+    /// would have given. Without this row 122 is quadratic again (option E's failure).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="lookMark">L0's pruning mark.</param>
+    private static void CutAFrameThatCannotReturn(MatchState state, long lookMark)
+    {
+        PatternObject pattern = state.Pattern;
+        if (state.OpenCalls.Count == 0 || !state.Bstack.ReadSizeBelow((int)lookMark - 1, out long saved))
+        {
+            return;
+        }
+
+        (long key, _, int frameSstack, _, _, int bstackAt) = state.OpenCalls[^1];
+        int group = (int)(key >> 32);
+        int entry = (int)(uint)key;
+        if (
+            frameSstack <= saved - _lookaroundStateDataSize
+            || bstackAt < lookMark
+            || pattern.TailTables?.GroupRequiredLiterals is not { } literals
+            || group >= literals.Length
+            || literals[group] < 0
+            || LastOfTheGroupsLiteral(state, group, literals[group]) >= entry
+            || !state.Bstack.ReadUInt8Below(bstackAt + 1, out byte op)
+            || op != (byte)Opcode.GroupCall
+        )
+        {
+            return;
+        }
+
+        Debug.Assert(
+            state.CallTracks.Count == 0 || state.CallTracks[^1].Touched,
+            "D101 option D: RunOut noted the run-out in the frame's call track before the cut"
+        );
+        RecordTheTailsOfACutFrame(state, bstackAt, state.OpenCalls.Count);
+
+        while (state.Pstack.TopSize(out long mark) && mark > bstackAt)
+        {
+            _ = state.Pstack.DropSize();
+        }
+
+        CutBstack(state, bstackAt);
+        /* sstack: caller_repeats capture_change caller_captures return_node */
+        state.Sstack.Count = frameSstack;
+        if (
+            !state.Sstack.DropSize()
+            || !PopCaptures(state, state.Sstack)
+            || !state.Sstack.PopSize(out long captureChange)
+            || !PopRepeats(state, state.Sstack, testJustEnded: false, keepSuccessMarks: false)
+        )
+        {
+            Debug.Assert(false, "D101 option D: the cut frame is whole");
+            return;
+        }
+
+        state.CaptureChange = captureChange;
+        _ = PopOpenCall(state, backtrackedPast: true);
+        WorkCounter.FrameCut();
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the last position of a group's literal in the text, cached per call.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="group">The call index.</param>
+    /// <param name="literal">The codepoint.</param>
+    /// <returns>Its last position, or -1.</returns>
+    private static int LastOfTheGroupsLiteral(MatchState state, int group, int literal)
+    {
+        int[] last = state.GroupLiteralLast ??= CreateUnknownLiteralPositions(
+            state.Pattern.TailTables!.GroupRequiredLiterals.Length
+        );
+        if (last[group] == int.MinValue)
+        {
+            // Searched as its UTF-16 units, so an astral literal is its pair (REVIEW-0100 W-E). A
+            // literal at or below 0xFFFF is one unit, a lone surrogate included, which
+            // char.ConvertFromUtf32 rejects. A surrogate unit found inside a pair can only move the
+            // last position later, which keeps the frame (the cut stays a no-op, never wrong).
+            ReadOnlySpan<char> text = state.Text.Span[..state.TextEnd];
+            last[group] =
+                literal <= char.MaxValue
+                    ? text.LastIndexOf((char)literal)
+                    : text.LastIndexOf(char.ConvertFromUtf32(literal).AsSpan());
+        }
+
+        return last[group];
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: a cache with every position unknown.</summary>
+    /// <param name="count">The number of call indices.</param>
+    /// <returns>The array.</returns>
+    private static int[] CreateUnknownLiteralPositions(int count)
+    {
+        int[] last = new int[count];
+        Array.Fill(last, int.MinValue);
+        return last;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: records the followed tails of a frame about to be cut (see
+    /// <see cref="CutAFrameThatCannotReturn"/>) and drops every track above its entry.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="bstackAt">The frame's GROUP_CALL entry.</param>
+    /// <param name="depth">The frame's depth.</param>
+    private static void RecordTheTailsOfACutFrame(MatchState state, int bstackAt, int depth)
+    {
+        List<MatchState.TailTrack> tracks = state.TailTracks;
+        while (tracks.Count != 0 && tracks[^1].BstackAt >= bstackAt)
+        {
+            MatchState.TailTrack track = tracks[^1];
+            tracks.RemoveAt(tracks.Count - 1);
+            if (
+                track.FrameDepth != depth
+                || track.BodyIndex >= state.RunOutStamps.Length
+                || state.RunOutStamps[track.BodyIndex] <= track.StartStamp
+                || (depth < state.ReturnStamps.Length && state.ReturnStamps[depth] > track.StartStamp)
+                || (depth < state.PoisonStamps.Length && state.PoisonStamps[depth] > track.StartStamp)
+            )
+            {
+                continue;
+            }
+
+            Dictionary<(long, long), long> summaries = state.TailRanOut ??= [];
+            if (
+                summaries.Count < state.TailMemoCapacity
+                && summaries.TryAdd((track.K1, track.K2), FrameStampAt(state, depth))
+            )
+            {
+                WorkCounter.TailRecorded();
+            }
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the open stamp of the frame at a depth, or 0 if it has none.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="depth">The frame's depth, one-based.</param>
+    /// <returns>The stamp.</returns>
+    private static long FrameStampAt(MatchState state, int depth) =>
+        depth < state.FrameStamps.Length ? state.FrameStamps[depth] : 0;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: a run-out is about to be taken, with the body on top of the
+    /// pruning stack as its innermost (no atomic node holds a mark where tails are followed).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void NoteARunOutInTheTails(MatchState state)
+    {
+        Debug.Assert(
+            state.Pstack.Count != 0
+                && state.Pstack.TopSize(out long mark)
+                && ReadPruningMark(state, (int)mark, out Opcode op, out _)
+                && op is Opcode.Lookaround or Opcode.Conditional or Opcode.Failure,
+            "D101 option D: the top pruning mark is the innermost body"
+        );
+        state.StampTail(ref state.RunOutStamps, (state.Pstack.Count / sizeof(long)) - 1);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: a run-out is about to be taken. Every open call has touched the text to
+    /// come, and every call opened inside the innermost lookaround or test (or every call, where
+    /// none is open, since the run-out then answers the attempt) is crossed by it. Only the innermost
+    /// call's track is written; the others learn it when the calls above them close
+    /// (<see cref="MatchState.CallOutcomeTrack"/>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    private static void NoteARunOutInTheOpenCalls(MatchState state)
+    {
+        Debug.Assert(state.CallTracks.Count == state.OpenCalls.Count, "D101: one track per open call");
+        long body = -1;
+        for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
+        {
+            long mark = state.Pstack.SizeAt(offset);
+            if (
+                ReadPruningMark(state, (int)mark, out Opcode op, out _) && op is Opcode.Lookaround or Opcode.Conditional
+            )
+            {
+                if (state.Bstack.ReadSizeBelow((int)mark - 1, out long saved))
+                {
+                    body = saved - _lookaroundStateDataSize;
+                }
+
+                break;
+            }
+        }
+
+        if (state.CallTracks.Count != 0)
+        {
+            WorkCounter.CallTracksWritten(1);
+            MatchState.CallOutcomeTrack track = state.CallTracks[^1];
+            state.CallTracks[^1] = track with { Touched = true, LowestBody = Math.Min(track.LowestBody, body) };
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101: a negative lookaround's key in <see cref="MatchState.NegativeOutcomes"/>.</summary>
+    /// <param name="node">The lookaround.</param>
+    /// <param name="position">Where its body starts.</param>
+    /// <returns>The key.</returns>
+    private static long NegativeOutcomeKey(Node node, int position) => ((long)node.OutcomeKey << 32) | (uint)position;
 
     /// <summary>
     /// The Prune arm of <see cref="BasicMatchCore"/>'s advance switch, moved out unchanged so that
@@ -20035,10 +20781,12 @@ internal static class Matcher
         // taken only for some continuations.
         bool condWasBlocked = false;
         bool condHeld = false;
+        bool condRunOutWaits = false;
         if (state.WMarks.Count != 0)
         {
             condWasBlocked = HasWMarkAt(state, state.Bstack.Count, WMarkKind.CutTaint);
             condHeld = HasWMarkAt(state, state.Bstack.Count, WMarkKind.Held);
+            condRunOutWaits = HasWMarkAt(state, state.Bstack.Count, WMarkKind.RunOutPending);
             state.DropWMarksFrom(state.Bstack.Count);
         }
 
@@ -20055,6 +20803,10 @@ internal static class Matcher
             return MatchStatus.Illegal;
         }
 
+        Debug.Assert(
+            !condRunOutWaits || state.OpenCalls.Count == 0 || state.OpenCalls[^1].SstackDepth <= condSstackCount,
+            "D101 B2': the calls the test opened were closed by their own arms before the test's"
+        );
         state.Sstack.Count = (int)condSstackCount;
         CloseFramesAbove(state);
 
@@ -20116,6 +20868,27 @@ internal static class Matcher
             );
             state.NotePartialEvent(PartialEvent.HeldFailedTheCondition);
             return _armContinue;
+        }
+
+        // D101 (B2'): a run-out inside a call the positive test opened waited, and no path of the
+        // test succeeded on the held text (WaitsAcrossCalls): the test is undetermined, so the
+        // conditional takes both branches, the yes-branch now and the no-branch through a
+        // NO_BRANCH entry, as a blocked negative test does below. Only that path marks a test.
+        if (condRunOutWaits && !condWasBlocked)
+        {
+            Debug.Assert(condNode.Match, "D101 B2': only a positive test waits");
+            state.Bstack.PushSize(state.TextPos);
+            state.Bstack.PushNode(condNode.Next2.Node!);
+            state.Bstack.PushUInt8((byte)Opcode.NoBranch);
+
+            /* bstack: text_pos node NO_BRANCH */
+
+            CountFork(state);
+            PushTouchMark(state);
+            state.NoteABlockedEnd();
+            state.NotePartialEvent(PartialEvent.ConditionBothWays);
+            node = condNode.TrueNode!;
+            return _armAdvance;
         }
 
         // A positive condition that failed means the condition does not hold, so take the
@@ -20213,7 +20986,7 @@ internal static class Matcher
         RecordFailedCall(state);
 
         // The call is no longer open: backtracking past it means it never happened.
-        PopOpenCall(state);
+        PopOpenCall(state, backtrackedPast: true);
 
         // The return node is dropped rather than popped: backtracking past the call
         // means there is nowhere to return to.
@@ -20323,7 +21096,14 @@ internal static class Matcher
                 state.OpenCalls.Count == 0 || state.OpenCalls[^1].Reach <= groupReturnBackReach,
                 "a re-opened call is still inside the calls that were open when it returned"
             );
-            // It has returned, so it is not one the failed-call memo may record.
+            // It has returned, so it is not one the failed-call memo may record, nor D101's.
+            if (TracksCallOutcomes(state))
+            {
+                state.CallTracks.Add(
+                    new MatchState.CallOutcomeTrack(Returned: true, Touched: true, RanOut: true, long.MaxValue)
+                );
+            }
+
             state.OpenCalls.Add(
                 (
                     groupReturnBackKey,
@@ -20455,6 +21235,10 @@ internal static class Matcher
             return MatchStatus.Illegal;
         }
 
+        Debug.Assert(
+            !lookRunOutWaits || state.OpenCalls.Count == 0 || state.OpenCalls[^1].SstackDepth <= lookSstackCount,
+            "D101 B2': the calls the body opened were closed by their own arms before the body's"
+        );
         state.Sstack.Count = (int)lookSstackCount;
         CloseFramesAbove(state);
 
@@ -20509,6 +21293,11 @@ internal static class Matcher
             // It's a negative lookaround that's failed, which means the lookaround as a
             // whole has succeeded: for every continuation, unless a success of its body
             // was blocked (D11 M2).
+            if (lookNode.MemoisesNegativeOutcome && state.PartialSide != MatchState.PartialNone)
+            {
+                (state.NegativeOutcomes ??= [])[NegativeOutcomeKey(lookNode, lookData.TextPos)] = lookWasBlocked;
+            }
+
             if (lookWasBlocked)
             {
                 PushTouchMark(state);
@@ -21114,6 +21903,15 @@ internal static class Matcher
     private static int RunOut(MatchState state, ref Node node, ref int stringPos, int gfoldedPos, int foldChangesStart)
     {
         PatternObject pattern = state.Pattern;
+        if (state.CallTracks.Count != 0)
+        {
+            NoteARunOutInTheOpenCalls(state);
+        }
+
+        if (state.TailsLive)
+        {
+            NoteARunOutInTheTails(state);
+        }
 
         if (
             pattern.NestsFuzzySections
@@ -21933,7 +22731,7 @@ internal static class Matcher
             || look.Node.Match
             || look.Node.BodyInfo is not { HasVerbOrCall: false }
             || pattern.HasBacktrackingVerb
-            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark))
+            || (pattern.HasGroupCalls && ACallOpenedInTheBodyIsOpenOrUnmodelled(state, mark, look.Node))
         )
         {
             return false;
@@ -22523,6 +23321,15 @@ internal static class Matcher
             changed = false;
         }
 
+        // NOT UPSTREAM'S, D101 option D: a tail summarised at this key replays its
+        // run-out; see TailAtEnd.
+        if (pattern.MemoisesTails && TailAtEnd(state, node, rpData, index, changed))
+        {
+            --rpData.Count;
+            armStatus = _armRunOut;
+            return node;
+        }
+
         // Could the body or tail match?
         // NOT UPSTREAM (D94 performance): a state already known to fail.
         if (StateKnownToFail(state, node))
@@ -22618,6 +23425,11 @@ internal static class Matcher
             --rpData.Count;
             armStatus = _armBacktrack;
             return node;
+        }
+
+        if (state.HasPendingTail)
+        {
+            FollowTheTail(state);
         }
 
         // Record info in case we backtrack into the body.
@@ -22781,6 +23593,15 @@ internal static class Matcher
             changed = false;
         }
 
+        // NOT UPSTREAM'S, D101 option D: as in END_GREEDY_REPEAT; the lazy order (tail
+        // first) does not change what a summary says.
+        if (pattern.MemoisesTails && TailAtEnd(state, node, rpData, index, changed))
+        {
+            --rpData.Count;
+            armStatus = _armRunOut;
+            return node;
+        }
+
         // Could the body or tail match?
         bool tryBody =
             changed
@@ -22845,6 +23666,11 @@ internal static class Matcher
             --rpData.Count;
             armStatus = _armBacktrack;
             return node;
+        }
+
+        if (state.HasPendingTail)
+        {
+            FollowTheTail(state);
         }
 
         // Record info in case we backtrack into the body.
@@ -22959,6 +23785,19 @@ internal static class Matcher
         // Repeat indexes are 0-based.
         int index = (int)node.Values[0];
         RepeatData rpData = state.Repeats[index];
+
+        // NOT UPSTREAM'S, D101 option D (share 2): the entry of a loop with no minimum
+        // and no maximum decides as its end does after a non-empty iteration.
+        if (pattern.MemoisesTails && TailAtEntry(state, node, index))
+        {
+            armStatus = _armRunOut;
+            return node;
+        }
+
+        if (state.HasPendingTail)
+        {
+            FollowTheTail(state);
+        }
 
         // We might need to backtrack into the head, so save the current repeat.
         // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
@@ -23181,6 +24020,19 @@ internal static class Matcher
         // Repeat indexes are 0-based.
         int index = (int)node.Values[0];
         RepeatData rpData = state.Repeats[index];
+
+        // NOT UPSTREAM'S, D101 option D (share 2): the entry of a loop with no minimum
+        // and no maximum decides as its end does after a non-empty iteration.
+        if (pattern.MemoisesTails && TailAtEntry(state, node, index))
+        {
+            armStatus = _armRunOut;
+            return node;
+        }
+
+        if (state.HasPendingTail)
+        {
+            FollowTheTail(state);
+        }
 
         // We might need to backtrack into the head, so save the current repeat.
         // NOT UPSTREAM (D17): with its run number first, when the pattern numbers runs.
@@ -24067,6 +24919,10 @@ internal static class Matcher
         rpData.ChangesAtStart = dataR.ChangesAtStart;
         rpData.ClearMemo();
         rpData.RunId = runId;
+        if (state.TailsLive)
+        {
+            RecordTheTail(state);
+        }
         armStatus = _armContinue;
         return node;
     }
@@ -24246,6 +25102,11 @@ internal static class Matcher
         {
             armStatus = MatchStatus.Illegal;
             return node;
+        }
+
+        if (state.TailsLive)
+        {
+            RecordTheTail(state);
         }
 
         // We're backtracking into the body.

@@ -1405,6 +1405,7 @@ internal static class NodeCompiler
 
         // Create a node for the lookaround.
         Node lookaroundNode = CreateNode(args.Pattern, Opcode.Lookaround, flags, 0, 0);
+        lookaroundNode.OutcomeKey = args.Code + 1; // D101 option D, share 1: the source, until SetNegativeOutcomeKeys
 
         // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
         if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
@@ -1452,7 +1453,7 @@ internal static class NodeCompiler
         Debug.Assert(subargs.HasGroups || args.Pattern.GroupEndIndex == groupEndsBefore);
         if (subargs.HasGroups && args.Pattern.GroupEndIndex == groupEndsBefore)
         {
-            (args.Pattern.LookaroundsSavingOnlyForCalls ??= []).Add(lookaroundNode);
+            lookaroundNode.SavesOnlyForCalls = true;
         }
 
         if (subargs.HasRepeats)

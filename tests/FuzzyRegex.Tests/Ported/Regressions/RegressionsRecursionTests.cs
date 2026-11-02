@@ -28,7 +28,7 @@ public sealed class RegressionsRecursionTests
             .Should()
             .Equal("(((1+0)+1)+1)");
 
-        FuzzyRegex kept = Upstream.Compile(pattern);
+        FuzzyRegex kept = Upstream.CompileWithCallsKept(pattern);
         kept.PatternObject.KeepCallCaptures = true;
         kept.Match("aaa(((1+0)+1)+1)bbb")
             .Groups["rec"]

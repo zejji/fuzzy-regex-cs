@@ -391,6 +391,11 @@ public sealed class FuzzyRegex
     /// parsed, as upstream does. The oracle sets it to show that D50 is the whole of a divergence;
     /// see <see cref="Parsing.Info.UpstreamCallCopies"/>.
     /// </param>
+    /// <param name="upstreamCalls">
+    /// NOT UPSTREAM, and never set by this library: compile every group call as a call, as upstream
+    /// does, rather than writing out the calls nothing can tell from their groups written out
+    /// (D101). The oracle and the tests set it; see <see cref="Parsing.PatternCompiler.Compile"/>'s <c>upstreamCalls</c>.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     internal static FuzzyRegex WithDefaultVersion(
         string pattern,
@@ -403,7 +408,8 @@ public sealed class FuzzyRegex
         bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false,
         bool upstreamFuzzyConditionTest = false,
-        bool upstreamCallCopies = false
+        bool upstreamCallCopies = false,
+        bool upstreamCalls = false
     ) =>
         new(
             pattern,
@@ -417,7 +423,8 @@ public sealed class FuzzyRegex
             upstreamWholePatternCall,
             upstreamCallFeatures,
             upstreamFuzzyConditionTest,
-            upstreamCallCopies
+            upstreamCallCopies,
+            upstreamCalls
         );
 
     /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
@@ -436,6 +443,7 @@ public sealed class FuzzyRegex
     /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamFuzzyConditionTest">See <see cref="WithDefaultVersion"/>.</param>
     /// <param name="upstreamCallCopies">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCalls">See <see cref="WithDefaultVersion"/>.</param>
     private FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
@@ -448,7 +456,8 @@ public sealed class FuzzyRegex
         bool upstreamWholePatternCall = false,
         bool upstreamCallFeatures = false,
         bool upstreamFuzzyConditionTest = false,
-        bool upstreamCallCopies = false
+        bool upstreamCallCopies = false,
+        bool upstreamCalls = false
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
@@ -462,27 +471,20 @@ public sealed class FuzzyRegex
         MaxCompiledNodes = maxCompiledNodes;
         try
         {
-            _compiled = Parsing.PatternCompiler.Compile(
+            (_compiled, PatternObject) = CompileGraph(
                 pattern,
-                (int)options,
-                ToCompilerNamedLists(namedLists),
+                options,
+                namedLists,
                 defaultVersion,
+                maxCompiledNodes,
                 upstreamReverseGrapheme,
                 upstreamFoldedRuns,
                 upstreamWholePatternCall,
                 upstreamCallFeatures,
                 upstreamFuzzyConditionTest,
-                upstreamCallCopies
+                upstreamCallCopies,
+                upstreamCalls
             );
-
-            // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler
-            // is the last thing that can reject a pattern - it refuses code the parser was happy to
-            // emit (upstream/src/_regex.c:25863). Building here rather than at first match keeps
-            // that rejection where the caller expects it, and where upstream puts it. The pattern
-            // text goes with it because the compile budget's refusal is a parse failure and
-            // carries the pattern, and CompiledPattern - the compile-parity seam - deliberately
-            // does not hold it.
-            PatternObject = Engine.PatternObject.Compile(_compiled, pattern, maxCompiledNodes);
         }
         catch (InsufficientExecutionStackException outOfStack)
         {
@@ -510,6 +512,81 @@ public sealed class FuzzyRegex
             ),
         ];
     }
+
+    /// <summary>Compiles the pattern's code and then its graph.</summary>
+    /// <param name="pattern">The pattern text.</param>
+    /// <param name="options">The options.</param>
+    /// <param name="namedLists">The named lists.</param>
+    /// <param name="defaultVersion">The default version.</param>
+    /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
+    /// <param name="upstreamReverseGrapheme">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFoldedRuns">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamWholePatternCall">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallFeatures">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamFuzzyConditionTest">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCallCopies">See <see cref="WithDefaultVersion"/>.</param>
+    /// <param name="upstreamCalls">See <see cref="WithDefaultVersion"/>.</param>
+    /// <returns>The code and the graph.</returns>
+    /// <remarks>
+    /// Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is the
+    /// last thing that can reject a pattern - it refuses code the parser was happy to emit
+    /// (upstream/src/_regex.c:25863). Building here rather than at first match keeps that rejection
+    /// where the caller expects it, and where upstream puts it. The pattern text goes with it
+    /// because the compile budget's refusal is a parse failure and carries the pattern, and
+    /// CompiledPattern - the compile-parity seam - deliberately does not hold it.
+    /// <para>
+    /// NOT UPSTREAM (D101): when the group calls written out make the graph bigger than the budget
+    /// allows, the pattern is compiled again with its calls kept, which answer the same in a smaller
+    /// graph, and is refused only if that is too big as well. The arguments are passed rather than
+    /// captured by a lambda, which allocated a closure and a delegate on every compile (+208 B on
+    /// the compile allocation tests, with the graph's own growth).
+    /// </para>
+    /// </remarks>
+    private static (Parsing.CompiledPattern Compiled, Engine.PatternObject Graph) CompileGraph(
+        string pattern,
+        FuzzyRegexOptions options,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
+        int defaultVersion,
+        int maxCompiledNodes,
+        bool upstreamReverseGrapheme,
+        bool upstreamFoldedRuns,
+        bool upstreamWholePatternCall,
+        bool upstreamCallFeatures,
+        bool upstreamFuzzyConditionTest,
+        bool upstreamCallCopies,
+        bool upstreamCalls
+    )
+    {
+        Parsing.CompiledPattern compiled = Code(keepCalls: false);
+        try
+        {
+            return (compiled, Engine.PatternObject.Compile(compiled, pattern, maxCompiledNodes));
+        }
+        catch (FuzzyRegexParseException) when (compiled.InlinedCalls != 0)
+        {
+            compiled = Code(keepCalls: true);
+            return (compiled, Engine.PatternObject.Compile(compiled, pattern, maxCompiledNodes));
+        }
+
+        // A local function, never made a delegate, so its captures live in a struct on the stack.
+        Parsing.CompiledPattern Code(bool keepCalls) =>
+            Parsing.PatternCompiler.Compile(
+                pattern,
+                (int)options,
+                ToCompilerNamedLists(namedLists),
+                defaultVersion,
+                upstreamReverseGrapheme,
+                upstreamFoldedRuns,
+                upstreamWholePatternCall,
+                upstreamCallFeatures,
+                upstreamFuzzyConditionTest,
+                upstreamCallCopies,
+                upstreamCalls || keepCalls
+            );
+    }
+
+    /// <summary>NOT UPSTREAM (D101): how many group calls were written out when this compiled.</summary>
+    internal int InlinedCalls => _compiled.InlinedCalls;
 
     /// <summary>The pattern this instance was compiled from.</summary>
     public string Pattern { get; }

@@ -213,7 +213,11 @@ public sealed class RequiredStringPrefilterTests
     [Arguments(@"(?P<a>.b?)(?&a)x", 4)]
     [Arguments(@"(.(?1)?)x", -1)]
     [Arguments(@"(.)(?1)(?R)?x", -1)]
-    [Arguments(@"(.)(?2)(.(?1)?)x", -1)]
+    // Since D101 a call to a group whose own call is not recursive is written out, so this group
+    // no longer holds a call and its width is known: 1 + 2 + 2 (-1 before). The row after keeps a
+    // group that holds a call, a recursive one.
+    [Arguments(@"(.)(?2)(.(?1)?)x", 5)]
+    [Arguments(@"(.)(?2)(.(?2)?)x", -1)]
     public void A_call_to_a_group_of_bounded_width_counts_towards_the_offset(string pattern, long offset) =>
         new FuzzyRegex(pattern).PatternObject.ReqOffset.Should().Be(offset);
 

@@ -290,18 +290,25 @@ public sealed class ThreadSafetyTests
         threadStatic
             .Should()
             .Equal(
+                "WorkCounter.<CallTracksMarked>k__BackingField",
                 "WorkCounter.<CapturesSaved>k__BackingField",
                 "WorkCounter.<CharacterLimit>k__BackingField",
                 "WorkCounter.<CharactersSearched>k__BackingField",
                 "WorkCounter.<CharactersWalked>k__BackingField",
+                "WorkCounter.<FramesCut>k__BackingField",
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<LeadingStringFallbacks>k__BackingField",
+                "WorkCounter.<LookaroundFoldVisits>k__BackingField",
                 "WorkCounter.<SearchStartCalls>k__BackingField",
                 "WorkCounter.<StatesInitialised>k__BackingField",
                 "WorkCounter.<StepLimit>k__BackingField",
                 "WorkCounter.<Steps>k__BackingField",
-                "WorkCounter.<SubjectUnitsScanned>k__BackingField"
+                "WorkCounter.<SubjectUnitsScanned>k__BackingField",
+                "WorkCounter.<TailsPoisoned>k__BackingField",
+                "WorkCounter.<TailsRecorded>k__BackingField",
+                "WorkCounter.<TailsReplayed>k__BackingField",
+                "WorkCounter.<TailsReplayedAcrossFrames>k__BackingField"
             );
     }
 
@@ -850,15 +857,11 @@ public sealed class ThreadSafetyTests
             // Ledger entry 52 added SkipWholeFoldedCharEdits, likewise set only by
             // OracleComparer.RunWithTheUpstreamSubjectFoldEdits.
             "PatternObject.SkipWholeFoldedCharEdits",
-            // D10 (ledger entry 54) added LookaroundsSavingOnlyForCalls, filled by
-            // NodeCompiler.BuildLookaround inside Compile and never read by the library. Only
-            // OracleComparer.RunWithTheUpstreamLookaroundCallCaptures reads it, to clear its nodes'
-            // flag on a pattern compiled for that one call.
-            "PatternObject.LookaroundsSavingOnlyForCalls",
             // D51 (ledger entry 63) added KeepCallCaptures, never set by the library. Only
             // OracleComparer.RunWithTheUpstreamCallCaptures sets it, on a pattern compiled for that
-            // one call.
-            "PatternObject.KeepCallCaptures",
+            // one call. A property since D101, which refuses it on a pattern whose calls were
+            // written out.
+            "PatternObject.<KeepCallCaptures>k__BackingField",
             // D62 added PartialRestoresFrameByFrame, likewise set only by
             // OracleComparer.RunWithTheFrameByFrameRestore.
             "PatternObject.PartialRestoresFrameByFrame",
@@ -928,6 +931,15 @@ public sealed class ThreadSafetyTests
             // UseCallMemo in and after the node-numbering loop) and by NodeCompiler inside it
             // (WritesInDiscardingConstruct).
             "PatternObject.WritesInDiscardingConstruct",
+            // D101: set by PatternObject.SetNegativeOutcomeMemo while the pattern compiles.
+            "PatternObject.MemoisesCallOutcomes",
+            // D101 option D: set once by PatternObject.SetTailMemo, after SetNegativeOutcomeMemo.
+            "PatternObject.TailTables",
+            // Share 1: Node.OutcomeKey, written by NodeCompiler.BuildLookaround and then by
+            // PatternObject.SetNegativeOutcomeKeys, both while the pattern compiles.
+            "Node.OutcomeKey",
+            // D101: set once by Compile after SetNegativeOutcomeMemo.
+            "PatternObject.CanDecideOnARunOut",
             "PatternObject.GroupCallSites",
             "PatternObject.UseCallMemo",
             // And these two, never written by the library: FailedCallMemoTests and the memo grid
@@ -1000,6 +1012,11 @@ public sealed class ThreadSafetyTests
             // D11 chunk 8: written by PatternObject.SetLookaroundBodies, which Compile calls once
             // the nodes are numbered.
             "Node.BodyInfo",
+            // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
+            // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
+            // pattern compiles; one byte holds the two, and (D10) Node.SavesOnlyForCalls, set by
+            // NodeCompiler.BuildLookaround and read only by the oracle.
+            "Node._flags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
             "Node.RunOutGroups",

@@ -448,7 +448,7 @@ public sealed class OracleWaveTests
     /// <summary>
     /// D128: the pattern-reuse sweep above must compare the port's answer with the port's answer.
     /// It passed its dirtying walk to <see cref="OracleComparer.Run(OracleRow, TimeSpan, bool,
-    /// Action{FuzzyRegex}?, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool)"/>
+    /// Action{FuzzyRegex}?, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool)"/>
     /// as an ablation, and on a partial row that disagrees with upstream an ablation is retried with
     /// D11's second pass taken away, the composition the named ablations need. So the "reused"
     /// side answered upstream's way: seed 936847660 row 49361, CI run 40847036039, fresh P(0, 4),

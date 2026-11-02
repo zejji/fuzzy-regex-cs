@@ -261,4 +261,10 @@ internal enum PartialEvent
 
     /// <summary>D124: a positive test's decided success after a failed blocked one failed without its rerun.</summary>
     DecidedRerunSkipped,
+
+    /// <summary>
+    /// D101: a run-out inside a group call a negative body opened was taken at the call, with the
+    /// call left open (<c>Matcher.RunsOutLikeACallFreeBody</c>).
+    /// </summary>
+    RunOutCallKeptOpen,
 }

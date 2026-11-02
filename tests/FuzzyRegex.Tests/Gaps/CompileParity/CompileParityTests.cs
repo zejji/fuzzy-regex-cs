@@ -106,8 +106,10 @@ public sealed class CompileParityTests
             return;
         }
 
+        // Every call kept as a call, as upstream compiles it: D101 writes out the calls nothing can
+        // tell from their groups, which no upstream bytecode can match (CallInliningTests covers it).
         CompiledPattern compiled = RunSeam(() =>
-            PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
+            PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion, upstreamCalls: true)
         );
 
         if (_pinnedDivergentPatterns.TryGetValue(row.Pattern, out string? reason))

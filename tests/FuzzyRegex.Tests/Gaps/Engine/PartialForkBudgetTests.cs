@@ -100,9 +100,9 @@ public sealed class PartialForkBudgetTests
     [Arguments(true)]
     public void A_budget_partial_inside_an_open_call_reports_no_capture(bool keepCallCaptures)
     {
-        var regex = new FuzzyRegex(
+        // The call kept as a call: D101 would write it out, and this row is about an open call.
+        FuzzyRegex regex = GroupCallTests.WithCallsKept(
             @"(x)(?&c)(?(DEFINE)(?<c>(?:(a)|a){12}(?!\b)(*FAIL)\3))",
-            FuzzyRegexOptions.None,
             EngineWork.HangGuard
         );
         regex.PatternObject.KeepCallCaptures = keepCallCaptures;

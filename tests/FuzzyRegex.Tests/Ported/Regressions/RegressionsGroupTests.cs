@@ -25,7 +25,7 @@ public sealed class RegressionsGroupTests
         m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b");
         m.Groups["x"].Value.Should().Be("b");
 
-        FuzzyRegex kept = Upstream.Compile("(?P<x>.)*(?&x)");
+        FuzzyRegex kept = Upstream.CompileWithCallsKept("(?P<x>.)*(?&x)");
         kept.PatternObject.KeepCallCaptures = true;
         Match upstream = kept.FullMatch("abc");
         upstream.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");

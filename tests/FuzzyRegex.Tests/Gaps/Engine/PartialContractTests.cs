@@ -167,67 +167,24 @@ public sealed class PartialContractTests
     }
 
     /// <summary>
-    /// A lookahead the held text already decides is still treated as undetermined in two shapes
-    /// (was D74): the run-out lies inside a group call that a condition's test opened (the SHORTCUT
-    /// on <c>Matcher.RunOutInALookaroundBody</c>), or the lookahead's body sets a group the pattern
-    /// reads later. No continuation completes either row; main before D11 and upstream 2026.9.10
-    /// answer None.
+    /// A lookahead the held text already decides is still treated as undetermined when the
+    /// lookahead's body sets a group the pattern reads later (was D74). No continuation completes
+    /// the row; main before D11 and upstream 2026.9.10 answer None. Its sibling, a run-out inside a
+    /// group call a condition's test opened, answers None since D101 writes the call out
+    /// (<c>CallInliningTests</c>).
     /// </summary>
     [Test]
-    [Arguments(@"(?(?=(?1))x|ab)((?:ab)*(?<=b))?")]
     [Arguments(@"(?>(?=((?:ab)*)(?<=b))|ab)(?(1)x|q)")]
-    public void A_decided_lookahead_inside_a_call_or_with_a_read_capture_answers_a_partial(string pattern)
+    public void A_decided_lookahead_with_a_read_capture_answers_a_partial(string pattern)
     {
         ShouldAnswer("match", pattern, "ab", 0, 2);
     }
 
     /// <summary>
-    /// A run-out inside a group call, where the body that opened the call feeds a decision (a
-    /// negative lookahead, a condition's test, a lookahead inside an atomic group, or any
-    /// lookaround in a fuzzy pattern), answers the partial at once (was D101; owner decision
-    /// 2026-10-18). The same pattern with the call written out can answer None, so here a call
-    /// does not answer as its group written out (DECISIONS, D40), which still holds for every full
-    /// match.
-    /// </summary>
-    /// <remarks>
-    /// The judge (brute force over every continuation of up to three characters, on the
-    /// written-out form) answers None on the four match rows and P(2, 2) on the search: no text
-    /// completes a match from 0, and 'xyxx' completes one from 2. Reporting a start earlier than
-    /// the first a continuation completes is the skip-fail row's kind (D53). Upstream answers the
-    /// first three rows as here; PCRE2 10.47 gives the same partials for them and for their
-    /// written-out forms too (<c>.scratch/s1016/refuse-partial/NOTES.md</c>, "PCRE2 10.47"). The
-    /// fix, re-opening the calls a body opened (D98's option B), is a 1.1 candidate. Evidence: D98's
-    /// grid (124 of 2,640 rows, <c>.scratch/s1016/d98/grid-vs-written.txt</c>) and the fuzzy grid
-    /// (421 phantoms and 188 earlier starts of 3,240 rows, no miss,
-    /// <c>.scratch/s1016/refuse-partial/fz/diff.txt</c>). In a fuzzy pattern that has any group
-    /// call, a run-out inside any lookaround answers at once whether or not the body opened a call
-    /// (<c>Matcher.ACallOpenedInTheBodyIsOpenOrUnmodelled</c> holds for every fuzzy pattern): the
-    /// last row's body opens none, no text completes it, and without the call it answers None
-    /// (battery run 9, matrix k43; upstream 2026.9.10 answers P(0, 1) in both forms).
-    /// </remarks>
-    [Test]
-    [Arguments("match", @"(?!(?:a*a){s<=1})(?P<g1>)(?1)", "a", 0, 1)]
-    [Arguments("match", @"(x)(?!y?(?1))\Z", "xy", 0, 2)]
-    [Arguments("match", @"(x)(?(?=y?(?1))a|b)", "xy", 0, 2)]
-    [Arguments("match", @"(x)(?>(?=(?1)))\Z", "x", 0, 1)]
-    [Arguments("match", @"(x)(?:(?=(?1))\Z){e<=1}", "xy", 0, 2)]
-    [Arguments("search", @"(x)(?:(?=(?1))\Z){e<=1}", "xy", 0, 2)]
-    public void A_run_out_inside_a_call_a_deciding_body_opened_answers_a_partial(
-        string operation,
-        string pattern,
-        string text,
-        int start,
-        int end
-    )
-    {
-        ShouldAnswer(operation, pattern, text, start, end);
-    }
-
-    /// <summary>
-    /// The guarantee holds for the rows above: over every text that starts with the row's text and
-    /// goes on by up to three characters, the call form answers every full call as its written-out
-    /// form does, and a partial call never answers None, or a different complete match, where the
-    /// written-out form finds one.
+    /// D101's guarantee before the fix, kept as a check of the fix: over every text that starts
+    /// with the row's text and goes on by up to three characters, the call form answers every full
+    /// call as its written-out form does, and a partial call never answers None, or a different
+    /// complete match, where the written-out form finds one.
     /// </summary>
     [Test]
     [Arguments(@"(x)(?!y?(?1))\Z", @"(x)(?!y?(?:x))\Z", "xy")]

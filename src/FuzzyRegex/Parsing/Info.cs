@@ -179,7 +179,37 @@ internal sealed class Info
     /// filled in by <c>FixGroups</c>, and <see cref="PatternCompiler"/> needs the answer before it,
     /// to know whether a call could carry a fuzzy budget into a section that allows no errors.
     /// </summary>
-    internal bool HasGroupCall { get; set; }
+    internal bool HasGroupCall
+    {
+        get => (_parsed & _parsedGroupCall) != 0;
+        set => _parsed = (byte)(value ? _parsed | _parsedGroupCall : _parsed & ~_parsedGroupCall);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D101): whether the parser has built a lookaround or a lookaround condition.
+    /// Without one <see cref="LookaroundFolder"/> has nothing to fold and does not walk the tree,
+    /// which on a large pattern was most of D101's compile time (<c>CompileLargePattern</c>,
+    /// 2026-10-31). A copy made later (a written-out call, D50's optimiser copy) is a copy of a
+    /// tree the parser built, so it holds a lookaround only if this is already set.
+    /// </summary>
+    internal bool HasLookaround
+    {
+        get => (_parsed & _parsedLookaround) != 0;
+        set => _parsed = (byte)(value ? _parsed | _parsedLookaround : _parsed & ~_parsedLookaround);
+    }
+
+    /// <summary>Bit of <see cref="_parsed"/> for <see cref="HasGroupCall"/>.</summary>
+    private const int _parsedGroupCall = 1;
+
+    /// <summary>Bit of <see cref="_parsed"/> for <see cref="HasLookaround"/>.</summary>
+    private const int _parsedLookaround = 2;
+
+    /// <summary>
+    /// What the parser has built, one bit each: a separate <see langword="bool"/> for
+    /// <see cref="HasLookaround"/> took the parse state past main's 216 bytes (8 more bytes on every
+    /// compile, red in AllocationTests' compile rows).
+    /// </summary>
+    private byte _parsed;
 
     /// <summary>
     /// NOT UPSTREAM (D109): the first <c>(*PRUNE)</c> or <c>(*SKIP)</c> the parser met, its name and

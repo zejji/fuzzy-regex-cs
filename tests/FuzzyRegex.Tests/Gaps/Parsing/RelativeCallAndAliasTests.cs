@@ -28,7 +28,7 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_backward_relative_call_resolves_to_the_previous_group()
     {
-        CompiledPattern compiled = PatternCompiler.Compile("(a)(?-1)");
+        CompiledPattern compiled = PatternCompiler.Compile("(a)(?-1)", upstreamCalls: true);
 
         compiled.Code.Should().Equal(11u, 0, 30, 1, 1, 1, 12, 1, 97, 20, 20, 31, 0, 1);
         compiled.GroupCount.Should().Be(1);
@@ -38,7 +38,7 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_backward_relative_call_counts_back_by_its_offset()
     {
-        CompiledPattern compiled = PatternCompiler.Compile("(a)(b)(?-2)");
+        CompiledPattern compiled = PatternCompiler.Compile("(a)(b)(?-2)", upstreamCalls: true);
 
         compiled.Code.Should().Equal(11u, 0, 30, 1, 1, 1, 12, 1, 97, 20, 20, 30, 1, 2, 2, 12, 1, 98, 20, 31, 0, 1);
         compiled.GroupCount.Should().Be(2);
@@ -54,7 +54,7 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_forward_relative_call_resolves_to_a_group_defined_later()
     {
-        CompiledPattern compiled = PatternCompiler.Compile("(?+1)(a)");
+        CompiledPattern compiled = PatternCompiler.Compile("(?+1)(a)", upstreamCalls: true);
 
         compiled.Code.Should().Equal(31u, 0, 11, 0, 30, 1, 1, 1, 12, 1, 97, 20, 20, 1);
         compiled.ReqOffset.Should().Be(1);
@@ -68,7 +68,7 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_backward_relative_call_of_zero_names_the_next_group()
     {
-        CompiledPattern compiled = PatternCompiler.Compile("(?-0)(a)");
+        CompiledPattern compiled = PatternCompiler.Compile("(?-0)(a)", upstreamCalls: true);
 
         compiled.Code.Should().Equal(31u, 0, 11, 0, 30, 1, 1, 1, 12, 1, 97, 20, 20, 1);
     }
@@ -175,7 +175,7 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_named_group_nested_inside_itself_gets_a_private_alias_the_compiler_fixes_up()
     {
-        CompiledPattern compiled = PatternCompiler.Compile("(?<x>a(?<x>b))(?&x)");
+        CompiledPattern compiled = PatternCompiler.Compile("(?<x>a(?<x>b))(?&x)", upstreamCalls: true);
 
         compiled.Code.Should().Equal(11u, 0, 30, 1, 1, 1, 12, 1, 97, 30, 1, 2, 1, 12, 1, 98, 20, 20, 20, 31, 0, 1);
         compiled.GroupCount.Should().Be(1);

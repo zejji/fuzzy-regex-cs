@@ -67,6 +67,23 @@ internal static class Upstream
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
     ) => FuzzyRegex.WithDefaultVersion(pattern, options, matchTimeout, namedLists, Parsing.RegexFlags.Version0);
 
+    /// <summary>
+    /// Upstream's <c>regex.compile</c> with every group call kept as a call, as upstream compiles it
+    /// (D101 writes out the calls nothing can tell from their groups): for upstream's capture rule,
+    /// under which every call is visible.
+    /// </summary>
+    /// <param name="pattern">The pattern to compile.</param>
+    /// <returns>The compiled pattern.</returns>
+    public static FuzzyRegex CompileWithCallsKept(string pattern) =>
+        FuzzyRegex.WithDefaultVersion(
+            pattern,
+            FuzzyRegexOptions.None,
+            FuzzyRegex.InfiniteMatchTimeout,
+            null,
+            Parsing.RegexFlags.Version0,
+            upstreamCalls: true
+        );
+
     /// <summary>Upstream's <c>regex.search</c>.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>

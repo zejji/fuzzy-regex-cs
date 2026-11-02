@@ -617,6 +617,56 @@ internal sealed class PatternObject
     internal bool WritesInDiscardingConstruct;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D101: whether a partial call's second pass keeps each group call's outcome per
+    /// position (<c>Matcher.AdvanceGroupCall</c>): set with <see cref="Node.MemoisesNegativeOutcome"/>,
+    /// whose conditions it shares, for the patterns that hold such a lookaround.
+    /// </summary>
+    /// <remarks>
+    /// The negative lookarounds' memo leaves each recursion level's own walk: the lookaround at a
+    /// position is decided once, but every call below it still runs its group to the end of the
+    /// text. Under the same conditions a call's run depends on its position alone, so what it did is
+    /// kept when backtracking passes its entry: it never returned and a run-out crossed it (replayed
+    /// as a run-out at the call, which the innermost body around the replay then takes, as it took
+    /// the original), or it never returned and nothing in it touched the text to come (replayed as a
+    /// failure). A call that returned, or one whose run-outs a lookaround inside it absorbed, is not
+    /// kept. Measured on `(?:x(?!(?R)?y)|z)+q` over 'x' * 80: 53,033 Debug steps with the lookaround
+    /// memo alone, 27,521 with this too. It shares the lookarounds' conditions and their evidence
+    /// (<see cref="SetNegativeOutcomeMemo"/>). Its own two: a call that returned is not kept (witness
+    /// <c>PartialNegativeOutcomeMemoTests.A_call_that_returned_is_not_kept</c>); a call whose run-outs
+    /// a lookaround inside it absorbed is not kept as a failure, since those run-outs left touches
+    /// and blocked ends a replayed failure would not (no witness found after 495 targeted rows and
+    /// the grids; the touches feed D90's pending records and the enclosing construct's taint).
+    /// </remarks>
+    internal bool MemoisesCallOutcomes;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: whether a partial call's second pass summarises repeat tails
+    /// inside call frames (<c>Matcher.TailAtEnd</c>): set by <see cref="SetTailMemo"/> where
+    /// <see cref="MemoisesCallOutcomes"/> is set and no node is atomic. Read from
+    /// <see cref="TailTables"/> rather than kept in a field of its own: with D121's switch beside
+    /// them, one more bool took a pattern without the memo 8 bytes past main's compile allocation
+    /// (<c>AllocationTests.Compiling_a_pattern_without_lookarounds_allocates_what_it_did_before_D124</c>).
+    /// </summary>
+    internal bool MemoisesTails => TailTables is not null;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: the tables the tail memo reads. Null unless
+    /// <see cref="MemoisesTails"/>; one field rather than one per table, so that a pattern without
+    /// the memo, nearly every pattern, compiles into an object no bigger than before D101.
+    /// </summary>
+    internal TailMemoTables? TailTables;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: whether the pattern holds anything <c>Matcher.RunOutFeedsADecisionIf</c>
+    /// can answer yes for: a condition, a negative lookaround, an atomic group (a possessive repeat
+    /// compiles to one) or a verb. Without one the walk over the pruning stack, as deep as a
+    /// recursion makes it, can only answer no, so it is skipped (it made
+    /// <c>(?:x(?=(?R)?y)|z)+q</c> 1.6x slower in Release once D101's B2' asked it at every choice
+    /// point inside a call).
+    /// </summary>
+    internal bool CanDecideOnARunOut;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether the failed-call memo is off whatever
     /// <see cref="UseCallMemo"/> says. Tests and <c>tools/probes/recursion-failure-memo/memo-grid.cs</c>
     /// set it on a pattern compiled for one call, to compare every answer with the memo on and off.
@@ -1153,21 +1203,6 @@ internal sealed class PatternObject
     internal bool SkipLookaroundInsertion;
 
     /// <summary>
-    /// NOT UPSTREAM, and never read by this library: the lookarounds that save and restore the
-    /// captures only because their body calls a group (D10), or <see langword="null"/> when there
-    /// are none. Written by <c>NodeCompiler.BuildLookaround</c>. The oracle clears their
-    /// <see cref="NodeStatus.HasGroups"/> flag on a pattern it compiled for one call, to show that
-    /// the D10 fix is the whole of a divergence.
-    /// </summary>
-    /// <remarks>
-    /// Upstream saves the captures around a lookaround only when its body holds a capture group
-    /// (<c>upstream/src/_regex.c</c>:13772), so a call's capture outlives a body that is thrown away:
-    /// <c>(a)(?:(?!.(?1))|.)+?b</c> over <c>aaab</c> leaves group 1 with [0,1][2,1]. See
-    /// <c>NodeCompiler.BuildGroupCall</c>.
-    /// </remarks>
-    internal List<Node>? LookaroundsSavingOnlyForCalls;
-
-    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a group call's captures stay on the
     /// group's capture list when the call returns, which is upstream's rule. The oracle sets it on a
     /// pattern it compiled for one call, to show that the D51 fix (ledger entry 63) is the whole of a
@@ -1178,8 +1213,35 @@ internal sealed class PatternObject
     /// (<c>push_groups</c>, <c>upstream/src/_regex.c</c>:2490, pushed at :13405 and popped at :13516), so
     /// <c>(?(DEFINE)(?&lt;c&gt;a))(?&amp;c)b</c> over 'ab' leaves c unset with the capture 'a'
     /// listed. See <c>Matcher.ReturnToCallerCaptures</c>.
+    /// <para>
+    /// Under that rule every call is visible, so none may be written out (D101): the pattern must
+    /// be compiled with <c>upstreamCalls</c>, and switching the rule on for a pattern whose calls
+    /// were written out throws, rather than answer as a different pattern.
+    /// </para>
     /// </remarks>
-    internal bool KeepCallCaptures;
+    /// <exception cref="InvalidOperationException">Set on a pattern compiled with calls written out.</exception>
+    internal bool KeepCallCaptures
+    {
+        get;
+        set
+        {
+            if (value && WroteCallsOut)
+            {
+                throw new InvalidOperationException(
+                    "upstream's call-capture rule needs every call kept: compile with upstreamCalls"
+                );
+            }
+
+            field = value;
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D101): whether any group call was written out when this compiled. A flag, not
+    /// the count the compiler keeps (<see cref="CompiledPattern.InlinedCalls"/>): nothing here
+    /// needs the count, and four bytes more took the object past main's size.
+    /// </summary>
+    internal bool WroteCallsOut { get; private init; }
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a partial result restores the groups
@@ -1284,6 +1346,7 @@ internal sealed class PatternObject
             RequiredChars = reqChars,
             ReqFlags = compiled.ReqFlags,
             OptionalPassEnds = compiled.OptionalPassEnds.Count == 0 ? null : [.. compiled.OptionalPassEnds],
+            WroteCallsOut = compiled.InlinedCalls != 0,
         };
 
         // Compile the regular expression code to nodes.
@@ -1508,6 +1571,16 @@ internal sealed class PatternObject
         {
             SetVacuousDecisionLookarounds(self);
         }
+
+        // NOT UPSTREAM'S, D101: once the bodies are known.
+        SetNegativeOutcomeMemo(self);
+        SetTailMemo(self);
+        SetNegativeOutcomeKeys(self);
+        self.CanDecideOnARunOut =
+            self.HasBacktrackingVerb
+            || self.NodeList.Exists(static n =>
+                n.Op is Opcode.Conditional or Opcode.Atomic || (n.Op == Opcode.Lookaround && !n.Match)
+            );
 
         // NOT UPSTREAM (ledger entry 44's addendum): see OptionalPassEndOf.
         if (self.OptionalPassBranches is { } optionalPassBranches)
@@ -1999,6 +2072,548 @@ internal sealed class PatternObject
             )
         );
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D101: marks the negative lookarounds whose outcome in a partial call's second
+    /// pass may be kept per position for the pass (<see cref="Node.MemoisesNegativeOutcome"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Since D101's B1 a run-out inside a call a negative lookaround's body opened searches the
+    /// body to its end before the lookaround passes undetermined (<c>Matcher.RunsOutLikeACallFreeBody</c>),
+    /// and a recursion below the lookaround reaches it again at the same position many times in one
+    /// attempt: `(?:x(?!(?R)?y)|z)+q` over 'x' * 80 took 539,448 steps where main's SHORTCUT took
+    /// 323. Each such lookaround's outcome, passed decided or passed undetermined, is then the same
+    /// at every visit, when only the position can change it:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>no fuzzy section: the errors spent before it and the section's limits would change
+    /// what its body can match;</item>
+    /// <item>no capture read while matching (backreference or condition): a group set before it
+    /// would change what its body matches;</item>
+    /// <item>no verb: a <c>(*SKIP)</c> moves the slice and a verb's taint changes a blocked end;</item>
+    /// <item>nothing matched against the scan (lookbehind, reverse) and no <c>\K</c> in a discarding
+    /// construct: with none of these and no fuzzy section, the re-entry guard
+    /// (<c>MatchState.ActiveCalls</c>) can never refuse a call, since the compile has refused every
+    /// group that calls itself before matching text (<see cref="Parsing.LeftRecursion"/>, whose
+    /// remarks list what is left to the runtime rule: a fuzzy deletion and a lookbehind stepping
+    /// back), so the calls open around the lookaround cannot change its body's run.</item>
+    /// </list>
+    /// <para>
+    /// The slice is the whole text inside a lookaround, and the text and the pass's limits are fixed
+    /// for the pass, which <c>MatchState.InitMatch</c> starts with an empty memo. A negative
+    /// lookaround leaves no state behind, so the outcome is all a later visit needs: a decided pass
+    /// goes on after it, and an undetermined one goes on with a touch, a blocked end and a fork,
+    /// as its backtracking arm does. A failure (a decided success of the body) is not kept. Only a
+    /// body that holds a group call is marked, so every other pattern runs as before.
+    /// </para>
+    /// <para>
+    /// The exclusions' evidence (2026-10-25). Capture read: witness test
+    /// (<c>PartialNegativeOutcomeMemoTests.A_negative_lookaround_that_reads_a_capture_is_not_kept_per_position</c>).
+    /// Fuzzy section: no witness can exist today, since a fuzzy pattern with a call answers every
+    /// run-out in a body at once (<c>Matcher.ACallOpenedInTheBodyIsOpenOrUnmodelled</c>), so its
+    /// negative lookarounds never pass undetermined through the arm that records; measured, the memo
+    /// fired on none of 30 recursive fuzzy shapes with the exclusion removed. It stays for B3, where
+    /// the errors spent before the lookaround would reach its body through the enclosing sections'
+    /// minimums (<c>Matcher.RaisesUnmetMinimum</c>). Verb, against the scan, <c>\K</c>: no witness
+    /// found after 288, 240 and 192 rows on which the memo fired with the exclusion removed
+    /// (<c>.scratch/s1024/d101/p/gen_ex3.py</c>, every answer unchanged); argument: a <c>(*SKIP)</c>
+    /// moves the slice and a verb's taint changes a blocked end, the re-entry guard can refuse a
+    /// call only through a lookbehind or a fuzzy deletion (<see cref="Parsing.LeftRecursion"/>), and
+    /// a <c>\K</c> in a discarding construct moves the next attempt's start
+    /// (<c>AnAttemptCanMoveTheNextStart</c>), each a state the key does not hold.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its bodies set.</param>
+    private static void SetNegativeOutcomeMemo(PatternObject pattern)
+    {
+        // (D101 option D's SetTailMemo follows; see there.)
+        if (
+            !pattern.HasGroupCalls
+            || pattern.IsFuzzy
+            || pattern.ReadsCapturesWhileMatching
+            || pattern.HasBacktrackingVerb
+            || pattern.LooksAgainstTheScan
+            || (pattern.Flags & RegexFlags.Reverse) != 0
+            || pattern.KeepInSubmatch
+        )
+        {
+            return;
+        }
+
+        foreach (Node node in pattern.NodeList)
+        {
+            if (
+                node is { Op: Opcode.Lookaround, Match: false, BodyInfo: { HasVerbOrCall: true } body }
+                && HoldsACall(pattern, body)
+            )
+            {
+                node.MemoisesNegativeOutcome = true;
+                pattern.MemoisesCallOutcomes = true;
+            }
+        }
+    }
+
+    /// <summary>Whether a lookaround body holds a group call (<see cref="SetNegativeOutcomeMemo"/>).</summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <param name="body">The body.</param>
+    /// <returns><see langword="true"/> if it holds one.</returns>
+    /// <remarks>
+    /// A loop rather than <c>Array.Exists</c> with a lambda: the lambda captured the caller's
+    /// parameter, so the caller allocated its closure on entry, on every compile.
+    /// </remarks>
+    private static bool HoldsACall(PatternObject pattern, Node.Body body)
+    {
+        for (int i = 0; i < body.Nodes.Length; i++)
+        {
+            if (pattern.NodeList[body.Nodes[i]].Op == Opcode.GroupCall)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D: turns on <see cref="MemoisesTails"/> and builds the static
+    /// nesting of repeats its key reads.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It inherits <see cref="MemoisesCallOutcomes"/>'s conditions (no fuzzy section, no capture
+    /// read, no verb, nothing against the scan, no <c>\K</c> in a discarding construct) and adds
+    /// one: no atomic node. An atomic group, a possessive repeat and <c>\X</c> all compile to
+    /// <see cref="Opcode.Atomic"/> (<c>PossessiveRepeat.CompileCore</c>, <c>Grapheme</c>), whose end
+    /// discards paths or, blocked, leaves a reopening entry, so "every path of the tail was tried"
+    /// would not hold when its entry is popped. Witness:
+    /// <c>PartialTailSummaryTests.An_atomic_construct_keeps_the_memo_off</c>, where share 1 changes
+    /// the answer; for the tails themselves no answer witness was found (809,590 generated rows,
+    /// 125,515 with the memo keyed, 2026-10-25), and the refusal is kept as the conservative side
+    /// of an argument this pattern class has not had.
+    /// </para>
+    /// <para>
+    /// The enclosing repeats are found by walking each repeat's body to its own end, through every
+    /// successor; a group call's successor is its return, so a callee's repeats are not counted.
+    /// A key holds at most two of them.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern, with <see cref="MemoisesCallOutcomes"/> set.</param>
+    private static void SetTailMemo(PatternObject pattern)
+    {
+        if (!pattern.MemoisesCallOutcomes || pattern.NodeList.Exists(static n => n.Op == Opcode.Atomic))
+        {
+            return;
+        }
+
+        List<Node> entries = pattern.NodeList.FindAll(static n => n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat);
+        int count = entries.Count == 0 ? 0 : entries.Max(static n => (int)n.Values[0]) + 1;
+        var nodes = new Node?[count];
+        var enclosing = new HashSet<int>[count];
+        foreach (Node n in entries)
+        {
+            nodes[(int)n.Values[0]] = n;
+        }
+
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        foreach (Node? repeat in nodes)
+        {
+            if (repeat?.Next1.Node is not { } first)
+            {
+                continue;
+            }
+
+            int index = (int)repeat.Values[0];
+            seen.Clear();
+            todo.Push(first);
+            while (todo.TryPop(out Node? n))
+            {
+                if (
+                    !seen.Add(n.Index)
+                    || (n.Op is Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat && (int)n.Values[0] == index)
+                )
+                {
+                    continue;
+                }
+
+                if (n.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat && (int)n.Values[0] != index)
+                {
+                    (enclosing[(int)n.Values[0]] ??= []).Add(index);
+                }
+
+                if (n.Next1.Node is { } next1)
+                {
+                    todo.Push(next1);
+                }
+
+                if (n.Next2.Node is { } next2)
+                {
+                    todo.Push(next2);
+                }
+            }
+        }
+
+        int[] groupRequiredLiterals = new int[pattern.CallRefInfoList.Count];
+        for (int g = 0; g < groupRequiredLiterals.Length; g++)
+        {
+            groupRequiredLiterals[g] = RequiredLiteralOfGroup(pattern, g);
+        }
+
+        pattern.TailTables = new TailMemoTables(
+            Array.ConvertAll(enclosing, static set => set is null ? [] : set.Order().ToArray()),
+            nodes,
+            groupRequiredLiterals
+        );
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, share 1 (design section 8): sets each memoised negative
+    /// lookaround's <see cref="Node.OutcomeKey"/>, letting the compiler's copies of one lookaround
+    /// keep their outcomes under one key where <see cref="MemoisesTails"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A repeat's minimum is compiled from the same code more than once (<c>NodeCompiler.BuildRepeat</c>),
+    /// so `(?:x(?!...)|z)+` holds the lookaround twice, and each copy was decided separately at a
+    /// position: 14 of row 122's 48 steps per character. The negative memo's argument (an outcome
+    /// depends on the position alone, <see cref="SetNegativeOutcomeMemo"/>) holds for each copy, and
+    /// copies compiled from one range hold the same items, so they share one outcome function where
+    /// nothing else differs. What can differ is in their repeats: each copy's repeats have their own
+    /// indices, so their own guard lists, and flags that depend on where the copy sits
+    /// (<see cref="RepeatInfo"/>; a failure memo needs depth 0, for one). So two copies share only
+    /// when their bodies match item for item, apart from repeat indices, and each pair of
+    /// corresponding repeats has the same <see cref="RepeatInfo"/> flags and no keyed tail; any
+    /// other copy keeps its own key. Copies that shared were never seen to disagree (FR_SRC=2 shadow,
+    /// 1,290 cross-copy recordings, 2026-10-25), but that check could not see a copy whose body
+    /// succeeded, since a failure is not kept.
+    /// </para>
+    /// <para>
+    /// Run only where <see cref="MemoisesTails"/> is set, so never with an atomic node: keyed on the
+    /// source, the two copies of the lookahead in `(?:x(?!(?:(?:\X|(?R)?)+w?)+y)|z)+q` reach different
+    /// outcomes over 'xxcw' and the answer moves (witness
+    /// <c>PartialTailSummaryTests.An_atomic_construct_keeps_the_memo_off</c>).
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its negative memo marked.</param>
+    private static void SetNegativeOutcomeKeys(PatternObject pattern)
+    {
+        if (!pattern.MemoisesCallOutcomes)
+        {
+            return;
+        }
+
+        // While compiling, OutcomeKey holds the source offset (plus one); every node gets its own
+        // index first, then a copy takes its first interchangeable copy's.
+        var first = new Dictionary<int, Node>();
+        foreach (Node node in pattern.NodeList.Where(static n => n.MemoisesNegativeOutcome))
+        {
+            int source = node.OutcomeKey;
+            node.OutcomeKey = node.Index;
+            if (!pattern.MemoisesTails || source <= 0)
+            {
+                continue;
+            }
+
+            if (!first.TryGetValue(source, out Node? canonical))
+            {
+                first[source] = node;
+            }
+            else if (AreInterchangeableCopies(pattern, canonical, node))
+            {
+                node.OutcomeKey = canonical.Index;
+            }
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, share 1: whether two lookarounds compiled from one code range
+    /// hold the same items in the same order, with the same values apart from repeat indices, and
+    /// repeats with the same flags (see <see cref="SetNegativeOutcomeKeys"/>).
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="a">One copy.</param>
+    /// <param name="b">The other.</param>
+    /// <returns>Whether they may share an outcome key.</returns>
+    private static bool AreInterchangeableCopies(PatternObject pattern, Node a, Node b)
+    {
+        if (
+            a.BodyInfo is not { } bodyA
+            || b.BodyInfo is not { } bodyB
+            || bodyA.Nodes.Length != bodyB.Nodes.Length
+            || a.Match != b.Match
+        )
+        {
+            return false;
+        }
+
+        for (int i = 0; i < bodyA.Nodes.Length; i++)
+        {
+            Node x = pattern.NodeList[bodyA.Nodes[i]];
+            Node y = pattern.NodeList[bodyB.Nodes[i]];
+            bool repeat =
+                x.Op
+                is Opcode.GreedyRepeat
+                    or Opcode.LazyRepeat
+                    or Opcode.EndGreedyRepeat
+                    or Opcode.EndLazyRepeat
+                    or Opcode.GreedyRepeatOne
+                    or Opcode.LazyRepeatOne;
+            if (x.Op != y.Op || x.Match != y.Match || x.Values.Length != y.Values.Length)
+            {
+                return false;
+            }
+
+            for (int v = repeat ? 1 : 0; v < x.Values.Length; v++)
+            {
+                if (x.Values[v] != y.Values[v])
+                {
+                    return false;
+                }
+            }
+
+            if (
+                repeat
+                && !SameRepeatFlags(pattern.RepeatInfoAt((int)x.Values[0]), pattern.RepeatInfoAt((int)y.Values[0]))
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, share 1: two repeats' flags agree and neither keys its tail
+    /// guards. The inner mark (<see cref="NodeStatus.Inner"/>, a repeat inside another, set by
+    /// <c>NodeCompiler.RecordRepeat</c>) is left out: the loop's copy of a lookaround has it and the
+    /// unrolled first iteration does not, and nothing reads it while matching (the two readers of
+    /// <see cref="RepeatInfo.Status"/> there, <c>MatchState.ActiveGuardList</c> and
+    /// <c>MatchState.RecordsAfterBlockedEnd</c>, mask it with the body or tail mark; the compile's
+    /// readers ask for the body and tail marks too).
+    /// </summary>
+    /// <param name="x">One repeat's information.</param>
+    /// <param name="y">The other's.</param>
+    /// <returns>Whether they agree.</returns>
+    private static bool SameRepeatFlags(RepeatInfo x, RepeatInfo y) =>
+        (x.Status & ~NodeStatus.Inner) == (y.Status & ~NodeStatus.Inner)
+        && x.FailureMemo == y.FailureMemo
+        && x.InsideACutBody == y.InsideACutBody
+        && (x.FirstIterationStart is null) == (y.FirstIterationStart is null)
+        && x.TailKey is null
+        && y.TailKey is null
+        && x.BodyHoldsKeyedTail == y.BodyHoldsKeyedTail
+        && x.BodyGuardDroppedForD85 == y.BodyGuardDroppedForD85;
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 option D, the frame cut: a codepoint that every path from a called
+    /// group's start to its <see cref="Opcode.GroupReturn"/> consumes, or -1.
+    /// </summary>
+    /// <remarks>
+    /// Only a case-sensitive <see cref="Opcode.Character"/> that must match counts: a literal under
+    /// a case-insensitive or full-case flag can be matched by other characters (KELVIN SIGN for
+    /// `(?i)k`, LONG S for `(?i)s`, 'ss' for `(?fi)ß`), and taking none only gives up the cut. The
+    /// walk follows every successor, steps over a lookaround to the node after it (its body
+    /// consumes nothing) and over a group call to its return (a callee may consume more, but
+    /// nothing a caller can rely on), and gives up at a condition. A candidate is required when
+    /// the return cannot be reached without passing it. Witnesses:
+    /// <c>PartialTailSummaryTests</c>'s cut rows and the brute-force property test
+    /// <c>Every_return_of_a_group_consumes_its_required_literal</c>.
+    /// </remarks>
+    /// <param name="pattern">The pattern, its nodes numbered.</param>
+    /// <param name="group">The call index.</param>
+    /// <returns>The codepoint, or -1.</returns>
+    internal static int RequiredLiteralOfGroup(PatternObject pattern, int group)
+    {
+        if (pattern.CallRefInfoList[group].Node?.Next1.Node is not { } start)
+        {
+            return -1;
+        }
+
+        var candidates = new List<Node>();
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        todo.Push(start);
+        while (todo.TryPop(out Node? n))
+        {
+            if (!seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.Conditional)
+            {
+                return -1;
+            }
+
+            if (n is { Op: Opcode.Character, Match: true })
+            {
+                candidates.Add(n);
+            }
+
+            foreach (Node next in LiteralWalkSuccessors(n))
+            {
+                todo.Push(next);
+            }
+        }
+
+        return candidates.Find(c => !ReachesTheReturnAvoiding(start, c)) is { } required ? (int)required.Values[0] : -1;
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: the literal walk's successors of a node (<see cref="RequiredLiteralOfGroup"/>).</summary>
+    /// <param name="n">The node.</param>
+    /// <returns>The nodes a path can go on to.</returns>
+    private static IEnumerable<Node> LiteralWalkSuccessors(Node n)
+    {
+        if (n.Op is Opcode.GroupReturn or Opcode.Success or Opcode.End)
+        {
+            yield break;
+        }
+
+        if (n.Op == Opcode.Lookaround)
+        {
+            if (n.LookaroundEnd?.Next1.Node is { } after)
+            {
+                yield return after;
+            }
+
+            yield break;
+        }
+
+        if (n.Op == Opcode.GroupCall)
+        {
+            if (n.Next1.Node is { } returnTo)
+            {
+                yield return returnTo;
+            }
+
+            yield break;
+        }
+
+        if (n.Next1.Node is { } next1)
+        {
+            yield return next1;
+        }
+
+        if (n.Next2.Node is { } next2)
+        {
+            yield return next2;
+        }
+
+        if (n.TrueNode is { } trueNode)
+        {
+            yield return trueNode;
+        }
+    }
+
+    /// <summary>NOT UPSTREAM'S, D101 option D: whether some path from <paramref name="start"/> ends the group without passing <paramref name="avoid"/>.</summary>
+    /// <param name="start">The group's first node.</param>
+    /// <param name="avoid">The candidate literal.</param>
+    /// <returns><see langword="true"/> if the group can end without it.</returns>
+    private static bool ReachesTheReturnAvoiding(Node start, Node avoid)
+    {
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        todo.Push(start);
+        while (todo.TryPop(out Node? n))
+        {
+            if (ReferenceEquals(n, avoid) || !seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.GroupReturn or Opcode.Success or Opcode.End)
+            {
+                return true;
+            }
+
+            foreach (Node next in LiteralWalkSuccessors(n))
+            {
+                todo.Push(next);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 (B2'): whether a verb lies in a body or in a group a call in it reaches,
+    /// through any depth of calls. The callees are walked from each call's target to their returns;
+    /// a call of the whole pattern walks from the start node, which reaches everything.
+    /// </summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <param name="test">The lookaround or condition.</param>
+    /// <param name="body">The indices of its body's nodes.</param>
+    /// <returns><see langword="true"/> if a verb is reachable.</returns>
+    private static bool ReachesVerb(PatternObject pattern, Node test, HashSet<int> body)
+    {
+        // A pattern without a verb has none to reach: Compile sets HasBacktrackingVerb from every
+        // node in NodeList before the bodies are set (the node loop of Compile, at "D11: see
+        // HasBacktrackingVerb"), the walk answers true only at a PRUNE or SKIP node, and every node
+        // it meets is one of the graph's, all of which NodeList holds. Without this, every
+        // lookaround body of every pattern allocated the walk's set and stack (the witness is
+        // AllocationTests' D101 compile rows). No Debug.Assert re-runs the walk here: in Debug it
+        // would allocate the very set and stack those rows measure.
+        if (!pattern.HasBacktrackingVerb)
+        {
+            return false;
+        }
+
+        return WalkReachesVerb(pattern, test, body);
+    }
+
+    /// <summary>The walk of <see cref="ReachesVerb"/>.</summary>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    /// <param name="test">The lookaround or condition.</param>
+    /// <param name="body">The indices of its body's nodes.</param>
+    /// <returns><see langword="true"/> if a verb is reachable.</returns>
+    private static bool WalkReachesVerb(PatternObject pattern, Node test, HashSet<int> body)
+    {
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        foreach (int i in body)
+        {
+            todo.Push(pattern.NodeList[i]);
+        }
+
+        while (todo.Count > 0)
+        {
+            Node n = todo.Pop();
+            if (!seen.Add(n.Index) || ReferenceEquals(n, test.LookaroundEnd))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.Prune or Opcode.Skip)
+            {
+                return true;
+            }
+
+            if (n.Op == Opcode.GroupCall)
+            {
+                Node? target = pattern.CallRefInfoList[(int)n.Values[0]].Node;
+                todo.Push(target is not null ? target.Next1.Node! : pattern.StartNode!);
+            }
+
+            // Inside a callee the walk stops at its return; the body's own nodes are all in the
+            // stack already, so their exits need not be followed.
+            if (body.Contains(n.Index) || n.Op is Opcode.GroupReturn or Opcode.End or Opcode.Success)
+            {
+                continue;
+            }
+
+            foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+            {
+                if (next is not null)
+                {
+                    todo.Push(next);
+                }
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>
     /// <remarks>
     /// A walk from each test's first body node, over every exit, stopped at the test's end node. A
@@ -2051,7 +2666,7 @@ internal sealed class PatternObject
 
             int[] sorted = [.. nodes];
             Array.Sort(sorted);
-            test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall);
+            test.BodyInfo = new Node.Body(sorted, [.. groups], hasVerbOrCall, ReachesVerb(pattern, test, nodes));
 
             // NOT UPSTREAM (D104): see CutBodyFacts.ContinuationKeyRepeats. The repeats' keys are set by then
             // (TailGuardLiveness.FindTailKeys, in the optimiser).
@@ -2089,7 +2704,8 @@ internal sealed class PatternObject
             SetRunOutGroups(pattern);
         }
 
-        if (pattern.IsFuzzy && !pattern.HasGroupCalls)
+        // D101 (B3a): with calls too, for the lookarounds no call can run (Node.RunByACall).
+        if (pattern.IsFuzzy)
         {
             SetEnclosingSections(pattern);
         }
@@ -2108,6 +2724,11 @@ internal sealed class PatternObject
     /// <param name="pattern">The pattern, with its bodies set.</param>
     private static void SetEnclosingSections(PatternObject pattern)
     {
+        if (pattern.HasGroupCalls)
+        {
+            MarkWhatACallCanRun(pattern);
+        }
+
         var fuzzyInABody = false;
         var anyBody = false;
         foreach (Node test in pattern.NodeList)
@@ -2163,6 +2784,76 @@ internal sealed class PatternObject
                 if (next is not null)
                 {
                     todo.Push((next, after));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D101 (B3a): marks the lookarounds and tests a group call can run
+    /// (<see cref="Node.RunByACall"/>): a walk from each call reference's target, or from the start
+    /// node for a call of the whole pattern, over every exit, stopped at the called code's return.
+    /// </summary>
+    /// <remarks>
+    /// The section walk (<see cref="SetEnclosingSections"/>) steps over a call, to its return node,
+    /// so it describes each node as the pattern reaches it without a call. A called group's code is
+    /// also run from the call site, in that site's section (a call to a group with the same
+    /// fuzziness reuses the group's own code), so a lookaround in it has no one section; those keep
+    /// the run-out answered at once (<c>Matcher.ACallOpenedInTheBodyIsOpenOrUnmodelled</c>).
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    private static void MarkWhatACallCanRun(PatternObject pattern)
+    {
+        var seen = new HashSet<int>();
+        var todo = new Stack<Node>();
+        foreach (CallRefInfo info in pattern.CallRefInfoList)
+        {
+            if (!info.Used)
+            {
+                continue;
+            }
+
+            if (info.Node?.Next1.Node is { } target)
+            {
+                todo.Push(target);
+            }
+        }
+
+        foreach (Node n in pattern.NodeList)
+        {
+            if (
+                n.Op == Opcode.GroupCall
+                && pattern.CallRefInfoList[(int)n.Values[0]].Node is null
+                && pattern.StartNode is { } start
+            )
+            {
+                todo.Push(start);
+            }
+        }
+
+        while (todo.Count > 0)
+        {
+            Node n = todo.Pop();
+            if (!seen.Add(n.Index))
+            {
+                continue;
+            }
+
+            if (n.Op is Opcode.Lookaround or Opcode.Conditional)
+            {
+                n.RunByACall = true;
+            }
+
+            if (n.Op is Opcode.GroupReturn or Opcode.End or Opcode.Success)
+            {
+                continue;
+            }
+
+            foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+            {
+                if (next is not null)
+                {
+                    todo.Push(next);
                 }
             }
         }
@@ -2419,6 +3110,28 @@ internal sealed class PatternObject
     /// <returns>The same characters, or an empty list when there are none.</returns>
     private static IReadOnlyList<int> GetRequiredChars(IReadOnlyList<int> reqChars) =>
         reqChars.Count < 1 ? [] : reqChars;
+}
+
+/// <summary>
+/// NOT UPSTREAM'S, D101 option D: the tables of <see cref="PatternObject.TailTables"/>, built once by
+/// <c>PatternObject.SetTailMemo</c> while the pattern compiles.
+/// </summary>
+/// <param name="enclosingRepeats">Per repeat index, the repeats whose body holds it in the compiled
+/// code, whose counts are part of a tail's key.</param>
+/// <param name="repeatNodes">Per repeat index, its GREEDY_REPEAT or LAZY_REPEAT node.</param>
+/// <param name="groupRequiredLiterals">The frame cut: per call index
+/// (<see cref="PatternObject.CallRefInfoList"/>), a codepoint that every path from the group's start
+/// to its return consumes, or -1 (<c>PatternObject.RequiredLiteralOfGroup</c>).</param>
+internal sealed class TailMemoTables(int[][] enclosingRepeats, Node?[] repeatNodes, int[] groupRequiredLiterals)
+{
+    /// <summary>See the constructor's <c>enclosingRepeats</c>.</summary>
+    internal readonly int[][] EnclosingRepeats = enclosingRepeats;
+
+    /// <summary>See the constructor's <c>repeatNodes</c>.</summary>
+    internal readonly Node?[] RepeatNodes = repeatNodes;
+
+    /// <summary>See the constructor's <c>groupRequiredLiterals</c>.</summary>
+    internal readonly int[] GroupRequiredLiterals = groupRequiredLiterals;
 }
 
 /// <summary>
