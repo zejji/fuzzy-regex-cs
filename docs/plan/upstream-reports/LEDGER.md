@@ -7508,3 +7508,44 @@ pass, `Matcher.BacktrackConditional`). The negative form was this port's own, th
 keeps a failed negative test's block as upstream keeps a positive one's.
 `PatternObject.UpstreamConditionalRestore` puts upstream's restore back for the oracle (entry
 `conditional-restore-keeps-success-marks`). Pinned by `Gaps/Engine/ConditionalRestoreGuardTests`.
+
+## 97. A committing construct keeps a fuzzy path that an enclosing section's maximum forbids, and the match is lost - DIVERGES HERE (D133, 2026-11-02)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D133, found 2026-11-01 by the
+blind review of the fix/atomic-lookbehind rows. Evidence: `.scratch/s1101/d133/` (probes, the
+20,580-row grid, the design and both blind reviews); `tests/FuzzyRegex.Tests/Gaps/Engine/EnclosingSectionMaximumTests.cs`.
+
+**Reproduction**, `regex` 2026.9.29 on Python 3.14, measured 2026-11-02:
+
+```
+match(r'(?:(?>(?:ab){e<=1})){d<=1}', 'bb')                          -> None              here (0, 1), one deletion
+search(r'(?:(?>(?:ab){e<=1})){d<=1}', 'zbb')                        -> (2, 3)            here (1, 2)
+match(r'(?:(?:ab){e<=1}(*PRUNE)){d<=1}', 'bb')                      -> None              here (0, 1)
+match(r'(?:(?:(?:ab){e<=1})++){d<=1}', 'bb')                        -> None              here (0, 1)
+match(r'(?:(?>(?&g))){d<=1}(?(DEFINE)(?P<g>(?:ab){e<=1}))', 'bb')   -> None              here (0, 1)
+match(r'(?:(?:ab){e<=1}){d<=1}', 'bb')                              -> (0, 1), one deletion, in both
+match(r'(?>(?:(?:ab){e<=1}){d<=1})', 'bb')                          -> (0, 1), one deletion, in both
+```
+
+**Why upstream is wrong.** README.rst (the fuzzy section) defines a constraint as a bound on the
+errors of the item it follows; nothing lets an enclosing bound be broken for a while. An atomic
+group, a possessive repeat or `(*PRUNE)` keeps the first way its body matches (pcre2pattern,
+"Atomic grouping and possessive quantifiers"). Upstream's first way is a substitution that the
+outer `{d<=1}` forbids, so the commitment is to a path that can only fail, and `(?>X)` answers
+differently from `X` and from the same atomic group placed around the outer section. Error counts
+only grow along a path and costs are not negative, so an error that breaks an enclosing maximum
+can never become legal later: checking it when the error is made removes only paths that must
+fail. Two blind reviews (2026-11-01, 2026-11-02) found no case where that pruning changes an
+answer without a committing construct; the 20,580-row grid agrees (3,655 rows change, all with a
+commitment; the reference matcher's switch `EAGER_MAXIMA` gives the same answers as this port).
+
+**Mechanism.** `this_error_permitted` (`_regex.c:9676`) reads only `state->fuzzy_node`, the
+innermost section; an enclosing section's maximums are checked only at its own `END_FUZZY`
+(`_regex.c:12461-12513`), after the committing construct has already discarded the alternatives.
+
+**Here.** `Matcher.OneMoreErrorFitsTheOpenSections` checks every enclosing maximum (and the pass
+limits) when an error is made, in patterns whose sections nest, walking the run-time section
+links past atomic groups and positive lookaround bodies and stopping at a negative lookaround body
+(its errors are dropped) and at every condition test (a test is not monotone: pruning there would
+make the no-branch run; left as upstream, D136). `PatternObject.MaximaAsBeforeD133` puts the late
+check back for the oracle.
